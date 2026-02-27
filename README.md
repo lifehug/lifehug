@@ -76,25 +76,51 @@ Interim deliverables (essays, letters) can ship before the full book is complete
 
 ## Getting Started
 
-1. **Clone this repo**
-2. **Open it with your AI assistant** (Claude, or any AI that reads CLAUDE.md)
-3. **The AI will guide you through setup** — it'll ask what you want to write, who matters in your story, and generate your custom question bank
-4. **Answer one question per day** — the AI picks the question, you just respond
+### With OpenClaw (recommended)
+
+1. **Clone this repo** into your workspace:
+   ```bash
+   git clone https://github.com/lifehug/lifehug.git ~/Workspace/lifehug
+   ```
+
+2. **Point your AI assistant at it.** In your OpenClaw chat, say:
+   ```
+   Set up Lifehug in ~/Workspace/lifehug
+   ```
+
+3. **The AI walks you through setup:**
+   - What do you want to write? (memoir, founder story, family history, etc.)
+   - Who are the important people in your story?
+   - What episodes do you already know you want to capture?
+
+4. **It creates your custom question bank** and sets up a daily cron job to send you one question per day on your preferred channel (Telegram, WhatsApp, Signal, Discord, etc.)
+
+5. **Answer one question per day** — voice or text, long or short. The AI processes your answer, generates follow-ups, and tracks your progress.
 
 That's it. The system handles rotation, coverage tracking, follow-up generation, and deliverable drafting.
+
+### With Other AI Tools
+
+1. **Clone this repo**
+2. **Open it with your AI assistant** (Claude Code, Cursor, or any AI that reads CLAUDE.md)
+3. **The AI will guide you through setup** — same flow as above
+4. **Set up your own daily delivery** — the AI will help you configure a scheduler for daily questions
+5. **Answer one question per day** — the AI picks the question, you just respond
 
 ---
 
 ## Delivery
 
-Lifehug is delivery-method agnostic. The daily question can reach you via:
-- Telegram
-- Email
-- Web interface
-- CLI
-- Any channel supported by your AI platform
+Lifehug works with whatever messaging channel you already use:
 
-The skill focuses on content logic. How questions get delivered is configured by you and your platform.
+- **Telegram** — Get your daily question as a Telegram message, reply right there
+- **WhatsApp** — Same flow, via WhatsApp
+- **Signal, Discord, Slack** — Any channel your AI platform supports
+- **Email** — Daily question email, reply to answer
+- **CLI** — For terminal-first people
+- **Voice** — Send a voice message as your answer; the AI transcribes and processes it
+
+During setup, the AI configures a daily cron job that picks a question and sends it to you at your preferred time. You reply whenever you're ready — there's no timer.
 
 ---
 
@@ -104,6 +130,9 @@ The skill focuses on content logic. How questions get delivered is configured by
 lifehug/
 ├── README.md                 # This file
 ├── CLAUDE.md                 # AI operating instructions (the skill)
+├── AGENTS.md                 # OpenClaw workspace entry point
+├── config.yaml.example       # Configuration template
+├── config.yaml               # Your config (created during setup)
 ├── .gitignore
 ├── answers/                  # Your stored responses
 │   └── {question_id}.md      # One file per answer, with metadata

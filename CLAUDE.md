@@ -63,7 +63,36 @@ Based on their answers:
 ### Step 6: Initialize state
 Update `system/rotation.json` and `system/coverage.json` to reflect the new categories.
 
-### Step 7: Ask the first question
+### Step 7: Create config.yaml
+Save the user's preferences to `config.yaml`:
+```yaml
+name: "Their Name"
+timezone: "Their/Timezone"
+question_time: "09:00"
+channel: "telegram"  # or whatsapp, signal, discord, etc.
+```
+
+### Step 8: Set up daily delivery
+Help the user configure a daily cron job or scheduled task that:
+1. Runs `python3 system/ask.py` to pick the next question
+2. Sends it to the user via their configured channel
+3. The question should be delivered warmly, not robotically
+
+For **OpenClaw**, create a cron job:
+```
+openclaw cron add \
+  --name "Lifehug Daily Question" \
+  --cron "0 9 * * *" \
+  --tz "America/New_York" \
+  --task "Run the Lifehug daily question: cd /path/to/lifehug && python3 system/ask.py — then send the question warmly to the user on their channel." \
+  --announce --channel telegram
+```
+
+Adjust the time, timezone, path, and channel to match their config.yaml.
+
+For **other platforms**, help them set up whatever scheduler is available (cron, systemd timer, Task Scheduler, etc.).
+
+### Step 9: Ask the first question
 Pick the first question and ask it. The system is now running.
 
 ---
@@ -266,14 +295,29 @@ Status thresholds: RED (0-30%), YELLOW (30-70%), GREEN (70%+).
 
 ## Platform Notes
 
-Life Hug is delivery-method agnostic. This skill handles the content logic — question selection, answer processing, coverage tracking, deliverable generation. The delivery mechanism (how questions reach the user and how answers come back) depends on the platform:
+Life Hug is delivery-method agnostic. This skill handles the content logic — question selection, answer processing, coverage tracking, deliverable generation. The delivery mechanism depends on the platform.
 
-- **Telegram**: Send question as message, receive reply
-- **Email**: Send question as email, process reply
-- **CLI**: Print question to terminal, accept typed response
-- **Web**: Display in web interface, accept form submission
+### Recognizing Answers
 
-Configure delivery through your platform's capabilities. The skill doesn't assume any specific channel.
+When you receive a message in the Lifehug workspace context, determine what it is:
+
+1. **An answer to the pending question** — If the user's message is personal, reflective, or detailed, and there's a pending question in `rotation.json` (`last_question_id`), treat it as an answer. Process it using the "Processing an Answer" flow above.
+
+2. **A command** — "show coverage", "draft a chapter", "skip this question", "ask me something else"
+
+3. **Setup conversation** — If config.yaml doesn't exist or question-bank.md only has A-E categories, this is still setup.
+
+### Voice Messages
+
+If the user sends a voice message as their answer:
+- Transcribe it using available tools (Whisper, platform transcription, etc.)
+- Clean up transcription artifacts (filler words, false starts)
+- Process the cleaned text as a normal answer
+- Note in the answer file metadata: `**Source:** voice`
+
+### Channel Configuration
+
+The daily question cron job handles outbound delivery. For inbound (receiving answers), the AI platform routes replies to the workspace session automatically. No special configuration needed — the user just replies to the question message.
 
 ---
 

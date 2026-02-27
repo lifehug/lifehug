@@ -1,0 +1,27 @@
+# Lifehug — Configuration
+#
+# Copy this file to config.yaml and fill in your details.
+# Your AI assistant will help you with this during setup.
+
+# Your first name (used in daily questions)
+name: ""
+
+# Your timezone (IANA format)
+# Examples: America/New_York, America/Los_Angeles, Europe/London, Asia/Tokyo
+timezone: "America/New_York"
+
+# What time to receive your daily question (24h format)
+question_time: "09:00"
+
+# Delivery channel
+# Options: telegram, whatsapp, signal, discord, slack, email, cli
+channel: "telegram"
+
+# Projects (filled in during setup)
+# projects:
+#   - name: "My Memoir"
+#     type: memoir
+#     categories: [F, G, H]
+#   - name: "Company Story"
+#     type: founder
+#     categories: [I, J]
