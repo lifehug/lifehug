@@ -293,6 +293,26 @@ Status thresholds: RED (0-30%), YELLOW (30-70%), GREEN (70%+).
 
 ---
 
+## Voice Messages
+
+Many people prefer answering by talking instead of typing. Support this:
+
+### Receiving Voice Answers
+When a user sends a voice message as their answer:
+1. **Transcribe it** — Use your platform's transcription (Whisper, built-in STT, etc.)
+2. **Clean up** — Fix transcription artifacts, filler words ("um", "uh"), false starts. Keep their natural voice and phrasing — don't over-edit.
+3. **Process as normal** — Save to `answers/`, generate follow-ups, update state
+4. **Note the source** — Add `**Source:** voice message (transcribed)` to the answer metadata
+
+### Sending Voice Questions
+If your platform supports TTS, consider sending the daily question as a voice message occasionally. It feels more personal — like a real interviewer asking you a question over coffee.
+
+### Transcription Tips
+- Long voice answers (5+ minutes) are gold — the best stories come out when people just talk
+- Don't break up a single voice message into multiple answers
+- Preserve emotional moments — if they paused, laughed, or got quiet, note it: `*[paused here]*`
+- If transcription is garbled, ask: "I got most of that but missed a bit — can you clarify the part about [X]?"
+
 ## Platform Notes
 
 Life Hug is delivery-method agnostic. This skill handles the content logic — question selection, answer processing, coverage tracking, deliverable generation. The delivery mechanism depends on the platform.

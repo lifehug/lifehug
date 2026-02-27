@@ -78,9 +78,10 @@ Interim deliverables (essays, letters) can ship before the full book is complete
 
 ### With OpenClaw (recommended)
 
-1. **Clone this repo** into your workspace:
+1. **Clone and run setup:**
    ```bash
    git clone https://github.com/lifehug/lifehug.git ~/Workspace/lifehug
+   cd ~/Workspace/lifehug && ./setup.sh
    ```
 
 2. **Point your AI assistant at it.** In your OpenClaw chat, say:
@@ -131,6 +132,7 @@ lifehug/
 ├── README.md                 # This file
 ├── CLAUDE.md                 # AI operating instructions (the skill)
 ├── AGENTS.md                 # OpenClaw workspace entry point
+├── setup.sh                  # First-run setup helper
 ├── config.yaml.example       # Configuration template
 ├── config.yaml               # Your config (created during setup)
 ├── .gitignore
@@ -139,6 +141,8 @@ lifehug/
 ├── spotlights/               # Spotlight deliverables
 │   └── {name}/               # Profiles, letters, stories per spotlight
 ├── drafts/                   # Chapter drafts, essays, deliverables
+├── examples/
+│   └── openclaw-cron.md      # Cron job examples for every channel
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
     ├── ask.py                # Rotation engine (CLI tool)
