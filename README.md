@@ -1,8 +1,8 @@
-# Life Hug
+# Lifehug
 
 **Capture your life story, one question at a time.**
 
-Life Hug is an AI-guided storytelling system that helps you write your life story through daily questions. You tell the AI what you want to create — a memoir, a founder's story, a family history — and it generates questions, manages rotation, tracks coverage, and helps you produce real deliverables over time.
+Lifehug is an AI-guided storytelling system that helps you write your life story through daily questions. You tell the AI what you want to create — a memoir, a founder's story, a family history — and it generates questions, manages rotation, tracks coverage, and helps you produce real deliverables over time.
 
 ---
 
@@ -84,7 +84,7 @@ That's it. The system handles rotation, coverage tracking, follow-up generation,
 
 ## Delivery
 
-Life Hug is delivery-method agnostic. The daily question can reach you via:
+Lifehug is delivery-method agnostic. The daily question can reach you via:
 - Telegram
 - Email
 - Web interface
@@ -156,7 +156,7 @@ python3 system/ask.py --mark-answered A1  # Mark a question as answered
 
 ## Methodology
 
-Life Hug's approach is based on established oral history and memoir-writing practices. See `system/research.md` for the full methodology, including:
+Lifehug's approach is based on established oral history and memoir-writing practices. See `system/research.md` for the full methodology, including:
 
 - **StoryCorps** oral history techniques (open-ended questions, sensory anchors, emotional depth)
 - **Professional ghostwriting** frameworks (discovery → outline → draft → revise → polish)
@@ -170,7 +170,7 @@ The key insight: the best stories aren't told chronologically. They're organized
 
 ## Question Categories
 
-Life Hug starts with five generic categories that work for any life story:
+Lifehug starts with five generic categories that work for any life story:
 
 | Cat | Name | Focus |
 |-----|------|-------|
@@ -184,4 +184,4 @@ During setup, the AI adds **project-specific categories** (F-J) based on what yo
 
 ---
 
-*Life Hug — because every life is a story worth telling.*
+*Lifehug — because every life is a story worth telling.*
