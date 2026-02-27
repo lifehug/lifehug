@@ -12,7 +12,10 @@ Lifehug is an AI-guided storytelling system that helps you write your life story
 Long-form narrative projects organized into chapters and acts. A memoir, a company founding story, a creative journey — whatever story you want to tell. Each book gets its own set of question categories, and the system rotates through them to build complete coverage.
 
 ### Spotlights
-Focused collections about important people or life episodes. When someone keeps coming up in your answers — a mentor, a parent, a co-founder, a friend — you can create a Spotlight to go deeper. Spotlights produce their own deliverables: letters, character profiles, short stories, standalone essays.
+Focused collections about important life episodes. A turning point, a season of your life, a project that changed everything — Spotlights let you zoom in on moments that deserve their own space. They produce standalone essays, short stories, and narrative pieces.
+
+### People
+Every story is really about people. As you answer daily questions, the people who shaped your life naturally surface — a parent, a mentor, a co-founder, a friend who showed up at the right moment. Lifehug lets you deepen those threads. Write down your feelings, thoughts, and experiences with the people who matter. Capture what they taught you, how they changed you, what you wish you'd said. These become standalone essays, letters, character profiles — pieces that can live on their own or weave into a larger book.
 
 ---
 
