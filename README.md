@@ -1,0 +1,187 @@
+# Life Hug
+
+**Capture your life story, one question at a time.**
+
+Life Hug is an AI-guided storytelling system that helps you write your life story through daily questions. You tell the AI what you want to create — a memoir, a founder's story, a family history — and it generates questions, manages rotation, tracks coverage, and helps you produce real deliverables over time.
+
+---
+
+## What You Can Create
+
+### Books
+Long-form narrative projects organized into chapters and acts. A memoir, a company founding story, a creative journey — whatever story you want to tell. Each book gets its own set of question categories, and the system rotates through them to build complete coverage.
+
+### Spotlights
+Focused collections about important people or life episodes. When someone keeps coming up in your answers — a mentor, a parent, a co-founder, a friend — you can create a Spotlight to go deeper. Spotlights produce their own deliverables: letters, character profiles, short stories, standalone essays.
+
+---
+
+## How It Works
+
+### Daily Questions
+Every day, the system picks one question and delivers it to you. You answer whenever you want — voice or text, long or short. There's no pressure. The questions are chosen by a rotation engine that ensures balanced coverage across all your projects.
+
+### The Four-Pass System
+
+The question bank is a living document that grows with every answer.
+
+**Pass 1: Skeleton** (~3 months)
+- Starter questions across all categories
+- Goal: get the broad strokes down for every chapter
+- After each answer, the AI generates 1-3 follow-up questions for the next pass
+
+**Pass 2: Depth** (~2 months)
+- Follow-up questions generated from your first-pass answers
+- Go deeper into specific scenes, sensory detail, dialogue
+- "You mentioned X — tell me more about that"
+
+**Pass 3: Connections** (~1 month)
+- Look across all answers for themes that connect across chapters
+- Bridge questions that weave narrative threads through your story
+
+**Pass 4: Polish** (ongoing)
+- Read drafted chapters aloud
+- Identify awkward transitions, missing context
+- Final gap-filling questions
+
+### Coverage Tracking
+
+After each pass, the system tracks progress per category:
+- **🔴 RED** (0-30%) — needs skeleton answers
+- **🟡 YELLOW** (30-70%) — needs depth
+- **🟢 GREEN** (70%+) — ready for drafting
+
+The rotation engine prioritizes RED categories, then YELLOW, then circles back to GREEN for polish.
+
+### Spotlight Discovery
+
+As you answer questions, the AI watches for significant people or events that come up repeatedly. It will offer to create a Spotlight:
+
+> "You've mentioned [person] several times. Want to create a Spotlight to capture more about them?"
+
+Spotlights get their own targeted questions and rotate at a lower frequency (roughly 1 Spotlight question per 3-4 main questions).
+
+### Deliverables
+
+At milestones, the AI drafts content from your accumulated answers:
+- **Books**: Chapter drafts, standalone essays, full manuscripts
+- **Spotlights**: Character profiles, letters, short stories, essays
+
+Interim deliverables (essays, letters) can ship before the full book is complete.
+
+---
+
+## Getting Started
+
+1. **Clone this repo**
+2. **Open it with your AI assistant** (Claude, or any AI that reads CLAUDE.md)
+3. **The AI will guide you through setup** — it'll ask what you want to write, who matters in your story, and generate your custom question bank
+4. **Answer one question per day** — the AI picks the question, you just respond
+
+That's it. The system handles rotation, coverage tracking, follow-up generation, and deliverable drafting.
+
+---
+
+## Delivery
+
+Life Hug is delivery-method agnostic. The daily question can reach you via:
+- Telegram
+- Email
+- Web interface
+- CLI
+- Any channel supported by your AI platform
+
+The skill focuses on content logic. How questions get delivered is configured by you and your platform.
+
+---
+
+## File Structure
+
+```
+lifehug/
+├── README.md                 # This file
+├── CLAUDE.md                 # AI operating instructions (the skill)
+├── .gitignore
+├── answers/                  # Your stored responses
+│   └── {question_id}.md      # One file per answer, with metadata
+├── spotlights/               # Spotlight deliverables
+│   └── {name}/               # Profiles, letters, stories per spotlight
+├── drafts/                   # Chapter drafts, essays, deliverables
+└── system/
+    ├── question-bank.md      # All questions + status (grows over time)
+    ├── ask.py                # Rotation engine (CLI tool)
+    ├── rotation.json         # Current rotation state
+    ├── coverage.json         # Gap tracking per category
+    └── research.md           # Methodology reference
+```
+
+### Answer File Format
+```markdown
+# Question A1: What's your earliest memory?
+**Category:** A (Origins) | **Pass:** 1
+**Asked:** 2026-03-01 | **Answered:** 2026-03-01
+
+---
+
+[Your full answer here]
+
+---
+
+## Follow-up Questions Generated
+- A11: "You mentioned [X] — can you describe that in more detail?"
+- A12: "How old were you? Who else was there?"
+```
+
+---
+
+## The Rotation Engine
+
+The `system/ask.py` script manages question selection:
+
+```bash
+python3 system/ask.py              # Pick next question, update state
+python3 system/ask.py --dry-run    # Pick but don't update state
+python3 system/ask.py --status     # Show coverage report
+python3 system/ask.py --mark-answered A1  # Mark a question as answered
+```
+
+### Selection Logic
+1. Check which categories have the lowest coverage ratio
+2. Alternate between project groups (if multiple books) to balance coverage
+3. Interleave Spotlight questions at configured frequency
+4. Pick the first unanswered question in the chosen category
+5. Update rotation and coverage state
+
+---
+
+## Methodology
+
+Life Hug's approach is based on established oral history and memoir-writing practices. See `system/research.md` for the full methodology, including:
+
+- **StoryCorps** oral history techniques (open-ended questions, sensory anchors, emotional depth)
+- **Professional ghostwriting** frameworks (discovery → outline → draft → revise → polish)
+- **Memoir structure** analysis (hybrid chronological/thematic approach)
+- **Founder story** patterns (problem → struggle → breakthrough arc)
+- **Interview methodology** (specific moments over generalizations, follow-up depth, contrast questions)
+
+The key insight: the best stories aren't told chronologically. They're organized around **turning points and themes**, built through multiple passes from skeleton to polish.
+
+---
+
+## Question Categories
+
+Life Hug starts with five generic categories that work for any life story:
+
+| Cat | Name | Focus |
+|-----|------|-------|
+| A | Origins | Childhood, family, early life, formative moments |
+| B | Becoming | Growing up, finding direction, early career, pivotal moments |
+| C | Relationships & People | Important people, friendships, mentors, how you connect |
+| D | Purpose & Calling | What drives you, key decisions, turning points |
+| E | Reflection & Wisdom | Lessons learned, values, advice, what matters |
+
+During setup, the AI adds **project-specific categories** (F-J) based on what you want to write about. Spotlight categories (K+) are added as you discover people and episodes worth focusing on.
+
+---
+
+*Life Hug — because every life is a story worth telling.*

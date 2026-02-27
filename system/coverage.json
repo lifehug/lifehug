@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "last_updated": null,
+  "categories": {
+    "A": {"total": 5, "answered": 0, "status": "red"},
+    "B": {"total": 5, "answered": 0, "status": "red"},
+    "C": {"total": 5, "answered": 0, "status": "red"},
+    "D": {"total": 5, "answered": 0, "status": "red"},
+    "E": {"total": 5, "answered": 0, "status": "red"}
+  }
+}

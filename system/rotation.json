@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "current_pass": 1,
+  "pass_names": ["skeleton", "depth", "connections", "polish"],
+  "last_question_id": null,
+  "last_asked_at": null,
+  "questions_asked": 0,
+  "questions_answered": 0,
+  "next_question_id": null,
+  "spotlight_frequency": 4
+}
