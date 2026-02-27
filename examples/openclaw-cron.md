@@ -14,7 +14,7 @@ openclaw cron add \
   --channel telegram \
   --announce \
   --task "You are the Lifehug interviewer. Run: cd ~/Workspace/lifehug && python3 system/ask.py
-Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first."
+Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first. End with: Reply here whenever you are ready — voice or text."
 ```
 
 ## WhatsApp (8:30 AM, US Pacific)
@@ -27,7 +27,7 @@ openclaw cron add \
   --channel whatsapp \
   --announce \
   --task "You are the Lifehug interviewer. Run: cd ~/Workspace/lifehug && python3 system/ask.py
-Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first."
+Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first. End with: Reply here whenever you are ready — voice or text."
 ```
 
 ## Signal (9 AM, UK)
@@ -40,7 +40,7 @@ openclaw cron add \
   --channel signal \
   --announce \
   --task "You are the Lifehug interviewer. Run: cd ~/Workspace/lifehug && python3 system/ask.py
-Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first."
+Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first. End with: Reply here whenever you are ready — voice or text."
 ```
 
 ## Discord (10 AM, any timezone)
@@ -53,7 +53,7 @@ openclaw cron add \
   --channel discord \
   --announce \
   --task "You are the Lifehug interviewer. Run: cd ~/Workspace/lifehug && python3 system/ask.py
-Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first."
+Send the output question to the user. Be warm and conversational — don't just paste the raw output. Frame it like: 'Good morning! Here is today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first. End with: Reply here whenever you are ready — voice or text."
 ```
 
 ---

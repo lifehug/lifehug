@@ -123,6 +123,22 @@ Lifehug works with whatever messaging channel you already use:
 
 During setup, the AI configures a daily cron job that picks a question and sends it to you at your preferred time. You reply whenever you're ready — there's no timer.
 
+### Installing the Skill (OpenClaw)
+
+For the best experience, install the Lifehug skill so your AI always knows how to handle your answers:
+
+```bash
+# From the lifehug repo
+cp -r skill ~/.openclaw/skills/lifehug
+```
+
+Or symlink it:
+```bash
+ln -s ~/Workspace/lifehug/skill ~/.openclaw/skills/lifehug
+```
+
+With the skill installed, your AI will automatically recognize when you reply to a daily question and process your answer — no matter which chat channel you're in.
+
 ---
 
 ## File Structure

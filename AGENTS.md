@@ -54,7 +54,7 @@ openclaw cron add \
   --name "Lifehug Daily Question" \
   --cron "<MIN> <HOUR> * * *" \
   --tz "<TIMEZONE>" \
-  --task "Run the Lifehug daily question. Execute: cd <WORKSPACE_PATH> && python3 system/ask.py Then send the output as a message to the user on their configured channel. Be warm and conversational — don't just paste the question ID. Frame it naturally, like: 'Good morning! Here's today's question: [question text]'. If there's a pending unanswered question from yesterday, gently remind them about it first." \
+  --task "You are the Lifehug interviewer. Run: cd <WORKSPACE_PATH> && python3 system/ask.py Then send the question warmly and conversationally — don't just paste the raw output. Frame it like: 'Good morning! Here's today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first. End every question with: 'Reply here whenever you're ready — voice or text.'" \
   --announce \
   --channel <CHANNEL>
 ```
