@@ -35,6 +35,18 @@ fi
 echo ""
 if command -v openclaw &>/dev/null; then
   echo "✅ OpenClaw detected: $(openclaw --version 2>&1 | head -1)"
+
+  # Install skill if not already installed
+  SKILL_DIR="${HOME}/.openclaw/skills/lifehug"
+  if [ -d "$SKILL_DIR" ]; then
+    echo "✅ Lifehug skill already installed"
+  else
+    echo "📦 Installing Lifehug skill..."
+    mkdir -p "${HOME}/.openclaw/skills"
+    ln -s "$SCRIPT_DIR/skill" "$SKILL_DIR" 2>/dev/null || cp -r "$SCRIPT_DIR/skill" "$SKILL_DIR"
+    echo "✅ Lifehug skill installed → your AI will auto-detect answers"
+  fi
+
   echo ""
   echo "To start setup, tell your AI:"
   echo ""

@@ -83,8 +83,9 @@ Interim deliverables (essays, letters) can ship before the full book is complete
    git clone https://github.com/lifehug/lifehug.git ~/Workspace/lifehug
    cd ~/Workspace/lifehug && ./setup.sh
    ```
+   This checks your environment, installs the Lifehug skill, and tells you what to do next.
 
-2. **Point your AI assistant at it.** In your OpenClaw chat, say:
+2. **Tell your AI to set you up.** In your OpenClaw chat (Telegram, WhatsApp, Signal, Discord — whatever you use), say:
    ```
    Set up Lifehug in ~/Workspace/lifehug
    ```
@@ -94,9 +95,9 @@ Interim deliverables (essays, letters) can ship before the full book is complete
    - Who are the important people in your story?
    - What episodes do you already know you want to capture?
 
-4. **It creates your custom question bank** and sets up a daily cron job to send you one question per day on your preferred channel (Telegram, WhatsApp, Signal, Discord, etc.)
+4. **It creates your custom question bank** and sets up a daily cron job to send you one question per day on your preferred channel.
 
-5. **Answer one question per day** — voice or text, long or short. The AI processes your answer, generates follow-ups, and tracks your progress.
+5. **Answer one question per day** — just reply in the same chat, voice or text. The Lifehug skill automatically detects your answer, processes it, generates follow-ups, and tracks your progress.
 
 That's it. The system handles rotation, coverage tracking, follow-up generation, and deliverable drafting.
 
@@ -123,21 +124,13 @@ Lifehug works with whatever messaging channel you already use:
 
 During setup, the AI configures a daily cron job that picks a question and sends it to you at your preferred time. You reply whenever you're ready — there's no timer.
 
-### Installing the Skill (OpenClaw)
+### Installing the Skill Manually (OpenClaw)
 
-For the best experience, install the Lifehug skill so your AI always knows how to handle your answers:
+If you didn't use `setup.sh`, install the skill manually so your AI can detect and process your answers:
 
-```bash
-# From the lifehug repo
-cp -r skill ~/.openclaw/skills/lifehug
-```
-
-Or symlink it:
 ```bash
 ln -s ~/Workspace/lifehug/skill ~/.openclaw/skills/lifehug
 ```
-
-With the skill installed, your AI will automatically recognize when you reply to a daily question and process your answer — no matter which chat channel you're in.
 
 ---
 
@@ -159,6 +152,8 @@ lifehug/
 ├── drafts/                   # Chapter drafts, essays, deliverables
 ├── examples/
 │   └── openclaw-cron.md      # Cron job examples for every channel
+├── skill/
+│   └── SKILL.md              # OpenClaw skill (auto-installed by setup.sh)
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
     ├── ask.py                # Rotation engine (CLI tool)
