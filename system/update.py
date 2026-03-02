@@ -29,6 +29,7 @@ PROTECTED_FILES = {
     "system/rotation.json",
     "system/coverage.json",
     "system/schedule.json",
+    "config.yaml",
     "answers/",
     "drafts/",
 }
@@ -220,7 +221,18 @@ def apply_version(version):
         # Stage and commit
         for f in updated:
             run_git("add", f)
-        run_git("commit", "-m", f"Update Lifehug to v{version}", check=False)
+        result = subprocess.run(
+            ["git", "-C", str(REPO_DIR), "commit", "-m", f"Update Lifehug to v{version}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            # Check if it failed because there was nothing to commit
+            if "nothing to commit" in result.stdout or "nothing to commit" in result.stderr:
+                print("  Files already match target version — nothing to commit.")
+            else:
+                print(f"  Warning: git commit failed: {result.stderr.strip()}", file=sys.stderr)
+    else:
+        print("  All framework files already up to date.")
 
     return True
 
@@ -230,6 +242,14 @@ def cmd_check(args):
     remote = find_upstream_remote()
     if remote:
         fetch_tags(remote)
+    else:
+        if not args.quiet:
+            print(
+                "Warning: No upstream remote found. Tags will be checked locally only.\n"
+                "To receive updates, add the upstream remote:\n"
+                "  git remote add upstream https://github.com/lifehug/lifehug.git",
+                file=sys.stderr,
+            )
 
     current = get_local_version()
     latest = get_latest_version()
@@ -256,6 +276,13 @@ def cmd_apply(args):
     remote = find_upstream_remote()
     if remote:
         fetch_tags(remote)
+    else:
+        print(
+            "Warning: No upstream remote found. Using local tags only.\n"
+            "To receive updates, add the upstream remote:\n"
+            "  git remote add upstream https://github.com/lifehug/lifehug.git",
+            file=sys.stderr,
+        )
 
     current = get_local_version()
 

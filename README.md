@@ -134,6 +134,31 @@ ln -s ~/Workspace/lifehug/skill ~/.openclaw/skills/lifehug
 
 ---
 
+## Keeping Up to Date
+
+Lifehug includes a built-in update system. When new versions are released, your AI will let you know:
+
+> *Lifehug v2 is available with spotlight improvements. Say "update lifehug" when you're ready.*
+
+Updates only touch framework files (CLAUDE.md, system scripts, etc.). Your answers, question bank, config, and drafts are never modified.
+
+You can also check manually:
+
+```bash
+python3 system/update.py --check
+python3 system/update.py --apply
+```
+
+If you forked Lifehug, add the upstream remote so updates can be fetched:
+
+```bash
+git remote add upstream https://github.com/lifehug/lifehug.git
+```
+
+See [UPGRADING.md](UPGRADING.md) for details on migrating from a pre-update-system clone.
+
+---
+
 ## File Structure
 
 ```
@@ -157,6 +182,8 @@ lifehug/
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
     ├── ask.py                # Rotation engine (CLI tool)
+    ├── update.py             # Update manager (check, apply, rollback)
+    ├── version.json          # Current version tracking
     ├── rotation.json         # Current rotation state
     ├── coverage.json         # Gap tracking per category
     └── research.md           # Methodology reference

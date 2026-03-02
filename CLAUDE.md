@@ -315,6 +315,15 @@ Questions are added over time (follow-ups, new categories, Spotlights). This fil
 
 Status thresholds: RED (0-30%), YELLOW (30-70%), GREEN (70%+).
 
+### `config.yaml`
+User preferences created during setup:
+```yaml
+name: "Their Name"
+timezone: "Their/Timezone"
+question_time: "09:00"
+channel: "telegram"
+```
+
 ---
 
 ## Voice Messages
@@ -350,14 +359,6 @@ When you receive a message in the Lifehug workspace context, determine what it i
 2. **A command** — "show coverage", "draft a chapter", "skip this question", "ask me something else"
 
 3. **Setup conversation** — If config.yaml doesn't exist or question-bank.md only has A-E categories, this is still setup.
-
-### Voice Messages
-
-If the user sends a voice message as their answer:
-- Transcribe it using available tools (Whisper, platform transcription, etc.)
-- Clean up transcription artifacts (filler words, false starts)
-- Process the cleaned text as a normal answer
-- Note in the answer file metadata: `**Source:** voice`
 
 ### Channel Configuration
 
@@ -417,5 +418,5 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 - `CLAUDE.md`, `system/ask.py`, `system/update.py`, `system/version.json`, `system/research.md`, `README.md`, `.gitignore`
 
 **User data** (never touched):
-- `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
+- `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
 - `answers/`, `drafts/`
