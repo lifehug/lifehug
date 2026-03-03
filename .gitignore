@@ -5,3 +5,4 @@ __pycache__/
 config.yaml
 system/schedule.json
 system/question-bank-upstream.md
+skill/life-legacy

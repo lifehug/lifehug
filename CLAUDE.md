@@ -60,10 +60,19 @@ Based on their answers:
 4. Generate 3-5 questions per new category
 5. Write everything to `system/question-bank.md`
 
-### Step 6: Initialize state
+### Step 6: Generate README.md
+Create a personalized `README.md` for this user's repo using `README.template.md` as a starting point. Fill in:
+- Their name
+- Their projects (with descriptions)
+- Any initial spotlights
+- The Coverage section (starts at 0)
+
+This README is **user data** — it won't be overwritten by framework updates. It's the face of their repo on GitHub.
+
+### Step 7: Initialize state
 Update `system/rotation.json` and `system/coverage.json` to reflect the new categories.
 
-### Step 7: Create config.yaml
+### Step 8: Create config.yaml
 Save the user's preferences to `config.yaml`:
 ```yaml
 name: "Their Name"
@@ -72,7 +81,7 @@ question_time: "09:00"
 channel: "telegram"  # or whatsapp, signal, discord, etc.
 ```
 
-### Step 8: Set up daily delivery
+### Step 9: Set up daily delivery
 Help the user configure a daily cron job or scheduled task that:
 1. Checks for Lifehug updates (`python3 system/update.py --check`)
 2. Runs `python3 system/ask.py` to pick the next question
@@ -116,7 +125,7 @@ Adjust the timezone, channel, and `to` field to match their config.yaml.
 
 For other schedulers (systemd timer, Task Scheduler, etc.), help them set up the equivalent.
 
-### Step 9: Ask the first question
+### Step 10: Ask the first question
 Pick the first question and ask it. The system is now running.
 
 ---
@@ -177,7 +186,9 @@ When the user responds:
    - `rotation.json`: update last_question_id, last_asked_at, questions_asked, questions_answered
    - `coverage.json`: recalculate category coverage
 
-6. **Commit and push** with message: `Answer {ID}: {brief summary}`
+6. **Update README** — Run `python3 system/update_readme.py` to refresh the Coverage section
+
+7. **Commit and push** with message: `Answer {ID}: {brief summary}`
 
 ---
 
@@ -198,7 +209,8 @@ When you notice this, offer to create a Spotlight:
 1. Add a new section to `system/question-bank.md` under "Spotlights" with category letter K+ (K1, L1, etc.)
 2. Generate 5-10 targeted questions specific to that person or episode
 3. Update `coverage.json` with the new category
-4. Spotlights rotate at lower frequency (1 per `spotlight_frequency` main questions)
+4. **Add to README.md** — Append the new spotlight to the `## Spotlights` section with a brief description
+5. Spotlights rotate at lower frequency (1 per `spotlight_frequency` main questions)
 
 ### Spotlight Deliverables
 Each Spotlight can produce:
@@ -415,8 +427,8 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/update.py`, `system/version.json`, `system/research.md`, `README.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/research.md`, `.gitignore`
 
 **User data** (never touched):
-- `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
-- `answers/`, `drafts/`
+- `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
+- `answers/`, `drafts/`, `spotlights/`

@@ -1,13 +1,13 @@
 {
-  "version": 1,
+  "version": 2,
   "released": "2026-03-02",
   "framework_files": [
     "CLAUDE.md",
     "system/ask.py",
     "system/update.py",
+    "system/update_readme.py",
     "system/version.json",
     "system/research.md",
-    "README.md",
     ".gitignore"
   ]
 }
