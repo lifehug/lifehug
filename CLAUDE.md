@@ -83,10 +83,12 @@ channel: "telegram"  # or whatsapp, signal, discord, etc.
 
 ### Step 9: Set up daily delivery
 Help the user configure a daily cron job or scheduled task that:
-1. Checks for Lifehug updates (`python3 system/update.py --check`)
+1. Checks for Lifehug updates (`python3 system/update.py --check --quiet`)
 2. Runs `python3 system/ask.py` to pick the next question
 3. Sends it to the user via their configured channel
-4. The question should be delivered warmly, not robotically
+4. If an update is available, mentions it briefly after the question
+
+The cron does NOT commit/push — that happens after the user answers (see "Processing an Answer"). The question should be delivered warmly, not robotically.
 
 **For OpenClaw:** Create/update `openclaw.json` cron entry:
 ```json
@@ -97,8 +99,9 @@ Help the user configure a daily cron job or scheduled task that:
       "timezone": "America/Chicago",
       "sessionTarget": "isolated",
       "payload": {
-        "kind": "system-event",
-        "text": "Run the Lifehug daily routine: check for updates with `python3 system/update.py --check`, then pick and deliver the next question with `python3 system/ask.py`. If an update is available, mention it briefly after the question."
+        "kind": "agentTurn",
+        "message": "Run the Lifehug daily routine:\n1. Check for updates: `python3 system/update.py --check --quiet` (exit code 1 = update available)\n2. Pick today's question: `python3 system/ask.py`\n3. Send the question warmly. If an update is available, mention it briefly after.\nDo NOT commit/push — that happens when the user answers.",
+        "model": "anthropic/claude-sonnet-4-6"
       },
       "deliver": {
         "mode": "announce",
