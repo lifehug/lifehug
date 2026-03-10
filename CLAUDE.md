@@ -83,12 +83,13 @@ channel: "telegram"  # or whatsapp, signal, discord, etc.
 
 ### Step 9: Set up daily delivery
 Help the user configure a daily cron job or scheduled task that:
-1. Checks for Lifehug updates (`python3 system/update.py --check --quiet`)
-2. Runs `python3 system/ask.py` to pick the next question
-3. Sends it to the user via their configured channel
-4. If an update is available, mentions it briefly after the question
+1. Commits and pushes any pending changes to their repo (ensures nothing is lost overnight)
+2. Checks for Lifehug updates (`python3 system/update.py --check --quiet`)
+3. Runs `python3 system/ask.py` to pick the next question
+4. Sends it to the user via their configured channel
+5. If an update is available, mentions it briefly after the question
 
-The cron does NOT commit/push — that happens after the user answers (see "Processing an Answer"). The question should be delivered warmly, not robotically.
+The cron commits and pushes any pending changes first (ensuring nothing is lost), then checks for updates and delivers the question. The question should be delivered warmly, not robotically.
 
 **For OpenClaw:** Create/update `openclaw.json` cron entry:
 ```json
@@ -100,7 +101,7 @@ The cron does NOT commit/push — that happens after the user answers (see "Proc
       "sessionTarget": "isolated",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run the Lifehug daily routine:\n1. Check for updates: `python3 system/update.py --check --quiet` (exit code 1 = update available)\n2. Pick today's question: `python3 system/ask.py`\n3. Send the question warmly. If an update is available, mention it briefly after.\nDo NOT commit/push — that happens when the user answers.",
+        "message": "Run the Lifehug daily routine:\n0. Commit and push any pending changes:\n```\ncd <WORKSPACE_PATH> && git add -A && git diff --cached --quiet || git commit -m \"Daily update $(date +%Y-%m-%d)\" && git push\n```\nIf nothing to commit, continue.\n1. Check for updates: `python3 system/update.py --check --quiet` (exit code 1 = update available)\n2. Pick today's question: `python3 system/ask.py`\n3. Send the question warmly. If an update is available, mention it briefly after.",
         "model": "anthropic/claude-sonnet-4-6"
       },
       "deliver": {
