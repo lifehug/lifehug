@@ -3,6 +3,7 @@
   "released": "2026-03-20",
   "framework_files": [
     "CLAUDE.md",
+    "examples/openclaw-cron.md",
     "system/ask.py",
     "system/update.py",
     "system/update_readme.py",
