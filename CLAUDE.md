@@ -91,27 +91,19 @@ Help the user configure a daily cron job or scheduled task that:
 
 The cron commits and pushes any pending changes first (ensuring nothing is lost), then checks for updates and delivers the question. The question should be delivered warmly, not robotically.
 
-**For OpenClaw:** Create/update `openclaw.json` cron entry:
-```json
-{
-  "cron": {
-    "lifehug-daily": {
-      "cron": "0 9 * * *",
-      "timezone": "America/Chicago",
-      "sessionTarget": "isolated",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "Run the Lifehug daily routine:\n0. Commit and push any pending changes:\n```\ncd <WORKSPACE_PATH> && git add -A && git diff --cached --quiet || git commit -m \"Daily update $(date +%Y-%m-%d)\" && git push\n```\nIf nothing to commit, continue.\n1. Check for updates: `python3 system/update.py --check --quiet` (exit code 1 = update available)\n2. Pick today's question: `python3 system/ask.py`\n3. Send the question warmly. If an update is available, mention it briefly after.",
-        "model": "anthropic/claude-sonnet-4-6"
-      },
-      "deliver": {
-        "mode": "announce",
-        "channel": "telegram",
-        "to": "<user-channel-id>"
-      }
-    }
-  }
-}
+**Delivery options:**
+- **DM**: Send directly to the user via their configured channel (`--announce` / `deliver.mode: announce`)
+- **Group chat** (Telegram): Send to a group and **pin the message** so it's always findable. Use `openclaw cron add` without `--announce` and target the group chat ID in the task. See `examples/openclaw-cron.md` for the full group example.
+
+**For OpenClaw:** See `examples/openclaw-cron.md` for copy-paste cron commands (Telegram DM, Telegram Group, WhatsApp, Signal, Discord).
+
+The cron task template (all platforms):
+```
+0. Commit and push any pending changes:
+   cd <WORKSPACE_PATH> && git add -A && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
+2. Pick today's question: python3 system/ask.py
+3. Send the question warmly. If an update is available, mention it briefly after.
 ```
 
 Adjust the cron expression based on the user's frequency and time preferences:
