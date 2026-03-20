@@ -32,7 +32,13 @@ Reply here whenever you are ready — voice or text."
 
 ## Telegram Group (9 AM, US Eastern)
 
-If you want questions delivered to a Telegram group (so others can follow along or you want them pinned for easy access):
+If you want questions delivered to a Telegram group (so others can follow along or you want them pinned for easy access).
+
+**Before using this:** get your group chat ID and bot token, then replace the placeholders:
+- `YOUR_GROUP_CHAT_ID` — the numeric ID of your Telegram group (negative number, e.g. `-1001234567890`)
+- `YOUR_OPENCLAW_CONFIG_PATH` — path to your openclaw.json (usually `~/.openclaw/openclaw.json`)
+
+To find your group chat ID: add your bot to the group, send any message, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and look for `"chat": { "id": -1001234567890 }`. Save it to `group_chat_id` in your `config.yaml`.
 
 ```bash
 openclaw cron add \
@@ -45,20 +51,18 @@ openclaw cron add \
    If nothing to commit, continue.
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick today's question: python3 system/ask.py
-3. Send the question ONLY to the Lifehug group (chat_id: <YOUR_GROUP_CHAT_ID>). Format:
+3. Send the question ONLY to the Lifehug group (chat_id: YOUR_GROUP_CHAT_ID). Format:
    📖 Lifehug — Daily Question
 
    [the question text]
 
    (Answer whenever you want — voice or text)
 4. Pin the message in the group so it's easy to find:
-   TOKEN=$(python3 -c \"import json; c=json.load(open('/Users/<you>/.openclaw/openclaw.json')); print(c['channels']['telegram']['botToken'])\")
-   curl -s -X POST \"https://api.telegram.org/bot\${TOKEN}/pinChatMessage\" -d \"chat_id=<YOUR_GROUP_CHAT_ID>&message_id=<returned_message_id>&disable_notification=true\"
+   TOKEN=$(python3 -c \"import json; c=json.load(open('YOUR_OPENCLAW_CONFIG_PATH')); print(c['channels']['telegram']['botToken'])\")
+   curl -s -X POST \"https://api.telegram.org/bot\${TOKEN}/pinChatMessage\" -d \"chat_id=YOUR_GROUP_CHAT_ID&message_id=<returned_message_id>&disable_notification=true\"
 5. If an update is available, mention it after the question.
 6. If rotation.json shows an unanswered question from yesterday, gently remind them first."
 ```
-
-To find your group chat ID: add your bot to the group, send a message, then check `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 
 ## WhatsApp (8:30 AM, US Pacific)
 

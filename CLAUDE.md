@@ -79,7 +79,13 @@ name: "Their Name"
 timezone: "Their/Timezone"
 question_time: "09:00"
 channel: "telegram"  # or whatsapp, signal, discord, etc.
+# group_chat_id: "-1001234567890"  # optional: Telegram group ID for group delivery + pinning
+#   To find it: add your bot to the group, send a message, then check:
+#   https://api.telegram.org/bot<TOKEN>/getUpdates
+#   Look for "chat": { "id": -1001234567890 }
 ```
+
+**Ask the user:** "Do you want questions delivered to a private DM or a Telegram group chat?" If they say group, ask them to share the group chat ID (or walk them through finding it) and save it as `group_chat_id` in config.yaml.
 
 ### Step 9: Set up daily delivery
 Help the user configure a daily cron job or scheduled task that:
