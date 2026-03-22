@@ -1,6 +1,6 @@
 {
-  "version": 4,
-  "released": "2026-03-20",
+  "version": 5,
+  "released": "2026-03-22",
   "framework_files": [
     "CLAUDE.md",
     "examples/openclaw-cron.md",

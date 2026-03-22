@@ -296,7 +296,11 @@ def main():
     else:
         emoji = "\U0001f4d6"
 
-    print(f"{emoji} [{question['id']}] {question['text']}")
+    cat_name = cat_info.get("name", "")
+    if cat_name:
+        print(f"{emoji} [{question['id']}] {cat_name}\n{question['text']}")
+    else:
+        print(f"{emoji} [{question['id']}] {question['text']}")
 
     if not args.dry_run:
         rotation["last_question_id"] = question["id"]
