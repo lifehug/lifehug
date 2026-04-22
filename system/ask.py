@@ -118,6 +118,18 @@ def mark_answered_in_md(question_id):
     return count > 0
 
 
+def reset_all_questions():
+    """Reset all answered questions back to unanswered for a new pass."""
+    md = QUESTIONS_FILE.read_text()
+    # Replace [x] with [ ] and remove date annotations
+    pattern = re.compile(
+        r'^- \[x\] (([A-Z]\d+): .+?)(?:\s*\*\(.+\)\*)?$',
+        re.MULTILINE,
+    )
+    new_md = pattern.sub(r'- [ ] \1', md)
+    QUESTIONS_FILE.write_text(new_md)
+
+
 def pick_next_question(questions, categories, rotation):
     """Pick the next question using rotation logic."""
     pending = [q for q in questions if not q["answered"]]
@@ -200,6 +212,30 @@ def pick_next_question(questions, categories, rotation):
     return pending[0]
 
 
+def advance_pass(rotation):
+    """Advance to the next pass and reset all questions. Returns (new_pass, pass_name)."""
+    pass_names = rotation.get("pass_names", ["skeleton", "depth", "connections", "polish"])
+    current_pass = rotation.get("current_pass", 1)
+    next_pass = current_pass + 1
+
+    # Cycle through named passes; after the last named pass, continue with numbered passes
+    if next_pass <= len(pass_names):
+        next_pass_name = pass_names[next_pass - 1]
+    else:
+        next_pass_name = f"pass-{next_pass}"
+
+    # Reset question state
+    reset_all_questions()
+
+    # Update rotation for new pass
+    rotation["current_pass"] = next_pass
+    rotation["questions_asked"] = 0
+    rotation["last_question_id"] = None
+    rotation["last_asked_at"] = None
+
+    return next_pass, next_pass_name
+
+
 def update_coverage(questions, categories):
     """Rebuild coverage.json from current question state."""
     coverage = {
@@ -255,6 +291,34 @@ def show_status(questions, categories):
     answered = sum(1 for q in questions if q["answered"])
     print(f"\n  Total: {answered}/{total}")
 
+    rotation = load_json(ROTATION_FILE)
+    current_pass = rotation.get("current_pass", 1)
+    pass_names = rotation.get("pass_names", ["skeleton", "depth", "connections", "polish"])
+    pass_name = pass_names[current_pass - 1] if current_pass <= len(pass_names) else f"pass-{current_pass}"
+    print(f"\n  Pass: {current_pass} ({pass_name})")
+
+
+def format_question(question, categories, pass_prefix=None):
+    """Format a question for output, with optional pass transition prefix."""
+    cat_info = categories.get(question["category"], {})
+    group = cat_info.get("group", "main")
+    if group == "spotlight":
+        emoji = "\u2728"
+    elif group == "project":
+        emoji = "\U0001f4bc"
+    else:
+        emoji = "\U0001f4d6"
+
+    cat_name = cat_info.get("name", "")
+    if cat_name:
+        q_line = f"{emoji} [{question['id']}] {cat_name}\n{question['text']}"
+    else:
+        q_line = f"{emoji} [{question['id']}] {question['text']}"
+
+    if pass_prefix:
+        return f"{pass_prefix}\n\n{q_line}"
+    return q_line
+
 
 def main():
     parser = argparse.ArgumentParser(description="Life Hug daily question picker")
@@ -282,25 +346,36 @@ def main():
         return
 
     question = pick_next_question(questions, categories, rotation)
+    pass_prefix = None
 
     if not question:
-        print("All questions answered! Time for the next pass.")
-        return
+        current_pass = rotation.get("current_pass", 1)
 
-    cat_info = categories.get(question["category"], {})
-    group = cat_info.get("group", "main")
-    if group == "spotlight":
-        emoji = "\u2728"
-    elif group == "project":
-        emoji = "\U0001f4bc"
-    else:
-        emoji = "\U0001f4d6"
+        if args.dry_run:
+            pass_names = rotation.get("pass_names", ["skeleton", "depth", "connections", "polish"])
+            next_pass = current_pass + 1
+            next_name = pass_names[next_pass - 1] if next_pass <= len(pass_names) else f"pass-{next_pass}"
+            print(f"Pass {current_pass} complete. Would start Pass {next_pass} ({next_name}) and reset all questions.")
+            return
 
-    cat_name = cat_info.get("name", "")
-    if cat_name:
-        print(f"{emoji} [{question['id']}] {cat_name}\n{question['text']}")
-    else:
-        print(f"{emoji} [{question['id']}] {question['text']}")
+        # Auto-advance: reset questions and start the next pass
+        next_pass, next_pass_name = advance_pass(rotation)
+        pass_prefix = f"🎉 Pass {current_pass} complete! Starting Pass {next_pass} — {next_pass_name}"
+
+        # Reload questions after reset
+        md_text = QUESTIONS_FILE.read_text()
+        questions = parse_questions(md_text)
+        update_coverage(questions, categories)
+
+        question = pick_next_question(questions, categories, rotation)
+
+        if not question:
+            # No questions at all — shouldn't happen with a populated question bank
+            print("No questions found in question-bank.md.")
+            return
+
+    output = format_question(question, categories, pass_prefix)
+    print(output)
 
     if not args.dry_run:
         rotation["last_question_id"] = question["id"]
