@@ -1,10 +1,13 @@
 {
-  "version": 6,
-  "released": "2026-04-22",
+  "version": 7,
+  "released": "2026-04-27",
+  "changelog": "Pass transition flow: ask.py now pauses at pass completion and requests model confirmation before generating depth questions. gen_followups.py handles question generation. daily_question.sh updated to handle PASS_COMPLETE signal and awaiting_pass_transition state.",
   "framework_files": [
     "CLAUDE.md",
     "examples/openclaw-cron.md",
     "system/ask.py",
+    "system/daily_question.sh",
+    "system/gen_followups.py",
     "system/update.py",
     "system/update_readme.py",
     "system/version.json",

@@ -18,6 +18,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 SYSTEM_DIR = Path(__file__).parent
+REPO_DIR = SYSTEM_DIR.parent
 QUESTIONS_FILE = SYSTEM_DIR / "question-bank.md"
 ROTATION_FILE = SYSTEM_DIR / "rotation.json"
 COVERAGE_FILE = SYSTEM_DIR / "coverage.json"
@@ -320,6 +321,18 @@ def format_question(question, categories, pass_prefix=None):
     return q_line
 
 
+def _get_followup_model():
+    """Read followup_model from config.yaml, fallback to opus."""
+    config_file = REPO_DIR / "config.yaml"
+    if config_file.exists():
+        for line in config_file.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("followup_model") and ":" in line:
+                _, _, val = line.partition(":")
+                return val.strip().strip('"').strip("'")
+    return "anthropic/claude-opus-4-6"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Life Hug daily question picker")
     parser.add_argument("--dry-run", action="store_true", help="Pick but don't update state")
@@ -358,21 +371,14 @@ def main():
             print(f"Pass {current_pass} complete. Would start Pass {next_pass} ({next_name}) and reset all questions.")
             return
 
-        # Auto-advance: reset questions and start the next pass
-        next_pass, next_pass_name = advance_pass(rotation)
-        pass_prefix = f"🎉 Pass {current_pass} complete! Starting Pass {next_pass} — {next_pass_name}"
+        # Don't auto-advance — pause and ask Dave which model to use for question generation
+        if not rotation.get("awaiting_pass_transition"):
+            rotation["awaiting_pass_transition"] = True
+            save_json(ROTATION_FILE, rotation)
 
-        # Reload questions after reset
-        md_text = QUESTIONS_FILE.read_text()
-        questions = parse_questions(md_text)
-        update_coverage(questions, categories)
-
-        question = pick_next_question(questions, categories, rotation)
-
-        if not question:
-            # No questions at all — shouldn't happen with a populated question bank
-            print("No questions found in question-bank.md.")
-            return
+        default_model = _get_followup_model()
+        print(f"PASS_COMPLETE:{current_pass}:{default_model}")
+        return
 
     output = format_question(question, categories, pass_prefix)
     print(output)

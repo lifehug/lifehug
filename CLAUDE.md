@@ -383,9 +383,71 @@ When you receive a message in the Lifehug workspace context, determine what it i
 
 1. **An answer to the pending question** — If the user's message is personal, reflective, or detailed, and there's a pending question in `rotation.json` (`last_question_id`), treat it as an answer. Process it using the "Processing an Answer" flow above.
 
-2. **A command** — "show coverage", "draft a chapter", "skip this question", "ask me something else"
+2. **A pass transition reply** — If `rotation.json` has `awaiting_pass_transition: true` and the user replies with a model name (e.g. "opus", "gpt-5", "anthropic/claude-opus-4-6") or just **go** / **yes** / **do it**, treat it as a pass transition trigger. See **Pass Transition** below.
 
-3. **Setup conversation** — If config.yaml doesn't exist or question-bank.md only has A-E categories, this is still setup.
+3. **A command** — "show coverage", "draft a chapter", "skip this question", "ask me something else"
+
+4. **Setup conversation** — If config.yaml doesn't exist or question-bank.md only has A-E categories, this is still setup.
+
+---
+
+## Pass Transition
+
+When a pass completes, `ask.py` sets `awaiting_pass_transition: true` in `rotation.json` and the daily question script sends Dave a Telegram message asking which model to use.
+
+### Handling the Reply
+
+When `awaiting_pass_transition: true` and the user replies with a model name or confirmation:
+
+1. **Resolve the model** — Map shorthand to full model ID:
+   - "go" / "yes" / "default" → use `followup_model` from `config.yaml` (default: `anthropic/claude-opus-4-6`)
+   - "opus" → `anthropic/claude-opus-4-6`
+   - "sonnet" → `anthropic/claude-sonnet-4-6`
+   - "gpt-5" → `openai/gpt-5`
+   - Otherwise treat the reply as a full model ID
+
+2. **Generate the prompt** — Run:
+   ```
+   python3 system/gen_followups.py --prompt
+   ```
+   This outputs the full context for the AI to generate follow-up questions.
+
+3. **Generate questions** — Feed the prompt to the chosen model and get back JSON in this format:
+   ```json
+   {"questions": [{"category": "A", "source_id": "A1", "text": "You mentioned..."}]}
+   ```
+
+4. **Append questions** — Save the JSON to a temp file and run:
+   ```
+   python3 system/gen_followups.py --append /tmp/followups.json --model <model-id>
+   ```
+   This writes the new questions to `question-bank.md`, advances the pass, and clears `awaiting_pass_transition`.
+
+5. **Advance the pass** — After appending, reset the question bank for the new pass:
+   ```
+   python3 system/ask.py  (in --dry-run mode to preview, then live)
+   ```
+   The `gen_followups.py --append` script handles this automatically.
+
+6. **Report back** — Tell Dave:
+   - How many questions were generated
+   - Which model wrote them
+   - What pass they're now on
+   - Send the first question of the new pass
+
+### Example Flow
+
+> Daily script sends: "Pass 1 complete! Default model: opus. Reply with a model name or go."
+>
+> Dave replies: "go"
+>
+> You:
+> 1. Read config.yaml → model = `anthropic/claude-opus-4-6`
+> 2. Run `gen_followups.py --prompt` → get the context
+> 3. Call Claude Opus with the prompt → get JSON
+> 4. Run `gen_followups.py --append /tmp/q.json --model anthropic/claude-opus-4-6`
+> 5. Report: "✓ Generated 47 depth questions using Claude Opus. You're now on Pass 2. Here's today's question:"
+> 6. Send the first Pass 2 question
 
 ### Channel Configuration
 
