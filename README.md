@@ -64,13 +64,16 @@ As you answer questions, the AI watches for significant people or events that co
 
 Spotlights get their own targeted questions and rotate at a lower frequency (roughly 1 Spotlight question per 3-4 main questions).
 
-### Deliverables
+### Outputs
 
-At milestones, the AI drafts content from your accumulated answers:
-- **Books**: Chapter drafts, standalone essays, full manuscripts
-- **Spotlights**: Character profiles, letters, short stories, essays
+At any point — at milestones, on a Mother's Day, or whenever you ask — the AI composes outputs from your accumulated answers using `system/compose.py`:
 
-Interim deliverables (essays, letters) can ship before the full book is complete.
+- **Letters** — heartfelt, specific, written in your voice (`--format letter`)
+- **Tweets** — one moment, condensed (`--format tweet`)
+- **Instagram captions** — 2-4 short paragraphs, personal tone (`--format instagram`)
+- **Chapter drafts** — literary nonfiction prose (`--format chapter`)
+
+Each output lives in `outputs/{title}/`, with `v1.md`, `v2.md`, etc. for revisions. Ask the AI to revise with feedback ("make it more personal", "shorter") and it bumps to the next version. Interim outputs can ship before the full book is complete.
 
 ---
 
@@ -176,9 +179,15 @@ lifehug/
 ├── .gitignore
 ├── answers/                  # Your stored responses
 │   └── {question_id}.md      # One file per answer, with metadata
-├── spotlights/               # Spotlight deliverables
-│   └── {name}/               # Profiles, letters, stories per spotlight
-├── drafts/                   # Chapter drafts, essays, deliverables
+├── outputs/                  # Composed outputs (letters, tweets, IG, chapters)
+│   └── {title}/
+│       ├── meta.yaml         # Format, subject, source categories, versions
+│       └── v{N}.md           # Each revision lives as a versioned file
+├── templates/                # Format instructions used by compose.py
+│   ├── letter.md
+│   ├── tweet.md
+│   ├── instagram.md
+│   └── chapter.md
 ├── examples/
 │   └── openclaw-cron.md      # Cron job examples for every channel
 ├── skill/
@@ -186,7 +195,10 @@ lifehug/
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
     ├── ask.py                # Rotation engine (CLI tool)
+    ├── compose.py            # Output composer (letters, tweets, IG, chapters)
+    ├── gen_followups.py      # Pass transition / depth question generator
     ├── update.py             # Update manager (check, apply, rollback)
+    ├── update_readme.py      # Refreshes Coverage section in README.md
     ├── version.json          # Current version tracking
     ├── rotation.json         # Current rotation state
     ├── coverage.json         # Gap tracking per category
@@ -229,6 +241,30 @@ python3 system/ask.py --mark-answered A1  # Mark a question as answered
 3. Interleave Spotlight questions at configured frequency
 4. Pick the first unanswered question in the chosen category
 5. Update rotation and coverage state
+
+---
+
+## Composing Outputs
+
+`system/compose.py` builds versioned outputs from your accumulated answers. The script doesn't call AI itself — it assembles a prompt your AI processes, then saves the result.
+
+```bash
+# Generate a Mother's Day letter from the Katie spotlight
+python3 system/compose.py --prompt --format letter --subject katie --title mothers-day-2026
+
+# AI processes prompt → save the result
+echo "$content" | python3 system/compose.py --save outputs/mothers-day-2026 \
+    --format letter --subject katie --model anthropic/claude-opus-4-6
+
+# Revise based on feedback
+python3 system/compose.py --revise outputs/mothers-day-2026 --feedback 'make it more personal'
+
+# Browse
+python3 system/compose.py --list
+python3 system/compose.py --info outputs/mothers-day-2026
+```
+
+Formats: `letter`, `tweet`, `instagram`, `chapter`. Each has its own template in `templates/`.
 
 ---
 

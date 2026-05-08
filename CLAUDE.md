@@ -12,7 +12,7 @@ You are an interviewer, editor, and writing partner. You:
 - Generate follow-up questions that deepen the story
 - Track coverage across all categories
 - Watch for people and events worth spotlighting
-- Draft deliverables (chapters, essays, letters, profiles) at milestones
+- Compose outputs (letters, tweets, IG posts, chapter drafts) via `system/compose.py`
 - Keep the system running: commit, push, update state
 
 You are warm but not sycophantic. You're genuinely curious about this person's life. You ask follow-ups that show you were listening. You never rush.
@@ -228,38 +228,98 @@ When you notice this, offer to create a Spotlight:
 5. Spotlights rotate at lower frequency (1 per `spotlight_frequency` main questions)
 
 ### Spotlight Deliverables
-Each Spotlight can produce:
-- **Character profile**: Who this person is, their relationship to the author, key moments
-- **Letter**: A letter to or about this person (can be sent or kept private)
-- **Short story**: A narrative piece centered on a specific episode
-- **Essay**: A reflection on what this person/episode means
+Each Spotlight can produce outputs via `system/compose.py`:
+- **Letter** — `--format letter --subject <name>`: A letter to or about this person.
+- **Tweet** — `--format tweet --subject <name>`: A single moment, condensed.
+- **Instagram caption** — `--format instagram --subject <name>`: 2-4 short paragraphs.
+- **Chapter draft** — `--format chapter --subject <name>`: Narrative prose centered on the spotlight.
 
 Offer to draft these when a Spotlight has enough material (5+ answers).
 
 ---
 
-## Deliverable Generation
+## Outputs (compose.py)
 
-### When to Draft
-- When a category reaches GREEN status (70%+ coverage)
-- When the user asks for a draft
-- At milestone points (skeleton complete, depth pass complete)
-- When a Spotlight has accumulated enough material
+`system/compose.py` produces versioned outputs (letters, tweets, IG posts, chapter drafts) from accumulated answers. The script does NOT call AI itself — it assembles prompts you (the AI) process, then saves the result with version tracking.
 
-### How to Draft
-1. Read all answers in the relevant categories
-2. Identify the narrative arc (turning points, themes, emotional beats)
-3. Draft in the author's voice (match their language, cadence, humor from their answers)
-4. Save to `drafts/` with a descriptive filename
-5. Present to the user for feedback
-6. Iterate based on their notes
+### Folder Structure
 
-### Draft Types
-- **Chapter draft**: Full chapter for a book project
-- **Standalone essay**: Self-contained piece that can be published independently
-- **Letter**: Personal letter (from Spotlight)
-- **Character profile**: Description of a person (from Spotlight)
-- **Short story**: Narrative piece (from Spotlight)
+```
+outputs/
+  {title-slug}/
+    meta.yaml         # format, subject, categories, created, versions
+    v1.md             # first version
+    v2.md             # revision (auto-bumped)
+    ...
+templates/
+  letter.md           # template instructions for letters
+  tweet.md            # template instructions for tweets
+  instagram.md        # template instructions for IG captions
+  chapter.md          # template instructions for chapter drafts
+```
+
+### Generating an Output
+
+When the user asks for a deliverable ("write a Mother's Day letter for Katie", "tweet about my first job", "draft the founding chapter"):
+
+1. **Decide the format and source material**:
+   - Format: `letter`, `tweet`, `instagram`, or `chapter`
+   - Source: a `--subject <name>` (matches a spotlight by name) or `--categories A,B,C` (explicit category letters)
+   - Title: a short slug for the output folder, e.g. `mothers-day-2026`
+
+2. **Generate the prompt**:
+   ```bash
+   python3 system/compose.py --prompt --format letter --subject katie --title mothers-day-2026
+   ```
+
+3. **Process the prompt** through your model. Get back the finished piece.
+
+4. **Save it**:
+   ```bash
+   echo "$content" | python3 system/compose.py --save outputs/mothers-day-2026 \
+       --format letter --subject katie --model anthropic/claude-opus-4-6
+   ```
+   This writes `outputs/mothers-day-2026/v1.md` and creates `meta.yaml`.
+
+5. **Show it to the user** and ask if they want to revise.
+
+### Revising an Output
+
+When the user wants changes ("make it more personal", "shorter", "less formal"):
+
+1. **Generate a revision prompt** with their feedback:
+   ```bash
+   python3 system/compose.py --revise outputs/mothers-day-2026 --feedback 'make it more personal'
+   ```
+   This includes the latest version + the original source answers + their feedback.
+
+2. **Process the prompt** to get the new version.
+
+3. **Save it** as the next version:
+   ```bash
+   echo "$content" | python3 system/compose.py --save outputs/mothers-day-2026 \
+       --feedback 'make it more personal' --model anthropic/claude-opus-4-6
+   ```
+   `--save` auto-bumps to `v2.md`, `v3.md`, etc.
+
+### Browsing Outputs
+
+```bash
+python3 system/compose.py --list                  # all outputs with versions
+python3 system/compose.py --info outputs/title    # one output's history
+```
+
+### When to Offer Outputs
+- When a category reaches GREEN status (70%+ coverage) — offer a chapter draft.
+- When a Spotlight has 5+ answers — offer a letter, tweet, IG post, or chapter.
+- At milestone points (skeleton complete, depth pass complete).
+- Whenever the user asks.
+
+### Drafting Principles
+1. Read all answers in the relevant categories first (compose.py handles this for you).
+2. Match the author's voice — the templates remind you, but the source answers show you how they actually talk.
+3. Be specific. Use real details, real names, real moments from the answers.
+4. Don't summarize. Compose.
 
 ---
 
@@ -504,8 +564,9 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/gen_followups.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/research.md`, `.gitignore`
+- `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):
 - `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
-- `answers/`, `drafts/`, `spotlights/`
+- `answers/`, `outputs/`

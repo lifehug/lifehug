@@ -2,7 +2,7 @@
 """Lifehug — Update Manager
 
 Checks for, applies, and rolls back framework updates from the upstream repo.
-User data (answers/, drafts/, question-bank.md, schedule.json) is never touched.
+User data (answers/, outputs/, question-bank.md, schedule.json) is never touched.
 
 Usage:
     python3 system/update.py --check              # JSON: current, latest, update_available, changelog
@@ -30,8 +30,12 @@ PROTECTED_FILES = {
     "system/coverage.json",
     "system/schedule.json",
     "config.yaml",
+    "README.md",
     "answers/",
+    "outputs/",
+    # Legacy paths (pre-v8) — still protected so historical content isn't clobbered
     "drafts/",
+    "spotlights/",
 }
 
 
@@ -169,6 +173,35 @@ def check_dirty_framework_files(framework_files):
     return dirty
 
 
+def run_migrations(target_version, current_version):
+    """Run any one-time migrations needed for the target version.
+
+    v8: drafts/ and spotlights/ are replaced by outputs/. We don't delete the
+    legacy directories (they're protected user data), but we do ensure outputs/
+    exists with a .gitkeep so compose.py can write to it.
+    """
+    if target_version >= 8 and current_version < 8:
+        outputs = REPO_DIR / "outputs"
+        outputs.mkdir(exist_ok=True)
+        gitkeep = outputs / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("")
+        legacy = []
+        for name in ("drafts", "spotlights"):
+            d = REPO_DIR / name
+            if d.exists():
+                # Check if it has any content beyond .gitkeep
+                contents = [p for p in d.iterdir() if p.name != ".gitkeep"]
+                if contents:
+                    legacy.append(name)
+        if legacy:
+            print(
+                f"  Note: legacy dirs still present with content: {', '.join(legacy)}.\n"
+                f"  These were the pre-v8 deliverables location. New outputs go to outputs/.\n"
+                f"  Move existing content to outputs/ at your leisure — nothing will overwrite it.",
+            )
+
+
 def apply_version(version):
     """Apply a specific version by extracting framework files from its tag."""
     tag = f"v{version}"
@@ -178,6 +211,8 @@ def apply_version(version):
     if framework_files is None:
         print(f"Error: Cannot read framework file list from {tag}", file=sys.stderr)
         return False
+
+    current_version = get_local_version()
 
     # Check for uncommitted changes in framework files
     dirty = check_dirty_framework_files(framework_files)
@@ -217,10 +252,17 @@ def apply_version(version):
         except subprocess.CalledProcessError:
             print(f"  Warning: {filepath} not found in {tag}, skipping", file=sys.stderr)
 
+    # Run any version-specific migrations
+    run_migrations(version, current_version)
+
     if updated:
         # Stage and commit
         for f in updated:
             run_git("add", f)
+        # Stage outputs/.gitkeep if it was just created by migration
+        outputs_gitkeep = REPO_DIR / "outputs" / ".gitkeep"
+        if outputs_gitkeep.exists():
+            run_git("add", "outputs/.gitkeep", check=False)
         result = subprocess.run(
             ["git", "-C", str(REPO_DIR), "commit", "-m", f"Update Lifehug to v{version}"],
             capture_output=True, text=True,

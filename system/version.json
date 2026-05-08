@@ -1,17 +1,22 @@
 {
-  "version": 7,
-  "released": "2026-04-27",
-  "changelog": "Pass transition flow: ask.py now pauses at pass completion and requests model confirmation before generating depth questions. gen_followups.py handles question generation. daily_question.sh updated to handle PASS_COMPLETE signal and awaiting_pass_transition state.",
+  "version": 8,
+  "released": "2026-05-08",
+  "changelog": "Outputs system: new system/compose.py builds versioned outputs (letters, tweets, IG posts, chapter drafts) from accumulated answers. Adds templates/ with format-specific instructions. Replaces drafts/ and spotlights/ with outputs/{title}/v{N}.md + meta.yaml. compose.py only assembles AI prompts and saves results — never calls AI directly.",
   "framework_files": [
     "CLAUDE.md",
     "examples/openclaw-cron.md",
     "system/ask.py",
+    "system/compose.py",
     "system/daily_question.sh",
     "system/gen_followups.py",
     "system/update.py",
     "system/update_readme.py",
     "system/version.json",
     "system/research.md",
+    "templates/letter.md",
+    "templates/tweet.md",
+    "templates/instagram.md",
+    "templates/chapter.md",
     ".gitignore"
   ]
 }
