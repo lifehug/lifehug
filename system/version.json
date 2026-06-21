@@ -1,7 +1,7 @@
 {
-  "version": 8,
-  "released": "2026-05-08",
-  "changelog": "Outputs system: new system/compose.py builds versioned outputs (letters, tweets, IG posts, chapter drafts) from accumulated answers. Adds templates/ with format-specific instructions. Replaces drafts/ and spotlights/ with outputs/{title}/v{N}.md + meta.yaml. compose.py only assembles AI prompts and saves results — never calls AI directly.",
+  "version": 9,
+  "released": "2026-06-21",
+  "changelog": "Spotlight system upgraded: spotlight.add(type, subject) replaces the generic 'create a spotlight' instruction. Types: person (fully built, baseline-first 4-tier arc), time (coming soon), place (coming soon). Question arc for person type requires foundational identity questions before specific events. Procedure lives in CLAUDE.md and skill/SKILL.md.",
   "framework_files": [
     "CLAUDE.md",
     "examples/openclaw-cron.md",
@@ -17,6 +17,7 @@
     "templates/tweet.md",
     "templates/instagram.md",
     "templates/chapter.md",
+    "skill/SKILL.md",
     ".gitignore"
   ]
 }

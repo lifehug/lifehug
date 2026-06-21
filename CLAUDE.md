@@ -220,12 +220,52 @@ When you notice this, offer to create a Spotlight:
 
 > "You've mentioned [person/event] several times now, and it clearly matters to you. Want to create a Spotlight? I'd ask you 5-10 targeted questions and we could produce a [letter/profile/short story] about them."
 
-### Creating a Spotlight
-1. Add a new section to `system/question-bank.md` under "Spotlights" with category letter K+ (K1, L1, etc.)
-2. Generate 5-10 targeted questions specific to that person or episode
-3. Update `coverage.json` with the new category
-4. **Add to README.md** — Append the new spotlight to the `## Spotlights` section with a brief description
-5. Spotlights rotate at lower frequency (1 per `spotlight_frequency` main questions)
+### Creating a Spotlight — `spotlight.add(type, subject)`
+
+Spotlights have types. Each type has its own question arc. Currently supported:
+
+| Type | Subject | Arc goal |
+|------|---------|----------|
+| `person` | An important person | Establish identity → relationship → turning points → legacy |
+| `time` | A defining period or episode | *(coming soon)* |
+| `place` | A formative location | *(coming soon)* |
+
+#### Steps (all types)
+1. Find the next available category letter: `grep "^## [A-Z]:" system/question-bank.md | tail -1`
+2. Scan `answers/*.md` for existing mentions of the subject — read relevant passages
+3. Build the question arc for the type (see below)
+4. Append the new category block to `system/question-bank.md`
+5. Update `coverage.json` with the new category
+6. **Add to README.md** — Append the new spotlight to the `## Spotlights` section
+7. Commit: `git add system/question-bank.md && git commit -m "Add spotlight {LETTER}: {subject}"`
+8. Spotlights rotate at lower frequency (1 per `spotlight_frequency` main questions)
+
+#### Question arc — type: `person`
+
+Must follow **baseline-first order**. Do NOT open with specific events.
+
+**Tier 1 — Foundational identity (questions 1–5)**
+- Q1: "Tell me about [name]. Who were they as a person — not as [role], just as a human being?"
+- Q2: Physical presence / how they carried themselves
+- Q3: What they cared about — passions, interests, what lit them up
+- Q4: Earliest memory of this person
+- Q5: What the day-to-day relationship felt like
+
+**Tier 2 — Relationship dynamics (questions 6–8)**
+- The friction or complexity in the relationship (if any)
+- A specific memory of their character in action
+- A skill, gift, or quality the author watched and admired
+
+**Tier 3 — Turning points (questions 9–11)**
+- When the relationship shifted
+- A defining episode (illness, loss, a hard conversation, a sacrifice)
+- What the author wishes they'd said or asked
+
+**Tier 4 — Legacy and meaning (questions 12–13)**
+- How this person lives on (named child, inherited trait, lesson carried forward)
+- The adult-to-adult question: if you met as strangers, who would they be?
+
+Keep 10–14 questions total. Tiers 2–4 should be grounded in what the answer scan revealed — not generic.
 
 ### Spotlight Deliverables
 Each Spotlight can produce outputs via `system/compose.py`:
