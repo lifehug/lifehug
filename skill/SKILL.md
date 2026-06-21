@@ -86,9 +86,27 @@ If yes → process as answer. If unclear → ask: "Is this your answer to the Li
 - "lifehug status" / "how's my story going" → Run `python3 system/ask.py --status`
 - "skip this question" → Pick next question without marking answered
 - "draft a chapter" → Read relevant answers, draft in user's voice, save to `drafts/`
-- "create a spotlight on [person]" / "add spotlight person" → Follow the **Add Spotlight Person** procedure below
+- "add spotlight person [name]" → `spotlight.add(type=person)` — see **Spotlight: add** below
+- "add spotlight time [event]" → `spotlight.add(type=time)` — coming soon
+- "add spotlight place [location]" → `spotlight.add(type=place)` — coming soon
 
-## Add Spotlight Person
+## Spotlight: add
+
+Command: `spotlight.add(type, subject)`
+
+A spotlight is a focused question set about an important person, time period, or place in the author's life. Each spotlight gets its own category (K, L, M, … next available letter) and follows a **baseline-first arc** — establish the subject before drilling into specific moments.
+
+### Types
+
+| Type | Subject | Example |
+|------|---------|--------|
+| `person` | An important person | "add spotlight person — my dad James" |
+| `time` | A defining period or episode | "add spotlight time — the bankruptcy year" *(coming soon)* |
+| `place` | A formative location | "add spotlight place — Yucaipa" *(coming soon)* |
+
+---
+
+## spotlight.add — type: person
 
 A spotlight is a focused question set about an important person in the author's life. Each spotlight gets its own category (K, L, M, … next available letter) and follows a **baseline-first arc** — establish who the person is before drilling into specific moments.
 
@@ -164,10 +182,22 @@ git commit -m "Add spotlight {LETTER}: {Name}"
 ```
 
 ### Notes
-- Keep 10–14 questions total per spotlight
+- Keep 10–14 questions total per person spotlight
 - Tier 1 questions are nearly universal; tiers 2–4 should be specific to what the scan revealed
 - The scan step is critical — questions grounded in what's already been said feel personal, not generic
 - If little has been said about the person yet, lean harder on Tier 1 open questions and fewer Tier 3/4 specifics
+
+---
+
+## spotlight.add — type: time
+
+*(Coming soon — question arc for defining periods: what was happening, what it felt like, how it changed things, what it meant)*
+
+---
+
+## spotlight.add — type: place
+
+*(Coming soon — question arc for formative locations: what it looked like, who was there, what happened, why it still matters)*
 
 ## Voice Messages
 
