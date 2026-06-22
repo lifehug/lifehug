@@ -85,6 +85,7 @@ def git_commit(message: str, push: bool) -> None:
         "system/rotation.json",
         "system/coverage.json",
         "answers",
+        "wiki",
     ]
     subprocess.run(["git", "-C", str(REPO_DIR), "add", "--", *paths], check=True)
     diff = subprocess.run(["git", "-C", str(REPO_DIR), "diff", "--cached", "--quiet"])
@@ -93,6 +94,14 @@ def git_commit(message: str, push: bool) -> None:
     subprocess.run(["git", "-C", str(REPO_DIR), "commit", "-m", message], check=True)
     if push:
         subprocess.run(["git", "-C", str(REPO_DIR), "push"], check=True)
+
+
+def compile_wiki() -> None:
+    subprocess.run(
+        [sys.executable, str(REPO_DIR / "system" / "wiki_compile.py")],
+        cwd=REPO_DIR,
+        check=True,
+    )
 
 
 def main():
@@ -106,6 +115,7 @@ def main():
     parser.add_argument("--commit", action="store_true", help="Commit changed Lifehug files")
     parser.add_argument("--push", action="store_true", help="Push after committing")
     parser.add_argument("--summary", default=None, help="Commit summary")
+    parser.add_argument("--no-compile-wiki", action="store_true", help="Skip automatic wiki compile")
     args = parser.parse_args()
 
     rotation = read_json(ROTATION_FILE, default={}) or {}
@@ -166,6 +176,8 @@ def main():
     rotation.pop("pending_answer_question_id", None)
     write_json(ROTATION_FILE, rotation)
     update_readme()
+    if not args.no_compile_wiki:
+        compile_wiki()
 
     if args.commit or args.push:
         summary = args.summary or str(question["text"])[:64]
@@ -173,6 +185,8 @@ def main():
 
     print(f"✓ Saved answer {question_id} to {out_file.relative_to(REPO_DIR)}")
     print(f"✓ Coverage: {answered_count}/{sum(c['total'] for c in coverage['categories'].values())}")
+    if not args.no_compile_wiki:
+        print("✓ Compiled wiki")
     if followups_added:
         print(f"✓ Added follow-ups: {', '.join(qid for qid, _ in followups_added)}")
 

@@ -90,9 +90,29 @@ When the user replies to a daily question (via any channel):
    - Clean up the response
    - Generate 1-3 follow-up questions when useful
    - Pipe the answer through `python3 system/lifehug.py process-answer {question_id}`
-   - Run `python3 system/lifehug.py compile` when you want the private wiki refreshed
+   - Let `process-answer` compile the private wiki automatically unless there is a clear repair reason to pass `--no-compile-wiki`
    - Commit and push if requested or part of the configured daily workflow
 3. **Acknowledge warmly** — Thank them, share a brief reflection on their answer, mention what's coming next
+
+## Unprompted Story Ingest
+
+If the user shares a life story that is not an answer to the current daily question, save it as source material instead of forcing it into an answer file:
+
+```bash
+printf '%s\n' "$STORY_TEXT" | python3 system/lifehug.py ingest-story --source "telegram" --title "<short title>"
+python3 system/lifehug.py compile
+python3 system/lifehug.py planner-report
+```
+
+This stores the raw story under `sources/manual/` and parks suggested follow-up questions in `state/question_candidates.json`. Candidates should inform planning and future question-bank edits; they should not automatically dominate daily delivery.
+
+Use a planned queue only when the user asks for one or the workflow explicitly calls for it:
+
+```bash
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2
+```
+
+`ask.py` uses `state/question_queue.json` when it exists, then falls back to normal rotation logic.
 
 ### Voice Messages
 
@@ -125,6 +145,9 @@ All paths are relative to this workspace root:
 - Questions: `system/question-bank.md`
 - Rotation state: `system/rotation.json`
 - Coverage: `system/coverage.json`
+- Story sources: `sources/manual/`
+- Question candidates: `state/question_candidates.json`
+- Planned queue: `state/question_queue.json`
 - Answers: `answers/`
 - Wiki: `wiki/`
 - Outputs: `outputs/`

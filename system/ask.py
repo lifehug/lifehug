@@ -8,6 +8,7 @@ from datetime import datetime
 
 from lifehug_core import (
     COVERAGE_FILE,
+    QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
     ROTATION_FILE,
     compute_coverage,
@@ -21,8 +22,28 @@ from lifehug_core import (
 )
 
 
+def pick_planned_question(questions):
+    """Return the first valid unanswered question from state/question_queue.json."""
+    queue_data = read_json(QUESTION_QUEUE_FILE, default={}) or {}
+    queue = queue_data.get("queue", [])
+    if not isinstance(queue, list):
+        return None
+    for item in queue:
+        if item.get("status", "queued") != "queued":
+            continue
+        question_id = item.get("question_id")
+        question = question_by_id(questions, question_id) if question_id else None
+        if question and not question["answered"]:
+            return question
+    return None
+
+
 def pick_next_question(questions, categories, rotation):
     """Pick the next unanswered question using coverage + rotation logic."""
+    planned = pick_planned_question(questions)
+    if planned:
+        return planned
+
     pending = [q for q in questions if not q["answered"]]
     if not pending:
         return None

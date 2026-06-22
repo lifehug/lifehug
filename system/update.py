@@ -2,7 +2,7 @@
 """Lifehug — Update Manager
 
 Checks for, applies, and rolls back framework updates from the upstream repo.
-User data (answers/, outputs/, question-bank.md, schedule.json) is never touched.
+User data (answers/, outputs/, sources/manual/, question-bank.md, planner state) is never touched.
 
 Usage:
     python3 system/update.py --check              # JSON: current, latest, update_available, changelog
@@ -33,6 +33,9 @@ PROTECTED_FILES = {
     "README.md",
     "answers/",
     "outputs/",
+    "sources/manual/",
+    "state/question_candidates.json",
+    "state/question_queue.json",
     # Legacy paths (pre-v8) — still protected so historical content isn't clobbered
     "drafts/",
     "spotlights/",
@@ -179,6 +182,9 @@ def run_migrations(target_version, current_version):
     v8: drafts/ and spotlights/ are replaced by outputs/. We don't delete the
     legacy directories (they're protected user data), but we do ensure outputs/
     exists with a .gitkeep so compose.py can write to it.
+
+    v12: unprompted story ingest and planner state need sources/manual/ and
+    state/ to exist, but all actual source and planner files remain user data.
     """
     if target_version >= 8 and current_version < 8:
         outputs = REPO_DIR / "outputs"
@@ -200,6 +206,13 @@ def run_migrations(target_version, current_version):
                 f"  These were the pre-v8 deliverables location. New outputs go to outputs/.\n"
                 f"  Move existing content to outputs/ at your leisure — nothing will overwrite it.",
             )
+
+    if target_version >= 12 and current_version < 12:
+        for directory in (REPO_DIR / "sources" / "manual", REPO_DIR / "state"):
+            directory.mkdir(parents=True, exist_ok=True)
+            gitkeep = directory / ".gitkeep"
+            if not gitkeep.exists():
+                gitkeep.write_text("")
 
 
 def apply_version(version):
@@ -259,10 +272,10 @@ def apply_version(version):
         # Stage and commit
         for f in updated:
             run_git("add", f)
-        # Stage outputs/.gitkeep if it was just created by migration
-        outputs_gitkeep = REPO_DIR / "outputs" / ".gitkeep"
-        if outputs_gitkeep.exists():
-            run_git("add", "outputs/.gitkeep", check=False)
+        # Stage .gitkeep files if they were just created by migrations.
+        for marker in ("outputs/.gitkeep", "sources/manual/.gitkeep", "state/.gitkeep"):
+            if (REPO_DIR / marker).exists():
+                run_git("add", marker, check=False)
         result = subprocess.run(
             ["git", "-C", str(REPO_DIR), "commit", "-m", f"Update Lifehug to v{version}"],
             capture_output=True, text=True,

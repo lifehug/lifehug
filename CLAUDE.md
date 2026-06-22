@@ -108,7 +108,7 @@ The cron commits and pushes any pending changes first (ensuring nothing is lost)
 The cron task template (all platforms):
 ```
 0. Commit and push pending Lifehug data only:
-   cd <WORKSPACE_PATH> && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+   cd <WORKSPACE_PATH> && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs sources/manual state wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick and deliver today's question: system/daily_question.sh
 3. If an update is available, mention it briefly after.
@@ -183,7 +183,7 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer {questio
 
 If follow-up questions are already known, pass `--followup "question text"` for each.
 
-The helper writes `answers/{question_id}.md`, marks the question answered, rebuilds coverage, updates rotation state, and refreshes `README.md`.
+The helper writes `answers/{question_id}.md`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki.
 
 Manual answer files use this format:
 
@@ -218,9 +218,35 @@ Manual answer files use this format:
 
 6. **Update README** — `process-answer` does this; otherwise run `python3 system/lifehug.py rebuild`.
 
-7. **Refresh wiki when appropriate** — Run `python3 system/lifehug.py compile`.
+7. **Refresh wiki** — `process-answer` compiles the wiki by default. Use `--no-compile-wiki` only for tests or emergency repairs.
 
 8. **Commit and push** with message: `Answer {ID}: {brief summary}`
+
+---
+
+### Unprompted Story Ingest
+
+If the user shares a story that is not an answer to the pending daily question, ingest it as raw source material. Do not force it into `answers/{question_id}.md`.
+
+```bash
+printf '%s\n' "$STORY_TEXT" | python3 system/lifehug.py ingest-story --source "telegram" --title "Arizona memory"
+python3 system/lifehug.py compile
+python3 system/lifehug.py planner-report
+```
+
+This writes an owner-only source file under `sources/manual/` and stores suggested follow-up questions in `state/question_candidates.json`. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan.
+
+### Planner
+
+Use the planner when new sources or uneven coverage should influence future questions without letting one corpus dominate the whole system.
+
+```bash
+python3 system/lifehug.py planner-report
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2
+python3 system/lifehug.py planner-clear
+```
+
+`planner-report` shows coverage by group, low-coverage categories, open candidates, and whether a queue is active. `planner-queue` writes `state/question_queue.json`; `ask.py` honors it only for valid unanswered question-bank items, then falls back to normal rotation. Candidates remain recommendations until a human or AI operator edits them into the question bank.
 
 ---
 
@@ -621,9 +647,10 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):
 - `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
-- `answers/`, `outputs/`
+- `answers/`, `outputs/`, `sources/manual/`
+- `state/question_candidates.json`, `state/question_queue.json`

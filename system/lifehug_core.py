@@ -21,6 +21,10 @@ OUTPUTS_DIR = REPO_DIR / "outputs"
 TEMPLATES_DIR = REPO_DIR / "templates"
 STATE_DIR = REPO_DIR / "state"
 WIKI_DIR = REPO_DIR / "wiki"
+SOURCES_DIR = REPO_DIR / "sources"
+MANUAL_SOURCES_DIR = SOURCES_DIR / "manual"
+QUESTION_CANDIDATES_FILE = STATE_DIR / "question_candidates.json"
+QUESTION_QUEUE_FILE = STATE_DIR / "question_queue.json"
 
 QUESTION_ID_RE = r"[A-Z]\d+[a-z]*"
 QUESTION_LINE_RE = re.compile(

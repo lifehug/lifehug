@@ -103,6 +103,7 @@ Lifehug is git-backed, file-native, and script-first. Markdown is the durable so
 lifehug/
 ├── answers/              # Daily question responses, one source file per answer
 ├── sources/              # Future imports: voice, email, chats, photos, social, docs
+│   └── manual/           # Unprompted stories captured outside daily prompts
 ├── wiki/                 # Compiled private life wiki, AI-maintained with citations
 │   ├── people/
 │   ├── places/
@@ -128,11 +129,39 @@ python3 system/lifehug.py status
 python3 system/lifehug.py next
 python3 system/lifehug.py rebuild
 python3 system/lifehug.py compile
+python3 system/lifehug.py ingest-story
+python3 system/lifehug.py planner-report
+python3 system/lifehug.py planner-queue
+python3 system/lifehug.py planner-clear
 python3 system/lifehug.py serve
 python3 system/lifehug.py daily-dry-run
 ```
 
 The wrapper delegates to the underlying scripts. Cron should call the same scripts as a human or skill-driven agent; it should not implement its own question picker, state editor, or wiki compiler.
+
+Answer processing compiles the private wiki by default, so every saved daily response immediately updates the owner-only synthesis layer:
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer A14 --source "voice (transcribed)"
+```
+
+Unprompted stories use the same source-first model without pretending they answered today's prompt:
+
+```bash
+printf '%s\n' "$STORY_TEXT" | python3 system/lifehug.py ingest-story --source "telegram" --title "Arizona memory"
+python3 system/lifehug.py compile
+python3 system/lifehug.py planner-report
+```
+
+This writes raw material to `sources/manual/`, creates suggested follow-up questions in `state/question_candidates.json`, and lets the planner show how new material should influence future questions. Candidates are a parking lot, not an automatic takeover of the daily queue.
+
+When you want a more intentional sequence, write an opt-in planned queue:
+
+```bash
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2
+```
+
+`ask.py` honors `state/question_queue.json` only when it exists and only for valid unanswered question-bank items. The planner reports candidates, but candidates are not asked until promoted into `system/question-bank.md`.
 
 ---
 
@@ -238,6 +267,8 @@ lifehug/
 ├── .gitignore
 ├── answers/                  # Your stored responses
 │   └── {question_id}.md      # One file per answer, with metadata
+├── sources/                  # Raw imported or manually captured source material
+│   └── manual/               # Unprompted stories from chat, voice, notes, etc.
 ├── wiki/                     # Compiled private life wiki
 │   ├── SCHEMA.md             # Wiki governance and page contracts
 │   ├── people/
@@ -251,6 +282,9 @@ lifehug/
 │   └── {title}/
 │       ├── meta.yaml         # Format, subject, source categories, versions
 │       └── v{N}.md           # Each revision lives as a versioned file
+├── state/                    # Rebuildable planner/candidate state
+│   ├── question_candidates.json
+│   └── question_queue.json
 ├── templates/                # Format instructions used by compose.py
 │   ├── letter.md
 │   ├── tweet.md
@@ -265,6 +299,8 @@ lifehug/
     ├── lifehug.py            # Script-first workflow wrapper + doctor checks
     ├── ask.py                # Rotation engine (CLI tool)
     ├── process_answer.py     # Atomic answer save + state update helper
+    ├── ingest_story.py       # Unprompted story source ingest
+    ├── question_planner.py   # Planner report + opt-in queue generation
     ├── rebuild_state.py      # Recomputes derived coverage/README state
     ├── wiki_compile.py       # Compiles answers into the private Lifehug wiki
     ├── serve_wiki.py         # Owner-only local wiki viewer

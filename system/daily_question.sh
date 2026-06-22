@@ -61,6 +61,8 @@ safe_autocommit() {
     system/coverage.json
     answers
     outputs
+    sources/manual
+    state
     wiki
   )
   local existing=()

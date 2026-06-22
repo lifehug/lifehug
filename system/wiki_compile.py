@@ -10,6 +10,7 @@ from pathlib import Path
 
 from lifehug_core import (
     ANSWERS_DIR,
+    MANUAL_SOURCES_DIR,
     QUESTIONS_FILE,
     REPO_DIR,
     WIKI_DIR,
@@ -73,6 +74,36 @@ def read_answers() -> dict[str, dict]:
     return answers
 
 
+def strip_frontmatter(text: str) -> str:
+    return re.sub(r"^---\s*\n.*?\n---\s*\n", "", text, count=1, flags=re.DOTALL).strip()
+
+
+def frontmatter_value(text: str, key: str, default: str = "") -> str:
+    match = re.search(rf"^{re.escape(key)}:\s*[\"']?(.+?)[\"']?\s*$", text, re.MULTILINE)
+    return match.group(1).strip().strip('"').strip("'") if match else default
+
+
+def read_manual_sources() -> dict[str, dict]:
+    sources = {}
+    if not MANUAL_SOURCES_DIR.exists():
+        return sources
+    for path in sorted(MANUAL_SOURCES_DIR.glob("*.md")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        title = frontmatter_value(text, "title", path.stem.replace("-", " ").title())
+        body = strip_frontmatter(text)
+        body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
+        source_id = f"source:{path.stem}"
+        sources[source_id] = {
+            "id": source_id,
+            "path": path,
+            "source": rel(path),
+            "title": title,
+            "body": body,
+            "kind": "manual_source",
+        }
+    return sources
+
+
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None) -> str:
     today = date.today().isoformat()
     related = related or []
@@ -97,14 +128,24 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
     return "\n".join(lines)
 
 
-def cited_answer_blocks(answer_items: list[dict], limit: int = 8) -> list[str]:
+def cited_blocks(items: list[dict], limit: int = 8) -> list[str]:
     blocks = []
-    for answer in answer_items[:limit]:
-        body = re.sub(r"\s+", " ", answer["body"]).strip()
+    for item in items[:limit]:
+        body = re.sub(r"\s+", " ", item["body"]).strip()
         if len(body) > 420:
             body = body[:420].rsplit(" ", 1)[0] + "..."
-        blocks.append(f"- **{answer['id']}**: {body} [{answer['source']}]")
+        blocks.append(f"- **{item['id']}**: {body} [{item['source']}]")
     return blocks
+
+
+def matching_sources(sources: dict[str, dict], terms: list[str]) -> list[dict]:
+    clean_terms = [term.lower() for term in terms if term and len(term.strip()) >= 3]
+    matches = []
+    for source in sources.values():
+        haystack = f"{source.get('title', '')} {source.get('body', '')}".lower()
+        if any(term in haystack for term in clean_terms):
+            matches.append(source)
+    return matches
 
 
 def unanswered_questions(questions: list[dict], category: str, limit: int = 8) -> list[str]:
@@ -128,7 +169,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
     return True
 
 
-def compile_spotlights(categories, questions, answers, dry_run=False):
+def compile_spotlights(categories, questions, answers, manual_sources, dry_run=False):
     written = []
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "spotlight":
@@ -136,7 +177,8 @@ def compile_spotlights(categories, questions, answers, dry_run=False):
         title = clean_spotlight_name(info["name"])
         slug = slugify(title)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
-        sources = [a["source"] for a in answer_items]
+        source_items = matching_sources(manual_sources, [title])
+        sources = [a["source"] for a in answer_items] + [s["source"] for s in source_items]
         body = [
             frontmatter(title, "person", sources),
             "",
@@ -148,9 +190,12 @@ def compile_spotlights(categories, questions, answers, dry_run=False):
             "## What We Know",
         ]
         if answer_items:
-            body.extend(cited_answer_blocks(answer_items))
+            body.extend(cited_blocks(answer_items))
         else:
             body.append("No answered source material yet.")
+        if source_items:
+            body.extend(["", "## Supporting Story Sources"])
+            body.extend(cited_blocks(source_items))
         body.extend(["", "## Open Questions"])
         body.extend(unanswered_questions(questions, cat_id) or ["No open questions currently tracked."])
         body.extend(["", "## Related Pages"])
@@ -161,7 +206,7 @@ def compile_spotlights(categories, questions, answers, dry_run=False):
     return written
 
 
-def compile_projects(categories, questions, answers, dry_run=False):
+def compile_projects(categories, questions, answers, manual_sources, dry_run=False):
     written = []
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "project":
@@ -169,7 +214,8 @@ def compile_projects(categories, questions, answers, dry_run=False):
         title = info["name"]
         slug = slugify(title)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
-        sources = [a["source"] for a in answer_items]
+        source_items = matching_sources(manual_sources, [title, title.replace("The ", "")])
+        sources = [a["source"] for a in answer_items] + [s["source"] for s in source_items]
         body = [
             frontmatter(title, "project", sources),
             "",
@@ -179,7 +225,10 @@ def compile_projects(categories, questions, answers, dry_run=False):
             "",
             "## What We Know",
         ]
-        body.extend(cited_answer_blocks(answer_items) or ["No answered source material yet."])
+        body.extend(cited_blocks(answer_items) or ["No answered source material yet."])
+        if source_items:
+            body.extend(["", "## Supporting Story Sources"])
+            body.extend(cited_blocks(source_items))
         body.extend(["", "## Open Questions"])
         body.extend(unanswered_questions(questions, cat_id) or ["No open questions currently tracked."])
         body.extend(["", "## Related Pages"])
@@ -190,14 +239,14 @@ def compile_projects(categories, questions, answers, dry_run=False):
     return written
 
 
-def compile_themes(answers, dry_run=False):
+def compile_themes(answers, manual_sources, dry_run=False):
     written = []
     for theme, keywords in sorted(THEME_KEYWORDS.items()):
         hits = []
-        for answer in answers.values():
-            haystack = answer["body"].lower()
+        for item in list(answers.values()) + list(manual_sources.values()):
+            haystack = item["body"].lower()
             if any(keyword in haystack for keyword in keywords):
-                hits.append(answer)
+                hits.append(item)
         if not hits:
             continue
         title = theme.replace("-", " ").title()
@@ -211,7 +260,7 @@ def compile_themes(answers, dry_run=False):
             "",
             "## Source Signals",
         ]
-        body.extend(cited_answer_blocks(hits, limit=12))
+        body.extend(cited_blocks(hits, limit=12))
         body.extend([
             "",
             "## Open Questions",
@@ -265,11 +314,12 @@ def main():
     questions = parse_questions(md_text)
     categories = parse_categories(md_text)
     answers = read_answers()
+    manual_sources = read_manual_sources()
 
     written = []
-    written.extend(compile_spotlights(categories, questions, answers, args.dry_run))
-    written.extend(compile_projects(categories, questions, answers, args.dry_run))
-    written.extend(compile_themes(answers, args.dry_run))
+    written.extend(compile_spotlights(categories, questions, answers, manual_sources, args.dry_run))
+    written.extend(compile_projects(categories, questions, answers, manual_sources, args.dry_run))
+    written.extend(compile_themes(answers, manual_sources, args.dry_run))
     update_index(written, args.dry_run)
 
     print(f"✓ Wiki compile complete: {len(written)} page updates")

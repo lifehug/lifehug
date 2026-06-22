@@ -96,6 +96,32 @@ def cmd_compile(args: argparse.Namespace) -> int:
     return run_python("wiki_compile.py", flags)
 
 
+def cmd_ingest_story(args: argparse.Namespace) -> int:
+    flags = ["--source", args.source]
+    if args.title:
+        flags.extend(["--title", args.title])
+    if args.captured_at:
+        flags.extend(["--captured-at", args.captured_at])
+    if args.no_candidates:
+        flags.append("--no-candidates")
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("ingest_story.py", flags)
+
+
+def cmd_planner_report(_args: argparse.Namespace) -> int:
+    return run_python("question_planner.py", ["--report"])
+
+
+def cmd_planner_queue(args: argparse.Namespace) -> int:
+    flags = ["--write-queue", "--limit", str(args.limit), "--arc-max", str(args.arc_max)]
+    return run_python("question_planner.py", flags)
+
+
+def cmd_planner_clear(_args: argparse.Namespace) -> int:
+    return run_python("question_planner.py", ["--clear-queue"])
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     return run_python("serve_wiki.py", ["--host", args.host, "--port", str(args.port)])
 
@@ -116,6 +142,8 @@ def cmd_process_answer(args: argparse.Namespace) -> int:
         flags.append("--commit")
     if args.push:
         flags.append("--push")
+    if args.no_compile_wiki:
+        flags.append("--no-compile-wiki")
     for followup in args.followup or []:
         flags.extend(["--followup", followup])
     question_id = [] if args.question_id is None else [args.question_id]
@@ -214,6 +242,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_compile)
 
+    p = sub.add_parser("ingest-story", help="Save an unprompted story source from stdin")
+    p.add_argument("--source", default="manual")
+    p.add_argument("--title", default=None)
+    p.add_argument("--captured-at", default=None)
+    p.add_argument("--no-candidates", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_ingest_story)
+
+    p = sub.add_parser("planner-report", help="Show planner balance and candidates")
+    p.set_defaults(func=cmd_planner_report)
+
+    p = sub.add_parser("planner-queue", help="Write an opt-in planned daily queue")
+    p.add_argument("--limit", type=int, default=14)
+    p.add_argument("--arc-max", type=int, default=2)
+    p.set_defaults(func=cmd_planner_queue)
+
+    p = sub.add_parser("planner-clear", help="Clear the planned daily queue")
+    p.set_defaults(func=cmd_planner_clear)
+
     p = sub.add_parser("serve", help="Serve the local owner-only wiki")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
@@ -230,6 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.add_argument("--commit", action="store_true")
     p.add_argument("--push", action="store_true")
+    p.add_argument("--no-compile-wiki", action="store_true")
     p.set_defaults(func=cmd_process_answer)
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")
