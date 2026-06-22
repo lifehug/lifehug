@@ -2,7 +2,19 @@
 
 Delete this file after these are created as GitHub issues on `lifehug/lifehug`.
 
+Status legend:
+- Shipped: implemented in the current codebase; create only if we want historical tracking.
+- Partial: keep as an issue because the first slice exists but important work remains.
+- Open: not implemented yet.
+
+Current status:
+- Shipped: 1, 2, 7.
+- Partial: 3, 4, 5.
+- Open: 6, 8, 9.
+
 ## 1. Add Unprompted Story Ingest
+
+Status: Shipped in `6f37dcc`.
 
 Build a first-class path for saving a story that was not prompted by a daily question.
 
@@ -15,6 +27,8 @@ Acceptance criteria:
 
 ## 2. Compile Ingested Sources Into The Private Wiki
 
+Status: Shipped in `6f37dcc`.
+
 Extend the wiki compiler so Lifehug wiki pages can cite both answered prompts and unprompted story sources.
 
 Acceptance criteria:
@@ -26,6 +40,18 @@ Acceptance criteria:
 
 ## 3. Add Question Candidate Store
 
+Status: Partial. Keep this issue.
+
+Shipped:
+- `state/question_candidates.json` exists.
+- `ingest-story` writes deterministic candidate records with source path, kind, priority, reason, status, and timestamp.
+- Candidates do not become daily prompts automatically.
+
+Remaining:
+- Add a review/list/promote command for candidates.
+- Support candidate status transitions such as accepted, rejected, promoted, deferred.
+- Let reviewed candidates become question-bank entries with source citations.
+
 Create a parking lot for possible follow-up questions produced by ingested stories or wiki analysis.
 
 Acceptance criteria:
@@ -36,6 +62,18 @@ Acceptance criteria:
 
 ## 4. Add Planner Report
 
+Status: Partial. Keep this issue.
+
+Shipped:
+- `system/question_planner.py --report` exists.
+- Reports coverage by group, low-coverage categories, open candidates, active queue, and unanswered count.
+
+Remaining:
+- Add stale-area detection.
+- Add overrepresented-area detection.
+- Add recent-ingest and theme balance.
+- Show clearer "what the planner would prioritize next" reasoning without changing state.
+
 Build a read-only planner report before giving the planner control over daily questions.
 
 Acceptance criteria:
@@ -45,6 +83,19 @@ Acceptance criteria:
 - Show what the planner would prioritize next without changing state.
 
 ## 5. Design Planner-Driven Daily Queue With Caps And Continuity Arcs
+
+Status: Partial. Keep this issue.
+
+Shipped:
+- `planner-queue` writes an opt-in `state/question_queue.json`.
+- `ask.py` uses the planned queue only when it exists and contains valid unanswered question-bank items.
+- The queue has simple group caps and per-category arc limits.
+
+Remaining:
+- Define richer planner state, likely `state/planner_state.json`.
+- Support active objectives, continuity arcs, and planner explanations.
+- Include reviewed candidates in the planning process.
+- Add stronger guardrails against large ingests dominating the story.
 
 Add a strategy layer that balances foundational story work, depth, active spotlights, projects, themes, and recent ingest.
 
@@ -57,6 +108,8 @@ Acceptance criteria:
 
 ## 6. Add AI Classification And Synthesis For Ingested Sources
 
+Status: Open.
+
 Use AI to classify ingested stories and suggest links, wiki updates, and candidate questions.
 
 Acceptance criteria:
@@ -68,6 +121,8 @@ Acceptance criteria:
 
 ## 7. Prepare Future Privacy And Access Tiers Without Building Them Yet
 
+Status: Shipped in `6f37dcc`.
+
 Keep the first product simple and owner-only, but avoid painting the architecture into a corner.
 
 Acceptance criteria:
@@ -77,6 +132,8 @@ Acceptance criteria:
 - Ensure future public/shared output generation can be built from reviewed outputs, not raw private wiki exposure.
 
 ## 8. Generate Deep Research-Style Question Neighborhoods
+
+Status: Open.
 
 Create a way for Lifehug to generate new neighborhoods of questions from a story, theme, person, period, project, or wiki page.
 
@@ -88,6 +145,8 @@ Acceptance criteria:
 - Ensure deep neighborhoods do not dominate the daily queue unless explicitly selected as an active objective.
 
 ## 9. Recommend New Spotlights From Stories And Wiki Development
+
+Status: Open.
 
 Use accumulated stories and wiki changes to recommend new spotlights worth developing.
 
