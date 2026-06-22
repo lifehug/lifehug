@@ -97,7 +97,7 @@ Each output lives in `outputs/{title}/`, with `v1.md`, `v2.md`, etc. for revisio
 
 ## Architecture
 
-Lifehug is git-backed and file-native. Markdown is the durable source of truth; any search or database layer should be treated as a rebuildable index.
+Lifehug is git-backed, file-native, and script-first. Markdown is the durable source of truth; any search or database layer should be treated as a rebuildable index. The scripts in `system/` are the canonical behavior, while skills, agents, and cron jobs are thin operators that call those scripts.
 
 ```
 lifehug/
@@ -117,6 +117,22 @@ lifehug/
 ```
 
 Privacy model for the first pass: everything is owner-only. Lifehug prepares for future sharing with `visibility` and `sensitivity` metadata, but publishing should happen through reviewed outputs rather than broad access tiers inside the core wiki.
+
+### Script-First Workflows
+
+Use the workflow wrapper for manual, AI-agent, and cron operations:
+
+```bash
+python3 system/lifehug.py doctor
+python3 system/lifehug.py status
+python3 system/lifehug.py next
+python3 system/lifehug.py rebuild
+python3 system/lifehug.py compile
+python3 system/lifehug.py serve
+python3 system/lifehug.py daily-dry-run
+```
+
+The wrapper delegates to the underlying scripts. Cron should call the same scripts as a human or skill-driven agent; it should not implement its own question picker, state editor, or wiki compiler.
 
 ---
 
@@ -246,6 +262,7 @@ lifehug/
 │   └── SKILL.md              # OpenClaw skill (auto-installed by setup.sh)
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
+    ├── lifehug.py            # Script-first workflow wrapper + doctor checks
     ├── ask.py                # Rotation engine (CLI tool)
     ├── process_answer.py     # Atomic answer save + state update helper
     ├── rebuild_state.py      # Recomputes derived coverage/README state
@@ -282,14 +299,15 @@ lifehug/
 
 ## The Rotation Engine
 
-The `system/ask.py` script manages question selection:
+Use the workflow wrapper for normal operation:
 
 ```bash
-python3 system/ask.py              # Pick next question, update state
-python3 system/ask.py --dry-run    # Pick but don't update state
-python3 system/ask.py --status     # Show coverage report
-python3 system/ask.py --mark-answered A1  # Mark a question as answered
+python3 system/lifehug.py next      # Pick but do not update state
+python3 system/lifehug.py status    # Show coverage report
+python3 system/lifehug.py rebuild   # Repair derived state
 ```
+
+The lower-level `system/ask.py` script still manages question selection, but agents and cron should prefer `system/lifehug.py` or `system/daily_question.sh`.
 
 ### Selection Logic
 1. Check which categories have the lowest coverage ratio

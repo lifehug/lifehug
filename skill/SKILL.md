@@ -1,204 +1,181 @@
 ---
 name: lifehug
-description: "Capture your life story through daily AI-guided questions. Use when: (1) setting up a new Lifehug workspace, (2) processing a reply that is an answer to a Lifehug daily question, (3) checking Lifehug coverage/status, (4) drafting chapters or essays from accumulated answers, (5) managing Lifehug spotlights for important people/episodes. Triggers: user mentions lifehug, life story, memoir questions, daily question, 'answer to my lifehug question', or the workspace contains AGENTS.md referencing Lifehug."
+description: "Operate a Lifehug workspace: daily life-story questions, answer processing, private wiki compile/serve, state repair, pass transitions, spotlight management, and local/cron workflows. Use when the user mentions Lifehug, memoir/story capture, a daily Lifehug answer, compiling or viewing the Lifehug wiki, running Lifehug locally, or maintaining a Lifehug/Dave workspace."
 ---
 
 # Lifehug Skill
 
-Lifehug captures life stories through one daily question. You are the interviewer.
+Lifehug is script-first. The scripts in `system/` are the source of truth; this skill is an operator wrapper. Prefer commands over manual edits.
 
-## Workspace Detection
+## Find The Workspace
 
-Find the Lifehug workspace. Check in order:
-1. `~/Workspace/lifehug/`
-2. `~/lifehug/`
-3. Any directory with `system/question-bank.md` and `system/ask.py`
-
-If not found, ask the user to clone it:
-```
-git clone https://github.com/lifehug/lifehug.git ~/Workspace/lifehug
-```
-
-## Setup (First Run)
-
-Detect fresh install: `system/question-bank.md` has only categories A-E (no F-J).
-
-1. Welcome — explain Lifehug simply
-2. Ask what they want to write (memoir, founder story, family history, etc.)
-3. Ask who matters (people to spotlight)
-4. Ask about key episodes they already know they want to tell
-5. Generate custom question bank — add categories F-J with 3-5 questions each
-6. Write to `system/question-bank.md`
-7. Create `config.yaml` with their name, timezone, channel, question time
-8. Set up daily cron:
+Use the current repo if it has `system/question-bank.md` and `system/lifehug.py`. Otherwise check:
 
 ```bash
-openclaw cron add \
-  --name "Lifehug Daily Question" \
-  --cron "<MIN> <HOUR> * * *" \
-  --tz "<TIMEZONE>" \
-  --channel <CHANNEL> \
-  --announce \
-  --task "You are the Lifehug interviewer. cd <WORKSPACE> && python3 system/ask.py — send the question warmly. If rotation.json shows a pending unanswered question, gently remind them first. End with: 'Reply here whenever you're ready — voice or text.'"
+~/Workspace/dave
+~/Workspace/lifehug
+~/lifehug
 ```
 
-9. Ask the first question
+Run commands from the workspace root.
 
-## Processing Answers
+## First Checks
 
-When a user's message looks like an answer to a Lifehug question (personal, reflective, about their life):
-
-1. Check `system/rotation.json` → `last_question_id` for the pending question
-2. Save to `answers/{question_id}.md`:
-
-```markdown
-# Question {ID}: {text}
-**Category:** {letter} ({name}) | **Pass:** {pass}
-**Asked:** {date} | **Answered:** {date}
-
----
-
-{cleaned answer}
-
----
-
-## Follow-up Questions Generated
-- {ID}: "{follow-up}"
-```
-
-3. Generate 1-3 follow-up questions (sensory, emotional, specific, contrast)
-4. Add follow-ups to `system/question-bank.md`
-5. Run `python3 system/ask.py --mark-answered {ID}`
-6. Commit: `Answer {ID}: {brief summary}`
-7. Acknowledge warmly — reflect briefly on their answer
-
-## Answer Detection
-
-When receiving a message, check if it's a Lifehug answer:
-- Is there a pending question in `rotation.json`?
-- Does the message sound like a life story answer (personal, reflective, detailed)?
-- Did the user reply to a Lifehug question message?
-
-If yes → process as answer. If unclear → ask: "Is this your answer to the Lifehug question, or something else?"
-
-## Commands
-
-- "lifehug status" / "how's my story going" → Run `python3 system/ask.py --status`
-- "skip this question" → Pick next question without marking answered
-- "draft a chapter" → Read relevant answers, draft in user's voice, save to `drafts/`
-- "add spotlight person [name]" → `spotlight.add(type=person)` — see **Spotlight: add** below
-- "add spotlight time [event]" → `spotlight.add(type=time)` — coming soon
-- "add spotlight place [location]" → `spotlight.add(type=place)` — coming soon
-
-## Spotlight: add
-
-Command: `spotlight.add(type, subject)`
-
-A spotlight is a focused question set about an important person, time period, or place in the author's life. Each spotlight gets its own category (K, L, M, … next available letter) and follows a **baseline-first arc** — establish the subject before drilling into specific moments.
-
-### Types
-
-| Type | Subject | Example |
-|------|---------|--------|
-| `person` | An important person | "add spotlight person — my dad James" |
-| `time` | A defining period or episode | "add spotlight time — the bankruptcy year" *(coming soon)* |
-| `place` | A formative location | "add spotlight place — Yucaipa" *(coming soon)* |
-
----
-
-## spotlight.add — type: person
-
-A spotlight is a focused question set about an important person in the author's life. Each spotlight gets its own category (K, L, M, … next available letter) and follows a **baseline-first arc** — establish who the person is before drilling into specific moments.
-
-### Step 1 — Find the next available category letter
+For maintenance or unclear state:
 
 ```bash
-grep "^## [A-Z]:" <workspace>/system/question-bank.md | tail -1
+python3 system/lifehug.py doctor
+python3 system/lifehug.py status
 ```
 
-Take the letter after the last one found (e.g. if L is last, new spotlight is M).
-
-### Step 2 — Scan existing answers for mentions of the person
+For scheduled-delivery checks, use:
 
 ```bash
-grep -r -l -i "<name>" <workspace>/answers/*.md
+python3 system/lifehug.py doctor --daily
 ```
 
-For each matching file, read the relevant passages. Build a picture of:
-- What the author has already said about this person
-- Emotions, conflicts, and formative moments that have surfaced
-- Appearance, personality, values, and role in the author's story
-- Unresolved threads worth exploring
+`doctor --daily` must not send a message; it uses the daily dry-run path.
 
-### Step 3 — Build the question arc
+## Canonical Commands
 
-Questions must follow this **baseline-first order**. Do NOT jump to specific events in the first 4–5 questions.
+Use these workflows. Do not duplicate their logic in the skill.
 
-#### Tier 1 — Foundational identity (questions 1–5)
-Establish who the person IS before anything happened:
-- Q1: "Tell me about [name]. Who were they as a person — not as [role], just as a human being?"
-- Q2: Physical presence / how they carried themselves
-- Q3: What they cared about — passions, interests, what lit them up
-- Q4: Earliest memory of this person
-- Q5: What the day-to-day relationship felt like
-
-#### Tier 2 — Relationship dynamics (questions 6–8)
-- The friction or complexity in the relationship (if any)
-- A specific memory of their character in action
-- A skill, gift, or quality the author watched and admired
-
-#### Tier 3 — Turning points (questions 9–11)
-- When the relationship shifted
-- A defining episode (illness, loss, a hard conversation, a sacrifice)
-- What the author wishes they'd said or asked
-
-#### Tier 4 — Legacy and meaning (questions 12–13)
-- How this person lives on (named child, inherited trait, lesson carried forward)
-- The adult-to-adult question: if you met as strangers, who would they be?
-
-### Step 4 — Write the category block
-
-Append to `system/question-bank.md`:
-
-```markdown
-
-## {LETTER}: Spotlight — {Name}
-*Discovered from {source_answers} — {2-3 word characterization}*
-- [ ] {LETTER}1: Tell me about {first name}. Who were they as a person — not as your {role}, just as a human being?
-- [ ] {LETTER}2: What did {first name} look like? How did they carry themselves?
-- [ ] {LETTER}3: What did {first name} care about most — their passions, interests, what lit them up?
-- [ ] {LETTER}4: What's your earliest memory of {first name}?
-- [ ] {LETTER}5: How would you describe your relationship day to day?
-... (continue through tiers 2–4, tailored to what the scan revealed)
+```bash
+python3 system/lifehug.py status            # coverage and pass status
+python3 system/lifehug.py next              # preview next question without mutation
+python3 system/lifehug.py rebuild           # rebuild coverage/README/rotation counters
+python3 system/lifehug.py compile           # compile private wiki
+python3 system/lifehug.py compile --dry-run # check compile without writing
+python3 system/lifehug.py serve             # local wiki at 127.0.0.1:8765
+python3 system/lifehug.py daily-dry-run     # validate daily delivery without sending
+python3 system/lifehug.py followups-status  # pass-transition state
+python3 system/lifehug.py followups-prompt  # prompt context for AI-generated depth questions
 ```
 
-### Step 5 — Verify and commit
+Process an answer from stdin:
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer A14a --source "voice (transcribed)"
+```
+
+If the user does not provide an ID, `process-answer` uses `rotation.last_question_id`.
+
+## Answer Processing
+
+When a user message is a Lifehug answer:
+
+1. Identify the question ID from the message or `system/rotation.json`.
+2. Transcribe voice if needed and lightly clean transcription artifacts.
+3. Save through the script:
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> --source "text"
+```
+
+4. If useful, add 1-3 specific follow-ups:
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> \
+  --source "voice (transcribed)" \
+  --followup "What did the room look like in that moment?"
+```
+
+5. Run `python3 system/lifehug.py compile` when the private wiki should refresh.
+6. Commit only when the user asks, or when operating an explicit daily/cron workflow.
+
+Never manually edit `coverage.json` or `rotation.json` unless repairing a failed script run with a clear reason.
+
+## Private Wiki
+
+The wiki is local-first. It does not require hosting.
+
+Compile:
+
+```bash
+python3 system/lifehug.py compile
+```
+
+Serve locally:
+
+```bash
+python3 system/lifehug.py serve
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765
+```
+
+Generated wiki pages must cite source answers or ingested source files. The current privacy default is owner-only.
+
+## Daily Delivery And Cron
+
+Cron/LaunchAgent/OpenClaw should call the same scripts as manual use.
+
+Daily delivery:
 
 ```bash
 cd <workspace>
-python3 system/ask.py --status   # confirm new category appears
-git add system/question-bank.md
-git commit -m "Add spotlight {LETTER}: {Name}"
+system/daily_question.sh
 ```
 
-### Notes
-- Keep 10–14 questions total per person spotlight
-- Tier 1 questions are nearly universal; tiers 2–4 should be specific to what the scan revealed
-- The scan step is critical — questions grounded in what's already been said feel personal, not generic
-- If little has been said about the person yet, lean harder on Tier 1 open questions and fewer Tier 3/4 specifics
+Dry-run:
 
----
+```bash
+cd <workspace>
+LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh
+```
 
-## spotlight.add — type: time
+Do not make a cron path that independently picks questions or edits state.
 
-*(Coming soon — question arc for defining periods: what was happening, what it felt like, how it changed things, what it meant)*
+## Pass Transitions
 
----
+If all questions in the current pass are answered:
 
-## spotlight.add — type: place
+```bash
+python3 system/lifehug.py followups-status
+python3 system/lifehug.py followups-prompt
+```
 
-*(Coming soon — question arc for formative locations: what it looked like, who was there, what happened, why it still matters)*
+The AI should generate valid JSON for `system/gen_followups.py --append`. Generated questions must deepen existing answers with specific scenes, sensory detail, emotion, dialogue, before/after, or contrast.
 
-## Voice Messages
+## Spotlights
 
-If the answer is a voice message: transcribe, clean up artifacts, process as text. Note `**Source:** voice (transcribed)` in the answer file.
+Use spotlights for important people, places, periods, projects, objects, or themes that deserve their own question arc.
+
+Current safe implementation: person spotlights in `system/question-bank.md`.
+
+For a new person spotlight:
+
+1. Scan `answers/` and `wiki/` for existing mentions.
+2. Choose the next available category letter after the current last `## X:` category.
+3. Add 10-14 questions using a baseline-first arc:
+   - identity and physical presence
+   - day-to-day relationship
+   - character in action
+   - friction or complexity
+   - turning points
+   - legacy and meaning
+4. Run:
+
+```bash
+python3 system/lifehug.py status
+python3 system/lifehug.py compile --dry-run
+```
+
+5. Commit only if requested.
+
+Do not auto-create spotlights from weak signals; recommend them with evidence first.
+
+## Local-First Roadmap Hooks
+
+Upcoming workflows should follow this same pattern:
+
+```bash
+python3 system/lifehug.py ingest-story
+python3 system/lifehug.py planner-report
+python3 system/lifehug.py recommend-spotlights
+```
+
+Until those commands exist, track them as roadmap issues rather than inventing ad hoc state changes.

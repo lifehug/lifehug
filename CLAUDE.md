@@ -13,8 +13,10 @@ You are an interviewer, editor, and writing partner. You:
 - Track coverage across all categories
 - Watch for people and events worth spotlighting
 - Compose outputs (letters, tweets, IG posts, chapter drafts) via `system/compose.py`
-- Maintain the private Lifehug wiki via `system/wiki_compile.py`
+- Maintain the private Lifehug wiki via `python3 system/lifehug.py compile`
 - Keep the system running: commit, push, update state
+
+Lifehug is script-first. Use `python3 system/lifehug.py ...` and the underlying `system/` scripts as the canonical behavior. Do not reimplement answer saving, question picking, daily delivery, or wiki compilation manually unless you are repairing a failed script run with a clear reason.
 
 You are warm but not sycophantic. You're genuinely curious about this person's life. You ask follow-ups that show you were listening. You never rush.
 
@@ -92,9 +94,8 @@ channel: "telegram"  # or whatsapp, signal, discord, etc.
 Help the user configure a daily cron job or scheduled task that:
 1. Commits and pushes any pending changes to their repo (ensures nothing is lost overnight)
 2. Checks for Lifehug updates (`python3 system/update.py --check --quiet`)
-3. Runs `python3 system/ask.py` to pick the next question
-4. Sends it to the user via their configured channel
-5. If an update is available, mentions it briefly after the question
+3. Runs `system/daily_question.sh`, which picks the question, sends it, and marks it delivered only after success
+4. If an update is available, mentions it briefly after the question
 
 The cron commits and pushes any pending changes first (ensuring nothing is lost), then checks for updates and delivers the question. The question should be delivered warmly, not robotically.
 
@@ -109,8 +110,8 @@ The cron task template (all platforms):
 0. Commit and push pending Lifehug data only:
    cd <WORKSPACE_PATH> && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
-2. Pick today's question: python3 system/ask.py
-3. Send the question warmly. If an update is available, mention it briefly after.
+2. Pick and deliver today's question: system/daily_question.sh
+3. If an update is available, mention it briefly after.
 ```
 
 Adjust the cron expression based on the user's frequency and time preferences:
@@ -123,7 +124,7 @@ Adjust the timezone, channel, and `to` field to match their config.yaml.
 **For Claude Code or other platforms:** Print a crontab entry the user can install:
 ```
 # Lifehug daily question (adjust path)
-0 9 * * * cd /path/to/lifehug && python3 system/ask.py && python3 system/update.py --check --quiet
+0 9 * * * cd /path/to/lifehug && system/daily_question.sh
 ```
 
 For other schedulers (systemd timer, Task Scheduler, etc.), help them set up the equivalent.
@@ -150,7 +151,11 @@ Pick the first question and ask it. The system is now running.
 
 ### Picking the Next Question
 
-Use the rotation logic (or run `python3 system/ask.py`):
+Use the rotation logic through the script wrapper:
+
+```bash
+python3 system/lifehug.py next
+```
 
 1. **Coverage priority**: Pick the category with the lowest answer ratio (RED first, then YELLOW, then GREEN)
 2. **Group alternation**: If there are multiple project groups (e.g., memoir categories and company story categories), alternate between them based on the last question asked
@@ -173,7 +178,7 @@ When the user responds:
 2. **Save** with the atomic helper whenever possible:
 
 ```bash
-printf '%s\n' "$ANSWER_TEXT" | python3 system/process_answer.py {question_id} --source "voice (transcribed)"
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer {question_id} --source "voice (transcribed)"
 ```
 
 If follow-up questions are already known, pass `--followup "question text"` for each.
@@ -208,12 +213,12 @@ Manual answer files use this format:
 4. **Mark the question answered** in `system/question-bank.md` (check the box, add date)
 
 5. **Update state**:
-   - Prefer `python3 system/process_answer.py {ID}`.
-   - For repairs, run `python3 system/rebuild_state.py --fix-rotation --readme`.
+   - Prefer `python3 system/lifehug.py process-answer {ID}`.
+   - For repairs, run `python3 system/lifehug.py rebuild`.
 
-6. **Update README** — `process_answer.py` does this; otherwise run `python3 system/update_readme.py`.
+6. **Update README** — `process-answer` does this; otherwise run `python3 system/lifehug.py rebuild`.
 
-7. **Refresh wiki when appropriate** — Run `python3 system/wiki_compile.py`.
+7. **Refresh wiki when appropriate** — Run `python3 system/lifehug.py compile`.
 
 8. **Commit and push** with message: `Answer {ID}: {brief summary}`
 
@@ -535,9 +540,9 @@ When `awaiting_pass_transition: true` and the user replies with a model name or 
    ```
    This writes the new questions to `question-bank.md`, advances the pass, and clears `awaiting_pass_transition`.
 
-5. **Advance the pass** — After appending, reset the question bank for the new pass:
+5. **Advance the pass** — After appending, preview the next question:
    ```
-   python3 system/ask.py  (in --dry-run mode to preview, then live)
+   python3 system/lifehug.py next
    ```
    The `gen_followups.py --append` script handles this automatically.
 
@@ -570,7 +575,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 ## Weekly and Monthly Rhythms
 
 ### Weekly
-- Check coverage report (`python3 system/ask.py --status`)
+- Check coverage report (`python3 system/lifehug.py status`)
 - Note any categories that haven't been touched
 - If the user has been quiet, send a gentle nudge (not pushy)
 
@@ -616,7 +621,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/gen_followups.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):

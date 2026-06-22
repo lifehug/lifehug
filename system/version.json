@@ -1,7 +1,7 @@
 {
-  "version": 10,
+  "version": 11,
   "released": "2026-06-21",
-  "changelog": "Private Lifehug wiki, shared parser/state core, generated follow-up ID support, safer daily Telegram delivery, answer-processing and rebuild tools, hardened updater, and focused regression tests.",
+  "changelog": "Script-first workflow wrapper, doctor checks, and a lean skill-driven operating model for local, cron, and AI-agent Lifehug workflows.",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
@@ -11,6 +11,7 @@
     "system/compose.py",
     "system/daily_question.sh",
     "system/gen_followups.py",
+    "system/lifehug.py",
     "system/lifehug_core.py",
     "system/process_answer.py",
     "system/rebuild_state.py",
@@ -31,6 +32,7 @@
     "templates/chapter.md",
     "tests/test_lifehug_core.py",
     "tests/test_pass_transition.py",
+    "tests/test_lifehug_wrapper.py",
     "skill/SKILL.md",
     ".gitignore"
   ]

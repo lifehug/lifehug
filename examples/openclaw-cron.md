@@ -1,147 +1,89 @@
 # OpenClaw Cron Examples for Lifehug
 
-Copy-paste these to set up your daily question delivery.
+Lifehug is script-first. Cron should call the same scripts a human or skill-driven agent would call.
 
-The cron:
-1. **Commits and pushes first** — preserves any state changes (coverage, rotation) before the day starts
-2. **Checks for updates** — notifies you if a new Lifehug version is available
-3. **Picks and sends today's question** — warmly, like a real interviewer
+## Daily Question
 
----
+Use `system/daily_question.sh` for scheduled delivery. It:
 
-## Telegram DM (9 AM, US Eastern)
+1. Safely commits pending Lifehug data paths.
+2. Picks the next question with `ask.py --dry-run`.
+3. Sends the message.
+4. Marks the question sent only after delivery succeeds.
+5. Pins the message when Telegram supports it.
+
+Telegram delivery needs one target:
+
+```yaml
+telegram_chat_id: "-1001234567890"
+```
+
+or an environment variable:
+
+```bash
+TELEGRAM_CHAT_ID="-1001234567890"
+```
+
+The bot token can come from `TELEGRAM_BOT_TOKEN` or `~/.openclaw/openclaw.json`.
+
+## Telegram DM Or Group
 
 ```bash
 openclaw cron add \
   --name "Lifehug Daily Question" \
   --cron "0 9 * * *" \
   --tz "America/New_York" \
-  --channel telegram \
-  --announce \
-  --task "Run the Lifehug daily routine:
-0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
-   If nothing to commit, continue.
-1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
-2. Pick today's question: python3 system/ask.py
-3. Send the question warmly — don't just paste raw output. Frame it like a real interviewer.
-4. If an update is available, mention it briefly after the question.
-5. If rotation.json shows an unanswered question from yesterday, gently remind them first.
-Reply here whenever you are ready — voice or text."
+  --task "cd ~/Workspace/lifehug && system/daily_question.sh"
 ```
 
-## Telegram Group (9 AM, US Eastern)
+For groups, add your bot to the group, send any message, then open:
 
-If you want questions delivered to a Telegram group (so others can follow along or you want them pinned for easy access).
+```text
+https://api.telegram.org/bot<TOKEN>/getUpdates
+```
 
-**Before using this:** get your group chat ID and bot token, then replace the placeholders:
-- `YOUR_GROUP_CHAT_ID` — the numeric ID of your Telegram group (negative number, e.g. `-1001234567890`)
-- `YOUR_OPENCLAW_CONFIG_PATH` — path to your openclaw.json (usually `~/.openclaw/openclaw.json`)
+Look for `"chat": { "id": -1001234567890 }`, then save that as `telegram_chat_id` or `group_chat_id` in `config.yaml`.
 
-To find your group chat ID: add your bot to the group, send any message, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and look for `"chat": { "id": -1001234567890 }`. Save it to `group_chat_id` in your `config.yaml`.
+## Local Dry Run
+
+Before enabling the schedule:
+
+```bash
+cd ~/Workspace/lifehug
+LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh
+```
+
+Or through the wrapper:
+
+```bash
+python3 system/lifehug.py daily-dry-run
+python3 system/lifehug.py doctor --daily
+```
+
+## Nightly Wiki Compile
+
+Optional local-only maintenance job:
 
 ```bash
 openclaw cron add \
-  --name "Lifehug Daily Question" \
-  --cron "0 9 * * *" \
+  --name "Lifehug Nightly Compile" \
+  --cron "55 23 * * *" \
   --tz "America/New_York" \
-  --task "Run the Lifehug daily routine:
-0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
-   If nothing to commit, continue.
-1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
-2. Pick today's question: python3 system/ask.py
-3. Send the question ONLY to the Lifehug group (chat_id: YOUR_GROUP_CHAT_ID). Format:
-   📖 Lifehug — Daily Question
-
-   [the question text]
-
-   (Answer whenever you want — voice or text)
-4. Pin the message in the group so it's easy to find:
-   TOKEN=$(python3 -c \"import json; c=json.load(open('YOUR_OPENCLAW_CONFIG_PATH')); print(c['channels']['telegram']['botToken'])\")
-   curl -s -X POST \"https://api.telegram.org/bot\${TOKEN}/pinChatMessage\" -d \"chat_id=YOUR_GROUP_CHAT_ID&message_id=<returned_message_id>&disable_notification=true\"
-5. If an update is available, mention it after the question.
-6. If rotation.json shows an unanswered question from yesterday, gently remind them first."
+  --task "cd ~/Workspace/lifehug && python3 system/lifehug.py rebuild && python3 system/lifehug.py compile && git add README.md system/coverage.json system/rotation.json wiki && git diff --cached --quiet || git commit -m 'Nightly wiki compile' && git push"
 ```
 
-## WhatsApp (8:30 AM, US Pacific)
+The same compile can be run manually at any time:
 
 ```bash
-openclaw cron add \
-  --name "Lifehug Daily Question" \
-  --cron "30 8 * * *" \
-  --tz "America/Los_Angeles" \
-  --channel whatsapp \
-  --announce \
-  --task "Run the Lifehug daily routine:
-0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
-   If nothing to commit, continue.
-1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
-2. Pick today's question: python3 system/ask.py
-3. Send the question warmly — don't just paste raw output. Frame it like a real interviewer.
-4. If an update is available, mention it briefly after the question.
-5. If rotation.json shows an unanswered question from yesterday, gently remind them first.
-Reply here whenever you are ready — voice or text."
+python3 system/lifehug.py compile
+python3 system/lifehug.py serve
 ```
-
-## Signal (9 AM, UK)
-
-```bash
-openclaw cron add \
-  --name "Lifehug Daily Question" \
-  --cron "0 9 * * *" \
-  --tz "Europe/London" \
-  --channel signal \
-  --announce \
-  --task "Run the Lifehug daily routine:
-0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
-   If nothing to commit, continue.
-1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
-2. Pick today's question: python3 system/ask.py
-3. Send the question warmly — don't just paste raw output. Frame it like a real interviewer.
-4. If an update is available, mention it briefly after the question.
-5. If rotation.json shows an unanswered question from yesterday, gently remind them first.
-Reply here whenever you are ready — voice or text."
-```
-
-## Discord (10 AM, US Central)
-
-```bash
-openclaw cron add \
-  --name "Lifehug Daily Question" \
-  --cron "0 10 * * *" \
-  --tz "America/Chicago" \
-  --channel discord \
-  --announce \
-  --task "Run the Lifehug daily routine:
-0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
-   If nothing to commit, continue.
-1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
-2. Pick today's question: python3 system/ask.py
-3. Send the question warmly — don't just paste raw output. Frame it like a real interviewer.
-4. If an update is available, mention it briefly after the question.
-5. If rotation.json shows an unanswered question from yesterday, gently remind them first.
-Reply here whenever you are ready — voice or text."
-```
-
----
-
-## Customizing
-
-- Change `--cron "0 9 * * *"` to your preferred time (minute hour)
-- Change `--tz` to your IANA timezone
-- Change `--channel` to your messaging platform
-- Change `~/Workspace/lifehug` to wherever you cloned the repo
-- For group delivery: replace `<YOUR_GROUP_CHAT_ID>` with your group's chat ID (negative number for Telegram groups)
 
 ## What Happens After You Answer
 
-When you reply to a question (voice or text), the AI:
-1. Processes and saves your answer to `answers/`
-2. Generates follow-up questions
-3. Updates coverage tracking
-4. Refreshes the README progress section
-5. Commits and pushes to git
+When you reply to a question, the AI should use the skill workflow:
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> --source "voice (transcribed)"
+python3 system/lifehug.py compile
+```

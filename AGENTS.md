@@ -4,11 +4,20 @@ This is a Lifehug workspace. Read `CLAUDE.md` for the full operating instruction
 
 ## Quick Start
 
-**On every session**, check the state:
+**On every session**, check the state through the script wrapper:
+
+```bash
+python3 system/lifehug.py doctor
+python3 system/lifehug.py status
+```
+
+The `system/` scripts are canonical. Skills, agents, and cron jobs should call scripts instead of duplicating workflow logic.
+
+Then decide:
 
 1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
 2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
-3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `system/process_answer.py` for answer saves.
+3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `python3 system/lifehug.py process-answer` for answer saves.
 
 ## Detecting State
 
@@ -41,9 +50,9 @@ channel: "telegram"         # telegram | whatsapp | signal | discord | email | c
 
 After setup, create a cron job for daily question delivery. The cron task should:
 
-1. Run `python3 system/ask.py` to pick the next question
-2. Send it to the user via their configured channel
-3. Track what was sent
+1. Run `system/daily_question.sh`
+2. Let that script pick, send, pin when supported, and mark sent only after delivery succeeds
+3. Avoid custom state mutation outside the script
 
 ### OpenClaw Cron
 
@@ -54,7 +63,7 @@ openclaw cron add \
   --name "Lifehug Daily Question" \
   --cron "<MIN> <HOUR> * * *" \
   --tz "<TIMEZONE>" \
-  --task "You are the Lifehug interviewer. Run: cd <WORKSPACE_PATH> && python3 system/ask.py Then send the question warmly and conversationally — don't just paste the raw output. Frame it like: 'Good morning! Here's today's question: [question text]'. If rotation.json shows an unanswered question from yesterday, gently remind them first. End every question with: 'Reply here whenever you're ready — voice or text.'" \
+  --task "cd <WORKSPACE_PATH> && system/daily_question.sh" \
   --announce \
   --channel <CHANNEL>
 ```
@@ -68,9 +77,9 @@ Replace:
 ### Other Platforms
 
 For non-OpenClaw setups, the user needs to configure their own scheduler (cron, systemd timer, etc.) to:
-1. Run `python3 system/ask.py`
-2. Capture stdout (the question)
-3. Deliver it however they prefer
+1. Run `system/daily_question.sh`
+2. Configure `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, or config values supported by that script
+3. Use `LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh` to test without sending
 
 ## Processing Answers
 
@@ -80,8 +89,8 @@ When the user replies to a daily question (via any channel):
 2. **Follow the "Processing an Answer" flow** in CLAUDE.md:
    - Clean up the response
    - Generate 1-3 follow-up questions when useful
-   - Pipe the answer through `python3 system/process_answer.py {question_id}`
-   - Run `python3 system/wiki_compile.py` when you want the private wiki refreshed
+   - Pipe the answer through `python3 system/lifehug.py process-answer {question_id}`
+   - Run `python3 system/lifehug.py compile` when you want the private wiki refreshed
    - Commit and push if requested or part of the configured daily workflow
 3. **Acknowledge warmly** — Thank them, share a brief reflection on their answer, mention what's coming next
 
