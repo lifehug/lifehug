@@ -75,3 +75,25 @@ Acceptance criteria:
 - Document that all current content is owner-only.
 - Do not implement granular sharing/access tiers in this phase.
 - Ensure future public/shared output generation can be built from reviewed outputs, not raw private wiki exposure.
+
+## 8. Generate Deep Research-Style Question Neighborhoods
+
+Create a way for Lifehug to generate new neighborhoods of questions from a story, theme, person, period, project, or wiki page.
+
+Acceptance criteria:
+- Add a research-style question expansion mode that starts from a target page or source.
+- Generate clustered question neighborhoods, not just one-off follow-ups.
+- Support different neighborhood types such as foundation, chronology, sensory detail, relationships, conflict, meaning, contradiction, and output-oriented questions.
+- Store generated questions as candidates first, with source citations and reasons.
+- Ensure deep neighborhoods do not dominate the daily queue unless explicitly selected as an active objective.
+
+## 9. Recommend New Spotlights From Stories And Wiki Development
+
+Use accumulated stories and wiki changes to recommend new spotlights worth developing.
+
+Acceptance criteria:
+- Analyze answers, ingested sources, candidate questions, and wiki pages for recurring people, places, periods, projects, objects, or themes.
+- Recommend spotlight candidates with evidence, source links, and a short reason.
+- Distinguish between strong recommendations and weak signals.
+- Do not automatically create spotlights without user approval.
+- Feed approved spotlight recommendations into the question candidate system and planner.
