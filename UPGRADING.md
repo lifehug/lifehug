@@ -2,14 +2,14 @@
 
 ## What changed
 
-- **Daily cron now commits and pushes first** — Before sending the question, the cron runs `git add -A && git commit && git push` to ensure any pending answer files, state updates, or drafts are safely backed up to your repo. This prevents data loss and keeps your repo in sync automatically.
+- **Daily cron now commits and pushes first** — Before sending the question, the cron runs `git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git commit && git push` to ensure any pending answer files, state updates, or drafts are safely backed up to your repo. This prevents data loss and keeps your repo in sync automatically.
 
 ## What you need to do
 
 Update your daily cron task to include the commit/push step at the start:
 
 ```
-0. cd <WORKSPACE_PATH> && git add -A && git diff --cached --quiet || git commit -m "Daily update $(date +%Y-%m-%d)" && git push
+0. cd <WORKSPACE_PATH> && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m "Daily update $(date +%Y-%m-%d)" && git push
 ```
 
 Then continue with the update check and question delivery as before.

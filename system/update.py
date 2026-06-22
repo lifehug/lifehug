@@ -76,8 +76,8 @@ def find_upstream_remote():
         if len(parts) >= 2:
             remotes[parts[0]] = parts[1]
 
-    # Prefer 'upstream' if it exists
-    if "upstream" in remotes:
+    # Prefer 'upstream' only when it points to the framework repo.
+    if "upstream" in remotes and "lifehug/lifehug" in remotes["upstream"]:
         return "upstream"
 
     # Check if any remote URL contains lifehug/lifehug
@@ -85,8 +85,8 @@ def find_upstream_remote():
         if "lifehug/lifehug" in url:
             return name
 
-    # Fall back to origin
-    if "origin" in remotes:
+    # In the framework repo itself, origin is acceptable when it is the framework.
+    if "origin" in remotes and "lifehug/lifehug" in remotes["origin"]:
         return "origin"
 
     return None
@@ -227,12 +227,7 @@ def apply_version(version):
     updated = []
     skipped = []
     for filepath in framework_files:
-        # Never touch protected files
-        if filepath in PROTECTED_FILES or any(filepath.startswith(p) for p in PROTECTED_FILES):
-            skipped.append(filepath)
-            continue
-
-        # Special handling: question-bank.md gets saved as upstream copy
+        # Special handling: question-bank.md gets saved as upstream copy.
         if filepath == "system/question-bank.md":
             try:
                 content = run_git("show", f"{tag}:{filepath}")
@@ -241,6 +236,11 @@ def apply_version(version):
                 print(f"  Saved upstream question bank to system/question-bank-upstream.md")
             except subprocess.CalledProcessError:
                 pass
+            continue
+
+        # Never touch protected files
+        if filepath in PROTECTED_FILES or any(filepath.startswith(p) for p in PROTECTED_FILES):
+            skipped.append(filepath)
             continue
 
         try:

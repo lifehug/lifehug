@@ -32,13 +32,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from lifehug_core import (
+    ANSWERS_DIR,
+    CONFIG_FILE,
+    OUTPUTS_DIR,
+    QUESTIONS_FILE,
+    QUESTION_ID_RE,
+    REPO_DIR,
+    TEMPLATES_DIR,
+    answer_body,
+    answer_id_from_filename,
+)
+
 SYSTEM_DIR = Path(__file__).parent
-REPO_DIR = SYSTEM_DIR.parent
-QUESTIONS_FILE = SYSTEM_DIR / "question-bank.md"
-ANSWERS_DIR = REPO_DIR / "answers"
-TEMPLATES_DIR = REPO_DIR / "templates"
-OUTPUTS_DIR = REPO_DIR / "outputs"
-CONFIG_FILE = REPO_DIR / "config.yaml"
 
 VALID_FORMATS = ("letter", "tweet", "instagram", "chapter")
 
@@ -180,17 +186,17 @@ def read_answers_for_categories(categories):
         if f.name == ".gitkeep":
             continue
         stem = f.stem
-        m = re.match(r'^([A-Z])(\d+)', stem)
-        if not m:
+        qid = answer_id_from_filename(f)
+        if not qid:
             continue
-        cat = m.group(1)
+        cat = qid[0]
         if cat_set is not None and cat not in cat_set:
             continue
         try:
             content = f.read_text().strip()
         except Exception:
             continue
-        answers.append({"id": m.group(0), "category": cat, "file": f.name, "content": content})
+        answers.append({"id": qid, "category": cat, "file": f.name, "content": content})
     return answers
 
 
@@ -209,7 +215,7 @@ def build_question_lookup():
     if not QUESTIONS_FILE.exists():
         return {}
     pattern = re.compile(
-        r'^- \[[ x]\] ([A-Z]\d+): (.+?)(?:\s*\*\(.+\)\*)?$',
+        rf'^- \[[ xX]\] ({QUESTION_ID_RE}): (.+?)(?:\s*\*\(.+\)\*)?$',
         re.MULTILINE,
     )
     lookup = {}
@@ -220,10 +226,7 @@ def build_question_lookup():
 
 def extract_answer_body(content):
     """Pull the answer body out of an answer file (between --- markers)."""
-    body_match = re.search(r'---\n+(.*?)(?:\n+---|\Z)', content, re.DOTALL)
-    if body_match:
-        return body_match.group(1).strip()
-    return content.strip()
+    return answer_body(content)
 
 
 def build_prompt(format_name, subject_name, categories, title, feedback=None,

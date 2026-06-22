@@ -1,8 +1,10 @@
 # Lifehug
 
-**Capture your life story, one question at a time.**
+**Capture, deepen, and connect your life story over time.**
 
-Lifehug is an AI-guided storytelling system that helps you write your life story through daily questions. You tell the AI what you want to create — a memoir, a founder's story, a family history — and it generates questions, manages rotation, tracks coverage, and helps you produce real deliverables over time.
+Lifehug is a lifelong AI oral-history system. It asks one thoughtful question at a time, accepts voice or text answers, tracks what has been covered, and keeps returning to your story with better follow-up questions. The goal is not just journaling. The goal is a compounding, AI-assisted memory system that helps you articulate your life, discover patterns, and produce real artifacts: letters, essays, chapters, memoirs, family histories, founder stories, and eventually an evolving private wiki of your life.
+
+The long-term model is inspired by the EKB / Karpathy-style "LLM Wiki" idea: raw sources are not only searched at query time. They are incrementally compiled into a living, interlinked knowledge base. For Lifehug, those sources are daily answers, voice transcripts, and eventually personal archives like email, chats, photos, social posts, documents, and calendars. The compiled wiki becomes the source of truth that helps an AI see relationships across people, places, time periods, projects, and themes that may not be obvious from any single answer.
 
 ---
 
@@ -17,6 +19,18 @@ Focused collections about important life episodes. A turning point, a season of 
 ### People
 Every story is really about people. As you answer daily questions, the people who shaped your life naturally surface — a parent, a mentor, a co-founder, a friend who showed up at the right moment. Lifehug lets you deepen those threads. Write down your feelings, thoughts, and experiences with the people who matter. Capture what they taught you, how they changed you, what you wish you'd said. These become standalone essays, letters, character profiles — pieces that can live on their own or weave into a larger book.
 
+### A Private Life Wiki
+As the corpus grows, Lifehug can compile your answers into an owner-only wiki:
+
+- **People** — the people in your life, who they are, how they shaped you
+- **Places** — homes, cities, schools, churches, offices, countries, rooms
+- **Periods** — seasons of life, transitions, hardships, golden eras
+- **Projects** — companies, creative work, missions, family efforts
+- **Themes** — hunger, agency, faith, money, belonging, grief, ambition
+- **Relationships** — how people, places, projects, and themes connect
+
+This wiki is not meant to replace the raw story. It is a living layer of understanding built from the raw story, with citations back to the source answers.
+
 ---
 
 ## How It Works
@@ -26,7 +40,7 @@ Every day, the system picks one question and delivers it to you. You answer when
 
 ### The Four-Pass System
 
-The question bank is a living document that grows with every answer.
+The question bank is a living document that grows with every answer. The named passes below describe the early shape, but Lifehug is designed to keep going indefinitely. Over a lifetime, the system keeps walking the story graph: finding thin spots, revisiting themes, connecting earlier and later experiences, and turning important people, places, periods, and projects into Spotlights.
 
 **Pass 1: Skeleton** (~3 months)
 - Starter questions across all categories
@@ -46,6 +60,12 @@ The question bank is a living document that grows with every answer.
 - Read drafted chapters aloud
 - Identify awkward transitions, missing context
 - Final gap-filling questions
+
+**Ongoing: Walk & Synthesize**
+- Revisit older answers and wiki pages as new material arrives
+- Add cross-links between people, places, periods, projects, and themes
+- Flag contradictions, gaps, or sensitive areas before publishing
+- Generate deeper questions from connections the author may not have noticed
 
 ### Coverage Tracking
 
@@ -74,6 +94,29 @@ At any point — at milestones, on a Mother's Day, or whenever you ask — the A
 - **Chapter drafts** — literary nonfiction prose (`--format chapter`)
 
 Each output lives in `outputs/{title}/`, with `v1.md`, `v2.md`, etc. for revisions. Ask the AI to revise with feedback ("make it more personal", "shorter") and it bumps to the next version. Interim outputs can ship before the full book is complete.
+
+## Architecture
+
+Lifehug is git-backed and file-native. Markdown is the durable source of truth; any search or database layer should be treated as a rebuildable index.
+
+```
+lifehug/
+├── answers/              # Daily question responses, one source file per answer
+├── sources/              # Future imports: voice, email, chats, photos, social, docs
+├── wiki/                 # Compiled private life wiki, AI-maintained with citations
+│   ├── people/
+│   ├── places/
+│   ├── periods/
+│   ├── projects/
+│   ├── themes/
+│   ├── objects/
+│   └── relationships/
+├── outputs/              # Letters, posts, chapters, publishable artifacts
+├── state/                # Rebuildable machine state and warnings
+└── system/               # Framework scripts
+```
+
+Privacy model for the first pass: everything is owner-only. Lifehug prepares for future sharing with `visibility` and `sensitivity` metadata, but publishing should happen through reviewed outputs rather than broad access tiers inside the core wiki.
 
 ---
 
@@ -179,6 +222,15 @@ lifehug/
 ├── .gitignore
 ├── answers/                  # Your stored responses
 │   └── {question_id}.md      # One file per answer, with metadata
+├── wiki/                     # Compiled private life wiki
+│   ├── SCHEMA.md             # Wiki governance and page contracts
+│   ├── people/
+│   ├── places/
+│   ├── periods/
+│   ├── projects/
+│   ├── themes/
+│   ├── objects/
+│   └── relationships/
 ├── outputs/                  # Composed outputs (letters, tweets, IG, chapters)
 │   └── {title}/
 │       ├── meta.yaml         # Format, subject, source categories, versions
@@ -195,6 +247,10 @@ lifehug/
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
     ├── ask.py                # Rotation engine (CLI tool)
+    ├── process_answer.py     # Atomic answer save + state update helper
+    ├── rebuild_state.py      # Recomputes derived coverage/README state
+    ├── wiki_compile.py       # Compiles answers into the private Lifehug wiki
+    ├── serve_wiki.py         # Owner-only local wiki viewer
     ├── compose.py            # Output composer (letters, tweets, IG, chapters)
     ├── gen_followups.py      # Pass transition / depth question generator
     ├── update.py             # Update manager (check, apply, rollback)

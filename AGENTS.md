@@ -8,7 +8,7 @@ This is a Lifehug workspace. Read `CLAUDE.md` for the full operating instruction
 
 1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
 2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
-3. **Normal session?** → Check if there's a pending question or incoming answer to process.
+3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `system/process_answer.py` for answer saves.
 
 ## Detecting State
 
@@ -79,11 +79,10 @@ When the user replies to a daily question (via any channel):
 1. **Identify the question** — Match to the last asked question from `system/rotation.json` (`last_question_id`)
 2. **Follow the "Processing an Answer" flow** in CLAUDE.md:
    - Clean up the response
-   - Save to `answers/{question_id}.md`
-   - Generate 1-3 follow-up questions
-   - Mark answered in question-bank.md
-   - Update rotation.json and coverage.json
-   - Commit and push
+   - Generate 1-3 follow-up questions when useful
+   - Pipe the answer through `python3 system/process_answer.py {question_id}`
+   - Run `python3 system/wiki_compile.py` when you want the private wiki refreshed
+   - Commit and push if requested or part of the configured daily workflow
 3. **Acknowledge warmly** — Thank them, share a brief reflection on their answer, mention what's coming next
 
 ### Voice Messages
@@ -118,6 +117,6 @@ All paths are relative to this workspace root:
 - Rotation state: `system/rotation.json`
 - Coverage: `system/coverage.json`
 - Answers: `answers/`
-- Drafts: `drafts/`
-- Spotlights: `spotlights/`
+- Wiki: `wiki/`
+- Outputs: `outputs/`
 - Config: `config.yaml`

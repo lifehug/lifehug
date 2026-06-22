@@ -17,6 +17,15 @@ question_time: "09:00"
 # Options: telegram, whatsapp, signal, discord, slack, email, cli
 channel: "telegram"
 
+# Telegram delivery targets. Use one of these when running system/daily_question.sh.
+# telegram_chat_id works for DMs or groups. group_chat_id is accepted as an alias
+# for older setup instructions.
+# telegram_chat_id: ""
+# group_chat_id: ""
+
+# Model to use for pass transition question generation.
+followup_model: "anthropic/claude-opus-4-6"
+
 # Projects (filled in during setup)
 # projects:
 #   - name: "My Memoir"

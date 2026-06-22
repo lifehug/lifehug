@@ -29,13 +29,24 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from lifehug_core import (
+    ANSWERS_DIR,
+    CONFIG_FILE,
+    COVERAGE_FILE,
+    QUESTIONS_FILE,
+    ROTATION_FILE,
+    QUESTION_ID_RE,
+    answer_body,
+    answer_id_from_filename,
+    parse_categories as core_parse_categories,
+    parse_questions as core_parse_questions,
+    rebuild_coverage,
+    write_text,
+    write_json,
+)
+
 SYSTEM_DIR = Path(__file__).parent
 REPO_DIR = SYSTEM_DIR.parent
-QUESTIONS_FILE = SYSTEM_DIR / "question-bank.md"
-ROTATION_FILE = SYSTEM_DIR / "rotation.json"
-COVERAGE_FILE = SYSTEM_DIR / "coverage.json"
-ANSWERS_DIR = REPO_DIR / "answers"
-CONFIG_FILE = REPO_DIR / "config.yaml"
 
 
 def load_json(path):
@@ -44,9 +55,7 @@ def load_json(path):
 
 
 def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+    write_json(path, data)
 
 
 def load_config():
@@ -71,22 +80,12 @@ def get_default_model():
 
 def parse_questions(md_text):
     """Parse all questions from question-bank.md."""
-    questions = []
-    pattern = re.compile(
-        r'^- \[([ x])\] ([A-Z]\d+): (.+?)(?:\s*\*\(.+\)\*)?$',
-        re.MULTILINE,
-    )
-    for match in pattern.finditer(md_text):
-        checked = match.group(1) == "x"
-        qid = match.group(2)
-        text = match.group(3).strip()
-        questions.append({"id": qid, "text": text, "answered": checked})
-    return questions
+    return core_parse_questions(md_text)
 
 
 def get_next_id_for_category(md_text, category):
     """Find the next available question ID for a category (e.g. A11, B8)."""
-    pattern = re.compile(rf'^- \[[ x]\] ({re.escape(category)}\d+):', re.MULTILINE)
+    pattern = re.compile(rf'^- \[[ xX]\] ({re.escape(category)}\d+):', re.MULTILINE)
     existing = [m.group(1) for m in pattern.finditer(md_text)]
     if not existing:
         return f"{category}1"
@@ -102,10 +101,7 @@ def read_answer_files():
     for f in sorted(ANSWERS_DIR.glob("*.md")):
         try:
             content = f.read_text().strip()
-            # Extract question ID from filename (A1.md → A1, E3-success-definition.md → E3)
-            stem = f.stem
-            match = re.match(r'^([A-Z]\d+)', stem)
-            qid = match.group(1) if match else stem
+            qid = answer_id_from_filename(f) or f.stem
             answers.append({"id": qid, "file": f.name, "content": content})
         except Exception:
             continue
@@ -147,11 +143,10 @@ def cmd_prompt(args):
     current_pass = rotation.get("current_pass", 1)
     pass_names = rotation.get("pass_names", ["skeleton", "depth", "connections", "polish"])
 
-    # current_pass is already the NEW pass (we're generating questions for it)
-    # The answers are from the PREVIOUS pass
-    prev_pass = current_pass - 1
-    prev_name = pass_names[prev_pass - 1] if prev_pass <= len(pass_names) else f"pass-{prev_pass}"
-    next_name = pass_names[current_pass - 1] if current_pass <= len(pass_names) else f"pass-{current_pass}"
+    completed_pass = rotation.get("completed_pass", current_pass)
+    target_pass = rotation.get("target_pass", completed_pass + 1)
+    prev_name = pass_names[completed_pass - 1] if completed_pass <= len(pass_names) else f"pass-{completed_pass}"
+    next_name = pass_names[target_pass - 1] if target_pass <= len(pass_names) else f"pass-{target_pass}"
 
     answers = read_answer_files()
     md_text = QUESTIONS_FILE.read_text()
@@ -170,19 +165,19 @@ def cmd_prompt(args):
     lines.append("=" * 70)
     lines.append("")
     lines.append(f"Author: {author_name}")
-    lines.append(f"Completed: Pass {prev_pass} ({prev_name})")
-    lines.append(f"Generating for: Pass {current_pass} ({next_name})")
+    lines.append(f"Completed: Pass {completed_pass} ({prev_name})")
+    lines.append(f"Generating for: Pass {target_pass} ({next_name})")
     lines.append(f"Answers available: {len(answers)}")
     lines.append("")
     lines.append("-" * 70)
     lines.append("YOUR TASK")
     lines.append("-" * 70)
     lines.append("")
-    lines.append(f"You are generating Pass {current_pass} ({next_name}) questions for {author_name}'s")
+    lines.append(f"You are generating Pass {target_pass} ({next_name}) questions for {author_name}'s")
     lines.append("Lifehug storytelling project.")
     lines.append("")
-    lines.append(f"Pass {prev_pass} ({prev_name}) captured the broad strokes — raw answers across all")
-    lines.append(f"categories. Pass {current_pass} ({next_name}) goes deeper: specific scenes, sensory")
+    lines.append(f"Pass {completed_pass} ({prev_name}) captured the broad strokes — raw answers across all")
+    lines.append(f"categories. Pass {target_pass} ({next_name}) goes deeper: specific scenes, sensory")
     lines.append("detail, dialogue, emotion, and the threads worth pulling harder.")
     lines.append("")
     lines.append("For each answer below:")
@@ -232,11 +227,7 @@ def cmd_prompt(args):
         # Include the full answer but trim very long ones
         content = ans["content"]
         # Remove the header block to save tokens (keep just the answer body)
-        body_match = re.search(r'---\n+(.*?)(?:\n+---|\Z)', content, re.DOTALL)
-        if body_match:
-            body = body_match.group(1).strip()
-        else:
-            body = content
+        body = answer_body(content)
         # Trim to ~800 chars if very long
         if len(body) > 800:
             body = body[:800] + "... [truncated]"
@@ -279,6 +270,7 @@ def cmd_append(args):
 
     rotation = load_json(ROTATION_FILE)
     current_pass = rotation.get("current_pass", 2)
+    target_pass = rotation.get("target_pass", current_pass + 1)
 
     md_text = QUESTIONS_FILE.read_text()
 
@@ -321,11 +313,8 @@ def cmd_append(args):
     # Re-read question bank fresh before appending
     md_text = QUESTIONS_FILE.read_text()
 
-    today = datetime.now().strftime("%Y-%m-%d")
-
     # Append new questions to each category section
     for cat, new_id, text, source_id in additions:
-        src_comment = f"  <!-- from {source_id}, pass {current_pass}, {model} -->" if source_id else f"  <!-- pass {current_pass}, {model} -->"
         new_line = f"- [ ] {new_id}: {text}"
 
         # Find the category section and append before the next section or EOF
@@ -343,10 +332,14 @@ def cmd_append(args):
             # Category not found — append to end of file
             md_text = md_text.rstrip() + f"\n\n## {cat}: (generated)\n{new_line}\n"
 
-    QUESTIONS_FILE.write_text(md_text)
+    write_text(QUESTIONS_FILE, md_text)
 
     # Update rotation: mark transition complete, record model
+    rotation["current_pass"] = target_pass
     rotation["awaiting_pass_transition"] = False
+    rotation.pop("completed_pass", None)
+    rotation.pop("target_pass", None)
+    rotation.pop("pass_completed_at", None)
     rotation["last_transition_model"] = model
     rotation["last_transition_at"] = datetime.now().isoformat()
     rotation["questions_asked"] = 0
@@ -354,12 +347,9 @@ def cmd_append(args):
     save_json(ROTATION_FILE, rotation)
 
     # Rebuild coverage
-    from ask import parse_questions as pq, parse_categories as pc, update_coverage as uc
-    questions_parsed = pq(QUESTIONS_FILE.read_text())
-    cats = pc(QUESTIONS_FILE.read_text())
-    uc(questions_parsed, cats)
+    rebuild_coverage()
 
-    print(f"✓ Added {len(additions)} questions for Pass {current_pass} (model: {model})")
+    print(f"✓ Added {len(additions)} questions for Pass {target_pass} (model: {model})")
     print()
     for cat, new_id, text, source_id in additions:
         src = f" ← {source_id}" if source_id else ""

@@ -10,23 +10,17 @@ Usage:
 """
 
 import argparse
-import json
 import re
-from pathlib import Path
 
-SYSTEM_DIR = Path(__file__).parent
-REPO_DIR = SYSTEM_DIR.parent
-README_FILE = REPO_DIR / "README.md"
-COVERAGE_FILE = SYSTEM_DIR / "coverage.json"
-QUESTION_BANK = SYSTEM_DIR / "question-bank.md"
-
-
-def load_coverage():
-    """Load coverage data from coverage.json."""
-    if not COVERAGE_FILE.exists():
-        return None
-    with open(COVERAGE_FILE) as f:
-        return json.load(f)
+from lifehug_core import (
+    README_FILE,
+    QUESTIONS_FILE as QUESTION_BANK,
+    compute_coverage,
+    parse_categories,
+    parse_questions,
+    status_emoji,
+    write_text,
+)
 
 
 def parse_categories_from_bank():
@@ -34,37 +28,7 @@ def parse_categories_from_bank():
     if not QUESTION_BANK.exists():
         return {}
 
-    md = QUESTION_BANK.read_text()
-    categories = {}
-    header_pattern = re.compile(r'^## ([A-Z]): (.+?)(?:\s*\(.*\))?\s*$', re.MULTILINE)
-
-    for line in md.splitlines():
-        match = header_pattern.match(line)
-        if match:
-            cat_id = match.group(1)
-            name = match.group(2).strip()
-            if cat_id >= "K":
-                cat_group = "spotlight"
-            elif cat_id >= "F":
-                cat_group = "project"
-            else:
-                cat_group = "main"
-            categories[cat_id] = {"name": name, "group": cat_group}
-
-    return categories
-
-
-def status_emoji(answered, total):
-    """Return status emoji based on coverage ratio."""
-    if total == 0:
-        return "⚪"
-    ratio = answered / total
-    if ratio >= 0.7:
-        return "🟢"
-    elif ratio >= 0.3:
-        return "🟡"
-    else:
-        return "🔴"
+    return parse_categories(QUESTION_BANK.read_text())
 
 
 def build_coverage_line(coverage, categories):
@@ -112,6 +76,8 @@ def update_category_bullets(readme, coverage, categories):
         total = data.get("total", 0)
         emoji = status_emoji(answered, total)
         name_to_progress[name] = (emoji, answered, total)
+        if " & " in name:
+            name_to_progress[name.split(" & ", 1)[0]] = (emoji, answered, total)
         # Also index without "Spotlight — " prefix for README matching
         if name.startswith("Spotlight — "):
             short_name = name[len("Spotlight — "):]
@@ -135,6 +101,48 @@ def update_category_bullets(readme, coverage, categories):
         return m.group(0)
 
     return bullet_pattern.sub(replace_bullet, readme)
+
+
+def spotlight_display_name(category_name):
+    name = category_name
+    for prefix in ("Spotlight — ", "Spotlight - ", "Spotlight: ", "Spotlight "):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    return re.sub(r"\s*\(.*?\)\s*$", "", name).strip()
+
+
+def add_missing_spotlights(readme, coverage, categories):
+    if "## Spotlights" not in readme:
+        return readme
+
+    existing = readme
+    missing = []
+    for cat_id, cat_info in sorted(categories.items()):
+        if cat_info.get("group") != "spotlight":
+            continue
+        data = coverage["categories"].get(cat_id)
+        if not data:
+            continue
+        display = spotlight_display_name(cat_info["name"])
+        if f"**{display}**" in existing or re.search(rf"- [🔴🟡🟢⚪] {re.escape(display)} \(", existing):
+            continue
+        emoji = status_emoji(data["answered"], data["total"])
+        missing.append(f"- {emoji} **{display}** ({data['answered']}/{data['total']})")
+
+    if not missing:
+        return readme
+
+    pattern = re.compile(r"(## Spotlights\n)(.*?)(?=\n## |\n---|\Z)", re.DOTALL)
+
+    def replace(m):
+        body = m.group(2).rstrip()
+        addition = "\n".join(missing)
+        if body:
+            return f"{m.group(1)}{body}\n{addition}\n"
+        return f"{m.group(1)}{addition}\n"
+
+    return pattern.sub(replace, readme, count=1)
 
 
 def update_coverage_section(readme, coverage_line):
@@ -162,12 +170,10 @@ def update_readme(dry_run=False):
         print("No README.md found. Nothing to update.")
         return False
 
-    coverage = load_coverage()
-    categories = parse_categories_from_bank()
-
-    if not coverage:
-        print("No coverage.json found. Run ask.py --status first.")
-        return False
+    md_text = QUESTION_BANK.read_text()
+    questions = parse_questions(md_text)
+    categories = parse_categories(md_text)
+    coverage = compute_coverage(questions, categories)
 
     readme = README_FILE.read_text()
     coverage_line = build_coverage_line(coverage, categories)
@@ -178,6 +184,7 @@ def update_readme(dry_run=False):
 
     # Update per-category bullets
     new_readme = update_category_bullets(readme, coverage, categories)
+    new_readme = add_missing_spotlights(new_readme, coverage, categories)
 
     # Update coverage summary
     new_readme = update_coverage_section(new_readme, coverage_line)
@@ -198,7 +205,7 @@ def update_readme(dry_run=False):
         print(f"\nCoverage: {coverage_line}")
         return True
 
-    README_FILE.write_text(new_readme)
+    write_text(README_FILE, new_readme)
     print(f"Updated README.md: {coverage_line}")
     return True
 

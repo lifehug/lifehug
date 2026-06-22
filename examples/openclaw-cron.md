@@ -20,7 +20,7 @@ openclaw cron add \
   --announce \
   --task "Run the Lifehug daily routine:
 0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add -A && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
    If nothing to commit, continue.
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick today's question: python3 system/ask.py
@@ -47,7 +47,7 @@ openclaw cron add \
   --tz "America/New_York" \
   --task "Run the Lifehug daily routine:
 0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add -A && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
    If nothing to commit, continue.
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick today's question: python3 system/ask.py
@@ -75,7 +75,7 @@ openclaw cron add \
   --announce \
   --task "Run the Lifehug daily routine:
 0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add -A && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
    If nothing to commit, continue.
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick today's question: python3 system/ask.py
@@ -96,7 +96,7 @@ openclaw cron add \
   --announce \
   --task "Run the Lifehug daily routine:
 0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add -A && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
    If nothing to commit, continue.
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick today's question: python3 system/ask.py
@@ -117,7 +117,7 @@ openclaw cron add \
   --announce \
   --task "Run the Lifehug daily routine:
 0. Commit and push any pending changes:
-   cd ~/Workspace/lifehug && git add -A && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
+   cd ~/Workspace/lifehug && git add README.md system/question-bank.md system/rotation.json system/coverage.json answers outputs wiki && git diff --cached --quiet || git commit -m 'Daily update $(date +%Y-%m-%d)' && git push
    If nothing to commit, continue.
 1. Check for updates: python3 system/update.py --check --quiet (exit code 1 = update available)
 2. Pick today's question: python3 system/ask.py
