@@ -177,8 +177,25 @@ THEME_KEYWORDS: dict[str, list[str]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Anthropic client
+# AI client — OpenClaw-first, Anthropic fallback
 # ---------------------------------------------------------------------------
+
+
+def _openclaw_gateway() -> tuple[str, str] | None:
+    """Return (base_url, token) if OpenClaw gateway is configured, else None."""
+    import json  # noqa: PLC0415
+    cfg_path = os.path.expanduser("~/.openclaw/openclaw.json")
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        gw = cfg.get("gateway", {})
+        port = gw.get("port", 18789)
+        token = gw.get("auth", {}).get("token", "")
+        if token:
+            return f"http://localhost:{port}/v1", token
+    except Exception:
+        pass
+    return None
 
 
 def get_client():
@@ -795,7 +812,37 @@ def find_relevant_answers(answers: list[dict], topic: str, max_answers: int = 8)
 
 
 def call_ai(prompt: str, model: str) -> str:
-    """Call the Anthropic API and return the response text."""
+    """Call AI and return the response text.
+
+    Routing priority:
+      1. OpenClaw local gateway (no API key needed) — model remapped to
+         openclaw/default so it uses whatever model OpenClaw has configured.
+      2. Anthropic SDK (needs ANTHROPIC_API_KEY or anthropic_api_key in
+         config.yaml) — used only when OpenClaw is not available.
+    """
+    gw = _openclaw_gateway()
+    if gw:
+        import urllib.request  # noqa: PLC0415
+        base_url, token = gw
+        oc_model = "openclaw/default"
+        payload = json.dumps({
+            "model": oc_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 4096,
+        }).encode()
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+            result = json.loads(resp.read())
+        return result["choices"][0]["message"]["content"]
+
+    # Fallback: Anthropic SDK
     client = get_client()
     response = client.messages.create(
         model=model,

@@ -1,7 +1,7 @@
 {
-  "version": 15,
+  "version": 15.1,
   "released": "2026-06-24",
-  "changelog": "v15: Focus model (unifies spotlights+projects into one objective+tier primitive on a durable roadmap); dynamic Focus-weighted allocation (saturation decay, per-Focus variety cap raisable when finishing, self-knowledge floor, demand-driven research); self-knowledge + relational (dyadic) neighborhoods with WNRS/36Q/IFS arcs; wiki relationships/ and self/ surfaces now compiled; progress/deliverable-readiness dashboard; daily job compiles the wiki first; three-tier scheduling. Non-destructive backfill derives the roadmap from existing answers.",
+  "changelog": "v15.1: OpenClaw-first AI routing in research_expand (no API key needed when OpenClaw is running; Anthropic SDK as fallback)",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
