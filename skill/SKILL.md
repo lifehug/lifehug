@@ -47,9 +47,13 @@ python3 system/lifehug.py rebuild           # rebuild coverage/README/rotation c
 python3 system/lifehug.py compile           # compile private wiki
 python3 system/lifehug.py compile --dry-run # check compile without writing
 python3 system/lifehug.py ingest-story      # save unprompted story source from stdin
+python3 system/lifehug.py candidates-list   # list candidate questions
+python3 system/lifehug.py candidates-review # review candidates before promotion
+python3 system/lifehug.py candidates-promote # promote a candidate to question-bank.md
 python3 system/lifehug.py planner-report    # show balance, candidates, active queue
 python3 system/lifehug.py planner-queue     # write opt-in planned queue with caps/arcs
 python3 system/lifehug.py planner-clear     # clear planned queue
+python3 system/lifehug.py planner-state     # show/init planner state
 python3 system/lifehug.py serve             # local wiki at 127.0.0.1:8765
 python3 system/lifehug.py daily-dry-run     # validate daily delivery without sending
 python3 system/lifehug.py followups-status  # pass-transition state
@@ -99,12 +103,32 @@ printf '%s\n' "$STORY_TEXT" | python3 system/lifehug.py ingest-story --source "t
 
 This writes to `sources/manual/` and stores suggested follow-up questions in `state/question_candidates.json`. Candidates are a parking lot; they are not asked automatically until promoted into the question bank or explicitly planned.
 
+Review and promote candidates through scripts:
+
+```bash
+python3 system/lifehug.py candidates-review --status candidate
+python3 system/lifehug.py candidates-update <candidate-id> --status accepted --target-category A
+python3 system/lifehug.py candidates-promote <candidate-id> --category A
+```
+
+Promotion appends to `system/question-bank.md`, preserves source provenance, and marks the candidate as promoted. Do not manually copy candidate text into the question bank unless repairing a failed script run.
+
 Refresh/report after ingest:
 
 ```bash
 python3 system/lifehug.py compile
 python3 system/lifehug.py planner-report
 ```
+
+Planner queues are opt-in and expire:
+
+```bash
+python3 system/lifehug.py planner-report --limit 10
+python3 system/lifehug.py planner-objective-add "Prepare Mom letter" --category K --keyword mom
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
+```
+
+`planner-report` is read-only. `ask.py` uses a planned queue only while it is valid and unexpired.
 
 ## Private Wiki
 

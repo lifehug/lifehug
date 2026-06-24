@@ -109,17 +109,101 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
     return run_python("ingest_story.py", flags)
 
 
-def cmd_planner_report(_args: argparse.Namespace) -> int:
-    return run_python("question_planner.py", ["--report"])
+def cmd_candidates_list(args: argparse.Namespace) -> int:
+    flags = ["list", "--limit", str(args.limit)]
+    if args.status:
+        flags.extend(["--status", args.status])
+    if args.kind:
+        flags.extend(["--kind", args.kind])
+    if args.source:
+        flags.extend(["--source", args.source])
+    if args.target_page:
+        flags.extend(["--target-page", args.target_page])
+    if args.min_priority is not None:
+        flags.extend(["--min-priority", str(args.min_priority)])
+    if args.detail:
+        flags.append("--detail")
+    if args.json:
+        flags.append("--json")
+    return run_python("question_candidates.py", flags)
+
+
+def cmd_candidates_review(args: argparse.Namespace) -> int:
+    flags = ["review", "--limit", str(args.limit)]
+    if args.status:
+        flags.extend(["--status", args.status])
+    if args.kind:
+        flags.extend(["--kind", args.kind])
+    if args.source:
+        flags.extend(["--source", args.source])
+    if args.target_page:
+        flags.extend(["--target-page", args.target_page])
+    if args.min_priority is not None:
+        flags.extend(["--min-priority", str(args.min_priority)])
+    return run_python("question_candidates.py", flags)
+
+
+def cmd_candidates_update(args: argparse.Namespace) -> int:
+    flags = ["update", args.candidate_id]
+    if args.status:
+        flags.extend(["--status", args.status])
+    if args.target_page is not None:
+        flags.extend(["--target-page", args.target_page])
+    if args.target_category is not None:
+        flags.extend(["--target-category", args.target_category])
+    if args.priority is not None:
+        flags.extend(["--priority", str(args.priority)])
+    if args.reason is not None:
+        flags.extend(["--reason", args.reason])
+    return run_python("question_candidates.py", flags)
+
+
+def cmd_candidates_promote(args: argparse.Namespace) -> int:
+    return run_python("question_candidates.py", ["promote", args.candidate_id, "--category", args.category])
+
+
+def cmd_planner_report(args: argparse.Namespace) -> int:
+    flags = ["--report", "--limit", str(args.limit)]
+    return run_python("question_planner.py", flags)
 
 
 def cmd_planner_queue(args: argparse.Namespace) -> int:
-    flags = ["--write-queue", "--limit", str(args.limit), "--arc-max", str(args.arc_max)]
+    flags = [
+        "--write-queue",
+        "--limit",
+        str(args.limit),
+        "--arc-max",
+        str(args.arc_max),
+        "--expires-days",
+        str(args.expires_days),
+    ]
     return run_python("question_planner.py", flags)
 
 
 def cmd_planner_clear(_args: argparse.Namespace) -> int:
     return run_python("question_planner.py", ["--clear-queue"])
+
+
+def cmd_planner_state(args: argparse.Namespace) -> int:
+    flags = ["--state"]
+    if args.init:
+        flags.append("--init-state")
+    return run_python("question_planner.py", flags)
+
+
+def cmd_planner_objective_add(args: argparse.Namespace) -> int:
+    flags = ["--objective-add", args.label]
+    for category in args.category or []:
+        flags.extend(["--objective-category", category])
+    for keyword in args.keyword or []:
+        flags.extend(["--objective-keyword", keyword])
+    if args.max_questions is not None:
+        flags.extend(["--objective-max-questions", str(args.max_questions)])
+    return run_python("question_planner.py", flags)
+
+
+def cmd_planner_objective_clear(_args: argparse.Namespace) -> int:
+    return run_python("question_planner.py", ["--objective-clear"])
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -154,6 +238,101 @@ def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["LIFEHUG_DAILY_DRY_RUN"] = "1"
     return run(["bash", str(script("daily_question.sh"))], env=env)
+
+
+def cmd_classify_story(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    if args.prompt:
+        flags.append("--prompt")
+        flags.append(args.prompt)
+    elif args.classify:
+        flags.append("--classify")
+        flags.append(args.classify)
+    elif args.classify_all:
+        flags.append("--classify-all")
+        if args.unclassified:
+            flags.append("--unclassified")
+    if args.model:
+        flags.extend(["--model", args.model])
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("classify_story.py", flags)
+
+
+def cmd_research_expand(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    if args.expand:
+        flags.extend(["--expand", args.expand])
+    elif args.topic:
+        flags.extend(["--topic", args.topic])
+        if args.type:
+            flags.extend(["--type", args.type])
+    elif args.gaps:
+        flags.append("--gaps")
+    if args.prompt_only:
+        flags.append("--prompt")
+    if args.output:
+        flags.extend(["--output", args.output])
+    if args.model:
+        flags.extend(["--model", args.model])
+    if args.dry_run:
+        flags.append("--dry-run")
+    if args.force:
+        flags.append("--force")
+    return run_python("research_expand.py", flags)
+
+
+def cmd_recommend_spotlights(args: argparse.Namespace) -> int:
+    flags = ["--recommend"]
+    if args.min_score is not None:
+        flags.extend(["--min-score", str(args.min_score)])
+    if args.type:
+        flags.extend(["--type", args.type])
+    if args.include_dismissed:
+        flags.append("--include-dismissed")
+    if args.json:
+        flags.append("--json")
+    return run_python("recommend_spotlights.py", flags)
+
+
+def cmd_spotlight_action(args: argparse.Namespace) -> int:
+    if args.approve:
+        return run_python("recommend_spotlights.py", ["--approve", args.approve])
+    if args.dismiss:
+        flags = ["--dismiss", args.dismiss]
+        if args.reason:
+            flags.extend(["--reason", args.reason])
+        return run_python("recommend_spotlights.py", flags)
+    return 1
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    if args.list_sources:
+        flags.append("--list-sources")
+    else:
+        flags.extend(["--source", args.source])
+    if args.limit:
+        flags.extend(["--limit", str(args.limit)])
+    if args.path:
+        flags.extend(["--path", args.path])
+    if args.export_path:
+        flags.extend(["--export-path", args.export_path])
+    if args.query:
+        flags.extend(["--query", args.query])
+    if args.since:
+        flags.extend(["--since", args.since])
+    if args.username:
+        flags.extend(["--username", args.username])
+    if args.no_candidates:
+        flags.append("--no-candidates")
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("ingest.py", flags)
+
+
+def cmd_candidates_stats(_args: argparse.Namespace) -> int:
+    return run_python("question_candidates.py", ["stats"])
 
 
 def cmd_followups_status(_args: argparse.Namespace) -> int:
@@ -250,16 +429,122 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_ingest_story)
 
+    def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:
+        candidate_parser.add_argument("--status", choices=["accepted", "candidate", "deferred", "promoted", "rejected"])
+        candidate_parser.add_argument("--kind")
+        candidate_parser.add_argument("--source")
+        candidate_parser.add_argument("--target-page")
+        candidate_parser.add_argument("--min-priority", type=float)
+        candidate_parser.add_argument("--limit", type=int, default=25)
+
+    p = sub.add_parser("candidates-list", help="List question candidates")
+    add_candidate_filters(p)
+    p.add_argument("--detail", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_candidates_list)
+
+    p = sub.add_parser("candidates-review", help="Review candidate questions with detail")
+    add_candidate_filters(p)
+    p.set_defaults(func=cmd_candidates_review)
+
+    p = sub.add_parser("candidates-update", help="Update candidate metadata or status")
+    p.add_argument("candidate_id")
+    p.add_argument("--status", choices=["accepted", "candidate", "deferred", "promoted", "rejected"])
+    p.add_argument("--target-page")
+    p.add_argument("--target-category")
+    p.add_argument("--priority", type=float)
+    p.add_argument("--reason")
+    p.set_defaults(func=cmd_candidates_update)
+
+    p = sub.add_parser("candidates-promote", help="Promote a candidate into the question bank")
+    p.add_argument("candidate_id")
+    p.add_argument("--category", required=True)
+    p.set_defaults(func=cmd_candidates_promote)
+
     p = sub.add_parser("planner-report", help="Show planner balance and candidates")
+    p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=cmd_planner_report)
 
     p = sub.add_parser("planner-queue", help="Write an opt-in planned daily queue")
     p.add_argument("--limit", type=int, default=14)
     p.add_argument("--arc-max", type=int, default=2)
+    p.add_argument("--expires-days", type=int, default=7)
     p.set_defaults(func=cmd_planner_queue)
 
     p = sub.add_parser("planner-clear", help="Clear the planned daily queue")
     p.set_defaults(func=cmd_planner_clear)
+
+    p = sub.add_parser("planner-state", help="Show or initialize planner state")
+    p.add_argument("--init", action="store_true")
+    p.set_defaults(func=cmd_planner_state)
+
+    p = sub.add_parser("planner-objective-add", help="Add an active planner objective")
+    p.add_argument("label")
+    p.add_argument("--category", action="append", default=[])
+    p.add_argument("--keyword", action="append", default=[])
+    p.add_argument("--max-questions", type=int)
+    p.set_defaults(func=cmd_planner_objective_add)
+
+    p = sub.add_parser("planner-objective-clear", help="Clear active planner objectives")
+    p.set_defaults(func=cmd_planner_objective_clear)
+
+    # --- AI Classification ---
+    p = sub.add_parser("classify-story", help="Classify a source file with AI")
+    p.add_argument("--classify", metavar="PATH", help="Source file to classify")
+    p.add_argument("--prompt", metavar="PATH", help="Output AI prompt only")
+    p.add_argument("--classify-all", action="store_true")
+    p.add_argument("--unclassified", action="store_true")
+    p.add_argument("--model", help="Override AI model")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_classify_story)
+
+    # --- Research Neighborhoods ---
+    p = sub.add_parser("research-expand", help="Generate question neighborhoods")
+    p.add_argument("--expand", metavar="PATH", help="Expand from a file")
+    p.add_argument("--topic", help="Named topic to expand")
+    p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme", "event"])
+    p.add_argument("--gaps", action="store_true", help="Auto-detect thin areas")
+    p.add_argument("--prompt-only", action="store_true", help="Output AI prompt only")
+    p.add_argument("--output", choices=["chapter", "letter", "essay", "post"], default="chapter")
+    p.add_argument("--model", help="Override AI model")
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_research_expand)
+
+    # --- Spotlight Recommendations ---
+    p = sub.add_parser("recommend-spotlights", help="Recommend new spotlights from accumulated stories")
+    p.add_argument("--min-score", type=float)
+    p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme"])
+    p.add_argument("--include-dismissed", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_recommend_spotlights)
+
+    p = sub.add_parser("spotlight-approve", help="Approve a spotlight recommendation")
+    p.add_argument("approve", metavar="REC_ID")
+    p.set_defaults(func=cmd_spotlight_action, dismiss=None, reason=None)
+
+    p = sub.add_parser("spotlight-dismiss", help="Dismiss a spotlight recommendation")
+    p.add_argument("dismiss", metavar="REC_ID")
+    p.add_argument("--reason", default="")
+    p.set_defaults(func=cmd_spotlight_action, approve=None)
+
+    # --- Unified Ingest ---
+    p = sub.add_parser("ingest", help="Import from external sources (x, email, instagram, file)")
+    p.add_argument("--source", help="Connector name")
+    p.add_argument("--list-sources", action="store_true")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--path", help="File path (file connector)")
+    p.add_argument("--export-path", help="Export file/dir path")
+    p.add_argument("--query", help="Search query (email connector)")
+    p.add_argument("--since", help="Date filter YYYY-MM-DD")
+    p.add_argument("--username", help="Username (X connector)")
+    p.add_argument("--no-candidates", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_ingest)
+
+    # --- Candidate Stats ---
+    p = sub.add_parser("candidates-stats", help="Show candidate question statistics")
+    p.set_defaults(func=cmd_candidates_stats)
 
     p = sub.add_parser("serve", help="Serve the local owner-only wiki")
     p.add_argument("--host", default="127.0.0.1")

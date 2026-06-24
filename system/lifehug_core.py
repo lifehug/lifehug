@@ -25,6 +25,12 @@ SOURCES_DIR = REPO_DIR / "sources"
 MANUAL_SOURCES_DIR = SOURCES_DIR / "manual"
 QUESTION_CANDIDATES_FILE = STATE_DIR / "question_candidates.json"
 QUESTION_QUEUE_FILE = STATE_DIR / "question_queue.json"
+PLANNER_STATE_FILE = STATE_DIR / "planner_state.json"
+MISSION_FILE = SYSTEM_DIR / "mission.md"
+CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
+NEIGHBORHOODS_FILE = STATE_DIR / "neighborhoods.json"
+SPOTLIGHT_RECS_FILE = STATE_DIR / "spotlight_recommendations.json"
+CONNECTORS_DIR = SYSTEM_DIR / "connectors"
 
 QUESTION_ID_RE = r"[A-Z]\d+[a-z]*"
 QUESTION_LINE_RE = re.compile(
@@ -32,6 +38,17 @@ QUESTION_LINE_RE = re.compile(
     re.MULTILINE,
 )
 CATEGORY_HEADER_RE = re.compile(r"^## ([A-Z]): (.+?)(?:\s*\(.*\))?\s*$")
+
+STORY_FUNCTIONS = (
+    "foundation",
+    "scene",
+    "tension",
+    "turning_point",
+    "relationship",
+    "meaning",
+    "contradiction",
+    "output_gap",
+)
 
 
 def now_utc() -> str:
@@ -211,3 +228,10 @@ def status_emoji(answered: int, total: int) -> str:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower())
     return slug.strip("-") or "untitled"
+
+
+def load_mission() -> str:
+    """Load mission.md content for AI prompt injection."""
+    if MISSION_FILE.exists():
+        return MISSION_FILE.read_text(encoding="utf-8")
+    return ""

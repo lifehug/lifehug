@@ -36,6 +36,7 @@ PROTECTED_FILES = {
     "sources/manual/",
     "state/question_candidates.json",
     "state/question_queue.json",
+    "state/planner_state.json",
     # Legacy paths (pre-v8) — still protected so historical content isn't clobbered
     "drafts/",
     "spotlights/",

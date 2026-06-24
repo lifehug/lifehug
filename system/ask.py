@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 
 from lifehug_core import (
     COVERAGE_FILE,
@@ -25,6 +25,8 @@ from lifehug_core import (
 def pick_planned_question(questions):
     """Return the first valid unanswered question from state/question_queue.json."""
     queue_data = read_json(QUESTION_QUEUE_FILE, default={}) or {}
+    if planned_queue_expired(queue_data):
+        return None
     queue = queue_data.get("queue", [])
     if not isinstance(queue, list):
         return None
@@ -36,6 +38,23 @@ def pick_planned_question(questions):
         if question and not question["answered"]:
             return question
     return None
+
+
+def planned_queue_expired(queue_data):
+    expires_at = queue_data.get("expires_at")
+    if not expires_at:
+        return False
+    try:
+        raw = str(expires_at)
+        if raw.endswith("Z"):
+            expires = datetime.fromisoformat(raw[:-1] + "+00:00")
+        else:
+            expires = datetime.fromisoformat(raw)
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return expires <= datetime.now(timezone.utc)
 
 
 def pick_next_question(questions, categories, rotation):
