@@ -7,6 +7,7 @@ import argparse
 import copy
 import json
 import math
+import random
 import re
 import sys
 from collections import Counter, defaultdict
@@ -34,6 +35,30 @@ from lifehug_core import (
     slugify,
     write_json,
 )
+from roadmap import (
+    DEFAULT_CAP,
+    FINISHING_CAP,
+    MAINTENANCE_FACTOR,
+    TIER_TARGETS,
+    derive_roadmap,
+    focus_fill,
+    load_roadmap,
+)
+
+# Relative base weight by tier — how much pull a Focus has before saturation.
+# Tier mainly sets target_depth (and thus how long it stays under-filled); base
+# gives a book a little more daily pull than a blog, but the per-Focus cap keeps
+# any one Focus from dominating a week.
+TIER_BASE = {"basic": 0.8, "standard": 1.0, "extreme": 1.2}
+
+# How much of a week is reserved (floored) for self-knowledge questions and how
+# much weight objectives get. Overridable via planner_state["lane_policy"].
+DEFAULT_LANE_POLICY = {
+    "self_floor_fraction": 0.08,   # ~1 self-knowledge slot per 12-question week
+    "objective_boost": 2.5,        # multiplier on a question matching an objective
+    "expansion_floor": 0.02,       # research-expansion residual when there's room
+    "expansion_onset": 0.60,       # global fullness where expansion urgency starts
+}
 
 GROUP_CAPS = {
     "main": 0.50,
@@ -136,10 +161,11 @@ def default_planner_state() -> dict:
             },
         },
         "queue": {
-            "default_limit": 14,
+            "default_limit": 12,
             "arc_max": 2,
-            "expires_after_days": 7,
+            "expires_after_days": 8,
         },
+        "lane_policy": DEFAULT_LANE_POLICY,
     }
 
 
@@ -290,8 +316,64 @@ def max_counts(limit: int, caps: dict[str, float]) -> dict[str, int]:
     return {key: max(1, math.ceil(limit * float(value))) for key, value in caps.items()}
 
 
-def enriched_pending_questions(questions: list[dict], categories: dict, coverage: dict, objectives: list[dict]) -> list[dict]:
+def resolve_roadmap(questions: list[dict] | None = None) -> dict:
+    """Load the roadmap; if absent (pre-v15 instance), derive it on the fly so
+    the planner still works. Never writes."""
+    roadmap = load_roadmap()
+    if roadmap.get("focuses"):
+        return roadmap
+    return derive_roadmap(QUESTIONS_FILE.read_text(encoding="utf-8"))
+
+
+def focus_weight(focus: dict, fill: dict) -> float:
+    """weight = base(tier) × fill_factor × room. Saturated focuses decay to
+    maintenance weight (never zero); empty-of-questions focuses go to zero."""
+    if not fill["room"]:
+        return 0.0
+    base = TIER_BASE.get(focus.get("tier", "standard"), 1.0)
+    sat = fill["saturation"]
+    if sat >= 1.0:
+        fill_factor = MAINTENANCE_FACTOR
+    elif sat >= 0.8:
+        fill_factor = 1.0 - (sat - 0.8) / 0.2 * 0.7   # 1.0 → 0.3 across .8–1.0
+    else:
+        fill_factor = 1.0
+    return base * fill_factor
+
+
+def build_focus_index(focuses: list[dict], questions: list[dict]) -> dict:
+    """Map category → focus, and precompute each focus's fill, weight and cap."""
+    cat_to_focus: dict[str, str] = {}
+    info: dict[str, dict] = {}
+    for focus in focuses:
+        fill = focus_fill(focus, questions)
+        cap_frac = FINISHING_CAP if focus.get("phase") == "finishing" else float(focus.get("cap", DEFAULT_CAP))
+        info[focus["id"]] = {
+            "focus": focus,
+            "fill": fill,
+            "weight": focus_weight(focus, fill),
+            "cap_fraction": cap_frac,
+            "type": focus.get("type", "project"),
+        }
+        for cat in focus.get("categories", []):
+            cat_to_focus[str(cat)] = focus["id"]
+    return {"cat_to_focus": cat_to_focus, "info": info}
+
+
+def global_fullness(focuses: list[dict], questions: list[dict]) -> float:
+    answered = total = 0
+    for focus in focuses:
+        fill = focus_fill(focus, questions)
+        answered += fill["answered"]
+        total += fill["target"]
+    return answered / total if total else 0.0
+
+
+def enriched_pending_questions(questions: list[dict], categories: dict, coverage: dict, objectives: list[dict],
+                               focus_index: dict | None = None) -> list[dict]:
     rows = []
+    cat_to_focus = (focus_index or {}).get("cat_to_focus", {})
+    info = (focus_index or {}).get("info", {})
     for question in questions:
         if question["answered"]:
             continue
@@ -299,6 +381,8 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
         group = categories.get(category, {}).get("group", "main")
         story_function = infer_story_function(str(question["text"]))
         objective, objective_limit = objective_match(question, objectives)
+        focus_id = cat_to_focus.get(category)
+        finfo = info.get(focus_id, {})
         rows.append({
             **question,
             "group": group,
@@ -307,6 +391,9 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
             "category_ratio": category_ratio(coverage, category),
             "objective": objective,
             "objective_limit": objective_limit,
+            "focus": focus_id,
+            "focus_type": finfo.get("type", group),
+            "weight": float(finfo.get("weight", 1.0)),
         })
     rows.sort(key=lambda q: (
         q["objective"] is None,
@@ -323,94 +410,169 @@ def accepted_candidate_recommendations(candidates: list[dict], limit: int = 8) -
     return rows[:limit]
 
 
-def build_queue(limit: int, arc_max: int, expires_days: int = 7, planner_state: dict | None = None) -> dict:
+def _week_seed(generated_at: str) -> int:
+    """Stable per-week seed so each weekly rebuild varies, but a given week is
+    reproducible (good for tests and idempotent re-runs within the week)."""
+    dt = parse_time(generated_at) or datetime.now(timezone.utc)
+    iso = dt.isocalendar()
+    return iso[0] * 100 + iso[1]
+
+
+def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: dict | None = None,
+                seed: int | None = None) -> dict:
+    """Build the weekly queue by dynamic Focus-weighted sampling.
+
+    Each Focus gets weight = base(tier) × fill_factor × room; saturated Focuses
+    fade to maintenance weight. No Focus exceeds its cap (30%, or 50% while
+    `finishing`). A self-knowledge floor reserves ~1 slot/week. Selection is
+    weighted-random (seeded per week) so the daily sequence has real variety
+    rather than a deterministic march. Research-expansion is NOT a queue slot —
+    it surfaces as `expansion` urgency in the metadata for the cron to act on.
+    """
     questions, categories, coverage = load_question_state()
     candidates = load_candidates()
     planner_state = planner_state or load_planner_state()
-    caps = planner_state.get("caps", {})
-    group_caps = caps.get("group", GROUP_CAPS)
-    story_caps = caps.get("story_function", STORY_FUNCTION_CAPS)
-    max_by_group = max_counts(limit, group_caps)
+    story_caps = planner_state.get("caps", {}).get("story_function", STORY_FUNCTION_CAPS)
     max_by_story = max_counts(limit, story_caps)
+    policy = {**DEFAULT_LANE_POLICY, **planner_state.get("lane_policy", {})}
 
-    pending = enriched_pending_questions(questions, categories, coverage, planner_state.get("active_objectives", []))
+    focuses = resolve_roadmap(questions).get("focuses", [])
+    findex = build_focus_index(focuses, questions)
+    info = findex["info"]
+    generated_at = now_utc()
+    rng = random.Random(seed if seed is not None else _week_seed(generated_at))
+
+    pending = enriched_pending_questions(
+        questions, categories, coverage, planner_state.get("active_objectives", []), findex)
+
+    # Per-Focus item caps (max share of the week any one Focus may take).
+    focus_max = {
+        fid: max(1, math.ceil(limit * d["cap_fraction"]))
+        for fid, d in info.items()
+    }
+
     queue = []
-    counts = Counter()
+    per_focus = Counter()
     story_counts = Counter()
     objective_counts = Counter()
     category_streak = None
     streak_count = 0
-
     remaining = pending[:]
-    while remaining and len(queue) < limit:
-        selected = None
-        for question in remaining:
-            cat = str(question["category"])
-            group = str(question["group"])
-            story_function = str(question["story_function"])
-            objective = question.get("objective")
-            objective_limit = int(question.get("objective_limit") or limit)
-            if counts[group] >= max_by_group.get(group, limit):
-                continue
-            if story_counts[story_function] >= max_by_story.get(story_function, limit):
-                continue
-            if objective and objective_counts[objective] >= objective_limit:
-                continue
-            if cat == category_streak and streak_count >= arc_max:
-                continue
-            selected = question
-            break
 
-        if selected is None:
-            selected = remaining[0]
-
+    def record(selected: dict) -> None:
+        nonlocal category_streak, streak_count
         remaining.remove(selected)
         cat = str(selected["category"])
-        group = str(selected["group"])
-        story_function = str(selected["story_function"])
         if cat == category_streak:
             streak_count += 1
         else:
-            category_streak = cat
-            streak_count = 1
-
-        counts[group] += 1
-        story_counts[story_function] += 1
+            category_streak, streak_count = cat, 1
+        if selected.get("focus"):
+            per_focus[selected["focus"]] += 1
+        story_counts[str(selected["story_function"])] += 1
         if selected.get("objective"):
             objective_counts[str(selected["objective"])] += 1
-
         reason_parts = [
-            f"{group} question from {cat}",
-            f"{story_function} story function",
+            f"focus {selected.get('focus') or selected['group']}",
+            f"{selected['story_function']} story function",
             f"category coverage {selected['category_ratio']:.0%}",
-            f"arc cap {arc_max}",
         ]
         if selected.get("objective"):
             reason_parts.append(f"objective: {selected['objective']}")
-
         queue.append({
             "question_id": selected["id"],
             "category": cat,
-            "group": group,
+            "group": str(selected["group"]),
+            "focus": selected.get("focus"),
             "source": "question_bank",
             "source_type": selected["source_type"],
-            "story_function": story_function,
+            "story_function": str(selected["story_function"]),
             "objective": selected.get("objective"),
             "status": "queued",
             "reason": "; ".join(reason_parts),
         })
 
+    def eligible(q: dict, *, enforce_arc: bool = True, enforce_story: bool = True) -> bool:
+        fid = q.get("focus")
+        if fid and per_focus[fid] >= focus_max.get(fid, limit):
+            return False
+        if q.get("objective") and objective_counts[q["objective"]] >= int(q.get("objective_limit") or limit):
+            return False
+        if enforce_arc and str(q["category"]) == category_streak and streak_count >= arc_max:
+            return False
+        if enforce_story and story_counts[str(q["story_function"])] >= max_by_story.get(str(q["story_function"]), limit):
+            return False
+        return True
+
+    def weighted_pick(pool: list[dict]) -> dict:
+        weights = [
+            max(q.get("weight", 1.0), 0.0001) * (policy["objective_boost"] if q.get("objective") else 1.0)
+            for q in pool
+        ]
+        return rng.choices(pool, weights=weights, k=1)[0]
+
+    # 1) Self-knowledge floor — reserve ~1 slot/week if self questions exist.
+    self_floor = max(1, round(limit * policy["self_floor_fraction"])) if any(
+        q.get("focus_type") == "self" for q in remaining) else 0
+    self_taken = 0
+    while self_taken < self_floor and len(queue) < limit:
+        pool = [q for q in remaining if q.get("focus_type") == "self" and eligible(q)]
+        if not pool:
+            break
+        record(weighted_pick(pool))
+        self_taken += 1
+
+    # 2) Weighted sampling for the rest, relaxing constraints only if stuck.
+    while remaining and len(queue) < limit:
+        pool = [q for q in remaining if eligible(q)]
+        if not pool:
+            pool = [q for q in remaining if eligible(q, enforce_arc=False, enforce_story=False)]
+        if not pool:
+            pool = remaining[:]   # last resort: caps exhausted, fill anyway
+        record(weighted_pick(pool))
+
+    fullness = global_fullness(focuses, questions)
+    onset = policy["expansion_onset"]
+    urgency = 0.0 if fullness < onset else round(min(1.0, (fullness - onset) / (1 - onset)), 3)
+    urgency = max(urgency, policy["expansion_floor"])
+    # Running low on askable questions also raises expansion urgency.
+    if len(queue) < limit:
+        urgency = max(urgency, 0.5)
+
     return {
-        "version": 2,
-        "generated_at": now_utc(),
+        "version": 3,
+        "generated_at": generated_at,
         "expires_at": future_timestamp(expires_days),
         "policy": {
             "limit": limit,
             "arc_max": arc_max,
             "expires_days": expires_days,
-            "group_caps": group_caps,
-            "story_function_caps": story_caps,
+            "allocation": "dynamic-focus-weighted",
             "candidate_policy": "accepted candidates are recommended for promotion but not asked until promoted to question-bank",
+        },
+        "allocation": {
+            "global_fullness": round(fullness, 3),
+            "focuses": [
+                {
+                    "id": fid,
+                    "label": d["focus"].get("label", fid),
+                    "tier": d["focus"].get("tier"),
+                    "phase": d["focus"].get("phase", "active"),
+                    "saturation": d["fill"]["saturation"],
+                    "saturated": d["fill"]["saturated"],
+                    "weight": round(d["weight"], 3),
+                    "queued": per_focus.get(fid, 0),
+                    "cap": focus_max.get(fid),
+                }
+                for fid, d in info.items()
+            ],
+            "self_floor": self_floor,
+            "expansion": {
+                "urgency": round(urgency, 3),
+                "recommended": urgency >= 0.5,
+                "reason": "running low on askable questions" if len(queue) < limit
+                          else f"global fullness {fullness:.0%}",
+            },
         },
         "active_objectives": planner_state.get("active_objectives", []),
         "candidate_recommendations": accepted_candidate_recommendations(candidates),
@@ -669,9 +831,9 @@ def main() -> int:
     parser.add_argument("--objective-keyword", action="append", default=[])
     parser.add_argument("--objective-max-questions", type=int, default=3)
     parser.add_argument("--objective-clear", action="store_true")
-    parser.add_argument("--limit", type=int, default=14)
+    parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--arc-max", type=int, default=2)
-    parser.add_argument("--expires-days", type=int, default=7)
+    parser.add_argument("--expires-days", type=int, default=8)
     args = parser.parse_args()
 
     if args.init_state:

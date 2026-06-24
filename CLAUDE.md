@@ -157,10 +157,30 @@ Use the rotation logic through the script wrapper:
 python3 system/lifehug.py next
 ```
 
-1. **Coverage priority**: Pick the category with the lowest answer ratio (RED first, then YELLOW, then GREEN)
-2. **Group alternation**: If there are multiple project groups (e.g., memoir categories and company story categories), alternate between them based on the last question asked
-3. **Spotlight interleaving**: Every N questions (configured by `spotlight_frequency` in rotation.json, default 4), pick a Spotlight question instead of a main question
-4. **Within category**: Pick the first unanswered question
+`ask.py` first consumes a planned weekly queue (`state/question_queue.json`) if one exists and hasn't expired; otherwise it falls back to coverage-driven rotation. The weekly queue is built by the **roadmap-driven planner** (see below). You normally don't pick by hand — the queue does it.
+
+Fallback rotation order:
+1. **Coverage priority**: lowest answer-ratio category first (RED → YELLOW → GREEN)
+2. **Group alternation**: alternate between groups based on the last question
+3. **Spotlight interleaving**: every N questions (`spotlight_frequency`, default 4)
+4. **Within category**: first unanswered question
+
+### The Roadmap & Focuses (v15)
+
+A **Focus** is the unit of intent — anything the author is building toward (a person, a book, a blog, a theme, their life's work). It replaces the older "spotlight vs project" split with one primitive: an **objective** + a **tier** (`basic` ≈ blog/~8 answers, `standard` ≈ essay/chapter/a person/~20, `extreme` ≈ book/life's work/~50+).
+
+The **roadmap** (`state/roadmap.json`) is the durable plan — the set of Focuses with targets, caps, and phases. It is **derived** from the question bank (run `python3 system/lifehug.py roadmap-rebuild`); you never hand-edit the JSON. Manage it with the CLI:
+
+```bash
+python3 system/lifehug.py roadmap                 # Focuses, tiers, saturation bars
+python3 system/lifehug.py focus-add "Etherfuse" --type project --tier extreme \
+    --objective "founding-story book" --deliverable book --category F --category G
+python3 system/lifehug.py focus-set mom --tier standard --target 18
+python3 system/lifehug.py focus-finish etherfuse  # push a deliverable to done (lifts its variety cap to 50%)
+python3 system/lifehug.py progress                # are we graduating toward deliverables?
+```
+
+The weekly planner builds the queue by **dynamic Focus-weighted allocation**: `weight = base(tier) × fill_factor × room`. Under-target Focuses get full weight; once a Focus passes its target it decays to a small maintenance weight (it never vanishes — re-promote it when a deliverable needs it). No Focus may take more than its cap (30% of a week, 50% when `finishing`), so nothing dominates daily life. A self-knowledge slot is reserved (~1/week), and research-expansion stays dormant until Focuses fill up and the system needs new domains. **Don't reimplement this — run the scripts.**
 
 ### Delivering the Question
 
@@ -266,7 +286,26 @@ python3 system/lifehug.py planner-objective-clear
 
 ---
 
+## Self-Knowledge & Relational Questions (v15)
+
+Beyond telling the story, Lifehug helps the author **understand themselves** and **their relationships** (WNRS / 36-Questions / IFS lineage). Two neighborhood types power this:
+
+```bash
+# Self-knowledge: escalating, vulnerable self-examination (arc: self_image → value →
+# fear → contradiction → perception_by_others → growth_edge)
+python3 system/research_expand.py --topic "Who I am becoming" --type self --output essay
+
+# Relational (dyadic): the bond from both sides (arc: who_they_are → shared_history →
+# tension → what_i_see_in_them → what_i_want_them_to_know → how_they_see_me).
+# Pulls the person's wiki page automatically.
+python3 system/research_expand.py --topic "Katie" --type relationship --output letter
+```
+
+These generate **candidates** (not daily questions yet) — review and promote the good ones with `candidates-list` / `candidates-promote`, ideally into a Focus of `--type self` so they compile into the `wiki/self/` surface. The planner's reserved weekly self-knowledge slot draws from this pool; the monthly cron refills it. Sprinkle these in — don't let them crowd out story work.
+
 ## Spotlight Management
+
+> **Note (v15):** "Spotlights" and "Projects" are now unified as **Focuses** (see *The Roadmap & Focuses*). The mechanics below for adding a question category still apply; a new spotlight/project category automatically becomes a Focus on the next `roadmap-rebuild`.
 
 ### Discovery
 While processing answers, watch for:

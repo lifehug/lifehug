@@ -101,6 +101,10 @@ print(payload["result"]["message_id"])
 '
 }
 
+# Keep the wiki (the relational database the rest of the system reads) fresh
+# before delivering. Cheap and deterministic; failures never block the question.
+python3 "$WORKSPACE/system/wiki_compile.py" >/dev/null 2>&1 || true
+
 safe_autocommit
 
 AWAITING=$(python3 - <<'PY'

@@ -215,6 +215,21 @@ def run_migrations(target_version, current_version):
             if not gitkeep.exists():
                 gitkeep.write_text("")
 
+    if target_version >= 15 and current_version < 15:
+        # v15: introduce the Focus/roadmap layer. This is a pure backfill —
+        # the roadmap is *derived* from the existing question bank and answers.
+        # No answers, no question-bank entries, and no outputs are touched.
+        (REPO_DIR / "state").mkdir(parents=True, exist_ok=True)
+        try:
+            from roadmap import ROADMAP_FILE, rebuild_roadmap  # local import; same dir
+            roadmap = rebuild_roadmap(write=True)
+            print(
+                f"  Derived roadmap of {len(roadmap['focuses'])} focuses → "
+                f"state/{ROADMAP_FILE.name} (your answers and question bank were untouched)."
+            )
+        except Exception as exc:  # never let a migration break the update
+            print(f"  Note: roadmap backfill deferred (run `python3 system/roadmap.py`): {exc}")
+
 
 def apply_version(version):
     """Apply a specific version by extracting framework files from its tag."""
@@ -274,7 +289,7 @@ def apply_version(version):
         for f in updated:
             run_git("add", f)
         # Stage .gitkeep files if they were just created by migrations.
-        for marker in ("outputs/.gitkeep", "sources/manual/.gitkeep", "state/.gitkeep"):
+        for marker in ("outputs/.gitkeep", "sources/manual/.gitkeep", "state/.gitkeep", "state/roadmap.json"):
             if (REPO_DIR / marker).exists():
                 run_git("add", marker, check=False)
         result = subprocess.run(

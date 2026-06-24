@@ -69,11 +69,45 @@ from lifehug_core import (
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODEL = "claude-opus-4-20250514"
-VALID_OUTPUT_TYPES = ("chapter", "letter", "essay", "post")
-VALID_TOPIC_TYPES = ("person", "place", "time_period", "project", "theme", "event")
+VALID_OUTPUT_TYPES = ("chapter", "letter", "essay", "post", "profile")
+VALID_TOPIC_TYPES = ("person", "place", "time_period", "project", "theme", "event", "self", "relationship")
 
-# Arc story functions — the spine of every neighborhood
-ARC_FUNCTIONS = ("foundation", "scene", "tension", "turning_point", "relationship", "meaning")
+# Arc story functions — the spine of a neighborhood. The arc is chosen by topic
+# type: most topics use the memoir arc, but self-knowledge and relational
+# (dyadic) topics get arcs built for escalating self-disclosure.
+MEMOIR_ARC = (
+    ("foundation", "establishes context, baseline facts, setting"),
+    ("scene", "specific vivid moment, sensory detail, dialogue"),
+    ("tension", "conflict, stakes, uncertainty, difficulty"),
+    ("turning_point", "the moment things changed; decision; revelation"),
+    ("relationship", "how this topic intersects with key people"),
+    ("meaning", "reflection, retrospective insight, what it means now"),
+)
+SELF_ARC = (
+    ("self_image", "the story you tell about who you are"),
+    ("value", "what you most care about; the principle under the choice"),
+    ("fear", "what you avoid, dread, or protect against"),
+    ("contradiction", "where your actions and your self-image disagree"),
+    ("perception_by_others", "how others see you — and the gap with how you see yourself"),
+    ("growth_edge", "who you are becoming; the change you're working toward"),
+)
+RELATIONSHIP_ARC = (
+    ("who_they_are", "who this person is in your eyes, beyond their role"),
+    ("shared_history", "the moments that defined your bond"),
+    ("tension", "the friction, distance, or unspoken difficulty between you"),
+    ("what_i_see_in_them", "what you admire or notice that they may not"),
+    ("what_i_want_them_to_know", "the thing you'd most want to say to them"),
+    ("how_they_see_me", "how you think they see you — and whether it's accurate"),
+)
+ARCS = {"self": SELF_ARC, "relationship": RELATIONSHIP_ARC}
+
+
+def arc_for(topic_type: str = "") -> tuple[tuple[str, str], ...]:
+    return ARCS.get(topic_type, MEMOIR_ARC)
+
+
+# Backward-compatible default (memoir) arc function names.
+ARC_FUNCTIONS = tuple(fn for fn, _ in MEMOIR_ARC)
 
 # Gap-detection thresholds
 GAP_COVERAGE_THRESHOLD = 0.30   # < 30% = thin
@@ -192,11 +226,11 @@ def find_neighborhood(data: dict, nbhd_id: str) -> dict | None:
     return None
 
 
-def make_arc() -> list[dict]:
-    """Create an empty arc with the standard story-function slots."""
+def make_arc(topic_type: str = "") -> list[dict]:
+    """Create an empty arc with the story-function slots for this topic type."""
     return [
         {"story_function": fn, "question_id": None, "status": "pending"}
-        for fn in ARC_FUNCTIONS
+        for fn, _ in arc_for(topic_type)
     ]
 
 
@@ -318,6 +352,8 @@ def load_wiki_pages(topic_lower: str = "", topic_type: str = "") -> list[dict]:
         "project":     WIKI_DIR / "projects",
         "theme":       WIKI_DIR / "themes",
         "event":       WIKI_DIR / "periods",  # events can be in periods or objects
+        "relationship": WIKI_DIR / "people",  # dyadic topics pull the person's page
+        "self":        WIKI_DIR / "self",
     }
 
     search_dirs: list[Path] = []
@@ -506,15 +542,13 @@ def build_expansion_prompt(
     lines.append(f"the target output: {target_output}.")
     lines.append("")
 
+    arc = arc_for(topic_type)
     lines.append("## ARC STRUCTURE")
     lines.append("Map your questions to these story functions (at least one per function):")
-    lines.append("  foundation    — establishes context, baseline facts, setting")
-    lines.append("  scene         — specific vivid moment, sensory detail, dialogue")
-    lines.append("  tension       — conflict, stakes, uncertainty, difficulty")
-    lines.append("  turning_point — the moment things changed; decision; revelation")
-    lines.append("  relationship  — how this topic intersects with key people")
-    lines.append("  meaning       — reflection, retrospective insight, what it means now")
-    lines.append("You may also use: contradiction, output_gap")
+    for fn, desc in arc:
+        lines.append(f"  {fn:22} — {desc}")
+    if topic_type not in ARCS:
+        lines.append("You may also use: contradiction, output_gap")
     lines.append("")
 
     lines.append("## QUESTION DESIGN PRINCIPLES")
@@ -527,6 +561,27 @@ def build_expansion_prompt(
     lines.append("  - Narrative therapy: reframing, agency, alternative stories")
     lines.append("  - Faith/spirituality prompts: meaning, transcendence, values")
     lines.append("")
+
+    if topic_type == "self":
+        lines.append("## SELF-KNOWLEDGE MODE")
+        lines.append("This is NOT a memoir arc — the deliverable is self-understanding, not a story.")
+        lines.append("Goal: help the author see patterns, values, fears, and contradictions they")
+        lines.append("haven't yet articulated. Lean hard into:")
+        lines.append("  - Internal Family Systems / parts work: 'a part of you that...'")
+        lines.append("  - 36 Questions + WNRS: escalating, genuinely vulnerable self-disclosure")
+        lines.append("  - Perception gap: how others see you vs. how you see yourself")
+        lines.append("  - Honest contradiction: where your stated values and actions diverge")
+        lines.append("Each question should go one layer deeper than the last (progressive disclosure).")
+        lines.append("")
+    elif topic_type == "relationship":
+        lines.append("## RELATIONAL (DYADIC) MODE")
+        lines.append("The deliverable centers on the bond between the author and this person.")
+        lines.append("Ask from BOTH sides of the relationship:")
+        lines.append("  - what the author sees, admires, fears, or resents")
+        lines.append("  - what the author imagines this person feels or sees in return")
+        lines.append("  - what has gone unsaid, and what the author would want them to know")
+        lines.append("Surface perception gaps and the things that are hard to say out loud.")
+        lines.append("")
     lines.append("Principles:")
     lines.append("  1. Never yes/no — always open-ended ('Tell me about...')")
     lines.append("  2. Sensory — 'What did it look like? Sound like? Smell like?'")
@@ -914,7 +969,7 @@ def _run_expansion(
         return 1
 
     # Build neighborhood record
-    arc = make_arc()
+    arc = make_arc(topic_type)
     # Try to fill arc slots from AI questions by story_function
     fn_to_slot = {slot["story_function"]: i for i, slot in enumerate(arc)}
     used_fns: set[str] = set()

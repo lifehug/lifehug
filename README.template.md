@@ -2,11 +2,13 @@
 
 {description}
 
-## Projects
+## Focuses
 {projects}
 
+*Each Focus is something I'm building toward — a person, a book, a theme — with an objective and a tier. See the live roadmap with `python3 system/lifehug.py roadmap` and progress toward deliverables with `python3 system/lifehug.py progress`.*
+
 ## Spotlights
-*Spotlights are discovered as you answer questions — important people and episodes that deserve their own space.*
+*People and episodes discovered as I answer questions; each becomes a Focus on the roadmap.*
 
 ## Outputs
 *Letters, tweets, Instagram captions, and chapter drafts composed from accumulated answers live in `outputs/`. Generated and revised via `system/compose.py`.*

@@ -16,11 +16,13 @@ from lifehug_core import (
     WIKI_DIR,
     answer_body,
     answer_id_from_filename,
+    load_config,
     parse_categories,
     parse_questions,
     slugify,
     write_text,
 )
+from roadmap import load_roadmap
 
 TYPE_DIRS = {
     "person": WIKI_DIR / "people",
@@ -30,6 +32,8 @@ TYPE_DIRS = {
     "theme": WIKI_DIR / "themes",
     "object": WIKI_DIR / "objects",
     "relationship": WIKI_DIR / "relationships",
+    "self": WIKI_DIR / "self",
+    "lifes_work": WIKI_DIR / "lifes_work",
 }
 
 THEME_KEYWORDS = {
@@ -277,6 +281,90 @@ def compile_themes(answers, manual_sources, dry_run=False):
     return written
 
 
+def compile_relationships(categories, questions, answers, author, dry_run=False):
+    """Build a relationship (dyadic) node per spotlight person: the bond between
+    the author and that person. Populates the graph edges in wiki/relationships/
+    (previously never written) so cross-entity synthesis is possible later."""
+    written = []
+    author = author or "Me"
+    author_slug = slugify(author)
+    for cat_id, info in sorted(categories.items()):
+        if info.get("group") != "spotlight":
+            continue
+        person = clean_spotlight_name(info["name"])
+        person_slug = slugify(person)
+        answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
+        if not answer_items:
+            continue
+        title = f"{author} & {person}"
+        slug = f"{author_slug}-and-{person_slug}"
+        sources = [a["source"] for a in answer_items]
+        body = [
+            frontmatter(title, "relationship", sources, related=[person_slug]),
+            "",
+            f"# {title}",
+            "",
+            f"> The relationship between {author} and {person}, synthesized from "
+            f"{len(answer_items)} answered prompts. Owner-only; cites its sources.",
+            "",
+            "## What We Know",
+        ]
+        body.extend(cited_blocks(answer_items, limit=10))
+        body.extend([
+            "",
+            "## Open Questions (dyadic)",
+            f"- What does {author} most want {person} to understand?",
+            f"- How does {author} think {person} sees them — and is it accurate?",
+            f"- What has gone unsaid between {author} and {person}?",
+            "",
+            "## Related Pages",
+            f"- [[{person_slug}]] — the person profile this relationship centers on",
+        ])
+        path = TYPE_DIRS["relationship"] / f"{slug}.md"
+        if write_page(path, "\n".join(body), dry_run):
+            written.append(path)
+    return written
+
+
+def compile_self(questions, answers, dry_run=False):
+    """Build a self-knowledge surface from answers belonging to self-type
+    Focuses (created via `focus-add --type self`). No self Focus → nothing to
+    compile yet; the page appears once self-knowledge questions are answered."""
+    written = []
+    roadmap = load_roadmap()
+    self_focuses = [f for f in roadmap.get("focuses", []) if f.get("type") == "self"]
+    for focus in self_focuses:
+        cats = set(focus.get("categories", []))
+        answer_items = [answers[q["id"]] for q in questions
+                        if str(q["category"]) in cats and q["id"] in answers]
+        if not answer_items:
+            continue
+        title = focus.get("label", "Self")
+        slug = slugify(title)
+        sources = [a["source"] for a in answer_items]
+        body = [
+            frontmatter(title, "self", sources),
+            "",
+            f"# {title}",
+            "",
+            f"> A self-knowledge surface synthesized from {len(answer_items)} answers — "
+            f"patterns, values, fears, and contradictions in the author's own words.",
+            "",
+            "## What We Know",
+        ]
+        body.extend(cited_blocks(answer_items, limit=12))
+        body.extend([
+            "",
+            "## Related Pages",
+            "- [[themes]] — self-knowledge surfaces recurring themes",
+            "- [[people]] — how the author sees themselves shapes their relationships",
+        ])
+        path = TYPE_DIRS["self"] / f"{slug}.md"
+        if write_page(path, "\n".join(body), dry_run):
+            written.append(path)
+    return written
+
+
 def update_index(written_pages: list[Path], dry_run=False):
     sections = []
     for page_type, directory in TYPE_DIRS.items():
@@ -315,11 +403,14 @@ def main():
     categories = parse_categories(md_text)
     answers = read_answers()
     manual_sources = read_manual_sources()
+    author = load_config().get("name", "Me")
 
     written = []
     written.extend(compile_spotlights(categories, questions, answers, manual_sources, args.dry_run))
     written.extend(compile_projects(categories, questions, answers, manual_sources, args.dry_run))
     written.extend(compile_themes(answers, manual_sources, args.dry_run))
+    written.extend(compile_relationships(categories, questions, answers, author, args.dry_run))
+    written.extend(compile_self(questions, answers, args.dry_run))
     update_index(written, args.dry_run)
 
     print(f"✓ Wiki compile complete: {len(written)} page updates")

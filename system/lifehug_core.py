@@ -48,6 +48,18 @@ STORY_FUNCTIONS = (
     "meaning",
     "contradiction",
     "output_gap",
+    # self-knowledge arc (WNRS / 36-Questions / IFS style)
+    "self_image",
+    "value",
+    "fear",
+    "perception_by_others",
+    "growth_edge",
+    # relational / dyadic arc
+    "who_they_are",
+    "shared_history",
+    "what_i_see_in_them",
+    "what_i_want_them_to_know",
+    "how_they_see_me",
 )
 
 

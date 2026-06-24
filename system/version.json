@@ -1,10 +1,11 @@
 {
-  "version": 14,
-  "released": "2026-06-23",
-  "changelog": "v14: Mission statement, AI classification, research neighborhoods, spotlight recommendations, unified ingest with pluggable connectors (X, email, Instagram, file), quality checker for candidates, enhanced planner report with neighborhoods/spotlights/ingest sections.",
+  "version": 15,
+  "released": "2026-06-24",
+  "changelog": "v15: Focus model (unifies spotlights+projects into one objective+tier primitive on a durable roadmap); dynamic Focus-weighted allocation (saturation decay, per-Focus variety cap raisable when finishing, self-knowledge floor, demand-driven research); self-knowledge + relational (dyadic) neighborhoods with WNRS/36Q/IFS arcs; wiki relationships/ and self/ surfaces now compiled; progress/deliverable-readiness dashboard; daily job compiles the wiki first; three-tier scheduling. Non-destructive backfill derives the roadmap from existing answers.",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
+    "README.template.md",
     "examples/openclaw-cron.md",
     "config.yaml.example",
     "system/ask.py",
@@ -19,12 +20,14 @@
     "system/lifehug_core.py",
     "system/mission.md",
     "system/process_answer.py",
+    "system/progress.py",
     "system/question_candidates.py",
     "system/question_planner.py",
     "system/rebuild_state.py",
     "system/recommend_spotlights.py",
     "system/research_expand.py",
     "system/research.md",
+    "system/roadmap.py",
     "system/serve_wiki.py",
     "system/update.py",
     "system/update_readme.py",
@@ -45,6 +48,7 @@
     "tests/test_pass_transition.py",
     "tests/test_lifehug_wrapper.py",
     "tests/test_v14_features.py",
+    "tests/test_v15_features.py",
     "skill/SKILL.md",
     ".gitignore"
   ]

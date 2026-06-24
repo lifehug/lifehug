@@ -60,23 +60,66 @@ python3 system/lifehug.py daily-dry-run
 python3 system/lifehug.py doctor --daily
 ```
 
-## Nightly Wiki Compile
+## The three-tier schedule
 
-Optional local-only maintenance job:
+Lifehug runs on three clocks plus per-answer events. The guiding rule:
+**detect/report jobs are cheap and frequent; generate jobs cost API money and
+run rarely.** The wiki is the relational database everything reads, so it is
+compiled *before* any planning or research.
+
+| Cadence | Job | Cost |
+|---|---|---|
+| **Daily** | `daily_question.sh` (compiles the wiki, then delivers today's question) | free |
+| **Weekly** | compile → `planner-queue` (Focus-weighted) → `research-expand --gaps --dry-run` → `progress` | free |
+| **Monthly** | compile → generate: research neighborhoods for the top gaps + a self-knowledge batch + spotlight recommendations | API $ |
+| **Event** | you answer → `process-answer` (saves, recompiles wiki, updates state) | small |
+
+### Daily (already set up above)
+
+`daily_question.sh` now compiles the wiki first, so the relational graph is
+fresh every morning before the question goes out. Nothing extra to schedule.
+
+### Weekly — plan the coming week + surface gaps (free)
 
 ```bash
 openclaw cron add \
-  --name "Lifehug Nightly Compile" \
-  --cron "55 23 * * *" \
+  --name "Lifehug Weekly Plan" \
+  --cron "0 20 * * 0" \
   --tz "America/New_York" \
-  --task "cd ~/Workspace/lifehug && python3 system/lifehug.py rebuild && python3 system/lifehug.py compile && git add README.md system/coverage.json system/rotation.json wiki && git diff --cached --quiet || git commit -m 'Nightly wiki compile' && git push"
+  --task "cd ~/Workspace/lifehug && python3 system/lifehug.py compile && python3 system/lifehug.py planner-queue && python3 system/research_expand.py --gaps --dry-run && python3 system/lifehug.py progress && git add state wiki && (git diff --cached --quiet || (git commit -m 'Weekly plan' && git push))"
 ```
 
-The same compile can be run manually at any time:
+`planner-queue` builds the coming week from the roadmap — Focus-weighted, with
+saturated Focuses fading to maintenance and no Focus taking more than its cap.
+`ask.py` consumes the queue daily and falls back to rotation if it expires, so a
+missed week degrades gracefully.
+
+### Monthly — generate new domains + self-knowledge (uses the API)
+
+Needs `ANTHROPIC_API_KEY` in the cron environment (or `anthropic_api_key` in
+`config.yaml`). The daily/weekly jobs do not.
 
 ```bash
-python3 system/lifehug.py compile
-python3 system/lifehug.py serve
+openclaw cron add \
+  --name "Lifehug Monthly Research" \
+  --cron "0 21 1 * *" \
+  --tz "America/New_York" \
+  --task "cd ~/Workspace/lifehug && python3 system/lifehug.py compile && python3 system/research_expand.py --gaps && python3 system/research_expand.py --topic 'Who I am becoming' --type self --output essay && python3 system/lifehug.py recommend-spotlights && git add state wiki && (git diff --cached --quiet || (git commit -m 'Monthly research' && git push))"
+```
+
+The self-knowledge batch refills the pool so a self/relational question is
+always available for the planner's reserved weekly slot. Research-expansion only
+*matters* once your Focuses are filling up — `lifehug progress` prints a nudge
+when overall fullness crosses 60%.
+
+### Manual / on-demand
+
+```bash
+python3 system/lifehug.py progress         # are we graduating toward deliverables?
+python3 system/lifehug.py roadmap          # Focuses, tiers, saturation
+python3 system/lifehug.py compile          # rebuild the wiki now
+python3 system/lifehug.py serve            # browse the wiki locally
+python3 system/research_expand.py --topic "Dad" --type relationship --output letter
 ```
 
 ## What Happens After You Answer

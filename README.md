@@ -10,33 +10,49 @@ The long-term model is inspired by the EKB / Karpathy-style "LLM Wiki" idea: raw
 
 ## What You Can Create
 
-### Books
-Long-form narrative projects organized into chapters and acts. A memoir, a company founding story, a creative journey — whatever story you want to tell. Each book gets its own set of question categories, and the system rotates through them to build complete coverage.
+### Focuses — the things you're building toward
+A **Focus** is anything you want to capture and eventually produce something from: a person, a book, a blog, a theme, your life's work. Each Focus has an **objective** ("a founding-story book", "a letter to Mom") and a **tier** that sets how deep it goes:
 
-### Spotlights
-Focused collections about important life episodes. A turning point, a season of your life, a project that changed everything — Spotlights let you zoom in on moments that deserve their own space. They produce standalone essays, short stories, and narrative pieces.
+| Tier | For | Depth |
+|------|-----|-------|
+| `basic` | a blog post, a tweet | ~8 answers |
+| `standard` | an essay, a chapter, a person | ~20 answers |
+| `extreme` | a book, your life's work | ~50+ answers |
 
-### People
-Every story is really about people. As you answer daily questions, the people who shaped your life naturally surface — a parent, a mentor, a co-founder, a friend who showed up at the right moment. Lifehug lets you deepen those threads. Write down your feelings, thoughts, and experiences with the people who matter. Capture what they taught you, how they changed you, what you wish you'd said. These become standalone essays, letters, character profiles — pieces that can live on their own or weave into a larger book.
+Lifehug meters your daily questions across all your Focuses at once — heavy on the under-filled ones, easing off the ones that are already well-covered, and never letting any single Focus (even a 50-question book) take more than ~30% of a week. So you make real progress toward each deliverable without spending every day on the same thing. When you want to *finish* one, flag it `finishing` and it gets a bigger share until it's done.
 
-### A Private Life Wiki
-As the corpus grows, Lifehug can compile your answers into an owner-only wiki:
+### Understanding yourself and your relationships
+Beyond telling stories, Lifehug helps you **understand yourself** and **the people in your life** — drawing on We're Not Really Strangers, the 36 Questions, and parts-work therapy. It asks escalating, honest self-knowledge questions (values, fears, contradictions, how others see you) and *relational* questions about specific people (what you see in them, what you'd want them to know, how they see you). These build the self and relationship layers of your wiki.
 
-- **People** — the people in your life, who they are, how they shaped you
-- **Places** — homes, cities, schools, churches, offices, countries, rooms
+### A private life wiki — your relational database
+This is the heart of the system. As you answer, Lifehug compiles your raw answers into an owner-only, cross-linked **wiki** — the source of truth an AI reads to understand you and help everything else work:
+
+- **People** — who they are, how they shaped you
+- **Relationships** — the bond between you and each person, from both sides
+- **Places** — homes, cities, schools, offices, countries, rooms
 - **Periods** — seasons of life, transitions, hardships, golden eras
-- **Projects** — companies, creative work, missions, family efforts
+- **Projects** / **Life's work** — companies, creative work, missions
 - **Themes** — hunger, agency, faith, money, belonging, grief, ambition
-- **Relationships** — how people, places, projects, and themes connect
+- **Self** — patterns, values, fears, and contradictions in your own words
 
-This wiki is not meant to replace the raw story. It is a living layer of understanding built from the raw story, with citations back to the source answers.
+Every page cites the answers it's built from. The wiki is a living layer of understanding on top of the raw story — and the surface a future synthesizer will run AI across to tell you things about yourself you haven't noticed.
 
 ---
 
 ## How It Works
 
 ### Daily Questions
-Every day, the system picks one question and delivers it to you. You answer whenever you want — voice or text, long or short. There's no pressure. The questions are chosen by a rotation engine that ensures balanced coverage across all your projects.
+Every day, the system picks one question and delivers it to you. You answer whenever you want — voice or text, long or short. There's no pressure.
+
+### The Roadmap (how questions get chosen)
+Your **roadmap** is the durable plan: the list of all your Focuses with their targets and how full each one is. Once a week, the planner builds the coming week's questions from it using a simple idea — give the most attention to what's under-filled, ease off what's well-covered, keep variety, and always reserve a slot for a self-knowledge question. Research for brand-new topics only kicks in once your existing Focuses start filling up and you need fresh ground. The daily delivery just hands you the next question from that plan; if the week's plan runs out, it falls back to balanced rotation.
+
+See where you stand any time:
+
+```bash
+python3 system/lifehug.py roadmap     # every Focus, its tier, and how full it is
+python3 system/lifehug.py progress     # what's ready to draft, and the command to draft it
+```
 
 ### The Four-Pass System
 
@@ -95,6 +111,20 @@ At any point — at milestones, on a Mother's Day, or whenever you ask — the A
 
 Each output lives in `outputs/{title}/`, with `v1.md`, `v2.md`, etc. for revisions. Ask the AI to revise with feedback ("make it more personal", "shorter") and it bumps to the next version. Interim outputs can ship before the full book is complete.
 
+## Running It
+
+Lifehug runs on three clocks plus the moment you answer. Set the cron jobs once (see [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste commands) and the system runs itself:
+
+| When | What happens | Cost |
+|------|--------------|------|
+| **Every day** | `daily_question.sh` refreshes the wiki, then sends you today's question. You reply (voice or text); the answer is saved, the wiki recompiles, and progress updates. | free |
+| **Weekly** (e.g. Sun evening) | Plans the coming week from your roadmap, detects thin spots, prints a progress report. | free |
+| **Monthly** | Generates new question domains for areas you've filled up, refills the self-knowledge pool, and suggests new spotlights. | uses the AI API |
+
+The only thing you do daily is **answer the question that arrives.** Everything else — picking the next question, keeping the wiki current, tracking progress toward your deliverables — is automatic. Check in whenever you like with `python3 system/lifehug.py progress`.
+
+> **Why the wiki compiles before planning:** the wiki is the relational database the planner and research read from, so it's always rebuilt first. Keep it fresh, and everything downstream gets smarter.
+
 ## Architecture
 
 Lifehug is git-backed, file-native, and script-first. Markdown is the durable source of truth; any search or database layer should be treated as a rebuildable index. The scripts in `system/` are the canonical behavior, while skills, agents, and cron jobs are thin operators that call those scripts.
@@ -106,14 +136,17 @@ lifehug/
 │   └── manual/           # Unprompted stories captured outside daily prompts
 ├── wiki/                 # Compiled private life wiki, AI-maintained with citations
 │   ├── people/
+│   ├── relationships/    # author↔person bonds (graph edges)
+│   ├── self/             # self-knowledge surface
 │   ├── places/
 │   ├── periods/
 │   ├── projects/
+│   ├── lifes_work/
 │   ├── themes/
-│   ├── objects/
-│   └── relationships/
+│   └── objects/
 ├── outputs/              # Letters, posts, chapters, publishable artifacts
-├── state/                # Rebuildable machine state and warnings
+├── state/                # Rebuildable machine state
+│   └── roadmap.json      # your Focuses (derived; manage via the CLI)
 └── system/               # Framework scripts
 ```
 
@@ -127,16 +160,18 @@ Use the workflow wrapper for manual, AI-agent, and cron operations:
 python3 system/lifehug.py doctor
 python3 system/lifehug.py status
 python3 system/lifehug.py next
+python3 system/lifehug.py progress          # progress toward deliverables (readiness)
+python3 system/lifehug.py roadmap           # Focuses, tiers, saturation
+python3 system/lifehug.py roadmap-rebuild   # re-derive the roadmap from the bank
+python3 system/lifehug.py focus-add "Etherfuse" --type project --tier extreme --category F --category G
+python3 system/lifehug.py focus-finish etherfuse
 python3 system/lifehug.py rebuild
 python3 system/lifehug.py compile
 python3 system/lifehug.py ingest-story
 python3 system/lifehug.py candidates-list
-python3 system/lifehug.py candidates-review
 python3 system/lifehug.py candidates-promote
 python3 system/lifehug.py planner-report
 python3 system/lifehug.py planner-queue
-python3 system/lifehug.py planner-clear
-python3 system/lifehug.py planner-state
 python3 system/lifehug.py serve
 python3 system/lifehug.py daily-dry-run
 ```
@@ -312,7 +347,9 @@ lifehug/
 └── system/
     ├── question-bank.md      # All questions + status (grows over time)
     ├── lifehug.py            # Script-first workflow wrapper + doctor checks
-    ├── ask.py                # Rotation engine (CLI tool)
+    ├── ask.py                # Rotation engine (consumes the weekly queue)
+    ├── roadmap.py            # Focus model + roadmap derivation/management
+    ├── progress.py           # Deliverable-readiness dashboard
     ├── process_answer.py     # Atomic answer save + state update helper
     ├── ingest_story.py       # Unprompted story source ingest
     ├── question_candidates.py # Candidate review, update, and promotion
@@ -420,7 +457,7 @@ Lifehug starts with five generic categories that work for any life story:
 | D | Purpose & Calling | What drives you, key decisions, turning points |
 | E | Reflection & Wisdom | Lessons learned, values, advice, what matters |
 
-During setup, the AI adds **project-specific categories** (F-J) based on what you want to write about. Spotlight categories (K+) are added as you discover people and episodes worth focusing on.
+During setup, the AI adds **project categories** (F-J) for what you want to write, and **spotlight categories** (K+) as important people and episodes surface. In v15 these all become **Focuses** on your roadmap automatically — each with an objective, a tier, and a target depth — so the planner can balance attention across them and track your progress toward each deliverable. Manage them with `lifehug.py roadmap` / `focus-add` / `focus-finish`.
 
 ---
 

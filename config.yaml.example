@@ -23,14 +23,24 @@ channel: "telegram"
 # telegram_chat_id: ""
 # group_chat_id: ""
 
-# Model to use for pass transition question generation.
+# --- AI models ---
+# Pass-transition question generation:
 followup_model: "anthropic/claude-opus-4-6"
+# Research neighborhood expansion (self-knowledge, gaps, topics):
+# research_model: "claude-opus-4-20250514"
+# Story/source classification:
+# classify_model: "claude-sonnet-4-20250514"
+# API key for the generate-tier jobs (or set ANTHROPIC_API_KEY in the environment):
+# anthropic_api_key: ""
 
-# Projects (filled in during setup)
-# projects:
-#   - name: "My Memoir"
-#     type: memoir
-#     categories: [F, G, H]
-#   - name: "Company Story"
-#     type: founder
-#     categories: [I, J]
+# --- Roadmap / Focuses ---
+# Your roadmap (state/roadmap.json) is DERIVED automatically from your question
+# bank and answers — you don't edit it here. Manage Focuses with the CLI:
+#   python3 system/lifehug.py roadmap                 # see Focuses + saturation
+#   python3 system/lifehug.py focus-add "Etherfuse" --type project --tier extreme \
+#       --objective "founding-story book" --deliverable book --category F --category G
+#   python3 system/lifehug.py focus-finish etherfuse  # push a deliverable to done (lifts its cap)
+#   python3 system/lifehug.py progress                # are we graduating toward deliverables?
+#
+# Tiers set how deep a Focus goes before it's "well-known": basic ~8 answers
+# (blog), standard ~20 (essay/chapter/a person), extreme ~50+ (book / life's work).

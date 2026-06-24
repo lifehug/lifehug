@@ -206,6 +206,49 @@ def cmd_planner_objective_clear(_args: argparse.Namespace) -> int:
     return run_python("question_planner.py", ["--objective-clear"])
 
 
+def cmd_progress(_args: argparse.Namespace) -> int:
+    return run_python("progress.py", [])
+
+
+def cmd_roadmap(_args: argparse.Namespace) -> int:
+    return run_python("roadmap.py", ["show"])
+
+
+def cmd_roadmap_rebuild(_args: argparse.Namespace) -> int:
+    return run_python("roadmap.py", ["rebuild"])
+
+
+def cmd_focus_add(args: argparse.Namespace) -> int:
+    flags = ["add", args.label, "--type", args.type, "--tier", args.tier,
+             "--deliverable", args.deliverable]
+    if args.objective:
+        flags.extend(["--objective", args.objective])
+    if args.target is not None:
+        flags.extend(["--target", str(args.target)])
+    for c in args.category or []:
+        flags.extend(["--category", c])
+    return run_python("roadmap.py", flags)
+
+
+def cmd_focus_set(args: argparse.Namespace) -> int:
+    flags = ["set", args.focus_id]
+    for name in ("tier", "phase", "objective", "deliverable"):
+        val = getattr(args, name)
+        if val is not None:
+            flags.extend([f"--{name}", val])
+    if args.target is not None:
+        flags.extend(["--target", str(args.target)])
+    if args.cap is not None:
+        flags.extend(["--cap", str(args.cap)])
+    for c in args.category or []:
+        flags.extend(["--category", c])
+    return run_python("roadmap.py", flags)
+
+
+def cmd_focus_finish(args: argparse.Namespace) -> int:
+    return run_python("roadmap.py", ["finish", args.focus_id])
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     return run_python("serve_wiki.py", ["--host", args.host, "--port", str(args.port)])
 
@@ -465,10 +508,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=cmd_planner_report)
 
-    p = sub.add_parser("planner-queue", help="Write an opt-in planned daily queue")
-    p.add_argument("--limit", type=int, default=14)
+    p = sub.add_parser("planner-queue", help="Write the roadmap-driven weekly queue")
+    p.add_argument("--limit", type=int, default=12)
     p.add_argument("--arc-max", type=int, default=2)
-    p.add_argument("--expires-days", type=int, default=7)
+    p.add_argument("--expires-days", type=int, default=8)
     p.set_defaults(func=cmd_planner_queue)
 
     p = sub.add_parser("planner-clear", help="Clear the planned daily queue")
@@ -502,10 +545,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("research-expand", help="Generate question neighborhoods")
     p.add_argument("--expand", metavar="PATH", help="Expand from a file")
     p.add_argument("--topic", help="Named topic to expand")
-    p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme", "event"])
+    p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme", "event", "self", "relationship"])
     p.add_argument("--gaps", action="store_true", help="Auto-detect thin areas")
     p.add_argument("--prompt-only", action="store_true", help="Output AI prompt only")
-    p.add_argument("--output", choices=["chapter", "letter", "essay", "post"], default="chapter")
+    p.add_argument("--output", choices=["chapter", "letter", "essay", "post", "profile"], default="chapter")
     p.add_argument("--model", help="Override AI model")
     p.add_argument("--force", action="store_true")
     p.add_argument("--dry-run", action="store_true")
@@ -545,6 +588,42 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Candidate Stats ---
     p = sub.add_parser("candidates-stats", help="Show candidate question statistics")
     p.set_defaults(func=cmd_candidates_stats)
+
+    # --- Roadmap / Focus ---
+    p = sub.add_parser("progress", help="Show progress toward deliverables (readiness dashboard)")
+    p.set_defaults(func=cmd_progress)
+
+    p = sub.add_parser("roadmap", help="Show the roadmap of Focuses with live fill")
+    p.set_defaults(func=cmd_roadmap)
+
+    p = sub.add_parser("roadmap-rebuild", help="Derive/refresh the roadmap from the question bank")
+    p.set_defaults(func=cmd_roadmap_rebuild)
+
+    p = sub.add_parser("focus-add", help="Add a Focus (objective + tier)")
+    p.add_argument("label")
+    p.add_argument("--type", default="project",
+                   choices=["person", "place", "period", "project", "theme", "event", "lifes_work", "self", "life_story"])
+    p.add_argument("--tier", default="standard", choices=["basic", "standard", "extreme"])
+    p.add_argument("--objective", default="")
+    p.add_argument("--deliverable", default="chapter")
+    p.add_argument("--target", type=int)
+    p.add_argument("--category", action="append", default=[])
+    p.set_defaults(func=cmd_focus_add)
+
+    p = sub.add_parser("focus-set", help="Update a Focus (tier/target/cap/phase/objective)")
+    p.add_argument("focus_id")
+    p.add_argument("--tier", choices=["basic", "standard", "extreme"])
+    p.add_argument("--target", type=int)
+    p.add_argument("--cap", type=float)
+    p.add_argument("--phase", choices=["active", "finishing", "maintenance"])
+    p.add_argument("--objective")
+    p.add_argument("--deliverable")
+    p.add_argument("--category", action="append", default=[])
+    p.set_defaults(func=cmd_focus_set)
+
+    p = sub.add_parser("focus-finish", help="Flag a Focus as finishing (lifts its variety cap)")
+    p.add_argument("focus_id")
+    p.set_defaults(func=cmd_focus_finish)
 
     p = sub.add_parser("serve", help="Serve the local owner-only wiki")
     p.add_argument("--host", default="127.0.0.1")
