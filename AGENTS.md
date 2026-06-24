@@ -106,13 +106,25 @@ python3 system/lifehug.py planner-report
 
 This stores the raw story under `sources/manual/` and parks suggested follow-up questions in `state/question_candidates.json`. Candidates should inform planning and future question-bank edits; they should not automatically dominate daily delivery.
 
+Review candidate questions before they enter the daily flow:
+
+```bash
+python3 system/lifehug.py candidates-review --status candidate
+python3 system/lifehug.py candidates-update <candidate-id> --status accepted --target-category A
+python3 system/lifehug.py candidates-promote <candidate-id> --category A
+```
+
+Candidate promotion appends to `system/question-bank.md` and preserves source provenance. Do not manually copy candidate text into the question bank unless repairing a failed script run.
+
 Use a planned queue only when the user asks for one or the workflow explicitly calls for it:
 
 ```bash
-python3 system/lifehug.py planner-queue --limit 14 --arc-max 2
+python3 system/lifehug.py planner-report --limit 10
+python3 system/lifehug.py planner-objective-add "Prepare Mom letter" --category K --keyword mom
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 ```
 
-`ask.py` uses `state/question_queue.json` when it exists, then falls back to normal rotation logic.
+`planner-report` is read-only. `ask.py` uses `state/question_queue.json` only while it is valid and unexpired, then falls back to normal rotation logic.
 
 ### Voice Messages
 
@@ -148,6 +160,7 @@ All paths are relative to this workspace root:
 - Story sources: `sources/manual/`
 - Question candidates: `state/question_candidates.json`
 - Planned queue: `state/question_queue.json`
+- Planner state: `state/planner_state.json`
 - Answers: `answers/`
 - Wiki: `wiki/`
 - Outputs: `outputs/`

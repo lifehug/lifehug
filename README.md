@@ -130,9 +130,13 @@ python3 system/lifehug.py next
 python3 system/lifehug.py rebuild
 python3 system/lifehug.py compile
 python3 system/lifehug.py ingest-story
+python3 system/lifehug.py candidates-list
+python3 system/lifehug.py candidates-review
+python3 system/lifehug.py candidates-promote
 python3 system/lifehug.py planner-report
 python3 system/lifehug.py planner-queue
 python3 system/lifehug.py planner-clear
+python3 system/lifehug.py planner-state
 python3 system/lifehug.py serve
 python3 system/lifehug.py daily-dry-run
 ```
@@ -155,13 +159,23 @@ python3 system/lifehug.py planner-report
 
 This writes raw material to `sources/manual/`, creates suggested follow-up questions in `state/question_candidates.json`, and lets the planner show how new material should influence future questions. Candidates are a parking lot, not an automatic takeover of the daily queue.
 
+Candidate questions can be reviewed, filtered, accepted, deferred, rejected, or promoted into the question bank with source provenance:
+
+```bash
+python3 system/lifehug.py candidates-review --status candidate
+python3 system/lifehug.py candidates-update cand-2026-06-22-arizona-memory-1 --status accepted --target-category A
+python3 system/lifehug.py candidates-promote cand-2026-06-22-arizona-memory-1 --category A
+```
+
 When you want a more intentional sequence, write an opt-in planned queue:
 
 ```bash
-python3 system/lifehug.py planner-queue --limit 14 --arc-max 2
+python3 system/lifehug.py planner-report --limit 10
+python3 system/lifehug.py planner-objective-add "Prepare Mom letter" --category K --keyword mom
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 ```
 
-`ask.py` honors `state/question_queue.json` only when it exists and only for valid unanswered question-bank items. The planner reports candidates, but candidates are not asked until promoted into `system/question-bank.md`.
+`planner-report` is read-only. It now shows group coverage, stale categories, overrepresented areas, story-function balance, recent ingest, open candidates, active objectives, and a recommended next queue preview. `ask.py` honors `state/question_queue.json` only when it exists, is not expired, and contains valid unanswered question-bank items. The planner reports candidates, but candidates are not asked until promoted into `system/question-bank.md`.
 
 ---
 
@@ -284,7 +298,8 @@ lifehug/
 │       └── v{N}.md           # Each revision lives as a versioned file
 ├── state/                    # Rebuildable planner/candidate state
 │   ├── question_candidates.json
-│   └── question_queue.json
+│   ├── question_queue.json
+│   └── planner_state.json
 ├── templates/                # Format instructions used by compose.py
 │   ├── letter.md
 │   ├── tweet.md
@@ -300,6 +315,7 @@ lifehug/
     ├── ask.py                # Rotation engine (CLI tool)
     ├── process_answer.py     # Atomic answer save + state update helper
     ├── ingest_story.py       # Unprompted story source ingest
+    ├── question_candidates.py # Candidate review, update, and promotion
     ├── question_planner.py   # Planner report + opt-in queue generation
     ├── rebuild_state.py      # Recomputes derived coverage/README state
     ├── wiki_compile.py       # Compiles answers into the private Lifehug wiki

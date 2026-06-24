@@ -236,17 +236,33 @@ python3 system/lifehug.py planner-report
 
 This writes an owner-only source file under `sources/manual/` and stores suggested follow-up questions in `state/question_candidates.json`. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan.
 
+### Candidate Review
+
+Candidate questions are the review buffer between raw source insight and daily delivery. Use the scripts instead of manually editing candidate JSON:
+
+```bash
+python3 system/lifehug.py candidates-list --status candidate
+python3 system/lifehug.py candidates-review --status candidate
+python3 system/lifehug.py candidates-update <candidate-id> --status accepted --target-category A
+python3 system/lifehug.py candidates-promote <candidate-id> --category A
+```
+
+Candidate promotion appends a new unchecked question to `system/question-bank.md`, records source provenance in a metadata comment, and marks the candidate as promoted. Do not promote rejected or already promoted candidates. Do not let candidates become daily prompts until they have been promoted into the question bank.
+
 ### Planner
 
 Use the planner when new sources or uneven coverage should influence future questions without letting one corpus dominate the whole system.
 
 ```bash
-python3 system/lifehug.py planner-report
-python3 system/lifehug.py planner-queue --limit 14 --arc-max 2
+python3 system/lifehug.py planner-report --limit 10
+python3 system/lifehug.py planner-state --init
+python3 system/lifehug.py planner-objective-add "Prepare Mom letter" --category K --keyword mom
+python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 python3 system/lifehug.py planner-clear
+python3 system/lifehug.py planner-objective-clear
 ```
 
-`planner-report` shows coverage by group, low-coverage categories, open candidates, and whether a queue is active. `planner-queue` writes `state/question_queue.json`; `ask.py` honors it only for valid unanswered question-bank items, then falls back to normal rotation. Candidates remain recommendations until a human or AI operator edits them into the question bank.
+`planner-report` is read-only. It shows coverage by group, story-function balance, low-coverage categories, stale or untouched areas, overrepresented areas, recent ingest, open candidates, active queue state, and a recommended next queue preview. `planner-queue` writes `state/question_queue.json` with reasons, story functions, active objectives, caps, and an expiration. `ask.py` honors it only while it is valid and unexpired, then falls back to normal rotation. Candidates remain recommendations until promoted into the question bank.
 
 ---
 
@@ -647,10 +663,10 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):
 - `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
 - `answers/`, `outputs/`, `sources/manual/`
-- `state/question_candidates.json`, `state/question_queue.json`
+- `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`
