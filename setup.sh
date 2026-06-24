@@ -97,6 +97,20 @@ else
   fi
 fi
 
+# ---- Claude Code desktop skill (/focus) ----
+echo ""
+CLAUDE_SKILLS="${HOME}/.claude/skills"
+if [ -d "$SCRIPT_DIR/skills/focus" ]; then
+  mkdir -p "$CLAUDE_SKILLS"
+  if [ -e "$CLAUDE_SKILLS/focus" ]; then
+    echo "✅ /focus desktop skill already installed"
+  else
+    ln -s "$SCRIPT_DIR/skills/focus" "$CLAUDE_SKILLS/focus" 2>/dev/null \
+      || cp -r "$SCRIPT_DIR/skills/focus" "$CLAUDE_SKILLS/focus"
+    echo "✅ Installed /focus skill → use it in Claude Code to add and manage Focuses"
+  fi
+fi
+
 # ---- OpenClaw ----
 echo ""
 if command -v openclaw &>/dev/null; then

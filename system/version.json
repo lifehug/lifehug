@@ -1,7 +1,7 @@
 {
-  "version": 15.1,
+  "version": 16,
   "released": "2026-06-24",
-  "changelog": "v15.1: OpenClaw-first AI routing in research_expand (no API key needed when OpenClaw is running; Anthropic SDK as fallback)",
+  "changelog": "v16: Guided Focus manager. One-shot `lifehug.py focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates+promotes ~8-12 starter questions (graceful scaffold-only fallback when no AI is available). New `/focus` Claude Code skill and OpenClaw message protocol walk through add/show/finish/tune. Adds category scaffolding (roadmap.scaffold_category) and bulk candidate promotion (candidates promote-neighborhood). Includes v15.1: OpenClaw-first AI routing in research_expand (keyless generation when OpenClaw is running; Anthropic SDK fallback). v15: Focus model + dynamic Focus-weighted allocation + self-knowledge/relational neighborhoods + wiki relationships/self surfaces + progress dashboard + three-tier scheduling.",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
@@ -49,7 +49,9 @@
     "tests/test_lifehug_wrapper.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
+    "tests/test_v16_focus_skill.py",
     "skill/SKILL.md",
+    "skills/focus/SKILL.md",
     ".gitignore"
   ]
 }

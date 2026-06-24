@@ -162,6 +162,11 @@ def cmd_candidates_promote(args: argparse.Namespace) -> int:
     return run_python("question_candidates.py", ["promote", args.candidate_id, "--category", args.category])
 
 
+def cmd_candidates_promote_neighborhood(args: argparse.Namespace) -> int:
+    return run_python("question_candidates.py",
+                      ["promote-neighborhood", "--neighborhood", args.neighborhood, "--category", args.category])
+
+
 def cmd_planner_report(args: argparse.Namespace) -> int:
     flags = ["--report", "--limit", str(args.limit)]
     return run_python("question_planner.py", flags)
@@ -247,6 +252,16 @@ def cmd_focus_set(args: argparse.Namespace) -> int:
 
 def cmd_focus_finish(args: argparse.Namespace) -> int:
     return run_python("roadmap.py", ["finish", args.focus_id])
+
+
+def cmd_focus_new(args: argparse.Namespace) -> int:
+    flags = ["new", args.label, "--type", args.type, "--tier", args.tier,
+             "--deliverable", args.deliverable]
+    if args.objective:
+        flags.extend(["--objective", args.objective])
+    if args.no_generate:
+        flags.append("--no-generate")
+    return run_python("roadmap.py", flags)
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -504,6 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--category", required=True)
     p.set_defaults(func=cmd_candidates_promote)
 
+    p = sub.add_parser("candidates-promote-neighborhood", help="Promote all of a neighborhood's candidates into one category")
+    p.add_argument("--neighborhood", required=True)
+    p.add_argument("--category", required=True)
+    p.set_defaults(func=cmd_candidates_promote_neighborhood)
+
     p = sub.add_parser("planner-report", help="Show planner balance and candidates")
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=cmd_planner_report)
@@ -598,6 +618,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("roadmap-rebuild", help="Derive/refresh the roadmap from the question bank")
     p.set_defaults(func=cmd_roadmap_rebuild)
+
+    p = sub.add_parser("focus-new", help="Create a Focus end-to-end: scaffold category, register, seed questions")
+    p.add_argument("label")
+    p.add_argument("--type", default="theme",
+                   choices=["person", "place", "period", "project", "theme", "event", "lifes_work", "self", "relationship"])
+    p.add_argument("--tier", default="standard", choices=["basic", "standard", "extreme"])
+    p.add_argument("--objective", default="")
+    p.add_argument("--deliverable", default="chapter")
+    p.add_argument("--no-generate", action="store_true")
+    p.set_defaults(func=cmd_focus_new)
 
     p = sub.add_parser("focus-add", help="Add a Focus (objective + tier)")
     p.add_argument("label")

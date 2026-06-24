@@ -33,8 +33,10 @@ from lifehug_core import (  # noqa: E402
     parse_categories,
     parse_questions,
     read_json,
+    rebuild_coverage,
     slugify,
     write_json,
+    write_text,
 )
 
 ROADMAP_FILE = STATE_DIR / "roadmap.json"
@@ -273,6 +275,115 @@ def rebuild_roadmap(write: bool = True) -> dict:
     return roadmap
 
 
+# --- Category scaffolding + one-shot focus creation -------------------------
+
+# Focus type → which question-bank section a new category lands in.
+def _section_header_for(focus_type: str) -> str:
+    return "## Project Categories" if focus_type in ("project", "lifes_work") else "## Spotlights"
+
+
+# Focus type → research_expand --type and --output.
+RESEARCH_TYPE = {
+    "person": "person", "project": "project", "theme": "theme", "place": "place",
+    "period": "time_period", "event": "event", "self": "self",
+    "relationship": "relationship", "lifes_work": "project", "life_story": "theme",
+}
+RESEARCH_OUTPUT = {
+    "book": "chapter", "memoir": "chapter", "chapter": "chapter",
+    "letter": "letter", "essay": "essay", "post": "post", "profile": "profile",
+}
+
+
+def next_free_letter(md_text: str) -> str:
+    used = set(parse_categories(md_text).keys())
+    for code in range(ord("A"), ord("Z") + 1):
+        if chr(code) not in used:
+            return chr(code)
+    raise ValueError("no free category letter (A–Z all used)")
+
+
+def scaffold_category(md_text: str, label: str, focus_type: str, tag: str | None = None) -> tuple[str, str]:
+    """Insert a new `## <Letter>: <Label> (<tag>)` category under the right
+    section, creating the section if absent. Returns (new_md, letter)."""
+    letter = next_free_letter(md_text)
+    cat_line = f"## {letter}: {label}" + (f" ({tag})" if tag else "")
+    section = _section_header_for(focus_type)
+    block = f"{cat_line}\n"
+
+    if section in md_text:
+        start = md_text.index(section) + len(section)
+        # End of this section = the next top-level section header, or EOF.
+        nexts = [p for p in (md_text.find("\n## Project Categories", start),
+                             md_text.find("\n## Spotlights", start)) if p != -1]
+        boundary = min(nexts) if nexts else len(md_text)
+        new_md = md_text[:boundary].rstrip() + "\n\n" + block + md_text[boundary:]
+    else:
+        new_md = md_text.rstrip() + f"\n\n{section}\n\n{block}"
+    return new_md, letter
+
+
+def _generate_and_promote(label: str, focus_type: str, deliverable: str, category: str) -> tuple[bool, int]:
+    """Generate starter questions via research_expand (needs API) and promote
+    them into the new category. Returns (generation_ran, num_promoted)."""
+    import subprocess
+
+    rtype = RESEARCH_TYPE.get(focus_type, "theme")
+    routput = RESEARCH_OUTPUT.get(deliverable, "chapter")
+    proc = subprocess.run(
+        [sys.executable, str(_SYSTEM_DIR / "research_expand.py"),
+         "--topic", label, "--type", rtype, "--output", routput, "--force"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return False, 0
+
+    import question_candidates as qc
+    data = qc.load_store()
+    bank = QUESTIONS_FILE.read_text(encoding="utf-8")
+    updated, ids = qc.promote_neighborhood(data, bank, f"nbhd-{slugify(label)}", category)
+    if ids:
+        write_text(QUESTIONS_FILE, updated)
+        qc.save_store(data)
+    return True, len(ids)
+
+
+def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
+              deliverable: str = "chapter", generate: bool = True) -> dict:
+    """End-to-end: scaffold a category, register the Focus, and (optionally)
+    generate + promote starter questions. Non-destructive to existing answers."""
+    md = QUESTIONS_FILE.read_text(encoding="utf-8")
+    tag = label if focus_type in ("project", "lifes_work") else None
+    new_md, letter = scaffold_category(md, label, focus_type, tag)
+    write_text(QUESTIONS_FILE, new_md)
+
+    # Derive the Focus from the new category, then apply chosen attributes.
+    rebuild_roadmap(write=True)
+    roadmap = load_roadmap()
+    fid = slugify(label)
+    focus = find_focus(roadmap, fid)
+    if focus:
+        focus["type"] = focus_type
+        focus["tier"] = tier
+        if objective:
+            focus["objective"] = objective
+        if deliverable:
+            focus["deliverable"] = deliverable
+        focus["target_depth"] = max(TIER_TARGETS.get(tier, 20), int(focus.get("target_depth", 0)))
+        focus["wiki_node"] = _wiki_node_for(focus_type, label)
+        roadmap["generated_at"] = now_utc()
+        write_json(ROADMAP_FILE, roadmap)
+
+    result = {"focus_id": fid, "category": letter, "type": focus_type,
+              "tier": tier, "generated": 0, "generation_ran": False}
+    if generate:
+        ran, n = _generate_and_promote(label, focus_type, deliverable, letter)
+        result["generation_ran"] = ran
+        result["generated"] = n
+        rebuild_roadmap(write=True)
+    rebuild_coverage()
+    return result
+
+
 def _print_roadmap(roadmap: dict) -> None:
     qs = parse_questions(QUESTIONS_FILE.read_text())
     print(f"Roadmap: {len(roadmap['focuses'])} focuses")
@@ -325,6 +436,15 @@ def cli(argv: list[str] | None = None) -> int:
     p = sub.add_parser("finish", help="Flag a Focus as finishing (lifts its variety cap)")
     p.add_argument("focus_id")
 
+    p = sub.add_parser("new", help="Create a Focus end-to-end: scaffold category, register, seed questions")
+    p.add_argument("label")
+    p.add_argument("--type", default="theme",
+                   choices=["person", "place", "period", "project", "theme", "event", "lifes_work", "self", "relationship"])
+    p.add_argument("--tier", default="standard", choices=list(TIER_ORDER))
+    p.add_argument("--objective", default="")
+    p.add_argument("--deliverable", default="chapter")
+    p.add_argument("--no-generate", action="store_true", help="Scaffold only; don't AI-generate starter questions")
+
     args = parser.parse_args(argv)
 
     if args.cmd in (None, "show"):
@@ -333,6 +453,26 @@ def cli(argv: list[str] | None = None) -> int:
 
     if args.cmd == "rebuild":
         _print_roadmap(rebuild_roadmap(write=True))
+        return 0
+
+    if args.cmd == "new":
+        if find_focus(load_roadmap(), slugify(args.label)):
+            print(f"✗ A focus '{slugify(args.label)}' already exists. Use focus-set to change it.")
+            return 1
+        res = focus_new(args.label, args.type, args.tier, args.objective,
+                        args.deliverable, generate=not args.no_generate)
+        print(f"✓ Focus '{args.label}' ({res['tier']} {res['type']}) added as category {res['category']}.")
+        if args.no_generate:
+            print(f"  Scaffolded only. Seed questions later: "
+                  f"python3 system/research_expand.py --topic \"{args.label}\" --type {RESEARCH_TYPE.get(args.type,'theme')}")
+        elif res["generation_ran"]:
+            print(f"  Generated and promoted {res['generated']} starter question(s) → category {res['category']}.")
+        else:
+            print("  ⚠ Could not generate starter questions (no AI available — needs OpenClaw running or ANTHROPIC_API_KEY).")
+            print(f"     With OpenClaw up (or a key set), run: python3 system/research_expand.py --topic \"{args.label}\" --type {RESEARCH_TYPE.get(args.type,'theme')}")
+            print(f"     then: python3 system/question_candidates.py promote-neighborhood --neighborhood nbhd-{slugify(args.label)} --category {res['category']}")
+        print()
+        _print_roadmap(load_roadmap())
         return 0
 
     if args.cmd == "add":

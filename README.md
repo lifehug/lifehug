@@ -21,6 +21,8 @@ A **Focus** is anything you want to capture and eventually produce something fro
 
 Lifehug meters your daily questions across all your Focuses at once — heavy on the under-filled ones, easing off the ones that are already well-covered, and never letting any single Focus (even a 50-question book) take more than ~30% of a week. So you make real progress toward each deliverable without spending every day on the same thing. When you want to *finish* one, flag it `finishing` and it gets a bigger share until it's done.
 
+**Adding one is one step.** Type `/focus` in Claude Code (or just tell your AI "add a focus on X" via Telegram) and it interviews you briefly, then `focus-new` scaffolds the category, registers the Focus, and auto-generates its first ~8–12 questions — answerable the next day.
+
 ### Understanding yourself and your relationships
 Beyond telling stories, Lifehug helps you **understand yourself** and **the people in your life** — drawing on We're Not Really Strangers, the 36 Questions, and parts-work therapy. It asks escalating, honest self-knowledge questions (values, fears, contradictions, how others see you) and *relational* questions about specific people (what you see in them, what you'd want them to know, how they see you). These build the self and relationship layers of your wiki.
 
