@@ -1,6 +1,6 @@
 ---
 name: lifehug
-description: "Operate a Lifehug workspace: daily life-story questions, answer processing, private wiki compile/serve, state repair, pass transitions, spotlight management, and local/cron workflows. Use when the user mentions Lifehug, memoir/story capture, a daily Lifehug answer, compiling or viewing the Lifehug wiki, running Lifehug locally, or maintaining a Lifehug/Dave workspace."
+description: "Operate a Lifehug workspace: daily life-story questions, answer processing, Focus/roadmap management (add a focus, show roadmap, progress toward deliverables, mark a focus finishing), private wiki compile/serve, state repair, pass transitions, and local/cron workflows. Use when the user mentions Lifehug, a daily Lifehug answer, adding or managing a focus, their roadmap or progress, compiling/viewing the Lifehug wiki, or maintaining a Lifehug/Dave workspace."
 ---
 
 # Lifehug Skill
@@ -42,6 +42,10 @@ Use these workflows. Do not duplicate their logic in the skill.
 
 ```bash
 python3 system/lifehug.py status            # coverage and pass status
+python3 system/lifehug.py roadmap           # Focuses, tiers, saturation
+python3 system/lifehug.py progress          # progress toward deliverables (readiness)
+python3 system/lifehug.py focus-new "<label>" --type <type> --tier <tier>  # add a focus end-to-end
+python3 system/lifehug.py focus-finish <id> # push a deliverable to done (lifts its cap)
 python3 system/lifehug.py next              # preview next question without mutation
 python3 system/lifehug.py rebuild           # rebuild coverage/README/rotation counters
 python3 system/lifehug.py compile           # compile private wiki
@@ -185,7 +189,34 @@ python3 system/lifehug.py followups-prompt
 
 The AI should generate valid JSON for `system/gen_followups.py --append`. Generated questions must deepen existing answers with specific scenes, sensory detail, emotion, dialogue, before/after, or contrast.
 
+## Add Or Manage A Focus
+
+A **Focus** is anything the user is building toward — a person, a book, a blog, a theme, their life's work (it unifies the old "spotlight" and "project" split). Each has an objective and a tier (`basic` ≈ blog/~8, `standard` ≈ essay/chapter/person/~20, `extreme` ≈ book/life's work/~50+).
+
+When the user says "add a focus" (or names something they want to build toward), interview briefly — **(1)** what they want to build (label + objective + deliverable), **(2)** how big (tier), **(3)** what kind (type) — then run one command:
+
+```bash
+python3 system/lifehug.py focus-new "<label>" \
+  --type <person|relationship|project|theme|place|period|event|lifes_work|self> \
+  --tier <basic|standard|extreme> \
+  --objective "<objective>" --deliverable <book|chapter|essay|letter|post>
+```
+
+`focus-new` scaffolds a new question-bank category, registers the Focus on the roadmap, and auto-generates ~8–12 starter questions toward the objective (uses the OpenClaw gateway when running — no key needed — or `ANTHROPIC_API_KEY` as fallback; without either, the Focus is still created and it prints how to seed later). It never touches existing answers. Then show `python3 system/lifehug.py progress` and confirm warmly.
+
+Other management:
+
+```bash
+python3 system/lifehug.py roadmap            # show Focuses + saturation
+python3 system/lifehug.py focus-finish <id>  # push a deliverable to done
+python3 system/lifehug.py focus-set <id> --tier <t> --target <N> --objective "<...>"
+```
+
+Don't create a Focus from a weak signal — confirm the objective first.
+
 ## Spotlights
+
+> Spotlights and projects are now **Focuses** (see *Add Or Manage A Focus*). Adding a question category here automatically becomes a Focus on the next `roadmap` rebuild.
 
 Use spotlights for important people, places, periods, projects, objects, or themes that deserve their own question arc.
 

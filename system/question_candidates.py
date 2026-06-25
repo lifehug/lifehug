@@ -229,6 +229,41 @@ def promote_candidate_record(data: dict, question_bank_text: str, candidate_id: 
     return updated_bank, question_id
 
 
+def promote_neighborhood(data: dict, question_bank_text: str, neighborhood_id: str, category: str) -> tuple[str, list[str]]:
+    """Promote every promotable candidate from a neighborhood into one category.
+
+    Skips candidates that are non-promotable or duplicate text (so a partial
+    re-run is safe). Returns the updated bank text and the list of new question
+    IDs created.
+    """
+    category = category.upper()
+    ensure_category_exists(question_bank_text, category)
+    rows = [c for c in data.get("candidates", [])
+            if c.get("neighborhood_id") == neighborhood_id
+            and c.get("status") in PROMOTABLE_STATUSES]
+    rows.sort(key=lambda c: (-float(c.get("priority", 0) or 0), c.get("created_at", "")))
+    new_ids: list[str] = []
+    for candidate in rows:
+        text = str(candidate.get("text", "")).strip()
+        if not text:
+            continue
+        try:
+            ensure_not_duplicate(question_bank_text, text)
+        except ValueError:
+            continue  # already in the bank — skip, keep going
+        question_id = next_question_id(question_bank_text, category)
+        promoted_at = now_utc()
+        question_bank_text = insert_question(
+            question_bank_text, category, question_id, text, candidate, promoted_at)
+        candidate["status"] = "promoted"
+        candidate["target_category"] = category
+        candidate["promoted_question_id"] = question_id
+        candidate["promoted_at"] = promoted_at
+        candidate["updated_at"] = promoted_at
+        new_ids.append(question_id)
+    return question_bank_text, new_ids
+
+
 def update_candidate(
     data: dict,
     candidate_id: str,
@@ -424,6 +459,17 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_promote_neighborhood(args: argparse.Namespace) -> int:
+    data = load_store()
+    question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
+    updated_bank, new_ids = promote_neighborhood(data, question_bank_text, args.neighborhood, args.category)
+    if new_ids:
+        write_text(QUESTIONS_FILE, updated_bank)
+        save_store(data)
+    print(f"✓ Promoted {len(new_ids)} question(s) from {args.neighborhood} → {args.category.upper()}: {', '.join(new_ids) or 'none'}")
+    return 0
+
+
 def add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--status", choices=sorted(VALID_STATUSES))
     parser.add_argument("--kind")
@@ -460,6 +506,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("candidate_id")
     p.add_argument("--category", required=True)
     p.set_defaults(func=cmd_promote)
+
+    p = sub.add_parser("promote-neighborhood", help="Promote all of a neighborhood's candidates into one category")
+    p.add_argument("--neighborhood", required=True)
+    p.add_argument("--category", required=True)
+    p.set_defaults(func=cmd_promote_neighborhood)
 
     p = sub.add_parser("stats", help="Show candidate statistics")
     p.set_defaults(func=cmd_stats)

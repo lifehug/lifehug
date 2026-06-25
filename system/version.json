@@ -1,7 +1,7 @@
 {
-  "version": 15.2,
+  "version": 16.1,
   "released": "2026-06-25",
-  "changelog": "v15.2: Answer quality loop \u2014 implicit richness scoring (word count, entities, wiki delta, follow-ups) accumulates in answer_scores.json; weekly quality_profile.py aggregation feeds multipliers into planner weights and AI expansion prompts; zero friction, activates at 20+ scored answers",
+  "changelog": "v16: Guided Focus manager. One-shot `lifehug.py focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates+promotes ~8-12 starter questions (graceful scaffold-only fallback when no AI is available). New `/focus` Claude Code skill and OpenClaw message protocol walk through add/show/finish/tune. Adds category scaffolding (roadmap.scaffold_category) and bulk candidate promotion (candidates promote-neighborhood). Includes v15.1: OpenClaw-first AI routing in research_expand (keyless generation when OpenClaw is running; Anthropic SDK fallback). v15: Focus model + dynamic Focus-weighted allocation + self-knowledge/relational neighborhoods + wiki relationships/self surfaces + progress dashboard + three-tier scheduling. | v16.1: Answer quality loop \u2014 implicit richness scoring accumulates per answer; weekly profile aggregation feeds multipliers into planner weights and AI expansion prompts; zero friction",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
@@ -49,7 +49,9 @@
     "tests/test_lifehug_wrapper.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
+    "tests/test_v16_focus_skill.py",
     "skill/SKILL.md",
+    "skills/focus/SKILL.md",
     ".gitignore",
     "system/quality_profile.py"
   ]

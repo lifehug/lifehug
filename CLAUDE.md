@@ -182,6 +182,17 @@ python3 system/lifehug.py progress                # are we graduating toward del
 
 The weekly planner builds the queue by **dynamic Focus-weighted allocation**: `weight = base(tier) × fill_factor × room`. Under-target Focuses get full weight; once a Focus passes its target it decays to a small maintenance weight (it never vanishes — re-promote it when a deliverable needs it). No Focus may take more than its cap (30% of a week, 50% when `finishing`), so nothing dominates daily life. A self-knowledge slot is reserved (~1/week), and research-expansion stays dormant until Focuses fill up and the system needs new domains. **Don't reimplement this — run the scripts.**
 
+#### Adding & Managing Focuses (guided)
+
+When the user wants to add or manage a Focus (or invokes the `/focus` skill), follow the **focus** skill protocol: interview briefly (what they're building → label/objective/deliverable; how big → tier; what kind → type), then create it in one command:
+
+```bash
+python3 system/lifehug.py focus-new "<label>" --type <type> --tier <tier> \
+    --objective "<objective>" --deliverable <book|chapter|essay|letter|post>
+```
+
+`focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates + promotes ~8–12 starter questions (uses the OpenClaw gateway when running — no key needed — or `ANTHROPIC_API_KEY` as fallback; without either, the Focus is still created and it prints how to seed later). It never touches existing answers. Then show `python3 system/lifehug.py progress`.
+
 ### Delivering the Question
 
 Send the question through whatever channel is configured (Telegram, email, CLI, etc.). Format:
