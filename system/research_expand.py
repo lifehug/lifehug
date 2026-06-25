@@ -579,6 +579,20 @@ def build_expansion_prompt(
     lines.append("  - Faith/spirituality prompts: meaning, transcendence, values")
     lines.append("")
 
+    # Personalization hints from the quality profile (only when active).
+    try:
+        from quality_profile import load_profile  # noqa: PLC0415
+        _profile = load_profile()
+        if _profile.get("active") and _profile.get("top_patterns"):
+            lines.append("## PERSONALIZATION INSIGHTS")
+            lines.append("Based on this author's answer history, questions that produce richer responses:")
+            for _pattern in _profile["top_patterns"][:3]:
+                lines.append(f"  - {_pattern}")
+            lines.append("Lean toward these patterns when choosing framing and story functions.")
+            lines.append("")
+    except Exception:  # noqa: BLE001
+        pass  # never break prompt generation
+
     if topic_type == "self":
         lines.append("## SELF-KNOWLEDGE MODE")
         lines.append("This is NOT a memoir arc — the deliverable is self-understanding, not a story.")

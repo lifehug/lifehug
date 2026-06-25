@@ -374,6 +374,14 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
     rows = []
     cat_to_focus = (focus_index or {}).get("cat_to_focus", {})
     info = (focus_index or {}).get("info", {})
+
+    # Load quality profile once — applies story-function multipliers when active.
+    try:
+        from quality_profile import load_profile  # noqa: PLC0415
+        _qprofile = load_profile()
+    except Exception:  # noqa: BLE001
+        _qprofile = {"active": False}
+
     for question in questions:
         if question["answered"]:
             continue
@@ -383,6 +391,14 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
         objective, objective_limit = objective_match(question, objectives)
         focus_id = cat_to_focus.get(category)
         finfo = info.get(focus_id, {})
+        base_weight = float(finfo.get("weight", 1.0))
+
+        # Apply quality multiplier from profile (only when profile is active).
+        if _qprofile.get("active"):
+            fn_data = _qprofile.get("by_story_function", {}).get(story_function, {})
+            quality_multiplier = float(fn_data.get("multiplier", 1.0))
+            base_weight = base_weight * quality_multiplier
+
         rows.append({
             **question,
             "group": group,
@@ -393,7 +409,7 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
             "objective_limit": objective_limit,
             "focus": focus_id,
             "focus_type": finfo.get("type", group),
-            "weight": float(finfo.get("weight", 1.0)),
+            "weight": base_weight,
         })
     rows.sort(key=lambda q: (
         q["objective"] is None,

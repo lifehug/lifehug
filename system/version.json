@@ -1,7 +1,7 @@
 {
-  "version": 15.1,
-  "released": "2026-06-24",
-  "changelog": "v15.1: OpenClaw-first AI routing in research_expand (no API key needed when OpenClaw is running; Anthropic SDK as fallback)",
+  "version": 15.2,
+  "released": "2026-06-25",
+  "changelog": "v15.2: Answer quality loop \u2014 implicit richness scoring (word count, entities, wiki delta, follow-ups) accumulates in answer_scores.json; weekly quality_profile.py aggregation feeds multipliers into planner weights and AI expansion prompts; zero friction, activates at 20+ scored answers",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
@@ -50,6 +50,7 @@
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "skill/SKILL.md",
-    ".gitignore"
+    ".gitignore",
+    "system/quality_profile.py"
   ]
 }

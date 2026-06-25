@@ -104,6 +104,14 @@ def compile_wiki() -> None:
     )
 
 
+def _count_wiki_files() -> int:
+    """Count .md files in wiki/ as a proxy for knowledge graph size."""
+    wiki_dir = REPO_DIR / "wiki"
+    if not wiki_dir.exists():
+        return 0
+    return sum(1 for _ in wiki_dir.rglob("*.md"))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Process a Lifehug answer")
     parser.add_argument("question_id", nargs="?", help="Question ID; defaults to rotation.last_question_id")
@@ -176,8 +184,24 @@ def main():
     rotation.pop("pending_answer_question_id", None)
     write_json(ROTATION_FILE, rotation)
     update_readme()
+    wiki_count_before = _count_wiki_files()
+
     if not args.no_compile_wiki:
         compile_wiki()
+
+    # Score this answer for the quality loop — runs silently, never fails.
+    if not args.no_compile_wiki:
+        try:
+            from quality_profile import append_score, extract_signals, score_richness  # noqa: PLC0415
+            wiki_nodes_added = _count_wiki_files() - wiki_count_before
+            followup_count = len(followups_added)
+            signals = extract_signals(answer_text, wiki_nodes_added, followup_count)
+            richness = score_richness(signals)
+            from question_planner import infer_story_function  # noqa: PLC0415
+            story_fn = infer_story_function(str(question.get("text", "")))
+            append_score(question_id, cat, story_fn, None, signals, richness)
+        except Exception:  # noqa: BLE001
+            pass  # quality scoring never breaks the answer save flow
 
     if args.commit or args.push:
         summary = args.summary or str(question["text"])[:64]

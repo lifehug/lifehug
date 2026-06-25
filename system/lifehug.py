@@ -210,6 +210,14 @@ def cmd_progress(_args: argparse.Namespace) -> int:
     return run_python("progress.py", [])
 
 
+def cmd_quality_stats(_args: argparse.Namespace) -> int:
+    return run_python("quality_profile.py", ["--show"])
+
+
+def cmd_quality_update(_args: argparse.Namespace) -> int:
+    return run_python("quality_profile.py", ["--update"])
+
+
 def cmd_roadmap(_args: argparse.Namespace) -> int:
     return run_python("roadmap.py", ["show"])
 
@@ -592,6 +600,12 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Roadmap / Focus ---
     p = sub.add_parser("progress", help="Show progress toward deliverables (readiness dashboard)")
     p.set_defaults(func=cmd_progress)
+
+    p = sub.add_parser("quality-stats", help="Show answer quality profile")
+    p.set_defaults(func=cmd_quality_stats)
+
+    p = sub.add_parser("quality-update", help="Recompute quality profile from answer scores")
+    p.set_defaults(func=cmd_quality_update)
 
     p = sub.add_parser("roadmap", help="Show the roadmap of Focuses with live fill")
     p.set_defaults(func=cmd_roadmap)
