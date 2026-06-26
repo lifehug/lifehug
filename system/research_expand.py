@@ -951,6 +951,7 @@ def _run_expansion(
     target_output = args.output or "chapter"
     dry_run = getattr(args, "dry_run", False)
     prompt_only = getattr(args, "prompt", False)
+    from_response = getattr(args, "from_response", None)
     force = getattr(args, "force", False)
 
     model_cfg = load_config().get("research_model", DEFAULT_MODEL)
@@ -1012,9 +1013,18 @@ def _run_expansion(
         print("... [truncated]")
         return 0
 
-    # Call AI
-    print(f"Expanding neighborhood '{topic}' via {model}...")
-    raw_response = call_ai(prompt, model)
+    # Get the model response: from an agent-written file (keyless desktop path)
+    # or by calling the AI (OpenClaw gateway / Anthropic key).
+    if from_response:
+        resp_path = Path(from_response)
+        if not resp_path.exists():
+            print(f"Error: response file not found: {resp_path}", file=sys.stderr)
+            return 1
+        print(f"Expanding neighborhood '{topic}' from {resp_path} (no model call)...")
+        raw_response = resp_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        print(f"Expanding neighborhood '{topic}' via {model}...")
+        raw_response = call_ai(prompt, model)
 
     try:
         ai_data = parse_ai_json(raw_response)
@@ -1190,6 +1200,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt",
         action="store_true",
         help="Output the AI prompt only without calling the API",
+    )
+    parser.add_argument(
+        "--from-response",
+        metavar="PATH",
+        help="Deposit questions from an agent-written response file instead of calling the API "
+             "(keyless desktop path: pair with --prompt). File holds the questions JSON "
+             "(optionally in a ```json fence).",
     )
     parser.add_argument(
         "--dry-run",

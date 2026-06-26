@@ -40,7 +40,7 @@ python3 system/lifehug.py focus-new "<label>" \
   --objective "<objective>" --deliverable <book|chapter|essay|letter|post>
 ```
 
-`focus-new` scaffolds a new question-bank category, registers the Focus on the roadmap, and **auto-generates ~8–12 starter questions** toward the objective. Generation uses the OpenClaw gateway when it's running (no API key needed), or `ANTHROPIC_API_KEY` as a fallback; if neither is available the Focus is still created and the command prints how to seed questions later. It never touches existing answers.
+`focus-new` scaffolds a new question-bank category, registers the Focus on the roadmap, and **auto-generates ~8–12 starter questions** toward the objective. Generation uses the OpenClaw gateway when it's running (cron path — no API key needed), or `ANTHROPIC_API_KEY` as a fallback. If neither is available — the usual case on the desktop — the Focus is still created and you generate the questions yourself (next section). It never touches existing answers.
 
 After it runs, confirm what happened and show the result:
 
@@ -48,17 +48,29 @@ After it runs, confirm what happened and show the result:
 python3 system/lifehug.py progress
 ```
 
-Tell the user the Focus is on the roadmap and (if generation ran) will start surfacing in their daily questions. Commit only if the user asks, or when operating a daily/cron workflow.
+Tell the user the Focus is on the roadmap and (once questions exist) will start surfacing in their daily questions. Commit only if the user asks, or when operating a daily/cron workflow.
 
-### If generation didn't run (no API key)
-The Focus and its empty category still exist. Seed it when a key is available:
+### Generate the questions on the desktop (keyless — you are the model)
 
-```bash
-python3 system/research_expand.py --topic "<label>" --type <research-type>
-python3 system/lifehug.py candidates-promote-neighborhood --neighborhood nbhd-<label-slug> --category <letter>
-```
+On the desktop there's usually no gateway or key, so `focus-new` scaffolds the Focus but generation doesn't run. Do it yourself — the script emits the prompt, you write the questions, the script deposits them. No key needed.
 
-(`research-type` maps period→time_period, lifes_work→project; others match the focus type.)
+`<research-type>` maps period→time_period and lifes_work→project; other types match the focus type. `<slug>` is the label slugified (e.g. "My Faith" → `my-faith`).
+
+1. **Get the prompt** (no model call):
+   ```bash
+   python3 system/research_expand.py --prompt --topic "<label>" --type <research-type> --output <deliverable> > /tmp/focus_prompt.txt
+   ```
+2. **Write the questions.** Read `/tmp/focus_prompt.txt` and follow it: produce the questions as the JSON object it specifies (`{"questions": [...]}` with `text`, `story_function`, `priority`, `reason` per item). Write just that JSON to `/tmp/focus_resp.json`.
+3. **Deposit** (no model call):
+   ```bash
+   python3 system/research_expand.py --topic "<label>" --type <research-type> --output <deliverable> --from-response /tmp/focus_resp.json
+   ```
+4. **Promote into the question bank:**
+   ```bash
+   python3 system/lifehug.py candidates-promote-neighborhood --neighborhood nbhd-<slug> --category <letter>
+   ```
+
+Then show `python3 system/lifehug.py progress` and confirm warmly.
 
 ## 2. Show roadmap / progress
 
