@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -155,6 +156,52 @@ class SynthesisTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Compiler: rendering
 # ---------------------------------------------------------------------------
+
+
+class AgentSynthesisTests(unittest.TestCase):
+    """Keyless desktop path: agent writes prose to a drop file, compile consumes it."""
+
+    def setUp(self):
+        self.wc = load("wiki_compile")
+        self.desc = make_desc(
+            "katie", ["answers/L1.md"],
+            cited_items=[{"id": "L1", "body": "drives the kids", "source": "answers/L1.md"}],
+        )
+
+    def test_parse_explicit_related_line(self):
+        narrative, related = self.wc.parse_agent_narrative(
+            "Related: Dave & Katie, family\n\nProse about [[belonging]] here.")
+        self.assertEqual(related, ["dave-katie", "family"])
+        self.assertTrue(narrative.startswith("Prose about"))
+        self.assertNotIn("Related:", narrative)
+
+    def test_related_inferred_from_wikilinks(self):
+        narrative, related = self.wc.parse_agent_narrative(
+            "She anchors [[dave-and-katie]] and shows up for [[family]].")
+        self.assertEqual(related, ["dave-and-katie", "family"])
+
+    def test_agent_file_consumed_and_cached(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.wc.SYNTH_DIR = Path(tmp)
+            (Path(tmp) / "katie.md").write_text(
+                "Related: family\n\nKatie is the anchor.", encoding="utf-8")
+            cache = {}
+            synth = self.wc.synthesize(self.desc, [], "m", cache, "", use_ai=False, dry_run=False)
+            self.assertTrue(synth["synthesized"])
+            self.assertEqual(synth["narrative"], "Katie is the anchor.")
+            self.assertEqual(synth["related"], ["family"])
+            self.assertIn(self.wc.cache_key(self.desc), cache)        # cached
+            self.assertFalse((Path(tmp) / "katie.md").exists())        # consumed
+
+    def test_agent_file_beats_call_ai(self):
+        def boom(*a, **k):
+            raise AssertionError("call_ai must not run when an agent draft exists")
+        self.wc.call_ai = boom
+        with tempfile.TemporaryDirectory() as tmp:
+            self.wc.SYNTH_DIR = Path(tmp)
+            (Path(tmp) / "katie.md").write_text("Agent prose.", encoding="utf-8")
+            synth = self.wc.synthesize(self.desc, [], "m", {}, "", use_ai=True, dry_run=False)
+            self.assertEqual(synth["narrative"], "Agent prose.")
 
 
 class RenderTests(unittest.TestCase):

@@ -99,6 +99,8 @@ def cmd_compile(args: argparse.Namespace) -> int:
         flags.append("--no-ai")
     if args.model:
         flags.extend(["--model", args.model])
+    if getattr(args, "emit_tasks", None):
+        flags.extend(["--emit-tasks", args.emit_tasks])
     return run_python("wiki_compile.py", flags)
 
 
@@ -493,6 +495,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-ai", action="store_true", help="Skip LLM synthesis; deterministic excerpts only")
     p.add_argument("--model", help="Override the wiki synthesis model")
+    p.add_argument("--emit-tasks", metavar="PATH",
+                   help="Write per-page synthesis tasks to PATH and exit (keyless agent path)")
     p.set_defaults(func=cmd_compile)
 
     p = sub.add_parser("ingest-story", help="Save an unprompted story source from stdin")

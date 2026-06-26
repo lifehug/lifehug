@@ -7,3 +7,5 @@ config.yaml
 system/schedule.json
 system/question-bank-upstream.md
 skill/life-legacy
+state/wiki_synthesis_cache.json
+state/synthesis/

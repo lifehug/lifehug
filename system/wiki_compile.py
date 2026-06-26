@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 from collections import Counter, defaultdict
 from datetime import date, datetime
@@ -70,6 +71,10 @@ THEME_KEYWORDS = {
 # Bump to invalidate cached syntheses when the prompt/contract changes.
 CACHE_VERSION = "v1"
 SYNTH_CACHE_FILE = STATE_DIR / "wiki_synthesis_cache.json"
+# Drop-zone for keyless desktop synthesis: when the skill runs through Claude
+# Code, the agent writes each page's prose here (state/synthesis/<slug>.md) and
+# the next compile consumes it into the cache. No API key / gateway needed.
+SYNTH_DIR = STATE_DIR / "synthesis"
 
 MAX_RELATED = 12  # total related links per page
 MAX_SHARED = 8    # shared-source links added per page
@@ -350,6 +355,54 @@ def cache_key(desc: dict) -> str:
     return h.hexdigest()
 
 
+WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def extract_related_from_text(text: str) -> list[str]:
+    """Pull related page slugs from [[wikilinks]] embedded in prose."""
+    seen, out = set(), []
+    for label in WIKILINK_RE.findall(text):
+        slug = slugify(label)
+        if slug not in seen:
+            seen.add(slug)
+            out.append(slug)
+    return out
+
+
+def parse_agent_narrative(text: str) -> tuple[str, list[str]]:
+    """Parse an agent-written narrative file.
+
+    An optional first non-empty line `Related: a, b, c` names related slugs
+    explicitly; otherwise related is inferred from [[wikilinks]] in the prose.
+    Returns (narrative_markdown, related_slugs).
+    """
+    lines = text.splitlines()
+    idx = 0
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    related: list[str] | None = None
+    if idx < len(lines):
+        m = re.match(r"(?i)^related:\s*(.*)$", lines[idx].strip())
+        if m:
+            related = [slugify(s) for s in re.split(r"[,/]", m.group(1)) if s.strip()]
+            lines = lines[idx + 1:]
+    narrative = "\n".join(lines).strip()
+    if related is None:
+        related = extract_related_from_text(narrative)
+    return narrative, related
+
+
+def task_sources(desc: dict, limit: int = 14, cap: int = 1500) -> list[dict]:
+    """Trimmed source material for an agent synthesis task."""
+    out = []
+    for item in (desc["cited_items"] + desc["supporting_items"])[:limit]:
+        body = re.sub(r"\s+", " ", item["body"]).strip()
+        if len(body) > cap:
+            body = body[:cap].rsplit(" ", 1)[0] + "..."
+        out.append({"id": item["id"], "source": item["source"], "body": body})
+    return out
+
+
 def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     src_lines = []
     for item in (desc["cited_items"] + desc["supporting_items"])[:14]:
@@ -397,6 +450,17 @@ def synthesize(desc, roster, model, cache, mission, use_ai, dry_run):
     if key in cache:
         cached = cache[key]
         return {"narrative": cached["narrative"], "related": cached.get("related", []), "synthesized": True}
+    # Keyless desktop path: prose written by the agent (via the /compile skill).
+    # Takes precedence over call_ai so Claude Code can synthesize without a key.
+    agent_file = SYNTH_DIR / f"{desc['slug']}.md"
+    if agent_file.exists():
+        raw = agent_file.read_text(encoding="utf-8", errors="replace").strip()
+        if raw:
+            narrative, related = parse_agent_narrative(raw)
+            if not dry_run:
+                cache[key] = {"narrative": narrative, "related": related}
+                agent_file.unlink()  # consumed into the cache
+            return {"narrative": narrative, "related": related, "synthesized": True}
     if not use_ai or dry_run:
         return fallback_synthesis(desc)
     try:
@@ -542,6 +606,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-ai", action="store_true", help="Skip LLM synthesis; use deterministic excerpts only")
     parser.add_argument("--model", help="Override the synthesis model")
+    parser.add_argument("--emit-tasks", metavar="PATH",
+                        help="Write per-page synthesis tasks to PATH and exit (keyless agent path; "
+                             "no model call). The agent writes each task's prose, then re-run compile.")
     args = parser.parse_args()
 
     WIKI_DIR.mkdir(exist_ok=True)
@@ -571,6 +638,33 @@ def main():
     model = get_model(args)
     mission = load_mission()
     cache = read_json(SYNTH_CACHE_FILE, {}) or {}
+
+    # Keyless agent path: emit synthesis tasks for any page not already cached
+    # or drafted, then exit. The agent fills each task's narrative_path; the
+    # next compile consumes those drafts. No model call here.
+    if args.emit_tasks:
+        SYNTH_DIR.mkdir(parents=True, exist_ok=True)
+        tasks = []
+        for d in descs:
+            if cache_key(d) in cache or (SYNTH_DIR / f"{d['slug']}.md").exists():
+                continue
+            others = [r for r in roster if r["slug"] != d["slug"]]
+            tasks.append({
+                "slug": d["slug"],
+                "type": d["type"],
+                "title": d["title"],
+                "narrative_path": str(SYNTH_DIR / f"{d['slug']}.md"),
+                "sources": task_sources(d),
+                "related_candidates": others,
+            })
+        Path(args.emit_tasks).write_text(
+            json.dumps(tasks, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"✓ Emitted {len(tasks)} synthesis task(s) to {args.emit_tasks}")
+        if tasks:
+            print("  Write each task's prose to its narrative_path, then run: "
+                  "python3 system/lifehug.py compile")
+        return
+
     synths = {}
     for d in descs:
         others = [r for r in roster if r["slug"] != d["slug"]]
