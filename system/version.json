@@ -1,7 +1,7 @@
 {
-  "version": 16.1,
+  "version": 17,
   "released": "2026-06-25",
-  "changelog": "v16: Guided Focus manager. One-shot `lifehug.py focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates+promotes ~8-12 starter questions (graceful scaffold-only fallback when no AI is available). New `/focus` Claude Code skill and OpenClaw message protocol walk through add/show/finish/tune. Adds category scaffolding (roadmap.scaffold_category) and bulk candidate promotion (candidates promote-neighborhood). Includes v15.1: OpenClaw-first AI routing in research_expand (keyless generation when OpenClaw is running; Anthropic SDK fallback). v15: Focus model + dynamic Focus-weighted allocation + self-knowledge/relational neighborhoods + wiki relationships/self surfaces + progress dashboard + three-tier scheduling. | v16.1: Answer quality loop \u2014 implicit richness scoring accumulates per answer; weekly profile aggregation feeds multipliers into planner weights and AI expansion prompts; zero friction",
+  "changelog": "v17: Wiki becomes a navigable graph. wiki_compile rewritten as plan→synthesize→cross-link→write: pages are now LLM-synthesized prose with content-derived related links (OpenClaw-first, Anthropic fallback, deterministic excerpt fallback when no LLM), plus auto-derived backlinks and shared-source 'see also' edges. Syntheses are cached in state/wiki_synthesis_cache.json so re-compiles are idempotent and cheap (--no-ai forces offline mode; new wiki_model config key). serve_wiki now resolves [[wikilinks]] to real pages (slug→page index with type-priority collision handling) instead of always bouncing to search. New `/compile` Claude Code/Desktop skill drives `lifehug.py compile` (now with --no-ai/--model passthrough). v16.1: Answer quality loop — implicit richness scoring accumulates per answer; weekly profile aggregation feeds multipliers into planner weights and AI expansion prompts; zero friction. v16: Guided Focus manager. One-shot `lifehug.py focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates+promotes ~8-12 starter questions (graceful scaffold-only fallback when no AI is available). New `/focus` Claude Code skill and OpenClaw message protocol walk through add/show/finish/tune. Adds category scaffolding (roadmap.scaffold_category) and bulk candidate promotion (candidates promote-neighborhood). Includes v15.1: OpenClaw-first AI routing in research_expand (keyless generation when OpenClaw is running; Anthropic SDK fallback). v15: Focus model + dynamic Focus-weighted allocation + self-knowledge/relational neighborhoods + wiki relationships/self surfaces + progress dashboard + three-tier scheduling.",
   "framework_files": [
     "CLAUDE.md",
     "README.md",
@@ -21,6 +21,7 @@
     "system/mission.md",
     "system/process_answer.py",
     "system/progress.py",
+    "system/quality_profile.py",
     "system/question_candidates.py",
     "system/question_planner.py",
     "system/rebuild_state.py",
@@ -50,9 +51,10 @@
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",
+    "tests/test_wiki_compile.py",
     "skill/SKILL.md",
     "skills/focus/SKILL.md",
-    ".gitignore",
-    "system/quality_profile.py"
+    "skills/compile/SKILL.md",
+    ".gitignore"
   ]
 }

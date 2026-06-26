@@ -30,6 +30,9 @@ followup_model: "anthropic/claude-opus-4-6"
 # research_model: "claude-opus-4-20250514"
 # Story/source classification:
 # classify_model: "claude-sonnet-4-20250514"
+# Wiki page synthesis (system/lifehug.py compile); falls back to deterministic
+# excerpts when no LLM (OpenClaw or ANTHROPIC_API_KEY) is available:
+# wiki_model: "claude-opus-4-20250514"
 # API key for the generate-tier jobs (or set ANTHROPIC_API_KEY in the environment):
 # anthropic_api_key: ""
 

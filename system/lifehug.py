@@ -92,7 +92,13 @@ def cmd_next(_args: argparse.Namespace) -> int:
 
 
 def cmd_compile(args: argparse.Namespace) -> int:
-    flags = ["--dry-run"] if args.dry_run else []
+    flags = []
+    if args.dry_run:
+        flags.append("--dry-run")
+    if args.no_ai:
+        flags.append("--no-ai")
+    if args.model:
+        flags.extend(["--model", args.model])
     return run_python("wiki_compile.py", flags)
 
 
@@ -485,6 +491,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("compile", help="Compile the private wiki")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-ai", action="store_true", help="Skip LLM synthesis; deterministic excerpts only")
+    p.add_argument("--model", help="Override the wiki synthesis model")
     p.set_defaults(func=cmd_compile)
 
     p = sub.add_parser("ingest-story", help="Save an unprompted story source from stdin")

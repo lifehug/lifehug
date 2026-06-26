@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from lifehug_core import WIKI_DIR
+from lifehug_core import WIKI_DIR, slugify
 
 
 def wiki_pages():
@@ -19,11 +19,47 @@ def wiki_pages():
     return sorted(p for p in WIKI_DIR.rglob("*.md") if p.is_file())
 
 
+# Slug-collision priority when two page types share a stem (e.g. a person and a
+# theme both named "family"). Lower index wins.
+_TYPE_PRIORITY = [
+    "people",
+    "relationships",
+    "projects",
+    "themes",
+    "places",
+    "periods",
+    "self",
+    "lifes_work",
+    "objects",
+]
+
+
+def page_index() -> dict[str, str]:
+    """Map each page slug (filename stem) to its /page/ relative path.
+
+    Lets [[wikilinks]] resolve to real pages instead of search. On collision,
+    the page whose parent directory ranks earliest in _TYPE_PRIORITY wins.
+    """
+    index: dict[str, str] = {}
+    chosen_rank: dict[str, int] = {}
+    for page in wiki_pages():
+        slug = page.stem
+        parent = page.parent.name
+        rank = _TYPE_PRIORITY.index(parent) if parent in _TYPE_PRIORITY else len(_TYPE_PRIORITY)
+        if slug in chosen_rank and chosen_rank[slug] <= rank:
+            continue
+        chosen_rank[slug] = rank
+        index[slug] = str(page.relative_to(WIKI_DIR.parent))
+    return index
+
+
 def strip_frontmatter(text: str) -> str:
     return re.sub(r"^---\s*\n.*?\n---\s*\n", "", text, count=1, flags=re.DOTALL)
 
 
-def render_markdown(text: str) -> str:
+def render_markdown(text: str, index: dict[str, str] | None = None) -> str:
+    if index is None:
+        index = page_index()
     text = strip_frontmatter(text)
     out = []
     in_list = False
@@ -53,27 +89,36 @@ def render_markdown(text: str) -> str:
             if not in_list:
                 out.append("<ul>")
                 in_list = True
-            out.append(f"<li>{linkify(html.escape(line[2:]))}</li>")
+            out.append(f"<li>{linkify(html.escape(line[2:]), index)}</li>")
         elif line.startswith("> "):
             if in_list:
                 out.append("</ul>")
                 in_list = False
-            out.append(f"<blockquote>{linkify(html.escape(line[2:]))}</blockquote>")
+            out.append(f"<blockquote>{linkify(html.escape(line[2:]), index)}</blockquote>")
         else:
             if in_list:
                 out.append("</ul>")
                 in_list = False
-            out.append(f"<p>{linkify(html.escape(line))}</p>")
+            out.append(f"<p>{linkify(html.escape(line), index)}</p>")
     if in_list:
         out.append("</ul>")
     return "\n".join(out)
 
 
-def linkify(text: str) -> str:
+def linkify(text: str, index: dict[str, str] | None = None) -> str:
+    index = index or {}
+
     def repl(match):
         label = match.group(1)
-        slug = label.strip().lower().replace(" ", "-")
-        return f'<a href="/search?q={quote(label)}">[[{html.escape(label)}]]</a>'
+        slug = slugify(label)
+        target = index.get(slug)
+        if target:
+            # Resolve to the real page — graph navigation, not a re-query.
+            href = f"/page/{quote(target)}"
+        else:
+            # Unknown/forward link: fall back to search so it still does something.
+            href = f"/search?q={quote(label)}"
+        return f'<a href="{href}">[[{html.escape(label)}]]</a>'
 
     text = re.sub(r"\[\[([^\]]+)\]\]", repl, text)
     text = re.sub(
