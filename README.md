@@ -320,6 +320,7 @@ The daily and weekly jobs need **no API key**. Only the monthly generation job d
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending
 LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh # preview weekly maintenance
+LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh # preview monthly growth
 ```
 
 ---
@@ -336,6 +337,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
 | **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, updates the quality profile, builds the next queue, scans for gaps, reports progress, then commits real changes. |
+| **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Spotlights, reports progress, then commits real changes. |
 | **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and spotlight interleaving). Also marks questions sent/answered and flags pass completion. |
 | **`process_answer.py`** | The answer pipeline. Saves the answer to `answers/<id>.md`, marks the question done, rebuilds coverage, updates rotation, refreshes the README, recompiles the wiki, and silently scores the answer's richness. The one command that runs after every reply. |
 | **`rebuild_state.py`** | Repair tool. Reconstructs derived state (rotation counts, README) from the source-of-truth files. Run it if state ever drifts. |
@@ -413,6 +415,7 @@ python3 system/lifehug.py quality-stats # what kinds of questions open you up
 python3 system/lifehug.py next                      # preview today's question
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh    # full dry run, nothing sent
 LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh # preview weekly loop
+LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh # preview monthly growth
 
 # Process an answer
 printf '%s\n' "$ANSWER" | python3 system/lifehug.py process-answer A14 --source "voice (transcribed)"
@@ -422,6 +425,7 @@ printf '%s\n' "$STORY" | python3 system/lifehug.py ingest-story --source telegra
 
 # Plan & grow
 python3 system/lifehug.py weekly-maintenance        # lint/fix, update profile, plan queue
+python3 system/lifehug.py monthly-research          # open new neighborhoods + spotlights
 python3 system/lifehug.py planner-queue             # build next week's queue
 python3 system/research_expand.py --gaps            # where is the story thin?
 python3 system/research_expand.py --topic "Dad" --type relationship --output letter

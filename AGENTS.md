@@ -128,6 +128,15 @@ LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
 
 The weekly loop compiles offline, lints sources, applies safe source fixes only when lint finds them, updates the quality profile, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
 
+Run the monthly growth loop with:
+
+```bash
+python3 system/lifehug.py monthly-research
+LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh
+```
+
+The monthly loop compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Spotlights, reports progress, and autocommits real changes.
+
 Review candidate questions before they enter the daily flow:
 
 ```bash
@@ -170,7 +179,7 @@ The pending question is always in `system/rotation.json` → `last_question_id`.
 
 Follow the rhythms in CLAUDE.md:
 - **Weekly**: Run `weekly-maintenance`; review any manual source findings, queue balance, and progress
-- **Monthly**: Review for themes, offer Spotlights, report progress
+- **Monthly**: Run `monthly-research`; review new candidates and Spotlight recommendations
 - **Milestones**: Draft deliverables when categories hit GREEN
 
 ## File Paths

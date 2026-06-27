@@ -46,6 +46,7 @@ class LifehugWrapperTests(unittest.TestCase):
             ["process-answer", "A1", "--source", "text"],
             ["daily-dry-run"],
             ["weekly-maintenance", "--dry-run"],
+            ["monthly-research", "--dry-run", "--gap-limit", "2", "--self-topic", "Who I am becoming", "--spotlight-min-score", "15"],
             ["followups-status"],
             ["followups-prompt"],
             ["doctor", "--daily"],

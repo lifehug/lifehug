@@ -71,7 +71,7 @@ compiled *before* any planning or research.
 |---|---|---|
 | **Daily** | `daily_question.sh` (compiles the wiki, then delivers today's question) | free |
 | **Weekly** | `weekly_maintenance.sh` (compile → source lint/fix → quality update → planner queue → gap scan → progress) | free |
-| **Monthly** | compile → generate: research neighborhoods for the top gaps + a self-knowledge batch + spotlight recommendations | API $ |
+| **Monthly** | `monthly_research.sh` (compile → capped new neighborhoods → self-knowledge → spotlight recommendations → progress) | API $ |
 | **Event** | you answer → `process-answer` (saves, recompiles wiki, updates state) | small |
 
 ### Daily (already set up above)
@@ -106,14 +106,15 @@ Needs `ANTHROPIC_API_KEY` in the cron environment (or `anthropic_api_key` in
 openclaw cron add \
   --name "Lifehug Monthly Research" \
   --cron "0 21 1 * *" \
-  --tz "America/New_York" \
-  --task "cd ~/Workspace/lifehug && python3 system/lifehug.py compile && python3 system/research_expand.py --gaps && python3 system/research_expand.py --topic 'Who I am becoming' --type self --output essay && python3 system/lifehug.py recommend-spotlights && git add state wiki && (git diff --cached --quiet || (git commit -m 'Monthly research' && git push))"
+  --tz "America/Los_Angeles" \
+  --task "cd ~/Workspace/lifehug && system/monthly_research.sh"
 ```
 
-The self-knowledge batch refills the pool so a self/relational question is
-always available for the planner's reserved weekly slot. Research-expansion only
-*matters* once your Focuses are filling up — `lifehug progress` prints a nudge
-when overall fullness crosses 60%.
+`monthly_research.sh` is the growth loop. It compiles the wiki, reports gaps,
+opens only a small capped set of new neighborhoods, refreshes the self-knowledge
+pool if that arc is missing, recommends new Spotlights, prints progress, and
+commits real state/wiki changes. The new candidates stay reviewable; the weekly
+planner decides what to do with accepted/promoted material later.
 
 ### Manual / on-demand
 

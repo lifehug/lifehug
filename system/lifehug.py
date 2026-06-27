@@ -379,6 +379,19 @@ def cmd_weekly_maintenance(args: argparse.Namespace) -> int:
     return run(["bash", str(script("weekly_maintenance.sh"))], env=env)
 
 
+def cmd_monthly_research(args: argparse.Namespace) -> int:
+    env = os.environ.copy()
+    if args.dry_run:
+        env["LIFEHUG_MONTHLY_DRY_RUN"] = "1"
+    if args.gap_limit is not None:
+        env["LIFEHUG_MONTHLY_GAP_LIMIT"] = str(args.gap_limit)
+    if args.self_topic:
+        env["LIFEHUG_MONTHLY_SELF_TOPIC"] = args.self_topic
+    if args.spotlight_min_score is not None:
+        env["LIFEHUG_MONTHLY_SPOTLIGHT_MIN_SCORE"] = str(args.spotlight_min_score)
+    return run(["bash", str(script("monthly_research.sh"))], env=env)
+
+
 def cmd_classify_story(args: argparse.Namespace) -> int:
     flags: list[str] = []
     if args.prompt:
@@ -808,6 +821,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("weekly-maintenance", help="Run weekly lint/fix, quality, planner, and progress flow")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_weekly_maintenance)
+
+    p = sub.add_parser("monthly-research", help="Run monthly neighborhood growth and spotlight recommendations")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--gap-limit", type=int, help="Maximum new gap neighborhoods to attempt")
+    p.add_argument("--self-topic", help="Self-knowledge topic to seed when missing")
+    p.add_argument("--spotlight-min-score", type=float, help="Minimum Spotlight recommendation score")
+    p.set_defaults(func=cmd_monthly_research)
 
     p = sub.add_parser("followups-status", help="Show pass-transition follow-up state")
     p.set_defaults(func=cmd_followups_status)

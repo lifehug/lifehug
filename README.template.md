@@ -19,6 +19,9 @@
 ## Weekly Maintenance
 *Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, update the quality profile, write the next queue, scan gaps, and report progress.*
 
+## Monthly Research
+*Run `python3 system/lifehug.py monthly-research` to open a capped set of new research neighborhoods, refresh self-knowledge candidates, recommend Spotlights, and report progress.*
+
 ## Coverage
 📊 0/0 questions answered
 

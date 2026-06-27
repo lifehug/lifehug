@@ -687,10 +687,10 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 - Check queue balance, progress, and whether any Focus is ready for a deliverable
 
 ### Monthly
-- Review recent answers for narrative threads and themes
-- Look for Spotlight opportunities
+- Run `python3 system/lifehug.py monthly-research` (or `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect first)
+- Review new research-neighborhood candidates before promotion
+- Review Spotlight recommendations and approve only the ones that should become Focuses
 - Check if any categories are ready for drafting (GREEN)
-- Report progress to the user
 
 ### At Milestones
 - **Skeleton complete** (all categories have at least one answer): Celebrate, preview what depth pass will look like
@@ -728,7 +728,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):
