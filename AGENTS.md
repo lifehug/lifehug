@@ -106,6 +106,19 @@ python3 system/lifehug.py planner-report
 
 This stores the raw story under `sources/manual/` and parks suggested follow-up questions in `state/question_candidates.json`. Candidates should inform planning and future question-bank edits; they should not automatically dominate daily delivery.
 
+## Source Integrity
+
+Treat `answers/` and `sources/` as raw source-of-truth. Do not rewrite old answers or stories to improve history. If a memory was wrong, add a correction source; if understanding changed, add a reflection source:
+
+```bash
+python3 system/lifehug.py source-lint
+python3 system/lifehug.py source-lint --fix
+printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/A1.md --kind factual
+printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A1.md
+```
+
+`source-lint --fix` is only for safe metadata and manifest repairs. Story meaning is repaired additively through `correct-source` or `reflect-source`. See `system/source_contract.md`.
+
 Review candidate questions before they enter the daily flow:
 
 ```bash
@@ -158,6 +171,9 @@ All paths are relative to this workspace root:
 - Rotation state: `system/rotation.json`
 - Coverage: `system/coverage.json`
 - Story sources: `sources/manual/`
+- Source corrections/reflections: `sources/corrections/`
+- Source manifest: `state/source_manifest.json`
+- Source lint findings: `state/source_lint_findings.json`
 - Question candidates: `state/question_candidates.json`
 - Planned queue: `state/question_queue.json`
 - Planner state: `state/planner_state.json`

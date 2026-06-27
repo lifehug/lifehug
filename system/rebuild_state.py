@@ -7,6 +7,7 @@ import argparse
 from datetime import datetime
 
 from lifehug_core import ANSWERS_DIR, QUESTIONS_FILE, ROTATION_FILE, parse_questions, read_json, rebuild_coverage, write_json
+from source_integrity import scan_sources, sync_manifest
 from update_readme import update_readme
 
 
@@ -46,9 +47,12 @@ def main():
     if args.readme:
         update_readme()
 
+    manifest = sync_manifest(scan_sources(), write=True, prune_missing=True)
+
     total = sum(data["total"] for data in coverage["categories"].values())
     answered = sum(data["answered"] for data in coverage["categories"].values())
     print(f"✓ Rebuilt coverage: {answered}/{total}")
+    print(f"✓ Refreshed source manifest: {len(manifest.get('sources', {}))} source(s)")
     if args.fix_rotation:
         print("✓ Refreshed rotation counters")
     if args.readme:

@@ -214,23 +214,34 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer {questio
 
 If follow-up questions are already known, pass `--followup "question text"` for each.
 
-The helper writes `answers/{question_id}.md`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki.
+The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki.
 
-Manual answer files use this format:
+Do not hand-edit old answer bodies to improve or revise history. New answer files use source metadata frontmatter:
 
 ```markdown
-# Question {ID}: {Question text}
-**Category:** {letter} ({name}) | **Pass:** {pass_number}
-**Asked:** {date} | **Answered:** {date}
-
 ---
+type: "prompted_answer"
+source_id: "answer:{ID}"
+question_id: "{ID}"
+source_medium: "voice (transcribed)"
+visibility: "owner_only"
+status: "raw"
+immutable: true
+schema_version: 1
+source_path: "answers/{ID}.md"
+content_sha256: "..."
+---
+
+# Question {ID}: {Question text}
 
 {Full answer}
+```
 
----
+If an old source needs a factual fix or later reinterpretation, create an additive source instead of rewriting it:
 
-## Follow-up Questions Generated
-- {ID}: "{follow-up question}"
+```bash
+printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/{ID}.md --kind factual
+printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/{ID}.md
 ```
 
 3. **Generate 1-3 follow-up questions** based on the answer:
@@ -251,7 +262,9 @@ Manual answer files use this format:
 
 7. **Refresh wiki** — `process-answer` compiles the wiki by default. Use `--no-compile-wiki` only for tests or emergency repairs.
 
-8. **Commit and push** with message: `Answer {ID}: {brief summary}`
+8. **Source lint when repairing** — use `python3 system/lifehug.py source-lint` for review and `source-lint --fix` only for safe metadata/manifest repairs.
+
+9. **Commit and push** with message: `Answer {ID}: {brief summary}`
 
 ---
 
@@ -266,6 +279,8 @@ python3 system/lifehug.py planner-report
 ```
 
 This writes an owner-only source file under `sources/manual/` and stores suggested follow-up questions in `state/question_candidates.json`. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan.
+
+Unprompted stories follow the same source contract as answers: they are raw source-of-truth files. Later corrections and changed perspective belong in `sources/corrections/`, not by rewriting the original story.
 
 ### Candidate Review
 
@@ -713,10 +728,10 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):
 - `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
-- `answers/`, `outputs/`, `sources/manual/`
-- `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`
+- `answers/`, `outputs/`, `sources/`
+- `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`

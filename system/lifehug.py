@@ -104,6 +104,62 @@ def cmd_compile(args: argparse.Namespace) -> int:
     return run_python("wiki_compile.py", flags)
 
 
+def cmd_source_scan(args: argparse.Namespace) -> int:
+    flags = ["scan"]
+    if args.json:
+        flags.append("--json")
+    return run_python("source_integrity.py", flags)
+
+
+def cmd_source_manifest(args: argparse.Namespace) -> int:
+    flags = ["manifest"]
+    if args.rebuild:
+        flags.append("--rebuild")
+    if args.json:
+        flags.append("--json")
+    return run_python("source_integrity.py", flags)
+
+
+def cmd_source_lint(args: argparse.Namespace) -> int:
+    flags = ["lint"]
+    if args.fix:
+        flags.append("--fix")
+    if args.strict:
+        flags.append("--strict")
+    if args.json:
+        flags.append("--json")
+    if args.no_write_findings:
+        flags.append("--no-write-findings")
+    if args.limit is not None:
+        flags.extend(["--limit", str(args.limit)])
+    return run_python("source_integrity.py", flags)
+
+
+def cmd_source_findings(args: argparse.Namespace) -> int:
+    flags = ["findings"]
+    if args.status:
+        flags.extend(["--status", args.status])
+    if args.json:
+        flags.append("--json")
+    if args.limit is not None:
+        flags.extend(["--limit", str(args.limit)])
+    return run_python("source_integrity.py", flags)
+
+
+def cmd_correct_source(args: argparse.Namespace) -> int:
+    flags = ["correct", args.target, "--kind", args.kind, "--source", args.source]
+    if args.title:
+        flags.extend(["--title", args.title])
+    return run_python("source_integrity.py", flags)
+
+
+def cmd_reflect_source(args: argparse.Namespace) -> int:
+    flags = ["reflect", args.target, "--source", args.source]
+    if args.title:
+        flags.extend(["--title", args.title])
+    return run_python("source_integrity.py", flags)
+
+
 def cmd_ingest_story(args: argparse.Namespace) -> int:
     flags = ["--source", args.source]
     if args.title:
@@ -294,6 +350,8 @@ def cmd_process_answer(args: argparse.Namespace) -> int:
         flags.extend(["--source", args.source])
     if args.answered_date:
         flags.extend(["--answered-date", args.answered_date])
+    if args.asked_date:
+        flags.extend(["--asked-date", args.asked_date])
     if args.force:
         flags.append("--force")
     if args.commit:
@@ -499,6 +557,42 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Write per-page synthesis tasks to PATH and exit (keyless agent path)")
     p.set_defaults(func=cmd_compile)
 
+    p = sub.add_parser("source-scan", help="Summarize raw source files")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_source_scan)
+
+    p = sub.add_parser("source-manifest", help="Show or rebuild the raw source manifest")
+    p.add_argument("--rebuild", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_source_manifest)
+
+    p = sub.add_parser("source-lint", help="Lint raw source integrity and queue repair findings")
+    p.add_argument("--fix", action="store_true", help="Apply safe metadata/manifest repairs")
+    p.add_argument("--strict", action="store_true", help="Also report uncited sources")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--no-write-findings", action="store_true")
+    p.set_defaults(func=cmd_source_lint)
+
+    p = sub.add_parser("source-findings", help="List persisted source lint findings")
+    p.add_argument("--status", default="open")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--limit", type=int)
+    p.set_defaults(func=cmd_source_findings)
+
+    p = sub.add_parser("correct-source", help="Create an additive correction source from stdin")
+    p.add_argument("target", help="Source path or source_id to correct")
+    p.add_argument("--kind", default="other", choices=["factual", "emotional", "perspective", "omission", "relationship", "other"])
+    p.add_argument("--source", default="manual")
+    p.add_argument("--title")
+    p.set_defaults(func=cmd_correct_source)
+
+    p = sub.add_parser("reflect-source", help="Create an additive reflection source from stdin")
+    p.add_argument("target", help="Source path or source_id to reflect on")
+    p.add_argument("--source", default="manual")
+    p.add_argument("--title")
+    p.set_defaults(func=cmd_reflect_source)
+
     p = sub.add_parser("ingest-story", help="Save an unprompted story source from stdin")
     p.add_argument("--source", default="manual")
     p.add_argument("--title", default=None)
@@ -693,6 +787,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("question_id", nargs="?")
     p.add_argument("--source", default=None)
     p.add_argument("--answered-date", default=None)
+    p.add_argument("--asked-date", default=None)
     p.add_argument("--followup", action="append", default=[])
     p.add_argument("--force", action="store_true")
     p.add_argument("--commit", action="store_true")

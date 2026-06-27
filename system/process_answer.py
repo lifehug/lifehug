@@ -24,6 +24,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
 from update_readme import update_readme
 
 
@@ -85,6 +86,7 @@ def git_commit(message: str, push: bool) -> None:
         "system/rotation.json",
         "system/coverage.json",
         "answers",
+        "state/source_manifest.json",
         "wiki",
     ]
     subprocess.run(["git", "-C", str(REPO_DIR), "add", "--", *paths], check=True)
@@ -162,18 +164,37 @@ def main():
         for qid, text in followups_added:
             followup_section += f"- {qid}: \"{text}\"\n"
 
-    content = (
+    body = (
         f"# Question {question_id}: {question['text']}\n"
-        f"**Category:** {cat} ({cat_name}) | **Pass:** {pass_number}\n"
-        f"**Asked:** {asked} | **Answered:** {args.answered_date}\n"
-        f"**Source:** {args.source}\n\n"
-        "---\n\n"
+        "\n"
         f"{answer_text}\n"
         f"{followup_section}"
     )
+    metadata = {
+        "title": f"Question {question_id}: {question['text']}",
+        "type": "prompted_answer",
+        "source_id": f"answer:{question_id}",
+        "question_id": question_id,
+        "question_text": str(question["text"]),
+        "category": cat,
+        "category_name": cat_name,
+        "pass_number": pass_number,
+        "source_medium": args.source,
+        "asked_at": asked,
+        "answered_date": args.answered_date,
+        "captured_at": datetime.now().isoformat(timespec="seconds"),
+        "visibility": "owner_only",
+        "status": "raw",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": out_file.relative_to(REPO_DIR).as_posix(),
+        "content_sha256": payload_sha256(body),
+    }
+    content = f"{format_frontmatter(metadata)}\n\n{body}"
     if not content.endswith("\n"):
         content += "\n"
     write_text(out_file, content)
+    register_source(out_file)
 
     mark_answered_in_bank(question_id, args.answered_date)
     coverage = rebuild_coverage()

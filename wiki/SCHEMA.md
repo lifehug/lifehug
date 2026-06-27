@@ -2,7 +2,9 @@
 
 This wiki is an owner-only, AI-maintained memory layer. It compiles raw story sources into structured pages so the author and future AI sessions can understand a life as an evolving graph of people, places, periods, projects, themes, objects, and relationships.
 
-The wiki is not the raw diary. Raw sources stay in `answers/` and future `sources/` imports. Wiki pages synthesize those sources, cite them, cross-link related pages, and improve over time.
+The wiki is not the raw diary. Raw sources stay in `answers/` and `sources/`. Wiki pages synthesize those sources, cite them, cross-link related pages, and improve over time.
+
+Corrections and reflections are also sources. If a memory was wrong or the author's understanding changed, the wiki should show the original source and the later correction/reflection together instead of erasing the earlier record.
 
 ## First-Pass Privacy Model
 
@@ -94,6 +96,7 @@ Hypothesis: the later Etherfuse urgency may echo early financial instability [an
 4. Keep raw emotional detail grounded in citations.
 5. Flag contradictions or sensitive publishing risks instead of hiding them.
 6. Improve pages incrementally; a page should get better or stay unchanged.
+7. Treat changed memories and contradictions as story signals. They may deserve a question candidate, relationship note, or self-knowledge page.
 
 ## Good Lifehug Wiki Pages
 

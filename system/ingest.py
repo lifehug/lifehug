@@ -30,7 +30,6 @@ from typing import Any
 
 from lifehug_core import (
     CONNECTORS_DIR,
-    MANUAL_SOURCES_DIR,
     QUESTION_CANDIDATES_FILE,
     REPO_DIR,
     SOURCES_DIR,
@@ -40,6 +39,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
 
 
 # ---------------------------------------------------------------------------
@@ -412,26 +412,30 @@ def store_record(record: SourceRecord) -> Path:
             idx += 1
 
     relative = path.relative_to(REPO_DIR).as_posix()
-    frontmatter_lines = [
-        "---",
-        f'title: "{record.title}"',
-        f'type: "ingested_source"',
-        f'source_type: "{record.source_type}"',
-        f'source_id: "{record.source_id}"',
-        f'source: "{record.source_type}"',
-        f'captured_at: "{record.date}"',
-        f'visibility: "owner_only"',
-        f'status: "raw"',
-    ]
+    payload = f"# {record.title}\n\n{record.text}\n"
+    metadata: dict[str, Any] = {
+        "title": record.title,
+        "type": "ingested_source",
+        "source_type": record.source_type,
+        "source_id": f"{record.source_type}:{record.source_id}",
+        "source_medium": record.source_type,
+        "source": record.source_type,
+        "captured_at": record.date,
+        "visibility": "owner_only",
+        "status": "raw",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": relative,
+        "content_sha256": payload_sha256(payload),
+    }
     if record.raw_url:
-        frontmatter_lines.append(f'raw_url: "{record.raw_url}"')
+        metadata["raw_url"] = record.raw_url
     if record.metadata:
-        frontmatter_lines.append(f"metadata: {json.dumps(record.metadata)}")
-    frontmatter_lines.append(f'source_path: "{relative}"')
-    frontmatter_lines.append("---")
+        metadata["metadata"] = record.metadata
 
-    content = "\n".join(frontmatter_lines) + f"\n\n# {record.title}\n\n{record.text}\n"
+    content = f"{format_frontmatter(metadata)}\n\n{payload}"
     write_text(path, content)
+    register_source(path)
     return path
 
 

@@ -4,7 +4,7 @@
 
 Lifehug is a lifelong AI oral-history system. It asks you one thoughtful question each day, takes your answer by voice or text, and keeps coming back with better follow-ups. Over time it compiles everything into a private, cross-linked **wiki of your life** — and uses that wiki to decide what to ask next. The result is a compounding loop that turns scattered memories into real artifacts: letters, essays, chapters, a memoir, a founder story.
 
-You do one thing: **answer the question.** Everything below is what the system does around that.
+You do one thing: **answer the question.** Every answer becomes a raw source record; everything below is what the system does around that.
 
 ---
 
@@ -242,7 +242,7 @@ As you answer, `wiki_compile.py` synthesizes your raw answers into an owner-only
 
 ```mermaid
 flowchart LR
-    A["answers/*.md<br/>sources/manual/*.md"] --> PLAN["1 · PLAN<br/>what pages should exist?"]
+    A["answers/*.md<br/>sources/**/*.md"] --> PLAN["1 · PLAN<br/>what pages should exist?"]
     PLAN --> SYN["2 · SYNTHESIZE<br/>prose from sources<br/>(cache → agent → LLM → excerpts)"]
     SYN --> XL["3 · CROSS-LINK<br/>backlinks + shared-source edges +<br/>wikilinks → a graph"]
     XL --> WRITE["4 · WRITE<br/>wiki/(type)/(slug).md"]
@@ -259,6 +259,22 @@ flowchart LR
 - **self/** — your patterns, values, fears, contradictions
 
 Every page cites the answers it's built from, and links to related pages — so the wiki is a navigable graph, not a flat list. Synthesis is cached and idempotent: re-compiling is cheap, and it runs **keyless on the desktop** (the agent writes each page's prose; the next compile folds it into the graph). Browse it locally with `python3 system/lifehug.py serve`.
+
+### Source integrity
+
+Lifehug treats `answers/` and `sources/` as the source-of-truth layer. The wiki, planner reports, question candidates, and outputs are derived from those sources.
+
+That means the system does not fix a memory by rewriting history. If something was wrong, you add a correction. If your understanding changed, you add a reflection. Both become new source files that the wiki can compile alongside the original memory.
+
+The repair loop is:
+
+1. **Capture** — answer a question or ingest a story
+2. **Compile** — rebuild the wiki from source files
+3. **Lint** — detect missing metadata, changed source bodies, stale citations, and unresolved repairs
+4. **Repair** — auto-fix safe metadata issues, or add correction/reflection sources
+5. **Ask better questions** — turn contradictions, thin areas, and uncited sources into future prompts
+
+This is how Lifehug keeps learning: it notices where the life model is weak, asks for what is missing, and preserves how your understanding evolves.
 
 ---
 
@@ -348,6 +364,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | Script | What it does |
 |---|---|
 | **`wiki_compile.py`** | The graph builder. Plan → synthesize → cross-link → write. Turns answers into cross-linked wiki pages with cached, idempotent synthesis and a keyless desktop path (`--emit-tasks`). See [the wiki](#the-private-wiki). |
+| **`source_integrity.py`** | The source contract enforcer. Scans raw sources, maintains `state/source_manifest.json`, writes source lint findings, and creates additive correction/reflection source files instead of rewriting old memories. |
 | **`serve_wiki.py`** | The local reader. A read-only HTTP server that renders the wiki as HTML and resolves `[[wikilinks]]` into real page navigation. No AI, no writes. |
 | **`compose.py`** | The output composer. Assembles a prompt (template + the right answers), then versions the AI's result under `outputs/`. Prompt-in, versioned-artifact-out. |
 | **`update_readme.py`** | Keeps the README's coverage section and progress bullets in sync with current state. |
@@ -414,7 +431,16 @@ python3 system/lifehug.py focus-new                 # guided: add a Focus
 python3 system/lifehug.py compile                   # rebuild the wiki
 python3 system/lifehug.py serve                     # browse it locally
 
-python3 system/lifehug.py --help                    # full list
+# Source integrity
+python3 system/lifehug.py source-scan
+python3 system/lifehug.py source-lint
+python3 system/lifehug.py source-lint --fix
+python3 system/lifehug.py source-findings
+printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/A14.md --kind factual
+printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A14.md
+
+# Full list
+python3 system/lifehug.py --help
 ```
 
 ---
@@ -423,11 +449,11 @@ python3 system/lifehug.py --help                    # full list
 
 ```
 lifehug/
-├── answers/          # one Markdown file per answered question
-├── sources/manual/   # unprompted stories and ingested material
+├── answers/          # prompted answers; raw source-of-truth
+├── sources/          # unprompted stories, imports, corrections, reflections
 ├── wiki/             # the compiled private wiki (people, places, themes, self…)
 ├── outputs/          # composed artifacts (letters, essays, chapters)
-├── state/            # roadmap, weekly queue, candidates, quality profile, neighborhoods
+├── state/            # roadmap, weekly queue, candidates, quality profile, source manifest
 ├── system/           # all the scripts (the system is script-first)
 ├── templates/        # output format templates
 ├── skills/           # Claude Code skills (/focus, /compile)
@@ -444,7 +470,7 @@ python3 system/update.py --check
 python3 system/update.py --apply
 ```
 
-Updates only touch framework files. Your answers, question bank, config, wiki, and outputs are never modified.
+Updates only touch framework files. Your answers, source files, question bank, config, wiki, and outputs are never modified.
 
 ---
 
@@ -455,5 +481,3 @@ Lifehug draws on StoryCorps oral history, professional ghostwriting frameworks, 
 ---
 
 *Lifehug — because every life is a story worth telling.*
-</content>
-</invoke>

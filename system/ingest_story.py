@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from datetime import datetime
@@ -20,6 +19,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
 
 
 def title_from_text(text: str) -> str:
@@ -119,25 +119,24 @@ def append_candidates(candidates: list[dict]) -> None:
     write_json(QUESTION_CANDIDATES_FILE, data)
 
 
-def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[str]) -> str:
+def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[str], payload: str) -> str:
     values = {
         "title": args.title,
         "type": "unprompted_story",
+        "source_id": f"manual:{Path(source_path).stem}",
+        "source_medium": args.source,
         "source": args.source,
         "captured_at": args.captured_at,
         "visibility": "owner_only",
         "status": "raw",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": source_path,
+        "content_sha256": payload_sha256(payload),
+        "related_pages": [],
+        "candidate_questions": candidate_ids,
     }
-    lines = ["---"]
-    for key, value in values.items():
-        lines.append(f"{key}: {json.dumps(value)}")
-    lines.append("related_pages: []")
-    lines.append("candidate_questions:")
-    for candidate_id_value in candidate_ids:
-        lines.append(f"  - {json.dumps(candidate_id_value)}")
-    lines.append(f"source_path: {json.dumps(source_path)}")
-    lines.append("---")
-    return "\n".join(lines)
+    return format_frontmatter(values)
 
 
 def main() -> int:
@@ -160,11 +159,8 @@ def main() -> int:
     created_at = now_utc()
     candidates = [] if args.no_candidates else generate_candidates(args.title, story, relative_source, created_at)
 
-    content = (
-        f"{frontmatter(args, relative_source, [c['id'] for c in candidates])}\n\n"
-        f"# {args.title}\n\n"
-        f"{story}\n"
-    )
+    payload = f"# {args.title}\n\n{story}\n"
+    content = f"{frontmatter(args, relative_source, [c['id'] for c in candidates], payload)}\n\n{payload}"
 
     if args.dry_run:
         print(f"would write {relative_source}")
@@ -172,6 +168,7 @@ def main() -> int:
         return 0
 
     write_text(source_path, content)
+    register_source(source_path)
     if candidates:
         append_candidates(candidates)
 

@@ -35,6 +35,35 @@ class CoreParsingTests(unittest.TestCase):
         self.assertEqual(coverage["categories"]["A"]["total"], 2)
         self.assertEqual(coverage["categories"]["A"]["answered"], 1)
 
+    def test_answer_body_skips_yaml_frontmatter(self):
+        content = """---
+title: "Question A1"
+source_id: "answer:A1"
+---
+
+# Question A1: First
+
+The answer body.
+"""
+        self.assertEqual(lifehug_core.answer_body(content), "# Question A1: First\n\nThe answer body.")
+
+    def test_answer_body_handles_legacy_answer_with_added_frontmatter(self):
+        content = """---
+title: "Question A1"
+source_id: "answer:A1"
+---
+
+# Question A1: First
+**Category:** A (Origins) | **Pass:** 1
+**Asked:** 2026-01-01 | **Answered:** 2026-01-02
+**Source:** voice
+
+---
+
+Legacy answer body.
+"""
+        self.assertEqual(lifehug_core.answer_body(content), "Legacy answer body.")
+
 
 class ProcessAnswerTests(unittest.TestCase):
     def test_next_followup_id_uses_letter_suffixes(self):

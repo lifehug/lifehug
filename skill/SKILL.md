@@ -50,6 +50,10 @@ python3 system/lifehug.py next              # preview next question without muta
 python3 system/lifehug.py rebuild           # rebuild coverage/README/rotation counters
 python3 system/lifehug.py compile           # compile private wiki
 python3 system/lifehug.py compile --dry-run # check compile without writing
+python3 system/lifehug.py source-scan       # summarize raw source files
+python3 system/lifehug.py source-lint       # lint source integrity and queue findings
+python3 system/lifehug.py source-lint --fix # safe metadata/manifest repairs only
+python3 system/lifehug.py source-findings   # review persisted repair findings
 python3 system/lifehug.py ingest-story      # save unprompted story source from stdin
 python3 system/lifehug.py candidates-list   # list candidate questions
 python3 system/lifehug.py candidates-review # review candidates before promotion
@@ -96,6 +100,15 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> \
 6. Commit only when the user asks, or when operating an explicit daily/cron workflow.
 
 Never manually edit `coverage.json` or `rotation.json` unless repairing a failed script run with a clear reason.
+
+Never rewrite old source bodies to improve history. `answers/` and `sources/` are raw source-of-truth; the wiki and planner state are derived. If a memory is wrong or later understanding changes, create an additive source:
+
+```bash
+printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/A1.md --kind factual
+printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A1.md
+```
+
+Use `source-lint --fix` only for safe metadata/manifest repairs. See `system/source_contract.md`.
 
 ## Unprompted Story Ingest
 

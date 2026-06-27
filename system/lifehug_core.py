@@ -23,9 +23,13 @@ STATE_DIR = REPO_DIR / "state"
 WIKI_DIR = REPO_DIR / "wiki"
 SOURCES_DIR = REPO_DIR / "sources"
 MANUAL_SOURCES_DIR = SOURCES_DIR / "manual"
+IMPORT_SOURCES_DIR = SOURCES_DIR / "imports"
+CORRECTION_SOURCES_DIR = SOURCES_DIR / "corrections"
 QUESTION_CANDIDATES_FILE = STATE_DIR / "question_candidates.json"
 QUESTION_QUEUE_FILE = STATE_DIR / "question_queue.json"
 PLANNER_STATE_FILE = STATE_DIR / "planner_state.json"
+SOURCE_MANIFEST_FILE = STATE_DIR / "source_manifest.json"
+SOURCE_LINT_FINDINGS_FILE = STATE_DIR / "source_lint_findings.json"
 MISSION_FILE = SYSTEM_DIR / "mission.md"
 CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
 NEIGHBORHOODS_FILE = STATE_DIR / "neighborhoods.json"
@@ -219,11 +223,56 @@ def answer_id_from_filename(path: Path) -> str | None:
     return match.group(1) if match else None
 
 
+def split_frontmatter(content: str) -> tuple[dict[str, object], str]:
+    """Return simple YAML-ish frontmatter and body.
+
+    Lifehug only emits scalar JSON-compatible values in frontmatter, so this
+    intentionally stays small instead of depending on a YAML parser.
+    """
+    if not content.startswith("---\n"):
+        return {}, content
+    lines = content.splitlines()
+    end_index = None
+    for idx, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end_index = idx
+            break
+    if end_index is None:
+        return {}, content
+
+    metadata: dict[str, object] = {}
+    for raw in lines[1:end_index]:
+        line = raw.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if not value:
+            metadata[key] = ""
+            continue
+        try:
+            metadata[key] = json.loads(value)
+        except json.JSONDecodeError:
+            metadata[key] = value.strip('"').strip("'")
+
+    body = "\n".join(lines[end_index + 1:])
+    if body.startswith("\n"):
+        body = body[1:]
+    if content.endswith("\n"):
+        body += "\n"
+    return metadata, body
+
+
 def answer_body(content: str) -> str:
-    body_match = re.search(r"---\n+(.*?)(?:\n+---|\Z)", content, re.DOTALL)
+    _metadata, frontmatter_body = split_frontmatter(content)
+    target = frontmatter_body if frontmatter_body != content else content
+    body_match = re.search(r"---\n+(.*?)(?:\n+---|\Z)", target, re.DOTALL)
     if body_match:
         return body_match.group(1).strip()
-    return content.strip()
+    return target.strip()
 
 
 def status_emoji(answered: int, total: int) -> str:

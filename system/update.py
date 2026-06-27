@@ -2,7 +2,7 @@
 """Lifehug — Update Manager
 
 Checks for, applies, and rolls back framework updates from the upstream repo.
-User data (answers/, outputs/, sources/manual/, question-bank.md, planner state) is never touched.
+User data (answers/, outputs/, sources/, question-bank.md, planner/source state) is never touched.
 
 Usage:
     python3 system/update.py --check              # JSON: current, latest, update_available, changelog
@@ -33,10 +33,13 @@ PROTECTED_FILES = {
     "README.md",
     "answers/",
     "outputs/",
+    "sources/",
     "sources/manual/",
     "state/question_candidates.json",
     "state/question_queue.json",
     "state/planner_state.json",
+    "state/source_manifest.json",
+    "state/source_lint_findings.json",
     # Legacy paths (pre-v8) — still protected so historical content isn't clobbered
     "drafts/",
     "spotlights/",
@@ -209,7 +212,7 @@ def run_migrations(target_version, current_version):
             )
 
     if target_version >= 12 and current_version < 12:
-        for directory in (REPO_DIR / "sources" / "manual", REPO_DIR / "state"):
+        for directory in (REPO_DIR / "sources" / "manual", REPO_DIR / "sources" / "corrections", REPO_DIR / "state"):
             directory.mkdir(parents=True, exist_ok=True)
             gitkeep = directory / ".gitkeep"
             if not gitkeep.exists():

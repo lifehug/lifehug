@@ -26,9 +26,9 @@ from pathlib import Path
 
 from lifehug_core import (
     ANSWERS_DIR,
-    MANUAL_SOURCES_DIR,
     QUESTIONS_FILE,
     REPO_DIR,
+    SOURCES_DIR,
     STATE_DIR,
     WIKI_DIR,
     answer_body,
@@ -39,6 +39,7 @@ from lifehug_core import (
     parse_questions,
     read_json,
     slugify,
+    split_frontmatter,
     write_json,
     write_text,
 )
@@ -111,7 +112,8 @@ def read_answers() -> dict[str, dict]:
 
 
 def strip_frontmatter(text: str) -> str:
-    return re.sub(r"^---\s*\n.*?\n---\s*\n", "", text, count=1, flags=re.DOTALL).strip()
+    _metadata, body = split_frontmatter(text)
+    return body.strip()
 
 
 def frontmatter_value(text: str, key: str, default: str = "") -> str:
@@ -121,21 +123,22 @@ def frontmatter_value(text: str, key: str, default: str = "") -> str:
 
 def read_manual_sources() -> dict[str, dict]:
     sources = {}
-    if not MANUAL_SOURCES_DIR.exists():
+    if not SOURCES_DIR.exists():
         return sources
-    for path in sorted(MANUAL_SOURCES_DIR.glob("*.md")):
+    for path in sorted(p for p in SOURCES_DIR.rglob("*.md") if p.name != ".gitkeep"):
         text = path.read_text(encoding="utf-8", errors="replace")
         title = frontmatter_value(text, "title", path.stem.replace("-", " ").title())
         body = strip_frontmatter(text)
         body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
-        source_id = f"source:{path.stem}"
+        source_id = frontmatter_value(text, "source_id", f"source:{path.stem}")
+        kind = frontmatter_value(text, "type", "manual_source")
         sources[source_id] = {
             "id": source_id,
             "path": path,
             "source": rel(path),
             "title": title,
             "body": body,
-            "kind": "manual_source",
+            "kind": kind,
         }
     return sources
 
