@@ -61,7 +61,7 @@ safe_autocommit() {
     system/coverage.json
     answers
     outputs
-    sources/manual
+    sources
     state
     wiki
   )
