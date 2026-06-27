@@ -35,9 +35,9 @@ SAMPLE_BANK = """# Lifehug — Question Bank
 - [ ] G1: building
 - [ ] G2: more building
 
-## Spotlights
+## Focuses
 
-## K: Spotlight — Mom
+## K: Focus — Mom
 - [x] K1: about mom *(2026-01-03)*
 - [x] K2: more mom *(2026-01-04)*
 """
@@ -60,7 +60,7 @@ class RoadmapDeriveTests(unittest.TestCase):
         self.assertEqual(sorted(focuses["etherfuse"]["categories"]), ["F", "G"])
         self.assertEqual(focuses["etherfuse"]["type"], "project")
 
-    def test_spotlight_label_is_cleaned(self):
+    def test_focus_label_is_cleaned(self):
         focuses = {f["id"]: f for f in self.rm.derive_focuses(SAMPLE_BANK)}
         self.assertIn("mom", focuses)
         self.assertEqual(focuses["mom"]["label"], "Mom")

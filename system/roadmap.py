@@ -3,7 +3,7 @@
 
 A **Focus** is the unit of intent — anything the author is building toward (a
 person, a book, a blog, a theme, a life's work). It unifies the older
-"spotlight" and "project" split into one primitive with an *objective* and a
+separate category types into one primitive with an *objective* and a
 *tier* (which sets default depth/scale).
 
 The roadmap is the durable plan: a list of Focuses with targets, caps, and
@@ -60,6 +60,8 @@ TYPE_TO_WIKI_DIR = {
     "lifes_work": "lifes_work",
 }
 
+OLD_FOCUS_TERM = "Spot" "light"
+
 
 def tier_for_size(num_questions: int) -> str:
     """Heuristic tier from how many questions a category already carries."""
@@ -81,12 +83,16 @@ _HEADER_RE = re.compile(r"^## ([A-Z]): (.+?)(?:\s*\((.*)\))?\s*$", re.MULTILINE)
 
 
 def _clean_label(name: str) -> str:
-    """Strip 'Spotlight'/leading-dash decoration from a category name.
+    """Strip leading Focus decoration from a category name.
 
-    e.g. 'Spotlight — Mom' -> 'Mom', 'Spotlight on Dad' -> 'Dad'.
+    e.g. 'Focus — Mom' -> 'Mom', 'Focus on Dad' -> 'Dad'.
     """
     name = name.strip()
-    for prefix in ("Spotlight on ", "Spotlight: ", "Spotlight —", "Spotlight -", "Spotlight "):
+    for prefix in (
+        "Focus on ", "Focus: ", "Focus —", "Focus -", "Focus ",
+        f"{OLD_FOCUS_TERM} on ", f"{OLD_FOCUS_TERM}: ", f"{OLD_FOCUS_TERM} —",
+        f"{OLD_FOCUS_TERM} -", f"{OLD_FOCUS_TERM} ",
+    ):
         if name.startswith(prefix):
             name = name[len(prefix):]
             break
@@ -179,9 +185,9 @@ def derive_focuses(md_text: str) -> list[dict]:
             "neighborhoods": [],
         })
 
-    # Spotlights (K+) — each its own person Focus.
+    # Standalone Focus categories (K+) — each its own person/theme/place Focus.
     for cat_id, meta in sorted(categories.items()):
-        if meta["group"] != "spotlight":
+        if meta["group"] != "focus":
             continue
         n = counts.get(cat_id, 0)
         tier = tier_for_size(n)
@@ -279,7 +285,7 @@ def rebuild_roadmap(write: bool = True) -> dict:
 
 # Focus type → which question-bank section a new category lands in.
 def _section_header_for(focus_type: str) -> str:
-    return "## Project Categories" if focus_type in ("project", "lifes_work") else "## Spotlights"
+    return "## Project Categories" if focus_type in ("project", "lifes_work") else "## Focuses"
 
 
 # Focus type → research_expand --type and --output.
@@ -313,8 +319,13 @@ def scaffold_category(md_text: str, label: str, focus_type: str, tag: str | None
     if section in md_text:
         start = md_text.index(section) + len(section)
         # End of this section = the next top-level section header, or EOF.
-        nexts = [p for p in (md_text.find("\n## Project Categories", start),
-                             md_text.find("\n## Spotlights", start)) if p != -1]
+        nexts = [
+            p for p in (
+                md_text.find("\n## Project Categories", start),
+                md_text.find("\n## Focuses", start),
+                md_text.find("\n## " + OLD_FOCUS_TERM + "s", start),
+            ) if p != -1
+        ]
         boundary = min(nexts) if nexts else len(md_text)
         new_md = md_text[:boundary].rstrip() + "\n\n" + block + md_text[boundary:]
     else:

@@ -111,7 +111,7 @@ ARC_FUNCTIONS = tuple(fn for fn, _ in MEMOIR_ARC)
 
 # Gap-detection thresholds
 GAP_COVERAGE_THRESHOLD = 0.30   # < 30% = thin
-GAP_PERSON_MENTION_MIN = 3       # mentioned ≥ 3 times but no spotlight → flag
+GAP_PERSON_MENTION_MIN = 3       # mentioned ≥ 3 times but no Focus → flag
 
 # ---------------------------------------------------------------------------
 # Gap detection keyword maps
@@ -474,8 +474,8 @@ def detect_gaps(answers: list[dict]) -> dict:
                 "coverage": round(ratio, 3),
             })
 
-    # Family: flag people mentioned ≥3 times who appear to have no wiki spotlight page
-    unspotlighted_family: list[dict] = []
+    # Family: flag people mentioned ≥3 times who appear to have no wiki Focus page
+    unfocused_family: list[dict] = []
     for person, count in family_counts.items():
         if count >= GAP_PERSON_MENTION_MIN:
             # Check if there's a wiki page for them
@@ -485,7 +485,7 @@ def detect_gaps(answers: list[dict]) -> dict:
                 if person in p.stem.lower() and p.stat().st_size > 0
             ) if wiki_people.exists() else False
             if not has_wiki:
-                unspotlighted_family.append({
+                unfocused_family.append({
                     "key": person,
                     "label": person.replace("_", " ").title(),
                     "mentions": count,
@@ -496,7 +496,7 @@ def detect_gaps(answers: list[dict]) -> dict:
         "total_answers": total_answers,
         "thin_periods": sorted(thin_periods, key=lambda x: x["mentions"]),
         "thin_themes": sorted(thin_themes, key=lambda x: x["mentions"]),
-        "unspotlighted_family": sorted(unspotlighted_family, key=lambda x: -x["mentions"]),
+        "unfocused_family": sorted(unfocused_family, key=lambda x: -x["mentions"]),
     }
 
 
@@ -715,9 +715,9 @@ def build_gaps_prompt(gaps: dict, mission: str) -> str:
         lines.append("  No thin themes detected.")
     lines.append("")
 
-    lines.append("## FAMILY MENTIONED BUT NO WIKI SPOTLIGHT")
-    if gaps["unspotlighted_family"]:
-        for f in gaps["unspotlighted_family"]:
+    lines.append("## FAMILY MENTIONED BUT NO WIKI FOCUS")
+    if gaps["unfocused_family"]:
+        for f in gaps["unfocused_family"]:
             lines.append(f"  {f['label']:20s}  mentioned {f['mentions']} times")
     else:
         lines.append("  All frequently mentioned family members have wiki pages.")
@@ -739,11 +739,11 @@ def build_gaps_prompt(gaps: dict, mission: str) -> str:
             "why": f"Only {t['mentions']} answers cover this theme",
             "cmd": f"python3 system/research_expand.py --topic \"{t['label']}\" --type theme --output essay",
         })
-    for f in gaps["unspotlighted_family"][:2]:
+    for f in gaps["unfocused_family"][:2]:
         suggestions.append({
             "title": f["label"],
             "type": "person",
-            "why": f"Mentioned {f['mentions']} times but no spotlight yet",
+            "why": f"Mentioned {f['mentions']} times but no Focus yet",
             "cmd": f"python3 system/research_expand.py --topic \"{f['label']}\" --type person --output letter",
         })
 
@@ -1143,7 +1143,7 @@ def cmd_gaps(args: argparse.Namespace) -> int:
         suggestions.append(("time_period", p["label"]))
     for t in gaps["thin_themes"][:2]:
         suggestions.append(("theme", t["label"]))
-    for f in gaps["unspotlighted_family"][:1]:
+    for f in gaps["unfocused_family"][:1]:
         suggestions.append(("person", f["label"]))
 
     if suggestions:

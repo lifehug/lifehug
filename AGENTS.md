@@ -135,7 +135,7 @@ python3 system/lifehug.py monthly-research
 LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh
 ```
 
-The monthly loop compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Spotlights, reports progress, and autocommits real changes.
+The monthly loop compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, reports progress, and autocommits real changes.
 
 Review candidate questions before they enter the daily flow:
 
@@ -179,7 +179,7 @@ The pending question is always in `system/rotation.json` → `last_question_id`.
 
 Follow the rhythms in CLAUDE.md:
 - **Weekly**: Run `weekly-maintenance`; review any manual source findings, queue balance, and progress
-- **Monthly**: Run `monthly-research`; review new candidates and Spotlight recommendations
+- **Monthly**: Run `monthly-research`; review new candidates and Focus recommendations
 - **Milestones**: Draft deliverables when categories hit GREEN
 
 ## File Paths

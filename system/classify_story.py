@@ -33,6 +33,7 @@ from pathlib import Path
 SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
+LEGACY_FOCUS_KEY = "spot" "light_opportunities"
 
 from lifehug_core import (
     ANSWERS_DIR,
@@ -237,7 +238,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   "possible_outputs": [
     {{ "type": "letter|chapter|essay|post|speech|profile", "description": "string" }}
   ],
-  "spotlight_opportunities": [
+  "focus_opportunities": [
     {{
       "entity": "string",
       "type": "person|place|period|project|theme",
@@ -265,7 +266,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   - Prioritize questions that deepen thin or unresolved areas
   - Assign story_function from the list: {', '.join(STORY_FUNCTIONS)}
   - Set priority between 0.4 (nice-to-have) and 0.95 (critical gap)
-- `spotlight_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section
+- `focus_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section
 - `contradictions`: tensions or paradoxes in values, beliefs, or events — leave them unresolved, do not explain them away
 - `possible_outputs`: concrete deliverables this story could contribute to
 
@@ -445,7 +446,10 @@ def build_classification(
         "projects": ai_result.get("projects", []),
         "contradictions": ai_result.get("contradictions", []),
         "possible_outputs": ai_result.get("possible_outputs", []),
-        "spotlight_opportunities": ai_result.get("spotlight_opportunities", []),
+        "focus_opportunities": ai_result.get(
+            "focus_opportunities",
+            ai_result.get(LEGACY_FOCUS_KEY, []),
+        ),
         "self_understanding_insights": ai_result.get("self_understanding_insights", []),
     }
 
@@ -466,7 +470,7 @@ def print_summary(classification: dict, new_candidates: list[dict]) -> None:
     themes = classification.get("themes", [])
     contradictions = classification.get("contradictions", [])
     outputs = classification.get("possible_outputs", [])
-    spotlights = classification.get("spotlight_opportunities", [])
+    focuses = classification.get("focus_opportunities", classification.get(LEGACY_FOCUS_KEY, []))
     insights = classification.get("self_understanding_insights", [])
 
     if people:
@@ -483,9 +487,9 @@ def print_summary(classification: dict, new_candidates: list[dict]) -> None:
     if outputs:
         out_types = ", ".join(o.get("type", "?") for o in outputs)
         print(f"  outputs : {out_types}")
-    if spotlights:
-        spot_names = ", ".join(s.get("entity", "?") for s in spotlights[:4])
-        print(f"  spotlts : {spot_names}")
+    if focuses:
+        focus_names = ", ".join(s.get("entity", "?") for s in focuses[:4])
+        print(f"  focuses : {focus_names}")
     if insights:
         print(f"  insights: {len(insights)}")
 

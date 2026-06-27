@@ -387,8 +387,8 @@ def cmd_monthly_research(args: argparse.Namespace) -> int:
         env["LIFEHUG_MONTHLY_GAP_LIMIT"] = str(args.gap_limit)
     if args.self_topic:
         env["LIFEHUG_MONTHLY_SELF_TOPIC"] = args.self_topic
-    if args.spotlight_min_score is not None:
-        env["LIFEHUG_MONTHLY_SPOTLIGHT_MIN_SCORE"] = str(args.spotlight_min_score)
+    if args.focus_min_score is not None:
+        env["LIFEHUG_MONTHLY_FOCUS_MIN_SCORE"] = str(args.focus_min_score)
     return run(["bash", str(script("monthly_research.sh"))], env=env)
 
 
@@ -434,7 +434,7 @@ def cmd_research_expand(args: argparse.Namespace) -> int:
     return run_python("research_expand.py", flags)
 
 
-def cmd_recommend_spotlights(args: argparse.Namespace) -> int:
+def cmd_recommend_focuses(args: argparse.Namespace) -> int:
     flags = ["--recommend"]
     if args.min_score is not None:
         flags.extend(["--min-score", str(args.min_score)])
@@ -444,17 +444,17 @@ def cmd_recommend_spotlights(args: argparse.Namespace) -> int:
         flags.append("--include-dismissed")
     if args.json:
         flags.append("--json")
-    return run_python("recommend_spotlights.py", flags)
+    return run_python("recommend_focuses.py", flags)
 
 
-def cmd_spotlight_action(args: argparse.Namespace) -> int:
+def cmd_focus_action(args: argparse.Namespace) -> int:
     if args.approve:
-        return run_python("recommend_spotlights.py", ["--approve", args.approve])
+        return run_python("recommend_focuses.py", ["--approve", args.approve])
     if args.dismiss:
         flags = ["--dismiss", args.dismiss]
         if args.reason:
             flags.extend(["--reason", args.reason])
-        return run_python("recommend_spotlights.py", flags)
+        return run_python("recommend_focuses.py", flags)
     return 1
 
 
@@ -708,22 +708,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_research_expand)
 
-    # --- Spotlight Recommendations ---
-    p = sub.add_parser("recommend-spotlights", help="Recommend new spotlights from accumulated stories")
+    # --- Focus Recommendations ---
+    p = sub.add_parser("recommend-focuses", help="Recommend new Focuses from accumulated stories")
     p.add_argument("--min-score", type=float)
     p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme"])
     p.add_argument("--include-dismissed", action="store_true")
     p.add_argument("--json", action="store_true")
-    p.set_defaults(func=cmd_recommend_spotlights)
+    p.set_defaults(func=cmd_recommend_focuses)
 
-    p = sub.add_parser("spotlight-approve", help="Approve a spotlight recommendation")
+    p = sub.add_parser("focus-approve", help="Approve a Focus recommendation")
     p.add_argument("approve", metavar="REC_ID")
-    p.set_defaults(func=cmd_spotlight_action, dismiss=None, reason=None)
+    p.set_defaults(func=cmd_focus_action, dismiss=None, reason=None)
 
-    p = sub.add_parser("spotlight-dismiss", help="Dismiss a spotlight recommendation")
+    p = sub.add_parser("focus-dismiss", help="Dismiss a Focus recommendation")
     p.add_argument("dismiss", metavar="REC_ID")
     p.add_argument("--reason", default="")
-    p.set_defaults(func=cmd_spotlight_action, approve=None)
+    p.set_defaults(func=cmd_focus_action, approve=None)
 
     # --- Unified Ingest ---
     p = sub.add_parser("ingest", help="Import from external sources (x, email, instagram, file)")
@@ -822,11 +822,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_weekly_maintenance)
 
-    p = sub.add_parser("monthly-research", help="Run monthly neighborhood growth and spotlight recommendations")
+    p = sub.add_parser("monthly-research", help="Run monthly neighborhood growth and Focus recommendations")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--gap-limit", type=int, help="Maximum new gap neighborhoods to attempt")
     p.add_argument("--self-topic", help="Self-knowledge topic to seed when missing")
-    p.add_argument("--spotlight-min-score", type=float, help="Minimum Spotlight recommendation score")
+    p.add_argument("--focus-min-score", type=float, help="Minimum Focus recommendation score")
     p.set_defaults(func=cmd_monthly_research)
 
     p = sub.add_parser("followups-status", help="Show pass-transition follow-up state")

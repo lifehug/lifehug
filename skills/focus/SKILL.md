@@ -29,7 +29,7 @@ Ask these one at a time, conversationally — don't dump all four at once:
    (e.g. "a letter to my daughter" → label "Letter to Maya", deliverable `letter`.)
 2. **How big is it?** → tier: a quick post is `basic`, an essay/chapter or a single person is `standard`, a whole book or your life's work is `extreme`.
 3. **What kind of thing is it?** → type: `person`, `relationship`, `project`, `theme`, `place`, `period`, `event`, `lifes_work`, or `self` (self-knowledge).
-   - For a person you already spotlight, or to deepen a relationship, prefer `relationship`.
+   - For a person you already focus, or to deepen a relationship, prefer `relationship`.
    - For "understanding myself" topics, use `self`.
 
 Then create it in one command:

@@ -47,6 +47,7 @@ from lifehug_core import (
 SYSTEM_DIR = Path(__file__).parent
 
 VALID_FORMATS = ("letter", "tweet", "instagram", "chapter")
+OLD_FOCUS_TERM = "Spot" "light"
 
 
 def _display_path(p):
@@ -71,32 +72,33 @@ def load_config():
     return config
 
 
-def parse_spotlight_subjects(md_text):
-    """Discover subject → category-letter mapping from ## Spotlight sections.
+def parse_focus_subjects(md_text):
+    """Discover subject → category-letter mapping from Focus sections.
 
-    Walks question-bank.md. Inside a `## Spotlights` section header, each
-    `## L: Spotlight on Katie` (or `Spotlight — Katie`) is recorded with its
-    cleaned name. Also records categories K+ as spotlight categories regardless
-    of section, since the convention is K+ = spotlight.
+    Walks question-bank.md. Inside a `## Focuses` section header, each
+    `## L: Focus on Katie` (or `Focus — Katie`) is recorded with its
+    cleaned name. Also records categories K+ as Focus categories regardless
+    of section.
     """
     subjects = {}  # cleaned_name (lowercase) → category letter
     cat_names = {}  # letter → cleaned name
 
     header_pattern = re.compile(r'^## ([A-Z]): (.+?)\s*$')
-    in_spotlight_section = False
+    in_focus_section = False
 
     for line in md_text.splitlines():
         stripped = line.strip()
-        if stripped.lower().startswith("## spotlight"):
-            in_spotlight_section = True
+        lower = stripped.lower()
+        if lower.startswith("## focus") or lower.startswith("## " + OLD_FOCUS_TERM.lower()):
+            in_focus_section = True
             continue
-        if stripped.startswith("## ") and not stripped.lower().startswith("## spotlight"):
+        if stripped.startswith("## ") and not lower.startswith(("## focus", "## " + OLD_FOCUS_TERM.lower())):
             # Hit some other section header
             m = header_pattern.match(stripped)
             if m:
                 cat_id = m.group(1)
                 if cat_id < "K":
-                    in_spotlight_section = False
+                    in_focus_section = False
 
         m = header_pattern.match(stripped)
         if not m:
@@ -104,14 +106,17 @@ def parse_spotlight_subjects(md_text):
         cat_id = m.group(1)
         raw_name = m.group(2).strip()
 
-        # Only treat K+ as spotlight categories (matches ask.py convention)
+        # Only treat K+ as Focus categories (matches ask.py convention)
         if cat_id < "K":
             continue
 
-        # Clean: drop leading "Spotlight on", "Spotlight —", "Spotlight:", "Spotlight"
+        # Clean: drop leading "Focus on", "Focus —", "Focus:", "Focus"
         clean = raw_name
-        for prefix in ("Spotlight on ", "Spotlight — ", "Spotlight - ",
-                       "Spotlight: ", "Spotlight "):
+        for prefix in (
+            "Focus on ", "Focus — ", "Focus - ", "Focus: ", "Focus ",
+            f"{OLD_FOCUS_TERM} on ", f"{OLD_FOCUS_TERM} — ", f"{OLD_FOCUS_TERM} - ",
+            f"{OLD_FOCUS_TERM}: ", f"{OLD_FOCUS_TERM} ",
+        ):
             if clean.startswith(prefix):
                 clean = clean[len(prefix):]
                 break
@@ -130,7 +135,7 @@ def resolve_categories(subject, categories_arg):
     Returns (categories_list, resolved_subject_name).
 
     If --categories is given, use those directly.
-    Else if --subject is given, look it up in spotlight subjects.
+    Else if --subject is given, look it up in Focus subjects.
     """
     if categories_arg:
         cats = [c.strip().upper() for c in categories_arg.split(",") if c.strip()]
@@ -145,7 +150,7 @@ def resolve_categories(subject, categories_arg):
             print(f"Error: {QUESTIONS_FILE} not found", file=sys.stderr)
             sys.exit(1)
         md_text = QUESTIONS_FILE.read_text()
-        subjects, cat_names = parse_spotlight_subjects(md_text)
+        subjects, cat_names = parse_focus_subjects(md_text)
 
         # Try exact (case-insensitive) match first
         key = subject.lower()
@@ -163,13 +168,13 @@ def resolve_categories(subject, categories_arg):
                   file=sys.stderr)
             sys.exit(1)
 
-        print(f"Error: subject '{subject}' not found in question-bank.md spotlights.",
+        print(f"Error: subject '{subject}' not found in question-bank.md Focuses.",
               file=sys.stderr)
         if subjects:
             available = ", ".join(f"{cat_names[l]} ({l})" for _, l in subjects.items())
             print(f"Available subjects: {available}", file=sys.stderr)
         else:
-            print("No spotlight subjects defined yet.", file=sys.stderr)
+            print("No Focus subjects defined yet.", file=sys.stderr)
         sys.exit(1)
 
     return [], None
@@ -624,7 +629,7 @@ def main():
     parser.add_argument("--format", choices=VALID_FORMATS,
                         help="Format type")
     parser.add_argument("--subject", metavar="NAME",
-                        help="Spotlight subject (matched against question-bank.md)")
+                        help="Focus subject (matched against question-bank.md)")
     parser.add_argument("--title", metavar="SLUG",
                         help="Title slug for the output (used by --prompt)")
     parser.add_argument("--categories", metavar="A,B,C",

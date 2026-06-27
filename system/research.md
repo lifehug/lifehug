@@ -147,20 +147,20 @@ The rotation system prioritizes RED categories, then YELLOW, then circles back t
 
 ---
 
-## 6. Spotlight System
+## 6. Focus System
 
-### What Spotlights Are
+### What Focuses Are
 
-Spotlights are focused collections about important people or life episodes. When the same person or event keeps appearing in answers, it's worth going deeper with targeted questions.
+Focuses are focused collections about important people or life episodes. When the same person or event keeps appearing in answers, it's worth going deeper with targeted questions.
 
-### How Spotlights Work
+### How Focuses Work
 - The AI watches for recurring names and themes
-- When a pattern emerges, it offers to create a Spotlight
-- Each Spotlight gets 5-10 targeted questions
-- Spotlights rotate at lower frequency than main questions
+- When a pattern emerges, it offers to create a Focus
+- Each Focus gets 5-10 targeted questions
+- Focuses rotate at lower frequency than main questions
 - They produce their own deliverables: letters, profiles, short stories
 
-### Spotlight Deliverables
+### Focus Deliverables
 - **Character profile**: Who this person is, their relationship to the author, key moments together
 - **Letter**: A letter to or about this person
 - **Short story**: A narrative piece centered on a specific episode
@@ -171,7 +171,7 @@ Spotlights are focused collections about important people or life episodes. When
 ## 7. Review Cycles
 
 - **Weekly:** Quick coverage check — how many categories are RED/YELLOW/GREEN?
-- **Monthly:** Read through recent answers, look for narrative threads and Spotlight opportunities
+- **Monthly:** Read through recent answers, look for narrative threads and Focus opportunities
 - **Quarterly:** Draft milestone deliverables from accumulated material
 
 ---

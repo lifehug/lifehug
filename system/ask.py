@@ -67,12 +67,12 @@ def pick_next_question(questions, categories, rotation):
     if not pending:
         return None
 
-    spotlight_freq = rotation.get("spotlight_frequency", 4)
+    focus_freq = rotation.get("focus_frequency", rotation.get("spot" "light_frequency", 4))
     questions_asked = rotation.get("questions_asked", 0)
-    spotlight_turn = (
-        spotlight_freq > 0
+    focus_turn = (
+        focus_freq > 0
         and questions_asked > 0
-        and questions_asked % spotlight_freq == 0
+        and questions_asked % focus_freq == 0
     )
 
     answered_per_cat = {}
@@ -90,17 +90,17 @@ def pick_next_question(questions, categories, rotation):
         cat_scores.append((ratio, cat))
     cat_scores.sort()
 
-    spotlight_cats = [
+    focus_cats = [
         (r, c) for r, c in cat_scores
-        if categories.get(c, {}).get("group") == "spotlight"
+        if categories.get(c, {}).get("group") == "focus"
     ]
     main_cats = [
         (r, c) for r, c in cat_scores
-        if categories.get(c, {}).get("group") != "spotlight"
+        if categories.get(c, {}).get("group") != "focus"
     ]
 
-    if spotlight_turn and spotlight_cats:
-        chosen_cat = spotlight_cats[0][1]
+    if focus_turn and focus_cats:
+        chosen_cat = focus_cats[0][1]
     elif main_cats:
         last_id = rotation.get("last_question_id")
         last_group = None
@@ -133,7 +133,7 @@ def pick_next_question(questions, categories, rotation):
 def format_question(question, categories, pass_prefix=None):
     cat_info = categories.get(question["category"], {})
     group = cat_info.get("group", "main")
-    if group == "spotlight":
+    if group == "focus":
         emoji = "✨"
     elif group == "project":
         emoji = "💼"

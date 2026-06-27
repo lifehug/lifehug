@@ -23,7 +23,8 @@ from lifehug_core import (
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
     SOURCES_DIR,
-    SPOTLIGHT_RECS_FILE,
+    FOCUS_RECS_FILE,
+    LEGACY_FOCUS_RECS_FILE,
     WIKI_DIR,
     answer_body,
     answer_id_from_filename,
@@ -63,7 +64,7 @@ DEFAULT_LANE_POLICY = {
 GROUP_CAPS = {
     "main": 0.50,
     "project": 0.35,
-    "spotlight": 0.25,
+    "focus": 0.25,
 }
 
 STORY_FUNCTIONS = (
@@ -185,6 +186,11 @@ def load_planner_state(*, write_default: bool = False) -> dict:
         data = default_planner_state()
     else:
         data = merge_defaults(data, default_planner_state())
+    group_caps = data.get("caps", {}).get("group", {})
+    old_focus_group = "spot" "light"
+    if "focus" not in group_caps and old_focus_group in group_caps:
+        group_caps["focus"] = group_caps[old_focus_group]
+    group_caps.pop(old_focus_group, None)
     if write_default:
         data["last_updated"] = now_utc()
         write_json(PLANNER_STATE_FILE, data)
@@ -414,7 +420,7 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
     rows.sort(key=lambda q: (
         q["objective"] is None,
         q["category_ratio"],
-        q["group"] == "spotlight",
+        q["group"] == "focus",
         qid_key(str(q["id"])),
     ))
     return rows
@@ -655,7 +661,13 @@ def report(limit: int = 10) -> int:
     for group in sorted(grouped):
         data = grouped[group]
         ratio = data["answered"] / data["total"] if data["total"] else 0
-        cap = planner_state.get("caps", {}).get("group", GROUP_CAPS).get(group)
+        state_caps = dict(planner_state.get("caps", {}).get("group", {}))
+        old_focus_group = "spot" "light"
+        if "focus" not in state_caps and old_focus_group in state_caps:
+            state_caps["focus"] = state_caps[old_focus_group]
+        cap_map = dict(GROUP_CAPS)
+        cap_map.update(state_caps)
+        cap = cap_map.get(group)
         cap_text = f", cap {cap:.0%}" if isinstance(cap, float) else ""
         print(f"- {group}: {data['answered']}/{data['total']} ({ratio:.0%}{cap_text})")
 
@@ -782,20 +794,24 @@ def report(limit: int = 10) -> int:
         print()
         print("Neighborhoods: none")
 
-    # Spotlight recommendations section
-    spotlight_data = read_json(SPOTLIGHT_RECS_FILE, default={}) or {}
-    recs = spotlight_data.get("recommendations", [])
+    # Focus recommendations section
+    focus_data = (
+        read_json(FOCUS_RECS_FILE, default=None)
+        or read_json(LEGACY_FOCUS_RECS_FILE, default={})
+        or {}
+    )
+    recs = focus_data.get("recommendations", [])
     pending_recs = [r for r in recs if r.get("status") == "pending"]
     if recs:
         print()
-        print(f"Spotlight recommendations: {len(recs)} total, {len(pending_recs)} pending")
+        print(f"Focus recommendations: {len(recs)} total, {len(pending_recs)} pending")
         for rec in sorted(pending_recs, key=lambda r: -r.get("score", 0))[:5]:
             strength = rec.get("evidence_strength", "?")
             emoji = {"strong": "\U0001f7e2", "moderate": "\U0001f7e1", "weak": "\U0001f534"}.get(strength, "\u26aa")
             print(f"  {emoji} {rec.get('entity', '?')} ({rec.get('type', '?')}) — score: {rec.get('score', 0):.1f} [{strength}]")
     else:
         print()
-        print("Spotlight recommendations: none (run recommend-spotlights to generate)")
+        print("Focus recommendations: none (run recommend-focuses to generate)")
 
     unanswered = sum(1 for q in questions if not q["answered"])
     print()

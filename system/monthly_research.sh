@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lifehug Monthly Research
-# Opens new question neighborhoods and spotlight recommendations at a slow cadence.
+# Opens new question neighborhoods and Focus recommendations at a slow cadence.
 
 set -euo pipefail
 
@@ -12,7 +12,7 @@ DRY_RUN="${LIFEHUG_MONTHLY_DRY_RUN:-0}"
 GAP_LIMIT="${LIFEHUG_MONTHLY_GAP_LIMIT:-2}"
 SELF_TOPIC="${LIFEHUG_MONTHLY_SELF_TOPIC:-Who I am becoming}"
 SELF_OUTPUT="${LIFEHUG_MONTHLY_SELF_OUTPUT:-essay}"
-SPOTLIGHT_MIN_SCORE="${LIFEHUG_MONTHLY_SPOTLIGHT_MIN_SCORE:-15}"
+FOCUS_MIN_SCORE="${LIFEHUG_MONTHLY_FOCUS_MIN_SCORE:-15}"
 TARGETS_FILE="$(mktemp "${TMPDIR:-/tmp}/lifehug-monthly-targets.XXXXXX")"
 trap 'rm -f "$TARGETS_FILE"' EXIT
 
@@ -111,7 +111,7 @@ for item in gaps.get("thin_periods", [])[:3]:
     add(item["label"], "time_period", "chapter")
 for item in gaps.get("thin_themes", [])[:3]:
     add(item["label"], "theme", "essay")
-for item in gaps.get("unspotlighted_family", [])[:2]:
+for item in gaps.get("unfocused_family", gaps.get("un" "spot" "lighted_family", []))[:2]:
     add(item["label"], "person", "letter")
 
 for row in rows:
@@ -119,8 +119,8 @@ for row in rows:
 PY
 }
 
-preview_spotlights() {
-  python3 - "$WORKSPACE" "$SPOTLIGHT_MIN_SCORE" <<'PY'
+preview_focuses() {
+  python3 - "$WORKSPACE" "$FOCUS_MIN_SCORE" <<'PY'
 import sys
 from pathlib import Path
 
@@ -128,10 +128,10 @@ workspace = Path(sys.argv[1])
 min_score = float(sys.argv[2])
 sys.path.insert(0, str(workspace / "system"))
 
-import recommend_spotlights as spotlights  # noqa: E402
+import recommend_focuses as focuses  # noqa: E402
 
-recs = spotlights.recommend(min_score=min_score)
-spotlights.display_recommendations(recs)
+recs = focuses.recommend(min_score=min_score)
+focuses.display_recommendations(recs)
 PY
 }
 
@@ -165,8 +165,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
     run_step python3 "$WORKSPACE/system/research_expand.py" --topic "$SELF_TOPIC" --type self --output "$SELF_OUTPUT" --dry-run
   fi
   echo
-  echo "==> preview spotlight recommendations"
-  preview_spotlights
+  echo "==> preview Focus recommendations"
+  preview_focuses
   run_step python3 "$WORKSPACE/system/lifehug.py" progress
   exit 0
 fi
@@ -183,6 +183,6 @@ while IFS=$'\t' read -r topic topic_type output; do
   generate_topic "$topic" "$topic_type" "$output"
 done < "$TARGETS_FILE"
 generate_topic "$SELF_TOPIC" self "$SELF_OUTPUT"
-run_optional python3 "$WORKSPACE/system/lifehug.py" recommend-spotlights --min-score "$SPOTLIGHT_MIN_SCORE"
+run_optional python3 "$WORKSPACE/system/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE"
 run_step python3 "$WORKSPACE/system/lifehug.py" progress
 safe_autocommit

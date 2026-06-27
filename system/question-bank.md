@@ -47,6 +47,6 @@ Pass 1: Skeleton
 
 ---
 
-## Spotlights
+## Focuses
 
-*Spotlight categories (K+) are added as significant people or episodes emerge from your answers. Each Spotlight gets 5-10 targeted questions.*
+*Focus categories (K+) are added as significant people or episodes emerge from your answers. Each Focus gets 5-10 targeted questions.*

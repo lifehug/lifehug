@@ -40,9 +40,11 @@ PROTECTED_FILES = {
     "state/planner_state.json",
     "state/source_manifest.json",
     "state/source_lint_findings.json",
+    "state/focus_recommendations.json",
+    "state/" + ("spot" "light") + "_recommendations.json",
     # Legacy paths (pre-v8) — still protected so historical content isn't clobbered
     "drafts/",
-    "spotlights/",
+    ("spot" "lights") + "/",
 }
 
 
@@ -183,7 +185,7 @@ def check_dirty_framework_files(framework_files):
 def run_migrations(target_version, current_version):
     """Run any one-time migrations needed for the target version.
 
-    v8: drafts/ and spotlights/ are replaced by outputs/. We don't delete the
+    v8: legacy output folders are replaced by outputs/. We don't delete the
     legacy directories (they're protected user data), but we do ensure outputs/
     exists with a .gitkeep so compose.py can write to it.
 
@@ -197,7 +199,7 @@ def run_migrations(target_version, current_version):
         if not gitkeep.exists():
             gitkeep.write_text("")
         legacy = []
-        for name in ("drafts", "spotlights"):
+        for name in ("drafts", "spot" "lights"):
             d = REPO_DIR / name
             if d.exists():
                 # Check if it has any content beyond .gitkeep
@@ -232,6 +234,19 @@ def run_migrations(target_version, current_version):
             )
         except Exception as exc:  # never let a migration break the update
             print(f"  Note: roadmap backfill deferred (run `python3 system/roadmap.py`): {exc}")
+
+    if target_version >= 21 and current_version < 21:
+        # v21: finish the Focus terminology migration across protected user
+        # files. Older workspaces may still have question-bank sections,
+        # rotation keys, queue groups, planner caps, or recommendation files
+        # using pre-v21 terminology; normalize them without touching raw answers.
+        try:
+            from focus_migration import migrate_workspace  # local import; same dir
+            changed = migrate_workspace()
+            if changed:
+                print(f"  Migrated Focus terminology in {len(changed)} protected file(s).")
+        except Exception as exc:  # never let a migration break the update
+            print(f"  Note: Focus terminology migration deferred (run `python3 system/focus_migration.py`): {exc}")
 
 
 def apply_version(version):

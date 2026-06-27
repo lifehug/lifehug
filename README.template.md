@@ -7,7 +7,7 @@
 
 *Each Focus is something I'm building toward — a person, a book, a theme — with an objective and a tier. See the live roadmap with `python3 system/lifehug.py roadmap` and progress toward deliverables with `python3 system/lifehug.py progress`.*
 
-## Spotlights
+## Focuses
 *People and episodes discovered as I answer questions; each becomes a Focus on the roadmap.*
 
 ## Outputs
@@ -20,7 +20,7 @@
 *Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, update the quality profile, write the next queue, scan gaps, and report progress.*
 
 ## Monthly Research
-*Run `python3 system/lifehug.py monthly-research` to open a capped set of new research neighborhoods, refresh self-knowledge candidates, recommend Spotlights, and report progress.*
+*Run `python3 system/lifehug.py monthly-research` to open a capped set of new research neighborhoods, refresh self-knowledge candidates, recommend Focuses, and report progress.*
 
 ## Coverage
 📊 0/0 questions answered

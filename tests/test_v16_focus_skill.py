@@ -26,9 +26,9 @@ BANK = """# Lifehug — Question Bank
 ## F: The Problem (Etherfuse Story)
 - [ ] F1: the problem
 
-## Spotlights
+## Focuses
 
-## K: Spotlight — Mom
+## K: Focus — Mom
 - [x] K1: about mom *(2026-01-02)*
 """
 
@@ -41,27 +41,27 @@ class ScaffoldTests(unittest.TestCase):
         # A, F, K used → next free is B.
         self.assertEqual(self.rm.next_free_letter(BANK), "B")
 
-    def test_theme_lands_under_spotlights(self):
+    def test_theme_lands_under_focuses(self):
         new_md, letter = self.rm.scaffold_category(BANK, "Faith", "theme")
-        # The new category header exists and sits after the Spotlights section.
+        # The new category header exists and sits after the Focuses section.
         self.assertIn(f"## {letter}: Faith", new_md)
-        self.assertLess(new_md.index("## Spotlights"), new_md.index(f"## {letter}: Faith"))
-        # And it parses with the spotlight group.
+        self.assertLess(new_md.index("## Focuses"), new_md.index(f"## {letter}: Faith"))
+        # And it parses with the focus group.
         cats = self.rm.parse_categories(new_md)
-        self.assertEqual(cats[letter]["group"], "spotlight")
+        self.assertEqual(cats[letter]["group"], "focus")
 
     def test_project_lands_under_project_categories_with_tag(self):
         new_md, letter = self.rm.scaffold_category(BANK, "New Book", "project", tag="New Book")
         self.assertIn(f"## {letter}: New Book (New Book)", new_md)
         cats = self.rm.parse_categories(new_md)
         self.assertEqual(cats[letter]["group"], "project")
-        # The project category must come before the Spotlights section.
-        self.assertLess(new_md.index(f"## {letter}: New Book"), new_md.index("## Spotlights"))
+        # The project category must come before the Focuses section.
+        self.assertLess(new_md.index(f"## {letter}: New Book"), new_md.index("## Focuses"))
 
     def test_scaffold_creates_missing_section(self):
         minimal = "# Bank\n\n## A: Origins\n- [ ] A1: q\n"
         new_md, letter = self.rm.scaffold_category(minimal, "Faith", "theme")
-        self.assertIn("## Spotlights", new_md)
+        self.assertIn("## Focuses", new_md)
         self.assertIn(f"## {letter}: Faith", new_md)
 
 
@@ -70,7 +70,7 @@ class BulkPromoteTests(unittest.TestCase):
         self.qc = load("question_candidates")
 
     def test_promote_neighborhood_scopes_and_dedupes(self):
-        bank = "# Bank\n\n## Spotlights\n\n## N: Faith\n"
+        bank = "# Bank\n\n## Focuses\n\n## N: Faith\n"
         data = {"version": 1, "candidates": [
             {"id": "c1", "text": "What is your earliest memory of faith?",
              "status": "candidate", "neighborhood_id": "nbhd-faith", "priority": 0.9},
@@ -89,7 +89,7 @@ class BulkPromoteTests(unittest.TestCase):
         self.assertTrue(all(c["status"] == "promoted" for c in data["candidates"][:2]))
 
     def test_promote_neighborhood_skips_duplicates(self):
-        bank = "# Bank\n\n## Spotlights\n\n## N: Faith\n- [ ] N1: Already here.\n"
+        bank = "# Bank\n\n## Focuses\n\n## N: Faith\n- [ ] N1: Already here.\n"
         data = {"version": 1, "candidates": [
             {"id": "c1", "text": "Already here.", "status": "candidate",
              "neighborhood_id": "nbhd-faith", "priority": 0.9},

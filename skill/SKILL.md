@@ -65,7 +65,7 @@ python3 system/lifehug.py planner-state     # show/init planner state
 python3 system/lifehug.py serve             # local wiki at 127.0.0.1:8765
 python3 system/lifehug.py daily-dry-run     # validate daily delivery without sending
 python3 system/lifehug.py weekly-maintenance # weekly lint/fix, profile, queue, progress
-python3 system/lifehug.py monthly-research  # monthly neighborhoods and spotlight recommendations
+python3 system/lifehug.py monthly-research  # monthly neighborhoods and focus recommendations
 python3 system/lifehug.py followups-status  # pass-transition state
 python3 system/lifehug.py followups-prompt  # prompt context for AI-generated depth questions
 ```
@@ -209,7 +209,7 @@ cd <workspace>
 system/monthly_research.sh
 ```
 
-Use `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect the monthly loop without writes. The monthly loop compiles, detects gaps, opens only a small capped set of new neighborhoods, refreshes the self-knowledge arc if needed, recommends Spotlights, reports progress, and autocommits real changes.
+Use `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect the monthly loop without writes. The monthly loop compiles, detects gaps, opens only a small capped set of new neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, reports progress, and autocommits real changes.
 
 ## Pass Transitions
 
@@ -224,7 +224,7 @@ The AI should generate valid JSON for `system/gen_followups.py --append`. Genera
 
 ## Add Or Manage A Focus
 
-A **Focus** is anything the user is building toward — a person, a book, a blog, a theme, their life's work (it unifies the old "spotlight" and "project" split). Each has an objective and a tier (`basic` ≈ blog/~8, `standard` ≈ essay/chapter/person/~20, `extreme` ≈ book/life's work/~50+).
+A **Focus** is anything the user is building toward — a person, a book, a blog, a theme, a relationship, a place, or their life's work. Each has an objective and a tier (`basic` ≈ blog/~8, `standard` ≈ essay/chapter/person/~20, `extreme` ≈ book/life's work/~50+).
 
 When the user says "add a focus" (or names something they want to build toward), interview briefly — **(1)** what they want to build (label + objective + deliverable), **(2)** how big (tier), **(3)** what kind (type) — then run one command:
 
@@ -247,15 +247,15 @@ python3 system/lifehug.py focus-set <id> --tier <t> --target <N> --objective "<.
 
 Don't create a Focus from a weak signal — confirm the objective first.
 
-## Spotlights
+## Focuses
 
-> Spotlights and projects are now **Focuses** (see *Add Or Manage A Focus*). Adding a question category here automatically becomes a Focus on the next `roadmap` rebuild.
+> Focuses are the single planning primitive (see *Add Or Manage A Focus*). Adding a question category here automatically becomes a Focus on the next `roadmap` rebuild.
 
-Use spotlights for important people, places, periods, projects, objects, or themes that deserve their own question arc.
+Use focuses for important people, places, periods, projects, objects, or themes that deserve their own question arc.
 
-Current safe implementation: person spotlights in `system/question-bank.md`.
+Current safe implementation: person focuses in `system/question-bank.md`.
 
-For a new person spotlight:
+For a new person focus:
 
 1. Scan `answers/` and `wiki/` for existing mentions.
 2. Choose the next available category letter after the current last `## X:` category.
@@ -275,14 +275,14 @@ python3 system/lifehug.py compile --dry-run
 
 5. Commit only if requested.
 
-Do not auto-create spotlights from weak signals; recommend them with evidence first.
+Do not auto-create focuses from weak signals; recommend them with evidence first.
 
 ## Local-First Roadmap Hooks
 
 Future workflows should follow this same script-first pattern:
 
 ```bash
-python3 system/lifehug.py recommend-spotlights
+python3 system/lifehug.py recommend-focuses
 ```
 
-Until those commands exist, track them as roadmap issues rather than inventing ad hoc state changes.
+Use these commands instead of inventing ad hoc state changes.

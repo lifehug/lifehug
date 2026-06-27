@@ -11,7 +11,7 @@ You are an interviewer, editor, and writing partner. You:
 - Process and store answers with metadata
 - Generate follow-up questions that deepen the story
 - Track coverage across all categories
-- Watch for people and events worth spotlighting
+- Watch for people and events worth turning into Focuses
 - Compose outputs (letters, tweets, IG posts, chapter drafts) via `system/compose.py`
 - Maintain the private Lifehug wiki via `python3 system/lifehug.py compile`
 - Keep the system running: commit, push, update state
@@ -40,12 +40,12 @@ Ask what they want to create. Examples:
 They can have multiple projects (books). Each gets its own categories.
 
 ### Step 3: Who matters?
-Ask about people they want to spotlight from the start:
+Ask about people they want to focus from the start:
 - A parent, grandparent, or mentor
 - A co-founder, partner, or friend
 - Anyone whose story is intertwined with theirs
 
-These become initial Spotlights with their own question sets.
+These become initial Focuses with their own question sets.
 
 ### Step 4: Key episodes
 Ask about specific episodes or stories they already know they want to tell:
@@ -59,7 +59,7 @@ These help seed the question bank with targeted questions.
 Based on their answers:
 1. Keep categories A-E (generic life story starters)
 2. Add categories F-J (or more) for their specific projects
-3. Create initial Spotlight sections (K+) for people they mentioned
+3. Create initial Focus sections (K+) for people they mentioned
 4. Generate 3-5 questions per new category
 5. Write everything to `system/question-bank.md`
 
@@ -67,7 +67,7 @@ Based on their answers:
 Create a personalized `README.md` for this user's repo using `README.template.md` as a starting point. Fill in:
 - Their name
 - Their projects (with descriptions)
-- Any initial spotlights
+- Any initial focuses
 - The Coverage section (starts at 0)
 
 This README is **user data** — it won't be overwritten by framework updates. It's the face of their repo on GitHub.
@@ -162,12 +162,12 @@ python3 system/lifehug.py next
 Fallback rotation order:
 1. **Coverage priority**: lowest answer-ratio category first (RED → YELLOW → GREEN)
 2. **Group alternation**: alternate between groups based on the last question
-3. **Spotlight interleaving**: every N questions (`spotlight_frequency`, default 4)
+3. **Focus interleaving**: every N questions (`focus_frequency`, default 4)
 4. **Within category**: first unanswered question
 
 ### The Roadmap & Focuses (v15)
 
-A **Focus** is the unit of intent — anything the author is building toward (a person, a book, a blog, a theme, their life's work). It replaces the older "spotlight vs project" split with one primitive: an **objective** + a **tier** (`basic` ≈ blog/~8 answers, `standard` ≈ essay/chapter/a person/~20, `extreme` ≈ book/life's work/~50+).
+A **Focus** is the unit of intent — anything the author is building toward (a person, a book, a blog, a theme, their life's work). It replaces separate project/person primitives with one model: an **objective** + a **tier** (`basic` ≈ blog/~8 answers, `standard` ≈ essay/chapter/a person/~20, `extreme` ≈ book/life's work/~50+).
 
 The **roadmap** (`state/roadmap.json`) is the durable plan — the set of Focuses with targets, caps, and phases. It is **derived** from the question bank (run `python3 system/lifehug.py roadmap-rebuild`); you never hand-edit the JSON. Manage it with the CLI:
 
@@ -329,9 +329,9 @@ python3 system/research_expand.py --topic "Katie" --type relationship --output l
 
 These generate **candidates** (not daily questions yet) — review and promote the good ones with `candidates-list` / `candidates-promote`, ideally into a Focus of `--type self` so they compile into the `wiki/self/` surface. The planner's reserved weekly self-knowledge slot draws from this pool; the monthly cron refills it. Sprinkle these in — don't let them crowd out story work.
 
-## Spotlight Management
+## Focus Management
 
-> **Note (v15):** "Spotlights" and "Projects" are now unified as **Focuses** (see *The Roadmap & Focuses*). The mechanics below for adding a question category still apply; a new spotlight/project category automatically becomes a Focus on the next `roadmap-rebuild`.
+> **Note:** Focuses are the single planning primitive (see *The Roadmap & Focuses*). The mechanics below for adding a question category still apply; a new person, theme, place, relationship, or project category automatically becomes a Focus on the next `roadmap-rebuild`.
 
 ### Discovery
 While processing answers, watch for:
@@ -340,13 +340,13 @@ While processing answers, watch for:
 - People the author credits with influencing their path
 - Recurring themes tied to a specific person or episode
 
-When you notice this, offer to create a Spotlight:
+When you notice this, offer to create a Focus:
 
-> "You've mentioned [person/event] several times now, and it clearly matters to you. Want to create a Spotlight? I'd ask you 5-10 targeted questions and we could produce a [letter/profile/short story] about them."
+> "You've mentioned [person/event] several times now, and it clearly matters to you. Want to create a Focus? I'd ask you 5-10 targeted questions and we could produce a [letter/profile/short story] about them."
 
-### Creating a Spotlight — `spotlight.add(type, subject)`
+### Creating a Focus — `focus.add(type, subject)`
 
-Spotlights have types. Each type has its own question arc. Currently supported:
+Focuses have types. Each type has its own question arc. Currently supported:
 
 | Type | Subject | Arc goal |
 |------|---------|----------|
@@ -360,9 +360,9 @@ Spotlights have types. Each type has its own question arc. Currently supported:
 3. Build the question arc for the type (see below)
 4. Append the new category block to `system/question-bank.md`
 5. Update `coverage.json` with the new category
-6. **Add to README.md** — Append the new spotlight to the `## Spotlights` section
-7. Commit: `git add system/question-bank.md && git commit -m "Add spotlight {LETTER}: {subject}"`
-8. Spotlights rotate at lower frequency (1 per `spotlight_frequency` main questions)
+6. **Add to README.md** — Append the new focus to the `## Focuses` section
+7. Commit: `git add system/question-bank.md && git commit -m "Add focus {LETTER}: {subject}"`
+8. Focuses rotate at lower frequency (1 per `focus_frequency` main questions)
 
 #### Question arc — type: `person`
 
@@ -391,14 +391,14 @@ Must follow **baseline-first order**. Do NOT open with specific events.
 
 Keep 10–14 questions total. Tiers 2–4 should be grounded in what the answer scan revealed — not generic.
 
-### Spotlight Deliverables
-Each Spotlight can produce outputs via `system/compose.py`:
+### Focus Deliverables
+Each Focus can produce outputs via `system/compose.py`:
 - **Letter** — `--format letter --subject <name>`: A letter to or about this person.
 - **Tweet** — `--format tweet --subject <name>`: A single moment, condensed.
 - **Instagram caption** — `--format instagram --subject <name>`: 2-4 short paragraphs.
-- **Chapter draft** — `--format chapter --subject <name>`: Narrative prose centered on the spotlight.
+- **Chapter draft** — `--format chapter --subject <name>`: Narrative prose centered on the focus.
 
-Offer to draft these when a Spotlight has enough material (5+ answers).
+Offer to draft these when a Focus has enough material (5+ answers).
 
 ---
 
@@ -428,7 +428,7 @@ When the user asks for a deliverable ("write a Mother's Day letter for Katie", "
 
 1. **Decide the format and source material**:
    - Format: `letter`, `tweet`, `instagram`, or `chapter`
-   - Source: a `--subject <name>` (matches a spotlight by name) or `--categories A,B,C` (explicit category letters)
+   - Source: a `--subject <name>` (matches a focus by name) or `--categories A,B,C` (explicit category letters)
    - Title: a short slug for the output folder, e.g. `mothers-day-2026`
 
 2. **Generate the prompt**:
@@ -475,7 +475,7 @@ python3 system/compose.py --info outputs/title    # one output's history
 
 ### When to Offer Outputs
 - When a category reaches GREEN status (70%+ coverage) — offer a chapter draft.
-- When a Spotlight has 5+ answers — offer a letter, tweet, IG post, or chapter.
+- When a Focus has 5+ answers — offer a letter, tweet, IG post, or chapter.
 - At milestone points (skeleton complete, depth pass complete).
 - Whenever the user asks.
 
@@ -503,17 +503,17 @@ Added during setup based on the user's specific projects. Examples:
 - For a founder story: "The Problem", "Building", "The Hard Parts", "Vision"
 - For a family history: "Grandparents", "Parents", "Traditions", "Migration"
 
-### Spotlight Categories (K+)
+### Focus Categories (K+)
 Added dynamically as significant people/events emerge:
-- K: Spotlight on [Person/Event]
-- L: Spotlight on [Person/Event]
+- K: Focus on [Person/Event]
+- L: Focus on [Person/Event]
 - etc.
 
 ---
 
 ## Question Design Principles
 
-When generating new questions (follow-ups, Spotlight questions, new categories):
+When generating new questions (follow-ups, Focus questions, new categories):
 
 1. **Open-ended, not yes/no** — "Tell me about..." not "Did you..."
 2. **Sensory** — "What did that place look like? What could you smell?"
@@ -536,7 +536,7 @@ The master list of all questions. Format:
 - [x] A2: Tell me about where you grew up. *(2026-03-01)*
 ```
 
-Questions are added over time (follow-ups, new categories, Spotlights). This file only grows.
+Questions are added over time (follow-ups, new categories, Focuses). This file only grows.
 
 ### `system/rotation.json`
 ```json
@@ -549,7 +549,7 @@ Questions are added over time (follow-ups, new categories, Spotlights). This fil
   "questions_asked": 2,
   "questions_answered": 1,
   "next_question_id": null,
-  "spotlight_frequency": 4
+  "focus_frequency": 4
 }
 ```
 
@@ -689,13 +689,13 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 ### Monthly
 - Run `python3 system/lifehug.py monthly-research` (or `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect first)
 - Review new research-neighborhood candidates before promotion
-- Review Spotlight recommendations and approve only the ones that should become Focuses
+- Review Focus recommendations and approve only the ones that should become Focuses
 - Check if any categories are ready for drafting (GREEN)
 
 ### At Milestones
 - **Skeleton complete** (all categories have at least one answer): Celebrate, preview what depth pass will look like
 - **Category reaches GREEN**: Offer to draft a chapter or essay
-- **Spotlight ready**: Offer to draft a deliverable (letter, profile, story)
+- **Focus ready**: Offer to draft a deliverable (letter, profile, story)
 - **Full pass complete**: Summary of what was captured, what's next
 
 ---

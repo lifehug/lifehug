@@ -71,7 +71,7 @@ compiled *before* any planning or research.
 |---|---|---|
 | **Daily** | `daily_question.sh` (compiles the wiki, then delivers today's question) | free |
 | **Weekly** | `weekly_maintenance.sh` (compile → source lint/fix → quality update → planner queue → gap scan → progress) | free |
-| **Monthly** | `monthly_research.sh` (compile → capped new neighborhoods → self-knowledge → spotlight recommendations → progress) | API $ |
+| **Monthly** | `monthly_research.sh` (compile → capped new neighborhoods → self-knowledge → focus recommendations → progress) | API $ |
 | **Event** | you answer → `process-answer` (saves, recompiles wiki, updates state) | small |
 
 ### Daily (already set up above)
@@ -112,7 +112,7 @@ openclaw cron add \
 
 `monthly_research.sh` is the growth loop. It compiles the wiki, reports gaps,
 opens only a small capped set of new neighborhoods, refreshes the self-knowledge
-pool if that arc is missing, recommends new Spotlights, prints progress, and
+pool if that arc is missing, recommends new Focuses, prints progress, and
 commits real state/wiki changes. The new candidates stay reviewable; the weekly
 planner decides what to do with accepted/promoted material later.
 

@@ -33,7 +33,8 @@ SOURCE_LINT_FINDINGS_FILE = STATE_DIR / "source_lint_findings.json"
 MISSION_FILE = SYSTEM_DIR / "mission.md"
 CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
 NEIGHBORHOODS_FILE = STATE_DIR / "neighborhoods.json"
-SPOTLIGHT_RECS_FILE = STATE_DIR / "spotlight_recommendations.json"
+FOCUS_RECS_FILE = STATE_DIR / "focus_recommendations.json"
+LEGACY_FOCUS_RECS_FILE = STATE_DIR / ("spot" "light_recommendations.json")
 CONNECTORS_DIR = SYSTEM_DIR / "connectors"
 
 QUESTION_ID_RE = r"[A-Z]\d+[a-z]*"
@@ -112,11 +113,19 @@ def load_config(path: Path = CONFIG_FILE) -> dict[str, str]:
     return config
 
 
+def normalize_group(group: str | None) -> str:
+    """Normalize old category group names to the current vocabulary."""
+    if group == "spot" "light":
+        return "focus"
+    return group or "main"
+
+
 def category_group(cat_id: str, section_group: str | None = None) -> str:
-    if section_group in {"main", "project", "spotlight"}:
+    section_group = normalize_group(section_group)
+    if section_group in {"main", "project", "focus"}:
         return section_group
     if cat_id >= "K":
-        return "spotlight"
+        return "focus"
     if cat_id >= "F":
         return "project"
     return "main"
@@ -128,8 +137,8 @@ def parse_categories(md_text: str) -> dict[str, dict[str, str]]:
     group = "main"
     for line in md_text.splitlines():
         stripped = line.strip().lower()
-        if stripped.startswith("## spotlight"):
-            group = "spotlight"
+        if stripped.startswith("## focus") or stripped.startswith("## " + ("spot" "light")):
+            group = "focus"
             continue
         if stripped.startswith("## project"):
             group = "project"

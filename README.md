@@ -122,7 +122,7 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Wiki** | The cross-linked, owner-only encyclopedia of your life, synthesized from your answers. | `wiki/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` |
 
-The key mental model: a **Focus** is the unit of intent. It used to be split into "projects" and "spotlights"; now it's one primitive. Everything — a person, a memoir, a recurring theme — is just a Focus with a tier and an objective.
+The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
 
 ---
 
@@ -307,7 +307,7 @@ flowchart TB
         W1["compile → source lint/fix → quality update →<br/>plan next week's queue → gap scan → progress"]
     end
     subgraph m["🗓️ MONTHLY · costs API $"]
-        M1["compile → generate research neighborhoods<br/>for top gaps + a self-knowledge batch +<br/>spotlight recommendations"]
+        M1["compile → generate research neighborhoods<br/>for top gaps + a self-knowledge batch +<br/>focus recommendations"]
     end
     subgraph e["⚡ ON ANSWER · tiny"]
         E1["process-answer: save · recompile · score"]
@@ -337,8 +337,8 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
 | **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, updates the quality profile, builds the next queue, scans for gaps, reports progress, then commits real changes. |
-| **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Spotlights, reports progress, then commits real changes. |
-| **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and spotlight interleaving). Also marks questions sent/answered and flags pass completion. |
+| **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Focuses, reports progress, then commits real changes. |
+| **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and focus interleaving). Also marks questions sent/answered and flags pass completion. |
 | **`process_answer.py`** | The answer pipeline. Saves the answer to `answers/<id>.md`, marks the question done, rebuilds coverage, updates rotation, refreshes the README, recompiles the wiki, and silently scores the answer's richness. The one command that runs after every reply. |
 | **`rebuild_state.py`** | Repair tool. Reconstructs derived state (rotation counts, README) from the source-of-truth files. Run it if state ever drifts. |
 
@@ -361,7 +361,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`ingest_story.py`** | Captures unprompted stories. Saves a story you share (that isn't an answer) as owner-only source material and seeds candidate questions to deepen it. |
 | **`ingest.py`** | Bulk source import. Pluggable connectors (X/Twitter, Gmail, Instagram, local files) normalize external writing into source records + candidates. |
 | **`classify_story.py`** | The source analyzer. AI-extracts people, places, periods, themes, contradictions, and possible outputs from any source file, and proposes targeted follow-up questions. |
-| **`recommend_spotlights.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
+| **`recommend_focuses.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
 
 ### Wiki, outputs & maintenance
 
@@ -425,7 +425,7 @@ printf '%s\n' "$STORY" | python3 system/lifehug.py ingest-story --source telegra
 
 # Plan & grow
 python3 system/lifehug.py weekly-maintenance        # lint/fix, update profile, plan queue
-python3 system/lifehug.py monthly-research          # open new neighborhoods + spotlights
+python3 system/lifehug.py monthly-research          # open new neighborhoods + focuses
 python3 system/lifehug.py planner-queue             # build next week's queue
 python3 system/research_expand.py --gaps            # where is the story thin?
 python3 system/research_expand.py --topic "Dad" --type relationship --output letter

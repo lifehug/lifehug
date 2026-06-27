@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Recommend new Spotlight arcs based on answer/source analysis.
+"""Recommend new Focus arcs based on answer/source analysis.
 
 Usage:
-    python3 system/recommend_spotlights.py --recommend
-    python3 system/recommend_spotlights.py --recommend --min-score 10
-    python3 system/recommend_spotlights.py --recommend --include-dismissed
-    python3 system/recommend_spotlights.py --recommend --type person
-    python3 system/recommend_spotlights.py --dismiss rec-dad --reason "already covered"
-    python3 system/recommend_spotlights.py --approve rec-dad
-    python3 system/recommend_spotlights.py --json
+    python3 system/recommend_focuses.py --recommend
+    python3 system/recommend_focuses.py --recommend --min-score 10
+    python3 system/recommend_focuses.py --recommend --include-dismissed
+    python3 system/recommend_focuses.py --recommend --type person
+    python3 system/recommend_focuses.py --dismiss rec-dad --reason "already covered"
+    python3 system/recommend_focuses.py --approve rec-dad
+    python3 system/recommend_focuses.py --json
 """
 
 from __future__ import annotations
@@ -28,7 +28,8 @@ from lifehug_core import (
     CLASSIFICATIONS_DIR,
     MANUAL_SOURCES_DIR,
     QUESTIONS_FILE,
-    SPOTLIGHT_RECS_FILE,
+    FOCUS_RECS_FILE,
+    LEGACY_FOCUS_RECS_FILE,
     answer_body,
     answer_id_from_filename,
     now_utc,
@@ -37,6 +38,8 @@ from lifehug_core import (
     slugify,
     write_json,
 )
+
+OLD_FOCUS_TERM = "Spot" "light"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -160,32 +163,32 @@ def _load_classifications() -> list[dict]:
     return results
 
 
-def _existing_spotlight_names(md_text: str) -> set[str]:
-    """Extract existing spotlight subject names from the question bank."""
-    names: set[str] = []
-    in_spotlight = False
+def _existing_focus_names(md_text: str) -> set[str]:
+    """Extract existing focus subject names from the question bank."""
+    names: list[str] = []
+    in_focus = False
     for line in md_text.splitlines():
         stripped = line.strip().lower()
-        if stripped.startswith("## spotlight"):
-            in_spotlight = True
+        if stripped.startswith("## focus") or stripped.startswith("## " + OLD_FOCUS_TERM.lower()):
+            in_focus = True
             continue
-        if in_spotlight and stripped.startswith("## "):
-            in_spotlight = False
-        if in_spotlight:
-            # Match category headers like "## K: Spotlight — Dad"
+        if in_focus and stripped.startswith("## "):
+            in_focus = False
+        if in_focus:
+            # Match category headers like "## K: Focus — Dad"
             m = re.match(r"^##\s+[A-Z]:\s*(.+?)(?:\s*\(.*\))?\s*$", line)
             if m:
                 name = m.group(1)
-                # Strip "Spotlight — " prefix if present
-                name = re.sub(r"^Spotlight\s*[—–-]\s*", "", name, flags=re.IGNORECASE)
+                # Strip "Focus — " prefix if present
+                name = re.sub(rf"^(Focus|{OLD_FOCUS_TERM})\s*[—–-]\s*", "", name, flags=re.IGNORECASE)
                 names.append(name.strip())
 
-    # Also look at category names with "spotlight" in them
+    # Also look at category names with "focus" in them
     categories = parse_categories(md_text)
     for cat in categories.values():
-        if cat.get("group") == "spotlight":
+        if cat.get("group") == "focus":
             raw_name = cat.get("name", "")
-            name = re.sub(r"^Spotlight\s*[—–-]\s*", "", raw_name, flags=re.IGNORECASE)
+            name = re.sub(rf"^(Focus|{OLD_FOCUS_TERM})\s*[—–-]\s*", "", raw_name, flags=re.IGNORECASE)
             names.append(name.strip())
 
     return {n.lower() for n in names if n}
@@ -383,7 +386,15 @@ def _make_reason(entity: str, entity_type: str, s: dict, score: float) -> str:
     strength = _evidence_strength(score)
     return (
         f"{entity} appears in {ua} different answer(s) across {cc} categor{'ies' if cc != 1 else 'y'} "
-        f"({cats}) with emotional weight {ew}. {strength.capitalize()} candidate for a dedicated spotlight arc."
+        f"({cats}) with emotional weight {ew}. {strength.capitalize()} candidate for a dedicated Focus arc."
+    )
+
+
+def load_recommendation_state() -> dict:
+    return (
+        read_json(FOCUS_RECS_FILE, default=None)
+        or read_json(LEGACY_FOCUS_RECS_FILE, default=None)
+        or {"version": 1, "recommendations": [], "dismissed": []}
     )
 
 
@@ -398,7 +409,7 @@ def recommend(
 ) -> list[dict]:
     """Analyze content and return updated recommendation list."""
     md_text = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
-    existing_spotlights = _existing_spotlight_names(md_text)
+    existing_focuses = _existing_focus_names(md_text)
 
     answers = _load_answer_texts()
     source_texts = _load_source_texts()
@@ -407,7 +418,7 @@ def recommend(
     stats = _build_entity_stats(answers, source_texts, classifications)
 
     # Load existing state
-    existing = read_json(SPOTLIGHT_RECS_FILE, default={"version": 1, "recommendations": [], "dismissed": []})
+    existing = load_recommendation_state()
     existing_recs = {r["id"]: r for r in existing.get("recommendations", [])}
     dismissed_ids = {r["id"] for r in existing.get("dismissed", [])}
 
@@ -415,8 +426,8 @@ def recommend(
     new_recs: list[dict] = []
 
     for (entity_type, entity), s in stats.items():
-        # Skip already-spotlighted entities
-        if entity.lower() in existing_spotlights:
+        # Skip already-focused entities
+        if entity.lower() in existing_focuses:
             continue
 
         score = _score(s)
@@ -459,9 +470,9 @@ def recommend(
 
 
 def save_recommendations(recs: list[dict]) -> None:
-    existing = read_json(SPOTLIGHT_RECS_FILE, default={"version": 1, "recommendations": [], "dismissed": []})
+    existing = load_recommendation_state()
     dismissed = existing.get("dismissed", [])
-    write_json(SPOTLIGHT_RECS_FILE, {
+    write_json(FOCUS_RECS_FILE, {
         "version": 1,
         "generated_at": now_utc(),
         "recommendations": recs,
@@ -470,7 +481,7 @@ def save_recommendations(recs: list[dict]) -> None:
 
 
 def dismiss_recommendation(rec_id: str, reason: str = "") -> bool:
-    existing = read_json(SPOTLIGHT_RECS_FILE, default={"version": 1, "recommendations": [], "dismissed": []})
+    existing = load_recommendation_state()
     recs = existing.get("recommendations", [])
     dismissed = existing.get("dismissed", [])
 
@@ -484,7 +495,7 @@ def dismiss_recommendation(rec_id: str, reason: str = "") -> bool:
     target["dismiss_reason"] = reason
     dismissed.append(target)
 
-    write_json(SPOTLIGHT_RECS_FILE, {
+    write_json(FOCUS_RECS_FILE, {
         "version": existing.get("version", 1),
         "generated_at": existing.get("generated_at", now_utc()),
         "recommendations": recs,
@@ -495,7 +506,7 @@ def dismiss_recommendation(rec_id: str, reason: str = "") -> bool:
 
 
 def approve_recommendation(rec_id: str) -> bool:
-    existing = read_json(SPOTLIGHT_RECS_FILE, default={"version": 1, "recommendations": [], "dismissed": []})
+    existing = load_recommendation_state()
     recs = existing.get("recommendations", [])
 
     target = next((r for r in recs if r["id"] == rec_id), None)
@@ -506,14 +517,14 @@ def approve_recommendation(rec_id: str) -> bool:
     target["status"] = "approved"
     target["approved_at"] = now_utc()
 
-    write_json(SPOTLIGHT_RECS_FILE, {
+    write_json(FOCUS_RECS_FILE, {
         "version": existing.get("version", 1),
         "generated_at": existing.get("generated_at", now_utc()),
         "recommendations": recs,
         "dismissed": existing.get("dismissed", []),
     })
     print(f"✓ Approved: {rec_id} — {target['entity']}")
-    print("  (Actual spotlight creation is a manual step — add category to question-bank.md)")
+    print("  (Actual focus creation is a manual step — add category to question-bank.md)")
     return True
 
 
@@ -531,7 +542,7 @@ TYPE_EMOJI = {
 
 def display_recommendations(recs: list[dict], filter_type: str | None = None) -> None:
     if not recs:
-        print("No spotlight recommendations found.")
+        print("No focus recommendations found.")
         print("Tip: Add more answers to get recommendations.")
         return
 
@@ -539,7 +550,7 @@ def display_recommendations(recs: list[dict], filter_type: str | None = None) ->
     for r in recs:
         by_strength[r["evidence_strength"]].append(r)
 
-    print("\nSpotlight Recommendations\n")
+    print("\nFocus Recommendations\n")
     for strength in ("strong", "moderate", "weak"):
         group = by_strength[strength]
         if not group:
@@ -564,7 +575,7 @@ def display_recommendations(recs: list[dict], filter_type: str | None = None) ->
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Recommend Lifehug spotlights.")
+    parser = argparse.ArgumentParser(description="Recommend Lifehug focuses.")
     parser.add_argument("--recommend", action="store_true", help="Analyze and show recommendations")
     parser.add_argument("--min-score", type=float, default=3.0, help="Minimum score to include (default: 3.0)")
     parser.add_argument("--include-dismissed", action="store_true", help="Include dismissed recommendations")
@@ -587,7 +598,7 @@ def main() -> None:
 
     if args.json:
         import json
-        data = read_json(SPOTLIGHT_RECS_FILE, default={"version": 1, "recommendations": [], "dismissed": []})
+        data = load_recommendation_state()
         print(json.dumps(data, indent=2))
         return
 

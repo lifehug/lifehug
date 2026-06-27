@@ -1,4 +1,4 @@
-"""Tests for v14 features: quality checker, ingest, classifications, neighborhoods, spotlights."""
+"""Tests for v14 features: quality checker, ingest, classifications, neighborhoods, focuses."""
 
 import importlib.util
 import json
@@ -130,9 +130,9 @@ class ResearchExpandTests(unittest.TestCase):
         )
 
 
-class RecommendSpotlightsTests(unittest.TestCase):
+class RecommendFocusesTests(unittest.TestCase):
     def test_module_imports(self):
-        mod = load("recommend_spotlights")
+        mod = load("recommend_focuses")
         self.assertTrue(hasattr(mod, "main"))
 
 
@@ -142,7 +142,7 @@ class PlannerEnhancementTests(unittest.TestCase):
         # Should reference new state files
         source = (SYSTEM / "question_planner.py").read_text()
         self.assertIn("NEIGHBORHOODS_FILE", source)
-        self.assertIn("SPOTLIGHT_RECS_FILE", source)
+        self.assertIn("FOCUS_RECS_FILE", source)
         self.assertIn("CLASSIFICATIONS_DIR", source)
 
 
@@ -161,9 +161,9 @@ class LifehugWrapperTests(unittest.TestCase):
         for cmd in [
             "classify-story",
             "research-expand",
-            "recommend-spotlights",
-            "spotlight-approve",
-            "spotlight-dismiss",
+            "recommend-focuses",
+            "focus-approve",
+            "focus-dismiss",
             "ingest",
             "candidates-stats",
         ]:

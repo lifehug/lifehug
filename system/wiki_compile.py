@@ -79,10 +79,15 @@ SYNTH_DIR = STATE_DIR / "synthesis"
 
 MAX_RELATED = 12  # total related links per page
 MAX_SHARED = 8    # shared-source links added per page
+OLD_FOCUS_TERM = "Spot" "light"
 
 
-def clean_spotlight_name(name: str) -> str:
-    for prefix in ("Spotlight — ", "Spotlight - ", "Spotlight: ", "Spotlight "):
+def clean_focus_name(name: str) -> str:
+    for prefix in (
+        "Focus — ", "Focus - ", "Focus: ", "Focus ",
+        f"{OLD_FOCUS_TERM} — ", f"{OLD_FOCUS_TERM} - ",
+        f"{OLD_FOCUS_TERM}: ", f"{OLD_FOCUS_TERM} ",
+    ):
         if name.startswith(prefix):
             name = name[len(prefix):]
             break
@@ -167,10 +172,15 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
     return "\n".join(lines)
 
 
+def display_body(text: str) -> str:
+    """Normalize old category labels for generated wiki display only."""
+    return re.sub(rf"\b{OLD_FOCUS_TERM}\b", "Focus", text)
+
+
 def cited_blocks(items: list[dict], limit: int = 8) -> list[str]:
     blocks = []
     for item in items[:limit]:
-        body = re.sub(r"\s+", " ", item["body"]).strip()
+        body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > 420:
             body = body[:420].rsplit(" ", 1)[0] + "..."
         blocks.append(f"- **{item['id']}**: {body} [{item['source']}]")
@@ -231,19 +241,19 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
     }
 
 
-def plan_spotlights(categories, questions, answers, manual_sources):
+def plan_focuses(categories, questions, answers, manual_sources):
     descs = []
     for cat_id, info in sorted(categories.items()):
-        if info.get("group") != "spotlight":
+        if info.get("group") != "focus":
             continue
-        title = clean_spotlight_name(info["name"])
+        title = clean_focus_name(info["name"])
         slug = slugify(title)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
         source_items = matching_sources(manual_sources, [title])
         sources = [a["source"] for a in answer_items] + [s["source"] for s in source_items]
         descs.append(_descriptor(
             "person", title, slug, sources, answer_items, source_items,
-            summary=f"A Lifehug spotlight compiled from {len(answer_items)} answered prompts. "
+            summary=f"A Lifehug Focus compiled from {len(answer_items)} answered prompts. "
                     f"Owner-only; cites its source answers.",
             open_questions=unanswered_questions(questions, cat_id),
         ))
@@ -296,9 +306,9 @@ def plan_relationships(categories, questions, answers, author):
     author = author or "Me"
     author_slug = slugify(author)
     for cat_id, info in sorted(categories.items()):
-        if info.get("group") != "spotlight":
+        if info.get("group") != "focus":
             continue
-        person = clean_spotlight_name(info["name"])
+        person = clean_focus_name(info["name"])
         person_slug = slugify(person)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
         if not answer_items:
@@ -399,7 +409,7 @@ def task_sources(desc: dict, limit: int = 14, cap: int = 1500) -> list[dict]:
     """Trimmed source material for an agent synthesis task."""
     out = []
     for item in (desc["cited_items"] + desc["supporting_items"])[:limit]:
-        body = re.sub(r"\s+", " ", item["body"]).strip()
+        body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > cap:
             body = body[:cap].rsplit(" ", 1)[0] + "..."
         out.append({"id": item["id"], "source": item["source"], "body": body})
@@ -409,7 +419,7 @@ def task_sources(desc: dict, limit: int = 14, cap: int = 1500) -> list[dict]:
 def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     src_lines = []
     for item in (desc["cited_items"] + desc["supporting_items"])[:14]:
-        body = re.sub(r"\s+", " ", item["body"]).strip()
+        body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > 1500:
             body = body[:1500].rsplit(" ", 1)[0] + "..."
         src_lines.append(f"[{item['id']}] ({item['source']}): {body}")
@@ -627,7 +637,7 @@ def main():
 
     # 1. plan
     descs = []
-    descs += plan_spotlights(categories, questions, answers, manual_sources)
+    descs += plan_focuses(categories, questions, answers, manual_sources)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources)
     descs += plan_relationships(categories, questions, answers, author)

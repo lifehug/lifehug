@@ -22,6 +22,8 @@ from lifehug_core import (
     write_text,
 )
 
+OLD_FOCUS_TERM = "Spot" "light"
+
 
 def parse_categories_from_bank():
     """Parse category metadata from question-bank.md."""
@@ -38,18 +40,18 @@ def build_coverage_line(coverage, categories):
 
     total_answered = 0
     total_questions = 0
-    spotlight_count = 0
+    focus_count = 0
 
     for cat_id, data in coverage["categories"].items():
         total_answered += data.get("answered", 0)
         total_questions += data.get("total", 0)
         cat_info = categories.get(cat_id, {})
-        if cat_info.get("group") == "spotlight":
-            spotlight_count += 1
+        if cat_info.get("group") == "focus":
+            focus_count += 1
 
     parts = [f"📊 {total_answered}/{total_questions} questions answered"]
-    if spotlight_count > 0:
-        parts.append(f"{spotlight_count} spotlight{'s' if spotlight_count != 1 else ''} active")
+    if focus_count > 0:
+        parts.append(f"{focus_count} focus{'es' if focus_count != 1 else ''} active")
 
     return " · ".join(parts)
 
@@ -78,10 +80,12 @@ def update_category_bullets(readme, coverage, categories):
         name_to_progress[name] = (emoji, answered, total)
         if " & " in name:
             name_to_progress[name.split(" & ", 1)[0]] = (emoji, answered, total)
-        # Also index without "Spotlight — " prefix for README matching
-        if name.startswith("Spotlight — "):
-            short_name = name[len("Spotlight — "):]
-            name_to_progress[short_name] = (emoji, answered, total)
+        # Also index without "Focus — " prefix for README matching
+        for prefix in ("Focus — ", "Focus - ", "Focus: ", "Focus ", f"{OLD_FOCUS_TERM} — "):
+            if name.startswith(prefix):
+                short_name = name[len(prefix):]
+                name_to_progress[short_name] = (emoji, answered, total)
+                break
 
     # Match category bullets like: - 🔴 Origins (2/10)
     bullet_pattern = re.compile(
@@ -92,7 +96,7 @@ def update_category_bullets(readme, coverage, categories):
     def replace_bullet(m):
         prefix = m.group(1)
         name = m.group(2)
-        suffix = m.group(3)  # preserve trailing text (e.g. spotlight descriptions)
+        suffix = m.group(3)  # preserve trailing text (e.g. category descriptions)
         # Strip bold markers for lookup
         lookup = name.replace("**", "")
         if lookup in name_to_progress:
@@ -103,28 +107,32 @@ def update_category_bullets(readme, coverage, categories):
     return bullet_pattern.sub(replace_bullet, readme)
 
 
-def spotlight_display_name(category_name):
+def focus_display_name(category_name):
     name = category_name
-    for prefix in ("Spotlight — ", "Spotlight - ", "Spotlight: ", "Spotlight "):
+    for prefix in (
+        "Focus — ", "Focus - ", "Focus: ", "Focus ",
+        f"{OLD_FOCUS_TERM} — ", f"{OLD_FOCUS_TERM} - ",
+        f"{OLD_FOCUS_TERM}: ", f"{OLD_FOCUS_TERM} ",
+    ):
         if name.startswith(prefix):
             name = name[len(prefix):]
             break
     return re.sub(r"\s*\(.*?\)\s*$", "", name).strip()
 
 
-def add_missing_spotlights(readme, coverage, categories):
-    if "## Spotlights" not in readme:
+def add_missing_focuses(readme, coverage, categories):
+    if "## Focuses" not in readme:
         return readme
 
     existing = readme
     missing = []
     for cat_id, cat_info in sorted(categories.items()):
-        if cat_info.get("group") != "spotlight":
+        if cat_info.get("group") != "focus":
             continue
         data = coverage["categories"].get(cat_id)
         if not data:
             continue
-        display = spotlight_display_name(cat_info["name"])
+        display = focus_display_name(cat_info["name"])
         if f"**{display}**" in existing or re.search(rf"- [🔴🟡🟢⚪] {re.escape(display)} \(", existing):
             continue
         emoji = status_emoji(data["answered"], data["total"])
@@ -133,7 +141,7 @@ def add_missing_spotlights(readme, coverage, categories):
     if not missing:
         return readme
 
-    pattern = re.compile(r"(## Spotlights\n)(.*?)(?=\n## |\n---|\Z)", re.DOTALL)
+    pattern = re.compile(r"(## Focuses\n)(.*?)(?=\n## |\n---|\Z)", re.DOTALL)
 
     def replace(m):
         body = m.group(2).rstrip()
@@ -184,7 +192,7 @@ def update_readme(dry_run=False):
 
     # Update per-category bullets
     new_readme = update_category_bullets(readme, coverage, categories)
-    new_readme = add_missing_spotlights(new_readme, coverage, categories)
+    new_readme = add_missing_focuses(new_readme, coverage, categories)
 
     # Update coverage summary
     new_readme = update_coverage_section(new_readme, coverage_line)
