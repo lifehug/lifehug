@@ -372,6 +372,13 @@ def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
     return run(["bash", str(script("daily_question.sh"))], env=env)
 
 
+def cmd_weekly_maintenance(args: argparse.Namespace) -> int:
+    env = os.environ.copy()
+    if args.dry_run:
+        env["LIFEHUG_WEEKLY_DRY_RUN"] = "1"
+    return run(["bash", str(script("weekly_maintenance.sh"))], env=env)
+
+
 def cmd_classify_story(args: argparse.Namespace) -> int:
     flags: list[str] = []
     if args.prompt:
@@ -797,6 +804,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")
     p.set_defaults(func=cmd_daily_dry_run)
+
+    p = sub.add_parser("weekly-maintenance", help="Run weekly lint/fix, quality, planner, and progress flow")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_weekly_maintenance)
 
     p = sub.add_parser("followups-status", help="Show pass-transition follow-up state")
     p.set_defaults(func=cmd_followups_status)

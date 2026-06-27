@@ -119,6 +119,15 @@ printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A
 
 `source-lint --fix` is only for safe metadata and manifest repairs. Story meaning is repaired additively through `correct-source` or `reflect-source`. See `system/source_contract.md`.
 
+Run the full weekly self-improvement loop with:
+
+```bash
+python3 system/lifehug.py weekly-maintenance
+LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
+```
+
+The weekly loop compiles offline, lints sources, applies safe source fixes only when lint finds them, updates the quality profile, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
+
 Review candidate questions before they enter the daily flow:
 
 ```bash
@@ -160,7 +169,7 @@ The pending question is always in `system/rotation.json` → `last_question_id`.
 ## Weekly/Monthly Rhythms
 
 Follow the rhythms in CLAUDE.md:
-- **Weekly**: Check coverage, nudge if quiet
+- **Weekly**: Run `weekly-maintenance`; review any manual source findings, queue balance, and progress
 - **Monthly**: Review for themes, offer Spotlights, report progress
 - **Milestones**: Draft deliverables when categories hit GREEN
 

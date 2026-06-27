@@ -682,9 +682,9 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 ## Weekly and Monthly Rhythms
 
 ### Weekly
-- Check coverage report (`python3 system/lifehug.py status`)
-- Note any categories that haven't been touched
-- If the user has been quiet, send a gentle nudge (not pushy)
+- Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
+- Review any manual source findings that `source-lint --fix` could not safely repair
+- Check queue balance, progress, and whether any Focus is ready for a deliverable
 
 ### Monthly
 - Review recent answers for narrative threads and themes
@@ -728,7 +728,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
 
 **User data** (never touched):

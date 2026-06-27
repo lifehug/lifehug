@@ -304,7 +304,7 @@ flowchart TB
         D1["compile wiki → deliver today's question"]
     end
     subgraph w["📅 WEEKLY · free"]
-        W1["compile → plan next week's queue →<br/>scan for gaps (dry-run) → progress report"]
+        W1["compile → source lint/fix → quality update →<br/>plan next week's queue → gap scan → progress"]
     end
     subgraph m["🗓️ MONTHLY · costs API $"]
         M1["compile → generate research neighborhoods<br/>for top gaps + a self-knowledge batch +<br/>spotlight recommendations"]
@@ -319,6 +319,7 @@ The daily and weekly jobs need **no API key**. Only the monthly generation job d
 
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending
+LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh # preview weekly maintenance
 ```
 
 ---
@@ -334,6 +335,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
+| **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, updates the quality profile, builds the next queue, scans for gaps, reports progress, then commits real changes. |
 | **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and spotlight interleaving). Also marks questions sent/answered and flags pass completion. |
 | **`process_answer.py`** | The answer pipeline. Saves the answer to `answers/<id>.md`, marks the question done, rebuilds coverage, updates rotation, refreshes the README, recompiles the wiki, and silently scores the answer's richness. The one command that runs after every reply. |
 | **`rebuild_state.py`** | Repair tool. Reconstructs derived state (rotation counts, README) from the source-of-truth files. Run it if state ever drifts. |
@@ -410,6 +412,7 @@ python3 system/lifehug.py quality-stats # what kinds of questions open you up
 # The daily cycle (usually run by cron)
 python3 system/lifehug.py next                      # preview today's question
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh    # full dry run, nothing sent
+LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh # preview weekly loop
 
 # Process an answer
 printf '%s\n' "$ANSWER" | python3 system/lifehug.py process-answer A14 --source "voice (transcribed)"
@@ -418,6 +421,7 @@ printf '%s\n' "$ANSWER" | python3 system/lifehug.py process-answer A14 --source 
 printf '%s\n' "$STORY" | python3 system/lifehug.py ingest-story --source telegram --title "memory"
 
 # Plan & grow
+python3 system/lifehug.py weekly-maintenance        # lint/fix, update profile, plan queue
 python3 system/lifehug.py planner-queue             # build next week's queue
 python3 system/research_expand.py --gaps            # where is the story thin?
 python3 system/research_expand.py --topic "Dad" --type relationship --output letter

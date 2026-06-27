@@ -45,6 +45,7 @@ class LifehugWrapperTests(unittest.TestCase):
             ["rebuild"],
             ["process-answer", "A1", "--source", "text"],
             ["daily-dry-run"],
+            ["weekly-maintenance", "--dry-run"],
             ["followups-status"],
             ["followups-prompt"],
             ["doctor", "--daily"],

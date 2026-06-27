@@ -537,13 +537,34 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
     return sorted(findings, key=lambda f: (f["severity"], f["type"], f["path"], f["id"]))
 
 
-def write_findings(findings: list[dict[str, str]]) -> None:
-    data = {
+def open_findings_count(findings: list[dict[str, str]]) -> int:
+    return len([f for f in findings if f.get("status") == "open"])
+
+
+def findings_payload(findings: list[dict[str, str]], *, updated_at: str | None = None) -> dict[str, object]:
+    return {
         "version": 1,
-        "updated_at": now_utc(),
-        "open_count": len([f for f in findings if f.get("status") == "open"]),
+        "updated_at": updated_at or now_utc(),
+        "open_count": open_findings_count(findings),
         "findings": findings,
     }
+
+
+def findings_changed(existing: object, findings: list[dict[str, str]]) -> bool:
+    if not isinstance(existing, dict):
+        return True
+    return (
+        existing.get("version") != 1
+        or existing.get("open_count") != open_findings_count(findings)
+        or existing.get("findings") != findings
+    )
+
+
+def write_findings(findings: list[dict[str, str]]) -> None:
+    existing = read_json(SOURCE_LINT_FINDINGS_FILE, default=None)
+    if not findings_changed(existing, findings):
+        return
+    data = findings_payload(findings)
     write_json(SOURCE_LINT_FINDINGS_FILE, data)
 
 

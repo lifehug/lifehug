@@ -49,7 +49,7 @@ def compose_hint(focus: dict) -> str:
 def run() -> int:
     roadmap = load_roadmap()
     if not roadmap.get("focuses"):
-        roadmap = rebuild_roadmap()
+        roadmap = rebuild_roadmap(write=False)
     questions = parse_questions(QUESTIONS_FILE.read_text())
     nbhd = (read_json(NEIGHBORHOODS_FILE, default={}) or {}).get("neighborhoods", [])
     nbhd_by_focus: dict[str, list[dict]] = {}

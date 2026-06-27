@@ -70,7 +70,7 @@ compiled *before* any planning or research.
 | Cadence | Job | Cost |
 |---|---|---|
 | **Daily** | `daily_question.sh` (compiles the wiki, then delivers today's question) | free |
-| **Weekly** | compile → `planner-queue` (Focus-weighted) → `research-expand --gaps --dry-run` → `progress` | free |
+| **Weekly** | `weekly_maintenance.sh` (compile → source lint/fix → quality update → planner queue → gap scan → progress) | free |
 | **Monthly** | compile → generate: research neighborhoods for the top gaps + a self-knowledge batch + spotlight recommendations | API $ |
 | **Event** | you answer → `process-answer` (saves, recompiles wiki, updates state) | small |
 
@@ -79,20 +79,23 @@ compiled *before* any planning or research.
 `daily_question.sh` now compiles the wiki first, so the relational graph is
 fresh every morning before the question goes out. Nothing extra to schedule.
 
-### Weekly — plan the coming week + surface gaps (free)
+### Weekly — self-improve, plan the coming week, and surface gaps (free)
 
 ```bash
 openclaw cron add \
-  --name "Lifehug Weekly Plan" \
+  --name "Lifehug Weekly Maintenance" \
   --cron "0 20 * * 0" \
-  --tz "America/New_York" \
-  --task "cd ~/Workspace/lifehug && python3 system/lifehug.py compile && python3 system/lifehug.py planner-queue && python3 system/research_expand.py --gaps --dry-run && python3 system/lifehug.py progress && git add state wiki && (git diff --cached --quiet || (git commit -m 'Weekly plan' && git push))"
+  --tz "America/Los_Angeles" \
+  --task "cd ~/Workspace/lifehug && system/weekly_maintenance.sh"
 ```
 
-`planner-queue` builds the coming week from the roadmap — Focus-weighted, with
-saturated Focuses fading to maintenance and no Focus taking more than its cap.
-`ask.py` consumes the queue daily and falls back to rotation if it expires, so a
-missed week degrades gracefully.
+`weekly_maintenance.sh` is the continuous-improvement loop. It compiles the
+wiki offline, runs source lint, applies safe metadata/manifest fixes only when
+lint finds fixable issues, updates the quality profile, builds the coming week
+from the roadmap, scans for gaps without generating paid questions, prints
+progress, and commits real state/wiki/source changes. `ask.py` consumes the
+queue daily and falls back to rotation if it expires, so a missed week degrades
+gracefully.
 
 ### Monthly — generate new domains + self-knowledge (uses the API)
 

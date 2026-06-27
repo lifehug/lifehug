@@ -64,6 +64,7 @@ python3 system/lifehug.py planner-clear     # clear planned queue
 python3 system/lifehug.py planner-state     # show/init planner state
 python3 system/lifehug.py serve             # local wiki at 127.0.0.1:8765
 python3 system/lifehug.py daily-dry-run     # validate daily delivery without sending
+python3 system/lifehug.py weekly-maintenance # weekly lint/fix, profile, queue, progress
 python3 system/lifehug.py followups-status  # pass-transition state
 python3 system/lifehug.py followups-prompt  # prompt context for AI-generated depth questions
 ```
@@ -190,6 +191,15 @@ LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh
 ```
 
 Do not make a cron path that independently picks questions or edits state.
+
+Weekly maintenance:
+
+```bash
+cd <workspace>
+system/weekly_maintenance.sh
+```
+
+Use `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect the weekly loop without writes. The weekly loop compiles offline, lints sources, safely fixes metadata/manifest drift only when lint reports fixable findings, updates the quality profile, writes the next queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
 
 ## Pass Transitions
 

@@ -68,6 +68,20 @@ class SourceIntegrityTests(unittest.TestCase):
             self.assertEqual(record["source_id"], "source:memory")
             self.assertEqual(record["type"], "source")
 
+    def test_findings_change_detection_ignores_timestamp_only(self):
+        finding = self.src.finding(
+            "manifest_missing",
+            "warning",
+            "answers/A1.md",
+            "source is not registered",
+            fixability="safe",
+            recommended_action="run source-lint --fix",
+        )
+        existing = self.src.findings_payload([finding], updated_at="2026-01-01T00:00:00Z")
+
+        self.assertFalse(self.src.findings_changed(existing, [finding]))
+        self.assertTrue(self.src.findings_changed(existing, []))
+
 
 if __name__ == "__main__":
     unittest.main()

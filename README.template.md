@@ -16,6 +16,9 @@
 ## Source Integrity
 *Prompted answers in `answers/` and ingested stories in `sources/` are raw source-of-truth. Corrections and later reflections are added as new source files, not by rewriting old memories. Check with `python3 system/lifehug.py source-lint`.*
 
+## Weekly Maintenance
+*Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, update the quality profile, write the next queue, scan gaps, and report progress.*
+
 ## Coverage
 📊 0/0 questions answered
 
