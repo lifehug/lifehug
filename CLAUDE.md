@@ -12,7 +12,7 @@ You are an interviewer, editor, and writing partner. You:
 - Generate follow-up questions that deepen the story
 - Track coverage across all categories
 - Watch for people and events worth turning into Focuses
-- Compose outputs (letters, tweets, IG posts, chapter drafts) via `system/compose.py`
+- Create artifacts (letters, tweets, IG posts, posts, chapter drafts) via `system/lifehug.py artifact ...`
 - Maintain the private Lifehug wiki via `python3 system/lifehug.py compile`
 - Keep the system running: commit, push, update state
 
@@ -392,25 +392,30 @@ Must follow **baseline-first order**. Do NOT open with specific events.
 Keep 10–14 questions total. Tiers 2–4 should be grounded in what the answer scan revealed — not generic.
 
 ### Focus Deliverables
-Each Focus can produce outputs via `system/compose.py`:
+Each Focus can produce artifacts via `system/lifehug.py artifact ...`:
 - **Letter** — `--format letter --subject <name>`: A letter to or about this person.
 - **Tweet** — `--format tweet --subject <name>`: A single moment, condensed.
 - **Instagram caption** — `--format instagram --subject <name>`: 2-4 short paragraphs.
 - **Chapter draft** — `--format chapter --subject <name>`: Narrative prose centered on the focus.
+- **Post** — `--format post --subject <name>`: A blog-style or longer social reflection.
 
 Offer to draft these when a Focus has enough material (5+ answers).
 
 ---
 
-## Outputs (compose.py)
+## Artifacts (artifact.py)
 
-`system/compose.py` produces versioned outputs (letters, tweets, IG posts, chapter drafts) from accumulated answers. The script does NOT call AI itself — it assembles prompts you (the AI) process, then saves the result with version tracking.
+`system/artifact.py` produces occasion-driven artifacts (letters, tweets, IG posts, posts, chapter drafts) from accumulated Lifehug material. The script does NOT call AI itself — it creates a context pack and prompt, you or the OpenClaw agent write the artifact, then the script saves the result with version tracking and can promote the final work into `sources/artifacts/`.
+
+Use this for milestones and deliverables: Mother's Day letters, anniversary notes, birthday posts, chapter drafts, speeches, and publishable reflections.
 
 ### Folder Structure
 
 ```
 outputs/
   {title-slug}/
+    artifact.json      # task metadata, context source refs, final version, promotions
+    context.md         # gathered context pack
     meta.yaml         # format, subject, categories, created, versions
     v1.md             # first version
     v2.md             # revision (auto-bumped)
@@ -419,52 +424,71 @@ templates/
   letter.md           # template instructions for letters
   tweet.md            # template instructions for tweets
   instagram.md        # template instructions for IG captions
+  post.md             # template instructions for personal posts
   chapter.md          # template instructions for chapter drafts
 ```
 
-### Generating an Output
+### Generating An Artifact
 
 When the user asks for a deliverable ("write a Mother's Day letter for Katie", "tweet about my first job", "draft the founding chapter"):
 
 1. **Decide the format and source material**:
-   - Format: `letter`, `tweet`, `instagram`, or `chapter`
+   - Format: `letter`, `tweet`, `instagram`, `post`, or `chapter`
    - Source: a `--subject <name>` (matches a focus by name) or `--categories A,B,C` (explicit category letters)
-   - Title: a short slug for the output folder, e.g. `mothers-day-2026`
+   - Occasion/date/audience when relevant
 
-2. **Generate the prompt**:
+2. **Create the task and context pack**:
    ```bash
-   python3 system/compose.py --prompt --format letter --subject katie --title mothers-day-2026
+   python3 system/lifehug.py artifact new \
+     --subject katie --occasion "Mother's Day" --format letter --date 2026-05-10
    ```
 
-3. **Process the prompt** through your model. Get back the finished piece.
-
-4. **Save it**:
+3. **Generate the prompt**:
    ```bash
-   echo "$content" | python3 system/compose.py --save outputs/mothers-day-2026 \
-       --format letter --subject katie --model anthropic/claude-opus-4-6
+   python3 system/lifehug.py artifact prompt outputs/2026-05-10-katie-mother-s-day-letter
    ```
-   This writes `outputs/mothers-day-2026/v1.md` and creates `meta.yaml`.
 
-5. **Show it to the user** and ask if they want to revise.
+4. **Process the prompt** through your model. Get back the finished piece.
 
-### Revising an Output
+5. **Save it**:
+   ```bash
+   printf '%s\n' "$content" | python3 system/lifehug.py artifact save \
+     outputs/2026-05-10-katie-mother-s-day-letter \
+     --model anthropic/claude-opus-4-6 --final
+   ```
+   This writes `outputs/<artifact>/v1.md`, updates `artifact.json`, and creates `meta.yaml`.
+
+6. **Show it to the user** and ask if they want to revise.
+
+7. **Promote when final**:
+   ```bash
+   python3 system/lifehug.py artifact promote-source \
+     outputs/2026-05-10-katie-mother-s-day-letter --kind all
+   python3 system/lifehug.py compile
+   ```
+
+Promotion is deliberate. The final artifact becomes an immutable `authored_artifact` source; the context pack becomes an `artifact_context` source. The final artifact is authoritative as the author's expression at that moment, not as independent proof of every claim inside it.
+
+### Revising An Artifact
 
 When the user wants changes ("make it more personal", "shorter", "less formal"):
 
-1. **Generate a revision prompt** with their feedback:
-   ```bash
-   python3 system/compose.py --revise outputs/mothers-day-2026 --feedback 'make it more personal'
-   ```
-   This includes the latest version + the original source answers + their feedback.
+1. Read the current `outputs/<artifact>/vN.md` and `outputs/<artifact>/context.md`.
+2. Rewrite the artifact using the user's feedback.
+3. Save it as the next version:
 
-2. **Process the prompt** to get the new version.
+```bash
+printf '%s\n' "$content" | python3 system/lifehug.py artifact save \
+  outputs/<artifact> --feedback "make it more personal" --final
+```
 
-3. **Save it** as the next version:
-   ```bash
-   echo "$content" | python3 system/compose.py --save outputs/mothers-day-2026 \
-       --feedback 'make it more personal' --model anthropic/claude-opus-4-6
-   ```
-   `--save` auto-bumps to `v2.md`, `v3.md`, etc.
+`artifact save` auto-bumps to `v2.md`, `v3.md`, etc.
+
+### Telegram / Phone Keyword
+
+When a Telegram/OpenClaw message starts with `/artifact` or `artifact:` — or plainly asks to write/create a letter, post, caption, speech, chapter, or similar deliverable — treat it as an artifact request, not a normal daily answer.
+
+If details are missing, ask short follow-ups for subject, occasion, format, and date. Then run the same script flow above. This keeps the phone path and desktop path identical.
 
 ### Browsing Outputs
 
@@ -728,8 +752,9 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
-- `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/chapter.md`
+- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
+- `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 
 **User data** (never touched):
 - `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`

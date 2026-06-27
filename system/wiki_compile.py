@@ -70,7 +70,7 @@ THEME_KEYWORDS = {
 }
 
 # Bump to invalidate cached syntheses when the prompt/contract changes.
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 SYNTH_CACHE_FILE = STATE_DIR / "wiki_synthesis_cache.json"
 # Drop-zone for keyless desktop synthesis: when the skill runs through Claude
 # Code, the agent writes each page's prose here (state/synthesis/<slug>.md) and
@@ -132,11 +132,15 @@ def read_manual_sources() -> dict[str, dict]:
         return sources
     for path in sorted(p for p in SOURCES_DIR.rglob("*.md") if p.name != ".gitkeep"):
         text = path.read_text(encoding="utf-8", errors="replace")
+        metadata, raw_body = split_frontmatter(text)
         title = frontmatter_value(text, "title", path.stem.replace("-", " ").title())
-        body = strip_frontmatter(text)
+        body = raw_body.strip() if raw_body != text else strip_frontmatter(text)
         body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
         source_id = frontmatter_value(text, "source_id", f"source:{path.stem}")
         kind = frontmatter_value(text, "type", "manual_source")
+        generated_from = metadata.get("generated_from", [])
+        if not isinstance(generated_from, list):
+            generated_from = []
         sources[source_id] = {
             "id": source_id,
             "path": path,
@@ -144,6 +148,9 @@ def read_manual_sources() -> dict[str, dict]:
             "title": title,
             "body": body,
             "kind": kind,
+            "source_trust": str(metadata.get("source_trust", "")),
+            "authority": str(metadata.get("authority", "")),
+            "generated_from": [str(item) for item in generated_from],
         }
     return sources
 
@@ -177,13 +184,27 @@ def display_body(text: str) -> str:
     return re.sub(rf"\b{OLD_FOCUS_TERM}\b", "Focus", text)
 
 
+def is_derived_source(item: dict) -> bool:
+    """Derived/artifact sources support synthesis but are not primary proof."""
+    kind = str(item.get("kind", ""))
+    trust = str(item.get("source_trust", ""))
+    return kind in {"authored_artifact", "artifact_context", "artifact_source"} or trust in {
+        "authored_expression",
+        "derived_context",
+        "derived",
+    }
+
+
 def cited_blocks(items: list[dict], limit: int = 8) -> list[str]:
     blocks = []
     for item in items[:limit]:
         body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > 420:
             body = body[:420].rsplit(" ", 1)[0] + "..."
-        blocks.append(f"- **{item['id']}**: {body} [{item['source']}]")
+        label = ""
+        if is_derived_source(item):
+            label = f" ({item.get('source_trust') or item.get('kind')})"
+        blocks.append(f"- **{item['id']}**{label}: {body} [{item['source']}]")
     return blocks
 
 
@@ -195,6 +216,16 @@ def matching_sources(sources: dict[str, dict], terms: list[str]) -> list[dict]:
         if any(term in haystack for term in clean_terms):
             matches.append(source)
     return matches
+
+
+def split_primary_supporting(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    primary, supporting = [], []
+    for item in items:
+        if is_derived_source(item):
+            supporting.append(item)
+        else:
+            primary.append(item)
+    return primary, supporting
 
 
 def unanswered_questions(questions: list[dict], category: str, limit: int = 8) -> list[str]:
@@ -281,17 +312,24 @@ def plan_projects(categories, questions, answers, manual_sources):
 def plan_themes(answers, manual_sources):
     descs = []
     for theme, keywords in sorted(THEME_KEYWORDS.items()):
-        hits = []
-        for item in list(answers.values()) + list(manual_sources.values()):
+        answer_hits = []
+        manual_hits = []
+        for item in answers.values():
             haystack = item["body"].lower()
             if any(keyword in haystack for keyword in keywords):
-                hits.append(item)
-        if not hits:
+                answer_hits.append(item)
+        for item in manual_sources.values():
+            haystack = item["body"].lower()
+            if any(keyword in haystack for keyword in keywords):
+                manual_hits.append(item)
+        primary_sources, supporting_sources = split_primary_supporting(manual_hits)
+        hits = answer_hits + primary_sources
+        if not hits and not supporting_sources:
             continue
         title = theme.replace("-", " ").title()
-        sources = [a["source"] for a in hits]
+        sources = [a["source"] for a in hits + supporting_sources]
         descs.append(_descriptor(
-            "theme", title, theme, sources, hits, [],
+            "theme", title, theme, sources, hits, supporting_sources,
             summary=f"A recurring Lifehug theme found across {len(hits)} source answers.",
             open_questions=[
                 f"- Where does {title.lower()} first appear in the author's life?",
@@ -435,6 +473,10 @@ MISSION / VOICE CONTEXT (for tone only):
 SOURCE MATERIAL — the ONLY facts you may use. Do not invent names, dates, events,
 or feelings that are not present below:
 {chr(10).join(src_lines) or '(no source material yet)'}
+
+Artifact/context sources marked `authored_expression`, `derived_context`, or
+similar are the author's later expression or a working context pack. Use them
+as attributed support, not as independent proof of every underlying event.
 
 OTHER WIKI PAGES — choose related pages ONLY from this list, referencing them by slug:
 {chr(10).join(roster_lines) or '(none yet)'}

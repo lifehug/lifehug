@@ -3,8 +3,8 @@
 
 Answers the question Dave cares about most: *are we graduating toward finished
 things?* For each Focus it shows fill vs. target and a readiness verdict, lists
-neighborhoods (output arcs) with completeness, and — the missing compose←research
-link — suggests composing a deliverable when a Focus is ready to draft.
+neighborhoods (output arcs) with completeness, and suggests creating an
+artifact when a Focus is ready to draft.
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 READY = 0.70
 DEVELOPING = 0.40
 
-# Map a Focus deliverable to the nearest compose.py format.
+# Map a Focus deliverable to the nearest artifact format.
 DELIVERABLE_TO_FORMAT = {
     "book": "chapter", "chapter": "chapter", "memoir": "chapter",
-    "letter": "letter", "essay": "chapter", "post": "instagram",
+    "letter": "letter", "essay": "chapter", "post": "post",
     "profile": "chapter", "tweet": "tweet",
 }
 
@@ -39,11 +39,12 @@ def verdict(saturation: float) -> tuple[str, str]:
     return "EARLY", "needs more answers"
 
 
-def compose_hint(focus: dict) -> str:
+def artifact_hint(focus: dict) -> str:
     fmt = DELIVERABLE_TO_FORMAT.get(focus.get("deliverable", "chapter"), "chapter")
     cats = ",".join(focus.get("categories", [])) or "?"
-    return (f"python3 system/compose.py --prompt --format {fmt} "
-            f"--categories {cats}   # → {focus.get('deliverable', 'draft')}")
+    label = str(focus.get("label", "")).replace('"', '\\"')
+    return (f'python3 system/lifehug.py artifact new --format {fmt} '
+            f'--subject "{label}" --categories {cats}   # -> {focus.get("deliverable", "draft")}')
 
 
 def run() -> int:
@@ -86,10 +87,10 @@ def run() -> int:
                   f"{c:.0%} arc complete [{n.get('status','draft')}]{flag}")
 
     if ready_focuses:
-        print("\nReady to compose — suggested next deliverables:")
+        print("\nReady to create — suggested next artifacts:")
         for focus in ready_focuses:
             print(f"  • {focus['label']}:")
-            print(f"      {compose_hint(focus)}")
+            print(f"      {artifact_hint(focus)}")
 
     # Expansion signal — when everything's full, it's time for new domains.
     if fullness >= 0.6:

@@ -46,7 +46,7 @@ from lifehug_core import (
 
 SYSTEM_DIR = Path(__file__).parent
 
-VALID_FORMATS = ("letter", "tweet", "instagram", "chapter")
+VALID_FORMATS = ("letter", "tweet", "instagram", "chapter", "post")
 OLD_FOCUS_TERM = "Spot" "light"
 
 
@@ -613,7 +613,7 @@ def cmd_info(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Lifehug output composer — letters, tweets, IG, chapters",
+        description="Lifehug output composer — letters, tweets, IG, posts, chapters",
     )
     parser.add_argument("--prompt", action="store_true",
                         help="Generate AI prompt for a new piece")

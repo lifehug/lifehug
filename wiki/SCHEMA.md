@@ -4,7 +4,7 @@ This wiki is an owner-only, AI-maintained memory layer. It compiles raw story so
 
 The wiki is not the raw diary. Raw sources stay in `answers/` and `sources/`. Wiki pages synthesize those sources, cite them, cross-link related pages, and improve over time.
 
-Corrections and reflections are also sources. If a memory was wrong or the author's understanding changed, the wiki should show the original source and the later correction/reflection together instead of erasing the earlier record.
+Corrections, reflections, and promoted artifacts are also sources. If a memory was wrong or the author's understanding changed, the wiki should show the original source and the later correction/reflection together instead of erasing the earlier record. If a letter, post, or chapter is promoted, treat it as the author's expression at that moment, not as independent proof of every event inside it.
 
 ## First-Pass Privacy Model
 
@@ -18,6 +18,26 @@ sensitivity: personal
 ```
 
 Publishing should happen through reviewed `outputs/` or a future `published/` tree, not by exposing the private wiki directly.
+
+## Artifact Sources
+
+Artifact drafts live in `outputs/<artifact>/`. When the author approves one, the workflow can promote its context pack and final version into `sources/artifacts/`.
+
+Artifact source frontmatter includes:
+
+```yaml
+type: authored_artifact | artifact_context
+source_trust: authored_expression | derived_context
+authority: first_person_expression | derived_working_context
+artifact_id: mothers-day-2026
+artifact_format: letter
+generated_from:
+  - answers/K1.md
+output_path: outputs/mothers-day-2026/v1.md
+privacy: owner_only
+```
+
+The compiler may use artifact sources as supporting/attributed material. It should not upgrade derived context or generated prose into primary evidence.
 
 ## Page Types
 

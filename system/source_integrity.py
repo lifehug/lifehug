@@ -57,6 +57,19 @@ FRONTMATTER_ORDER = (
     "pass_number",
     "source_medium",
     "source_type",
+    "source_trust",
+    "authority",
+    "artifact_id",
+    "artifact_title",
+    "artifact_format",
+    "subject",
+    "occasion",
+    "occasion_date",
+    "audience",
+    "privacy",
+    "generated_from",
+    "output_path",
+    "output_version",
     "captured_at",
     "asked_at",
     "answered_date",
@@ -164,6 +177,8 @@ def _path_source_type(path: Path, metadata: dict[str, object]) -> str:
         relative = path.resolve().relative_to(SOURCES_DIR.resolve())
         if relative.parts and relative.parts[0] == "corrections":
             return "source_correction"
+        if relative.parts and relative.parts[0] == "artifacts":
+            return "artifact_source"
         if relative.parts and relative.parts[0] == "manual":
             return "unprompted_story"
         return "ingested_source"

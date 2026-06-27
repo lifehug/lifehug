@@ -134,3 +134,21 @@ When you reply to a question, the AI should use the skill workflow:
 printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> --source "voice (transcribed)"
 python3 system/lifehug.py compile
 ```
+
+## Artifact Requests From Telegram
+
+If a message starts with `/artifact` or `artifact:`, or plainly asks to write a
+letter, post, caption, chapter, speech, or milestone deliverable, the agent
+should use the artifact workflow instead of treating the message as a daily
+answer:
+
+```bash
+python3 system/lifehug.py artifact new \
+  --subject "<subject>" --occasion "<occasion>" --format <letter|tweet|instagram|post|chapter>
+python3 system/lifehug.py artifact prompt outputs/<artifact>
+printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<artifact> --final
+python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
+python3 system/lifehug.py compile
+```
+
+The phone path and desktop path are intentionally the same script path.

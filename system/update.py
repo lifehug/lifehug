@@ -35,6 +35,7 @@ PROTECTED_FILES = {
     "outputs/",
     "sources/",
     "sources/manual/",
+    "sources/artifacts/",
     "state/question_candidates.json",
     "state/question_queue.json",
     "state/planner_state.json",
@@ -220,6 +221,13 @@ def run_migrations(target_version, current_version):
             if not gitkeep.exists():
                 gitkeep.write_text("")
 
+    if target_version >= 22 and current_version < 22:
+        directory = REPO_DIR / "sources" / "artifacts"
+        directory.mkdir(parents=True, exist_ok=True)
+        gitkeep = directory / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("")
+
     if target_version >= 15 and current_version < 15:
         # v15: introduce the Focus/roadmap layer. This is a pure backfill —
         # the roadmap is *derived* from the existing question bank and answers.
@@ -307,7 +315,13 @@ def apply_version(version):
         for f in updated:
             run_git("add", f)
         # Stage .gitkeep files if they were just created by migrations.
-        for marker in ("outputs/.gitkeep", "sources/manual/.gitkeep", "state/.gitkeep", "state/roadmap.json"):
+        for marker in (
+            "outputs/.gitkeep",
+            "sources/manual/.gitkeep",
+            "sources/artifacts/.gitkeep",
+            "state/.gitkeep",
+            "state/roadmap.json",
+        ):
             if (REPO_DIR / marker).exists():
                 run_git("add", marker, check=False)
         result = subprocess.run(

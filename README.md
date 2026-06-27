@@ -12,11 +12,11 @@ You do one thing: **answer the question.** Every answer becomes a raw source rec
 
 - [The big picture](#the-big-picture) — how the whole thing fits together
 - [The daily loop](#the-daily-loop) — what happens every morning
-- [Core concepts](#core-concepts) — Focus, Roadmap, Wiki, Neighborhood, Candidate, Pass
+- [Core concepts](#core-concepts) — Focus, Roadmap, Wiki, Neighborhood, Candidate, Artifact, Pass
 - [How the planner decides what to ask](#how-the-planner-decides-what-to-ask)
 - [Research & neighborhoods: finding new questions](#research--neighborhoods-finding-new-questions)
 - [The private wiki](#the-private-wiki)
-- [Outputs](#outputs)
+- [Outputs & artifacts](#outputs--artifacts)
 - [The three clocks](#the-three-clocks-scheduling)
 - [Every script, holistically](#every-script-holistically)
 - [Getting started](#getting-started)
@@ -67,9 +67,10 @@ flowchart TB
     RE --> CA
     CA -->|promote| QB
 
-    OUT["📜 OUTPUTS<br/>letters · tweets · posts · chapters"]
+    OUT["📜 ARTIFACTS<br/>letters · tweets · posts · chapters"]
     W --> OUT
     QB --> OUT
+    OUT -->|promote final/context| W
 ```
 
 **Read it as four layers:**
@@ -120,6 +121,7 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Neighborhood** | A cluster of 6–12 questions around one topic, arranged on a narrative **arc**, aimed at a deliverable. How new questions are born. | `state/neighborhoods.json` |
 | **Candidate** | A proposed question waiting in a review buffer. Becomes a real question only when *promoted* into the bank. | `state/question_candidates.json` |
 | **Wiki** | The cross-linked, owner-only encyclopedia of your life, synthesized from your answers. | `wiki/` |
+| **Artifact** | A produced letter, post, caption, tweet, or chapter. Drafts live in `outputs/`; approved finals/context can be promoted as sources. | `outputs/`, `sources/artifacts/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` |
 
 The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
@@ -278,19 +280,26 @@ This is how Lifehug keeps learning: it notices where the life model is weak, ask
 
 ---
 
-## Outputs
+## Outputs & artifacts
 
-At any milestone — Mother's Day, a birthday, or whenever you ask — compose a real artifact from your accumulated answers. `compose.py` doesn't call the AI itself; it assembles a prompt from the right answers + a format template, the AI fills it, and the script saves the result with version history.
+At any milestone — Mother's Day, a birthday, an anniversary, or whenever you ask — create a real artifact from your accumulated answers: a letter, post, Instagram caption, tweet, or chapter. The artifact workflow creates a context pack, asks the AI/agent to write the piece, saves versioned drafts under `outputs/`, and can promote the final work back into `sources/artifacts/`.
 
 ```bash
-python3 system/compose.py --prompt --format letter --subject katie --title mothers-day-2026
-# → AI writes it → save it →
-echo "$content" | python3 system/compose.py --save outputs/mothers-day-2026 --format letter --subject katie
-# revise:
-python3 system/compose.py --revise outputs/mothers-day-2026 --feedback "make it more personal"
+python3 system/lifehug.py artifact new \
+  --subject katie --occasion "anniversary" --format letter --date 2026-07-12
+
+python3 system/lifehug.py artifact prompt outputs/2026-07-12-katie-anniversary-letter
+# -> AI writes it -> save it:
+printf '%s\n' "$content" | python3 system/lifehug.py artifact save \
+  outputs/2026-07-12-katie-anniversary-letter --final
+
+python3 system/lifehug.py artifact promote-source \
+  outputs/2026-07-12-katie-anniversary-letter --kind all
 ```
 
-Formats: `letter`, `tweet`, `instagram`, `chapter`. Each output lives in `outputs/<title>/` with versioned revisions (`v1.md`, `v2.md`, …) and a `meta.yaml` history.
+Formats: `letter`, `tweet`, `instagram`, `chapter`, `post`. Each artifact lives in `outputs/<title>/` with a `context.md`, `artifact.json`, `meta.yaml`, and versioned drafts (`v1.md`, `v2.md`, ...).
+
+Promotion is opt-in. A final artifact is authoritative as **your authored expression at that moment**. It is not treated as independent proof of every underlying event. The compiler reads artifact/context sources as supporting, attributed material so Lifehug can learn from what you produce without circularly turning generated text into primary evidence.
 
 ---
 
@@ -370,7 +379,8 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`wiki_compile.py`** | The graph builder. Plan → synthesize → cross-link → write. Turns answers into cross-linked wiki pages with cached, idempotent synthesis and a keyless desktop path (`--emit-tasks`). See [the wiki](#the-private-wiki). |
 | **`source_integrity.py`** | The source contract enforcer. Scans raw sources, maintains `state/source_manifest.json`, writes source lint findings, and creates additive correction/reflection source files instead of rewriting old memories. |
 | **`serve_wiki.py`** | The local reader. A read-only HTTP server that renders the wiki as HTML and resolves `[[wikilinks]]` into real page navigation. No AI, no writes. |
-| **`compose.py`** | The output composer. Assembles a prompt (template + the right answers), then versions the AI's result under `outputs/`. Prompt-in, versioned-artifact-out. |
+| **`artifact.py`** | The artifact workflow. Creates occasion tasks, writes context packs, saves versioned outputs, marks finals, and promotes context/final versions into `sources/artifacts/` with provenance. |
+| **`compose.py`** | The low-level output composer. Assembles a prompt (template + the right answers), then versions the AI's result under `outputs/`. `artifact.py` is the preferred milestone workflow. |
 | **`update_readme.py`** | Keeps the README's coverage section and progress bullets in sync with current state. |
 | **`update.py`** + **`version.json`** | The framework updater. Pulls tagged framework releases from upstream and applies them — **never touching your data** (answers, outputs, sources, config, question bank). Runs version migrations and protects locally-edited files. |
 
@@ -458,13 +468,13 @@ python3 system/lifehug.py --help
 ```
 lifehug/
 ├── answers/          # prompted answers; raw source-of-truth
-├── sources/          # unprompted stories, imports, corrections, reflections
+├── sources/          # unprompted stories, imports, corrections, reflections, artifact sources
 ├── wiki/             # the compiled private wiki (people, places, themes, self…)
-├── outputs/          # composed artifacts (letters, essays, chapters)
+├── outputs/          # artifact tasks and drafts (letters, posts, chapters)
 ├── state/            # roadmap, weekly queue, candidates, quality profile, source manifest
 ├── system/           # all the scripts (the system is script-first)
 ├── templates/        # output format templates
-├── skills/           # Claude Code skills (/focus, /compile)
+├── skills/           # Claude Code skills (/focus, /compile, /artifact)
 ├── config.yaml       # your preferences (name, timezone, channel)
 └── CLAUDE.md         # operating instructions for the AI
 ```

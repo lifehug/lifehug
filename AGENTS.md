@@ -157,6 +157,26 @@ python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 
 `planner-report` is read-only. `ask.py` uses `state/question_queue.json` only while it is valid and unexpired, then falls back to normal rotation logic.
 
+## Artifact Creation
+
+If the user asks to write/create/draft a letter, post, caption, chapter, speech,
+or milestone deliverable, use the artifact workflow instead of raw compose.
+Telegram/OpenClaw messages beginning with `/artifact` or `artifact:` are
+explicit artifact requests, not daily answers.
+
+```bash
+python3 system/lifehug.py artifact new \
+  --subject "<subject>" --occasion "<occasion>" --format <letter|tweet|instagram|post|chapter>
+python3 system/lifehug.py artifact prompt outputs/<artifact>
+printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<artifact> --final
+python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
+python3 system/lifehug.py compile
+```
+
+Promotion is opt-in and writes immutable sources under `sources/artifacts/`.
+Final artifacts are authored-expression sources; context packs are derived
+context sources. Do not rewrite those source bodies later.
+
 ### Voice Messages
 
 If the user sends a voice message as their answer:

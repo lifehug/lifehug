@@ -287,6 +287,11 @@ def cmd_quality_update(_args: argparse.Namespace) -> int:
     return run_python("quality_profile.py", ["--update"])
 
 
+def cmd_artifact(args: argparse.Namespace) -> int:
+    artifact_args = ["--help"] if getattr(args, "artifact_help", False) else (args.artifact_args or ["--help"])
+    return run_python("artifact.py", artifact_args)
+
+
 def cmd_roadmap(_args: argparse.Namespace) -> int:
     return run_python("roadmap.py", ["show"])
 
@@ -752,6 +757,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("quality-update", help="Recompute quality profile from answer scores")
     p.set_defaults(func=cmd_quality_update)
+
+    p = sub.add_parser("artifact", help="Create occasion artifacts and promote final works as sources", add_help=False)
+    p.add_argument("-h", "--help", dest="artifact_help", action="store_true")
+    p.add_argument("artifact_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_artifact)
 
     p = sub.add_parser("roadmap", help="Show the roadmap of Focuses with live fill")
     p.set_defaults(func=cmd_roadmap)

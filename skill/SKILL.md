@@ -55,6 +55,9 @@ python3 system/lifehug.py source-lint       # lint source integrity and queue fi
 python3 system/lifehug.py source-lint --fix # safe metadata/manifest repairs only
 python3 system/lifehug.py source-findings   # review persisted repair findings
 python3 system/lifehug.py ingest-story      # save unprompted story source from stdin
+python3 system/lifehug.py artifact new --format letter --subject Mom # create artifact context
+python3 system/lifehug.py artifact prompt outputs/<artifact>          # prompt to write it
+python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
 python3 system/lifehug.py candidates-list   # list candidate questions
 python3 system/lifehug.py candidates-review # review candidates before promotion
 python3 system/lifehug.py candidates-promote # promote a candidate to question-bank.md
@@ -148,6 +151,39 @@ python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 ```
 
 `planner-report` is read-only. `ask.py` uses a planned queue only while it is valid and unexpired.
+
+## Artifact Creation
+
+When the user asks to write/create/draft a letter, post, caption, chapter, speech, or other meaningful deliverable, use the artifact workflow. On Telegram/OpenClaw, messages beginning with `/artifact` or `artifact:` are explicit artifact requests and should not be processed as daily answers.
+
+Ask for only the missing essentials: subject, occasion, format, date, and audience/privacy if relevant. Then create the task:
+
+```bash
+python3 system/lifehug.py artifact new \
+  --subject "<subject>" --occasion "<occasion>" --format <letter|tweet|instagram|post|chapter> \
+  --date <YYYY-MM-DD>
+```
+
+Generate the prompt:
+
+```bash
+python3 system/lifehug.py artifact prompt outputs/<artifact>
+```
+
+You are the model on desktop; write the artifact from the prompt. In Telegram/OpenClaw, the agent follows the same prompt and returns the draft for review. Save the draft:
+
+```bash
+printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<artifact> --final
+```
+
+If the user approves it as final, promote both the context pack and final version into immutable sources:
+
+```bash
+python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
+python3 system/lifehug.py compile
+```
+
+Promotion is opt-in. The final artifact is an authored expression source; the context pack is a derived context source. Do not rewrite promoted source bodies later.
 
 ## Private Wiki
 
