@@ -1,10 +1,10 @@
 # Lifehug
 
-**Capture, deepen, and connect your life story — one question a day.**
+**Capture your life, deepen it with AI, and turn it into artifacts that matter.**
 
-Lifehug is a lifelong AI oral-history system. It asks you one thoughtful question each day, takes your answer by voice or text, and keeps coming back with better follow-ups. Over time it compiles everything into a private, cross-linked **wiki of your life** — and uses that wiki to decide what to ask next. The result is a compounding loop that turns scattered memories into real artifacts: letters, essays, chapters, a memoir, a founder story.
+Lifehug is a lifelong AI oral-history system with two core loops. The **capture loop** asks one thoughtful question each day, takes your answer by voice or text, compiles it into a private cross-linked **wiki of your life**, and uses that wiki to decide what to ask next. The **artifact loop** turns that accumulated memory into things you can actually use: letters, posts, chapters, speeches, a memoir, a founder story.
 
-You do one thing: **answer the question.** Every answer becomes a raw source record; everything below is what the system does around that.
+You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make an artifact.** Both become part of the same compounding memory system.
 
 ---
 
@@ -16,7 +16,7 @@ You do one thing: **answer the question.** Every answer becomes a raw source rec
 - [How the planner decides what to ask](#how-the-planner-decides-what-to-ask)
 - [Research & neighborhoods: finding new questions](#research--neighborhoods-finding-new-questions)
 - [The private wiki](#the-private-wiki)
-- [Outputs & artifacts](#outputs--artifacts)
+- [Artifacts](#artifacts)
 - [The three clocks](#the-three-clocks-scheduling)
 - [Every script, holistically](#every-script-holistically)
 - [Getting started](#getting-started)
@@ -28,7 +28,7 @@ You do one thing: **answer the question.** Every answer becomes a raw source rec
 
 ## The big picture
 
-Lifehug is a **compounding loop**, not a journal. Each answer feeds a private wiki; the wiki feeds a planner; the planner decides the next question; the question pulls out the next answer. The more you answer, the smarter the questions get.
+Lifehug is a **compounding system**, not a journal. Each answer feeds a private wiki; the wiki feeds a planner; the planner decides the next question; the question pulls out the next answer. When you need something real — a Mother's Day letter, a birthday post, a chapter, a speech — the artifact workflow turns that memory into a finished piece, and the finished piece can feed back into the source layer.
 
 ```mermaid
 flowchart TB
@@ -55,6 +55,11 @@ flowchart TB
         CA["Candidates<br/>review buffer before<br/>they become real questions"]
     end
 
+    subgraph make["📜 the artifact layer"]
+        OUT["ARTIFACTS<br/>letters · posts · captions<br/>chapters · speeches"]
+        SRC["Artifact sources<br/>final piece + context pack"]
+    end
+
     P -->|writes answer| W
     P -->|marks answered| QB
     P -->|silently scores| QP
@@ -67,18 +72,19 @@ flowchart TB
     RE --> CA
     CA -->|promote| QB
 
-    OUT["📜 ARTIFACTS<br/>letters · tweets · posts · chapters"]
     W --> OUT
     QB --> OUT
-    OUT -->|promote final/context| W
+    OUT -->|promote final/context| SRC
+    SRC --> W
 ```
 
-**Read it as four layers:**
+**Read it as five layers:**
 
 1. **Daily** — one question out, one answer in. The only part you touch.
 2. **Knowledge** — every answer becomes a wiki page and marks a question done. The wiki is the relational database the rest of the system reads.
 3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly queue of what to ask.
 4. **Growth** — occasionally (and only here does it cost API money), the system inspects the wiki for thin areas and *generates new questions* about people, themes, and periods you haven't covered.
+5. **Artifacts** — when there is an occasion or deliverable, Lifehug gathers the right context, helps write the piece, versions it, and can store the final artifact back as source material.
 
 ---
 
@@ -121,7 +127,7 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Neighborhood** | A cluster of 6–12 questions around one topic, arranged on a narrative **arc**, aimed at a deliverable. How new questions are born. | `state/neighborhoods.json` |
 | **Candidate** | A proposed question waiting in a review buffer. Becomes a real question only when *promoted* into the bank. | `state/question_candidates.json` |
 | **Wiki** | The cross-linked, owner-only encyclopedia of your life, synthesized from your answers. | `wiki/` |
-| **Artifact** | A produced letter, post, caption, tweet, or chapter. Drafts live in `outputs/`; approved finals/context can be promoted as sources. | `outputs/`, `sources/artifacts/` |
+| **Artifact** | The product payoff: a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. | `outputs/`, `sources/artifacts/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` |
 
 The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
@@ -264,7 +270,7 @@ Every page cites the answers it's built from, and links to related pages — so 
 
 ### Source integrity
 
-Lifehug treats `answers/` and `sources/` as the source-of-truth layer. The wiki, planner reports, question candidates, and outputs are derived from those sources.
+Lifehug treats `answers/` and `sources/` as the source-of-truth layer. The wiki, planner reports, question candidates, and artifact drafts are derived from those sources. Approved artifact finals can re-enter the source layer under `sources/artifacts/`.
 
 That means the system does not fix a memory by rewriting history. If something was wrong, you add a correction. If your understanding changed, you add a reflection. Both become new source files that the wiki can compile alongside the original memory.
 
@@ -280,9 +286,18 @@ This is how Lifehug keeps learning: it notices where the life model is weak, ask
 
 ---
 
-## Outputs & artifacts
+## Artifacts
 
-At any milestone — Mother's Day, a birthday, an anniversary, or whenever you ask — create a real artifact from your accumulated answers: a letter, post, Instagram caption, tweet, or chapter. The artifact workflow creates a context pack, asks the AI/agent to write the piece, saves versioned drafts under `outputs/`, and can promote the final work back into `sources/artifacts/`.
+Artifacts are the reason the system is more than a private archive. They are the moments where Lifehug turns memory into something useful outside the system: a letter to your mom, an anniversary note, a birthday Instagram caption, a chapter draft, a speech, a post about your company, a piece your kids might read years later.
+
+The artifact workflow does four things:
+
+1. **Gathers context** — pulls relevant answers, wiki pages, prior artifacts, and Focus material into a context pack.
+2. **Creates the piece** — gives the AI/agent the right prompt and template for the format.
+3. **Versions the work** — saves drafts under `outputs/<artifact>/` so revision is part of the record.
+4. **Learns from the result** — when you approve the final, Lifehug can promote both the final artifact and its context pack into `sources/artifacts/`.
+
+That last step matters. A Mother's Day letter is not just an export; it is evidence of what you chose to say, how you understood the relationship, and which memories mattered at that moment.
 
 ```bash
 python3 system/lifehug.py artifact new \
@@ -300,6 +315,8 @@ python3 system/lifehug.py artifact promote-source \
 Formats: `letter`, `tweet`, `instagram`, `chapter`, `post`. Each artifact lives in `outputs/<title>/` with a `context.md`, `artifact.json`, `meta.yaml`, and versioned drafts (`v1.md`, `v2.md`, ...).
 
 Promotion is opt-in. A final artifact is authoritative as **your authored expression at that moment**. It is not treated as independent proof of every underlying event. The compiler reads artifact/context sources as supporting, attributed material so Lifehug can learn from what you produce without circularly turning generated text into primary evidence.
+
+The same workflow works from a desktop skill or from your phone. In Telegram/OpenClaw, start with `/artifact` or `artifact:` and the agent should gather missing details, run the same script path, draft the piece, and ask before promoting it as source material.
 
 ---
 
@@ -358,7 +375,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`roadmap.py`** | Owns Focuses. *Derives* the roadmap from the question bank (categories → Focuses), infers tiers from size, computes live saturation per Focus, and exposes the `focus-*` management commands. The JSON is config, not source-of-truth, so renumbering questions never breaks it. |
 | **`question_planner.py`** | The brain of question selection. Builds the weekly queue by Focus-weighted random sampling under caps (see [the planner section](#how-the-planner-decides-what-to-ask)). Also computes the expansion-urgency signal that tells the research job when to find new territory. |
 | **`quality_profile.py`** | The feedback loop. Scores each answer's richness (length, entity diversity, wiki nodes added, follow-ups spawned) and, after ~20 answers, aggregates a profile that biases the planner toward question types that pull the deepest answers out of you. Zero friction — no ratings. |
-| **`progress.py`** | The deliverables dashboard. For each Focus, shows fill-vs-target and a readiness verdict (EARLY → DEVELOPING → READY → SATURATED), and nudges you to compose when something's ready to draft. |
+| **`progress.py`** | The deliverables dashboard. For each Focus, shows fill-vs-target and a readiness verdict (EARLY → DEVELOPING → READY → SATURATED), and nudges you to create an artifact when something is ready. |
 
 ### Research & question generation
 
@@ -372,7 +389,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`classify_story.py`** | The source analyzer. AI-extracts people, places, periods, themes, contradictions, and possible outputs from any source file, and proposes targeted follow-up questions. |
 | **`recommend_focuses.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
 
-### Wiki, outputs & maintenance
+### Wiki, artifacts & maintenance
 
 | Script | What it does |
 |---|---|
@@ -443,6 +460,12 @@ python3 system/research_expand.py --topic "Dad" --type relationship --output let
 # Questions
 python3 system/lifehug.py candidates-review
 python3 system/lifehug.py candidates-promote <id> --category A
+
+# Artifacts
+python3 system/lifehug.py artifact new --subject Mom --occasion "Mother's Day" --format letter
+python3 system/lifehug.py artifact prompt outputs/<artifact>
+printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<artifact> --final
+python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
 
 # Focuses & wiki
 python3 system/lifehug.py focus-new                 # guided: add a Focus
