@@ -51,6 +51,14 @@ from roadmap import (
 # gives a book a little more daily pull than a blog, but the per-Focus cap keeps
 # any one Focus from dominating a week.
 TIER_BASE = {"basic": 0.8, "standard": 1.0, "extreme": 1.2}
+PRIMARY_BASE = 1.5  # the primary focus (the author's life story) outweighs any sub-focus
+
+# Inner-story dimension of the life-story arc (the SELF_ARC). These are first-class
+# story functions alongside the outer-narrative (memoir) ones — self-knowledge is
+# part of building the life story, not a separate competing track.
+SELF_FUNCTIONS = (
+    "self_image", "value", "fear", "contradiction", "perception_by_others", "growth_edge",
+)
 
 # How much of a week is reserved (floored) for self-knowledge questions and how
 # much weight objectives get. Overridable via planner_state["lane_policy"].
@@ -76,6 +84,12 @@ STORY_FUNCTIONS = (
     "meaning",
     "contradiction",
     "output_gap",
+    # Inner story (SELF_ARC) — "contradiction" is shared with the memoir arc above.
+    "self_image",
+    "value",
+    "fear",
+    "perception_by_others",
+    "growth_edge",
 )
 
 STORY_FUNCTION_CAPS = {
@@ -87,6 +101,12 @@ STORY_FUNCTION_CAPS = {
     "meaning": 0.30,
     "contradiction": 0.20,
     "output_gap": 0.20,
+    # Inner-story dimension — kept modest so it's always represented but never floods.
+    "self_image": 0.15,
+    "value": 0.15,
+    "fear": 0.12,
+    "perception_by_others": 0.12,
+    "growth_edge": 0.15,
 }
 
 KIND_TO_STORY_FUNCTION = {
@@ -100,6 +120,18 @@ KIND_TO_STORY_FUNCTION = {
 }
 
 STORY_FUNCTION_KEYWORDS = {
+    # Inner story first — specific phrases so genuine self-examination questions
+    # classify as self functions, while plain event questions fall through below.
+    "self_image": ["who are you", "who am i", "story you tell about yourself",
+                   "how you see yourself", "kind of person you", "who you really are"],
+    "value": ["value most", "what matters most", "care about most", "principle you",
+              "what you stand for", "most important to you"],
+    "fear": ["afraid of becoming", "what do you fear", "dread", "protect against",
+             "scared of becoming", "avoid most"],
+    "perception_by_others": ["how others see", "how people see you", "how they see you",
+                             "others perceive", "misunderstood", "people get wrong about you"],
+    "growth_edge": ["becoming", "working on about yourself", "want to change about yourself",
+                    "who you want to be", "growth edge", "still figuring out about yourself"],
     "scene": [
         "walk me through",
         "what did it look",
@@ -336,7 +368,7 @@ def focus_weight(focus: dict, fill: dict) -> float:
     maintenance weight (never zero); empty-of-questions focuses go to zero."""
     if not fill["room"]:
         return 0.0
-    base = TIER_BASE.get(focus.get("tier", "standard"), 1.0)
+    base = PRIMARY_BASE if focus.get("primary") else TIER_BASE.get(focus.get("tier", "standard"), 1.0)
     sat = fill["saturation"]
     if sat >= 1.0:
         fill_factor = MAINTENANCE_FACTOR
@@ -533,12 +565,17 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         ]
         return rng.choices(pool, weights=weights, k=1)[0]
 
-    # 1) Self-knowledge floor — reserve ~1 slot/week if self questions exist.
+    # 1) Inner-story floor — reserve ~1 slot/week for self-examination questions
+    # (the SELF_ARC dimension) drawn from within the life story itself. Self-
+    # knowledge isn't a separate focus; it's how the primary life story deepens.
+    def is_self_dimension(q: dict) -> bool:
+        return str(q.get("story_function")) in SELF_FUNCTIONS
+
     self_floor = max(1, round(limit * policy["self_floor_fraction"])) if any(
-        q.get("focus_type") == "self" for q in remaining) else 0
+        is_self_dimension(q) for q in remaining) else 0
     self_taken = 0
     while self_taken < self_floor and len(queue) < limit:
-        pool = [q for q in remaining if q.get("focus_type") == "self" and eligible(q)]
+        pool = [q for q in remaining if is_self_dimension(q) and eligible(q)]
         if not pool:
             break
         record(weighted_pick(pool))

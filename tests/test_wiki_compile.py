@@ -391,6 +391,43 @@ class ProjectGroupingTests(unittest.TestCase):
         self.assertNotIn("section:", self.wc.frontmatter("Mom", "person", []))
 
 
+class PrimaryFocusTests(unittest.TestCase):
+    def setUp(self):
+        self.rm = load("roadmap")
+        self.qp = load("question_planner")
+
+    def test_life_story_is_primary_with_elevated_cap(self):
+        md = ("## A: Origins (Childhood)\n- [ ] A1: q\n"
+              "## B: Becoming\n- [ ] B1: q\n"
+              "## Projects\n## F: The Problem (Etherfuse Story)\n- [ ] F1: q\n")
+        focuses = self.rm.derive_focuses(md)
+        life = next(f for f in focuses if f["id"] == "my-life")
+        self.assertTrue(life["primary"])
+        self.assertEqual(life["cap"], self.rm.PRIMARY_CAP)
+        self.assertEqual(life["tier"], "extreme")
+        self.assertNotEqual(life["label"], "")
+        # A sub-project is NOT primary.
+        proj = next(f for f in focuses if f["type"] == "project")
+        self.assertFalse(proj.get("primary", False))
+
+    def test_primary_outweighs_extreme(self):
+        fill = {"room": True, "saturation": 0.0}
+        primary = self.qp.focus_weight({"primary": True, "tier": "standard"}, fill)
+        extreme = self.qp.focus_weight({"tier": "extreme"}, fill)
+        self.assertGreater(primary, extreme)  # the person beats any sub-focus
+
+    def test_self_examination_classified_as_self_function(self):
+        self.assertEqual(self.qp.infer_story_function("What do you value most in life?"), "value")
+        self.assertEqual(self.qp.infer_story_function("Who are you when no one is watching?"), "self_image")
+        # A plain event question stays outer-narrative.
+        self.assertNotIn(self.qp.infer_story_function("Tell me about the house you grew up in"),
+                         self.qp.SELF_FUNCTIONS)
+
+    def test_self_functions_have_planner_caps(self):
+        for fn in ("self_image", "value", "fear", "growth_edge"):
+            self.assertIn(fn, self.qp.STORY_FUNCTION_CAPS)
+
+
 class ConfigMergeTests(unittest.TestCase):
     def setUp(self):
         import lifehug_core

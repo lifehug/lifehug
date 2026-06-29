@@ -29,6 +29,7 @@ from lifehug_core import (  # noqa: E402
     QUESTIONS_FILE,
     STATE_DIR,
     WIKI_DIR,
+    load_config,
     now_utc,
     parse_categories,
     parse_questions,
@@ -46,6 +47,7 @@ TIER_TARGETS = {"basic": 8, "standard": 20, "extreme": 50}
 TIER_ORDER = ("basic", "standard", "extreme")
 
 DEFAULT_CAP = 0.30        # max share of a week's questions one Focus may take
+PRIMARY_CAP = 0.40        # the author's own life story (primary focus) may take a larger share
 FINISHING_CAP = 0.50      # raised cap while a Focus is being pushed to done
 MAINTENANCE_FACTOR = 0.1  # weight multiplier once a Focus is saturated
 
@@ -132,20 +134,25 @@ def derive_focuses(md_text: str) -> list[dict]:
 
     focuses: list[dict] = []
 
-    # Life-story baseline: A–E collapse into one always-present Focus.
+    # Life-story baseline: A–E collapse into one always-present Focus — and it's
+    # the PRIMARY focus (the author themselves). It carries both the outer
+    # narrative and the inner story (self-knowledge), gets the largest share of
+    # questions, and is the heart of the whole system.
     main_cats = sorted(c for c, m in categories.items() if m["group"] == "main")
     if main_cats:
         total_main = sum(counts.get(c, 0) for c in main_cats)
+        full_name = load_config().get("full_name") or load_config().get("name") or "My Life"
         focuses.append({
             "id": "my-life",
-            "label": "My Life",
+            "label": full_name,
             "type": "life_story",
-            "tier": "standard",
+            "primary": True,
+            "tier": "extreme",
             "objective": "a faithful record of my life story",
-            "deliverable": "memoir",
+            "deliverable": "book",
             "categories": main_cats,
-            "target_depth": max(total_main, TIER_TARGETS["standard"]),
-            "cap": DEFAULT_CAP,
+            "target_depth": max(total_main, TIER_TARGETS["extreme"]),
+            "cap": PRIMARY_CAP,
             "phase": "active",
             "wiki_node": None,
             "neighborhoods": [],

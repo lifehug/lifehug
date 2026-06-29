@@ -29,6 +29,8 @@ If there are no project-specific categories in `system/question-bank.md` (only A
 ### Step 1: Welcome
 Explain what Life Hug is — a system that captures their life story through daily questions, building toward books and other deliverables. Keep it simple and inviting.
 
+Make clear that **they are the primary Focus**: their own life story is the biggest, most important thing the system builds — a lifelong "project" whose deliverable is their book. Everything else (a company story, a person, a theme) is a supporting Focus. This primary Focus is created automatically from the A–E life-story arc and always gets the largest share of questions; understanding themselves (values, fears, contradictions, growth) is built in, not optional.
+
 ### Step 2: What do you want to write?
 Ask what they want to create. Examples:
 - A memoir
@@ -516,13 +518,15 @@ python3 system/compose.py --info outputs/title    # one output's history
 
 ## Category Management
 
-### Generic Starter Categories (A-E)
-These come pre-loaded and work for any life story:
+### Generic Starter Categories (A-E) — the life-story character arc
+A–E are pre-loaded and form the **author's life-story character arc** — and the author is the **primary Focus** (`type: life_story`, the biggest one, derived automatically; see *The Roadmap & Focuses*). The arc holds **both** the outer narrative (what happened) and the **inner story** (who you are):
 - **A: Origins** — Childhood, family, early life
 - **B: Becoming** — Growing up, finding direction
 - **C: Relationships & People** — Important people, connections
 - **D: Purpose & Calling** — What drives you, key decisions
 - **E: Reflection & Wisdom** — Lessons, values, advice
+
+The inner story isn't a separate track: self-examination questions (self-image, values, fears, contradictions, how others see you, who you're becoming — the SELF_ARC) live **inside** A–E and build the same book and the same self-portrait hub. The planner reserves a weekly inner-story slot from within the life story so the self dimension keeps deepening. Self-knowledge questions are generated with `research_expand --type self` and promoted into A–E.
 
 ### Project Categories (F-J+)
 Added during setup based on the user's specific projects. Examples:
