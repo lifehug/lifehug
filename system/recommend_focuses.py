@@ -117,6 +117,14 @@ STOPWORDS = {
     "January", "February", "March", "April", "May", "June", "July",
     "August", "September", "October", "November", "December",
     "American", "Mexican", "Spanish", "English", "Latin", "Christian",
+    # Pronouns / interrogatives / quantifiers / fillers the proper-noun scanner
+    # mistakes for names. (people_roster.py also gates these, but dropping them
+    # here keeps the recommendation queue itself clean.)
+    "You", "Which", "Some", "Not", "Question", "Being", "Things", "Pure",
+    "Growing", "Missed", "Answered", "Dating", "Someone", "Something", "Anyone",
+    "Everyone", "Nobody", "Somebody", "Everybody", "Anything", "Nothing",
+    "Both", "Each", "Either", "Neither", "One", "Two", "Three", "Many", "Most",
+    "Few", "Several", "Another", "Other", "Others", "Same", "Such", "Only",
 }
 
 
@@ -213,16 +221,20 @@ def _extract_people(text: str, qid: str) -> list[tuple[str, int, float]]:
         # Look for a capitalized name in the next ~40 chars
         after = text[m.end():m.end() + 60]
         name_m = re.search(r"\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})?)\b", after)
+        named = False
         if name_m:
             name = name_m.group(1)
             if name not in STOPWORDS and len(name) > 2:
                 ew = _window_has_emotion(text, m.start(), m.end())
                 results.append((name, m.start(), ew))
-        # Also capture bare relationship labels when no name follows
-        # e.g. "my dad" → entity is "Dad"
-        rel_name = m.group(0).capitalize()
-        ew = _window_has_emotion(text, m.start(), m.end())
-        results.append((rel_name, m.start(), ew))
+                named = True
+        # Capture the bare relationship label ONLY when no real name followed,
+        # e.g. "my dad" with nothing after → entity "Dad". Avoids doubling every
+        # named mention with a generic role entity.
+        if not named:
+            rel_name = m.group(0).capitalize()
+            ew = _window_has_emotion(text, m.start(), m.end())
+            results.append((rel_name, m.start(), ew))
     return results
 
 

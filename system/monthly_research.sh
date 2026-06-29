@@ -215,6 +215,12 @@ done < "$TARGETS_FILE"
 generate_topic "$SELF_TOPIC" self "$SELF_OUTPUT"
 FOCUSES_OUT=$(python3 "$WORKSPACE/system/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE" 2>&1) || true
 echo "$FOCUSES_OUT"
+# Refresh the canonical people roster (AI-curated) from the updated recommendations,
+# then recompile so newly-eligible people get their auto pages and Focus pages pick
+# up fresh mentions. People grow without any human interaction.
+ROSTER_OUT=$(python3 "$WORKSPACE/system/lifehug.py" people-roster 2>&1) || true
+echo "$ROSTER_OUT"
+run_step python3 "$WORKSPACE/system/lifehug.py" compile
 PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
 safe_autocommit

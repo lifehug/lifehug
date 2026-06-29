@@ -44,6 +44,7 @@ from lifehug_core import (
     write_text,
 )
 from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
+from people_roster import load_roster
 from roadmap import load_roadmap
 
 TYPE_DIRS = {
@@ -179,7 +180,7 @@ def read_manual_sources() -> dict[str, dict]:
 
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
-                synthesized: bool = True) -> str:
+                synthesized: bool = True, origin: str = "focus") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -189,6 +190,7 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         "status: active",
         "visibility: owner_only",
         "sensitivity: personal",
+        f"origin: {origin}",
         f"synthesized: {'true' if synthesized else 'false'}",
         f"created: {today}",
         f"last_updated: {today}",
@@ -281,7 +283,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
-                seed_related=None):
+                seed_related=None, origin="focus"):
     return {
         "type": page_type,
         "title": title,
@@ -294,11 +296,45 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "open_questions": open_questions,
         "open_questions_header": open_questions_header,
         "seed_related": seed_related or [],
+        "origin": origin,
     }
 
 
-def plan_focuses(categories, questions, answers, manual_sources):
+def _mention_regex(names):
+    """Word-boundary, case-insensitive matcher for a person's name + aliases.
+    Names shorter than 3 chars are skipped to avoid noisy substring hits."""
+    parts = sorted({n.strip() for n in names if n and len(n.strip()) >= 3}, key=len, reverse=True)
+    if not parts:
+        return None
+    return re.compile(r"\b(" + "|".join(re.escape(p) for p in parts) + r")\b", re.IGNORECASE)
+
+
+def scan_mentions(names, answers, manual_sources):
+    """Return (answer_items, manual_items) whose body mentions any of `names`."""
+    rx = _mention_regex(names)
+    if rx is None:
+        return [], []
+    a_hits = [it for it in answers.values() if rx.search(it.get("body") or "")]
+    m_hits = [it for it in manual_sources.values() if rx.search(it.get("body") or "")]
+    return a_hits, m_hits
+
+
+def _focus_alias_map(people_roster):
+    """focus_slug -> set of alias names, from roster entries mapped to a Focus."""
+    alias_map = defaultdict(set)
+    for p in (people_roster or {}).get("people", []):
+        mf = p.get("maps_to_focus")
+        if not mf:
+            continue
+        alias_map[mf].add(p.get("name", ""))
+        for a in p.get("aliases", []):
+            alias_map[mf].add(a)
+    return alias_map
+
+
+def plan_focuses(categories, questions, answers, manual_sources, people_roster=None):
     descs = []
+    alias_map = _focus_alias_map(people_roster)
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
             continue
@@ -306,12 +342,69 @@ def plan_focuses(categories, questions, answers, manual_sources):
         slug = slugify(title)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
         source_items = matching_sources(manual_sources, [title])
-        sources = [a["source"] for a in answer_items] + [s["source"] for s in source_items]
+
+        # Mention enrichment: pull answers/sources that mention this person by
+        # name or any roster alias, even when filed under other categories. This
+        # is what fills, e.g., an empty Dad Focus from his many cross-category
+        # mentions. Focus *behavior* is unchanged — only the page's sources widen.
+        names = [title] + sorted(n for n in alias_map.get(slug, set()) if n)
+        a_hits, m_hits = scan_mentions(names, answers, manual_sources)
+        cited_srcs = {a["source"] for a in answer_items}
+        extra_answers = [it for it in a_hits if it["source"] not in cited_srcs]
+        cited_items = answer_items + extra_answers
+        src_srcs = {s["source"] for s in source_items}
+        supporting_items = source_items + [it for it in m_hits if it["source"] not in src_srcs]
+        sources = [x["source"] for x in cited_items] + [x["source"] for x in supporting_items]
+
+        if answer_items and extra_answers:
+            summary = (f"A Lifehug Focus from {len(answer_items)} answered prompts "
+                       f"(+{len(extra_answers)} mentions across the story). Owner-only.")
+        elif answer_items:
+            summary = (f"A Lifehug Focus compiled from {len(answer_items)} answered prompts. "
+                       f"Owner-only; cites its source answers.")
+        elif extra_answers:
+            summary = (f"A Lifehug Focus — no dedicated answers yet; compiled from "
+                       f"{len(extra_answers)} mentions across the story. Owner-only.")
+        else:
+            summary = ("A Lifehug Focus with no source material yet. Owner-only.")
+
         descs.append(_descriptor(
-            "person", title, slug, sources, answer_items, source_items,
-            summary=f"A Lifehug Focus compiled from {len(answer_items)} answered prompts. "
-                    f"Owner-only; cites its source answers.",
+            "person", title, slug, sources, cited_items, supporting_items,
+            summary=summary,
             open_questions=unanswered_questions(questions, cat_id),
+        ))
+    return descs
+
+
+def plan_people(answers, manual_sources, people_roster, focus_slugs):
+    """Auto person pages for real, page-eligible people who aren't Focuses.
+    Aggregated purely from mentions across the corpus (no dedicated category)."""
+    descs = []
+    seen = set(focus_slugs)
+    for person in (people_roster or {}).get("people", []):
+        if not person.get("page_eligible"):
+            continue
+        slug = person.get("slug", "")
+        if not slug or slug in seen:
+            continue  # a Focus owns it, or already emitted
+        names = [person.get("name", "")] + person.get("aliases", [])
+        a_hits, m_hits = scan_mentions(names, answers, manual_sources)
+        if not a_hits and not m_hits:
+            continue
+        primary, supporting = split_primary_supporting(m_hits)
+        cited_items = a_hits + primary
+        sources = [x["source"] for x in cited_items + supporting]
+        seen.add(slug)
+        name = person.get("name", slug)
+        descs.append(_descriptor(
+            "person", name, slug, sources, cited_items, supporting,
+            summary=f"A person page compiled automatically from {len(cited_items)} mentions "
+                    f"across the story. Owner-only; cites its source answers.",
+            open_questions=[
+                f"- Who is {name} in the author's life, in their own words?",
+                f"- What moments with {name} most shaped the author?",
+            ],
+            origin="mention",
         ))
     return descs
 
@@ -619,7 +712,7 @@ def compute_crosslinks(descs, synths):
 def render_page(desc, synth, related, backlinks, slug_title):
     body = [
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
-                    synthesized=bool(synth["synthesized"])),
+                    synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus")),
         "",
         f"# {desc['title']}",
         "",
@@ -702,14 +795,18 @@ def main():
     answers = read_answers()
     manual_sources = read_manual_sources()
     author = load_config().get("name", "Me")
+    people_roster = load_roster()
+    focus_slugs = {slugify(clean_focus_name(info["name"]))
+                   for info in categories.values() if info.get("group") == "focus"}
 
     # 1. plan
     descs = []
-    descs += plan_focuses(categories, questions, answers, manual_sources)
+    descs += plan_focuses(categories, questions, answers, manual_sources, people_roster)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources)
     descs += plan_relationships(categories, questions, answers, author)
     descs += plan_self(questions, answers)
+    descs += plan_people(answers, manual_sources, people_roster, focus_slugs)
 
     slug_title = {d["slug"]: d["title"] for d in descs}
     roster = [{"slug": d["slug"], "title": d["title"], "type": d["type"]} for d in descs]

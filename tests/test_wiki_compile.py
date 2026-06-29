@@ -274,5 +274,98 @@ class PreserveGuardTests(unittest.TestCase):
         self.assertFalse(self.wc.page_is_synthesized("synthesized: false\n\nProse.\n## Sources"))
 
 
+# ---------------------------------------------------------------------------
+# Compiler: mention-based people (auto pages + Focus enrichment)
+# ---------------------------------------------------------------------------
+
+
+def _ans(qid, body):
+    return {"id": qid, "source": f"answers/{qid}.md", "body": body}
+
+
+class MentionScanTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_word_boundary_match(self):
+        answers = {"A1": _ans("A1", "Trevor drove me home"), "A2": _ans("A2", "a retriever ran by")}
+        a_hits, _ = self.wc.scan_mentions(["Trevor"], answers, {})
+        ids = {h["id"] for h in a_hits}
+        self.assertIn("A1", ids)
+        self.assertNotIn("A2", ids)  # 'retriever' must not match 'Trevor'
+
+    def test_short_names_skipped(self):
+        answers = {"A1": _ans("A1", "Ed was there")}
+        a_hits, _ = self.wc.scan_mentions(["Ed"], answers, {})
+        self.assertEqual(a_hits, [])  # <3 chars → skipped to avoid noise
+
+    def test_aliases_matched(self):
+        answers = {"A1": _ans("A1", "Betty Jo baked bread"), "A2": _ans("A2", "nothing here")}
+        a_hits, _ = self.wc.scan_mentions(["Grandma", "Betty Jo"], answers, {})
+        self.assertEqual({h["id"] for h in a_hits}, {"A1"})
+
+
+class PlanPeopleTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+        self.answers = {"D1": _ans("D1", "Trevor believed in me"), "D2": _ans("D2", "Trevor again")}
+
+    def _roster(self, **over):
+        p = {"name": "Trevor", "slug": "trevor", "aliases": [], "is_real_person": True,
+             "maps_to_focus": None, "page_eligible": True}
+        p.update(over)
+        return {"people": [p]}
+
+    def test_eligible_person_gets_page(self):
+        descs = self.wc.plan_people(self.answers, {}, self._roster(), focus_slugs=set())
+        self.assertEqual(len(descs), 1)
+        self.assertEqual(descs[0]["slug"], "trevor")
+        self.assertEqual(descs[0]["origin"], "mention")
+        self.assertEqual({c["id"] for c in descs[0]["cited_items"]}, {"D1", "D2"})
+
+    def test_not_eligible_no_page(self):
+        descs = self.wc.plan_people(self.answers, {}, self._roster(page_eligible=False), focus_slugs=set())
+        self.assertEqual(descs, [])
+
+    def test_focus_slug_suppresses_duplicate(self):
+        descs = self.wc.plan_people(self.answers, {}, self._roster(), focus_slugs={"trevor"})
+        self.assertEqual(descs, [])  # a Focus already owns this slug
+
+    def test_no_mentions_no_page(self):
+        descs = self.wc.plan_people({"A1": _ans("A1", "unrelated")}, {}, self._roster(), focus_slugs=set())
+        self.assertEqual(descs, [])
+
+
+class FocusEnrichmentTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_empty_focus_fills_from_mentions(self):
+        categories = {"M": {"name": "Focus — Dad", "group": "focus"}}
+        questions = []  # zero answered M questions
+        answers = {"A6": _ans("A6", "my dad was an architect"),
+                   "A9": _ans("A9", "my dad and I reconciled"),
+                   "K2": _ans("K2", "mom was kind")}  # no dad mention
+        roster = {"people": [{"name": "Dad", "slug": "dad", "aliases": ["Father"],
+                              "maps_to_focus": "dad", "page_eligible": False}]}
+        descs = self.wc.plan_focuses(categories, questions, answers, {}, roster)
+        dad = next(d for d in descs if d["slug"] == "dad")
+        cited = {c["id"] for c in dad["cited_items"]}
+        self.assertEqual(cited, {"A6", "A9"})        # dad mentions pulled in
+        self.assertNotIn("K2", cited)                # non-mention excluded
+        self.assertIn("mentions across the story", dad["summary"])
+
+    def test_focus_with_category_answers_still_enriched(self):
+        categories = {"K": {"name": "Focus — Mom", "group": "focus"}}
+        questions = [{"id": "K1", "category": "K", "answered": True, "text": "Tell me about mom"}]
+        answers = {"K1": _ans("K1", "mom taught me kindness"),
+                   "A3": _ans("A3", "my mom moved us a lot")}
+        descs = self.wc.plan_focuses(categories, questions, answers, {}, {"people": []})
+        mom = next(d for d in descs if d["slug"] == "mom")
+        cited = {c["id"] for c in mom["cited_items"]}
+        self.assertIn("K1", cited)   # category answer
+        self.assertIn("A3", cited)   # cross-category mention enrichment
+
+
 if __name__ == "__main__":
     unittest.main()
