@@ -367,6 +367,30 @@ class FocusEnrichmentTests(unittest.TestCase):
         self.assertIn("A3", cited)   # cross-category mention enrichment
 
 
+class ProjectGroupingTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_project_label_strips_story(self):
+        self.assertEqual(self.wc.project_label("Etherfuse Story"), "Etherfuse")
+        self.assertEqual(self.wc.project_label("Memo"), "Memo")
+        self.assertEqual(self.wc.project_label(""), "")
+
+    def test_parse_categories_captures_qualifier(self):
+        import lifehug_core
+        cats = lifehug_core.parse_categories(
+            "## Projects\n## F: The Problem (Etherfuse Story)\n- [ ] F1: q\n")
+        self.assertEqual(cats["F"]["qualifier"], "Etherfuse Story")
+        self.assertEqual(cats["F"]["name"], "The Problem")
+        self.assertEqual(cats["F"]["group"], "project")
+
+    def test_frontmatter_includes_project(self):
+        fm = self.wc.frontmatter("The Problem", "project", [], [], project="Etherfuse")
+        self.assertIn('project: "Etherfuse"', fm)
+        # No project → field omitted.
+        self.assertNotIn("project:", self.wc.frontmatter("Mom", "person", []))
+
+
 class SidebarNavTests(unittest.TestCase):
     def setUp(self):
         self.sw = load("serve_wiki")
@@ -408,6 +432,18 @@ class SidebarNavTests(unittest.TestCase):
         self.assertIn("sidebar-meta", out)                    # meta block exists
         self.assertLess(out.index('data-group="people"'), out.index("sidebar-meta"))  # groups first
         self.assertIn(">Page Structure<", out)                # Schema relabeled
+
+    def test_nav_projects_subgrouped_by_project(self):
+        wiki = self.sw.WIKI_DIR
+        self.sw.wiki_pages = lambda: [wiki / "projects" / "the-problem.md",
+                                      wiki / "projects" / "building.md"]
+        self.sw.page_title = lambda p: p.stem.replace("-", " ").title()
+        self.sw.page_field = lambda p, key: "Etherfuse" if key == "project" else ""
+        out = self.sw.nav_html()
+        self.assertIn('class="sidebar-subgroup">Etherfuse<', out)   # sub-label rendered
+        self.assertIn('class="sidebar-item sub"', out)              # items indented under it
+        # The Projects group still wraps them.
+        self.assertLess(out.index('data-group="projects"'), out.index("sidebar-subgroup"))
 
     def test_nav_people_before_themes(self):
         wiki = self.sw.WIKI_DIR

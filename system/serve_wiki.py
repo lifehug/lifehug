@@ -48,17 +48,22 @@ _GROUP_LABELS = {
 }
 
 
-def page_title(path: Path) -> str:
-    """Friendly page label: frontmatter `title:` if present, else prettified stem."""
+def page_field(path: Path, key: str) -> str:
+    """Read a single frontmatter scalar (e.g. `title`, `project`) from a page."""
     try:
         with path.open(encoding="utf-8", errors="replace") as fh:
             head = fh.read(1024)
-        m = re.search(r'^title:\s*"?(.+?)"?\s*$', head, re.MULTILINE)
+        m = re.search(rf'^{re.escape(key)}:\s*"?(.+?)"?\s*$', head, re.MULTILINE)
         if m:
             return m.group(1).strip()
     except OSError:
         pass
-    return path.stem.replace("-", " ").title()
+    return ""
+
+
+def page_title(path: Path) -> str:
+    """Friendly page label: frontmatter `title:` if present, else prettified stem."""
+    return page_field(path, "title") or path.stem.replace("-", " ").title()
 
 
 def nav_html(active_rel: str | None = None) -> str:
@@ -82,13 +87,29 @@ def nav_html(active_rel: str | None = None) -> str:
 
     parts: list[str] = []
 
+    def items_html(items: list[Path]) -> str:
+        """Item links for a group, sub-grouped by `project:` frontmatter when
+        present (e.g. the Etherfuse arcs nest under a 'Etherfuse' sub-label).
+        Pages with no project list directly."""
+        plain = [p for p in items if not page_field(p, "project")]
+        subs: dict[str, list[Path]] = {}
+        for p in items:
+            proj = page_field(p, "project")
+            if proj:
+                subs.setdefault(proj, []).append(p)
+        out = [link(p, "sidebar-item") for p in plain]
+        for proj in sorted(subs):
+            out.append(f'<div class="sidebar-subgroup">{html.escape(proj)}</div>')
+            out += [link(p, "sidebar-item sub") for p in subs[proj]]
+        return "".join(out)
+
     ordered = [t for t in _TYPE_PRIORITY if t in groups] + [t for t in groups if t not in _TYPE_PRIORITY]
     for gtype in ordered:
         items = sorted(groups[gtype], key=lambda p: page_title(p).lower())
         if not items:
             continue
         label = html.escape(_GROUP_LABELS.get(gtype, gtype.replace("_", " ").title()))
-        rows = "".join(link(p, "sidebar-item") for p in items)
+        rows = items_html(items)
         parts.append(
             f'<div class="sidebar-group" data-group="{html.escape(gtype)}">'
             f'<div class="sidebar-group-header" onclick="toggleGroup(\'{html.escape(gtype)}\')">'
@@ -235,6 +256,9 @@ def layout(title: str, body: str, active_rel: str | None = None) -> bytes:
     .sidebar-item {{ display: block; color: #5a4d3c; text-decoration: none; padding: 4px 8px 4px 22px;
       font-size: 13px; border-left: 3px solid transparent; border-radius: 0 4px 4px 0; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis; }}
+    .sidebar-subgroup {{ padding: 4px 8px 2px 22px; font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+      text-transform: uppercase; color: #9a8c75; }}
+    .sidebar-item.sub {{ padding-left: 34px; }}
     .sidebar-item:hover {{ background: #ece5d8; }}
     .sidebar-item.active {{ background: #e6dcc8; border-left-color: #987b55; color: #2f271c; font-weight: 600; }}
     main {{ max-width: 860px; padding: 32px 44px 80px; }}

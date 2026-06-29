@@ -180,7 +180,7 @@ def read_manual_sources() -> dict[str, dict]:
 
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
-                synthesized: bool = True, origin: str = "focus") -> str:
+                synthesized: bool = True, origin: str = "focus", project: str = "") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -192,6 +192,10 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         "sensitivity: personal",
         f"origin: {origin}",
         f"synthesized: {'true' if synthesized else 'false'}",
+    ]
+    if project:
+        lines.append(f'project: "{project}"')
+    lines += [
         f"created: {today}",
         f"last_updated: {today}",
         "sources:",
@@ -283,7 +287,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
-                seed_related=None, origin="focus"):
+                seed_related=None, origin="focus", project=""):
     return {
         "type": page_type,
         "title": title,
@@ -297,7 +301,16 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "open_questions_header": open_questions_header,
         "seed_related": seed_related or [],
         "origin": origin,
+        "project": project,
     }
+
+
+def project_label(qualifier: str) -> str:
+    """Sidebar sub-group label for a project category's '(...)' qualifier:
+    '(Etherfuse Story)' -> 'Etherfuse'. Drops a trailing ' Story' if present."""
+    if not qualifier:
+        return ""
+    return re.sub(r"\s+story$", "", qualifier.strip(), flags=re.IGNORECASE).strip()
 
 
 def _mention_regex(names):
@@ -428,13 +441,19 @@ def plan_projects(categories, questions, answers, manual_sources):
             continue
         title = info["name"]
         slug = slugify(title)
+        project = project_label(info.get("qualifier", ""))
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
         source_items = matching_sources(manual_sources, [title, title.replace("The ", "")])
         sources = [a["source"] for a in answer_items] + [s["source"] for s in source_items]
+        summary = (f"A project thread compiled from category {cat_id} and {len(answer_items)} answered prompts.")
+        if project:
+            summary = (f"Part of the {project} story — category {cat_id}, "
+                       f"{len(answer_items)} answered prompts.")
         descs.append(_descriptor(
             "project", title, slug, sources, answer_items, source_items,
-            summary=f"A project thread compiled from category {cat_id} and {len(answer_items)} answered prompts.",
+            summary=summary,
             open_questions=unanswered_questions(questions, cat_id),
+            project=project,
         ))
     return descs
 
@@ -724,7 +743,8 @@ def compute_crosslinks(descs, synths):
 def render_page(desc, synth, related, backlinks, slug_title):
     body = [
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
-                    synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus")),
+                    synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus"),
+                    project=desc.get("project", "")),
         "",
         f"# {desc['title']}",
         "",

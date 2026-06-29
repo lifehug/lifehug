@@ -43,7 +43,7 @@ QUESTION_LINE_RE = re.compile(
     rf"^- \[([ xX])\] ({QUESTION_ID_RE}): (.+?)(?:\s+\*\(.+\)\*)?\s*$",
     re.MULTILINE,
 )
-CATEGORY_HEADER_RE = re.compile(r"^## ([A-Z]): (.+?)(?:\s*\(.*\))?\s*$")
+CATEGORY_HEADER_RE = re.compile(r"^## ([A-Z]): (.+?)(?:\s*\((.*)\))?\s*$")
 
 STORY_FUNCTIONS = (
     "foundation",
@@ -149,7 +149,12 @@ def parse_categories(md_text: str) -> dict[str, dict[str, str]]:
         if match:
             cat_id = match.group(1)
             name = match.group(2).strip()
-            categories[cat_id] = {"name": name, "group": category_group(cat_id, group)}
+            qualifier = (match.group(3) or "").strip()  # the "(...)" suffix, e.g. "Etherfuse Story"
+            categories[cat_id] = {
+                "name": name,
+                "group": category_group(cat_id, group),
+                "qualifier": qualifier,
+            }
     return categories
 
 
