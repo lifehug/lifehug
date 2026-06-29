@@ -13,12 +13,12 @@ Use the current repo if it has `system/lifehug.py`. Otherwise check `~/Workspace
 
 ## Where the prose comes from
 
-A page's prose can be written three ways. The script picks the first available, per page:
+A page's prose can be written four ways. The script picks the first available, per page:
 
-1. **Cached** — a prior synthesis for unchanged source material (`state/wiki_synthesis_cache.json`).
+1. **Cached** — a prior synthesis for unchanged source material (`state/wiki_synthesis_cache.json`). This cache is **committed to the repo**, so prose synthesized on one machine (the compile machine) travels to every other machine. A page is only re-synthesized when its inputs change.
 2. **Agent draft** — prose you (Claude) wrote to `state/synthesis/<slug>.md` (the keyless desktop path — see Mode 1).
 3. **Gateway/API** — `call_ai` via the OpenClaw gateway (keyless, if running) or `ANTHROPIC_API_KEY` (the cron path — Mode 2).
-4. **Excerpt fallback** — deterministic source excerpts if none of the above is available (still builds the full graph).
+4. **Excerpt fallback** — deterministic source excerpts, **only for a page that was never synthesized**. Compile will **never** downgrade an already-synthesized page (frontmatter `synthesized: true`) to excerpts — it preserves the last good prose and logs `↻ preserved <slug>`. So a bare `compile` on a keyless machine is safe; at worst a changed page keeps its prior prose until a real synthesis runs.
 
 ## Mode 1 — Desktop through Claude Code (keyless; YOU synthesize)
 

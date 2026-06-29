@@ -228,6 +228,40 @@ class RenderTests(unittest.TestCase):
         self.assertIn("## What We Know", out)
         self.assertIn("No related pages identified yet.", out)
 
+    def test_synthesized_marker_in_frontmatter(self):
+        synth_t = {"narrative": "Prose.", "related": [], "synthesized": True}
+        synth_f = {"narrative": "x", "related": [], "synthesized": False}
+        self.assertIn("synthesized: true", self.wc.render_page(self.desc, synth_t, [], [], {}))
+        self.assertIn("synthesized: false", self.wc.render_page(self.desc, synth_f, [], [], {}))
+
+
+# ---------------------------------------------------------------------------
+# Compiler: non-destructive guard (never downgrade a synthesized page)
+# ---------------------------------------------------------------------------
+
+
+class PreserveGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_fallback_preserves_synthesized_page(self):
+        existing = "---\ntitle: \"A\"\nsynthesized: true\n---\n\nGood prose."
+        self.assertTrue(self.wc.should_preserve_existing(existing, new_synthesized=False))
+
+    def test_fallback_overwrites_prior_excerpt_page(self):
+        existing = "---\ntitle: \"A\"\nsynthesized: false\n---\n\n## What We Know"
+        self.assertFalse(self.wc.should_preserve_existing(existing, new_synthesized=False))
+
+    def test_fresh_synthesis_always_writes(self):
+        existing = "---\ntitle: \"A\"\nsynthesized: true\n---\n\nGood prose."
+        self.assertFalse(self.wc.should_preserve_existing(existing, new_synthesized=True))
+
+    def test_unmarked_legacy_page_not_preserved(self):
+        # Pages compiled before the marker existed have no `synthesized:` field;
+        # they are not treated as synthesized (first post-upgrade compile re-stamps them).
+        existing = "---\ntitle: \"A\"\n---\n\nSome prose."
+        self.assertFalse(self.wc.should_preserve_existing(existing, new_synthesized=False))
+
 
 if __name__ == "__main__":
     unittest.main()

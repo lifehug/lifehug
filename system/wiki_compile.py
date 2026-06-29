@@ -126,6 +126,16 @@ def frontmatter_value(text: str, key: str, default: str = "") -> str:
     return match.group(1).strip().strip('"').strip("'") if match else default
 
 
+def should_preserve_existing(existing_text: str, new_synthesized: bool) -> bool:
+    """True when re-rendering would downgrade an already-synthesized page to an
+    excerpt fallback. Guards every compile path on a keyless machine: a page that
+    was synthesized (frontmatter `synthesized: true`) is never clobbered by a
+    fallback render — its last good prose is preserved until a real synthesis runs."""
+    if new_synthesized:
+        return False
+    return frontmatter_value(existing_text, "synthesized") == "true"
+
+
 def read_manual_sources() -> dict[str, dict]:
     sources = {}
     if not SOURCES_DIR.exists():
@@ -155,7 +165,8 @@ def read_manual_sources() -> dict[str, dict]:
     return sources
 
 
-def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None) -> str:
+def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
+                synthesized: bool = True) -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -165,6 +176,7 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         "status: active",
         "visibility: owner_only",
         "sensitivity: personal",
+        f"synthesized: {'true' if synthesized else 'false'}",
         f"created: {today}",
         f"last_updated: {today}",
         "sources:",
@@ -593,7 +605,8 @@ def compute_crosslinks(descs, synths):
 
 def render_page(desc, synth, related, backlinks, slug_title):
     body = [
-        frontmatter(desc["title"], desc["type"], desc["sources"], related),
+        frontmatter(desc["title"], desc["type"], desc["sources"], related,
+                    synthesized=bool(synth["synthesized"])),
         "",
         f"# {desc['title']}",
         "",
@@ -730,7 +743,18 @@ def main():
 
     # 4. write
     written = []
+    preserved = 0
     for d in descs:
+        # Non-destructive guard: never downgrade an already-synthesized page to a
+        # raw excerpt fallback (e.g. on a keyless machine with no cache/draft).
+        # Keep the last good prose; the page refreshes when a real synthesis is
+        # available (compile machine, or the /compile skill writes a draft).
+        if d["path"].exists() and should_preserve_existing(
+                d["path"].read_text(encoding="utf-8", errors="replace"),
+                synths[d["slug"]]["synthesized"]):
+            preserved += 1
+            print(f"  ↻ preserved {d['slug']} (no key/draft to refresh)")
+            continue
         text = render_page(d, synths[d["slug"]], final_related[d["slug"]], backlinks[d["slug"]], slug_title)
         if write_page(d["path"], text, args.dry_run):
             written.append(d["path"])
@@ -739,7 +763,8 @@ def main():
     if not args.dry_run:
         write_json(SYNTH_CACHE_FILE, cache)
 
-    print(f"✓ Wiki compile complete: {len(written)} page updates")
+    suffix = f" ({preserved} preserved)" if preserved else ""
+    print(f"✓ Wiki compile complete: {len(written)} page updates{suffix}")
 
 
 if __name__ == "__main__":
