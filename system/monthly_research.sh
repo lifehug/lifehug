@@ -9,6 +9,36 @@ WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 cd "$WORKSPACE"
 
 DRY_RUN="${LIFEHUG_MONTHLY_DRY_RUN:-0}"
+
+# --- Telegram notification helper ---
+telegram_notify() {
+  local text="$1"
+  local chat_id
+  chat_id=$(python3 -c "
+import yaml, pathlib, sys
+cfg = pathlib.Path('$WORKSPACE/config.yaml')
+if not cfg.exists(): sys.exit(1)
+d = yaml.safe_load(cfg.read_text())
+print(d.get('telegram_chat_id') or d.get('group_chat_id') or '')
+" 2>/dev/null) || return 0
+  [[ -z "$chat_id" ]] && return 0
+
+  local token="${TELEGRAM_BOT_TOKEN:-}"
+  if [[ -z "$token" ]]; then
+    local openclaw_cfg="${HOME}/.openclaw/openclaw.json"
+    [[ -f "$openclaw_cfg" ]] && token=$(python3 -c "
+import json, pathlib
+c = json.loads(pathlib.Path('$openclaw_cfg').read_text())
+print(c.get('channels',{}).get('telegram',{}).get('botToken',''))
+" 2>/dev/null) || true
+  fi
+  [[ -z "$token" ]] && return 0
+
+  curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    --data-urlencode "text=${text}" \
+    -d "parse_mode=Markdown" > /dev/null || true
+}
 GAP_LIMIT="${LIFEHUG_MONTHLY_GAP_LIMIT:-2}"
 SELF_TOPIC="${LIFEHUG_MONTHLY_SELF_TOPIC:-Who I am becoming}"
 SELF_OUTPUT="${LIFEHUG_MONTHLY_SELF_OUTPUT:-essay}"
@@ -183,6 +213,14 @@ while IFS=$'\t' read -r topic topic_type output; do
   generate_topic "$topic" "$topic_type" "$output"
 done < "$TARGETS_FILE"
 generate_topic "$SELF_TOPIC" self "$SELF_OUTPUT"
-run_optional python3 "$WORKSPACE/system/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE"
-run_step python3 "$WORKSPACE/system/lifehug.py" progress
+FOCUSES_OUT=$(python3 "$WORKSPACE/system/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE" 2>&1) || true
+echo "$FOCUSES_OUT"
+PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
+echo "$PROGRESS_OUT"
 safe_autocommit
+
+telegram_notify "🔬 Lifehug Monthly Research — $(date '+%B %-d')
+
+${FOCUSES_OUT}
+
+${PROGRESS_OUT}"

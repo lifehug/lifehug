@@ -13,6 +13,38 @@ QUEUE_LIMIT="${LIFEHUG_WEEKLY_QUEUE_LIMIT:-14}"
 ARC_MAX="${LIFEHUG_WEEKLY_ARC_MAX:-2}"
 EXPIRES_DAYS="${LIFEHUG_WEEKLY_EXPIRES_DAYS:-8}"
 
+# --- Telegram notification helper ---
+# Reads telegram_chat_id from config.yaml; token from TELEGRAM_BOT_TOKEN env
+# or falls back to reading from ~/.openclaw/openclaw.json (OpenClaw setups).
+telegram_notify() {
+  local text="$1"
+  local chat_id
+  chat_id=$(python3 -c "
+import yaml, pathlib, sys
+cfg = pathlib.Path('$WORKSPACE/config.yaml')
+if not cfg.exists(): sys.exit(1)
+d = yaml.safe_load(cfg.read_text())
+print(d.get('telegram_chat_id') or d.get('group_chat_id') or '')
+" 2>/dev/null) || return 0
+  [[ -z "$chat_id" ]] && return 0
+
+  local token="${TELEGRAM_BOT_TOKEN:-}"
+  if [[ -z "$token" ]]; then
+    local openclaw_cfg="${HOME}/.openclaw/openclaw.json"
+    [[ -f "$openclaw_cfg" ]] && token=$(python3 -c "
+import json, pathlib
+c = json.loads(pathlib.Path('$openclaw_cfg').read_text())
+print(c.get('channels',{}).get('telegram',{}).get('botToken',''))
+" 2>/dev/null) || true
+  fi
+  [[ -z "$token" ]] && return 0
+
+  curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    --data-urlencode "text=${text}" \
+    -d "parse_mode=Markdown" > /dev/null || true
+}
+
 run_step() {
   echo
   echo "==> $*"
@@ -96,7 +128,15 @@ fi
 run_step python3 "$WORKSPACE/system/lifehug.py" compile --no-ai
 run_source_integrity
 run_step python3 "$WORKSPACE/system/lifehug.py" quality-update
-run_step python3 "$WORKSPACE/system/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS"
+QUEUE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS" 2>&1)
+echo "$QUEUE_OUT"
 run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
-run_step python3 "$WORKSPACE/system/lifehug.py" progress
+PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
+echo "$PROGRESS_OUT"
 safe_autocommit
+
+telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
+
+${QUEUE_OUT}
+
+${PROGRESS_OUT}"
