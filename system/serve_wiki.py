@@ -237,7 +237,7 @@ def layout(title: str, body: str, active_rel: str | None = None) -> bytes:
 </head>
 <body>
   <header>
-    <a href="/">Lifehug Wiki</a>
+    <a href="/">Lifehug</a>
     <a href="/search">Search</a>
     <form action="/search"><input name="q" placeholder="Search wiki"></form>
   </header>
@@ -276,7 +276,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             index = WIKI_DIR / "index.md"
-            text = index.read_text(encoding="utf-8") if index.exists() else "# Lifehug Wiki\n\nRun `python3 system/wiki_compile.py`."
+            text = index.read_text(encoding="utf-8") if index.exists() else "# Lifehug\n\nRun `python3 system/wiki_compile.py`."
             self.send_html("Index", render_markdown(text))
             return
 

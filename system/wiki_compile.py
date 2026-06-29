@@ -770,12 +770,12 @@ def update_index(written_pages: list[Path], dry_run=False):
         else:
             sections.append("")
         sections.append("")
-    text = "# Lifehug Wiki Index\n\n" + "\n".join(sections).rstrip() + "\n"
+    text = "# Lifehug Index\n\n" + "\n".join(sections).rstrip() + "\n"
     write_page(WIKI_DIR / "index.md", text, dry_run)
 
     if written_pages and not dry_run:
         log = WIKI_DIR / "log.md"
-        existing = log.read_text(encoding="utf-8") if log.exists() else "# Lifehug Wiki Compile Log\n"
+        existing = log.read_text(encoding="utf-8") if log.exists() else "# Lifehug Compile Log\n"
         stamp = datetime.now().isoformat(timespec="seconds")
         additions = "\n".join(f"- {stamp}: updated {rel(p)}" for p in written_pages)
         write_text(log, existing.rstrip() + "\n" + additions + "\n")

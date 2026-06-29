@@ -1,4 +1,4 @@
-# Lifehug Wiki Schema
+# Lifehug Schema
 
 This wiki is an owner-only, AI-maintained memory layer. It compiles raw story sources into structured pages so the author and future AI sessions can understand a life as an evolving graph of people, places, periods, projects, themes, objects, and relationships.
 
