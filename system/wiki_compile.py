@@ -310,13 +310,25 @@ def _mention_regex(names):
 
 
 def scan_mentions(names, answers, manual_sources):
-    """Return (answer_items, manual_items) whose body mentions any of `names`."""
+    """Return (answer_items, manual_items) whose body mentions any of `names`,
+    ordered by salience (how many times the person is mentioned) so the most
+    relevant sources survive the downstream source cap — not alphabetical order,
+    which would, e.g., drop a Focus person's death from a later category."""
     rx = _mention_regex(names)
     if rx is None:
         return [], []
-    a_hits = [it for it in answers.values() if rx.search(it.get("body") or "")]
-    m_hits = [it for it in manual_sources.values() if rx.search(it.get("body") or "")]
-    return a_hits, m_hits
+
+    def ranked(items):
+        scored = []
+        for it in items:
+            hits = len(rx.findall(it.get("body") or ""))
+            if hits:
+                scored.append((hits, it))
+        # Most-mentioned first; stable tie-break on source for determinism.
+        scored.sort(key=lambda t: (-t[0], t[1].get("source", "")))
+        return [it for _, it in scored]
+
+    return ranked(answers.values()), ranked(manual_sources.values())
 
 
 def _focus_alias_map(people_roster):
