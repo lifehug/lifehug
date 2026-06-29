@@ -15,6 +15,7 @@ QUESTIONS_FILE = SYSTEM_DIR / "question-bank.md"
 ROTATION_FILE = SYSTEM_DIR / "rotation.json"
 COVERAGE_FILE = SYSTEM_DIR / "coverage.json"
 CONFIG_FILE = REPO_DIR / "config.yaml"
+PROFILE_FILE = REPO_DIR / "profile.yaml"
 README_FILE = REPO_DIR / "README.md"
 ANSWERS_DIR = REPO_DIR / "answers"
 OUTPUTS_DIR = REPO_DIR / "outputs"
@@ -98,11 +99,11 @@ def write_text(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def load_config(path: Path = CONFIG_FILE) -> dict[str, str]:
-    """Load the simple top-level scalar subset of config.yaml used by scripts."""
-    config: dict[str, str] = {}
+def _parse_simple_yaml(path: Path) -> dict[str, str]:
+    """Read the flat top-level scalar subset of a YAML file used by scripts."""
+    out: dict[str, str] = {}
     if not path.exists():
-        return config
+        return out
     for raw in path.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or ":" not in line:
@@ -110,8 +111,24 @@ def load_config(path: Path = CONFIG_FILE) -> dict[str, str]:
         key, _, val = line.partition(":")
         if not key.strip() or val.strip().startswith("|"):
             continue
-        config[key.strip()] = val.split("#", 1)[0].strip().strip('"').strip("'")
-    return config
+        out[key.strip()] = val.split("#", 1)[0].strip().strip('"').strip("'")
+    return out
+
+
+def load_config(path: Path | None = None) -> dict[str, str]:
+    """Merge committed identity/preferences with local secrets.
+
+    `profile.yaml` (committed to the repo — safe to share: name, full_name,
+    timezone, channel) is the base; `config.yaml` (gitignored — secrets like
+    anthropic_api_key / telegram tokens, and local overrides) layers on top and
+    wins on conflict. Legacy installs with only config.yaml keep working
+    unchanged. Passing an explicit path other than config.yaml reads just that
+    file (back-compat for callers/tests)."""
+    if path is None or path == CONFIG_FILE:
+        merged = _parse_simple_yaml(PROFILE_FILE)
+        merged.update(_parse_simple_yaml(CONFIG_FILE))
+        return merged
+    return _parse_simple_yaml(path)
 
 
 def normalize_group(group: str | None) -> str:

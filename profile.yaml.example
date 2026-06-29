@@ -1,0 +1,23 @@
+# Lifehug — Profile (committed; safe to share)
+#
+# Public identity and delivery preferences for this instance. Unlike config.yaml,
+# this file IS tracked in git, so your name and settings travel with your repo
+# across machines. SECRETS NEVER GO HERE — keep API keys and bot tokens in
+# config.yaml or environment variables (.env), which are gitignored.
+#
+# Copy this to profile.yaml and fill it in (setup does this for you).
+
+# Your first name — used in daily questions and relationship page titles ("Dave & Mom")
+name: ""
+
+# Your full name — the title of your life-story hub and the wiki home page
+full_name: ""
+
+# Your timezone (IANA format): America/Los_Angeles, Europe/London, Asia/Tokyo, …
+timezone: "America/New_York"
+
+# What time to receive your daily question (24h)
+question_time: "09:00"
+
+# Delivery channel: telegram, whatsapp, signal, discord, slack, email, cli
+channel: "telegram"

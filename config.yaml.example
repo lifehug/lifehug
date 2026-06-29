@@ -1,21 +1,10 @@
-# Lifehug — Configuration
+# Lifehug — Local config (gitignored)
 #
-# Copy this file to config.yaml and fill in your details.
-# Your AI assistant will help you with this during setup.
-
-# Your first name (used in daily questions)
-name: ""
-
-# Your timezone (IANA format)
-# Examples: America/New_York, America/Los_Angeles, Europe/London, Asia/Tokyo
-timezone: "America/New_York"
-
-# What time to receive your daily question (24h format)
-question_time: "09:00"
-
-# Delivery channel
-# Options: telegram, whatsapp, signal, discord, slack, email, cli
-channel: "telegram"
+# SECRETS and machine-local overrides ONLY. This file is gitignored so API keys
+# and tokens are never committed. Your identity and preferences (name, full_name,
+# timezone, question_time, channel) live in profile.yaml, which IS committed and
+# travels with your repo. Copy this to config.yaml only if you need something
+# below; values here override profile.yaml on this machine.
 
 # Telegram delivery targets. Use one of these when running system/daily_question.sh.
 # telegram_chat_id works for DMs or groups. group_chat_id is accepted as an alias

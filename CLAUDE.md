@@ -75,20 +75,23 @@ This README is **user data** — it won't be overwritten by framework updates. I
 ### Step 7: Initialize state
 Update `system/rotation.json` and `system/coverage.json` to reflect the new categories.
 
-### Step 8: Create config.yaml
-Save the user's preferences to `config.yaml`:
+### Step 8: Create profile.yaml (identity) and, if needed, config.yaml (secrets)
+Identity and preferences go in **`profile.yaml`**, which **is committed to the repo** (no secrets — safe to share, travels across machines). Write it:
 ```yaml
-name: "Their Name"
+name: "Their Name"           # first name — daily questions, "Name & Mom" relationship pages
+full_name: "Their Full Name" # titles the life-story hub and the wiki home page
 timezone: "Their/Timezone"
 question_time: "09:00"
-channel: "telegram"  # or whatsapp, signal, discord, etc.
-# group_chat_id: "-1001234567890"  # optional: Telegram group ID for group delivery + pinning
-#   To find it: add your bot to the group, send a message, then check:
-#   https://api.telegram.org/bot<TOKEN>/getUpdates
-#   Look for "chat": { "id": -1001234567890 }
+channel: "telegram"          # or whatsapp, signal, discord, etc.
 ```
+`load_config()` merges `profile.yaml` (committed identity/prefs) with `config.yaml` (gitignored secrets/local overrides), with `config.yaml` winning on conflict.
 
-**Ask the user:** "Do you want questions delivered to a private DM or a Telegram group chat?" If they say group, ask them to share the group chat ID (or walk them through finding it) and save it as `group_chat_id` in config.yaml.
+**Secrets never go in `profile.yaml`.** API keys and bot tokens belong in environment variables / `.env` (gitignored) or in `config.yaml` (gitignored):
+- `ANTHROPIC_API_KEY` (env/.env) or `anthropic_api_key:` in config.yaml
+- `TELEGRAM_BOT_TOKEN` (env/.env); `telegram_chat_id:` / `group_chat_id:` in config.yaml
+
+**Ask the user:** "Do you want questions delivered to a private DM or a Telegram group chat?" If they say group, ask them to share the group chat ID (or walk them through finding it) and save it as `group_chat_id` in **config.yaml** (it's a delivery target kept with secrets, gitignored).
+- To find a group ID: add your bot to the group, send a message, then check `https://api.telegram.org/bot<TOKEN>/getUpdates` and look for `"chat": { "id": -1001234567890 }`.
 
 ### Step 9: Set up daily delivery
 Help the user configure a daily cron job or scheduled task that:
@@ -757,6 +760,6 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 
 **User data** (never touched):
-- `README.md`, `config.yaml`, `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
+- `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
 - `answers/`, `outputs/`, `sources/`
 - `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`

@@ -391,6 +391,38 @@ class ProjectGroupingTests(unittest.TestCase):
         self.assertNotIn("section:", self.wc.frontmatter("Mom", "person", []))
 
 
+class ConfigMergeTests(unittest.TestCase):
+    def setUp(self):
+        import lifehug_core
+        self.core = lifehug_core
+        self._orig = (lifehug_core.PROFILE_FILE, lifehug_core.CONFIG_FILE)
+
+    def tearDown(self):
+        self.core.PROFILE_FILE, self.core.CONFIG_FILE = self._orig
+
+    def test_profile_provides_identity_config_overrides(self):
+        with tempfile.TemporaryDirectory() as d:
+            prof = Path(d) / "profile.yaml"
+            conf = Path(d) / "config.yaml"
+            prof.write_text('name: "Dave"\nfull_name: "David James Taylor"\ntimezone: "America/Los_Angeles"\n')
+            conf.write_text('anthropic_api_key: "sk-secret"\nname: "Davey"\n')  # local override + secret
+            self.core.PROFILE_FILE, self.core.CONFIG_FILE = prof, conf
+            cfg = self.core.load_config()
+            self.assertEqual(cfg["full_name"], "David James Taylor")  # from committed profile
+            self.assertEqual(cfg["timezone"], "America/Los_Angeles")
+            self.assertEqual(cfg["name"], "Davey")                    # config.yaml wins on conflict
+            self.assertEqual(cfg["anthropic_api_key"], "sk-secret")   # secret only in config.yaml
+
+    def test_legacy_config_only_still_works(self):
+        with tempfile.TemporaryDirectory() as d:
+            conf = Path(d) / "config.yaml"
+            conf.write_text('name: "Dave"\ntimezone: "UTC"\n')
+            self.core.PROFILE_FILE = Path(d) / "profile.yaml"  # absent
+            self.core.CONFIG_FILE = conf
+            cfg = self.core.load_config()
+            self.assertEqual(cfg["name"], "Dave")
+
+
 class LifeStoryTests(unittest.TestCase):
     def setUp(self):
         self.wc = load("wiki_compile")

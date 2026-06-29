@@ -4,6 +4,8 @@ system/__pycache__/
 *.pyc
 .env
 config.yaml
+# profile.yaml is intentionally NOT ignored — it holds non-secret identity/prefs
+# (name, full_name, timezone) and is committed so it travels across machines.
 system/schedule.json
 system/question-bank-upstream.md
 skill/life-legacy
