@@ -34,6 +34,69 @@ _TYPE_PRIORITY = [
 ]
 
 
+# Friendly labels + display order for sidebar groups, keyed by page-type dir.
+_GROUP_LABELS = {
+    "people": "People",
+    "relationships": "Relationships",
+    "themes": "Themes",
+    "projects": "Projects",
+    "places": "Places",
+    "periods": "Periods",
+    "self": "Self",
+    "lifes_work": "Life's Work",
+    "objects": "Objects",
+}
+
+
+def page_title(path: Path) -> str:
+    """Friendly page label: frontmatter `title:` if present, else prettified stem."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            head = fh.read(1024)
+        m = re.search(r'^title:\s*"?(.+?)"?\s*$', head, re.MULTILINE)
+        if m:
+            return m.group(1).strip()
+    except OSError:
+        pass
+    return path.stem.replace("-", " ").title()
+
+
+def nav_html(active_rel: str | None = None) -> str:
+    """Grouped, collapsible sidebar. Top-level pages (index/log) link directly;
+    type folders become collapsible sections with a caret, count, and titles."""
+    top_links: list[Path] = []
+    groups: dict[str, list[Path]] = {}
+    for p in wiki_pages():
+        if p.parent == WIKI_DIR:  # top-level (index.md, log.md)
+            top_links.append(p)
+        else:
+            groups.setdefault(p.parent.name, []).append(p)
+
+    def link(p: Path, cls: str) -> str:
+        rel = str(p.relative_to(WIKI_DIR.parent))
+        active = " active" if active_rel == rel else ""
+        return f'<a class="{cls}{active}" href="/page/{quote(rel)}">{html.escape(page_title(p))}</a>'
+
+    parts: list[str] = [link(p, "sidebar-top") for p in top_links]
+
+    ordered = [t for t in _TYPE_PRIORITY if t in groups] + [t for t in groups if t not in _TYPE_PRIORITY]
+    for gtype in ordered:
+        items = sorted(groups[gtype], key=lambda p: page_title(p).lower())
+        if not items:
+            continue
+        label = html.escape(_GROUP_LABELS.get(gtype, gtype.replace("_", " ").title()))
+        rows = "".join(link(p, "sidebar-item") for p in items)
+        parts.append(
+            f'<div class="sidebar-group" data-group="{html.escape(gtype)}">'
+            f'<div class="sidebar-group-header" onclick="toggleGroup(\'{html.escape(gtype)}\')">'
+            f'<span class="sidebar-group-main"><span class="chevron">&#9660;</span>'
+            f'<span class="sidebar-group-title">{label}</span></span>'
+            f'<span class="count">{len(items)}</span></div>'
+            f'<div class="sidebar-items">{rows}</div></div>'
+        )
+    return "\n".join(parts)
+
+
 def page_index() -> dict[str, str]:
     """Map each page slug (filename stem) to its /page/ relative path.
 
@@ -131,12 +194,8 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
     return text
 
 
-def layout(title: str, body: str) -> bytes:
-    pages = wiki_pages()
-    nav = "\n".join(
-        f'<a href="/page/{quote(str(p.relative_to(WIKI_DIR.parent)))}">{html.escape(str(p.relative_to(WIKI_DIR)))}</a>'
-        for p in pages
-    )
+def layout(title: str, body: str, active_rel: str | None = None) -> bytes:
+    nav = nav_html(active_rel)
     doc = f"""<!doctype html>
 <html>
 <head>
@@ -150,8 +209,23 @@ def layout(title: str, body: str) -> bytes:
     form {{ margin-left: auto; }}
     input {{ border: 1px solid #c8c2b8; border-radius: 6px; padding: 7px 9px; min-width: 220px; }}
     .shell {{ display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 53px); }}
-    nav {{ border-right: 1px solid #ddd8cf; padding: 18px; overflow: auto; background: #f4f0e8; }}
-    nav a {{ display: block; color: #3f3428; text-decoration: none; padding: 5px 0; font-size: 14px; }}
+    nav {{ border-right: 1px solid #ddd8cf; padding: 14px 10px; overflow: auto; background: #f4f0e8; }}
+    .sidebar-top {{ display: block; color: #3f3428; text-decoration: none; padding: 5px 8px; font-size: 14px; font-weight: 600; }}
+    .sidebar-group {{ margin-top: 6px; }}
+    .sidebar-group-header {{ display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 8px; cursor: pointer; user-select: none; border-radius: 6px; color: #2f271c; font-weight: 650; font-size: 13px; }}
+    .sidebar-group-header:hover {{ background: #ece5d8; }}
+    .sidebar-group-main {{ display: flex; align-items: center; gap: 6px; }}
+    .chevron {{ display: inline-block; font-size: 9px; color: #8a7a63; transition: transform 0.15s; }}
+    .sidebar-group.collapsed .chevron {{ transform: rotate(-90deg); }}
+    .sidebar-group.collapsed .sidebar-items {{ display: none; }}
+    .count {{ font-size: 11px; color: #9a8c75; font-weight: 600; }}
+    .sidebar-items {{ padding: 2px 0 4px; }}
+    .sidebar-item {{ display: block; color: #5a4d3c; text-decoration: none; padding: 4px 8px 4px 22px;
+      font-size: 13px; border-left: 3px solid transparent; border-radius: 0 4px 4px 0; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; }}
+    .sidebar-item:hover {{ background: #ece5d8; }}
+    .sidebar-item.active {{ background: #e6dcc8; border-left-color: #987b55; color: #2f271c; font-weight: 600; }}
     main {{ max-width: 860px; padding: 32px 44px 80px; }}
     h1 {{ font-size: 34px; line-height: 1.15; margin: 0 0 20px; }}
     h2 {{ margin-top: 34px; border-bottom: 1px solid #e5dfd5; padding-bottom: 6px; }}
@@ -168,14 +242,30 @@ def layout(title: str, body: str) -> bytes:
     <form action="/search"><input name="q" placeholder="Search wiki"></form>
   </header>
   <div class="shell"><nav>{nav}</nav><main>{body}</main></div>
+  <script>
+    var KEY = "lifehug.collapsedGroups";
+    function loadCollapsed() {{ try {{ return new Set(JSON.parse(localStorage.getItem(KEY)) || []); }} catch (e) {{ return new Set(); }} }}
+    function toggleGroup(type) {{
+      var el = document.querySelector('.sidebar-group[data-group="' + type + '"]');
+      if (!el) return;
+      el.classList.toggle('collapsed');
+      var set = loadCollapsed();
+      el.classList.contains('collapsed') ? set.add(type) : set.delete(type);
+      localStorage.setItem(KEY, JSON.stringify(Array.from(set)));
+    }}
+    loadCollapsed().forEach(function (type) {{
+      var el = document.querySelector('.sidebar-group[data-group="' + type + '"]');
+      if (el) el.classList.add('collapsed');
+    }});
+  </script>
 </body>
 </html>"""
     return doc.encode("utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
-    def send_html(self, title, body, status=200):
-        payload = layout(title, body)
+    def send_html(self, title, body, status=200, active_rel=None):
+        payload = layout(title, body, active_rel)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
@@ -199,7 +289,9 @@ class Handler(BaseHTTPRequestHandler):
             if not page.exists() or WIKI_DIR not in page.resolve().parents:
                 self.send_html("Not found", "<h1>Not found</h1>", status=404)
                 return
-            self.send_html(page.stem, render_markdown(page.read_text(encoding="utf-8", errors="replace")))
+            active_rel = str(page.relative_to(WIKI_DIR.parent))
+            self.send_html(page_title(page), render_markdown(page.read_text(encoding="utf-8", errors="replace")),
+                           active_rel=active_rel)
             return
 
         if parsed.path == "/search":

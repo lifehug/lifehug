@@ -367,5 +367,44 @@ class FocusEnrichmentTests(unittest.TestCase):
         self.assertIn("A3", cited)   # cross-category mention enrichment
 
 
+class SidebarNavTests(unittest.TestCase):
+    def setUp(self):
+        self.sw = load("serve_wiki")
+
+    def test_page_title_reads_frontmatter(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "dad.md"
+            p.write_text('---\ntitle: "Dad"\ntype: person\n---\n# Dad\n', encoding="utf-8")
+            self.assertEqual(self.sw.page_title(p), "Dad")
+
+    def test_page_title_fallback_to_stem(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "grandma-betty-jo.md"
+            p.write_text("no frontmatter here", encoding="utf-8")
+            self.assertEqual(self.sw.page_title(p), "Grandma Betty Jo")
+
+    def test_nav_groups_counts_and_active(self):
+        wiki = self.sw.WIKI_DIR
+        fake = [wiki / "index.md", wiki / "people" / "dad.md",
+                wiki / "people" / "katie.md", wiki / "themes" / "grief.md"]
+        self.sw.wiki_pages = lambda: fake
+        self.sw.page_title = lambda p: p.stem.replace("-", " ").title()
+        rel = str((wiki / "people" / "dad.md").relative_to(wiki.parent))
+        out = self.sw.nav_html(active_rel=rel)
+        self.assertIn('data-group="people"', out)
+        self.assertIn(">People<", out)                 # friendly group label
+        self.assertIn(">Themes<", out)
+        self.assertIn('class="count">2<', out)          # People group has 2 items
+        self.assertIn('class="sidebar-item active"', out)  # Dad is the active page
+        self.assertIn('class="sidebar-top"', out)       # index.md as a top-level link
+
+    def test_nav_people_before_themes(self):
+        wiki = self.sw.WIKI_DIR
+        self.sw.wiki_pages = lambda: [wiki / "themes" / "grief.md", wiki / "people" / "dad.md"]
+        self.sw.page_title = lambda p: p.stem.title()
+        out = self.sw.nav_html()
+        self.assertLess(out.index('data-group="people"'), out.index('data-group="themes"'))
+
+
 if __name__ == "__main__":
     unittest.main()
