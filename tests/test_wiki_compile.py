@@ -410,6 +410,18 @@ class PrimaryFocusTests(unittest.TestCase):
         proj = next(f for f in focuses if f["type"] == "project")
         self.assertFalse(proj.get("primary", False))
 
+    def test_rebuild_refreshes_primary_system_fields(self):
+        # An old roadmap with a stale my-life (standard/0.3) must be promoted on rebuild.
+        md = "## A: Origins\n- [ ] A1: q\n## B: Becoming\n- [ ] B1: q\n"
+        stale = {"version": 1, "focuses": [
+            {"id": "my-life", "label": "My Life", "type": "life_story",
+             "tier": "standard", "cap": 0.3, "deliverable": "memoir", "categories": ["A"]}]}
+        rm = self.rm.derive_roadmap(md, existing=stale)
+        life = next(f for f in rm["focuses"] if f["id"] == "my-life")
+        self.assertTrue(life["primary"])
+        self.assertEqual(life["tier"], "extreme")   # refreshed, not the stale "standard"
+        self.assertEqual(life["cap"], self.rm.PRIMARY_CAP)
+
     def test_primary_outweighs_extreme(self):
         fill = {"room": True, "saturation": 0.0}
         primary = self.qp.focus_weight({"primary": True, "tier": "standard"}, fill)

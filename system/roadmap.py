@@ -240,8 +240,12 @@ def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
         if fid in prior:
             old = prior[fid]
             focus["categories"] = sorted(set(focus["categories"]) | set(old.get("categories", [])))
+            # The primary life-story focus's identity is system-owned (label tracks
+            # full_name; tier/cap/deliverable are policy) — always refresh those so
+            # an upgrade actually promotes the author to the primary, biggest focus.
+            system_owned = {"label", "tier", "cap", "deliverable"} if focus.get("primary") else set()
             for field in _USER_FIELDS:
-                if field in old:
+                if field in old and field not in system_owned:
                     focus[field] = old[field]
         merged.append(focus)
 
