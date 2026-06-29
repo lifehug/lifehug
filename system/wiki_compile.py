@@ -126,14 +126,27 @@ def frontmatter_value(text: str, key: str, default: str = "") -> str:
     return match.group(1).strip().strip('"').strip("'") if match else default
 
 
+def page_is_synthesized(existing_text: str) -> bool:
+    """Whether an already-written page holds synthesized prose (vs an excerpt
+    fallback). Prefers the explicit `synthesized:` frontmatter marker; for legacy
+    pages written before the marker existed, infers from layout — a fallback page
+    carries the `## What We Know` header, a synthesized page does not."""
+    marker = frontmatter_value(existing_text, "synthesized")
+    if marker == "true":
+        return True
+    if marker == "false":
+        return False
+    return "## What We Know" not in existing_text  # legacy page: infer from layout
+
+
 def should_preserve_existing(existing_text: str, new_synthesized: bool) -> bool:
     """True when re-rendering would downgrade an already-synthesized page to an
-    excerpt fallback. Guards every compile path on a keyless machine: a page that
-    was synthesized (frontmatter `synthesized: true`) is never clobbered by a
-    fallback render — its last good prose is preserved until a real synthesis runs."""
+    excerpt fallback. Guards every compile path on a keyless machine: a synthesized
+    page is never clobbered by a fallback render — its last good prose is preserved
+    until a real synthesis runs (compile machine, or the /compile skill writes a draft)."""
     if new_synthesized:
         return False
-    return frontmatter_value(existing_text, "synthesized") == "true"
+    return page_is_synthesized(existing_text)
 
 
 def read_manual_sources() -> dict[str, dict]:

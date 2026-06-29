@@ -256,11 +256,22 @@ class PreserveGuardTests(unittest.TestCase):
         existing = "---\ntitle: \"A\"\nsynthesized: true\n---\n\nGood prose."
         self.assertFalse(self.wc.should_preserve_existing(existing, new_synthesized=True))
 
-    def test_unmarked_legacy_page_not_preserved(self):
-        # Pages compiled before the marker existed have no `synthesized:` field;
-        # they are not treated as synthesized (first post-upgrade compile re-stamps them).
-        existing = "---\ntitle: \"A\"\n---\n\nSome prose."
+    def test_unmarked_legacy_synthesized_page_preserved(self):
+        # Pages compiled before the marker existed have no `synthesized:` field.
+        # A synthesized legacy page (prose + ## Sources, no ## What We Know) must
+        # still be protected on the first post-upgrade keyless compile.
+        existing = "---\ntitle: \"A\"\n---\n\n# A\n\nGood prose.\n\n## Sources\n- A1"
+        self.assertTrue(self.wc.should_preserve_existing(existing, new_synthesized=False))
+
+    def test_unmarked_legacy_fallback_page_not_preserved(self):
+        existing = "---\ntitle: \"A\"\n---\n\n# A\n\n## What We Know\n- A1"
         self.assertFalse(self.wc.should_preserve_existing(existing, new_synthesized=False))
+
+    def test_page_is_synthesized_layout_inference(self):
+        self.assertTrue(self.wc.page_is_synthesized("# A\n\nProse.\n\n## Sources\n- x"))
+        self.assertFalse(self.wc.page_is_synthesized("# A\n\n## What We Know\n- x"))
+        self.assertTrue(self.wc.page_is_synthesized("synthesized: true\n\n## What We Know"))   # marker wins
+        self.assertFalse(self.wc.page_is_synthesized("synthesized: false\n\nProse.\n## Sources"))
 
 
 if __name__ == "__main__":
