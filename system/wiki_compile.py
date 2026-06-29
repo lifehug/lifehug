@@ -48,6 +48,7 @@ from people_roster import load_roster
 from roadmap import load_roadmap
 
 TYPE_DIRS = {
+    "life": WIKI_DIR / "life",
     "person": WIKI_DIR / "people",
     "place": WIKI_DIR / "places",
     "period": WIKI_DIR / "periods",
@@ -180,7 +181,7 @@ def read_manual_sources() -> dict[str, dict]:
 
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
-                synthesized: bool = True, origin: str = "focus", project: str = "") -> str:
+                synthesized: bool = True, origin: str = "focus", section: str = "") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -193,8 +194,8 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         f"origin: {origin}",
         f"synthesized: {'true' if synthesized else 'false'}",
     ]
-    if project:
-        lines.append(f'project: "{project}"')
+    if section:
+        lines.append(f'section: "{section}"')
     lines += [
         f"created: {today}",
         f"last_updated: {today}",
@@ -287,7 +288,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
-                seed_related=None, origin="focus", project=""):
+                seed_related=None, origin="focus", section=""):
     return {
         "type": page_type,
         "title": title,
@@ -301,7 +302,7 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "open_questions_header": open_questions_header,
         "seed_related": seed_related or [],
         "origin": origin,
-        "project": project,
+        "section": section,
     }
 
 
@@ -453,7 +454,7 @@ def plan_projects(categories, questions, answers, manual_sources):
             "project", title, slug, sources, answer_items, source_items,
             summary=summary,
             open_questions=unanswered_questions(questions, cat_id),
-            project=project,
+            section=project,
         ))
     return descs
 
@@ -540,6 +541,54 @@ def plan_self(questions, answers):
     return descs
 
 
+def plan_life_story(categories, questions, answers, manual_sources, author_full):
+    """The person at the center: a self-portrait hub plus one page per life-story
+    arc (the A–E 'main' categories). This finally surfaces the author's own life
+    story — the core of the program — which no other pass renders."""
+    per_cat = []
+    for cid, info in sorted(categories.items()):
+        if info.get("group") != "main":
+            continue
+        items = [answers[q["id"]] for q in questions if q["category"] == cid and q["id"] in answers]
+        per_cat.append((cid, info, items))
+    if not per_cat:
+        return []
+
+    descs = []
+    # One page per arc (skip arcs with no answers yet).
+    for cid, info, items in per_cat:
+        if not items:
+            continue
+        title = info["name"]
+        descs.append(_descriptor(
+            "life", title, slugify(title), [a["source"] for a in items], items, [],
+            summary=f"A chapter of {author_full}'s life story — {title}, "
+                    f"from {len(items)} answered prompts.",
+            open_questions=unanswered_questions(questions, cid),
+            origin="arc",
+        ))
+
+    # Hub: a self-portrait synthesized across all arcs. Interleave answers across
+    # categories so the synthesis cap sees a spread (Origins…Reflection), not just A.
+    hub_items = []
+    maxlen = max((len(items) for _, _, items in per_cat), default=0)
+    for i in range(maxlen):
+        for _, _, items in per_cat:
+            if i < len(items):
+                hub_items.append(items[i])
+    if hub_items:
+        descs.insert(0, _descriptor(
+            "life", author_full, slugify(author_full),
+            [a["source"] for a in hub_items], hub_items, [],
+            summary=f"{author_full} — a self-portrait synthesized from the life story so far: "
+                    f"who they are, what they value, what they fear, and who they're becoming.",
+            open_questions=[],
+            origin="hub",
+            section="",
+        ))
+    return descs
+
+
 # ---------------------------------------------------------------------------
 # Synthesis pass — prose + content-derived related (LLM, cached, offline fallback)
 # ---------------------------------------------------------------------------
@@ -611,7 +660,19 @@ def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
             body = body[:1500].rsplit(" ", 1)[0] + "..."
         src_lines.append(f"[{item['id']}] ({item['source']}): {body}")
     roster_lines = [f"- {r['slug']} — {r['title']} ({r['type']})" for r in roster]
+    if desc["type"] == "life" and desc.get("origin") == "hub":
+        lens = ("This page is an honest self-portrait of the author. From the source "
+                "material, synthesize who they are: their core values, what drives and "
+                "what scares them, the contradictions between how they act and how they "
+                "see themselves, and who they are becoming. Write in third person, warm "
+                "but unflinching. This is the heart of the wiki — understanding this person.")
+    elif desc["type"] == "life":
+        lens = ("This page is one chapter of the author's life story. Synthesize the "
+                "narrative and what it reveals about who they became.")
+    else:
+        lens = ""
     return f"""You are compiling a private, owner-only life-story wiki. Write the entry for one page.
+{lens}
 
 PAGE TITLE: {desc['title']}
 PAGE TYPE: {desc['type']}
@@ -744,7 +805,7 @@ def render_page(desc, synth, related, backlinks, slug_title):
     body = [
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
                     synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus"),
-                    project=desc.get("project", "")),
+                    section=desc.get("section", "")),
         "",
         f"# {desc['title']}",
         "",
@@ -778,19 +839,40 @@ def render_page(desc, synth, related, backlinks, slug_title):
 
 
 def update_index(written_pages: list[Path], dry_run=False):
+    cfg = load_config()
+    author_full = cfg.get("full_name") or cfg.get("name") or "Me"
+
+    def label(page: Path) -> str:
+        title = frontmatter_value(page.read_text(encoding="utf-8", errors="replace"), "title")
+        return title or page.stem.replace("-", " ").title()
+
     sections = []
+
+    # Featured first: the person and their life story (the heart of the wiki).
+    life_pages = sorted(p for p in TYPE_DIRS["life"].glob("*.md") if p.name != ".gitkeep")
+    hub = next((p for p in life_pages if p.stem == slugify(author_full)), None)
+    arcs = [p for p in life_pages if p is not hub]
+    if hub or arcs:
+        sections.append(f"_Understanding {author_full} — the life story so far._")
+        sections.append("")
+        if hub:
+            sections.append(f"- **[{author_full} — who I am]({rel(hub)})**")
+        for page in arcs:
+            sections.append(f"- [{label(page)}]({rel(page)})")
+        sections.append("")
+
     for page_type, directory in TYPE_DIRS.items():
-        title = page_type.title() + "s"
-        sections.append(f"## {title}")
+        if page_type == "life":
+            continue  # already featured above
+        sections.append(f"## {page_type.title()}s")
         pages = sorted(p for p in directory.glob("*.md") if p.name != ".gitkeep")
         if pages:
             for page in pages:
-                label = page.stem.replace("-", " ").title()
-                sections.append(f"- [{label}]({rel(page)})")
+                sections.append(f"- [{label(page)}]({rel(page)})")
         else:
             sections.append("")
         sections.append("")
-    text = "# Lifehug Index\n\n" + "\n".join(sections).rstrip() + "\n"
+    text = f"# {author_full}\n\n" + "\n".join(sections).rstrip() + "\n"
     write_page(WIKI_DIR / "index.md", text, dry_run)
 
     if written_pages and not dry_run:
@@ -826,13 +908,16 @@ def main():
     categories = parse_categories(md_text)
     answers = read_answers()
     manual_sources = read_manual_sources()
-    author = load_config().get("name", "Me")
+    cfg = load_config()
+    author = cfg.get("name", "Me")
+    author_full = cfg.get("full_name") or author
     people_roster = load_roster()
     focus_slugs = {slugify(clean_focus_name(info["name"]))
                    for info in categories.values() if info.get("group") == "focus"}
 
-    # 1. plan
+    # 1. plan — the person's own life story leads.
     descs = []
+    descs += plan_life_story(categories, questions, answers, manual_sources, author_full)
     descs += plan_focuses(categories, questions, answers, manual_sources, people_roster)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources)

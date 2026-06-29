@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from lifehug_core import WIKI_DIR, slugify
+from lifehug_core import WIKI_DIR, load_config, slugify
 
 
 def wiki_pages():
@@ -67,9 +67,14 @@ def page_title(path: Path) -> str:
 
 
 def nav_html(active_rel: str | None = None) -> str:
-    """Grouped, collapsible sidebar: content groups (People, Relationships, …)
-    first, then the less-important meta pages (Index, Page Structure) at the
-    bottom. The compile log is omitted — it isn't useful to navigate."""
+    """Grouped, collapsible sidebar. The author's own life-story section leads
+    (their self-portrait hub + the life-story arcs), then content groups
+    (People, Projects, Themes, …), then meta pages at the bottom. The compile
+    log is omitted."""
+    cfg = load_config()
+    full_name = cfg.get("full_name") or cfg.get("name") or "Me"
+    hub_slug = slugify(full_name)
+
     meta_links: list[Path] = []
     groups: dict[str, list[Path]] = {}
     for p in wiki_pages():
@@ -80,44 +85,62 @@ def nav_html(active_rel: str | None = None) -> str:
         else:
             groups.setdefault(p.parent.name, []).append(p)
 
-    def link(p: Path, cls: str) -> str:
+    life_pages = groups.get("life", [])
+    hub = next((p for p in life_pages if p.stem == hub_slug), None)
+
+    def link(p: Path, cls: str, label: str | None = None) -> str:
         rel = str(p.relative_to(WIKI_DIR.parent))
         active = " active" if active_rel == rel else ""
-        return f'<a class="{cls}{active}" href="/page/{quote(rel)}">{html.escape(page_title(p))}</a>'
-
-    parts: list[str] = []
+        text = html.escape(label if label is not None else page_title(p))
+        return f'<a class="{cls}{active}" href="/page/{quote(rel)}">{text}</a>'
 
     def items_html(items: list[Path]) -> str:
-        """Item links for a group, sub-grouped by `project:` frontmatter when
-        present (e.g. the Etherfuse arcs nest under a 'Etherfuse' sub-label).
-        Pages with no project list directly."""
-        plain = [p for p in items if not page_field(p, "project")]
+        """Item links for a group, sub-grouped by `section:` frontmatter when
+        present (e.g. Etherfuse arcs nest under an 'Etherfuse' sub-label)."""
+        plain = [p for p in items if not page_field(p, "section")]
         subs: dict[str, list[Path]] = {}
         for p in items:
-            proj = page_field(p, "project")
-            if proj:
-                subs.setdefault(proj, []).append(p)
+            sec = page_field(p, "section")
+            if sec:
+                subs.setdefault(sec, []).append(p)
         out = [link(p, "sidebar-item") for p in plain]
-        for proj in sorted(subs):
-            out.append(f'<div class="sidebar-subgroup">{html.escape(proj)}</div>')
-            out += [link(p, "sidebar-item sub") for p in subs[proj]]
+        for sec in sorted(subs):
+            out.append(f'<div class="sidebar-subgroup">{html.escape(sec)}</div>')
+            out += [link(p, "sidebar-item sub") for p in subs[sec]]
         return "".join(out)
 
-    ordered = [t for t in _TYPE_PRIORITY if t in groups] + [t for t in groups if t not in _TYPE_PRIORITY]
+    def group_block(gtype: str, label: str, rows: str, count: int) -> str:
+        return (
+            f'<div class="sidebar-group" data-group="{html.escape(gtype)}">'
+            f'<div class="sidebar-group-header" onclick="toggleGroup(\'{html.escape(gtype)}\')">'
+            f'<span class="sidebar-group-main"><span class="chevron">&#9660;</span>'
+            f'<span class="sidebar-group-title">{html.escape(label)}</span></span>'
+            f'<span class="count">{count}</span></div>'
+            f'<div class="sidebar-items">{rows}</div></div>'
+        )
+
+    parts: list[str] = []
+    # Life section first: the person's self-portrait hub, then the arcs.
+    if life_pages:
+        arcs = sorted((p for p in life_pages if p is not hub), key=lambda p: page_title(p).lower())
+        rows = (link(hub, "sidebar-item", "Who I am") if hub else "") + items_html(arcs)
+        count = (1 if hub else 0) + len(arcs)
+        parts.append(group_block("life", full_name, rows, count))
+
+    ordered = [t for t in _TYPE_PRIORITY if t in groups] + \
+              [t for t in groups if t not in _TYPE_PRIORITY and t != "life"]
     for gtype in ordered:
         items = sorted(groups[gtype], key=lambda p: page_title(p).lower())
         if not items:
             continue
-        label = html.escape(_GROUP_LABELS.get(gtype, gtype.replace("_", " ").title()))
         rows = items_html(items)
-        parts.append(
-            f'<div class="sidebar-group" data-group="{html.escape(gtype)}">'
-            f'<div class="sidebar-group-header" onclick="toggleGroup(\'{html.escape(gtype)}\')">'
-            f'<span class="sidebar-group-main"><span class="chevron">&#9660;</span>'
-            f'<span class="sidebar-group-title">{label}</span></span>'
-            f'<span class="count">{len(items)}</span></div>'
-            f'<div class="sidebar-items">{rows}</div></div>'
-        )
+        count = len(items)
+        # People also carries a pointer to the life hub (the author themselves).
+        if gtype == "people" and hub:
+            rows = link(hub, "sidebar-item", f"{full_name} →") + rows
+            count += 1
+        parts.append(group_block(gtype, _GROUP_LABELS.get(gtype, gtype.replace("_", " ").title()),
+                                  rows, count))
 
     # Meta pages last, set apart — Index first, then the rest (Page Structure).
     if meta_links:

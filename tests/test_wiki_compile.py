@@ -384,11 +384,47 @@ class ProjectGroupingTests(unittest.TestCase):
         self.assertEqual(cats["F"]["name"], "The Problem")
         self.assertEqual(cats["F"]["group"], "project")
 
-    def test_frontmatter_includes_project(self):
-        fm = self.wc.frontmatter("The Problem", "project", [], [], project="Etherfuse")
-        self.assertIn('project: "Etherfuse"', fm)
-        # No project → field omitted.
-        self.assertNotIn("project:", self.wc.frontmatter("Mom", "person", []))
+    def test_frontmatter_includes_section(self):
+        fm = self.wc.frontmatter("The Problem", "project", [], [], section="Etherfuse")
+        self.assertIn('section: "Etherfuse"', fm)
+        # No section → field omitted.
+        self.assertNotIn("section:", self.wc.frontmatter("Mom", "person", []))
+
+
+class LifeStoryTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_plan_life_story_builds_hub_and_arcs(self):
+        categories = {"A": {"name": "Origins", "group": "main"},
+                      "B": {"name": "Becoming", "group": "main"},
+                      "K": {"name": "Mom", "group": "focus"}}
+        questions = [{"id": "A1", "category": "A", "answered": True, "text": "q"},
+                     {"id": "B1", "category": "B", "answered": True, "text": "q"}]
+        answers = {"A1": _ans("A1", "origins body"), "B1": _ans("B1", "becoming body")}
+        descs = self.wc.plan_life_story(categories, questions, answers, {}, "David James Taylor")
+        by_origin = {d["origin"]: d for d in descs}
+        self.assertIn("hub", by_origin)
+        hub = by_origin["hub"]
+        self.assertEqual(hub["title"], "David James Taylor")
+        self.assertEqual(hub["slug"], "david-james-taylor")
+        self.assertEqual(hub["type"], "life")
+        arcs = [d for d in descs if d["origin"] == "arc"]
+        self.assertEqual({d["title"] for d in arcs}, {"Origins", "Becoming"})  # main cats only, not Mom
+        self.assertTrue(all(d["type"] == "life" for d in arcs))
+
+    def test_hub_interleaves_across_arcs(self):
+        # The hub's cited items should span categories (not all of A first).
+        categories = {"A": {"name": "Origins", "group": "main"},
+                      "E": {"name": "Reflection", "group": "main"}}
+        questions = [{"id": "A1", "category": "A", "answered": True, "text": "q"},
+                     {"id": "A2", "category": "A", "answered": True, "text": "q"},
+                     {"id": "E1", "category": "E", "answered": True, "text": "q"}]
+        answers = {k: _ans(k, k) for k in ("A1", "A2", "E1")}
+        hub = next(d for d in self.wc.plan_life_story(categories, questions, answers, {}, "Me")
+                   if d["origin"] == "hub")
+        # First two cited items come from different categories (A1, E1), not A1,A2.
+        self.assertEqual([c["id"] for c in hub["cited_items"][:2]], ["A1", "E1"])
 
 
 class SidebarNavTests(unittest.TestCase):
@@ -438,12 +474,26 @@ class SidebarNavTests(unittest.TestCase):
         self.sw.wiki_pages = lambda: [wiki / "projects" / "the-problem.md",
                                       wiki / "projects" / "building.md"]
         self.sw.page_title = lambda p: p.stem.replace("-", " ").title()
-        self.sw.page_field = lambda p, key: "Etherfuse" if key == "project" else ""
+        self.sw.page_field = lambda p, key: "Etherfuse" if key == "section" else ""
         out = self.sw.nav_html()
         self.assertIn('class="sidebar-subgroup">Etherfuse<', out)   # sub-label rendered
         self.assertIn('class="sidebar-item sub"', out)              # items indented under it
         # The Projects group still wraps them.
         self.assertLess(out.index('data-group="projects"'), out.index("sidebar-subgroup"))
+
+    def test_nav_life_section_first_with_hub_and_people_pointer(self):
+        wiki = self.sw.WIKI_DIR
+        self.sw.load_config = lambda *a, **k: {"name": "Dave", "full_name": "David James Taylor"}
+        self.sw.wiki_pages = lambda: [wiki / "life" / "david-james-taylor.md",
+                                      wiki / "life" / "origins.md",
+                                      wiki / "people" / "mom.md"]
+        self.sw.page_title = lambda p: p.stem.replace("-", " ").title()
+        self.sw.page_field = lambda p, key: ""
+        out = self.sw.nav_html()
+        self.assertLess(out.index('data-group="life"'), out.index('data-group="people"'))  # life first
+        self.assertIn(">David James Taylor<", out)        # section labeled with full name
+        self.assertIn(">Who I am<", out)                  # hub surfaced as an item
+        self.assertIn(">David James Taylor &rarr;<", out.replace("→", "&rarr;"))  # People pointer
 
     def test_nav_people_before_themes(self):
         wiki = self.sw.WIKI_DIR
