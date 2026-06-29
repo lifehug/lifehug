@@ -398,6 +398,17 @@ class SidebarNavTests(unittest.TestCase):
         self.assertIn('class="sidebar-item active"', out)  # Dad is the active page
         self.assertIn('class="sidebar-top"', out)       # index.md as a top-level link
 
+    def test_nav_log_excluded_and_meta_at_bottom(self):
+        wiki = self.sw.WIKI_DIR
+        self.sw.wiki_pages = lambda: [wiki / "index.md", wiki / "log.md",
+                                      wiki / "SCHEMA.md", wiki / "people" / "dad.md"]
+        self.sw.page_title = lambda p: {"SCHEMA": "Page Structure"}.get(p.stem, p.stem.title())
+        out = self.sw.nav_html()
+        self.assertNotIn("log.md", out)                       # compile log hidden
+        self.assertIn("sidebar-meta", out)                    # meta block exists
+        self.assertLess(out.index('data-group="people"'), out.index("sidebar-meta"))  # groups first
+        self.assertIn(">Page Structure<", out)                # Schema relabeled
+
     def test_nav_people_before_themes(self):
         wiki = self.sw.WIKI_DIR
         self.sw.wiki_pages = lambda: [wiki / "themes" / "grief.md", wiki / "people" / "dad.md"]

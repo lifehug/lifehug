@@ -62,13 +62,16 @@ def page_title(path: Path) -> str:
 
 
 def nav_html(active_rel: str | None = None) -> str:
-    """Grouped, collapsible sidebar. Top-level pages (index/log) link directly;
-    type folders become collapsible sections with a caret, count, and titles."""
-    top_links: list[Path] = []
+    """Grouped, collapsible sidebar: content groups (People, Relationships, …)
+    first, then the less-important meta pages (Index, Page Structure) at the
+    bottom. The compile log is omitted — it isn't useful to navigate."""
+    meta_links: list[Path] = []
     groups: dict[str, list[Path]] = {}
     for p in wiki_pages():
-        if p.parent == WIKI_DIR:  # top-level (index.md, log.md)
-            top_links.append(p)
+        if p.parent == WIKI_DIR:  # top-level page (index.md, log.md, SCHEMA.md)
+            if p.stem.lower() == "log":
+                continue  # the compile log doesn't belong in the nav
+            meta_links.append(p)
         else:
             groups.setdefault(p.parent.name, []).append(p)
 
@@ -77,7 +80,7 @@ def nav_html(active_rel: str | None = None) -> str:
         active = " active" if active_rel == rel else ""
         return f'<a class="{cls}{active}" href="/page/{quote(rel)}">{html.escape(page_title(p))}</a>'
 
-    parts: list[str] = [link(p, "sidebar-top") for p in top_links]
+    parts: list[str] = []
 
     ordered = [t for t in _TYPE_PRIORITY if t in groups] + [t for t in groups if t not in _TYPE_PRIORITY]
     for gtype in ordered:
@@ -94,6 +97,12 @@ def nav_html(active_rel: str | None = None) -> str:
             f'<span class="count">{len(items)}</span></div>'
             f'<div class="sidebar-items">{rows}</div></div>'
         )
+
+    # Meta pages last, set apart — Index first, then the rest (Page Structure).
+    if meta_links:
+        meta_sorted = sorted(meta_links, key=lambda p: (p.stem.lower() != "index", page_title(p).lower()))
+        parts.append('<div class="sidebar-meta">'
+                     + "".join(link(p, "sidebar-top") for p in meta_sorted) + "</div>")
     return "\n".join(parts)
 
 
@@ -211,6 +220,8 @@ def layout(title: str, body: str, active_rel: str | None = None) -> bytes:
     .shell {{ display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 53px); }}
     nav {{ border-right: 1px solid #ddd8cf; padding: 14px 10px; overflow: auto; background: #f4f0e8; }}
     .sidebar-top {{ display: block; color: #3f3428; text-decoration: none; padding: 5px 8px; font-size: 14px; font-weight: 600; }}
+    .sidebar-meta {{ margin-top: 14px; padding-top: 8px; border-top: 1px solid #ddd8cf; }}
+    .sidebar-meta .sidebar-top {{ font-weight: 500; color: #6b5d49; font-size: 13px; }}
     .sidebar-group {{ margin-top: 6px; }}
     .sidebar-group-header {{ display: flex; align-items: center; justify-content: space-between;
       padding: 6px 8px; cursor: pointer; user-select: none; border-radius: 6px; color: #2f271c; font-weight: 650; font-size: 13px; }}
@@ -238,8 +249,7 @@ def layout(title: str, body: str, active_rel: str | None = None) -> bytes:
 <body>
   <header>
     <a href="/">Lifehug</a>
-    <a href="/search">Search</a>
-    <form action="/search"><input name="q" placeholder="Search wiki"></form>
+    <form action="/search"><input name="q" placeholder="Search"></form>
   </header>
   <div class="shell"><nav>{nav}</nav><main>{body}</main></div>
   <script>
