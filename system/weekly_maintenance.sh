@@ -128,6 +128,12 @@ fi
 run_step python3 "$WORKSPACE/system/lifehug.py" compile --no-ai
 run_source_integrity
 run_step python3 "$WORKSPACE/system/lifehug.py" quality-update
+
+echo
+echo "==> python3 system/lifehug.py candidates-auto-promote"
+PROMOTE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote 2>&1)
+echo "$PROMOTE_OUT"
+
 QUEUE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS" 2>&1)
 echo "$QUEUE_OUT"
 run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
@@ -136,6 +142,8 @@ echo "$PROGRESS_OUT"
 safe_autocommit
 
 telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
+
+${PROMOTE_OUT}
 
 ${QUEUE_OUT}
 

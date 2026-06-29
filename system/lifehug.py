@@ -492,6 +492,13 @@ def cmd_candidates_stats(_args: argparse.Namespace) -> int:
     return run_python("question_candidates.py", ["stats"])
 
 
+def cmd_candidates_auto_promote(args: argparse.Namespace) -> int:
+    flags = ["auto-promote"]
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    return run_python("question_candidates.py", flags)
+
+
 def cmd_followups_status(_args: argparse.Namespace) -> int:
     return run_python("gen_followups.py", ["--status"])
 
@@ -747,6 +754,10 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Candidate Stats ---
     p = sub.add_parser("candidates-stats", help="Show candidate question statistics")
     p.set_defaults(func=cmd_candidates_stats)
+
+    p = sub.add_parser("candidates-auto-promote", help="Auto-promote top candidates into the question bank")
+    p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    p.set_defaults(func=cmd_candidates_auto_promote)
 
     # --- Roadmap / Focus ---
     p = sub.add_parser("progress", help="Show progress toward deliverables (readiness dashboard)")

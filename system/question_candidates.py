@@ -23,8 +23,44 @@ from lifehug_core import (
 
 from lifehug_core import STORY_FUNCTIONS
 
-VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted"}
+VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted", "needs_review"}
 PROMOTABLE_STATUSES = {"candidate", "accepted", "deferred"}
+
+# ---------------------------------------------------------------------------
+# Auto-promotion constants
+# ---------------------------------------------------------------------------
+
+# Quality threshold to auto-promote (priority × story_function_multiplier).
+AUTO_PROMOTE_THRESHOLD = 0.82
+
+# Below this score but above NEEDS_REVIEW_THRESHOLD → needs_review.
+NEEDS_REVIEW_THRESHOLD = 0.70
+
+# Max auto-promotions per week, keyed by unanswered-bank-count band.
+# Bank is "full" above 120; "healthy" 80-120; "thin" 40-80; "low" <40.
+def dynamic_weekly_cap(unanswered_count: int) -> int:
+    if unanswered_count > 120:
+        return 1
+    if unanswered_count >= 80:
+        return 2
+    if unanswered_count >= 40:
+        return 3
+    return 4
+
+# Max candidates from the same neighborhood/source promoted in one week.
+PER_NEIGHBORHOOD_CAP = 1
+
+# Infer a default bank category from neighborhood topic_type.
+TOPIC_TYPE_CATEGORY: dict[str, str] = {
+    "self":        "E",
+    "theme":       "E",
+    "project":     "D",
+    "event":       "B",
+    "place":       "A",
+    "time_period": "A",
+    "person":      "C",
+    "relationship": "C",
+}
 
 # ---------------------------------------------------------------------------
 # Quality checker — operationalizes system/research.md
@@ -459,6 +495,181 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Auto-promotion engine
+# ---------------------------------------------------------------------------
+
+def _count_unanswered(question_bank_text: str) -> int:
+    return len(re.findall(r"^- \[ \]", question_bank_text, re.MULTILINE))
+
+
+def _infer_category(candidate: dict, neighborhoods: dict) -> str | None:
+    """Best-effort category inference from candidate metadata."""
+    # Explicit target already set
+    if candidate.get("target_category"):
+        return str(candidate["target_category"]).upper()
+    # Look up neighborhood topic_type
+    nbhd_id = candidate.get("neighborhood_id", "")
+    for nbhd in neighborhoods.get("neighborhoods", []):
+        if nbhd.get("id") == nbhd_id:
+            return TOPIC_TYPE_CATEGORY.get(nbhd.get("type", "") or nbhd.get("topic_type", ""), None)
+    return None
+
+
+def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None = None) -> float:
+    """Score a candidate for auto-promotion.
+
+    Score = priority × story_function_multiplier (from quality profile).
+    Falls back to priority alone when the profile is inactive.
+    """
+    priority = float(candidate.get("priority", 0.5) or 0.5)
+    multiplier = 1.0
+    if quality_profile and quality_profile.get("active"):
+        sf = candidate.get("story_function", "")
+        fn_data = quality_profile.get("by_story_function", {}).get(sf, {})
+        multiplier = float(fn_data.get("multiplier", 1.0))
+    return round(priority * multiplier, 4)
+
+
+def auto_promote_candidates(
+    dry_run: bool = False,
+) -> dict:
+    """Score all eligible candidates, auto-promote the best ones.
+
+    Returns a summary dict:
+    {
+        "promoted": [(candidate_id, question_id, score), ...],
+        "needs_review": [(candidate_id, score, reason), ...],
+        "skipped": [(candidate_id, reason), ...],
+        "cap": int,
+        "unanswered": int,
+    }
+    """
+    from pathlib import Path as _Path
+
+    data = load_store()
+    question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
+    unanswered = _count_unanswered(question_bank_text)
+    weekly_cap = dynamic_weekly_cap(unanswered)
+
+    # Load quality profile (optional)
+    quality_profile: dict | None = None
+    try:
+        from quality_profile import load_profile  # noqa: PLC0415
+        quality_profile = load_profile()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Load neighborhoods for category inference
+    try:
+        from lifehug_core import NEIGHBORHOODS_FILE  # noqa: PLC0415
+        neighborhoods = read_json(NEIGHBORHOODS_FILE) if NEIGHBORHOODS_FILE.exists() else {}
+    except Exception:  # noqa: BLE001
+        neighborhoods = {}
+
+    # Collect promotable candidates with scores
+    eligible = []
+    for c in data.get("candidates", []):
+        if c.get("status") not in PROMOTABLE_STATUSES:
+            continue
+        text = str(c.get("text", "")).strip()
+        if not text:
+            continue
+        score = score_candidate_for_promotion(c, quality_profile)
+        eligible.append((score, c))
+
+    # Sort best-first
+    eligible.sort(key=lambda x: -x[0])
+
+    promoted: list[tuple[str, str, float]] = []
+    needs_review: list[tuple[str, float, str]] = []
+    skipped: list[tuple[str, str]] = []
+    per_neighborhood: Counter = Counter()
+
+    updated_bank = question_bank_text
+
+    for score, candidate in eligible:
+        cid = candidate["id"]
+        nbhd = candidate.get("neighborhood_id", "_none")
+
+        # Duplicate check
+        try:
+            ensure_not_duplicate(updated_bank, candidate["text"])
+        except ValueError:
+            skipped.append((cid, "duplicate"))
+            continue
+
+        # Category inference
+        category = _infer_category(candidate, neighborhoods)
+        if not category:
+            needs_review.append((cid, score, "missing_category"))
+            if not dry_run:
+                candidate["status"] = "needs_review"
+                candidate["needs_review_reason"] = "missing_category"
+                candidate["updated_at"] = now_utc()
+            continue
+
+        # Quality gate
+        if score < AUTO_PROMOTE_THRESHOLD:
+            if score >= NEEDS_REVIEW_THRESHOLD:
+                needs_review.append((cid, score, f"score {score:.2f} below threshold"))
+                if not dry_run:
+                    candidate["status"] = "needs_review"
+                    candidate["needs_review_reason"] = f"score {score:.2f} below threshold {AUTO_PROMOTE_THRESHOLD}"
+                    candidate["updated_at"] = now_utc()
+            else:
+                skipped.append((cid, f"score {score:.2f} too low"))
+            continue
+
+        # Weekly cap
+        if len(promoted) >= weekly_cap:
+            skipped.append((cid, "weekly_cap_reached"))
+            continue
+
+        # Per-neighborhood cap
+        if per_neighborhood[nbhd] >= PER_NEIGHBORHOOD_CAP:
+            skipped.append((cid, f"neighborhood_cap ({nbhd})"))
+            continue
+
+        # Promote
+        try:
+            ensure_category_exists(updated_bank, category)
+            question_id = next_question_id(updated_bank, category)
+            promoted_at = now_utc()
+            updated_bank = insert_question(
+                updated_bank, category, question_id,
+                candidate["text"], candidate, promoted_at,
+            )
+            # Augment provenance with auto-promotion metadata
+            # (insert_question writes the comment; we update candidate record)
+            if not dry_run:
+                candidate["status"] = "auto_promoted"
+                candidate["target_category"] = category
+                candidate["promoted_question_id"] = question_id
+                candidate["promoted_at"] = promoted_at
+                candidate["promoted_by"] = "auto"
+                candidate["promotion_score"] = score
+                candidate["promotion_reason"] = f"auto: score {score:.2f} ≥ {AUTO_PROMOTE_THRESHOLD}"
+                candidate["updated_at"] = promoted_at
+            promoted.append((cid, question_id, score))
+            per_neighborhood[nbhd] += 1
+        except ValueError as exc:
+            skipped.append((cid, str(exc)))
+
+    if not dry_run and (promoted or needs_review):
+        write_text(QUESTIONS_FILE, updated_bank)
+        save_store(data)
+
+    return {
+        "promoted": promoted,
+        "needs_review": needs_review,
+        "skipped": skipped,
+        "cap": weekly_cap,
+        "unanswered": unanswered,
+        "dry_run": dry_run,
+    }
+
+
 def cmd_promote_neighborhood(args: argparse.Namespace) -> int:
     data = load_store()
     question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
@@ -467,6 +678,36 @@ def cmd_promote_neighborhood(args: argparse.Namespace) -> int:
         write_text(QUESTIONS_FILE, updated_bank)
         save_store(data)
     print(f"✓ Promoted {len(new_ids)} question(s) from {args.neighborhood} → {args.category.upper()}: {', '.join(new_ids) or 'none'}")
+    return 0
+
+
+def cmd_auto_promote(args: argparse.Namespace) -> int:
+    result = auto_promote_candidates(dry_run=args.dry_run)
+    cap = result["cap"]
+    unanswered = result["unanswered"]
+    promoted = result["promoted"]
+    needs_review = result["needs_review"]
+    skipped = result["skipped"]
+    prefix = "[DRY RUN] " if args.dry_run else ""
+
+    print(f"{prefix}Auto-promotion — bank: {unanswered} unanswered, weekly cap: {cap}")
+    print()
+    if promoted:
+        print(f"  ✅ Promoted ({len(promoted)}):")
+        for cid, qid, score in promoted:
+            print(f"    {qid} ← {cid} (score {score:.2f})")
+    else:
+        print("  Promoted: none")
+    if needs_review:
+        print(f"  ⚠️  Needs review ({len(needs_review)}):")
+        for cid, score, reason in needs_review:
+            print(f"    {cid} (score {score:.2f}) — {reason}")
+    if skipped:
+        print(f"  ⏭️  Skipped ({len(skipped)}):")
+        for cid, reason in skipped[:5]:
+            print(f"    {cid} — {reason}")
+        if len(skipped) > 5:
+            print(f"    ... and {len(skipped) - 5} more")
     return 0
 
 
@@ -514,6 +755,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("stats", help="Show candidate statistics")
     p.set_defaults(func=cmd_stats)
+
+    p = sub.add_parser("auto-promote", help="Auto-promote top candidates into question-bank.md")
+    p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    p.set_defaults(func=cmd_auto_promote)
 
     return parser
 
