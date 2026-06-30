@@ -277,13 +277,17 @@ flowchart LR
 
 **The surfaces it builds:**
 
+- **life/** — your own life story, the heart of the wiki: a self-portrait hub plus a page per arc (Origins → Reflection)
 - **people/** — who they are, how they shaped you
 - **relationships/** — the bond between you and each person, from both sides
 - **places/** — homes, cities, schools, countries
-- **periods/** — seasons of life, transitions, hardships
+- **periods/** — seasons of life, transitions, hardships (listed in chronological order, earliest first)
 - **projects/** — companies, creative work, missions
 - **themes/** — recurring threads (hunger, agency, faith, belonging)
+- **objects/** — objects that carry meaning (the cleats, the orange shorts)
 - **self/** — your patterns, values, fears, contradictions
+
+Most of these grow on their own through **entity graduation** — the system detects people, places, periods, and symbolic objects mentioned across your answers and builds a page for each, no setup required.
 
 Every page cites the answers it's built from, and links to related pages — so the wiki is a navigable graph, not a flat list. Synthesis is cached and idempotent: re-compiling is cheap, and it runs **keyless on the desktop** (the agent writes each page's prose; the next compile folds it into the graph). Browse it locally with `python3 system/lifehug.py serve`.
 
