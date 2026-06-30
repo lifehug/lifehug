@@ -60,6 +60,20 @@ TYPE_DIRS = {
     "lifes_work": WIKI_DIR / "lifes_work",
 }
 
+# Friendly index section headings per entity type (mirrors serve_wiki._GROUP_LABELS).
+# Naive `type.title() + "s"` mangles these ("Persons", "Selfs", "Lifes_Works").
+SECTION_LABELS = {
+    "person": "People",
+    "place": "Places",
+    "period": "Periods",
+    "project": "Projects",
+    "theme": "Themes",
+    "object": "Objects",
+    "relationship": "Relationships",
+    "self": "Self",
+    "lifes_work": "Life's Work",
+}
+
 THEME_KEYWORDS = {
     "agency": ["agency", "control", "choice", "independent", "untethered"],
     "belonging": ["belong", "friend", "included", "circle", "home"],
@@ -878,13 +892,12 @@ def update_index(written_pages: list[Path], dry_run=False):
     for page_type, directory in TYPE_DIRS.items():
         if page_type == "life":
             continue  # already featured above
-        sections.append(f"## {page_type.title()}s")
         pages = sorted(p for p in directory.glob("*.md") if p.name != ".gitkeep")
-        if pages:
-            for page in pages:
-                sections.append(f"- [{label(page)}]({rel(page)})")
-        else:
-            sections.append("")
+        if not pages:
+            continue  # skip entity types with no pages — no orphan headers
+        sections.append(f"## {SECTION_LABELS.get(page_type, page_type.title() + 's')}")
+        for page in pages:
+            sections.append(f"- [{label(page)}]({rel(page)})")
         sections.append("")
     text = f"# {author_full}\n\n" + "\n".join(sections).rstrip() + "\n"
     write_page(WIKI_DIR / "index.md", text, dry_run)
