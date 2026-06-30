@@ -195,7 +195,8 @@ def read_manual_sources() -> dict[str, dict]:
 
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
-                synthesized: bool = True, origin: str = "focus", section: str = "") -> str:
+                synthesized: bool = True, origin: str = "focus", section: str = "",
+                chrono: int | None = None) -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -208,6 +209,9 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         f"origin: {origin}",
         f"synthesized: {'true' if synthesized else 'false'}",
     ]
+    if chrono is not None:
+        # Chronological rank (1 = earliest in life); periods sort by this in the index.
+        lines.append(f"chrono: {chrono}")
     if section:
         lines.append(f'section: "{section}"')
     lines += [
@@ -302,7 +306,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
-                seed_related=None, origin="focus", section=""):
+                seed_related=None, origin="focus", section="", chrono=None):
     return {
         "type": page_type,
         "title": title,
@@ -312,6 +316,7 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "cited_items": cited_items,
         "supporting_items": supporting_items,
         "summary": summary,
+        "chrono": chrono,
         "open_questions": open_questions,
         "open_questions_header": open_questions_header,
         "seed_related": seed_related or [],
@@ -446,6 +451,9 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
         sources = [x["source"] for x in cited_items + supporting]
         taken_slugs.add(slug)
         name = ent.get("name", slug)
+        # Periods carry an AI-assigned chronological rank so the index can order
+        # them earliest→latest (Childhood before My 40s) instead of alphabetically.
+        chrono = ent.get("chrono") if entity_type == "period" else None
         descs.append(_descriptor(
             entity_type, name, slug, sources, cited_items, supporting,
             summary=f"A {noun} in the author's life, compiled automatically from "
@@ -455,6 +463,7 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
                 f"- Which moments make {name} matter to the story?",
             ],
             origin="mention",
+            chrono=chrono if isinstance(chrono, int) else None,
         ))
     return descs
 
@@ -833,7 +842,7 @@ def render_page(desc, synth, related, backlinks, slug_title):
     body = [
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
                     synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus"),
-                    section=desc.get("section", "")),
+                    section=desc.get("section", ""), chrono=desc.get("chrono")),
         "",
         f"# {desc['title']}",
         "",
@@ -874,6 +883,16 @@ def update_index(written_pages: list[Path], dry_run=False):
         title = frontmatter_value(page.read_text(encoding="utf-8", errors="replace"), "title")
         return title or page.stem.replace("-", " ").title()
 
+    def chrono_key(page: Path) -> tuple:
+        """Sort key for periods: by chrono rank (1 = earliest), pages without a
+        rank sort last, alphabetical within ties. Earliest life stage on top."""
+        raw = frontmatter_value(page.read_text(encoding="utf-8", errors="replace"), "chrono")
+        try:
+            rank = int(raw)
+        except (TypeError, ValueError):
+            rank = 10**6
+        return (rank, page.stem)
+
     sections = []
 
     # Featured first: the person and their life story (the heart of the wiki).
@@ -892,9 +911,12 @@ def update_index(written_pages: list[Path], dry_run=False):
     for page_type, directory in TYPE_DIRS.items():
         if page_type == "life":
             continue  # already featured above
-        pages = sorted(p for p in directory.glob("*.md") if p.name != ".gitkeep")
-        if not pages:
+        page_glob = [p for p in directory.glob("*.md") if p.name != ".gitkeep"]
+        if not page_glob:
             continue  # skip entity types with no pages — no orphan headers
+        # Periods read chronologically (earliest life stage on top); everything
+        # else is alphabetical.
+        pages = sorted(page_glob, key=chrono_key) if page_type == "period" else sorted(page_glob)
         sections.append(f"## {SECTION_LABELS.get(page_type, page_type.title() + 's')}")
         for page in pages:
             sections.append(f"- [{label(page)}]({rel(page)})")

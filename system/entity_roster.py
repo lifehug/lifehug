@@ -180,6 +180,15 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         "pronouns, wrong type, mundane objects). When unsure, set qualifies false.",
         "",
     ]
+    if entity_type == "period":
+        lines += [
+            "- Also set `chrono`: an integer ranking these periods in the order they "
+            "occur across a life, EARLIEST = 1 and increasing (e.g. Childhood=1, "
+            "My Teens=2, High School=3, College=4, My 20s=5, My 30s=6). Overlapping "
+            "stages get an order that reads naturally earliest→latest; use your best "
+            "judgment for named eras ('the war years', 'after the divorce').",
+            "",
+        ]
     if entity_type == "object":
         lines.append("Source answers (find symbolic objects mentioned in these):")
         for e in (excerpts or []):
@@ -189,11 +198,12 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         for c in candidates:
             ev = "; ".join(c["evidence"][:2])
             lines.append(f"- {c['entity']} — score {c['score']}, {c['unique_answers']} answers. {ev}")
+    chrono_field = ', "chrono": 1' if entity_type == "period" else ""
     lines += [
         "",
         "Respond with ONLY a JSON object, no prose:",
         '{"entities": [{"name": "Name", "aliases": ["Variant"], "qualifies": true, '
-        '"maps_to_focus": null}]}',
+        '"maps_to_focus": null' + chrono_field + "}]}",
     ]
     return "\n".join(lines)
 
@@ -242,12 +252,19 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
             # is enforced at compile time against real mention counts, and objects
             # graduate on symbolic meaning regardless of frequency.
             page_eligible = qualifies and maps_to is None
-        out.append({
+        entry = {
             "name": name, "slug": slug, "aliases": aliases,
             "qualifies": qualifies, "maps_to_focus": maps_to,
             "score": round(score, 2), "unique_answers": answers,
             "page_eligible": page_eligible,
-        })
+        }
+        if entity_type == "period":
+            # Chronological rank (1 = earliest in life) drives index ordering.
+            try:
+                entry["chrono"] = int(e.get("chrono"))
+            except (TypeError, ValueError):
+                entry["chrono"] = None
+        out.append(entry)
     return out
 
 
@@ -332,8 +349,9 @@ def main() -> int:
             "candidates": candidates,
             "focus_map": focus_map,
             "min_score": min_score, "min_answers": min_answers,
-            "response_format": {"entities": [{"name": "", "aliases": [], "qualifies": True,
-                                              "maps_to_focus": None}]},
+            "response_format": {"entities": [dict({"name": "", "aliases": [], "qualifies": True,
+                                              "maps_to_focus": None},
+                                             **({"chrono": 1} if t == "period" else {}))]},
         }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         n = len(excerpts or candidates)
         print(f"✓ Emitted {t} roster task ({n} items) to {args.emit_task}")
