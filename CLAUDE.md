@@ -290,8 +290,11 @@ Candidate questions are the review buffer between raw source insight and daily d
 
 ```bash
 python3 system/lifehug.py candidates-list --status candidate
+python3 system/lifehug.py candidates-list --status needs_review
 python3 system/lifehug.py candidates-review --status candidate
+python3 system/lifehug.py candidates-review --status needs_review
 python3 system/lifehug.py candidates-update <candidate-id> --status accepted --target-category A
+python3 system/lifehug.py candidates-update <candidate-id> --status deferred --reason "wait for more context"
 python3 system/lifehug.py candidates-promote <candidate-id> --category A
 ```
 
@@ -720,7 +723,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
-- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps, writes the next queue, scans gaps, reports progress, and commits real changes.
+- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps, writes the next queue, scans gaps, reports progress, and commits real changes. Dry-run previews the candidate promotion gate too.
 - Review any manual source findings that `source-lint --fix` could not safely repair
 - Review classifier/candidate output in the weekly Telegram summary, then check queue balance, progress, and whether any Focus is ready for a deliverable
 

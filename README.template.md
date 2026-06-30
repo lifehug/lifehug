@@ -29,7 +29,7 @@ This wiki is a **graph of {name}'s life**. Standard terms:
 *`classify_story.py` is the structured-understanding pass. It extracts people, places, periods, themes, contradictions, possible outputs, Focus opportunities, self-understanding insights, and follow-up candidates from answers/sources. Weekly maintenance works through unclassified files in capped batches using the OpenClaw-first AI path.*
 
 ## Weekly Maintenance
-*Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, classify a capped batch of unclassified sources, update the quality profile, auto-promote good candidates, write the next queue, scan gaps, and report progress.*
+*Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, classify a capped batch of unclassified sources, update the quality profile, auto-promote good candidates, write the next queue, scan gaps, and report progress. Dry-run previews candidate promotion before the real weekly job mutates the question bank.*
 
 ## Neighborhood Readiness
 *Research neighborhoods track generated questions, promoted questions, and captured answers separately. A full candidate arc means the system knows what to ask; only an answer-ready arc is ready to become an artifact.*

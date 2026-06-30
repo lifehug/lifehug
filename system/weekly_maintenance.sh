@@ -121,6 +121,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$WORKSPACE/system/lifehug.py" source-lint --no-write-findings
   run_step python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" quality-stats
+  run_step python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" planner-report --limit 10
   run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" progress

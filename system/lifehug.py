@@ -26,8 +26,10 @@ from lifehug_core import (
     parse_categories,
     parse_questions,
 )
+from question_candidates import VALID_STATUSES
 
 SYSTEM_DIR = Path(__file__).resolve().parent
+CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
 
 
 def script(name: str) -> Path:
@@ -674,7 +676,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_ingest_story)
 
     def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:
-        candidate_parser.add_argument("--status", choices=["accepted", "candidate", "deferred", "promoted", "rejected"])
+        candidate_parser.add_argument("--status", choices=CANDIDATE_STATUS_CHOICES)
         candidate_parser.add_argument("--kind")
         candidate_parser.add_argument("--source")
         candidate_parser.add_argument("--target-page")
@@ -693,7 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("candidates-update", help="Update candidate metadata or status")
     p.add_argument("candidate_id")
-    p.add_argument("--status", choices=["accepted", "candidate", "deferred", "promoted", "rejected"])
+    p.add_argument("--status", choices=CANDIDATE_STATUS_CHOICES)
     p.add_argument("--target-page")
     p.add_argument("--target-category")
     p.add_argument("--priority", type=float)

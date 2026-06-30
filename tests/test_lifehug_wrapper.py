@@ -10,10 +10,31 @@ sys.path.insert(0, str(SYSTEM))
 
 
 def load_wrapper():
+    return load_system("lifehug")
+
+
+def load_system(name):
     spec = importlib.util.spec_from_file_location("lifehug", SYSTEM / "lifehug.py")
+    if name != "lifehug":
+        spec = importlib.util.spec_from_file_location(name, SYSTEM / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+def subparser(parser, command):
+    for action in parser._actions:
+        if action.__class__.__name__ == "_SubParsersAction":
+            return action.choices[command]
+    raise AssertionError("subparser action not found")
+
+
+def option_choices(parser, option):
+    for action in parser._actions:
+        if option in action.option_strings:
+            return set(action.choices or [])
+    raise AssertionError(f"{option} not found")
 
 
 class LifehugWrapperTests(unittest.TestCase):
@@ -60,6 +81,16 @@ class LifehugWrapperTests(unittest.TestCase):
                 args = parser.parse_args(command)
                 self.assertTrue(callable(args.func))
 
+    def test_candidate_status_choices_match_candidate_manager(self):
+        wrapper = load_wrapper()
+        candidates = load_system("question_candidates")
+        parser = wrapper.build_parser()
+        expected = set(candidates.VALID_STATUSES)
+
+        for command in ["candidates-list", "candidates-review", "candidates-update"]:
+            with self.subTest(command=command):
+                self.assertEqual(option_choices(subparser(parser, command), "--status"), expected)
+
     def test_telegram_target_detection_uses_config_or_env(self):
         mod = load_wrapper()
         self.assertTrue(mod.has_telegram_target({"telegram_chat_id": "123"}))
@@ -74,6 +105,15 @@ class LifehugWrapperTests(unittest.TestCase):
         self.assertIn("CLASSIFY_LIMIT", script)
         self.assertIn("CLASSIFY_OUT=", script)
         self.assertLess(classify_index, promote_index)
+
+    def test_weekly_dry_run_previews_candidate_auto_promotion(self):
+        script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
+        dry_run_index = script.index("candidates-auto-promote --dry-run")
+        dry_run_exit_index = script.index("  exit 0", dry_run_index)
+        real_promote_index = script.index("PROMOTE_OUT=")
+
+        self.assertLess(dry_run_index, dry_run_exit_index)
+        self.assertLess(dry_run_exit_index, real_promote_index)
 
 
 if __name__ == "__main__":
