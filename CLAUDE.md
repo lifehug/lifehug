@@ -329,7 +329,7 @@ python3 system/research_expand.py --topic "Who I am becoming" --type self --outp
 python3 system/research_expand.py --topic "Katie" --type relationship --output letter
 ```
 
-These generate **candidates** (not daily questions yet) — review and promote the good ones with `candidates-list` / `candidates-promote`, ideally into a Focus of `--type self` so they compile into the `wiki/self/` surface. The planner's reserved weekly self-knowledge slot draws from this pool; the monthly cron refills it. Sprinkle these in — don't let them crowd out story work.
+These generate **candidates** (not daily questions yet) — review and promote the good ones with `candidates-list` / `candidates-promote`, ideally into a Focus of `--type self` so they compile into the `wiki/self/` surface. The planner's reserved weekly self-knowledge slot draws from this pool; the monthly cron refills it. A neighborhood is not artifact-ready just because its arc has candidates: readiness moves `candidate → promoted question → answered source`, and `progress` only labels it ready to draft when enough arc slots have answers. Sprinkle these in — don't let them crowd out story work.
 
 ## Focus Management
 

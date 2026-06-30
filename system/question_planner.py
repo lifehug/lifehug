@@ -37,6 +37,7 @@ from lifehug_core import (
     slugify,
     write_json,
 )
+from neighborhoods import apply_readiness
 from roadmap import (
     DEFAULT_CAP,
     FINISHING_CAP,
@@ -821,16 +822,26 @@ def report(limit: int = 10) -> int:
 
     # Neighborhoods section
     neighborhoods_data = read_json(NEIGHBORHOODS_FILE, default={}) or {}
-    neighborhoods = neighborhoods_data.get("neighborhoods", [])
+    neighborhoods = [
+        apply_readiness(neighborhood, {"candidates": candidates}, questions)
+        for neighborhood in neighborhoods_data.get("neighborhoods", [])
+    ]
     if neighborhoods:
-        by_status = Counter(n.get("status", "draft") for n in neighborhoods)
+        by_status = Counter(n.get("readiness_status", "empty") for n in neighborhoods)
         print()
         print(f"Neighborhoods: {len(neighborhoods)} total")
-        print(f"  statuses: {', '.join(f'{s}={c}' for s, c in sorted(by_status.items()))}")
+        print(f"  readiness: {', '.join(f'{s}={c}' for s, c in sorted(by_status.items()))}")
         for nbhd in neighborhoods[:5]:
-            completeness = nbhd.get("completeness", 0)
+            counts = nbhd.get("arc_lifecycle_counts", {})
+            total = counts.get("total_slots", 0)
+            generated = counts.get("questions_generated", 0)
+            promoted = counts.get("questions_promoted", 0)
+            answered = counts.get("answers_captured", 0)
+            answered_c = nbhd.get("answered_completeness", 0)
+            ready = " ready" if nbhd.get("ready_to_draft") else ""
             print(f"  - {nbhd.get('title', '?')} ({nbhd.get('type', '?')}) [{nbhd.get('status', 'draft')}] "
-                  f"target: {nbhd.get('target_output', '?')}, completeness: {completeness:.0%}")
+                  f"target: {nbhd.get('target_output', '?')}, answer-ready: {answered_c:.0%}{ready} "
+                  f"({answered}/{total} answered, {promoted}/{total} promoted, {generated}/{total} generated)")
     else:
         print()
         print("Neighborhoods: none")

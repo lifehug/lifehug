@@ -31,6 +31,9 @@ This wiki is a **graph of {name}'s life**. Standard terms:
 ## Weekly Maintenance
 *Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, classify a capped batch of unclassified sources, update the quality profile, auto-promote good candidates, write the next queue, scan gaps, and report progress.*
 
+## Neighborhood Readiness
+*Research neighborhoods track generated questions, promoted questions, and captured answers separately. A full candidate arc means the system knows what to ask; only an answer-ready arc is ready to become an artifact.*
+
 ## Monthly Research
 *Run `python3 system/lifehug.py monthly-research` to open a capped set of new research neighborhoods, refresh self-knowledge candidates, recommend Focuses, and report progress.*
 

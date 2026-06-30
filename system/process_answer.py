@@ -28,6 +28,15 @@ from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256,
 from update_readme import update_readme
 
 
+def refresh_neighborhood_readiness_safely() -> None:
+    """Refresh derived neighborhood lifecycle fields without blocking answer save."""
+    try:
+        from neighborhoods import refresh_all_neighborhood_readiness  # noqa: PLC0415
+        refresh_all_neighborhood_readiness(write=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def next_followup_id(md_text: str, source_id: str) -> str:
     existing = re.findall(
         rf"^- \[[ xX]\] ({re.escape(source_id)}[a-z]+):",
@@ -86,6 +95,7 @@ def git_commit(message: str, push: bool) -> None:
         "system/rotation.json",
         "system/coverage.json",
         "answers",
+        "state/neighborhoods.json",
         "state/source_manifest.json",
         "wiki",
     ]
@@ -198,6 +208,7 @@ def main():
 
     mark_answered_in_bank(question_id, args.answered_date)
     coverage = rebuild_coverage()
+    refresh_neighborhood_readiness_safely()
     answered_count = sum(1 for q in parse_questions(QUESTIONS_FILE.read_text()) if q["answered"])
     rotation["last_answered_id"] = question_id
     rotation["last_answered_at"] = datetime.now().isoformat()

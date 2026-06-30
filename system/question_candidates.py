@@ -171,6 +171,15 @@ def save_store(data: dict, path: Path = QUESTION_CANDIDATES_FILE) -> None:
     write_json(path, data)
 
 
+def refresh_neighborhood_readiness_safely() -> None:
+    """Refresh derived neighborhood lifecycle fields without blocking promotion."""
+    try:
+        from neighborhoods import refresh_all_neighborhood_readiness  # noqa: PLC0415
+        refresh_all_neighborhood_readiness(write=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def find_candidate(data: dict, candidate_id: str) -> dict:
     for candidate in data.get("candidates", []):
         if candidate.get("id") == candidate_id:
@@ -491,6 +500,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
     updated_bank, question_id = promote_candidate_record(data, question_bank_text, args.candidate_id, args.category)
     write_text(QUESTIONS_FILE, updated_bank)
     save_store(data)
+    refresh_neighborhood_readiness_safely()
     print(f"✓ Promoted {args.candidate_id} to {question_id}")
     return 0
 
@@ -677,6 +687,7 @@ def cmd_promote_neighborhood(args: argparse.Namespace) -> int:
     if new_ids:
         write_text(QUESTIONS_FILE, updated_bank)
         save_store(data)
+        refresh_neighborhood_readiness_safely()
     print(f"✓ Promoted {len(new_ids)} question(s) from {args.neighborhood} → {args.category.upper()}: {', '.join(new_ids) or 'none'}")
     return 0
 
@@ -696,6 +707,8 @@ def cmd_auto_promote(args: argparse.Namespace) -> int:
         print(f"  ✅ Promoted ({len(promoted)}):")
         for cid, qid, score in promoted:
             print(f"    {qid} ← {cid} (score {score:.2f})")
+        if not args.dry_run:
+            refresh_neighborhood_readiness_safely()
     else:
         print("  Promoted: none")
     if needs_review:

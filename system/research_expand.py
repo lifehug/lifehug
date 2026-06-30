@@ -63,6 +63,7 @@ from lifehug_core import (
     slugify,
     write_json,
 )
+from neighborhoods import apply_readiness
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -252,7 +253,7 @@ def make_arc(topic_type: str = "") -> list[dict]:
 
 
 def compute_completeness(arc: list[dict]) -> float:
-    """Fraction of arc slots that have an assigned question."""
+    """Legacy fraction of arc slots that have a generated question candidate."""
     if not arc:
         return 0.0
     filled = sum(1 for slot in arc if slot.get("question_id") is not None)
@@ -1064,22 +1065,28 @@ def _run_expansion(
         fn = slot["story_function"]
         if fn in fn_to_cand_id:
             slot["question_id"] = fn_to_cand_id[fn]
-            slot["status"] = "draft"
+            slot["status"] = "candidate"
 
     completeness = compute_completeness(arc)
+    questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
 
     # Build or update neighborhood record
     now = now_utc()
     if existing and force:
-        existing["arc"] = arc
-        existing["completeness"] = completeness
-        existing["status"] = "draft"
-        existing["target_output"] = target_output
-        existing["source"] = source_path
-        existing["updated_at"] = now
+        refreshed = apply_readiness({
+            **existing,
+            "arc": arc,
+            "completeness": completeness,
+            "status": "draft",
+            "target_output": target_output,
+            "source": source_path,
+            "updated_at": now,
+        }, cands_data, questions)
+        existing.clear()
+        existing.update(refreshed)
         print(f"✓ Updated neighborhood: {nbhd_id}")
     else:
-        neighborhood = {
+        neighborhood = apply_readiness({
             "id": nbhd_id,
             "title": topic,
             "type": topic_type,
@@ -1089,7 +1096,7 @@ def _run_expansion(
             "completeness": completeness,
             "status": "draft",
             "created_at": now,
-        }
+        }, cands_data, questions)
         nbhd_data["neighborhoods"].append(neighborhood)
         print(f"✓ Created neighborhood: {nbhd_id}")
 
@@ -1100,8 +1107,12 @@ def _run_expansion(
     print(f"  Type:        {topic_type}")
     print(f"  Output:      {target_output}")
     print(f"  Questions:   {len(new_cand_ids)} candidates added")
-    print(f"  Arc filled:  {sum(1 for s in arc if s['question_id'])} / {len(arc)} slots")
-    print(f"  Completeness: {completeness:.0%}")
+    counts = (existing if existing and force else neighborhood).get("arc_lifecycle_counts", {})
+    readiness = existing if existing and force else neighborhood
+    print(f"  Generated:   {counts.get('questions_generated', 0)} / {counts.get('total_slots', len(arc))} arc slots")
+    print(f"  Promoted:    {counts.get('questions_promoted', 0)} / {counts.get('total_slots', len(arc))} arc slots")
+    print(f"  Answered:    {counts.get('answers_captured', 0)} / {counts.get('total_slots', len(arc))} arc slots")
+    print(f"  Draft ready: {'yes' if readiness.get('ready_to_draft') else 'no'}")
     print()
     print("Candidate questions added:")
     cands_data2 = load_candidates()

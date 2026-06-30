@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Lifehug progress / deliverable-readiness dashboard.
 
-Answers the question Dave cares about most: *are we graduating toward finished
+Answers the question the author cares about most: *are we graduating toward finished
 things?* For each Focus it shows fill vs. target and a readiness verdict, lists
-neighborhoods (output arcs) with completeness, and suggests creating an
-artifact when a Focus is ready to draft.
+neighborhoods (output arcs) with generated/promoted/answered readiness, and
+suggests creating an artifact when a Focus or neighborhood is ready to draft.
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ _SYSTEM_DIR = Path(__file__).resolve().parent
 if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
-from lifehug_core import NEIGHBORHOODS_FILE, QUESTIONS_FILE, parse_questions, read_json
+from lifehug_core import NEIGHBORHOODS_FILE, QUESTION_CANDIDATES_FILE, QUESTIONS_FILE, parse_questions, read_json
+from neighborhoods import apply_readiness
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 
 # Saturation thresholds for the readiness verdict.
@@ -47,19 +48,39 @@ def artifact_hint(focus: dict) -> str:
             f'--subject "{label}" --categories {cats}   # -> {focus.get("deliverable", "draft")}')
 
 
+def neighborhood_artifact_hint(neighborhood: dict) -> str:
+    fmt = DELIVERABLE_TO_FORMAT.get(neighborhood.get("target_output", "chapter"), "chapter")
+    subject = str(neighborhood.get("title", "")).replace('"', '\\"')
+    return (f'python3 system/lifehug.py artifact new --format {fmt} '
+            f'--subject "{subject}"   # -> {neighborhood.get("target_output", "draft")}')
+
+
+def readiness_label(neighborhood: dict) -> str:
+    status = neighborhood.get("readiness_status", "empty")
+    if status == "answer_ready":
+        return "ready to draft"
+    if status == "answering":
+        return "capturing answers"
+    if status == "promoted":
+        return "questions promoted"
+    if status == "questions_generated":
+        return "questions generated"
+    return "needs questions"
+
+
 def run() -> int:
     roadmap = load_roadmap()
     if not roadmap.get("focuses"):
         roadmap = rebuild_roadmap(write=False)
     questions = parse_questions(QUESTIONS_FILE.read_text())
+    candidates = read_json(QUESTION_CANDIDATES_FILE, default={"version": 1, "candidates": []}) or {}
     nbhd = (read_json(NEIGHBORHOODS_FILE, default={}) or {}).get("neighborhoods", [])
-    nbhd_by_focus: dict[str, list[dict]] = {}
-    for n in nbhd:
-        nbhd_by_focus.setdefault(n.get("type", ""), []).append(n)
+    nbhd = [apply_readiness(n, candidates, questions) for n in nbhd]
 
     print("Lifehug — Progress toward deliverables\n")
     total_answered = total_target = 0
     ready_focuses = []
+    ready_neighborhoods = []
     for focus in roadmap["focuses"]:
         fill = focus_fill(focus, questions)
         total_answered += fill["answered"]
@@ -81,16 +102,28 @@ def run() -> int:
     if nbhd:
         print("\nNeighborhoods (output arcs):")
         for n in nbhd:
-            c = n.get("completeness", 0)
-            flag = "  ← ready to draft" if c >= 0.8 else ""
+            counts = n.get("arc_lifecycle_counts", {})
+            total = counts.get("total_slots", 0)
+            generated = counts.get("questions_generated", 0)
+            promoted = counts.get("questions_promoted", 0)
+            answered = counts.get("answers_captured", 0)
+            answered_c = n.get("answered_completeness", 0)
+            if n.get("ready_to_draft"):
+                ready_neighborhoods.append(n)
+            flag = "  ← ready to draft" if n.get("ready_to_draft") else ""
             print(f"  - {n.get('title','?')} ({n.get('type','?')}) → {n.get('target_output','?')}: "
-                  f"{c:.0%} arc complete [{n.get('status','draft')}]{flag}")
+                  f"{answered_c:.0%} answer-ready "
+                  f"({answered}/{total} answered, {promoted}/{total} promoted, {generated}/{total} generated) "
+                  f"[{readiness_label(n)}]{flag}")
 
-    if ready_focuses:
+    if ready_focuses or ready_neighborhoods:
         print("\nReady to create — suggested next artifacts:")
         for focus in ready_focuses:
             print(f"  • {focus['label']}:")
             print(f"      {artifact_hint(focus)}")
+        for neighborhood in ready_neighborhoods:
+            print(f"  • {neighborhood.get('title', '?')} ({neighborhood.get('target_output', 'draft')}):")
+            print(f"      {neighborhood_artifact_hint(neighborhood)}")
 
     # Expansion signal — when everything's full, it's time for new domains.
     if fullness >= 0.6:
