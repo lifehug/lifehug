@@ -25,8 +25,11 @@ This wiki is a **graph of {name}'s life**. Standard terms:
 ## Source Integrity
 *Prompted answers in `answers/` and ingested stories in `sources/` are raw source-of-truth. Corrections and later reflections are added as new source files, not by rewriting old memories. Check with `python3 system/lifehug.py source-lint`.*
 
+## Source Classification
+*`classify_story.py` is the structured-understanding pass. It extracts people, places, periods, themes, contradictions, possible outputs, Focus opportunities, self-understanding insights, and follow-up candidates from answers/sources. Weekly maintenance works through unclassified files in capped batches using the OpenClaw-first AI path.*
+
 ## Weekly Maintenance
-*Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, update the quality profile, write the next queue, scan gaps, and report progress.*
+*Run `python3 system/lifehug.py weekly-maintenance` to compile, lint/fix safe source metadata, classify a capped batch of unclassified sources, update the quality profile, auto-promote good candidates, write the next queue, scan gaps, and report progress.*
 
 ## Monthly Research
 *Run `python3 system/lifehug.py monthly-research` to open a capped set of new research neighborhoods, refresh self-knowledge candidates, recommend Focuses, and report progress.*

@@ -12,6 +12,7 @@ DRY_RUN="${LIFEHUG_WEEKLY_DRY_RUN:-0}"
 QUEUE_LIMIT="${LIFEHUG_WEEKLY_QUEUE_LIMIT:-14}"
 ARC_MAX="${LIFEHUG_WEEKLY_ARC_MAX:-2}"
 EXPIRES_DAYS="${LIFEHUG_WEEKLY_EXPIRES_DAYS:-8}"
+CLASSIFY_LIMIT="${LIFEHUG_WEEKLY_CLASSIFY_LIMIT:-5}"
 
 # --- Telegram notification helper ---
 # Reads telegram_chat_id from config.yaml; token from TELEGRAM_BOT_TOKEN env
@@ -118,6 +119,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY RUN: weekly maintenance"
   run_step python3 "$WORKSPACE/system/lifehug.py" compile --dry-run --no-ai
   run_step python3 "$WORKSPACE/system/lifehug.py" source-lint --no-write-findings
+  run_step python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" quality-stats
   run_step python3 "$WORKSPACE/system/lifehug.py" planner-report --limit 10
   run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
@@ -127,6 +129,10 @@ fi
 
 run_step python3 "$WORKSPACE/system/lifehug.py" compile --no-ai
 run_source_integrity
+echo
+echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --limit ${CLASSIFY_LIMIT}"
+CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1) || true
+echo "$CLASSIFY_OUT"
 run_step python3 "$WORKSPACE/system/lifehug.py" quality-update
 
 echo
@@ -142,6 +148,8 @@ echo "$PROGRESS_OUT"
 safe_autocommit
 
 telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
+
+${CLASSIFY_OUT}
 
 ${PROMOTE_OUT}
 

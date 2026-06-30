@@ -70,7 +70,7 @@ compiled *before* any planning or research.
 | Cadence | Job | Cost |
 |---|---|---|
 | **Daily** | `daily_question.sh` (compiles the wiki, then delivers today's question) | free |
-| **Weekly** | `weekly_maintenance.sh` (compile → source lint/fix → quality update → planner queue → gap scan → progress) | free |
+| **Weekly** | `weekly_maintenance.sh` (compile → source lint/fix → classify capped batch → quality update → planner queue → gap scan → progress) | keyless/capped |
 | **Monthly** | `monthly_research.sh` (compile → capped new neighborhoods → self-knowledge → focus recommendations → progress) | API $ |
 | **Event** | you answer → `process-answer` (saves, recompiles wiki, updates state) | small |
 
@@ -79,7 +79,7 @@ compiled *before* any planning or research.
 `daily_question.sh` now compiles the wiki first, so the relational graph is
 fresh every morning before the question goes out. Nothing extra to schedule.
 
-### Weekly — self-improve, plan the coming week, and surface gaps (free)
+### Weekly — self-improve, plan the coming week, and surface gaps (capped)
 
 ```bash
 openclaw cron add \
@@ -91,16 +91,20 @@ openclaw cron add \
 
 `weekly_maintenance.sh` is the continuous-improvement loop. It compiles the
 wiki offline, runs source lint, applies safe metadata/manifest fixes only when
-lint finds fixable issues, updates the quality profile, builds the coming week
-from the roadmap, scans for gaps without generating paid questions, prints
-progress, and commits real state/wiki/source changes. `ask.py` consumes the
-queue daily and falls back to rotation if it expires, so a missed week degrades
-gracefully.
+lint finds fixable issues, classifies a capped batch of unclassified sources
+through the OpenClaw-first AI path, updates the quality profile, builds the
+coming week from the roadmap, scans for gaps without opening paid research
+neighborhoods, prints progress, and commits real state/wiki/source changes.
+If no model path is available, classification can fail for that week without
+blocking the rest of the loop; it catches up on a later run. `ask.py` consumes
+the queue daily and falls back to rotation if it expires, so a missed week
+degrades gracefully.
 
 ### Monthly — generate new domains + self-knowledge (uses the API)
 
 Needs `ANTHROPIC_API_KEY` in the cron environment (or `anthropic_api_key` in
-`config.yaml`). The daily/weekly jobs do not.
+`config.yaml`) unless OpenClaw handles the model call. The daily job does not
+need a model. The weekly classifier is capped and OpenClaw-first.
 
 ```bash
 openclaw cron add \

@@ -1,10 +1,14 @@
 """Tests for v14 features: quality checker, ingest, classifications, neighborhoods, focuses."""
 
 import importlib.util
+import contextlib
+import io
+import argparse
 import json
 import sys
 import tempfile
 import unittest
+import importlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,6 +115,113 @@ class ClassifyStoryTests(unittest.TestCase):
         self.assertTrue(hasattr(mod, "build_prompt"))
         self.assertTrue(hasattr(mod, "main"))
 
+    def test_classify_uses_shared_openclaw_first_ai_path(self):
+        mod = load("classify_story")
+        research_expand = importlib.import_module("research_expand")
+        original = research_expand.call_ai
+        calls = []
+
+        def fake_call_ai(prompt, model):
+            calls.append((prompt, model))
+            return json.dumps({
+                "people": [],
+                "places": [],
+                "time_periods": [],
+                "themes": ["identity"],
+                "projects": [],
+                "contradictions": [],
+                "possible_outputs": [],
+                "focus_opportunities": [],
+                "self_understanding_insights": [],
+                "candidate_questions": [],
+            })
+
+        try:
+            research_expand.call_ai = fake_call_ai
+            result = mod.classify_with_ai("prompt text", "test-model")
+        finally:
+            research_expand.call_ai = original
+
+        self.assertEqual(result["themes"], ["identity"])
+        self.assertEqual(calls, [("prompt text", "test-model")])
+
+    def test_dry_run_does_not_call_model_or_write(self):
+        mod = load("classify_story")
+        with tempfile.TemporaryDirectory() as td:
+            original_dir = mod.CLASSIFICATIONS_DIR
+            source = Path(td) / "story.md"
+            source.write_text("# Story\n\nA meaningful memory about Dad and Arizona.\n", encoding="utf-8")
+            original = mod.classify_with_ai
+
+            def fail_if_called(*_args, **_kwargs):
+                raise AssertionError("dry-run must not call the model")
+
+            try:
+                mod.CLASSIFICATIONS_DIR = Path(td) / "classifications"
+                mod.classify_with_ai = fail_if_called
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = mod.classify_file(source, "test-model", dry_run=True)
+            finally:
+                mod.classify_with_ai = original
+                mod.CLASSIFICATIONS_DIR = original_dir
+
+            self.assertEqual(rc, 0)
+            self.assertIn("[dry-run] would classify", buf.getvalue())
+            self.assertFalse(mod.classification_path(source).exists())
+
+    def test_classification_paths_are_repo_relative_with_legacy_compatibility(self):
+        mod = load("classify_story")
+        source = ROOT / "sources" / "manual" / "memory.md"
+        path_names = [path.name for path in mod.classification_paths(source)]
+
+        self.assertEqual(path_names[0], "sources-manual-memory.json")
+        self.assertIn("memory.json", path_names)
+
+    def test_legacy_classification_file_counts_as_classified(self):
+        mod = load("classify_story")
+        with tempfile.TemporaryDirectory() as td:
+            original_dir = mod.CLASSIFICATIONS_DIR
+            try:
+                mod.CLASSIFICATIONS_DIR = Path(td)
+                source = ROOT / "sources" / "manual" / "memory.md"
+                mod.legacy_classification_path(source).write_text("{}", encoding="utf-8")
+                self.assertTrue(mod.is_classified(source))
+            finally:
+                mod.CLASSIFICATIONS_DIR = original_dir
+
+    def test_classify_all_limit_caps_batch(self):
+        mod = load("classify_story")
+        original_all = mod.all_source_files
+        original_is_classified = mod.is_classified
+        original_classify = mod.classify_file
+        calls = []
+
+        try:
+            mod.all_source_files = lambda: [Path("a.md"), Path("b.md"), Path("c.md")]
+            mod.is_classified = lambda _path: False
+
+            def fake_classify(path, model, *, dry_run=False, verbose=False):
+                calls.append((path, model, dry_run, verbose))
+                return 0
+
+            mod.classify_file = fake_classify
+            args = argparse.Namespace(
+                unclassified=True,
+                limit=2,
+                model="test-model",
+                dry_run=True,
+                verbose=False,
+            )
+            rc = mod.cmd_classify_all(args)
+        finally:
+            mod.all_source_files = original_all
+            mod.is_classified = original_is_classified
+            mod.classify_file = original_classify
+
+        self.assertEqual(rc, 0)
+        self.assertEqual([call[0] for call in calls], [Path("a.md"), Path("b.md")])
+
 
 class ResearchExpandTests(unittest.TestCase):
     def test_module_imports(self):
@@ -144,6 +255,35 @@ class PlannerEnhancementTests(unittest.TestCase):
         self.assertIn("NEIGHBORHOODS_FILE", source)
         self.assertIn("FOCUS_RECS_FILE", source)
         self.assertIn("CLASSIFICATIONS_DIR", source)
+
+    def test_planner_counts_path_based_and_legacy_classifications(self):
+        mod = load("question_planner")
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            source_dir = repo / "sources" / "manual"
+            classification_dir = repo / "state" / "classifications"
+            source_dir.mkdir(parents=True)
+            classification_dir.mkdir(parents=True)
+            (source_dir / "memory.md").write_text("story", encoding="utf-8")
+
+            original_repo = mod.REPO_DIR
+            original_sources = mod.SOURCES_DIR
+            original_classifications = mod.CLASSIFICATIONS_DIR
+            try:
+                mod.REPO_DIR = repo
+                mod.SOURCES_DIR = repo / "sources"
+                mod.CLASSIFICATIONS_DIR = classification_dir
+
+                (classification_dir / "sources-manual-memory.json").write_text("{}", encoding="utf-8")
+                self.assertEqual(mod._count_classified("manual"), 1)
+
+                (classification_dir / "sources-manual-memory.json").unlink()
+                (classification_dir / "memory.json").write_text("{}", encoding="utf-8")
+                self.assertEqual(mod._count_classified("manual"), 1)
+            finally:
+                mod.REPO_DIR = original_repo
+                mod.SOURCES_DIR = original_sources
+                mod.CLASSIFICATIONS_DIR = original_classifications
 
 
 class LifehugWrapperTests(unittest.TestCase):

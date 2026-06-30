@@ -45,6 +45,7 @@ class LifehugWrapperTests(unittest.TestCase):
             ["artifact", "prompt", "outputs/mothers-day"],
             ["artifact", "save", "outputs/mothers-day", "--final"],
             ["artifact", "promote-source", "outputs/mothers-day", "--kind", "all"],
+            ["classify-story", "--classify-all", "--unclassified", "--limit", "3", "--dry-run"],
             ["serve", "--port", "8765"],
             ["rebuild"],
             ["process-answer", "A1", "--source", "text"],
@@ -64,6 +65,15 @@ class LifehugWrapperTests(unittest.TestCase):
         self.assertTrue(mod.has_telegram_target({"telegram_chat_id": "123"}))
         self.assertTrue(mod.has_telegram_target({"group_chat_id": "-100123"}))
         self.assertFalse(mod.has_telegram_target({}))
+
+    def test_weekly_maintenance_runs_classification_before_promotion(self):
+        script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
+        classify_index = script.index("classify-story --classify-all --unclassified --limit")
+        promote_index = script.index("candidates-auto-promote")
+
+        self.assertIn("CLASSIFY_LIMIT", script)
+        self.assertIn("CLASSIFY_OUT=", script)
+        self.assertLess(classify_index, promote_index)
 
 
 if __name__ == "__main__":

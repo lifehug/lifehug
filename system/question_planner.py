@@ -22,6 +22,7 @@ from lifehug_core import (
     QUESTION_CANDIDATES_FILE,
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
+    REPO_DIR,
     SOURCES_DIR,
     FOCUS_RECS_FILE,
     LEGACY_FOCUS_RECS_FILE,
@@ -264,14 +265,17 @@ def _count_classified(source_type: str) -> int:
     """Count classified sources for a given type."""
     if not CLASSIFICATIONS_DIR.exists():
         return 0
-    # Classifications are stored by source stem
     count = 0
     source_dir = SOURCES_DIR / source_type
     if not source_dir.exists():
         return 0
     for path in source_dir.glob("*.md"):
-        classification = CLASSIFICATIONS_DIR / f"{path.stem}.json"
-        if classification.exists():
+        rel_key = slugify(path.relative_to(REPO_DIR).with_suffix("").as_posix())
+        candidates = [
+            CLASSIFICATIONS_DIR / f"{rel_key}.json",
+            CLASSIFICATIONS_DIR / f"{path.stem}.json",
+        ]
+        if any(candidate.exists() for candidate in candidates):
             count += 1
     return count
 

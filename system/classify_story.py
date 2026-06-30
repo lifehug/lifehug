@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classify ingested Lifehug stories using the Anthropic SDK.
+"""Classify ingested Lifehug stories using OpenClaw-first AI routing.
 
 Extracts entities, themes, story functions, and generates smart
 candidate questions from any source file or answer file.
@@ -9,7 +9,7 @@ Modes
 --classify <source_path>          Classify a single file via AI.
 --prompt <source_path>            Print the prompt only (no API call).
 --classify-all [--unclassified]   Batch classify all (or only unclassified) sources.
---dry-run                         Preview actions without writing anything.
+--dry-run                         Preview actions without model calls or writes.
 
 Examples
 --------
@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -72,22 +71,14 @@ THEME_TAXONOMY = [
 ]
 
 
-# ── Anthropic client ──────────────────────────────────────────────────────────
+# ── AI client ─────────────────────────────────────────────────────────────────
 
-def get_client():
-    """Return an Anthropic client, sourcing the key from env or config."""
-    import anthropic  # local import keeps CLI importable without the package
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        config = load_config()
-        api_key = config.get("anthropic_api_key")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY not set. "
-            "Export it or add 'anthropic_api_key: ...' to config.yaml."
-        )
-    return anthropic.Anthropic(api_key=api_key)
+def classify_with_ai(prompt: str, model: str = DEFAULT_MODEL) -> dict:
+    """Classify via the same OpenClaw-first path used by research expansion."""
+    from research_expand import call_ai  # local import keeps prompt mode keyless
+
+    return extract_json(call_ai(prompt, model))
 
 
 def get_model(args: argparse.Namespace) -> str:
@@ -134,16 +125,36 @@ def load_source_text(source_path: Path) -> tuple[dict, str]:
 
 
 def classify_stem(source_path: Path) -> str:
-    """Return the classification file stem for a given source path."""
-    return source_path.stem
+    """Return the stable classification file stem for a given source path."""
+    if not source_path.is_absolute():
+        source_path = REPO_DIR / source_path
+    try:
+        rel = source_path.relative_to(REPO_DIR)
+        key = rel.with_suffix("").as_posix()
+    except ValueError:
+        key = source_path.stem
+    return slugify(key)
 
 
 def classification_path(source_path: Path) -> Path:
     return CLASSIFICATIONS_DIR / f"{classify_stem(source_path)}.json"
 
 
+def legacy_classification_path(source_path: Path) -> Path:
+    """Return the v14-v42 stem-only path, kept for existing state compatibility."""
+    return CLASSIFICATIONS_DIR / f"{source_path.stem}.json"
+
+
+def classification_paths(source_path: Path) -> list[Path]:
+    paths = [classification_path(source_path)]
+    legacy = legacy_classification_path(source_path)
+    if legacy != paths[0]:
+        paths.append(legacy)
+    return paths
+
+
 def is_classified(source_path: Path) -> bool:
-    return classification_path(source_path).exists()
+    return any(path.exists() for path in classification_paths(source_path))
 
 
 def all_source_files() -> list[Path]:
@@ -306,18 +317,6 @@ def extract_json(text: str) -> dict:
             pass
 
     raise ValueError(f"Could not extract JSON from AI response (first 200 chars): {stripped[:200]}")
-
-
-def classify_with_ai(prompt: str, model: str = DEFAULT_MODEL) -> dict:
-    """Send the prompt to Anthropic and return the parsed classification dict."""
-    client = get_client()
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = response.content[0].text
-    return extract_json(text)
 
 
 # ── candidate store helpers ───────────────────────────────────────────────────
@@ -523,6 +522,14 @@ def classify_file(
 
     prompt = build_prompt(source_path, fm, story_text)
 
+    if dry_run:
+        clf_path = classification_path(source_path)
+        print(f"[dry-run] would classify: {_relative_path(source_path)}")
+        print(f"[dry-run] would call model: {model}")
+        print(f"[dry-run] would write classification: {clf_path}")
+        print("[dry-run] would append candidate questions returned by the model")
+        return 0
+
     if verbose:
         print(f"[verbose] calling model={model} for {source_path}")
 
@@ -545,12 +552,6 @@ def classify_file(
     )
 
     clf_path = classification_path(source_path)
-
-    if dry_run:
-        print(f"[dry-run] would write classification: {clf_path}")
-        print(f"[dry-run] would add {len(new_candidates)} candidate question(s)")
-        print_summary(classification, new_candidates)
-        return 0
 
     # Write classification
     CLASSIFICATIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -603,12 +604,15 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
 
     if args.unclassified:
         sources = [s for s in sources if not is_classified(s)]
+    if args.limit is not None:
+        sources = sources[: max(0, args.limit)]
 
     if not sources:
         print("No source files to classify.")
         return 0
 
-    print(f"Classifying {len(sources)} source file(s) with model={model}")
+    action = "Previewing" if args.dry_run else "Classifying"
+    print(f"{action} {len(sources)} source file(s) with model={model}")
 
     errors: list[str] = []
     for i, source_path in enumerate(sources, start=1):
@@ -628,7 +632,8 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
             print(f"  {e}")
         return 1
 
-    print(f"\n✓ Done. Classified {len(sources) - len(errors)} file(s).")
+    done_action = "Previewed" if args.dry_run else "Classified"
+    print(f"\n✓ Done. {done_action} {len(sources) - len(errors)} file(s).")
     return 0
 
 
@@ -665,9 +670,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --classify-all: skip already-classified files.",
     )
     parser.add_argument(
+        "--limit",
+        type=int,
+        help="With --classify-all: maximum files to classify.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Preview actions without writing files.",
+        help="Preview actions without model calls or writes.",
     )
     parser.add_argument(
         "--model",

@@ -411,6 +411,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
             flags.append("--unclassified")
     if args.model:
         flags.extend(["--model", args.model])
+    if args.limit is not None:
+        flags.extend(["--limit", str(args.limit)])
     if args.dry_run:
         flags.append("--dry-run")
     return run_python("classify_story.py", flags)
@@ -741,6 +743,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prompt", metavar="PATH", help="Output AI prompt only")
     p.add_argument("--classify-all", action="store_true")
     p.add_argument("--unclassified", action="store_true")
+    p.add_argument("--limit", type=int, help="With --classify-all: maximum files to classify")
     p.add_argument("--model", help="Override AI model")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_classify_story)

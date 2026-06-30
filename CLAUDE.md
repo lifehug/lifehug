@@ -249,13 +249,10 @@ printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/{
 printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/{ID}.md
 ```
 
-3. **Generate 1-3 follow-up questions** based on the answer:
-   - Sensory: "What did that place look like? Sound like?"
-   - Emotional: "How did that make you feel in the moment?"
-   - Specific: "You mentioned [X] — can you tell me more about that?"
-   - Contrast: "How was that different from what you expected?"
-
-   Add these to the appropriate section in `system/question-bank.md` with the next available ID.
+3. **Let the follow-up loop work**:
+   - Do not manually append ad hoc follow-ups in normal operation.
+   - Weekly classification reads new answer/source files, extracts people, places, themes, contradictions, possible outputs, and candidate follow-up questions, then stores them in `state/question_candidates.json`.
+   - Manual question-bank edits are reserved for deliberate repairs or curated additions with provenance.
 
 4. **Mark the question answered** in `system/question-bank.md` (check the box, add date)
 
@@ -283,7 +280,7 @@ python3 system/lifehug.py compile
 python3 system/lifehug.py planner-report
 ```
 
-This writes an owner-only source file under `sources/manual/` and stores suggested follow-up questions in `state/question_candidates.json`. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan.
+This writes an owner-only source file under `sources/manual/` and stores initial suggested follow-up questions in `state/question_candidates.json`. The weekly classifier also works through unclassified stories in capped batches and may add better structured candidates later. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan; automated weekly promotion is allowed only through the quality/cap gate.
 
 Unprompted stories follow the same source contract as answers: they are raw source-of-truth files. Later corrections and changed perspective belong in `sources/corrections/`, not by rewriting the original story.
 
@@ -723,8 +720,9 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
+- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps, writes the next queue, scans gaps, reports progress, and commits real changes.
 - Review any manual source findings that `source-lint --fix` could not safely repair
-- Check queue balance, progress, and whether any Focus is ready for a deliverable
+- Review classifier/candidate output in the weekly Telegram summary, then check queue balance, progress, and whether any Focus is ready for a deliverable
 
 ### Monthly
 - Run `python3 system/lifehug.py monthly-research` (or `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect first)

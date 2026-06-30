@@ -37,7 +37,7 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 
 ## The big picture
 
-Lifehug is a **compounding system**, not a journal. Each answer feeds a private wiki; the wiki feeds a planner; the planner decides the next question; the question pulls out the next answer. When you need something real — a Mother's Day letter, a birthday post, a chapter, a speech — the artifact workflow turns that memory into a finished piece, and the finished piece can feed back into the source layer.
+Lifehug is a **compounding system**, not a journal. Each answer feeds a private wiki and a classifier; the classifier turns raw stories into structured people, places, themes, contradictions, possible outputs, and follow-up candidates; the wiki, roadmap, quality profile, and planner decide the next question; the question pulls out the next answer. When you need something real — a Mother's Day letter, a birthday post, a chapter, a speech — the artifact workflow turns that memory into a finished piece, and the finished piece can feed back into the source layer.
 
 ```mermaid
 flowchart TB
@@ -50,6 +50,7 @@ flowchart TB
 
     subgraph brain["🧠 the knowledge layer"]
         W["Private WIKI<br/>people · places · periods<br/>projects · themes · self"]
+        CL["CLASSIFIER<br/>people · places · themes<br/>contradictions · outputs"]
         QB["Question bank<br/>(every question, answered or not)"]
     end
 
@@ -70,8 +71,11 @@ flowchart TB
     end
 
     P -->|writes answer| W
+    P -->|weekly capped pass| CL
     P -->|marks answered| QB
     P -->|silently scores| QP
+    CL -->|follow-up candidates| CA
+    CL -->|focus/entity signals| RM
     W --> PL
     QB --> PL
     RM --> PL
@@ -93,9 +97,9 @@ flowchart TB
 **Read it as five layers:**
 
 1. **Daily** — one question out, one answer in. The only part you touch.
-2. **Knowledge** — every answer becomes a wiki page and marks a question done. The wiki is the relational database the rest of the system reads.
+2. **Knowledge** — every answer becomes wiki input, a completed question, and, during the weekly capped classifier pass, a structured classification record: people, places, periods, themes, contradictions, possible outputs, and follow-up candidates.
 3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly queue. It applies quality multipliers (questions matching your richest-answer patterns score higher) and age-based float (questions sitting unselected for 8+ weeks gradually rise so nothing good is buried forever).
-4. **Growth** — occasionally (and only here does it cost API money), the system inspects the wiki for thin areas and *generates new questions* about people, themes, and periods you haven't covered. The best candidates are automatically promoted into the bank each week; weak old questions are retired. Average bank quality rises over time without any manual curation.
+4. **Growth** — classification runs in small weekly batches; broader research runs rarely. Together they inspect the wiki and source layer for thin areas, extract structured meaning, and *generate new questions* about people, themes, periods, and contradictions you haven't covered. The best candidates are automatically promoted into the bank each week; weak old questions are retired. Average bank quality rises over time without any manual curation.
 5. **Artifacts** — when there is an occasion or deliverable, Lifehug gathers the right context, helps write the piece, versions it, and can store the final artifact back as source material.
 
 ---
@@ -222,7 +226,7 @@ flowchart LR
 Three ways a neighborhood gets opened:
 
 1. **Gap detection** — `research_expand.py --gaps` scans your answers for thin spots: life periods barely covered (under 30%), people mentioned 3+ times but with no wiki page, emotionally-charged themes with little material. It hands back a list of suggested neighborhoods to open.
-2. **Story ingest** — when you share something *not* tied to the daily question (`ingest-story`), it's saved as raw source material and auto-seeds candidate questions to deepen it. External corpora (X, Gmail, Instagram, local files) can be pulled in the same way via `ingest.py` connectors, then classified by `classify_story.py` (which extracts people, places, themes, contradictions, and proposes questions).
+2. **Story ingest** — when you share something *not* tied to the daily question (`ingest-story`), it's saved as raw source material and auto-seeds candidate questions to deepen it. External corpora (X, Gmail, Instagram, local files) can be pulled in the same way via `ingest.py` connectors. The weekly classifier then works through unclassified sources in small batches, extracting people, places, themes, contradictions, possible outputs, and targeted follow-up questions.
 3. **You ask for it** — `research_expand.py --topic "Faith" --type theme --output essay` opens a neighborhood directly.
 
 In every case the script: loads your mission + relevant existing answers (so it won't repeat what you've already told it), builds an arc-aware prompt, calls the model, and deposits the generated questions as **candidates** — never directly as daily questions.
@@ -250,6 +254,22 @@ Each week, `weekly_maintenance.sh` automatically promotes the highest-scoring ca
 Weak old questions in the bank are periodically retired: if `quality_score < 0.55` and the question has been sitting unanswered for 8+ weeks, it's marked retired (max 2-3/week) so it no longer appears in planner scoring.
 
 You can still review with `candidates-review` and promote manually with `candidates-promote <id> --category F`. Manual promotion always overrides automated decisions.
+
+### Source classification: turning raw stories into structured insight
+
+`classify_story.py` is the structured-understanding pass. It reads answer/source files and extracts:
+
+- people, places, time periods, themes, projects
+- contradictions and self-understanding insights
+- possible outputs such as letters, chapters, essays, posts, or speeches
+- Focus opportunities and candidate follow-up questions
+
+Weekly maintenance classifies a capped number of unclassified sources (`LIFEHUG_WEEKLY_CLASSIFY_LIMIT`, default `5`) before candidate auto-promotion runs. The source file stays immutable; the derived record is written under `state/classifications/` using a repo-relative key, and any follow-up questions are added to the reviewable candidate store. That keeps the system improving without letting a large archive import dominate the week. You can also run it manually:
+
+```bash
+python3 system/lifehug.py classify-story --classify answers/A14.md
+python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
+```
 
 ### Where the AI comes from (keyless by default)
 
@@ -303,9 +323,10 @@ The repair loop is:
 2. **Compile** — rebuild the wiki from source files
 3. **Lint** — detect missing metadata, changed source bodies, stale citations, and unresolved repairs
 4. **Repair** — auto-fix safe metadata issues, or add correction/reflection sources
-5. **Ask better questions** — turn contradictions, thin areas, and uncited sources into future prompts
+5. **Classify** — derive entities, themes, contradictions, possible outputs, Focus opportunities, and follow-up candidates from new source files
+6. **Ask better questions** — promote the best candidates under weekly caps and turn contradictions, thin areas, and uncited sources into future prompts
 
-This is how Lifehug keeps learning: it notices where the life model is weak, asks for what is missing, and preserves how your understanding evolves.
+This is how Lifehug keeps learning: it notices where the life model is weak, classifies new source material into structured meaning, asks for what is missing, and preserves how your understanding evolves.
 
 ---
 
@@ -352,8 +373,8 @@ flowchart TB
     subgraph d["🌅 DAILY · free"]
         D1["compile wiki → deliver today's question"]
     end
-    subgraph w["📅 WEEKLY · free"]
-        W1["compile → source lint/fix → quality update →<br/>auto-promote candidates → plan next week's queue → gap scan → progress"]
+    subgraph w["📅 WEEKLY · keyless/capped"]
+        W1["compile → source lint/fix → classify new sources → quality update →<br/>auto-promote candidates → plan next week's queue → gap scan → progress"]
     end
     subgraph m["🗓️ MONTHLY · costs API $"]
         M1["compile → generate research neighborhoods<br/>for top gaps + a self-knowledge batch +<br/>focus recommendations"]
@@ -364,7 +385,7 @@ flowchart TB
     d --> w --> m
 ```
 
-The daily and weekly jobs need **no API key**. Only the monthly generation job does. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
+The daily job needs **no model call**. Weekly maintenance is capped and keyless when OpenClaw is running; if no model is available, the rest of the weekly loop still runs and classification can catch up later. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
 
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending
@@ -385,7 +406,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
-| **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, scans for gaps, reports progress, then commits and sends a Telegram summary. |
+| **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, classifies a capped batch of unclassified sources, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, scans for gaps, reports progress, then commits and sends a Telegram summary. |
 | **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Focuses, reports progress, then commits real changes. |
 | **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and focus interleaving). Also marks questions sent/answered and flags pass completion. |
 | **`process_answer.py`** | The answer pipeline. Saves the answer to `answers/<id>.md`, marks the question done, rebuilds coverage, updates rotation, refreshes the README, recompiles the wiki, and silently scores the answer's richness. The one command that runs after every reply. |
@@ -409,7 +430,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`gen_followups.py`** | The pass engine. At the end of a rotation pass it builds a prompt over the pass's answers, takes back AI-written follow-ups, appends them to the bank, and advances to the next, deeper pass. |
 | **`ingest_story.py`** | Captures unprompted stories. Saves a story you share (that isn't an answer) as owner-only source material and seeds candidate questions to deepen it. |
 | **`ingest.py`** | Bulk source import. Pluggable connectors (X/Twitter, Gmail, Instagram, local files) normalize external writing into source records + candidates. |
-| **`classify_story.py`** | The source analyzer. AI-extracts people, places, periods, themes, contradictions, and possible outputs from any source file, and proposes targeted follow-up questions. |
+| **`classify_story.py`** | The source analyzer. OpenClaw-first, Anthropic fallback. AI-extracts people, places, periods, themes, contradictions, possible outputs, self-understanding insights, Focus opportunities, and targeted follow-up questions from any answer/source file. Weekly maintenance runs it over a capped batch of unclassified files. |
 | **`recommend_focuses.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
 
 ### Wiki, artifacts & maintenance
@@ -474,8 +495,9 @@ printf '%s\n' "$ANSWER" | python3 system/lifehug.py process-answer A14 --source 
 printf '%s\n' "$STORY" | python3 system/lifehug.py ingest-story --source telegram --title "memory"
 
 # Plan & grow
-python3 system/lifehug.py weekly-maintenance        # lint/fix, update profile, plan queue
+python3 system/lifehug.py weekly-maintenance        # lint/fix, classify, update profile, plan queue
 python3 system/lifehug.py monthly-research          # open new neighborhoods + focuses
+python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
 python3 system/lifehug.py planner-queue             # build next week's queue
 python3 system/research_expand.py --gaps            # where is the story thin?
 python3 system/research_expand.py --topic "Dad" --type relationship --output letter
@@ -517,7 +539,7 @@ lifehug/
 ├── sources/          # unprompted stories, imports, corrections, reflections, artifact sources
 ├── wiki/             # the compiled private wiki (people, places, themes, self…)
 ├── outputs/          # artifact tasks and drafts (letters, posts, chapters)
-├── state/            # roadmap, weekly queue, candidates, quality profile, source manifest
+├── state/            # roadmap, weekly queue, candidates, classifications, quality profile, source manifest
 ├── system/           # all the scripts (the system is script-first)
 ├── templates/        # output format templates
 ├── skills/           # Claude Code skills (/focus, /compile, /artifact)
