@@ -1,7 +1,5 @@
 import importlib.util
-import json
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -86,44 +84,6 @@ class DeterministicTests(unittest.TestCase):
             {}, min_score=8, min_answers=2)
         self.assertTrue(people[0]["qualifies"])
         self.assertTrue(people[0]["page_eligible"])
-
-
-class LegacyMigrationTests(unittest.TestCase):
-    def test_legacy_people_roster_migrates_to_person_entities(self):
-        old_entity_dir = er.ENTITY_DIR
-        old_legacy = er.LEGACY_PEOPLE_FILE
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                state = Path(tmp)
-                er.ENTITY_DIR = state / "entity_rosters"
-                er.LEGACY_PEOPLE_FILE = state / "people_roster.json"
-                er.LEGACY_PEOPLE_FILE.write_text(json.dumps({
-                    "version": 1,
-                    "resolved_at": "2026-01-01T00:00:00Z",
-                    "people": [{
-                        "name": "Dad",
-                        "slug": "dad",
-                        "aliases": ["Father"],
-                        "is_real_person": True,
-                        "maps_to_focus": "dad",
-                        "score": 22,
-                        "unique_answers": 5,
-                        "page_eligible": False,
-                    }],
-                }), encoding="utf-8")
-
-                roster = er.load_roster("person")
-
-                self.assertEqual(roster["type"], "person")
-                self.assertIn("migrated_from", roster)
-                self.assertNotIn("people", roster)
-                self.assertEqual(roster["entities"][0]["name"], "Dad")
-                self.assertTrue(roster["entities"][0]["qualifies"])
-                self.assertFalse(roster["entities"][0]["page_eligible"])
-                self.assertTrue((er.ENTITY_DIR / "person.json").exists())
-        finally:
-            er.ENTITY_DIR = old_entity_dir
-            er.LEGACY_PEOPLE_FILE = old_legacy
 
 
 if __name__ == "__main__":

@@ -52,7 +52,6 @@ from recommend_focuses import STOPWORDS, OLD_FOCUS_TERM, load_recommendation_sta
 
 ENTITY_TYPES = ("person", "place", "period", "object")
 ENTITY_DIR = STATE_DIR / "entity_rosters"
-LEGACY_PEOPLE_FILE = STATE_DIR / "people_roster.json"
 
 # (page_min_score, page_min_answers) defaults per type. Objects are symbolic-gated,
 # not score-gated, so their thresholds are 0/1.
@@ -297,66 +296,11 @@ def write_roster(entity_type: str, entities: list[dict]) -> None:
     })
 
 
-def _canonical_person_entry(entry: dict) -> dict:
-    """Convert a legacy people-roster entry into the person entity shape."""
-    name = (entry.get("name") or "").strip()
-    slug = entry.get("slug") or slugify(name)
-    aliases = [a.strip() for a in entry.get("aliases", []) if isinstance(a, str) and a.strip()]
-    qualifies = bool(entry.get("qualifies", entry.get("is_real_person", False)))
-    return {
-        "name": name,
-        "slug": slug,
-        "aliases": aliases,
-        "qualifies": qualifies,
-        "maps_to_focus": entry.get("maps_to_focus") or None,
-        "score": float(entry.get("score", 0.0) or 0.0),
-        "unique_answers": int(entry.get("unique_answers", 0) or 0),
-        "page_eligible": bool(entry.get("page_eligible", False)),
-    }
-
-
-def migrate_legacy_person_roster() -> dict | None:
-    """Import state/people_roster.json into the canonical person roster once.
-
-    The old `people` schema is an import boundary only. Active code should read
-    `state/entity_rosters/person.json` with top-level `entities`.
-    """
-    canonical = roster_file("person")
-    if canonical.exists():
-        return None
-    legacy = read_json(LEGACY_PEOPLE_FILE, default=None)
-    if not legacy or "people" not in legacy:
-        return None
-    entities = [_canonical_person_entry(p) for p in legacy.get("people", []) if isinstance(p, dict)]
-    ENTITY_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        migrated_from = str(LEGACY_PEOPLE_FILE.relative_to(SYSTEM_DIR.parent))
-    except ValueError:
-        migrated_from = str(LEGACY_PEOPLE_FILE)
-    migrated = {
-        "version": 1,
-        "type": "person",
-        "resolved_at": legacy.get("resolved_at") or now_utc(),
-        "migrated_from": migrated_from,
-        "entities": entities,
-    }
-    write_json(canonical, migrated)
-    return migrated
-
-
 def load_roster(entity_type: str = "person") -> dict:
-    """Load a canonical entity roster.
-
-    Person rosters are migrated from the old people_roster.json file if needed,
-    but callers always receive the canonical `entities` schema.
-    """
+    """Load a canonical entity roster."""
     data = read_json(roster_file(entity_type), default=None)
     if data and "entities" in data:
         return data
-    if entity_type == "person":
-        migrated = migrate_legacy_person_roster()
-        if migrated:
-            return migrated
     return {"version": 1, "type": entity_type, "entities": []}
 
 
@@ -411,10 +355,7 @@ def main() -> int:
     if args.from_response:
         from research_expand import parse_ai_json
         data = parse_ai_json(Path(args.from_response).read_text(encoding="utf-8"))
-        raw_entities = data.get("entities")
-        if raw_entities is None and t == "person":
-            raw_entities = data.get("people", [])  # legacy import shape
-        ents = normalize(t, raw_entities or [], candidates, focus_map, min_score, min_answers)
+        ents = normalize(t, data.get("entities", []), candidates, focus_map, min_score, min_answers)
         write_roster(t, ents)
         elig = sum(1 for e in ents if e["page_eligible"])
         print(f"✓ {t} roster written: {len(ents)} entities, {elig} page-eligible → {roster_file(t).name}")

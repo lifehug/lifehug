@@ -118,7 +118,7 @@ STOPWORDS = {
     "August", "September", "October", "November", "December",
     "American", "Mexican", "Spanish", "English", "Latin", "Christian",
     # Pronouns / interrogatives / quantifiers / fillers the proper-noun scanner
-    # mistakes for names. (people_roster.py also gates these, but dropping them
+    # mistakes for names. (entity_roster.py also gates these, but dropping them
     # here keeps the recommendation queue itself clean.)
     "You", "Which", "Some", "Not", "Question", "Being", "Things", "Pure",
     "Growing", "Missed", "Answered", "Dating", "Someone", "Something", "Anyone",
