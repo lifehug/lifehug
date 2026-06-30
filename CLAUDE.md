@@ -516,6 +516,15 @@ python3 system/compose.py --info outputs/title    # one output's history
 
 ---
 
+## Nomenclature: the Life Graph
+
+The private wiki is a **graph of the author's life**. Standard terms:
+
+- **Entity** — a node in that graph; one wiki page. People, places, periods, objects, themes, projects, relationships, and the author's own life story are all entities.
+- **Entity Type** — the kind of entity / the index section it lives under: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (the author).
+- **Focus** — a *deliberately built-out* entity with an objective, a tier, and a deliverable (book/letter/…). The author themselves is the **primary Focus** (their life story; biggest share of questions). Not every entity is a Focus.
+- **Entity graduation** — the automatic mechanism: the system detects entities mentioned across answers, an **AI-curated roster** (`lifehug.py entity-roster --type <t>`, written to `state/entity_rosters/<t>.json`) cleans and merges them, and `wiki_compile.plan_entities` graduates each page-eligible one into a page built from its mentions. Per-type rules: **places/periods** graduate on a low bar (a few mentions); **objects** graduate on **AI-judged symbolic meaning** (the cleats, the orange shorts), not frequency; **people** on score + answers. This runs monthly (and on compile) so the graph grows with no human action.
+
 ## Category Management
 
 ### Generic Starter Categories (A-E) — the life-story character arc

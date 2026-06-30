@@ -44,7 +44,7 @@ from lifehug_core import (
     write_text,
 )
 from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
-from people_roster import load_roster
+from entity_roster import load_roster
 from roadmap import load_roadmap
 
 TYPE_DIRS = {
@@ -402,33 +402,39 @@ def plan_focuses(categories, questions, answers, manual_sources, people_roster=N
     return descs
 
 
-def plan_people(answers, manual_sources, people_roster, focus_slugs):
-    """Auto person pages for real, page-eligible people who aren't Focuses.
-    Aggregated purely from mentions across the corpus (no dedicated category)."""
+_ENTITY_NOUN = {"person": "person", "place": "place", "period": "period", "object": "object"}
+
+
+def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
+    """Auto pages for page-eligible ENTITIES of a type (person/place/period/object)
+    that aren't already Focuses — graduated purely from mentions across the corpus.
+    Generalizes the old person-only path to every entity type (the life graph
+    builds itself). `taken_slugs` accumulates so we never double-build a slug."""
     descs = []
-    seen = set(focus_slugs)
-    for person in (people_roster or {}).get("people", []):
-        if not person.get("page_eligible"):
+    noun = _ENTITY_NOUN.get(entity_type, entity_type)
+    entities = (roster or {}).get("entities") or (roster or {}).get("people") or []
+    for ent in entities:
+        if not ent.get("page_eligible"):
             continue
-        slug = person.get("slug", "")
-        if not slug or slug in seen:
+        slug = ent.get("slug") or slugify(ent.get("name", ""))
+        if not slug or slug in taken_slugs:
             continue  # a Focus owns it, or already emitted
-        names = [person.get("name", "")] + person.get("aliases", [])
+        names = [ent.get("name", "")] + ent.get("aliases", [])
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
         if not a_hits and not m_hits:
             continue
         primary, supporting = split_primary_supporting(m_hits)
         cited_items = a_hits + primary
         sources = [x["source"] for x in cited_items + supporting]
-        seen.add(slug)
-        name = person.get("name", slug)
+        taken_slugs.add(slug)
+        name = ent.get("name", slug)
         descs.append(_descriptor(
-            "person", name, slug, sources, cited_items, supporting,
-            summary=f"A person page compiled automatically from {len(cited_items)} mentions "
-                    f"across the story. Owner-only; cites its source answers.",
+            entity_type, name, slug, sources, cited_items, supporting,
+            summary=f"A {noun} in the author's life, compiled automatically from "
+                    f"{len(cited_items)} mentions across the story. Owner-only.",
             open_questions=[
-                f"- Who is {name} in the author's life, in their own words?",
-                f"- What moments with {name} most shaped the author?",
+                f"- What did {name} mean in the author's life?",
+                f"- Which moments make {name} matter to the story?",
             ],
             origin="mention",
         ))
@@ -669,6 +675,10 @@ def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     elif desc["type"] == "life":
         lens = ("This page is one chapter of the author's life story. Synthesize the "
                 "narrative and what it reveals about who they became.")
+    elif desc["type"] in ("place", "period", "object"):
+        lens = (f"This page is a {desc['type']} in the author's life. Synthesize what it "
+                f"was and — most importantly — what it meant to them and what it stands for "
+                f"in their story.")
     else:
         lens = ""
     return f"""You are compiling a private, owner-only life-story wiki. Write the entry for one page.
@@ -911,7 +921,7 @@ def main():
     cfg = load_config()
     author = cfg.get("name", "Me")
     author_full = cfg.get("full_name") or author
-    people_roster = load_roster()
+    people_roster = load_roster("person")
     focus_slugs = {slugify(clean_focus_name(info["name"]))
                    for info in categories.values() if info.get("group") == "focus"}
 
@@ -923,7 +933,14 @@ def main():
     descs += plan_themes(answers, manual_sources)
     descs += plan_relationships(categories, questions, answers, author)
     descs += plan_self(questions, answers)
-    descs += plan_people(answers, manual_sources, people_roster, focus_slugs)
+
+    # Entity graduation: build out every node of the life graph from mentions —
+    # people, then places, periods, and symbolic objects. taken_slugs accumulates
+    # so a slug is never double-built across types.
+    taken_slugs = set(focus_slugs) | {d["slug"] for d in descs}
+    for entity_type in ("person", "place", "period", "object"):
+        descs += plan_entities(entity_type, answers, manual_sources,
+                               load_roster(entity_type), taken_slugs)
 
     slug_title = {d["slug"]: d["title"] for d in descs}
     roster = [{"slug": d["slug"], "title": d["title"], "type": d["type"]} for d in descs]

@@ -305,35 +305,49 @@ class MentionScanTests(unittest.TestCase):
         self.assertEqual({h["id"] for h in a_hits}, {"A1"})
 
 
-class PlanPeopleTests(unittest.TestCase):
+class PlanEntitiesTests(unittest.TestCase):
     def setUp(self):
         self.wc = load("wiki_compile")
         self.answers = {"D1": _ans("D1", "Trevor believed in me"), "D2": _ans("D2", "Trevor again")}
 
     def _roster(self, **over):
-        p = {"name": "Trevor", "slug": "trevor", "aliases": [], "is_real_person": True,
+        p = {"name": "Trevor", "slug": "trevor", "aliases": [],
              "maps_to_focus": None, "page_eligible": True}
         p.update(over)
-        return {"people": [p]}
+        return {"entities": [p]}
 
-    def test_eligible_person_gets_page(self):
-        descs = self.wc.plan_people(self.answers, {}, self._roster(), focus_slugs=set())
+    def test_eligible_entity_gets_page(self):
+        descs = self.wc.plan_entities("person", self.answers, {}, self._roster(), set())
         self.assertEqual(len(descs), 1)
         self.assertEqual(descs[0]["slug"], "trevor")
         self.assertEqual(descs[0]["origin"], "mention")
         self.assertEqual({c["id"] for c in descs[0]["cited_items"]}, {"D1", "D2"})
 
+    def test_place_type_builds_place_page(self):
+        answers = {"A1": _ans("A1", "We moved to Mesa when I was young"), "A2": _ans("A2", "Mesa again")}
+        roster = {"entities": [{"name": "Mesa", "slug": "mesa", "aliases": [],
+                                "maps_to_focus": None, "page_eligible": True}]}
+        descs = self.wc.plan_entities("place", answers, {}, roster, set())
+        self.assertEqual(descs[0]["type"], "place")
+        self.assertEqual(descs[0]["slug"], "mesa")
+
     def test_not_eligible_no_page(self):
-        descs = self.wc.plan_people(self.answers, {}, self._roster(page_eligible=False), focus_slugs=set())
+        descs = self.wc.plan_entities("person", self.answers, {}, self._roster(page_eligible=False), set())
         self.assertEqual(descs, [])
 
-    def test_focus_slug_suppresses_duplicate(self):
-        descs = self.wc.plan_people(self.answers, {}, self._roster(), focus_slugs={"trevor"})
-        self.assertEqual(descs, [])  # a Focus already owns this slug
+    def test_taken_slug_suppresses_duplicate(self):
+        descs = self.wc.plan_entities("person", self.answers, {}, self._roster(), {"trevor"})
+        self.assertEqual(descs, [])  # a Focus / prior page already owns this slug
 
     def test_no_mentions_no_page(self):
-        descs = self.wc.plan_people({"A1": _ans("A1", "unrelated")}, {}, self._roster(), focus_slugs=set())
+        descs = self.wc.plan_entities("person", {"A1": _ans("A1", "unrelated")}, {}, self._roster(), set())
         self.assertEqual(descs, [])
+
+    def test_legacy_people_key_still_read(self):
+        descs = self.wc.plan_entities("person", self.answers, {}, {"people": [
+            {"name": "Trevor", "slug": "trevor", "aliases": [], "maps_to_focus": None,
+             "page_eligible": True}]}, set())
+        self.assertEqual(len(descs), 1)
 
 
 class FocusEnrichmentTests(unittest.TestCase):
@@ -438,6 +452,41 @@ class PrimaryFocusTests(unittest.TestCase):
     def test_self_functions_have_planner_caps(self):
         for fn in ("self_image", "value", "fear", "growth_edge"):
             self.assertIn(fn, self.qp.STORY_FUNCTION_CAPS)
+
+
+class EntityRosterTests(unittest.TestCase):
+    def setUp(self):
+        self.er = load("entity_roster")
+
+    def test_place_uses_score_gate(self):
+        cands = [{"entity": "Mesa", "score": 12.0, "unique_answers": 3, "evidence": []}]
+        people = self.er.normalize("place", [{"name": "Mesa", "qualifies": True, "maps_to_focus": None}],
+                                   cands, {}, min_score=6, min_answers=2)
+        self.assertTrue(people[0]["page_eligible"])
+        # Below the (low) bar → not eligible.
+        thin = self.er.normalize("place", [{"name": "Nowhere", "qualifies": True, "maps_to_focus": None}],
+                                 [{"entity": "Nowhere", "score": 1.0, "unique_answers": 1}], {}, 6, 2)
+        self.assertFalse(thin[0]["page_eligible"])
+
+    def test_object_is_symbolic_not_frequency(self):
+        # No score/answers at all — a symbolic object still graduates.
+        obj = self.er.normalize("object", [{"name": "The Cleats", "qualifies": True, "maps_to_focus": None}],
+                                [], {}, min_score=0, min_answers=1)
+        self.assertTrue(obj[0]["page_eligible"])
+        # Not symbolic (qualifies false) → no page even if frequent.
+        no = self.er.normalize("object", [{"name": "A Chair", "qualifies": False, "maps_to_focus": None}],
+                               [], {}, 0, 1)
+        self.assertFalse(no[0]["page_eligible"])
+
+    def test_alias_merge_and_focus_dedup(self):
+        people = self.er.normalize("period",
+                                   [{"name": "My 20s", "aliases": ["Twenties", "20s"], "qualifies": True}],
+                                   [{"entity": "20s", "score": 9.0, "unique_answers": 2}], {}, 6, 2)
+        self.assertEqual(people[0]["unique_answers"], 2)  # picks up best-stats across aliases
+        # Maps to an existing focus → never its own page.
+        mapped = self.er.normalize("place", [{"name": "Etherfuse", "qualifies": True, "maps_to_focus": "etherfuse"}],
+                                   [], {"etherfuse": "Etherfuse"}, 6, 2)
+        self.assertFalse(mapped[0]["page_eligible"])
 
 
 class ConfigMergeTests(unittest.TestCase):

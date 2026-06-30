@@ -5,6 +5,8 @@ title: "Page Structure"
 
 This wiki is an owner-only, AI-maintained memory layer. It compiles raw story sources into structured pages so the author and future AI sessions can understand a life as an evolving graph of people, places, periods, projects, themes, objects, and relationships.
 
+**Nomenclature.** Each page is an **Entity** — a node in the life graph. Its **Entity Type** is the section it lives under (person, place, period, object, theme, project, relationship, and `life` — the author themselves). A **Focus** is an entity deliberately built toward a deliverable; the author is the **primary Focus**. **Entity graduation** is how the graph grows on its own: entities mentioned across answers are detected, AI-curated into a roster, and graduated into pages — places/periods on a low bar, objects on symbolic meaning, people on score.
+
 The wiki is not the raw diary. Raw sources stay in `answers/` and `sources/`. Wiki pages synthesize those sources, cite them, cross-link related pages, and improve over time.
 
 Corrections, reflections, and promoted artifacts are also sources. If a memory was wrong or the author's understanding changed, the wiki should show the original source and the later correction/reflection together instead of erasing the earlier record. If a letter, post, or chapter is promoted, treat it as the author's expression at that moment, not as independent proof of every event inside it.

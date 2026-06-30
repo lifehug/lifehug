@@ -6,6 +6,15 @@ Lifehug is a lifelong AI oral-history system with two core loops. The **capture 
 
 You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make an artifact.** Both become part of the same compounding memory system.
 
+## Nomenclature
+
+The wiki is a **graph of your life**, and these are the standard terms used throughout:
+
+- **Entity** — a node in the graph; one wiki page. People, places, periods, objects, themes, projects, relationships, and *you* are all entities.
+- **Entity Type** — the kind of entity / the index section it lives under: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (you).
+- **Focus** — an entity you're deliberately building toward a deliverable (book, letter, …), with a tier and target. **You are the primary Focus** — your own life story is the biggest one and gets the largest share of questions; self-knowledge (values, fears, contradictions, growth) is a built-in dimension of it, not a separate track.
+- **Entity graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into their own pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score. Runs monthly and on compile — no manual work.
+
 ---
 
 ## Contents

@@ -471,6 +471,25 @@ def cmd_people_roster(args: argparse.Namespace) -> int:
     return run_python("people_roster.py", flags)
 
 
+def cmd_entity_roster(args: argparse.Namespace) -> int:
+    flags = ["--type", args.type]
+    if args.emit_task:
+        flags.extend(["--emit-task", args.emit_task])
+    elif args.from_response:
+        flags.extend(["--from-response", args.from_response])
+    elif args.show:
+        flags.append("--show")
+    else:
+        flags.append("--resolve")
+    if args.min_score is not None:
+        flags.extend(["--min-score", str(args.min_score)])
+    if args.min_answers is not None:
+        flags.extend(["--min-answers", str(args.min_answers)])
+    if args.model:
+        flags.extend(["--model", args.model])
+    return run_python("entity_roster.py", flags)
+
+
 def cmd_focus_action(args: argparse.Namespace) -> int:
     if args.approve:
         return run_python("recommend_focuses.py", ["--approve", args.approve])
@@ -755,6 +774,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-answers", type=int, help="Page answer threshold (default config/2)")
     p.add_argument("--model", help="Override AI model")
     p.set_defaults(func=cmd_people_roster)
+
+    p = sub.add_parser("entity-roster",
+                       help="Resolve mentioned entities (person/place/period/object) into a canonical roster")
+    p.add_argument("--type", choices=["person", "place", "period", "object"], default="person")
+    p.add_argument("--emit-task", metavar="PATH", help="Write resolution prompt + candidates (keyless agent path)")
+    p.add_argument("--from-response", metavar="PATH", help="Ingest an agent-written roster JSON")
+    p.add_argument("--show", action="store_true", help="Print the current roster")
+    p.add_argument("--min-score", type=float, help="Page score threshold (type default)")
+    p.add_argument("--min-answers", type=int, help="Page answer threshold (type default)")
+    p.add_argument("--model", help="Override AI model")
+    p.set_defaults(func=cmd_entity_roster)
 
     p = sub.add_parser("focus-approve", help="Approve a Focus recommendation")
     p.add_argument("approve", metavar="REC_ID")
