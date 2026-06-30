@@ -331,6 +331,16 @@ class PlanEntitiesTests(unittest.TestCase):
         self.assertEqual(descs[0]["type"], "place")
         self.assertEqual(descs[0]["slug"], "mesa")
 
+    def test_place_needs_a_few_real_mentions(self):
+        # A single real mention isn't enough for a place (min 2); a person needs only 1.
+        one = {"A1": _ans("A1", "We passed through Reno once")}
+        roster = {"entities": [{"name": "Reno", "slug": "reno", "aliases": [],
+                                "maps_to_focus": None, "page_eligible": True}]}
+        self.assertEqual(self.wc.plan_entities("place", one, {}, roster, set()), [])
+        self.assertEqual(len(self.wc.plan_entities("person", one,
+            {}, {"entities": [{"name": "Reno", "slug": "reno", "aliases": [], "page_eligible": True,
+                               "maps_to_focus": None}]}, set())), 1)
+
     def test_not_eligible_no_page(self):
         descs = self.wc.plan_entities("person", self.answers, {}, self._roster(page_eligible=False), set())
         self.assertEqual(descs, [])
@@ -458,15 +468,17 @@ class EntityRosterTests(unittest.TestCase):
     def setUp(self):
         self.er = load("entity_roster")
 
-    def test_place_uses_score_gate(self):
-        cands = [{"entity": "Mesa", "score": 12.0, "unique_answers": 3, "evidence": []}]
-        people = self.er.normalize("place", [{"name": "Mesa", "qualifies": True, "maps_to_focus": None}],
-                                   cands, {}, min_score=6, min_answers=2)
-        self.assertTrue(people[0]["page_eligible"])
-        # Below the (low) bar → not eligible.
-        thin = self.er.normalize("place", [{"name": "Nowhere", "qualifies": True, "maps_to_focus": None}],
-                                 [{"entity": "Nowhere", "score": 1.0, "unique_answers": 1}], {}, 6, 2)
-        self.assertFalse(thin[0]["page_eligible"])
+    def test_place_eligibility_is_ai_gated_not_score(self):
+        # The noisy detector undercounts real places, so place eligibility is the
+        # AI's judgment (qualifies), regardless of detector stats. The real
+        # "a few mentions" bar is enforced at compile time (PlanEntitiesTests).
+        cands = [{"entity": "Mesa", "score": 1.0, "unique_answers": 1, "evidence": []}]
+        ok = self.er.normalize("place", [{"name": "Mesa", "qualifies": True, "maps_to_focus": None}],
+                               cands, {}, min_score=6, min_answers=2)
+        self.assertTrue(ok[0]["page_eligible"])           # low detector stats, still eligible
+        no = self.er.normalize("place", [{"name": "Her", "qualifies": False, "maps_to_focus": None}],
+                               [], {}, 6, 2)
+        self.assertFalse(no[0]["page_eligible"])          # AI rejected → not eligible
 
     def test_object_is_symbolic_not_frequency(self):
         # No score/answers at all — a symbolic object still graduates.

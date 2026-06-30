@@ -403,6 +403,10 @@ def plan_focuses(categories, questions, answers, manual_sources, people_roster=N
 
 
 _ENTITY_NOUN = {"person": "person", "place": "place", "period": "period", "object": "object"}
+# Minimum REAL mentions (answers that actually name the entity) for a page. Places
+# and periods need "a few"; people are already score-gated in the roster; a
+# symbolic object can graduate on a single resonant mention.
+_ENTITY_MIN_MENTIONS = {"person": 1, "place": 2, "period": 2, "object": 1}
 
 
 def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
@@ -421,8 +425,8 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
             continue  # a Focus owns it, or already emitted
         names = [ent.get("name", "")] + ent.get("aliases", [])
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
-        if not a_hits and not m_hits:
-            continue
+        if len(a_hits) < _ENTITY_MIN_MENTIONS.get(entity_type, 1) and not m_hits:
+            continue  # needs a few real mentions to be worth a page
         primary, supporting = split_primary_supporting(m_hits)
         cited_items = a_hits + primary
         sources = [x["source"] for x in cited_items + supporting]

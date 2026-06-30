@@ -232,12 +232,16 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
         if maps_to is None and slug in focus_slugs:
             maps_to = slug
         score, answers = _best_stats(e, stats)
-        if entity_type == "object":
-            # Symbolic objects graduate on the AI's judgment, not frequency.
-            page_eligible = qualifies and maps_to is None
-        else:
+        if entity_type == "person":
+            # People are the noisiest detections → keep a score/answers bar.
             page_eligible = (qualifies and maps_to is None
                              and score >= min_score and answers >= min_answers)
+        else:
+            # Places/periods/objects: the AI's judgment is the gate (the noisy
+            # detector undercounts real places). The actual "a few mentions" bar
+            # is enforced at compile time against real mention counts, and objects
+            # graduate on symbolic meaning regardless of frequency.
+            page_eligible = qualifies and maps_to is None
         out.append({
             "name": name, "slug": slug, "aliases": aliases,
             "qualifies": qualifies, "maps_to_focus": maps_to,
