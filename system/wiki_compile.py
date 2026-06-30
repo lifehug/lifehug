@@ -426,6 +426,7 @@ _ENTITY_NOUN = {"person": "person", "place": "place", "period": "period", "objec
 # and periods need "a few"; people are already score-gated in the roster; a
 # symbolic object can graduate on a single resonant mention.
 _ENTITY_MIN_MENTIONS = {"person": 1, "place": 2, "period": 2, "object": 1}
+RELATIONSHIP_MIN_MENTION_ANSWERS = 2
 
 
 def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
@@ -522,25 +523,56 @@ def plan_themes(answers, manual_sources):
     return descs
 
 
-def plan_relationships(categories, questions, answers, author):
+def plan_relationships(categories, questions, answers, manual_sources, author, people_roster=None):
     descs = []
     author = author or "Me"
     author_slug = slugify(author)
+    alias_map = _focus_alias_map(people_roster)
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
             continue
         person = clean_focus_name(info["name"])
         person_slug = slugify(person)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
-        if not answer_items:
+
+        # Relationships are dyadic entities. They should be able to graduate
+        # from the same mention-enriched evidence as Focus person pages, but
+        # only when there is enough actual source material to say something
+        # useful about the bond.
+        names = [person] + sorted(n for n in alias_map.get(person_slug, set()) if n)
+        a_hits, _m_hits = scan_mentions(names, answers, manual_sources)
+        cited_srcs = {a["source"] for a in answer_items}
+        extra_answers = [it for it in a_hits if it["source"] not in cited_srcs]
+        if not answer_items and len(extra_answers) < RELATIONSHIP_MIN_MENTION_ANSWERS:
             continue
+
         title = f"{author} & {person}"
         slug = f"{author_slug}-and-{person_slug}"
-        sources = [a["source"] for a in answer_items]
+        supporting_items = []
+        if answer_items:
+            supporting_items.extend(extra_answers)
+        source_items = matching_sources(manual_sources, names)
+        primary_sources, supporting_sources = split_primary_supporting(source_items)
+        if answer_items:
+            supporting_items.extend(primary_sources + supporting_sources)
+            cited_items = answer_items
+        else:
+            cited_items = extra_answers + primary_sources
+            supporting_items.extend(supporting_sources)
+        sources = [a["source"] for a in cited_items] + [s["source"] for s in supporting_items]
+        if answer_items and extra_answers:
+            summary = (f"The relationship between {author} and {person}, synthesized from "
+                       f"{len(answer_items)} dedicated answered prompts plus "
+                       f"{len(extra_answers)} mentions across the story. Owner-only; cites its sources.")
+        elif answer_items:
+            summary = (f"The relationship between {author} and {person}, synthesized from "
+                       f"{len(answer_items)} answered prompts. Owner-only; cites its sources.")
+        else:
+            summary = (f"The relationship between {author} and {person} — no dedicated Focus answers yet; "
+                       f"compiled from {len(extra_answers)} mentions across the story. Owner-only; cites its sources.")
         descs.append(_descriptor(
-            "relationship", title, slug, sources, answer_items, [],
-            summary=f"The relationship between {author} and {person}, synthesized from "
-                    f"{len(answer_items)} answered prompts. Owner-only; cites its sources.",
+            "relationship", title, slug, sources, cited_items, supporting_items,
+            summary=summary,
             open_questions=[
                 f"- What does {author} most want {person} to understand?",
                 f"- How does {author} think {person} sees them — and is it accurate?",
@@ -970,7 +1002,7 @@ def main():
     descs += plan_focuses(categories, questions, answers, manual_sources, people_roster)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources)
-    descs += plan_relationships(categories, questions, answers, author)
+    descs += plan_relationships(categories, questions, answers, manual_sources, author, people_roster)
     descs += plan_self(questions, answers)
 
     # Entity graduation: build out every node of the life graph from mentions —

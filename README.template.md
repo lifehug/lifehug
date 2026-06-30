@@ -9,7 +9,7 @@ This wiki is a **graph of {name}'s life**. Standard terms:
 - **Entity** — a node in the graph; one wiki page (a person, place, period, object, theme, project, relationship, or {name}'s own life story).
 - **Entity Type** — the kind of entity / index section: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` ({name}).
 - **Focus** — an entity deliberately built toward a deliverable (book, letter, …). **{name} is the primary Focus** — their life story is the biggest, with self-knowledge built in as a dimension of it.
-- **Entity graduation** — entities mentioned across answers are detected, AI-curated into a roster, and graduated into pages automatically. Places/periods graduate on a low bar; objects on symbolic meaning; people on score. The graph grows without manual work.
+- **Entity graduation** — entities mentioned across answers are detected, AI-curated into a roster, and graduated into pages automatically. Places/periods graduate on a low bar; objects on symbolic meaning; people on score. Relationships are dyadic entities: Focus relationship pages can graduate from dedicated answers or enough cross-story mentions about the person. The graph grows without manual work.
 
 ## Focuses
 {projects}

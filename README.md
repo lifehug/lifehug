@@ -13,7 +13,7 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 - **Entity** — a node in the graph; one wiki page. People, places, periods, objects, themes, projects, relationships, and *you* are all entities.
 - **Entity Type** — the kind of entity / the index section it lives under: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (you).
 - **Focus** — an entity you're deliberately building toward a deliverable (book, letter, …), with a tier and target. **You are the primary Focus** — your own life story is the biggest one and gets the largest share of questions; self-knowledge (values, fears, contradictions, growth) is a built-in dimension of it, not a separate track.
-- **Entity graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into their own pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score. Runs monthly and on compile — no manual work.
+- **Entity graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into their own pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score. Relationships use a dyadic path: Focus relationships can graduate from dedicated answers or enough cross-story mentions about the person. Runs monthly and on compile — no manual work.
 
 ---
 
@@ -299,7 +299,7 @@ flowchart LR
 
 - **life/** — your own life story, the heart of the wiki: a self-portrait hub plus a page per arc (Origins → Reflection)
 - **people/** — who they are, how they shaped you
-- **relationships/** — the bond between you and each person, from both sides
+- **relationships/** — the bond between you and each Focus person, from both sides; can compile from dedicated Focus answers or enough cross-story mentions
 - **places/** — homes, cities, schools, countries
 - **periods/** — seasons of life, transitions, hardships (listed in chronological order, earliest first)
 - **projects/** — companies, creative work, missions
@@ -307,7 +307,7 @@ flowchart LR
 - **objects/** — objects that carry meaning (the cleats, the orange shorts)
 - **self/** — your patterns, values, fears, contradictions
 
-Most of these grow on their own through **entity graduation** — the system detects people, places, periods, and symbolic objects mentioned across your answers and builds a page for each, no setup required.
+Most of these grow on their own through **entity graduation** — the system detects people, places, periods, and symbolic objects mentioned across your answers and builds a page for each, no setup required. Relationship pages grow through a relationship-specific path so the page can focus on the bond, tension, gratitude, grief, repair, and what went unsaid rather than merely duplicating a person page.
 
 Every page cites the answers it's built from, and links to related pages — so the wiki is a navigable graph, not a flat list. Synthesis is cached and idempotent: re-compiling is cheap, and it runs **keyless on the desktop** (the agent writes each page's prose; the next compile folds it into the graph). Browse it locally with `python3 system/lifehug.py serve`.
 

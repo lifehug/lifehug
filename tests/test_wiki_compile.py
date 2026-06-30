@@ -391,6 +391,55 @@ class FocusEnrichmentTests(unittest.TestCase):
         self.assertIn("A3", cited)   # cross-category mention enrichment
 
 
+class RelationshipPlanningTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_empty_focus_relationship_fills_from_mentions(self):
+        categories = {"M": {"name": "Focus — Dad", "group": "focus"}}
+        questions = []  # zero dedicated Dad answers
+        answers = {
+            "A6": _ans("A6", "my dad was an architect"),
+            "A9": _ans("A9", "my father and I had a hard conversation"),
+            "K2": _ans("K2", "mom was kind"),
+        }
+        roster = {"people": [{"name": "Dad", "slug": "dad", "aliases": ["Father"],
+                              "maps_to_focus": "dad", "page_eligible": False}]}
+
+        descs = self.wc.plan_relationships(categories, questions, answers, {}, "Dave", roster)
+
+        rel = next(d for d in descs if d["slug"] == "dave-and-dad")
+        self.assertEqual(rel["type"], "relationship")
+        self.assertEqual(rel["title"], "Dave & Dad")
+        self.assertEqual({c["id"] for c in rel["cited_items"]}, {"A6", "A9"})
+        self.assertNotIn("K2", {c["id"] for c in rel["cited_items"]})
+        self.assertEqual(rel["seed_related"], ["dad"])
+        self.assertIn("no dedicated Focus answers yet", rel["summary"])
+
+    def test_relationship_needs_enough_mention_evidence_without_dedicated_answers(self):
+        categories = {"M": {"name": "Focus — Dad", "group": "focus"}}
+        answers = {"A6": _ans("A6", "my dad was an architect")}
+
+        descs = self.wc.plan_relationships(categories, [], answers, {}, "Dave", {"people": []})
+
+        self.assertEqual(descs, [])
+
+    def test_dedicated_relationship_answers_stay_primary(self):
+        categories = {"K": {"name": "Focus — Mom", "group": "focus"}}
+        questions = [{"id": "K1", "category": "K", "answered": True, "text": "Tell me about Mom"}]
+        answers = {
+            "K1": _ans("K1", "mom taught me kindness"),
+            "A3": _ans("A3", "my mom moved us a lot"),
+        }
+
+        descs = self.wc.plan_relationships(categories, questions, answers, {}, "Dave", {"people": []})
+
+        rel = next(d for d in descs if d["slug"] == "dave-and-mom")
+        self.assertEqual([c["id"] for c in rel["cited_items"]], ["K1"])
+        self.assertEqual({s["id"] for s in rel["supporting_items"]}, {"A3"})
+        self.assertIn("dedicated answered prompts plus 1 mentions", rel["summary"])
+
+
 class ProjectGroupingTests(unittest.TestCase):
     def setUp(self):
         self.wc = load("wiki_compile")
