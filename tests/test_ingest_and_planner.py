@@ -56,6 +56,13 @@ class PlannerTests(unittest.TestCase):
             "expires_at": "2000-01-01T00:00:00Z",
         }))
 
+    def test_default_planner_state_uses_delivery_queue_limit(self):
+        planner = load("question_planner")
+        state = planner.default_planner_state()
+
+        self.assertEqual(state["queue"]["default_limit"], planner.DEFAULT_DELIVERY_QUEUE_LIMIT)
+        self.assertEqual(planner.DEFAULT_DELIVERY_QUEUE_LIMIT, 8)
+
 
 class CandidateManagerTests(unittest.TestCase):
     def test_promote_candidate_appends_next_question_and_preserves_provenance(self):

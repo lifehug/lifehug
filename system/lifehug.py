@@ -27,6 +27,7 @@ from lifehug_core import (
     parse_questions,
 )
 from question_candidates import VALID_STATUSES
+from question_planner import DEFAULT_DELIVERY_QUEUE_LIMIT
 
 SYSTEM_DIR = Path(__file__).resolve().parent
 CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
@@ -698,7 +699,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_planner_report)
 
     p = sub.add_parser("planner-queue", help="Write the roadmap-driven weekly queue")
-    p.add_argument("--limit", type=int, default=12)
+    p.add_argument("--limit", type=int, default=DEFAULT_DELIVERY_QUEUE_LIMIT)
     p.add_argument("--arc-max", type=int, default=2)
     p.add_argument("--expires-days", type=int, default=8)
     p.set_defaults(func=cmd_planner_queue)

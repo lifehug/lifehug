@@ -91,6 +91,15 @@ class LifehugWrapperTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(option_choices(subparser(parser, command), "--status"), expected)
 
+    def test_planner_queue_default_matches_delivery_horizon(self):
+        wrapper = load_wrapper()
+        planner = load_system("question_planner")
+        parser = wrapper.build_parser()
+        args = parser.parse_args(["planner-queue"])
+
+        self.assertEqual(args.limit, planner.DEFAULT_DELIVERY_QUEUE_LIMIT)
+        self.assertEqual(args.limit, 8)
+
     def test_telegram_target_detection_uses_config_or_env(self):
         mod = load_wrapper()
         self.assertTrue(mod.has_telegram_target({"telegram_chat_id": "123"}))
@@ -114,6 +123,13 @@ class LifehugWrapperTests(unittest.TestCase):
 
         self.assertLess(dry_run_index, dry_run_exit_index)
         self.assertLess(dry_run_exit_index, real_promote_index)
+
+    def test_weekly_maintenance_defaults_to_delivery_horizon(self):
+        script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
+
+        self.assertIn('QUEUE_LIMIT="${LIFEHUG_WEEKLY_QUEUE_LIMIT:-8}"', script)
+        self.assertIn('planner-report --limit "$QUEUE_LIMIT"', script)
+        self.assertIn('planner-queue --limit "$QUEUE_LIMIT"', script)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ from roadmap import (
 # any one Focus from dominating a week.
 TIER_BASE = {"basic": 0.8, "standard": 1.0, "extreme": 1.2}
 PRIMARY_BASE = 1.5  # the primary focus (the author's life story) outweighs any sub-focus
+DEFAULT_DELIVERY_QUEUE_LIMIT = 8
 
 # Inner-story dimension of the life-story arc (the SELF_ARC). These are first-class
 # story functions alongside the outer-narrative (memoir) ones — self-knowledge is
@@ -196,7 +197,7 @@ def default_planner_state() -> dict:
             },
         },
         "queue": {
-            "default_limit": 12,
+            "default_limit": DEFAULT_DELIVERY_QUEUE_LIMIT,
             "arc_max": 2,
             "expires_after_days": 8,
         },
@@ -915,7 +916,7 @@ def main() -> int:
     parser.add_argument("--objective-keyword", action="append", default=[])
     parser.add_argument("--objective-max-questions", type=int, default=3)
     parser.add_argument("--objective-clear", action="store_true")
-    parser.add_argument("--limit", type=int, default=12)
+    parser.add_argument("--limit", type=int, default=DEFAULT_DELIVERY_QUEUE_LIMIT)
     parser.add_argument("--arc-max", type=int, default=2)
     parser.add_argument("--expires-days", type=int, default=8)
     args = parser.parse_args()

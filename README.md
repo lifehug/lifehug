@@ -92,22 +92,20 @@ flowchart TB
     W -->|thin spots| RE
     RE --> CA
     CA -->|auto-promote weekly| QB
-    QB -->|retire weak old questions| RETIRED["Retired ✗"]
 
     W --> OUT
     QB --> OUT
     OUT -->|promote final/context| SRC
     SRC --> W
     QP -->|candidate scoring| CA
-    QB -->|retire weak old questions| RETIRED["Retired ✗"]
 ```
 
 **Read it as five layers:**
 
 1. **Daily** — one question out, one answer in. The only part you touch.
 2. **Knowledge** — every answer becomes wiki input, a completed question, and, during the weekly capped classifier pass, a structured classification record: people, places, periods, themes, contradictions, possible outputs, and follow-up candidates.
-3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly queue. It applies quality multipliers (questions matching your richest-answer patterns score higher) and age-based float (questions sitting unselected for 8+ weeks gradually rise so nothing good is buried forever).
-4. **Growth** — classification runs in small weekly batches; broader research runs rarely. Together they inspect the wiki and source layer for thin areas, extract structured meaning, and *generate new questions* about people, themes, periods, and contradictions you haven't covered. The best candidates are automatically promoted into the bank each week; weak old questions are retired. Average bank quality rises over time without any manual curation.
+3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly delivery queue. It applies quality multipliers so question types that have historically pulled richer answers score higher.
+4. **Growth** — classification runs in small weekly batches; broader research runs rarely. Together they inspect the wiki and source layer for thin areas, extract structured meaning, and *generate new questions* about people, themes, periods, and contradictions you haven't covered. The best candidates are automatically promoted into the bank each week under a dynamic cap; once promoted, bank questions stay available until answered or manually edited.
 5. **Artifacts** — when there is an occasion or deliverable, Lifehug gathers the right context, helps write the piece, versions it, and can store the final artifact back as source material.
 
 ---
@@ -160,7 +158,7 @@ The key mental model: a **Focus** is the unit of intent. Everything — a person
 
 ## How the planner decides what to ask
 
-You almost never pick a question by hand. Once a week the **planner** (`question_planner.py`) writes a queue of ~12 questions, and `ask.py` serves one per day from it. If the queue expires or runs out, `ask.py` falls back to simple coverage-based rotation, so a missed week degrades gracefully.
+You almost never pick a question by hand. Once a week the **planner** (`question_planner.py`) writes a delivery queue of about 8 questions, matching the horizon before the queue expires, and `ask.py` serves one per day from it. If the queue expires or runs out, `ask.py` falls back to simple coverage-based rotation, so a missed week degrades gracefully.
 
 The planner's job is **balance**: pour attention into under-developed Focuses, ease off ones that are nearly done, and never let a single Focus eat your whole week.
 
@@ -171,7 +169,7 @@ flowchart LR
     QP["Quality profile<br/>(what scores richest?)"] --> W
     W["weight =<br/>base(tier) × fill_factor × room"] --> SAMPLE
     OBJ["Active objectives<br/>(e.g. 'Mom letter')"] -->|2.5× boost| SAMPLE
-    SAMPLE["Weighted random sample<br/>into a 12-slot queue"] --> CAPS
+    SAMPLE["Weighted random sample<br/>into an 8-slot delivery queue"] --> CAPS
     CAPS["Apply caps:<br/>• no Focus over 30% (50% if finishing)<br/>• story-function balance<br/>• ≥1 self-knowledge slot<br/>• max 2 in a row per category"] --> QUEUE["state/question_queue.json"]
     QUEUE --> ASK["ask.py serves one/day"]
 ```
@@ -254,12 +252,9 @@ flowchart LR
     AUTO --> BANK["question bank"]
     MAN --> BANK
     BANK --> PLAN["planner picks it up<br/>when the Focus needs it"]
-    BANK -->|"quality < 0.55\n+ age > 8 weeks"| RETIRE["retired ✗"]
 ```
 
 Each week, `weekly_maintenance.sh` automatically promotes the highest-scoring candidates into the bank. The weekly cap is dynamic — it scales with how full the bank is (1 promotion when >120 unanswered, up to 4 when <40), so the bank self-regulates around a healthy level. Each promotion includes a full audit trail: candidate id, source, quality score, and `promoted_by: auto`. Weekly dry-run previews this promotion gate before the real job mutates the candidate store or question bank.
-
-Weak old questions in the bank are periodically retired: if `quality_score < 0.55` and the question has been sitting unanswered for 8+ weeks, it's marked retired (max 2-3/week) so it no longer appears in planner scoring.
 
 You can still review with `candidates-review`, inspect `needs_review` items, update candidate status with `candidates-update`, and promote manually with `candidates-promote <id> --category F`. Manual promotion always overrides automated decisions.
 
@@ -425,7 +420,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | Script | What it does |
 |---|---|
 | **`roadmap.py`** | Owns Focuses. *Derives* the roadmap from the question bank (categories → Focuses), infers tiers from size, computes live saturation per Focus, and exposes the `focus-*` management commands. The JSON is config, not source-of-truth, so renumbering questions never breaks it. |
-| **`question_planner.py`** | The brain of question selection. Builds the weekly queue by Focus-weighted random sampling under caps (see [the planner section](#how-the-planner-decides-what-to-ask)). Applies quality-profile multipliers (question types that historically pull richer answers score higher) and age-based float (questions sitting unselected 8+ weeks gradually rise in priority so nothing good is permanently buried). Also computes the expansion-urgency signal that tells the research job when to find new territory. |
+| **`question_planner.py`** | The brain of question selection. Builds the weekly delivery queue by Focus-weighted random sampling under caps (see [the planner section](#how-the-planner-decides-what-to-ask)). Applies quality-profile multipliers so question types that historically pull richer answers score higher. Also computes the expansion-urgency signal that tells the research job when to find new territory. |
 | **`quality_profile.py`** | The feedback loop. Scores each answer's richness (length, entity diversity, wiki nodes added, follow-ups spawned) and, after ~20 answers, aggregates a profile that biases the planner toward question types that pull the deepest answers out of you. Zero friction — no ratings. Also feeds the candidate auto-promotion scorer: candidates matching your richest-answer story functions score higher and promote sooner. |
 | **`progress.py`** | The deliverables dashboard. For each Focus, shows fill-vs-target and a readiness verdict (EARLY → DEVELOPING → READY → SATURATED), and nudges you to create an artifact when something is ready. |
 
