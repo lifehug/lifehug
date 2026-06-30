@@ -243,6 +243,11 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
         text,
     )
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    # Italics: single *…* or _…_ (bold already consumed above). The underscore
+    # form uses word-boundary guards so snake_case identifiers and file paths
+    # (e.g. source_manifest.json) aren't turned into emphasis.
+    text = re.sub(r"\*([^*\n]+)\*", r"<em>\1</em>", text)
+    text = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"<em>\1</em>", text)
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
     return text
 
