@@ -143,20 +143,158 @@ def load_candidates(entity_type: str, min_answers: int = 1) -> list[dict]:
     return candidates
 
 
+def _answer_sort_key(path: Path) -> tuple:
+    qid = answer_id_from_filename(path) or path.stem
+    match = re.match(r"^([A-Z]+)(\d+)([a-z]*)$", qid)
+    if match:
+        prefix, number, suffix = match.groups()
+        return (prefix, int(number), suffix, path.name)
+    return (qid, path.name)
+
+
+def _evenly_spaced_indices(total: int, count: int) -> list[int]:
+    if total <= 0 or count <= 0:
+        return []
+    if count >= total:
+        return list(range(total))
+    if count == 1:
+        return [0]
+    return sorted({round(i * (total - 1) / (count - 1)) for i in range(count)})
+
+
+def _object_search_terms(roster: dict) -> list[str]:
+    terms: set[str] = set()
+    for ent in (roster or {}).get("entities", []):
+        raw_terms = [ent.get("name", ""), *ent.get("aliases", [])]
+        for raw in raw_terms:
+            term = str(raw or "").strip().lower()
+            if len(term) < 3:
+                continue
+            terms.add(term)
+            if term.startswith("the "):
+                terms.add(term[4:])
+    return sorted(terms, key=len, reverse=True)
+
+
+def _select_excerpt_records(records: list[dict], limit: int) -> list[dict]:
+    if limit <= 0:
+        return []
+    if len(records) <= limit:
+        return records
+
+    selected: set[int] = set()
+
+    def add(indices, quota: int) -> None:
+        added = 0
+        for idx in indices:
+            if len(selected) >= limit or added >= quota:
+                break
+            if idx < 0 or idx >= len(records):
+                continue
+            before = len(selected)
+            selected.add(idx)
+            if len(selected) > before:
+                added += 1
+
+    # Keep broad archive coverage first, so late answers cannot disappear just
+    # because early categories are dense.
+    add(_evenly_spaced_indices(len(records), max(1, limit // 2)), max(1, limit // 2))
+
+    terms = _object_search_terms(load_roster("object"))
+    if terms:
+        linked = [
+            idx for idx, rec in enumerate(records)
+            if any(term in rec["body"].lower() for term in terms)
+        ]
+        add(linked, max(1, limit // 5))
+
+    long_answers = sorted(range(len(records)), key=lambda idx: len(records[idx]["body"]), reverse=True)
+    add(long_answers, max(1, limit // 5))
+
+    recent_answers = sorted(
+        range(len(records)),
+        key=lambda idx: records[idx]["path"].stat().st_mtime,
+        reverse=True,
+    )
+    add(recent_answers, max(1, limit // 5))
+
+    if len(selected) < limit:
+        add(_evenly_spaced_indices(len(records), limit), limit - len(selected))
+    if len(selected) < limit:
+        add(range(len(records)), limit - len(selected))
+
+    return [records[idx] for idx in sorted(selected)]
+
+
 def answer_excerpts(limit: int = 60, cap: int = 400) -> list[dict]:
     """Answer bodies (trimmed) for the object pass — the AI reads these to spot
     symbolic objects."""
-    out = []
     if not ANSWERS_DIR.exists():
-        return out
-    for path in sorted(ANSWERS_DIR.glob("*.md"))[:limit]:
+        return []
+    records = []
+    for path in sorted(ANSWERS_DIR.glob("*.md"), key=_answer_sort_key):
         qid = answer_id_from_filename(path)
         if not qid:
             continue
         body = re.sub(r"\s+", " ", answer_body(path.read_text(encoding="utf-8", errors="replace"))).strip()
         if body:
-            out.append({"id": qid, "body": body[:cap]})
-    return out
+            records.append({"path": path, "id": qid, "body": body})
+    return [
+        {"id": rec["id"], "body": rec["body"][:cap]}
+        for rec in _select_excerpt_records(records, limit)
+    ]
+
+
+def _entity_keys(entity: dict) -> set[str]:
+    keys: set[str] = set()
+    raw_values = [
+        entity.get("name", ""),
+        entity.get("slug", ""),
+        *entity.get("aliases", []),
+    ]
+    for raw in raw_values:
+        value = str(raw or "").strip().lower()
+        if not value:
+            continue
+        keys.add(value)
+        keys.add(slugify(value))
+        if value.startswith("the "):
+            keys.add(value[4:])
+            keys.add(slugify(value[4:]))
+    return {k for k in keys if k}
+
+
+def carry_forward_objects(entities: list[dict], previous_roster: dict | None) -> tuple[list[dict], int]:
+    """Keep known symbolic objects unless a new response names/replaces them."""
+    previous = (previous_roster or {}).get("entities") or []
+    if not previous:
+        return entities, 0
+
+    merged = [dict(e) for e in entities]
+    current_keys: set[str] = set()
+    for ent in merged:
+        current_keys.update(_entity_keys(ent))
+
+    preserved = 0
+    for ent in previous:
+        keys = _entity_keys(ent)
+        if keys & current_keys:
+            continue
+        merged.append(dict(ent))
+        current_keys.update(keys)
+        preserved += 1
+    return merged, preserved
+
+
+def preserve_existing_object_roster(entity_type: str, entities: list[dict],
+                                    previous_roster: dict | None,
+                                    force_empty: bool = False) -> tuple[list[dict], bool]:
+    if entity_type != "object" or entities or force_empty:
+        return entities, False
+    previous_entities = (previous_roster or {}).get("entities") or []
+    if not previous_entities:
+        return entities, False
+    return [dict(e) for e in previous_entities], True
 
 
 def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, str],
@@ -289,11 +427,23 @@ def deterministic(entity_type: str, candidates: list[dict], focus_map: dict[str,
     return normalize(entity_type, raw, candidates, focus_map, min_score, min_answers)
 
 
-def write_roster(entity_type: str, entities: list[dict]) -> None:
+def write_roster(entity_type: str, entities: list[dict], *, source: str | None = None,
+                 sampled_answer_ids: list[str] | None = None,
+                 preserved_count: int = 0,
+                 failure_reason: str | None = None) -> None:
     ENTITY_DIR.mkdir(parents=True, exist_ok=True)
-    write_json(roster_file(entity_type), {
+    payload = {
         "version": 1, "type": entity_type, "resolved_at": now_utc(), "entities": entities,
-    })
+    }
+    if source:
+        payload["source"] = source
+    if sampled_answer_ids is not None:
+        payload["sampled_answer_ids"] = sampled_answer_ids
+    if preserved_count:
+        payload["preserved_count"] = preserved_count
+    if failure_reason:
+        payload["failure_reason"] = failure_reason
+    write_json(roster_file(entity_type), payload)
 
 
 def load_roster(entity_type: str = "person") -> dict:
@@ -324,6 +474,8 @@ def main() -> int:
     parser.add_argument("--min-score", type=float, default=None)
     parser.add_argument("--min-answers", type=int, default=None)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--force-empty", action="store_true",
+                        help="Allow an empty object roster to overwrite an existing one.")
     args = parser.parse_args()
     t = args.type
 
@@ -335,12 +487,15 @@ def main() -> int:
     focus_map = _focus_map()
     candidates = load_candidates(t, min_answers=1)
     excerpts = answer_excerpts() if t == "object" else None
+    sampled_answer_ids = [e["id"] for e in excerpts or []] if t == "object" else None
+    previous_roster = load_roster(t)
 
     if args.emit_task:
         Path(args.emit_task).write_text(json.dumps({
             "type": t,
             "prompt": build_prompt(t, candidates, focus_map, excerpts),
             "candidates": candidates,
+            "sampled_answer_ids": sampled_answer_ids,
             "focus_map": focus_map,
             "min_score": min_score, "min_answers": min_answers,
             "response_format": {"entities": [dict({"name": "", "aliases": [], "qualifies": True,
@@ -356,24 +511,47 @@ def main() -> int:
         from research_expand import parse_ai_json
         data = parse_ai_json(Path(args.from_response).read_text(encoding="utf-8"))
         ents = normalize(t, data.get("entities", []), candidates, focus_map, min_score, min_answers)
-        write_roster(t, ents)
+        preserved = 0
+        if t == "object" and not args.force_empty:
+            ents, preserved = carry_forward_objects(ents, previous_roster)
+        ents, was_preserved = preserve_existing_object_roster(t, ents, previous_roster, args.force_empty)
+        if was_preserved:
+            print("  ⚠ Empty object response; preserving existing object roster")
+            return 0
+        write_roster(t, ents, source="response", sampled_answer_ids=sampled_answer_ids,
+                     preserved_count=preserved)
         elig = sum(1 for e in ents if e["page_eligible"])
-        print(f"✓ {t} roster written: {len(ents)} entities, {elig} page-eligible → {roster_file(t).name}")
+        extra = f", preserved {preserved}" if preserved else ""
+        print(f"✓ {t} roster written: {len(ents)} entities, {elig} page-eligible{extra} → {roster_file(t).name}")
         return 0
 
     from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
+    preserved = 0
+    failure_reason = None
     try:
         data = parse_ai_json(call_ai(build_prompt(t, candidates, focus_map, excerpts),
                                      args.model or DEFAULT_MODEL))
         ents = normalize(t, data.get("entities", []), candidates, focus_map, min_score, min_answers)
+        if t == "object" and not args.force_empty:
+            ents, preserved = carry_forward_objects(ents, previous_roster)
         source = "AI"
     except Exception as exc:  # noqa: BLE001
         print(f"  ⚠ AI resolution unavailable ({exc}); using deterministic fallback")
         ents = deterministic(t, candidates, focus_map, min_score, min_answers)
         source = "deterministic"
-    write_roster(t, ents)
+        failure_reason = str(exc)
+
+    ents, was_preserved = preserve_existing_object_roster(t, ents, previous_roster, args.force_empty)
+    if was_preserved:
+        elig = sum(1 for e in ents if e["page_eligible"])
+        print(f"✓ {t} roster preserved: {len(ents)} existing entities, {elig} page-eligible → {roster_file(t).name}")
+        return 0
+
+    write_roster(t, ents, source=source.lower(), sampled_answer_ids=sampled_answer_ids,
+                 preserved_count=preserved, failure_reason=failure_reason)
     elig = sum(1 for e in ents if e["page_eligible"])
-    print(f"✓ {t} roster via {source}: {len(ents)} entities, {elig} page-eligible → {roster_file(t).name}")
+    extra = f", preserved {preserved}" if preserved else ""
+    print(f"✓ {t} roster via {source}: {len(ents)} entities, {elig} page-eligible{extra} → {roster_file(t).name}")
     return 0
 
 
