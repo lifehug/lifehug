@@ -22,9 +22,11 @@ from lifehug_core import (
     REPO_DIR,
     ROTATION_FILE,
     WIKI_DIR,
+    format_learning_failure,
     load_config,
     parse_categories,
     parse_questions,
+    read_learning_failures,
 )
 from question_candidates import VALID_STATUSES
 from question_planner import DEFAULT_DELIVERY_QUEUE_LIMIT
@@ -562,6 +564,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         check("telegram token source available", True)
     else:
         warn("telegram token missing", "set TELEGRAM_BOT_TOKEN or configure ~/.openclaw/openclaw.json")
+
+    learning_rows = read_learning_failures(limit=5, since_days=14)
+    if learning_rows:
+        warn("recent learning-loop failures", f"{len(learning_rows)} recorded in the last 14 days")
+        for row in learning_rows[:3]:
+            print(f"  - {format_learning_failure(row)}")
+    else:
+        check("recent learning-loop failures", True, "none recorded")
 
     print()
     print("checking next question...", flush=True)

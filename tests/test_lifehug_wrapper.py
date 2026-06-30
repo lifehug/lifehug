@@ -131,6 +131,26 @@ class LifehugWrapperTests(unittest.TestCase):
         self.assertIn('planner-report --limit "$QUEUE_LIMIT"', script)
         self.assertIn('planner-queue --limit "$QUEUE_LIMIT"', script)
 
+    def test_daily_compile_failure_is_recorded_without_blocking(self):
+        script = (SYSTEM / "daily_question.sh").read_text(encoding="utf-8")
+
+        self.assertIn('record_learning_failure "daily_question" "wiki_compile"', script)
+        self.assertIn("COMPILE_STATUS=$?", script)
+        self.assertIn('if [[ "$COMPILE_STATUS" -ne 0 ]]', script)
+
+    def test_weekly_reports_recent_learning_failures(self):
+        script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
+
+        self.assertIn('record_learning_failure "weekly_maintenance" "classify_story"', script)
+        self.assertIn("LEARNING_OUT=$(learning_failures_summary", script)
+        self.assertIn("${LEARNING_OUT}", script)
+
+    def test_process_answer_learning_state_is_committed(self):
+        script = (SYSTEM / "process_answer.py").read_text(encoding="utf-8")
+
+        self.assertIn('"state"', script)
+        self.assertIn('"quality_scoring"', script)
+
 
 if __name__ == "__main__":
     unittest.main()

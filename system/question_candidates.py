@@ -17,6 +17,7 @@ from lifehug_core import (
     parse_categories,
     parse_questions,
     read_json,
+    record_learning_failure,
     write_json,
     write_text,
 )
@@ -176,8 +177,12 @@ def refresh_neighborhood_readiness_safely() -> None:
     try:
         from neighborhoods import refresh_all_neighborhood_readiness  # noqa: PLC0415
         refresh_all_neighborhood_readiness(write=True)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "question_candidates",
+            "refresh_neighborhood_readiness",
+            exc,
+        )
 
 
 def find_candidate(data: dict, candidate_id: str) -> dict:
@@ -567,14 +572,23 @@ def auto_promote_candidates(
     try:
         from quality_profile import load_profile  # noqa: PLC0415
         quality_profile = load_profile()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "question_candidates",
+            "load_quality_profile",
+            exc,
+        )
 
     # Load neighborhoods for category inference
     try:
         from lifehug_core import NEIGHBORHOODS_FILE  # noqa: PLC0415
         neighborhoods = read_json(NEIGHBORHOODS_FILE) if NEIGHBORHOODS_FILE.exists() else {}
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "question_candidates",
+            "load_neighborhoods",
+            exc,
+        )
         neighborhoods = {}
 
     # Collect promotable candidates with scores

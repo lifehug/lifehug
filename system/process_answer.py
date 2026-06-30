@@ -20,6 +20,7 @@ from lifehug_core import (
     parse_questions,
     question_by_id,
     read_json,
+    record_learning_failure,
     rebuild_coverage,
     write_json,
     write_text,
@@ -33,8 +34,12 @@ def refresh_neighborhood_readiness_safely() -> None:
     try:
         from neighborhoods import refresh_all_neighborhood_readiness  # noqa: PLC0415
         refresh_all_neighborhood_readiness(write=True)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "refresh_neighborhood_readiness",
+            exc,
+        )
 
 
 def next_followup_id(md_text: str, source_id: str) -> str:
@@ -95,8 +100,7 @@ def git_commit(message: str, push: bool) -> None:
         "system/rotation.json",
         "system/coverage.json",
         "answers",
-        "state/neighborhoods.json",
-        "state/source_manifest.json",
+        "state",
         "wiki",
     ]
     subprocess.run(["git", "-C", str(REPO_DIR), "add", "--", *paths], check=True)
@@ -232,8 +236,13 @@ def main():
             from question_planner import infer_story_function  # noqa: PLC0415
             story_fn = infer_story_function(str(question.get("text", "")))
             append_score(question_id, cat, story_fn, None, signals, richness)
-        except Exception:  # noqa: BLE001
-            pass  # quality scoring never breaks the answer save flow
+        except Exception as exc:  # noqa: BLE001
+            record_learning_failure(
+                "process_answer",
+                "quality_scoring",
+                exc,
+                context={"question_id": question_id},
+            )
 
     if args.commit or args.push:
         summary = args.summary or str(question["text"])[:64]

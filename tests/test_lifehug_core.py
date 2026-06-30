@@ -64,6 +64,26 @@ Legacy answer body.
 """
         self.assertEqual(lifehug_core.answer_body(content), "Legacy answer body.")
 
+    def test_learning_failure_log_round_trip(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "learning_failures.jsonl"
+            lifehug_core.record_learning_failure(
+                "process_answer",
+                "quality_scoring",
+                RuntimeError("scorer unavailable"),
+                context={"question_id": "A1"},
+                exit_code=7,
+                path=path,
+            )
+
+            rows = lifehug_core.read_learning_failures(path=path)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["component"], "process_answer")
+            self.assertEqual(rows[0]["operation"], "quality_scoring")
+            self.assertEqual(rows[0]["exit_code"], 7)
+            self.assertIn("A1", json.dumps(rows[0]["context"]))
+            self.assertIn("process_answer/quality_scoring", lifehug_core.format_learning_failure(rows[0]))
+
 
 class ProcessAnswerTests(unittest.TestCase):
     def test_next_followup_id_uses_letter_suffixes(self):

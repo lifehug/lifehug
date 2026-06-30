@@ -90,6 +90,31 @@ pin_message() {
     -d "chat_id=${CHAT_ID}&message_id=${message_id}&disable_notification=true" >/dev/null || true
 }
 
+record_learning_failure() {
+  local component="$1"
+  local operation="$2"
+  local exit_code="$3"
+  local output="$4"
+  LEARNING_FAILURE_OUTPUT="$output" python3 - "$component" "$operation" "$exit_code" <<'PY' || true
+import os
+import sys
+
+sys.path.insert(0, "system")
+from lifehug_core import record_learning_failure
+
+try:
+    code = int(sys.argv[3])
+except (IndexError, ValueError):
+    code = None
+record_learning_failure(
+    sys.argv[1],
+    sys.argv[2],
+    os.environ.get("LEARNING_FAILURE_OUTPUT", ""),
+    exit_code=code,
+)
+PY
+}
+
 extract_message_id() {
   python3 -c '
 import json
@@ -103,7 +128,13 @@ print(payload["result"]["message_id"])
 
 # Keep the wiki (the relational database the rest of the system reads) fresh
 # before delivering. Cheap and deterministic; failures never block the question.
-python3 "$WORKSPACE/system/wiki_compile.py" >/dev/null 2>&1 || true
+set +e
+COMPILE_OUT=$(python3 "$WORKSPACE/system/wiki_compile.py" 2>&1)
+COMPILE_STATUS=$?
+set -e
+if [[ "$COMPILE_STATUS" -ne 0 ]]; then
+  record_learning_failure "daily_question" "wiki_compile" "$COMPILE_STATUS" "$COMPILE_OUT"
+fi
 
 safe_autocommit
 

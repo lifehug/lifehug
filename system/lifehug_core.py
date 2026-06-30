@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SYSTEM_DIR = Path(__file__).resolve().parent
@@ -32,6 +32,7 @@ QUESTION_QUEUE_FILE = STATE_DIR / "question_queue.json"
 PLANNER_STATE_FILE = STATE_DIR / "planner_state.json"
 SOURCE_MANIFEST_FILE = STATE_DIR / "source_manifest.json"
 SOURCE_LINT_FINDINGS_FILE = STATE_DIR / "source_lint_findings.json"
+LEARNING_FAILURES_FILE = STATE_DIR / "learning_failures.jsonl"
 MISSION_FILE = SYSTEM_DIR / "mission.md"
 CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
 NEIGHBORHOODS_FILE = STATE_DIR / "neighborhoods.json"
@@ -97,6 +98,82 @@ def write_text(path: Path, text: str) -> None:
         f.write(text)
         tmp = Path(f.name)
     tmp.replace(path)
+
+
+def record_learning_failure(
+    component: str,
+    operation: str,
+    error: object,
+    *,
+    context: dict[str, object] | None = None,
+    exit_code: int | None = None,
+    path: Path = LEARNING_FAILURES_FILE,
+) -> dict[str, object]:
+    """Append a non-blocking learning-loop failure for later doctor review."""
+    record: dict[str, object] = {
+        "recorded_at": now_utc(),
+        "component": component,
+        "operation": operation,
+        "error": str(error)[:4000],
+    }
+    if exit_code is not None:
+        record["exit_code"] = exit_code
+    if context:
+        record["context"] = context
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return record
+
+
+def read_learning_failures(
+    *,
+    limit: int = 5,
+    since_days: int | None = 14,
+    path: Path = LEARNING_FAILURES_FILE,
+) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    cutoff = None
+    if since_days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
+    rows: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if cutoff is not None:
+            recorded_at = str(row.get("recorded_at", ""))
+            try:
+                recorded_dt = datetime.strptime(recorded_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            except ValueError:
+                recorded_dt = None
+            if recorded_dt is not None and recorded_dt < cutoff:
+                continue
+        rows.append(row)
+    return rows[-limit:][::-1]
+
+
+def format_learning_failure(row: dict[str, object]) -> str:
+    when = str(row.get("recorded_at", "?"))
+    component = str(row.get("component", "?"))
+    operation = str(row.get("operation", "?"))
+    error = " ".join(str(row.get("error", "")).split())
+    if len(error) > 160:
+        error = error[:157] + "..."
+    return f"{when} {component}/{operation}: {error or 'unknown failure'}"
+
+
+def format_learning_failures_summary(limit: int = 3, since_days: int | None = 14) -> str:
+    rows = read_learning_failures(limit=limit, since_days=since_days)
+    if not rows:
+        return "Learning-loop failures: none recorded recently"
+    lines = [f"Learning-loop failures: {len(rows)} recent"]
+    lines.extend(f"- {format_learning_failure(row)}" for row in rows)
+    return "\n".join(lines)
 
 
 def _parse_simple_yaml(path: Path) -> dict[str, str]:

@@ -52,6 +52,42 @@ run_step() {
   "$@"
 }
 
+record_learning_failure() {
+  local component="$1"
+  local operation="$2"
+  local exit_code="$3"
+  local output="$4"
+  LEARNING_FAILURE_OUTPUT="$output" python3 - "$component" "$operation" "$exit_code" <<'PY' || true
+import os
+import sys
+
+sys.path.insert(0, "system")
+from lifehug_core import record_learning_failure
+
+try:
+    code = int(sys.argv[3])
+except (IndexError, ValueError):
+    code = None
+record_learning_failure(
+    sys.argv[1],
+    sys.argv[2],
+    os.environ.get("LEARNING_FAILURE_OUTPUT", ""),
+    exit_code=code,
+)
+PY
+}
+
+learning_failures_summary() {
+  python3 - <<'PY'
+import sys
+
+sys.path.insert(0, "system")
+from lifehug_core import format_learning_failures_summary
+
+print(format_learning_failures_summary(limit=3, since_days=14))
+PY
+}
+
 safe_autocommit() {
   local paths=(
     README.md
@@ -132,7 +168,13 @@ run_step python3 "$WORKSPACE/system/lifehug.py" compile --no-ai
 run_source_integrity
 echo
 echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --limit ${CLASSIFY_LIMIT}"
-CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1) || true
+set +e
+CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1)
+CLASSIFY_STATUS=$?
+set -e
+if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
+  record_learning_failure "weekly_maintenance" "classify_story" "$CLASSIFY_STATUS" "$CLASSIFY_OUT"
+fi
 echo "$CLASSIFY_OUT"
 run_step python3 "$WORKSPACE/system/lifehug.py" quality-update
 
@@ -146,6 +188,8 @@ echo "$QUEUE_OUT"
 run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
 PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
+LEARNING_OUT=$(learning_failures_summary 2>&1 || true)
+echo "$LEARNING_OUT"
 safe_autocommit
 
 telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
@@ -156,4 +200,6 @@ ${PROMOTE_OUT}
 
 ${QUEUE_OUT}
 
-${PROGRESS_OUT}"
+${PROGRESS_OUT}
+
+${LEARNING_OUT}"
