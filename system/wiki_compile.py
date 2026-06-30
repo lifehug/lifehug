@@ -367,22 +367,34 @@ def scan_mentions(names, answers, manual_sources):
     return ranked(answers.values()), ranked(manual_sources.values())
 
 
-def _focus_alias_map(people_roster):
-    """focus_slug -> set of alias names, from roster entries mapped to a Focus."""
+def _focus_slugs(categories):
+    return {
+        slugify(clean_focus_name(info["name"]))
+        for info in categories.values()
+        if info.get("group") == "focus"
+    }
+
+
+def _focus_alias_map(person_roster, focus_slugs=None):
+    """focus_slug -> alias names, from canonical person entities mapped to a Focus."""
     alias_map = defaultdict(set)
-    for p in (people_roster or {}).get("people", []):
+    valid = set(focus_slugs or [])
+    for p in (person_roster or {}).get("entities", []):
         mf = p.get("maps_to_focus")
         if not mf:
             continue
-        alias_map[mf].add(p.get("name", ""))
+        focus_slug = slugify(clean_focus_name(str(mf)))
+        if valid and focus_slug not in valid:
+            continue
+        alias_map[focus_slug].add(p.get("name", ""))
         for a in p.get("aliases", []):
-            alias_map[mf].add(a)
+            alias_map[focus_slug].add(a)
     return alias_map
 
 
-def plan_focuses(categories, questions, answers, manual_sources, people_roster=None):
+def plan_focuses(categories, questions, answers, manual_sources, person_roster=None):
     descs = []
-    alias_map = _focus_alias_map(people_roster)
+    alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
             continue
@@ -439,7 +451,7 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
     builds itself). `taken_slugs` accumulates so we never double-build a slug."""
     descs = []
     noun = _ENTITY_NOUN.get(entity_type, entity_type)
-    entities = (roster or {}).get("entities") or (roster or {}).get("people") or []
+    entities = (roster or {}).get("entities") or []
     for ent in entities:
         if not ent.get("page_eligible"):
             continue
@@ -526,11 +538,11 @@ def plan_themes(answers, manual_sources):
     return descs
 
 
-def plan_relationships(categories, questions, answers, manual_sources, author, people_roster=None):
+def plan_relationships(categories, questions, answers, manual_sources, author, person_roster=None):
     descs = []
     author = author or "Me"
     author_slug = slugify(author)
-    alias_map = _focus_alias_map(people_roster)
+    alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
             continue
@@ -995,17 +1007,17 @@ def main():
     cfg = load_config()
     author = cfg.get("name", "Me")
     author_full = cfg.get("full_name") or author
-    people_roster = load_roster("person")
+    person_roster = load_roster("person")
     focus_slugs = {slugify(clean_focus_name(info["name"]))
                    for info in categories.values() if info.get("group") == "focus"}
 
     # 1. plan — the person's own life story leads.
     descs = []
     descs += plan_life_story(categories, questions, answers, manual_sources, author_full)
-    descs += plan_focuses(categories, questions, answers, manual_sources, people_roster)
+    descs += plan_focuses(categories, questions, answers, manual_sources, person_roster)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources)
-    descs += plan_relationships(categories, questions, answers, manual_sources, author, people_roster)
+    descs += plan_relationships(categories, questions, answers, manual_sources, author, person_roster)
     descs += plan_self(questions, answers)
 
     # Entity/node graduation: build out every node of the life graph from mentions —

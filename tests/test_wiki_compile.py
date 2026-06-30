@@ -353,12 +353,6 @@ class PlanEntitiesTests(unittest.TestCase):
         descs = self.wc.plan_entities("person", {"A1": _ans("A1", "unrelated")}, {}, self._roster(), set())
         self.assertEqual(descs, [])
 
-    def test_legacy_people_key_still_read(self):
-        descs = self.wc.plan_entities("person", self.answers, {}, {"people": [
-            {"name": "Trevor", "slug": "trevor", "aliases": [], "maps_to_focus": None,
-             "page_eligible": True}]}, set())
-        self.assertEqual(len(descs), 1)
-
 
 class FocusEnrichmentTests(unittest.TestCase):
     def setUp(self):
@@ -370,8 +364,8 @@ class FocusEnrichmentTests(unittest.TestCase):
         answers = {"A6": _ans("A6", "my dad was an architect"),
                    "A9": _ans("A9", "my dad and I reconciled"),
                    "K2": _ans("K2", "mom was kind")}  # no dad mention
-        roster = {"people": [{"name": "Dad", "slug": "dad", "aliases": ["Father"],
-                              "maps_to_focus": "dad", "page_eligible": False}]}
+        roster = {"entities": [{"name": "Dad", "slug": "dad", "aliases": ["Father"],
+                                "maps_to_focus": "dad", "page_eligible": False}]}
         descs = self.wc.plan_focuses(categories, questions, answers, {}, roster)
         dad = next(d for d in descs if d["slug"] == "dad")
         cited = {c["id"] for c in dad["cited_items"]}
@@ -384,11 +378,23 @@ class FocusEnrichmentTests(unittest.TestCase):
         questions = [{"id": "K1", "category": "K", "answered": True, "text": "Tell me about mom"}]
         answers = {"K1": _ans("K1", "mom taught me kindness"),
                    "A3": _ans("A3", "my mom moved us a lot")}
-        descs = self.wc.plan_focuses(categories, questions, answers, {}, {"people": []})
+        descs = self.wc.plan_focuses(categories, questions, answers, {}, {"entities": []})
         mom = next(d for d in descs if d["slug"] == "mom")
         cited = {c["id"] for c in mom["cited_items"]}
         self.assertIn("K1", cited)   # category answer
         self.assertIn("A3", cited)   # cross-category mention enrichment
+
+    def test_focus_alias_map_normalizes_focus_names(self):
+        categories = {"M": {"name": "Focus — Dad", "group": "focus"}}
+        answers = {"A1": _ans("A1", "Father taught me how to work")}
+        roster = {"entities": [{"name": "James Taylor", "slug": "james-taylor",
+                                "aliases": ["Father"], "maps_to_focus": "Focus — Dad",
+                                "page_eligible": False}]}
+
+        descs = self.wc.plan_focuses(categories, [], answers, {}, roster)
+
+        dad = next(d for d in descs if d["slug"] == "dad")
+        self.assertEqual({c["id"] for c in dad["cited_items"]}, {"A1"})
 
 
 class RelationshipPlanningTests(unittest.TestCase):
@@ -403,8 +409,8 @@ class RelationshipPlanningTests(unittest.TestCase):
             "A9": _ans("A9", "my father and I had a hard conversation"),
             "K2": _ans("K2", "mom was kind"),
         }
-        roster = {"people": [{"name": "Dad", "slug": "dad", "aliases": ["Father"],
-                              "maps_to_focus": "dad", "page_eligible": False}]}
+        roster = {"entities": [{"name": "Dad", "slug": "dad", "aliases": ["Father"],
+                                "maps_to_focus": "dad", "page_eligible": False}]}
 
         descs = self.wc.plan_relationships(categories, questions, answers, {}, "Dave", roster)
 
@@ -420,7 +426,7 @@ class RelationshipPlanningTests(unittest.TestCase):
         categories = {"M": {"name": "Focus — Dad", "group": "focus"}}
         answers = {"A6": _ans("A6", "my dad was an architect")}
 
-        descs = self.wc.plan_relationships(categories, [], answers, {}, "Dave", {"people": []})
+        descs = self.wc.plan_relationships(categories, [], answers, {}, "Dave", {"entities": []})
 
         self.assertEqual(descs, [])
 
@@ -432,7 +438,7 @@ class RelationshipPlanningTests(unittest.TestCase):
             "A3": _ans("A3", "my mom moved us a lot"),
         }
 
-        descs = self.wc.plan_relationships(categories, questions, answers, {}, "Dave", {"people": []})
+        descs = self.wc.plan_relationships(categories, questions, answers, {}, "Dave", {"entities": []})
 
         rel = next(d for d in descs if d["slug"] == "dave-and-mom")
         self.assertEqual([c["id"] for c in rel["cited_items"]], ["K1"])

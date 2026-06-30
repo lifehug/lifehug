@@ -457,7 +457,7 @@ def cmd_recommend_focuses(args: argparse.Namespace) -> int:
 
 
 def cmd_people_roster(args: argparse.Namespace) -> int:
-    flags = []
+    flags = ["--type", "person"]
     if args.emit_task:
         flags.extend(["--emit-task", args.emit_task])
     elif args.from_response:
@@ -472,7 +472,8 @@ def cmd_people_roster(args: argparse.Namespace) -> int:
         flags.extend(["--min-answers", str(args.min_answers)])
     if args.model:
         flags.extend(["--model", args.model])
-    return run_python("people_roster.py", flags)
+    print("people-roster is a compatibility alias; using entity-roster --type person.")
+    return run_python("entity_roster.py", flags)
 
 
 def cmd_entity_roster(args: argparse.Namespace) -> int:
@@ -771,7 +772,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_recommend_focuses)
 
-    p = sub.add_parser("people-roster", help="Resolve mentioned people into a canonical roster for auto-pages")
+    p = sub.add_parser("people-roster", help="Compatibility alias for entity-roster --type person")
     p.add_argument("--emit-task", metavar="PATH", help="Write resolution prompt + candidates (keyless agent path)")
     p.add_argument("--from-response", metavar="PATH", help="Ingest an agent-written roster JSON")
     p.add_argument("--show", action="store_true", help="Print the current roster")
