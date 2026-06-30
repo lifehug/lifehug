@@ -39,6 +39,8 @@ from lifehug_core import (
     write_json,
 )
 
+FOCUS_RECOMMENDATION_TYPES = ("person", "place", "period", "theme")
+
 OLD_FOCUS_TERM = "Spot" "light"
 
 # ---------------------------------------------------------------------------
@@ -591,7 +593,7 @@ def main() -> None:
     parser.add_argument("--recommend", action="store_true", help="Analyze and show recommendations")
     parser.add_argument("--min-score", type=float, default=3.0, help="Minimum score to include (default: 3.0)")
     parser.add_argument("--include-dismissed", action="store_true", help="Include dismissed recommendations")
-    parser.add_argument("--type", dest="filter_type", choices=["person", "place", "period", "theme"],
+    parser.add_argument("--type", dest="filter_type", choices=FOCUS_RECOMMENDATION_TYPES,
                         help="Filter by entity type")
     parser.add_argument("--dismiss", metavar="REC_ID", help="Dismiss a recommendation by id")
     parser.add_argument("--reason", default="", help="Reason for dismissal")

@@ -66,10 +66,13 @@ class LifehugWrapperTests(unittest.TestCase):
             ["artifact", "prompt", "outputs/mothers-day"],
             ["artifact", "save", "outputs/mothers-day", "--final"],
             ["artifact", "promote-source", "outputs/mothers-day", "--kind", "all"],
-            ["classify-story", "--classify-all", "--unclassified", "--limit", "3", "--dry-run"],
+            ["classify-story", "--classify-all", "--unclassified", "--limit", "3", "--dry-run", "--verbose"],
+            ["research-expand", "--topic", "Dad", "--type", "person", "--from-response", "/tmp/response.json"],
+            ["recommend-focuses", "--type", "period"],
+            ["entity-roster", "--type", "object", "--force-empty"],
             ["serve", "--port", "8765"],
             ["rebuild"],
-            ["process-answer", "A1", "--source", "text"],
+            ["process-answer", "A1", "--source", "text", "--summary", "Short answer"],
             ["daily-dry-run"],
             ["weekly-maintenance", "--dry-run"],
             ["monthly-research", "--dry-run", "--gap-limit", "2", "--self-topic", "Who I am becoming", "--focus-min-score", "15"],
@@ -90,6 +93,25 @@ class LifehugWrapperTests(unittest.TestCase):
         for command in ["candidates-list", "candidates-review", "candidates-update"]:
             with self.subTest(command=command):
                 self.assertEqual(option_choices(subparser(parser, command), "--status"), expected)
+
+    def test_research_expand_choices_match_expander(self):
+        wrapper = load_wrapper()
+        research = load_system("research_expand")
+        parser = wrapper.build_parser()
+        command = subparser(parser, "research-expand")
+
+        self.assertEqual(option_choices(command, "--type"), set(research.VALID_TOPIC_TYPES))
+        self.assertEqual(option_choices(command, "--output"), set(research.VALID_OUTPUT_TYPES))
+
+    def test_recommend_focus_type_choices_match_recommender(self):
+        wrapper = load_wrapper()
+        recommends = load_system("recommend_focuses")
+        parser = wrapper.build_parser()
+
+        self.assertEqual(
+            option_choices(subparser(parser, "recommend-focuses"), "--type"),
+            set(recommends.FOCUS_RECOMMENDATION_TYPES),
+        )
 
     def test_planner_queue_default_matches_delivery_horizon(self):
         wrapper = load_wrapper()
@@ -150,6 +172,23 @@ class LifehugWrapperTests(unittest.TestCase):
 
         self.assertIn('"state"', script)
         self.assertIn('"quality_scoring"', script)
+
+    def test_monthly_dry_run_previews_entity_roster_refresh(self):
+        script = (SYSTEM / "monthly_research.sh").read_text(encoding="utf-8")
+        dry_run_index = script.index('if [[ "$DRY_RUN" == "1" ]]')
+        dry_run_exit_index = script.index("  exit 0", dry_run_index)
+        preview_index = script.index("preview entity roster refreshes", dry_run_index)
+        emit_task_index = script.index("--emit-task", preview_index)
+
+        self.assertLess(preview_index, dry_run_exit_index)
+        self.assertLess(emit_task_index, dry_run_exit_index)
+
+    def test_monthly_report_includes_research_and_roster_output(self):
+        script = (SYSTEM / "monthly_research.sh").read_text(encoding="utf-8")
+        notify_index = script.index('telegram_notify "')
+
+        self.assertIn("${RESEARCH_OUT}", script[notify_index:])
+        self.assertIn("${ROSTER_OUT}", script[notify_index:])
 
 
 if __name__ == "__main__":

@@ -30,6 +30,8 @@ from lifehug_core import (
 )
 from question_candidates import VALID_STATUSES
 from question_planner import DEFAULT_DELIVERY_QUEUE_LIMIT
+from recommend_focuses import FOCUS_RECOMMENDATION_TYPES
+from research_expand import VALID_OUTPUT_TYPES, VALID_TOPIC_TYPES
 
 SYSTEM_DIR = Path(__file__).resolve().parent
 CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
@@ -370,6 +372,8 @@ def cmd_process_answer(args: argparse.Namespace) -> int:
         flags.append("--push")
     if args.no_compile_wiki:
         flags.append("--no-compile-wiki")
+    if args.summary:
+        flags.extend(["--summary", args.summary])
     for followup in args.followup or []:
         flags.extend(["--followup", followup])
     question_id = [] if args.question_id is None else [args.question_id]
@@ -416,6 +420,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
             flags.append("--unclassified")
     if args.model:
         flags.extend(["--model", args.model])
+    if args.verbose:
+        flags.append("--verbose")
     if args.limit is not None:
         flags.extend(["--limit", str(args.limit)])
     if args.dry_run:
@@ -439,6 +445,8 @@ def cmd_research_expand(args: argparse.Namespace) -> int:
         flags.extend(["--output", args.output])
     if args.model:
         flags.extend(["--model", args.model])
+    if args.from_response:
+        flags.extend(["--from-response", args.from_response])
     if args.dry_run:
         flags.append("--dry-run")
     if args.force:
@@ -475,6 +483,8 @@ def cmd_entity_roster(args: argparse.Namespace) -> int:
         flags.extend(["--min-answers", str(args.min_answers)])
     if args.model:
         flags.extend(["--model", args.model])
+    if args.force_empty:
+        flags.append("--force-empty")
     return run_python("entity_roster.py", flags)
 
 
@@ -739,6 +749,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unclassified", action="store_true")
     p.add_argument("--limit", type=int, help="With --classify-all: maximum files to classify")
     p.add_argument("--model", help="Override AI model")
+    p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_classify_story)
 
@@ -746,10 +757,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("research-expand", help="Generate question neighborhoods")
     p.add_argument("--expand", metavar="PATH", help="Expand from a file")
     p.add_argument("--topic", help="Named topic to expand")
-    p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme", "event", "self", "relationship"])
+    p.add_argument("--type", choices=VALID_TOPIC_TYPES)
     p.add_argument("--gaps", action="store_true", help="Auto-detect thin areas")
     p.add_argument("--prompt-only", action="store_true", help="Output AI prompt only")
-    p.add_argument("--output", choices=["chapter", "letter", "essay", "post", "profile"], default="chapter")
+    p.add_argument("--output", choices=VALID_OUTPUT_TYPES, default="chapter")
+    p.add_argument("--from-response", metavar="PATH",
+                   help="Deposit an agent-written questions JSON instead of calling a model")
     p.add_argument("--model", help="Override AI model")
     p.add_argument("--force", action="store_true")
     p.add_argument("--dry-run", action="store_true")
@@ -758,7 +771,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Focus Recommendations ---
     p = sub.add_parser("recommend-focuses", help="Recommend new Focuses from accumulated stories")
     p.add_argument("--min-score", type=float)
-    p.add_argument("--type", choices=["person", "place", "time_period", "project", "theme"])
+    p.add_argument("--type", choices=FOCUS_RECOMMENDATION_TYPES)
     p.add_argument("--include-dismissed", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_recommend_focuses)
@@ -772,6 +785,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-score", type=float, help="Page score threshold (type default)")
     p.add_argument("--min-answers", type=int, help="Page answer threshold (type default)")
     p.add_argument("--model", help="Override AI model")
+    p.add_argument("--force-empty", action="store_true",
+                   help="Allow an empty object roster to overwrite an existing one")
     p.set_defaults(func=cmd_entity_roster)
 
     p = sub.add_parser("focus-approve", help="Approve a Focus recommendation")
@@ -879,6 +894,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.add_argument("--commit", action="store_true")
     p.add_argument("--push", action="store_true")
+    p.add_argument("--summary")
     p.add_argument("--no-compile-wiki", action="store_true")
     p.set_defaults(func=cmd_process_answer)
 

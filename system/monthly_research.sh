@@ -44,7 +44,8 @@ SELF_TOPIC="${LIFEHUG_MONTHLY_SELF_TOPIC:-Who I am becoming}"
 SELF_OUTPUT="${LIFEHUG_MONTHLY_SELF_OUTPUT:-essay}"
 FOCUS_MIN_SCORE="${LIFEHUG_MONTHLY_FOCUS_MIN_SCORE:-15}"
 TARGETS_FILE="$(mktemp "${TMPDIR:-/tmp}/lifehug-monthly-targets.XXXXXX")"
-trap 'rm -f "$TARGETS_FILE"' EXIT
+ROSTER_PREVIEW_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lifehug-roster-preview.XXXXXX")"
+trap 'rm -f "$TARGETS_FILE"; rm -rf "$ROSTER_PREVIEW_DIR"' EXIT
 
 run_step() {
   echo
@@ -197,22 +198,40 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo
   echo "==> preview Focus recommendations"
   preview_focuses
+  echo
+  echo "==> preview entity roster refreshes"
+  for etype in person place period object; do
+    run_step python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" --emit-task "$ROSTER_PREVIEW_DIR/${etype}.json"
+  done
+  run_step python3 "$WORKSPACE/system/lifehug.py" compile --dry-run --no-ai
   run_step python3 "$WORKSPACE/system/lifehug.py" progress
   exit 0
 fi
 
 run_step python3 "$WORKSPACE/system/lifehug.py" compile
-run_step python3 "$WORKSPACE/system/research_expand.py" --gaps
+RESEARCH_OUT=""
+GAPS_OUT=$(python3 "$WORKSPACE/system/research_expand.py" --gaps 2>&1)
+echo "$GAPS_OUT"
+RESEARCH_OUT="${RESEARCH_OUT}${GAPS_OUT}
+"
 select_gap_targets > "$TARGETS_FILE"
 if [[ ! -s "$TARGETS_FILE" ]]; then
   echo
   echo "No new gap neighborhoods selected."
+  RESEARCH_OUT="${RESEARCH_OUT}No new gap neighborhoods selected.
+"
 fi
 while IFS=$'\t' read -r topic topic_type output; do
   [[ -z "${topic:-}" ]] && continue
-  generate_topic "$topic" "$topic_type" "$output"
+  TOPIC_OUT=$(generate_topic "$topic" "$topic_type" "$output" 2>&1)
+  echo "$TOPIC_OUT"
+  RESEARCH_OUT="${RESEARCH_OUT}${TOPIC_OUT}
+"
 done < "$TARGETS_FILE"
-generate_topic "$SELF_TOPIC" self "$SELF_OUTPUT"
+SELF_OUT=$(generate_topic "$SELF_TOPIC" self "$SELF_OUTPUT" 2>&1)
+echo "$SELF_OUT"
+RESEARCH_OUT="${RESEARCH_OUT}${SELF_OUT}
+"
 FOCUSES_OUT=$(python3 "$WORKSPACE/system/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE" 2>&1) || true
 echo "$FOCUSES_OUT"
 # Refresh the canonical entity rosters (AI-curated) for every entity type, then
@@ -232,6 +251,10 @@ safe_autocommit
 
 telegram_notify "🔬 Lifehug Monthly Research — $(date '+%B %-d')
 
+${RESEARCH_OUT}
+
 ${FOCUSES_OUT}
+
+${ROSTER_OUT}
 
 ${PROGRESS_OUT}"
