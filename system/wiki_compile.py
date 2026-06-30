@@ -47,6 +47,9 @@ from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
 from entity_roster import load_roster
 from roadmap import load_roadmap
 
+# `Entity Type` is the code/frontmatter routing term. Most values are graph
+# node types. `relationship` stays here for compatibility, but it writes a
+# Relationship Edge page rather than a node page.
 TYPE_DIRS = {
     "life": WIKI_DIR / "life",
     "person": WIKI_DIR / "people",
@@ -535,10 +538,10 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
         person_slug = slugify(person)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
 
-        # Relationships are dyadic entities. They should be able to graduate
-        # from the same mention-enriched evidence as Focus person pages, but
-        # only when there is enough actual source material to say something
-        # useful about the bond.
+        # Relationships are dyadic edges, not generic node pages. They should
+        # be able to graduate from the same mention-enriched evidence as Focus
+        # person pages, but only when there is enough actual source material to
+        # say something useful about the bond.
         names = [person] + sorted(n for n in alias_map.get(person_slug, set()) if n)
         a_hits, _m_hits = scan_mentions(names, answers, manual_sources)
         cited_srcs = {a["source"] for a in answer_items}
@@ -1005,7 +1008,7 @@ def main():
     descs += plan_relationships(categories, questions, answers, manual_sources, author, people_roster)
     descs += plan_self(questions, answers)
 
-    # Entity graduation: build out every node of the life graph from mentions —
+    # Entity/node graduation: build out every node of the life graph from mentions —
     # people, then places, periods, and symbolic objects. taken_slugs accumulates
     # so a slug is never double-built across types.
     taken_slugs = set(focus_slugs) | {d["slug"] for d in descs}

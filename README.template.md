@@ -6,10 +6,14 @@
 
 This wiki is a **graph of {name}'s life**. Standard terms:
 
-- **Entity** — a node in the graph; one wiki page (a person, place, period, object, theme, project, relationship, or {name}'s own life story).
-- **Entity Type** — the kind of entity / index section: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` ({name}).
+- **Node** — a graph vertex: a durable subject in {name}'s life that can be compiled into a wiki page.
+- **Node Type** — graph vocabulary for the kind of node: person, place, period, object, theme, project, or life. Most current `Entity Type` values are node types; `relationship` is the exception because it represents an edge page.
+- **Entity** — the current product/code term for a node-worthy subject; usually one wiki page (a person, place, period, object, theme, project, or {name}'s own life story).
+- **Entity Type** — the current product/code and frontmatter term for a wiki page kind: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` ({name}). Most entity types are node types; `relationship` remains the compatibility page type for an edge page.
+- **Edge** — a meaningful connection between nodes. A **Relationship Edge** is a human bond edge, usually between {name} and another person; `wiki/relationships/` stores edge pages.
 - **Focus** — an entity deliberately built toward a deliverable (book, letter, …). **{name} is the primary Focus** — their life story is the biggest, with self-knowledge built in as a dimension of it.
-- **Entity graduation** — entities mentioned across answers are detected, AI-curated into a roster, and graduated into pages automatically. Places/periods graduate on a low bar; objects on symbolic meaning; people on score. Relationships are dyadic entities: Focus relationship pages can graduate from dedicated answers or enough cross-story mentions about the person. The graph grows without manual work.
+- **Entity graduation / node graduation** — entities mentioned across answers are detected, AI-curated into a roster, and graduated into node pages automatically. Places/periods graduate on a low bar; objects on symbolic meaning; people on score. Relationship edges use a dyadic path: Focus relationship pages can graduate from dedicated answers or enough cross-story mentions about the person. The graph grows without manual work.
+- **The Loop** — the continuous-learning flow: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source. Features are **In the Loop** when daily, weekly, monthly, or artifact flows reach them and their output can improve future questions, wiki pages, relationship understanding, or artifacts.
 
 ## Focuses
 {projects}

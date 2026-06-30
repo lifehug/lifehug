@@ -13,6 +13,13 @@ python3 system/lifehug.py status
 
 The `system/` scripts are canonical. Skills, agents, and cron jobs should call scripts instead of duplicating workflow logic.
 
+Use **the Loop** as the canonical operating term: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source. When auditing or designing, classify features as:
+- **In the Loop**: reached by daily, weekly, monthly, or artifact flows and able to affect future questions, wiki pages, relationship understanding, or artifacts.
+- **Loop-adjacent**: manual, dry-run, inspection, setup, or repair support that only changes future behavior when promoted into a Loop surface.
+- **Out of the Loop**: code/data that exists but is not called by Loop entrypoints and is not read downstream. Mission-critical features should not remain here.
+
+Use **Node** and **Edge** when reasoning about graph shape. A Node is a durable life subject that usually compiles into one wiki page; an Edge is a meaningful connection between nodes. Keep `Entity` and `Entity Type` as the current product/code and frontmatter terms: most entity types are node types, while `relationship` remains the compatibility page type for a **Relationship Edge**. `wiki/relationships/` describes the bond between two nodes, not a generic node page.
+
 Then decide:
 
 1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
@@ -126,7 +133,7 @@ python3 system/lifehug.py weekly-maintenance
 LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
 ```
 
-The weekly loop compiles offline, lints sources, applies safe source fixes only when lint finds them, updates the quality profile, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
+The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, auto-promotes candidates under caps, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
 
 Run the monthly growth loop with:
 
@@ -135,7 +142,7 @@ python3 system/lifehug.py monthly-research
 LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh
 ```
 
-The monthly loop compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, reports progress, and autocommits real changes.
+The monthly Loop segment compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, reports progress, and autocommits real changes.
 
 Review candidate questions before they enter the daily flow:
 

@@ -18,6 +18,8 @@ You are an interviewer, editor, and writing partner. You:
 
 Lifehug is script-first. Use `python3 system/lifehug.py ...` and the underlying `system/` scripts as the canonical behavior. Do not reimplement answer saving, question picking, daily delivery, or wiki compilation manually unless you are repairing a failed script run with a clear reason.
 
+The central product concept is **the Loop**: the continuous-learning path where source capture, wiki compile, source integrity, classification, quality scoring, candidate promotion, planning, daily questioning, and artifact feedback compound over time. When auditing or designing, say whether a feature is **In the Loop**, **Loop-adjacent**, or **Out of the Loop**. A mission-critical feature is not done if it only exists in a script but is not reached by the daily, weekly, monthly, or artifact flows.
+
 You are warm but not sycophantic. You're genuinely curious about this person's life. You ask follow-ups that show you were listening. You never rush.
 
 ---
@@ -520,10 +522,18 @@ python3 system/compose.py --info outputs/title    # one output's history
 
 The private wiki is a **graph of the author's life**. Standard terms:
 
-- **Entity** — a node in that graph; one wiki page. People, places, periods, objects, themes, projects, relationships, and the author's own life story are all entities.
-- **Entity Type** — the kind of entity / the index section it lives under: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (the author).
+- **Node** — a graph vertex: a durable subject in the author's life that can be compiled into a wiki page. People, places, periods, objects, themes, projects, and the author's own life story are nodes.
+- **Node Type** — graph vocabulary for the kind of node, such as person, place, period, object, theme, project, or life. Most current `Entity Type` values are node types; `relationship` is the exception because it represents an edge page.
+- **Entity** — the current product/code term for a node-worthy subject; usually one wiki page. Keep using Entity in code and product flows where the system already does.
+- **Entity Type** — the current product/code and frontmatter term for a wiki page kind: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (the author). Most entity types are node types; `relationship` remains the compatibility page type for an edge page.
+- **Edge** — a meaningful connection between nodes/entities. An edge can carry evidence, tension, change over time, and artifact relevance.
+- **Relationship Edge** — a human bond edge, usually between the author and another person. The page in `wiki/relationships/` is an edge page: it answers what the bond is, not merely who the other person is.
 - **Focus** — a *deliberately built-out* entity with an objective, a tier, and a deliverable (book/letter/…). The author themselves is the **primary Focus** (their life story; biggest share of questions). Not every entity is a Focus.
-- **Entity graduation** — the automatic mechanism: the system detects entities mentioned across answers, an **AI-curated roster** (`lifehug.py entity-roster --type <t>`, written to `state/entity_rosters/<t>.json`) cleans and merges them, and `wiki_compile.plan_entities` graduates each page-eligible one into a page built from its mentions. Per-type rules: **places/periods** graduate on a low bar (a few mentions); **objects** graduate on **AI-judged symbolic meaning** (the cleats, the orange shorts), not frequency; **people** on score + answers. Relationships are also entities, but they use `plan_relationships` because they are dyadic: a Focus relationship can graduate from dedicated answers or enough cross-story mentions about the person, using a prompt lens of bond, tension, gratitude, grief, repair, and what went unsaid. This runs monthly (and on compile) so the graph grows with no human action.
+- **Entity graduation / node graduation** — the automatic mechanism: the system detects entities mentioned across answers, an **AI-curated roster** (`lifehug.py entity-roster --type <t>`, written to `state/entity_rosters/<t>.json`) cleans and merges them, and `wiki_compile.plan_entities` graduates each page-eligible one into a node page built from its mentions. Per-type rules: **places/periods** graduate on a low bar (a few mentions); **objects** graduate on **AI-judged symbolic meaning** (the cleats, the orange shorts), not frequency; **people** on score + answers. Relationship edges use `plan_relationships` because they are dyadic: a Focus relationship can graduate from dedicated answers or enough cross-story mentions about the person, using a prompt lens of bond, tension, gratitude, grief, repair, and what went unsaid. This runs monthly (and on compile) so the graph grows with no human action.
+- **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source.
+- **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows without a human manually stitching it together, and whose output can affect future questions, wiki pages, relationship understanding, or artifacts.
+- **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
+- **Out of the Loop** — code or data that exists but is not called by scheduled/manual Loop entrypoints and is not read by downstream Loop state. If it matters to Lifehug's mission, wire it in or explicitly mark it experimental.
 
 ## Category Management
 

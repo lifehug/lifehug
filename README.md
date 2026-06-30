@@ -2,7 +2,7 @@
 
 **Capture your life, deepen it with AI, and turn it into artifacts that matter.**
 
-Lifehug is a lifelong AI oral-history system with two core loops. The **capture loop** asks one thoughtful question each day, takes your answer by voice or text, compiles it into a private cross-linked **wiki of your life**, and uses that wiki to decide what to ask next. The **artifact loop** turns that accumulated memory into things you can actually use: letters, posts, chapters, speeches, a memoir, a founder story.
+Lifehug is a lifelong AI oral-history system organized around **the Loop**: the self-improving flow where daily answers become durable sources, sources become a private wiki and structured signals, signals become better questions, and better questions deepen the life story. The artifact path turns that accumulated memory into things you can actually use: letters, posts, chapters, speeches, a memoir, a founder story — and finished artifacts can feed back into the same Loop as source material.
 
 You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make an artifact.** Both become part of the same compounding memory system.
 
@@ -10,10 +10,18 @@ You usually do one thing: **answer the question.** When an occasion arrives, you
 
 The wiki is a **graph of your life**, and these are the standard terms used throughout:
 
-- **Entity** — a node in the graph; one wiki page. People, places, periods, objects, themes, projects, relationships, and *you* are all entities.
-- **Entity Type** — the kind of entity / the index section it lives under: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (you).
+- **Node** — a graph vertex: a durable subject in your life that can be compiled into a wiki page. People, places, periods, objects, themes, projects, and *you* are nodes.
+- **Node Type** — graph vocabulary for the kind of node, such as person, place, period, object, theme, project, or life. Most current `Entity Type` values are node types; `relationship` is the exception because it represents an edge page.
+- **Entity** — the current product/code term for a node-worthy subject; usually one wiki page. Keep using Entity in code and product flows where the system already does.
+- **Entity Type** — the current product/code and frontmatter term for a wiki page kind: `person`, `place`, `period`, `object`, `theme`, `project`, `relationship`, and `life` (you). Most entity types are node types; `relationship` remains the compatibility page type for an edge page.
+- **Edge** — a meaningful connection between nodes/entities. An edge can carry evidence, tension, change over time, and artifact relevance.
+- **Relationship Edge** — a human bond edge, usually between you and another person. The page in `wiki/relationships/` is an edge page: it answers what the bond is, not merely who the other person is.
 - **Focus** — an entity you're deliberately building toward a deliverable (book, letter, …), with a tier and target. **You are the primary Focus** — your own life story is the biggest one and gets the largest share of questions; self-knowledge (values, fears, contradictions, growth) is a built-in dimension of it, not a separate track.
-- **Entity graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into their own pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score. Relationships use a dyadic path: Focus relationships can graduate from dedicated answers or enough cross-story mentions about the person. Runs monthly and on compile — no manual work.
+- **Entity graduation / node graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into node pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score. Relationship edges use a dyadic path: Focus relationships can graduate from dedicated answers or enough cross-story mentions about the person. Runs monthly and on compile — no manual work.
+- **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source. When we ask whether a feature "works in the Loop," we mean this path.
+- **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows without a human manually stitching it together, and whose output can affect future questions, wiki pages, relationship understanding, or artifacts.
+- **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
+- **Out of the Loop** — code or data that exists but is not called by scheduled/manual Loop entrypoints and is not read by downstream Loop state. Mission-critical work should not stay here; wire it in or document it as experimental.
 
 ---
 
@@ -37,7 +45,7 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 
 ## The big picture
 
-Lifehug is a **compounding system**, not a journal. Each answer feeds a private wiki and a classifier; the classifier turns raw stories into structured people, places, themes, contradictions, possible outputs, and follow-up candidates; the wiki, roadmap, quality profile, and planner decide the next question; the question pulls out the next answer. When you need something real — a Mother's Day letter, a birthday post, a chapter, a speech — the artifact workflow turns that memory into a finished piece, and the finished piece can feed back into the source layer.
+Lifehug is a **compounding system**, not a journal. The Loop is the clutch: each answer feeds a private wiki and a classifier; the classifier turns raw stories into structured people, places, themes, contradictions, possible outputs, and follow-up candidates; the wiki, roadmap, quality profile, and planner decide the next question; the question pulls out the next answer. When you need something real — a Mother's Day letter, a birthday post, a chapter, a speech — the artifact workflow turns that memory into a finished piece, and the finished piece can feed back into the source layer.
 
 ```mermaid
 flowchart TB
@@ -317,7 +325,7 @@ Lifehug treats `answers/` and `sources/` as the source-of-truth layer. The wiki,
 
 That means the system does not fix a memory by rewriting history. If something was wrong, you add a correction. If your understanding changed, you add a reflection. Both become new source files that the wiki can compile alongside the original memory.
 
-The repair loop is:
+The source-integrity segment of the Loop is:
 
 1. **Capture** — answer a question or ingest a story
 2. **Compile** — rebuild the wiki from source files
@@ -385,7 +393,7 @@ flowchart TB
     d --> w --> m
 ```
 
-The daily job needs **no model call**. Weekly maintenance is capped and keyless when OpenClaw is running; if no model is available, the rest of the weekly loop still runs and classification can catch up later. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
+The daily job needs **no model call**. Weekly maintenance is capped and keyless when OpenClaw is running; if no model is available, the rest of the weekly Loop segment still runs and classification can catch up later. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
 
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending
@@ -485,7 +493,7 @@ python3 system/lifehug.py quality-stats # what kinds of questions open you up
 # The daily cycle (usually run by cron)
 python3 system/lifehug.py next                      # preview today's question
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh    # full dry run, nothing sent
-LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh # preview weekly loop
+LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh # preview weekly Loop segment
 LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh # preview monthly growth
 
 # Process an answer
