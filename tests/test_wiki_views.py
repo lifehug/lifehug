@@ -121,7 +121,8 @@ class WikiViewsTests(unittest.TestCase):
         entity_roster.ENTITY_DIR = self.tmp / "rosters"
         self._write("rosters/person.json", {"type": "person", "entities": [
             {"name": "Emma", "aliases": ["Em"], "score": 7.5, "unique_answers": 4, "qualifies": True, "page_eligible": True},
-            {"name": "Dad", "aliases": [], "score": 6, "unique_answers": 2, "qualifies": True, "maps_to_focus": "dad"}]})
+            {"name": "Dad", "aliases": [], "score": 6, "unique_answers": 2, "qualifies": True, "maps_to_focus": "dad"},
+            {"name": "Sarah", "aliases": ["Sare"], "score": 4, "unique_answers": 1, "qualifies": False}]})
         wiki = self.tmp / "wiki"
         serve_wiki.WIKI_DIR = wiki
         self._write("wiki/life/my-life.md",
@@ -144,6 +145,25 @@ class WikiViewsTests(unittest.TestCase):
         _, body, _ = self._view("coverage")
         self.assertLess(body.index('cov-cat">A'), body.index('cov-cat">F'))
 
+    def test_coverage_shows_category_names(self):
+        self._populate()
+        _, body, _ = self._view("coverage")
+        # Each letter is annotated with its category title in parentheses.
+        self.assertIn('cov-name">(Origins)', body)
+
+    def test_candidates_menu_label(self):
+        label = dict((slug, lbl) for slug, lbl, _ in serve_wiki.VIEWS)["candidates"]
+        self.assertEqual(label, "Question Candidates")
+
+    def test_every_view_has_a_description(self):
+        for slug, _, _ in serve_wiki.VIEWS:
+            self.assertIn(slug, serve_wiki.VIEW_DESCRIPTIONS,
+                          f"view {slug} is missing a description")
+
+    def test_description_injected_after_h1(self):
+        body = serve_wiki._with_description("<h1>Coverage</h1><p>x</p>", "hello desc")
+        self.assertEqual(body, '<h1>Coverage</h1><p class="view-desc">hello desc</p><p>x</p>')
+
     def test_question_bank_markers(self):
         self._populate()
         _, body, _ = self._view("question-bank")
@@ -158,12 +178,17 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("needs_review (1)", body)
         self.assertIn("turning_point", body)
 
-    def test_entities_graduation_flags(self):
+    def test_entities_shows_only_ungraduated_candidates(self):
         self._populate()
         _, body, _ = self._view("entities")
-        self.assertIn("Emma", body)
-        self.assertIn("✓ page", body)
-        self.assertIn("→ dad", body)
+        # Sarah is still a candidate — she should appear.
+        self.assertIn("Sarah", body)
+        # Emma (page_eligible) and Dad (maps_to_focus) already have wiki pages,
+        # so they are excluded — you can see them in the wiki itself.
+        self.assertNotIn("Emma", body)
+        self.assertNotIn("Dad", body)
+        # The graduation column is gone now that only candidates are shown.
+        self.assertNotIn("Graduates", body)
 
     def test_status_dashboard(self):
         self._populate()

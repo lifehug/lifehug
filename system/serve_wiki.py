@@ -348,6 +348,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     a {{ color: #7c4f1d; }}
     .muted {{ color: #8a7a63; font-size: 14px; }}
     .empty {{ color: #9a8c75; font-style: italic; padding: 8px 0; }}
+    .view-desc {{ color: #6b5d49; font-size: 15px; line-height: 1.5; margin: -8px 0 24px; max-width: 680px; }}
     /* Dashboard primitives */
     .barwrap {{ display: flex; align-items: center; gap: 10px; margin: 4px 0; }}
     .bar {{ flex: 1; height: 12px; background: #ece5d8; border-radius: 6px; overflow: hidden; max-width: 520px; }}
@@ -363,7 +364,8 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .focus-label {{ font-weight: 650; }}
     .focus-sub {{ color: #8a7a63; font-size: 13px; margin-top: 2px; }}
     .cov-row {{ display: flex; align-items: center; gap: 10px; padding: 5px 0; }}
-    .cov-cat {{ width: 60px; font-weight: 650; }}
+    .cov-cat {{ width: 230px; font-weight: 650; flex-shrink: 0; }}
+    .cov-name {{ font-weight: 400; color: #8a7a63; font-size: 13px; }}
     .qb-cat {{ margin-bottom: 18px; }}
     .qb-list {{ list-style: none; padding-left: 0; }}
     .qb-list li {{ padding: 3px 0; }}
@@ -524,18 +526,22 @@ def view_coverage():
     cats = (read_json(COVERAGE_FILE, default={}) or {}).get("categories", {})
     if not cats:
         return ("Coverage", "<h1>Coverage</h1>" + _empty("No coverage data yet."), False)
+    names = parse_categories(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else {}
     items = []
     for cid, c in cats.items():
         total = c.get("total", 0)
         answered = c.get("answered", 0)
         ratio = answered / total if total else 0
-        items.append((ratio, cid, answered, total, c.get("status", "red")))
+        name = (names.get(cid) or {}).get("name", "")
+        items.append((ratio, cid, name, answered, total, c.get("status", "red")))
     items.sort(key=lambda x: x[0])
     rows = [
-        f'<div class="cov-row"><span class="cov-cat">{html.escape(cid)}</span>'
+        '<div class="cov-row"><span class="cov-cat">'
+        + html.escape(cid) + (f' <span class="cov-name">({html.escape(name)})</span>' if name else "")
+        + "</span>"
         + _bar(ratio, f"{answered}/{total} · {_pct(ratio)}")
         + " " + _badge(status, status) + "</div>"
-        for ratio, cid, answered, total, status in items
+        for ratio, cid, name, answered, total, status in items
     ]
     return ("Coverage", "<h1>Coverage</h1>" + "".join(rows), False)
 
@@ -601,32 +607,29 @@ def view_candidates():
 
 
 def view_entities():
-    parts = ["<h1>Entity Candidates</h1>",
-             '<p class="muted">Auto-detected entities curated into rosters. '
-             'Page-eligible entities graduate to wiki pages on compile.</p>']
+    parts = ["<h1>Entity Candidates</h1>"]
     for etype in ENTITY_TYPES:
-        ents = load_roster(etype).get("entities", [])
+        # Only show entities still in the candidate stage — anything that has
+        # graduated (page-eligible) or already maps to a Focus has a wiki page,
+        # so it's visible in the wiki itself and shouldn't be repeated here.
+        ents = [
+            e for e in load_roster(etype).get("entities", [])
+            if not e.get("page_eligible") and not e.get("maps_to_focus")
+        ]
         parts.append(_h2(f"{etype.title()} ({len(ents)})"))
         if not ents:
-            parts.append(_empty("None yet."))
+            parts.append(_empty("No candidates — none pending graduation."))
             continue
         rows = []
         for e in sorted(ents, key=lambda x: x.get("score", 0) or 0, reverse=True):
-            if e.get("page_eligible"):
-                grad = "✓ page"
-            elif e.get("maps_to_focus"):
-                grad = "→ " + str(e.get("maps_to_focus"))
-            else:
-                grad = "—"
             rows.append([
                 html.escape(str(e.get("name", "?"))),
                 html.escape(", ".join(e.get("aliases", []) or [])) or "—",
                 format(e.get("score", 0) or 0, ".1f"),
                 str(e.get("unique_answers", 0) or 0),
                 ("yes" if e.get("qualifies") else "no"),
-                html.escape(grad),
             ])
-        parts.append(_table(["Name", "Aliases", "Score", "Answers", "Qualifies", "Graduates"], rows))
+        parts.append(_table(["Name", "Aliases", "Score", "Answers", "Qualifies"], rows))
     return ("Entity Candidates", "".join(parts), False)
 
 
@@ -952,13 +955,39 @@ VIEWS = [
     ("coverage", "Coverage", view_coverage),
     ("graph", "Graph", view_graph),
     ("question-bank", "Question Bank", view_question_bank),
-    ("candidates", "Candidates", view_candidates),
+    ("candidates", "Question Candidates", view_candidates),
     ("entities", "Entity Candidates", view_entities),
     ("queue", "Question Queue", view_queue),
     ("sources", "Source Integrity", view_sources),
     ("recommendations", "Focus Recommendations", view_recommendations),
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
+
+# One-line explainer shown under each view's title: what the page is and what the
+# data on it means. Plain text (may include simple inline HTML); injected after
+# the <h1> so empty-state pages get it too.
+VIEW_DESCRIPTIONS = {
+    "status": "A live snapshot of the whole system — one card per moving part of the Loop: what pass you're on, how much you've answered, how many candidates and sources are waiting, and whether the weekly queue is being delivered.",
+    "focuses": "Everything you're deliberately building toward — people, themes, or books. Each bar shows how full a Focus is against its target (answered / target), its tier, and whether it's early, developing, ready to draft, or saturated.",
+    "coverage": "How much of each question category you've answered. The bar and colour show your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+). Categories are sorted least-covered first, so the top of the list is where the story still needs you.",
+    "graph": "Your life as a graph. Each node is a wiki page (people, places, periods, themes, Focuses); size reflects how many sources mention it and edges connect subjects that share sources. Click any node to open its page.",
+    "question-bank": "The full master list of questions by category — answered (✓) and still open (○). This is the raw pool the daily question and the weekly planner draw from; it only ever grows.",
+    "candidates": "Follow-up questions the weekly classifier proposed from your answers and stories, grouped by review status. These are <em>not</em> daily questions yet — they wait here until promoted into the question bank.",
+    "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
+    "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and whether it's already been delivered. The queue expires and is rebuilt weekly.",
+    "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
+    "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
+}
+
+
+def _with_description(body: str, desc: str) -> str:
+    """Insert a description paragraph right after the view's first <h1>."""
+    marker = "</h1>"
+    idx = body.find(marker)
+    if idx == -1:
+        return body
+    idx += len(marker)
+    return body[:idx] + f'<p class="view-desc">{desc}</p>' + body[idx:]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1024,6 +1053,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 title, body, wide = builder()
+                desc = VIEW_DESCRIPTIONS.get(slug)
+                if desc:
+                    body = _with_description(body, desc)
             except Exception as exc:  # a broken view shouldn't take down the server
                 title, body, wide = ("View error", f"<h1>View error</h1><pre>{html.escape(repr(exc))}</pre>", False)
             self.send_html(title, body, wide=wide)
