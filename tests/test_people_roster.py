@@ -200,5 +200,24 @@ class ObjectRosterSafetyTests(unittest.TestCase):
         self.assertFalse(merged[0]["page_eligible"])
 
 
+class LoadCandidatesTests(unittest.TestCase):
+    def test_two_char_initials_name_survives(self):
+        # A 2-char detector candidate (AJ) must reach the AI curator, not be
+        # dropped by a min-length filter. Single-char junk is still excluded.
+        orig = er.load_recommendation_state
+        er.load_recommendation_state = lambda: {"recommendations": [
+            {"entity": "AJ", "type": "person", "score": 20.0, "unique_answers": 4,
+             "cross_categories": ["C"], "evidence": []},
+            {"entity": "X", "type": "person", "score": 20.0, "unique_answers": 4,
+             "cross_categories": ["C"], "evidence": []},
+        ]}
+        try:
+            names = [c["entity"] for c in er.load_candidates("person", min_answers=1)]
+        finally:
+            er.load_recommendation_state = orig
+        self.assertIn("AJ", names)
+        self.assertNotIn("X", names)
+
+
 if __name__ == "__main__":
     unittest.main()

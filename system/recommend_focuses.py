@@ -55,6 +55,13 @@ RELATIONSHIP_WORDS = re.compile(
     re.IGNORECASE,
 )
 
+# A person-name token: a normal Capitalized word (Emma, Taylor) OR a short
+# all-caps initialism (AJ, JT). The initialism branch lets names like "AJ"
+# through — the previous `[A-Z][a-z]+` form required a lowercase letter, so
+# initials-style names were invisible. 4+ letter all-caps acronyms (NASA) are
+# naturally excluded by the word boundaries around the match.
+_NAME_TOKEN = r"(?:[A-Z][a-z]+|[A-Z]{2,3})"
+
 PLACE_INDICATORS = re.compile(
     r"\b(lived in|moved to|grew up in|visited|traveled to|went to|school in|"
     r"church in|office in|home in|grew up|born in|raised in|based in|working in|"
@@ -127,6 +134,10 @@ STOPWORDS = {
     "Everyone", "Nobody", "Somebody", "Everybody", "Anything", "Nothing",
     "Both", "Each", "Either", "Neither", "One", "Two", "Three", "Many", "Most",
     "Few", "Several", "Another", "Other", "Others", "Same", "Such", "Only",
+    # Common short all-caps acronyms the initialism branch could mistake for a
+    # name when they follow a relationship word.
+    "US", "USA", "UK", "TV", "OK", "AM", "PM", "CEO", "CTO", "CFO", "ID", "DUI",
+    "PhD", "USC", "UCLA", "NYC", "LA", "SF",
 }
 
 
@@ -248,11 +259,11 @@ def _extract_people(text: str, qid: str) -> list[tuple[str, int, float]]:
     for m in RELATIONSHIP_WORDS.finditer(text):
         # Look for a capitalized name in the next ~40 chars
         after = text[m.end():m.end() + 60]
-        name_m = re.search(r"\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})?)\b", after)
+        name_m = re.search(rf"\b({_NAME_TOKEN}(?:\s+{_NAME_TOKEN})?)\b", after)
         named = False
         if name_m:
             name = name_m.group(1)
-            if name not in STOPWORDS and len(name) > 2:
+            if name not in STOPWORDS and len(name) >= 2:
                 ew = _window_has_emotion(text, m.start(), m.end())
                 results.append((name, m.start(), ew))
                 named = True

@@ -128,7 +128,7 @@ def load_candidates(entity_type: str, min_answers: int = 1) -> list[dict]:
         entity = (r.get("entity") or "").strip()
         if not entity or entity in STOPWORDS or entity in JUNK:
             continue
-        if len(entity) < 3:
+        if len(entity) < 2:  # allow initials-style names (AJ, JT); single chars still out
             continue
         if r.get("unique_answers", 0) < min_answers:
             continue

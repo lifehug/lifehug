@@ -338,8 +338,10 @@ def project_label(qualifier: str) -> str:
 
 def _mention_regex(names):
     """Word-boundary, case-insensitive matcher for a person's name + aliases.
-    Names shorter than 3 chars are skipped to avoid noisy substring hits."""
-    parts = sorted({n.strip() for n in names if n and len(n.strip()) >= 3}, key=len, reverse=True)
+    Names shorter than 2 chars are skipped to avoid noisy substring hits;
+    2-char names (initials like AJ, JT) are allowed — word boundaries keep them
+    from matching inside other words."""
+    parts = sorted({n.strip() for n in names if n and len(n.strip()) >= 2}, key=len, reverse=True)
     if not parts:
         return None
     return re.compile(r"\b(" + "|".join(re.escape(p) for p in parts) + r")\b", re.IGNORECASE)

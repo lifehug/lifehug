@@ -294,10 +294,13 @@ class MentionScanTests(unittest.TestCase):
         self.assertIn("A1", ids)
         self.assertNotIn("A2", ids)  # 'retriever' must not match 'Trevor'
 
-    def test_short_names_skipped(self):
+    def test_two_char_names_now_matched(self):
+        # 2-char names (initials like AJ/Ed) are matched via word boundaries;
+        # only single-char names are skipped as noise.
         answers = {"A1": _ans("A1", "Ed was there")}
         a_hits, _ = self.wc.scan_mentions(["Ed"], answers, {})
-        self.assertEqual(a_hits, [])  # <3 chars → skipped to avoid noise
+        self.assertTrue(a_hits)
+        self.assertEqual(self.wc.scan_mentions(["E"], answers, {})[0], [])  # single char → skipped
 
     def test_aliases_matched(self):
         answers = {"A1": _ans("A1", "Betty Jo baked bread"), "A2": _ans("A2", "nothing here")}
@@ -698,6 +701,21 @@ class SidebarNavTests(unittest.TestCase):
         self.sw.page_title = lambda p: p.stem.title()
         out = self.sw.nav_html()
         self.assertLess(out.index('data-group="people"'), out.index('data-group="themes"'))
+
+
+class MentionRegexTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+
+    def test_two_char_initials_name_matches(self):
+        rx = self.wc._mention_regex(["AJ"])
+        self.assertIsNotNone(rx)
+        self.assertTrue(rx.search("and then AJ showed up"))
+        # Word boundaries prevent substring hits inside other words.
+        self.assertFalse(rx.search("the major leagues"))
+
+    def test_single_char_name_still_skipped(self):
+        self.assertIsNone(self.wc._mention_regex(["X"]))
 
 
 if __name__ == "__main__":

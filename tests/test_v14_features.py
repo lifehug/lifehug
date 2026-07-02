@@ -246,6 +246,18 @@ class RecommendFocusesTests(unittest.TestCase):
         mod = load("recommend_focuses")
         self.assertTrue(hasattr(mod, "main"))
 
+    def test_extract_people_captures_initials_names(self):
+        # Initials-style names (AJ) must be detected, not just the role label.
+        rf = load("recommend_focuses")
+        names = [n for n, _, _ in rf._extract_people("my brother AJ was building", "X")]
+        self.assertIn("AJ", names)
+        # A bare role with no following name still yields the label.
+        labels = [n for n, _, _ in rf._extract_people("my brother was kind", "X")]
+        self.assertIn("Brother", labels)
+        # Common acronyms after a relationship word are not mistaken for names.
+        got = [n for n, _, _ in rf._extract_people("my dad was in the US army", "X")]
+        self.assertNotIn("US", got)
+
     def test_focus_covered_aliases_uses_roster_maps_to_focus(self):
         # Names/aliases the entity roster maps to a Focus must be reported as
         # covered, so recommend() won't re-surface e.g. Father when Dad is a
