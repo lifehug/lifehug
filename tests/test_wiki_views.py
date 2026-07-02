@@ -28,6 +28,7 @@ class WikiViewsTests(unittest.TestCase):
             (serve_wiki, "SOURCE_LINT_FINDINGS_FILE"): serve_wiki.SOURCE_LINT_FINDINGS_FILE,
             (serve_wiki, "FOCUS_RECS_FILE"): serve_wiki.FOCUS_RECS_FILE,
             (serve_wiki, "ROTATION_FILE"): serve_wiki.ROTATION_FILE,
+            (serve_wiki, "NEIGHBORHOODS_FILE"): serve_wiki.NEIGHBORHOODS_FILE,
             (serve_wiki, "WIKI_DIR"): serve_wiki.WIKI_DIR,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
@@ -68,6 +69,7 @@ class WikiViewsTests(unittest.TestCase):
             (serve_wiki, "QUESTION_CANDIDATES_FILE"), (serve_wiki, "QUESTION_QUEUE_FILE"),
             (serve_wiki, "SOURCE_MANIFEST_FILE"), (serve_wiki, "SOURCE_LINT_FINDINGS_FILE"),
             (serve_wiki, "FOCUS_RECS_FILE"), (serve_wiki, "ROTATION_FILE"),
+            (serve_wiki, "NEIGHBORHOODS_FILE"),
             (roadmap, "QUESTIONS_FILE"), (roadmap, "ROADMAP_FILE"),
         ]:
             setattr(mod, name, self.tmp / "missing.json")
@@ -99,7 +101,12 @@ class WikiViewsTests(unittest.TestCase):
             {"id": "c1", "text": "First commit?", "status": "candidate", "priority": 0.82,
              "target_category": "F", "story_function": "turning_point", "source_path": "answers/F1.md",
              "quality": {"score": 0.88}},
-            {"id": "c2", "text": "What scared you?", "status": "needs_review", "priority": 0.71}]})
+            {"id": "c2", "text": "What scared you?", "status": "needs_review", "priority": 0.71},
+            # No explicit target, but its neighborhood maps to a category.
+            {"id": "c3", "text": "Who are you becoming?", "status": "candidate", "priority": 0.9,
+             "neighborhood_id": "nbhd-self"}]})
+        serve_wiki.NEIGHBORHOODS_FILE = self._write("neighborhoods.json", {"neighborhoods": [
+            {"id": "nbhd-self", "type": "self"}]})
         serve_wiki.QUESTION_QUEUE_FILE = self._write("queue.json", {"expires_at": "2026-07-07", "queue": [
             # No inline text — the view must resolve it from the question bank by id.
             {"question_id": "A2", "category": "A", "story_function": "scene", "status": "queued"},
@@ -175,9 +182,21 @@ class WikiViewsTests(unittest.TestCase):
     def test_candidates_grouped_by_status(self):
         self._populate()
         _, body, _ = self._view("candidates")
-        self.assertIn("candidate (1)", body)
+        self.assertIn("candidate (2)", body)
         self.assertIn("needs_review (1)", body)
         self.assertIn("turning_point", body)
+
+    def test_candidates_show_quality_and_category(self):
+        self._populate()
+        _, body, _ = self._view("candidates")
+        # c1: explicit target category (with name) and stored quality score.
+        self.assertIn("F (The Problem)", body)
+        self.assertIn("0.88", body)
+        # c2: no target and no neighborhood -> unassigned (only this one).
+        self.assertEqual(body.count("unassigned"), 1)
+        # c3: category inferred from its neighborhood's topic_type (self -> E),
+        # so it is NOT unassigned.
+        self.assertIn(">E<", body)
 
     def test_entities_shows_only_ungraduated_candidates(self):
         self._populate()
@@ -221,7 +240,7 @@ class WikiViewsTests(unittest.TestCase):
         self._populate()
         _, body, _ = self._view("status")
         self.assertIn("2 · depth", body)
-        self.assertIn("candidate: 1", body)
+        self.assertIn("candidate: 2", body)
 
     def test_graph_nodes_edges_and_weight(self):
         self._populate()

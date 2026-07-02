@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from lifehug_core import (
     COVERAGE_FILE,
     FOCUS_RECS_FILE,
+    NEIGHBORHOODS_FILE,
     QUESTION_CANDIDATES_FILE,
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
@@ -28,6 +29,7 @@ from lifehug_core import (
     slugify,
 )
 from entity_roster import ENTITY_TYPES, load_roster
+from question_candidates import check_quality, _infer_category
 from progress import verdict
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 
@@ -584,6 +586,12 @@ def view_candidates():
     cands = (read_json(QUESTION_CANDIDATES_FILE, default={}) or {}).get("candidates", [])
     if not cands:
         return ("Candidates", "<h1>Question Candidates</h1>" + _empty("No candidates yet."), False)
+    # Quality is not stored on candidates — it's computed on demand by
+    # check_quality (same scorer the classifier/promotion gate use). Category
+    # is only stamped at review time; until then infer it from the candidate's
+    # neighborhood (target_category → neighborhood topic_type → bank letter).
+    neighborhoods = read_json(NEIGHBORHOODS_FILE, default={}) or {}
+    cat_names = parse_categories(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else {}
     by_status: dict[str, list[dict]] = {}
     for c in cands:
         by_status.setdefault(c.get("status", "candidate"), []).append(c)
@@ -593,12 +601,23 @@ def view_candidates():
         parts.append(_h2(f"{status} ({len(group)})"))
         rows = []
         for c in group:
-            score = (c.get("quality") or {}).get("score")
+            stored = (c.get("quality") or {}).get("score")
+            try:
+                score = stored if isinstance(stored, (int, float)) else \
+                    check_quality(str(c.get("text", "")), source_path=c.get("source_path")).get("score")
+            except Exception:
+                score = None
+            letter = _infer_category(c, neighborhoods)
+            if letter:
+                name = (cat_names.get(letter) or {}).get("name", "")
+                cat_cell = html.escape(letter + (f" ({name})" if name else ""))
+            else:
+                cat_cell = '<span class="muted">unassigned</span>'
             rows.append([
                 html.escape(str(c.get("text", ""))[:300]),
                 format(c.get("priority", 0) or 0, ".2f"),
                 (format(score, ".2f") if isinstance(score, (int, float)) else "—"),
-                html.escape(str(c.get("target_category") or "—")),
+                cat_cell,
                 html.escape(str(c.get("story_function") or "—")),
                 html.escape(str(c.get("source_path") or "—")),
             ])
