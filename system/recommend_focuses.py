@@ -204,6 +204,32 @@ def _existing_focus_names(md_text: str) -> set[str]:
     return {n.lower() for n in names if n}
 
 
+def _focus_covered_aliases() -> set[str]:
+    """Names/aliases the AI-curated entity rosters already map to an existing
+    Focus. recommend() must not re-surface these as *new* focus candidates —
+    e.g. 'Father'/'James' both alias the "James Taylor"→Dad roster entry, and
+    'Mother'→Mom, 'Wife'→Katie. Without this, role words get recommended even
+    though that person is already a Focus."""
+    covered: set[str] = set()
+    try:
+        from entity_roster import ENTITY_TYPES, load_roster  # noqa: PLC0415
+    except Exception:
+        return covered
+    for etype in ENTITY_TYPES:
+        try:
+            entities = load_roster(etype).get("entities", [])
+        except Exception:
+            continue
+        for e in entities:
+            if not e.get("maps_to_focus"):
+                continue
+            covered.add(str(e.get("name", "")).lower())
+            for alias in e.get("aliases", []) or []:
+                covered.add(str(alias).lower())
+    covered.discard("")
+    return covered
+
+
 def _window_has_emotion(text: str, start: int, end: int, window: int = 80) -> float:
     """Return count of emotion words within window characters of a mention."""
     lo = max(0, start - window)
@@ -423,7 +449,9 @@ def recommend(
 ) -> list[dict]:
     """Analyze content and return updated recommendation list."""
     md_text = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
-    existing_focuses = _existing_focus_names(md_text)
+    # Existing Focus subject names, plus any roster names/aliases the curator
+    # already mapped to a Focus (so 'Father'/'Mother'/'Wife' aren't re-recommended).
+    existing_focuses = _existing_focus_names(md_text) | _focus_covered_aliases()
 
     answers = _load_answer_texts()
     source_texts = _load_source_texts()

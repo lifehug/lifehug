@@ -246,6 +246,33 @@ class RecommendFocusesTests(unittest.TestCase):
         mod = load("recommend_focuses")
         self.assertTrue(hasattr(mod, "main"))
 
+    def test_focus_covered_aliases_uses_roster_maps_to_focus(self):
+        # Names/aliases the entity roster maps to a Focus must be reported as
+        # covered, so recommend() won't re-surface e.g. Father when Dad is a
+        # Focus. Patch entity_roster.load_roster to a controlled fixture.
+        import entity_roster
+        rf = load("recommend_focuses")
+        rosters = {
+            "person": {"entities": [
+                {"name": "James Taylor", "aliases": ["James", "Father"], "maps_to_focus": "dad"},
+                {"name": "Mother", "aliases": [], "maps_to_focus": "mom"},
+                {"name": "Grandma Betty Jo", "aliases": ["Grandma"], "maps_to_focus": None},
+            ]},
+        }
+        orig = entity_roster.load_roster
+        try:
+            entity_roster.load_roster = lambda t: rosters.get(t, {"entities": []})
+            covered = rf._focus_covered_aliases()
+        finally:
+            entity_roster.load_roster = orig
+        self.assertIn("father", covered)
+        self.assertIn("james", covered)
+        self.assertIn("james taylor", covered)
+        self.assertIn("mother", covered)
+        # An entry not mapped to a Focus is NOT covered (grandma has no Focus).
+        self.assertNotIn("grandma", covered)
+        self.assertNotIn("grandma betty jo", covered)
+
 
 class PlannerEnhancementTests(unittest.TestCase):
     def test_planner_imports_new_paths(self):
