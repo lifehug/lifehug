@@ -202,6 +202,15 @@ class WikiViewsTests(unittest.TestCase):
         # Header reads "Category", not the old cryptic "Cat".
         self.assertIn("<th>Category</th>", body)
 
+    def test_queue_status_reflects_answered_state_from_bank(self):
+        # Fixture: F1 is answered ([x]) in the bank AND present in the queue;
+        # A2 is unanswered ([ ]) and queued. The view must read answered state
+        # from the bank, not from the queue's own status field.
+        self._populate()
+        _, body, _ = self._view("queue")
+        self.assertIn("answered", body)   # F1
+        self.assertIn("queued", body)     # A2
+
     def test_status_dashboard(self):
         self._populate()
         _, body, _ = self._view("status")

@@ -691,26 +691,37 @@ def view_queue():
     if not items:
         return ("Question Queue", "<h1>Question Queue</h1>" + _empty("No active queue. Build one with <code>lifehug planner-queue</code>."), False)
     # Queue items store only the question id + category letter — resolve the
-    # human-readable question text and category name from the question bank.
+    # human-readable question text, category name, and (crucially) the real
+    # answered state from the question bank, which is the source of truth. The
+    # queue's own status field only tracks delivery, and nothing writes it back
+    # on answer, so a queued question you've answered would otherwise still read
+    # "queued". Deriving from the bank keeps the view honest.
     md = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
-    text_by_id = {str(q["id"]): str(q["text"]) for q in parse_questions(md)} if md else {}
+    bank = parse_questions(md) if md else []
+    text_by_id = {str(q["id"]): str(q["text"]) for q in bank}
+    answered_ids = {str(q["id"]) for q in bank if q.get("answered")}
     cat_names = parse_categories(md) if md else {}
     head = (f'<p class="muted">Generated {html.escape(str(queue.get("generated_at", "?")))} · '
             f'expires {html.escape(str(queue.get("expires_at", "?")))}</p>')
     rows = []
     for q in items:
-        delivered = q.get("status") == "delivered" or q.get("delivered_at")
         qid = str(q.get("question_id", ""))
         letter = str(q.get("category", ""))
         name = (cat_names.get(letter) or {}).get("name", "")
         cat_cell = html.escape(letter + (f" ({name})" if name else ""))
         text = str(q.get("text") or text_by_id.get(qid, ""))
+        if qid in answered_ids:
+            status = _badge("answered", "green")
+        elif q.get("status") == "delivered" or q.get("delivered_at"):
+            status = _badge("delivered", "saturated")
+        else:
+            status = _badge("queued", "yellow")
         rows.append([
             html.escape(qid),
             cat_cell,
             html.escape(text[:300]) or '<span class="muted">—</span>',
             html.escape(str(q.get("story_function") or q.get("reason") or "—")),
-            _badge("delivered", "green") if delivered else _badge("queued", "yellow"),
+            status,
         ])
     return ("Question Queue", "<h1>Question Queue</h1>" + head + _table(["ID", "Category", "Question", "Why", "Status"], rows), False)
 
@@ -984,7 +995,7 @@ VIEW_DESCRIPTIONS = {
     "question-bank": "The full master list of questions by category — answered (✓) and still open (○). This is the raw pool the daily question and the weekly planner draw from; it only ever grows.",
     "candidates": "Follow-up questions the weekly classifier proposed from your answers and stories, grouped by review status. These are <em>not</em> daily questions yet — they wait here until promoted into the question bank.",
     "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
-    "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and whether it's already been delivered. The queue expires and is rebuilt weekly.",
+    "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
 }
