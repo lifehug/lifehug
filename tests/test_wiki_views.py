@@ -211,6 +211,12 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("answered", body)   # F1
         self.assertIn("queued", body)     # A2
 
+    def test_queue_shows_progress_summary(self):
+        # Fixture queue has 2 items (A2 unanswered, F1 answered) -> 1 of 2.
+        self._populate()
+        _, body, _ = self._view("queue")
+        self.assertIn("1 of 2 answered · 1 remaining", body)
+
     def test_status_dashboard(self):
         self._populate()
         _, body, _ = self._view("status")

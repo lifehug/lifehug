@@ -701,7 +701,12 @@ def view_queue():
     text_by_id = {str(q["id"]): str(q["text"]) for q in bank}
     answered_ids = {str(q["id"]) for q in bank if q.get("answered")}
     cat_names = parse_categories(md) if md else {}
-    head = (f'<p class="muted">Generated {html.escape(str(queue.get("generated_at", "?")))} · '
+    done = sum(1 for q in items if str(q.get("question_id", "")) in answered_ids)
+    total = len(items)
+    remaining = total - done
+    progress = _bar(done / total if total else 0,
+                    f"{done} of {total} answered · {remaining} remaining")
+    head = (progress + f'<p class="muted">Generated {html.escape(str(queue.get("generated_at", "?")))} · '
             f'expires {html.escape(str(queue.get("expires_at", "?")))}</p>')
     rows = []
     for q in items:
