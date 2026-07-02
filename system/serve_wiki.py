@@ -690,19 +690,29 @@ def view_queue():
     items = queue.get("queue", [])
     if not items:
         return ("Question Queue", "<h1>Question Queue</h1>" + _empty("No active queue. Build one with <code>lifehug planner-queue</code>."), False)
+    # Queue items store only the question id + category letter — resolve the
+    # human-readable question text and category name from the question bank.
+    md = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
+    text_by_id = {str(q["id"]): str(q["text"]) for q in parse_questions(md)} if md else {}
+    cat_names = parse_categories(md) if md else {}
     head = (f'<p class="muted">Generated {html.escape(str(queue.get("generated_at", "?")))} · '
             f'expires {html.escape(str(queue.get("expires_at", "?")))}</p>')
     rows = []
     for q in items:
         delivered = q.get("status") == "delivered" or q.get("delivered_at")
+        qid = str(q.get("question_id", ""))
+        letter = str(q.get("category", ""))
+        name = (cat_names.get(letter) or {}).get("name", "")
+        cat_cell = html.escape(letter + (f" ({name})" if name else ""))
+        text = str(q.get("text") or text_by_id.get(qid, ""))
         rows.append([
-            html.escape(str(q.get("question_id", ""))),
-            html.escape(str(q.get("category", ""))),
-            html.escape(str(q.get("text", ""))[:300]),
+            html.escape(qid),
+            cat_cell,
+            html.escape(text[:300]) or '<span class="muted">—</span>',
             html.escape(str(q.get("story_function") or q.get("reason") or "—")),
             _badge("delivered", "green") if delivered else _badge("queued", "yellow"),
         ])
-    return ("Question Queue", "<h1>Question Queue</h1>" + head + _table(["ID", "Cat", "Question", "Why", "Status"], rows), False)
+    return ("Question Queue", "<h1>Question Queue</h1>" + head + _table(["ID", "Category", "Question", "Why", "Status"], rows), False)
 
 
 def view_sources():

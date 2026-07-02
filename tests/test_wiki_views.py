@@ -101,7 +101,8 @@ class WikiViewsTests(unittest.TestCase):
              "quality": {"score": 0.88}},
             {"id": "c2", "text": "What scared you?", "status": "needs_review", "priority": 0.71}]})
         serve_wiki.QUESTION_QUEUE_FILE = self._write("queue.json", {"expires_at": "2026-07-07", "queue": [
-            {"question_id": "A2", "category": "A", "text": "Where?", "story_function": "scene", "status": "queued"},
+            # No inline text — the view must resolve it from the question bank by id.
+            {"question_id": "A2", "category": "A", "story_function": "scene", "status": "queued"},
             {"question_id": "F1", "category": "F", "text": "What?", "delivered_at": "x", "status": "delivered"}]})
         serve_wiki.SOURCE_MANIFEST_FILE = self._write("man.json", {"sources": {
             "answers/A1.md": {"type": "prompted_answer", "title": "A1", "captured_at": "2026-01-01",
@@ -189,6 +190,17 @@ class WikiViewsTests(unittest.TestCase):
         self.assertNotIn("Dad", body)
         # The graduation column is gone now that only candidates are shown.
         self.assertNotIn("Graduates", body)
+
+    def test_queue_resolves_text_and_category_name(self):
+        self._populate()
+        _, body, _ = self._view("queue")
+        # Category letter is annotated with its English name.
+        self.assertIn("A (Origins)", body)
+        # Question text is resolved from the bank even when the queue item
+        # carries no inline text.
+        self.assertIn("Where?", body)
+        # Header reads "Category", not the old cryptic "Cat".
+        self.assertIn("<th>Category</th>", body)
 
     def test_status_dashboard(self):
         self._populate()
