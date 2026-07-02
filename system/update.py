@@ -64,12 +64,44 @@ def save_json(path, data):
 
 
 def run_git(*args, check=True):
-    """Run a git command in the repo directory and return stdout."""
+    """Run a git command in the repo directory and return stripped stdout.
+
+    Suitable for git plumbing whose output is a token/list (tags, remotes,
+    version numbers). Do NOT use for extracting file content — stripping would
+    drop the file's trailing newline. Use read_repo_file_at for that.
+    """
     result = subprocess.run(
         ["git", "-C", str(REPO_DIR)] + list(args),
         capture_output=True, text=True, check=check,
     )
     return result.stdout.strip()
+
+
+def read_repo_file_at(ref, filepath):
+    """Return the exact bytes of a file at a git ref, preserving trailing
+    newlines (unlike run_git, which strips). Raises CalledProcessError if the
+    path does not exist at that ref."""
+    result = subprocess.run(
+        ["git", "-C", str(REPO_DIR), "show", f"{ref}:{filepath}"],
+        capture_output=True, check=True,
+    )
+    return result.stdout  # bytes
+
+
+def is_protected(filepath):
+    """True if filepath is user data the updater must never overwrite.
+
+    Directory entries in PROTECTED_FILES (those ending in '/') protect
+    everything beneath them; file entries match exactly. Exact matching for
+    files avoids the prefix trap where 'config.yaml' would also shadow
+    'config.yaml.example'."""
+    for p in PROTECTED_FILES:
+        if p.endswith("/"):
+            if filepath == p.rstrip("/") or filepath.startswith(p):
+                return True
+        elif filepath == p:
+            return True
+    return False
 
 
 def find_upstream_remote():
@@ -288,24 +320,24 @@ def apply_version(version):
         # Special handling: question-bank.md gets saved as upstream copy.
         if filepath == "system/question-bank.md":
             try:
-                content = run_git("show", f"{tag}:{filepath}")
+                content = read_repo_file_at(tag, filepath)
                 upstream_path = REPO_DIR / "system" / "question-bank-upstream.md"
-                upstream_path.write_text(content)
+                upstream_path.write_bytes(content)
                 print(f"  Saved upstream question bank to system/question-bank-upstream.md")
             except subprocess.CalledProcessError:
                 pass
             continue
 
         # Never touch protected files
-        if filepath in PROTECTED_FILES or any(filepath.startswith(p) for p in PROTECTED_FILES):
+        if is_protected(filepath):
             skipped.append(filepath)
             continue
 
         try:
-            content = run_git("show", f"{tag}:{filepath}")
+            content = read_repo_file_at(tag, filepath)
             target = REPO_DIR / filepath
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content)
+            target.write_bytes(content)
             updated.append(filepath)
         except subprocess.CalledProcessError:
             print(f"  Warning: {filepath} not found in {tag}, skipping", file=sys.stderr)
