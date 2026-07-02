@@ -57,6 +57,14 @@ class WikiViewsTests(unittest.TestCase):
             self.assertIn(f'/views/{slug}', menu)
             self.assertIn(label, menu)
 
+    def test_menu_order(self):
+        order = [slug for slug, _, _ in serve_wiki.VIEWS]
+        self.assertEqual(order, [
+            "status", "graph", "focuses", "recommendations",
+            "question-bank", "candidates", "queue",
+            "coverage", "entities", "sources",
+        ])
+
     def test_layout_wide_flag_and_menu(self):
         out = serve_wiki.layout("T", "<h1>x</h1>", wide=True).decode()
         self.assertIn('main class="wide"', out)

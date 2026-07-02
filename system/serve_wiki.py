@@ -1006,16 +1006,20 @@ def view_graph():
 
 
 VIEWS = [
+    # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
-    ("focuses", "Focuses", view_focuses),
-    ("coverage", "Coverage", view_coverage),
     ("graph", "Graph", view_graph),
+    # Focus block: focuses and their recommendations.
+    ("focuses", "Focuses", view_focuses),
+    ("recommendations", "Focus Recommendations", view_recommendations),
+    # The question surfaces.
     ("question-bank", "Question Bank", view_question_bank),
     ("candidates", "Question Candidates", view_candidates),
-    ("entities", "Entity Candidates", view_entities),
     ("queue", "Question Queue", view_queue),
+    # The rest.
+    ("coverage", "Coverage", view_coverage),
+    ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
-    ("recommendations", "Focus Recommendations", view_recommendations),
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 
