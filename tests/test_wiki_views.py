@@ -179,6 +179,16 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("✓", body)
         self.assertIn("○", body)
 
+    def test_question_bank_categories_collapsible_and_collapsed(self):
+        self._populate()
+        _, body, _ = self._view("question-bank")
+        # Each category is a native <details> with a <summary> (overview) …
+        self.assertIn('<details class="qb-cat">', body)
+        self.assertIn("<summary>", body)
+        # … and starts collapsed (no open attribute on any category).
+        self.assertNotIn("<details class=\"qb-cat\" open", body)
+        self.assertNotIn("<details open", body)
+
     def test_candidates_grouped_by_status(self):
         self._populate()
         _, body, _ = self._view("candidates")

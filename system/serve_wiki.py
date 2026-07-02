@@ -368,8 +368,17 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .cov-row {{ display: flex; align-items: center; gap: 10px; padding: 5px 0; }}
     .cov-cat {{ width: 230px; font-weight: 650; flex-shrink: 0; }}
     .cov-name {{ font-weight: 400; color: #8a7a63; font-size: 13px; }}
-    .qb-cat {{ margin-bottom: 18px; }}
-    .qb-list {{ list-style: none; padding-left: 0; }}
+    details.qb-cat {{ margin-bottom: 8px; border: 1px solid #e5dfd5; border-radius: 8px; overflow: hidden; background: #fffdf9; }}
+    details.qb-cat > summary {{ list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; background: #f4f0e8; }}
+    details.qb-cat > summary::-webkit-details-marker {{ display: none; }}
+    details.qb-cat > summary::before {{ content: "\\25B8"; color: #9a8c75; font-size: 12px; flex: 0 0 auto;
+      transition: transform 0.15s; }}
+    details.qb-cat[open] > summary::before {{ transform: rotate(90deg); }}
+    details.qb-cat > summary:hover {{ background: #ece5d8; }}
+    .qb-cat-title {{ font-weight: 650; flex: 0 0 auto; min-width: 200px; }}
+    details.qb-cat > summary .barwrap {{ flex: 1; margin: 0; }}
+    .qb-list {{ list-style: none; padding: 8px 16px 12px; margin: 0; }}
     .qb-list li {{ padding: 3px 0; }}
     .qb-list .q-done {{ color: #6b5d49; }}
     .qb-list .q-mark {{ display: inline-block; width: 16px; }}
@@ -576,8 +585,10 @@ def view_question_bank():
                 f'{html.escape(str(q["text"]))}</li>'
             )
         parts.append(
-            '<div class="qb-cat">' + _h2(head) + _bar(ratio, f"{answered}/{total}")
-            + '<ul class="qb-list">' + "".join(lis) + "</ul></div>"
+            '<details class="qb-cat"><summary>'
+            f'<span class="qb-cat-title">{html.escape(head)}</span>'
+            + _bar(ratio, f"{answered}/{total} · {_pct(ratio)}")
+            + '</summary><ul class="qb-list">' + "".join(lis) + "</ul></details>"
         )
     return ("Question Bank", "".join(parts), False)
 
