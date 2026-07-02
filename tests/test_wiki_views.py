@@ -70,6 +70,16 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn('main class="wide"', out)
         self.assertIn("menu-dropdown", out)
 
+    def test_sidebar_groups_default_collapsed(self):
+        self._populate()
+        nav = serve_wiki.nav_html()
+        # Every group renders collapsed; none is left in the open form.
+        self.assertIn('class="sidebar-group collapsed"', nav)
+        self.assertNotIn('class="sidebar-group"', nav)
+        # Persistence tracks the groups the user *expands* (default = closed).
+        out = serve_wiki.layout("T", "<h1>x</h1>").decode()
+        self.assertIn("lifehug.expandedGroups", out)
+
     def test_all_views_safe_on_empty_state(self):
         # Point every source at a non-existent file/dir; nothing should raise.
         for mod, name in [

@@ -131,8 +131,10 @@ def nav_html(active_rel: str | None = None) -> str:
         return "".join(out)
 
     def group_block(gtype: str, label: str, rows: str, count: int) -> str:
+        # Groups start collapsed (overview first); JS re-expands any the user
+        # previously opened. See the expandedGroups localStorage logic below.
         return (
-            f'<div class="sidebar-group" data-group="{html.escape(gtype)}">'
+            f'<div class="sidebar-group collapsed" data-group="{html.escape(gtype)}">'
             f'<div class="sidebar-group-header" onclick="toggleGroup(\'{html.escape(gtype)}\')">'
             f'<span class="sidebar-group-main"><span class="chevron">&#9660;</span>'
             f'<span class="sidebar-group-title">{html.escape(label)}</span></span>'
@@ -402,19 +404,20 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
   </header>
   <div class="shell"><nav>{nav}</nav><main class="{main_cls}">{body}</main></div>
   <script>
-    var KEY = "lifehug.collapsedGroups";
-    function loadCollapsed() {{ try {{ return new Set(JSON.parse(localStorage.getItem(KEY)) || []); }} catch (e) {{ return new Set(); }} }}
+    var KEY = "lifehug.expandedGroups";
+    function loadExpanded() {{ try {{ return new Set(JSON.parse(localStorage.getItem(KEY)) || []); }} catch (e) {{ return new Set(); }} }}
     function toggleGroup(type) {{
       var el = document.querySelector('.sidebar-group[data-group="' + type + '"]');
       if (!el) return;
       el.classList.toggle('collapsed');
-      var set = loadCollapsed();
-      el.classList.contains('collapsed') ? set.add(type) : set.delete(type);
+      var set = loadExpanded();
+      el.classList.contains('collapsed') ? set.delete(type) : set.add(type);
       localStorage.setItem(KEY, JSON.stringify(Array.from(set)));
     }}
-    loadCollapsed().forEach(function (type) {{
+    // Groups render collapsed by default; re-open any the user expanded before.
+    loadExpanded().forEach(function (type) {{
       var el = document.querySelector('.sidebar-group[data-group="' + type + '"]');
-      if (el) el.classList.add('collapsed');
+      if (el) el.classList.remove('collapsed');
     }});
     function toggleMenu(e) {{ if (e) e.stopPropagation(); document.getElementById('menuDropdown').classList.toggle('open'); }}
     document.addEventListener('click', function (e) {{
