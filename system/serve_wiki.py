@@ -685,7 +685,11 @@ def view_status():
     open_cands = cand_by_status.get("candidate", 0) + cand_by_status.get("needs_review", 0)
     pending_recs = sum(1 for r in recs if r.get("status") == "pending")
     q_items = queue.get("queue", [])
-    q_delivered = sum(1 for q in q_items if q.get("status") == "delivered" or q.get("delivered_at"))
+    # Answered state lives in the question bank, not the queue's own status field
+    # (nothing writes delivery back), so derive queue progress from the bank.
+    answered_ids = ({str(q["id"]) for q in parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if q.get("answered")}
+                    if QUESTIONS_FILE.exists() else set())
+    q_answered = sum(1 for q in q_items if str(q.get("question_id", "")) in answered_ids)
 
     names = rot.get("pass_names") or []
     cur = rot.get("current_pass")
@@ -705,17 +709,10 @@ def view_status():
         card("Sources captured", len(manifest)),
         card("Open lint findings", lint.get("open_count", len([f for f in lint.get("findings", []) if f.get("status", "open") == "open"]))),
         card("Pending focus recs", pending_recs),
-        card("Queue delivered", f"{q_delivered}/{len(q_items)}", "expires " + str(queue.get("expires_at", "—"))),
+        card("Queue answered", f"{q_answered}/{len(q_items)}", "expires " + str(queue.get("expires_at", "—"))),
     ]
     grid = '<div class="cards">' + "".join(cards) + "</div>"
-    breakdown = ""
-    if cand_by_status:
-        chips = " ".join(_badge(f"{k}: {v}") for k, v in sorted(cand_by_status.items()))
-        breakdown = _h2("Candidate pipeline") + f"<p>{chips}</p>"
-    links = '<p class="muted">Detail views: ' + " · ".join(
-        f'<a href="/views/{slug}">{html.escape(label)}</a>' for slug, label, _ in VIEWS if slug != "status"
-    ) + "</p>"
-    return ("The Loop", "<h1>The Loop — System Status</h1>" + grid + breakdown + links, False)
+    return ("The Loop", "<h1>The Loop — System Status</h1>" + grid, False)
 
 
 def view_queue():

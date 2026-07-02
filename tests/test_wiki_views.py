@@ -268,7 +268,13 @@ class WikiViewsTests(unittest.TestCase):
         self._populate()
         _, body, _ = self._view("status")
         self.assertIn("2 · depth", body)
-        self.assertIn("candidate: 2", body)
+        # Queue progress is answered-from-bank (F1 answered, A2 not) -> 1/2,
+        # not the old delivered-flag count.
+        self.assertIn("Queue answered", body)
+        self.assertIn("1/2", body)
+        # Candidate pipeline breakdown and detail-view links were removed.
+        self.assertNotIn("Candidate pipeline", body)
+        self.assertNotIn("Detail views", body)
 
     def test_graph_nodes_edges_and_weight(self):
         self._populate()
