@@ -172,6 +172,14 @@ Fallback rotation order:
 3. **Focus interleaving**: every N questions (`focus_frequency`, default 4)
 4. **Within category**: first unanswered question
 
+**Adaptive cadence (v68).** The system runs 1–3 questions/day, conversation-style:
+after an answer is processed, `process-answer` may offer one optional same-day
+follow-up question (config `max_questions_per_day`, default 3; never after 20:00).
+After `reengage_after_days` (default 4) silent days, the daily pick switches to a
+short, warm re-engagement question instead of re-offering the heavy queue head.
+Deliveries-per-question and latency-to-answer are recorded in `rotation.json` as
+engagement signal. Disable with `adaptive_cadence: false` in config.yaml.
+
 ### The Roadmap & Focuses (v15)
 
 A **Focus** is the unit of intent — anything the author is building toward (a person, a book, a blog, a theme, their life's work). It replaces separate project/person primitives with one model: an **objective** + a **tier** (`basic` ≈ blog/~8 answers, `standard` ≈ essay/chapter/a person/~20, `extreme` ≈ book/life's work/~50+).
@@ -199,6 +207,12 @@ python3 system/lifehug.py focus-new "<label>" --type <type> --tier <tier> \
 ```
 
 `focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates + promotes ~8–12 starter questions (uses the OpenClaw gateway when running — no key needed — or `ANTHROPIC_API_KEY` as fallback; without either, the Focus is still created and it prints how to seed later). It never touches existing answers. Then show `python3 system/lifehug.py progress`.
+
+**Healing a zombie Focus.** A Focus registered on the roadmap with NO question
+category can never be asked about — `doctor`, `planner-report`, and `progress`
+all warn about these. The same `focus-new` command heals them: when the Focus
+exists without categories it scaffolds and attaches one instead of refusing.
+See the focus skill's "Heal a zombie focus" section.
 
 ### Delivering the Question
 
@@ -733,14 +747,14 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
-- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps, writes the next queue, scans gaps, reports progress, and commits real changes. Dry-run previews the candidate promotion gate too.
+- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps (backlog-aware, quality-gated, semantically deduped — v68/v69), writes the next queue, scans gaps, reports progress, surfaces pending Focus recommendations, **runs `doctor`** (queue expiry, backlog age, cadence stalls, zombie Focuses, roster continuity), and commits real changes. Every learning step is failure-wrapped; the Telegram summary is chunked under the 4096-char limit via `lifehug.py notify`. Dry-run previews the candidate promotion gate too.
 - Review any manual source findings that `source-lint --fix` could not safely repair
 - Review classifier/candidate output in the weekly Telegram summary, then check queue balance, progress, and whether any Focus is ready for a deliverable
 
 ### Monthly
 - Run `python3 system/lifehug.py monthly-research` (or `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect first)
-- Review new research-neighborhood candidates before promotion
-- Review Focus recommendations and approve only the ones that should become Focuses
+- Review new research-neighborhood candidates before promotion. New gap neighborhoods only open when the planner's expansion urgency ≥ 0.25 (the archive deepens before it widens — v69)
+- Review Focus recommendations and approve only the ones that should become Focuses — **approval creates the Focus for real** (category scaffolded + starter questions seeded via `roadmap.focus_new`; never a zombie — v69)
 - Check if any categories are ready for drafting (GREEN)
 
 ### At Milestones

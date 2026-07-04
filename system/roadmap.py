@@ -478,12 +478,20 @@ def cli(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "new":
-        if find_focus(load_roadmap(), slugify(args.label)):
-            print(f"✗ A focus '{slugify(args.label)}' already exists. Use focus-set to change it.")
+        existing = find_focus(load_roadmap(), slugify(args.label))
+        if existing and existing.get("categories"):
+            print(f"✗ A focus '{slugify(args.label)}' already exists with categories "
+                  f"{existing['categories']}. Use focus-set to change it.")
             return 1
+        if existing:
+            # Zombie focus (registered, but no question category — the planner
+            # can never ask about it). focus-new is the healing path: scaffold
+            # the category and attach it; the roadmap rebuild merges by id.
+            print(f"↺ Focus '{slugify(args.label)}' exists with no question category — healing it.")
         res = focus_new(args.label, args.type, args.tier, args.objective,
                         args.deliverable, generate=not args.no_generate)
-        print(f"✓ Focus '{args.label}' ({res['tier']} {res['type']}) added as category {res['category']}.")
+        verb = "healed with" if existing else "added as"
+        print(f"✓ Focus '{args.label}' ({res['tier']} {res['type']}) {verb} category {res['category']}.")
         if args.no_generate:
             print(f"  Scaffolded only. Seed questions later: "
                   f"python3 system/research_expand.py --topic \"{args.label}\" --type {RESEARCH_TYPE.get(args.type,'theme')}")

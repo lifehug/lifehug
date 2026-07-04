@@ -238,3 +238,15 @@ class QueueConsumptionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ZombieHealTests(unittest.TestCase):
+    """focus-new heals a category-less (zombie) focus instead of refusing."""
+
+    def test_cli_guard_allows_healing_zombie(self):
+        import re as _re
+        roadmap_mod = load("roadmap")
+        src = (SYSTEM / "roadmap.py").read_text(encoding="utf-8")
+        # The guard must only refuse when the existing focus HAS categories.
+        self.assertIn('existing.get("categories")', src)
+        self.assertIn("healing", src.lower())

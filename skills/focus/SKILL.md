@@ -99,6 +99,21 @@ python3 system/lifehug.py focus-set <focus-id> --tier <tier> --target <N> --obje
 
 Use this to change scale (tier/target), re-point the objective, or set `--phase maintenance` to back off a Focus without deleting it.
 
+## 5. Heal a zombie focus
+
+A **zombie focus** is registered on the roadmap but has NO question category — the
+planner can never ask about it, forever. `doctor`, `planner-report`, and `progress`
+all warn about these. The healing path is the same `focus-new` command: when the
+focus already exists **without** categories, `focus-new` scaffolds and attaches a
+category instead of refusing (it only refuses when the focus already has one — then
+use `focus-set`). After healing, seed the questions exactly as in section 1's
+keyless flow.
+
+```bash
+python3 system/lifehug.py focus-new "<existing zombie label>" --type person \
+  --tier standard --objective "<...>" --deliverable letter --no-generate
+```
+
 ## Notes
 - Don't create a Focus from a weak signal — confirm the objective with the user first.
 - A Focus over **existing** categories doesn't need `focus-new`; use `focus-add … --category X`.

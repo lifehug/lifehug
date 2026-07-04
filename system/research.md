@@ -1,205 +1,123 @@
-# Life Hug — Research & Methodology
+# Life Hug — Research & Methodology (v2)
 
-**Research completed:** 2026-02-25
-**Sources:** StoryCorps oral history methodology, professional ghostwriting frameworks, memoir structure analysis, founder story analysis
-
----
-
-## 1. Executive Summary
-
-Life Hug is a rotating question engine that surfaces one question per day. The author answers via voice or text. Answers get transcribed, tagged by chapter/theme, and filed. Over time, chapters fill themselves. Periodic review identifies gaps. Milestone deliverables ship along the way.
-
-**Key insight from research:** The best memoirs are NOT chronological timelines. They're organized around **turning points and themes**. The best founder stories follow a **problem → struggle → breakthrough** arc. Both require multiple passes: skeleton → depth → polish.
+**Original research:** 2026-02-25 (StoryCorps, ghostwriting frameworks, memoir structure)
+**Deep-research revision:** 2026-07-04 — verified against primary sources (McAdams, Pennebaker, Frattaroli meta-analysis, Aron, Bridges, Birren, Belli, Tversky & Marsh, Cochrane reviews) plus competitor post-mortems (StoryWorth, Remento, HereAfter AI). Implementation status is tagged per section: **[shipped]**, or the wave that lands it (v70–v73, issues lifehug/lifehug#27–#30).
 
 ---
 
-## 2. Memoir Framework
+## 1. Question Design — the essentials (read first; this section feeds AI prompts)
 
-### Recommended Structure: Hybrid (Thematic + Chronological)
-
-Pure chronology ("I was born in...") reads like a resume. Pure thematic ("Here are my lessons...") lacks narrative drive. The hybrid approach — **chronological backbone with thematic chapters** — is what makes the best memoirs work.
-
-### What Makes a Great Chapter
-
-Each chapter should have:
-- **A central scene** (one vivid memory that anchors it)
-- **A tension** (what was at stake?)
-- **A turning point** (what changed?)
-- **A reflection** (what does it mean now?)
-
-### Voice & Tone Best Practices
-- First person, conversational
-- Honest about struggles — hardship isn't shameful, it's formative
-- Show don't tell: scenes and dialogue, not summaries
-- Humor where natural
-- Vulnerability is the differentiator
+1. **Open-ended, never yes/no** — "Tell me about…" not "Did you…"
+2. **Two-sentence rule** (Morrissey, oral-history canon): one sentence of context drawn from a prior answer, then ONE open question. This is the mechanic that makes a generated question feel like listening.
+3. **Specific moment over generality** — "Think of one time when…" not "Generally, what was…"
+4. **Sensory ("carnality", Karr)** — when an answer is habitual summary ("we always went to the lake"), drop into one instance and one sense ("Pick one of those mornings — what did the dock smell like?").
+5. **Emotional anchor** — "What were you feeling when that happened?"
+6. **The five-slot scene probe (McAdams)** — every key scene wants: what happened / when & where / who was there / what you thought & felt / **what does it say about you**. The last slot is the highest-value follow-up in the literature and the one shallow products never ask.
+7. **Action↔identity ladder (narrative therapy)** — after an action answer: "what does it say about you that you did that?"; after an identity claim: "tell me about one specific moment that proves it."
+8. **"What", not "why", for the author's own feelings** (Eurich) — why-questions about one's own recurring emotions produce confabulation and brooding. "Why" stays fine for events and other people.
+9. **Never restate the author's account as fact** — recall makes memory labile (reconsolidation); a paraphrase-back that changes details can contaminate the memory itself. Quote exactly or ask fresh.
+10. **New angles on depth passes** — re-asking for the canonical version suppresses unretrieved detail (retrieval-induced forgetting). Ask for what's NEVER been told: "a detail from that day you've never mentioned to anyone."
+11. **One question at a time. Never leading. How/What openers.**
 
 ---
 
-## 3. Founder Story Framework
+## 2. How People Write Life Stories
 
-### Recommended Structure: Problem → Struggle → Breakthrough
+### 2a. Structure: hybrid thematic-chronological (unchanged from v1)
+Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. *(Book-level operationalization: v73 chapter-readiness scoring.)*
 
-The best founder stories follow this arc:
+### 2b. McAdams — narrative identity (Life Story Interview II)
+- **Life chapters exercise**: "think of your life as a book — 2–7 chapters, give each a title, and say how we get from one to the next." The transition clause forces boundary articulation. *(v71: TOC onboarding + annual re-run; re-chaptering deltas are signal.)*
+- **Eight key scenes** (high point, low point, turning point, positive/negative childhood memory, vivid adult memory, spiritual experience, wisdom event), each probed with the five slots. A person- or period-Focus isn't deep until it holds at least a high point, low point, and turning point. *(v70: five-slot rubric as scorer + follow-up generator.)*
+- **Redemption sequences** (bad→good) track well-being; contamination (good→bad) tracks distress. OFFER, never force, the reframe: "did anything grow out of that?" If a low-point question is refused, soften to "just a very bad experience of some kind." Note: redemption framing is culturally American — offer, don't impose.
 
-1. **The Problem** — What's broken in the world?
-2. **The Insight** — What did the founders see that others didn't?
-3. **The Bet** — The decision to go all-in
-4. **The Struggle** — Everything that almost killed the company
-5. **The Breakthrough** — The moment it started working
-6. **The Vision** — Where it's going and why it matters
+### 2c. Guided Autobiography (Birren)
+Weekly **theme** + a fan of sensitizing questions ("react to the ones that open windows — skip the rest"; a skip is signal, not failure), ~2-page story, witnessed reading. Nine themes: branching points, family, money, life work, health/body, sexual identity, death, spiritual life, goals. **Money, health/body, sexual identity, and death are high-yield domains most question banks under-cover.** Never open a heavy theme cold — one framing sentence first. *(v70: nine-theme coverage check + framing paragraphs.)*
 
-### Voice & Tone Best Practices
-- First person is more compelling than third person
-- More authoritative than a memoir, but still personal
-- Data and market context woven into narrative
-- "We saw X and realized Y" framing
-- Vulnerability about hard moments makes it real
+### 2d. Memoir craft (Karr / Gornick)
+- **Situation vs story** (Gornick): what happened vs "the thing one has come to say." Tag answers; situation-rich/story-empty answers get the meaning-making follow-up. Chapter drafting picks its "thing to say" FIRST, then selects scenes serving it.
+- Memoir fails when **the narrator doesn't change** — track then-vs-now deltas; additive `reflect-source` is the right primitive. *(v71: anniversary re-asks + change tracking.)*
+- **Voice is the product.** "Your words, lightly cleaned, never rewritten." Never paraphrase into third person, never alter names. (Remento's AI rewrites — changed names, third-person rendering — are the canonical trust failure.)
 
----
-
-## 4. Question Design
-
-### How Professional Interviewers Extract Stories
-
-From StoryCorps methodology and ghostwriter practice:
-
-1. **Open-ended, not yes/no** — "Tell me about..." not "Did you..."
-2. **Sensory questions** — "What did that room look like? What could you smell?"
-3. **Emotional anchors** — "How did that make you feel? What were you thinking?"
-4. **Specific moments** — "Can you think of one time when..." not "Generally, what was..."
-5. **Follow-up depth** — "You mentioned X — can you tell me more about that?"
-6. **Contrast questions** — "How was that different from what you expected?"
-
-### Question Categories
-
-#### Generic Life Story (A-E)
-
-**Category A: Origins (Childhood & Family)**
-- Earliest memories, where you grew up, family dynamics
-- Financial situation, moving, formative moments
-- What parents taught (intentionally and not)
-
-**Category B: Becoming (Growing Up & Finding Direction)**
-- First sense of agency, first job, pivotal people
-- Big risks, failures that taught lessons
-- When you started thinking about your path
-
-**Category C: Relationships & People**
-- Key relationships, mentors, friendships
-- How upbringing shapes how you connect
-- People you've lost or lost touch with
-
-**Category D: Purpose & Calling**
-- The decision to pursue your path
-- Early conversations that shaped direction
-- What people said, what keeps you going
-
-**Category E: Reflection & Wisdom**
-- Life lessons, advice to younger self
-- How your definition of success changed
-- What you're proud of beyond work
-
-#### Project-Specific Categories (F-J+)
-These are generated during setup based on what the author wants to write about. They follow the same open-ended, sensory, emotionally-anchored question design.
+### 2e. Competitor lessons (why people abandon these products)
+- **StoryWorth**: #1 failure is silent abandonment — "a few get answered, then it quietly stops." No conversational follow-up; repetitive prompts. **The fix is conversation, not cadence** — immediate acknowledgment + one listening follow-up. **[shipped v68: adaptive 1–3/day + re-engagement question after silent days]**
+- **Remento**: voice-first wins completion; AI rewriting bled trust (see 2d).
+- **HereAfter AI**: shut down; users' recordings held behind a support email. Lifehug's git/markdown own-your-data model is the answer — never gate reading or export.
+- **De-risk the book early**: interim artifacts (letters, posts) prevent the year-end quality shock where competitor complaints cluster.
 
 ---
 
-## 5. Iteration Model: Fill → Deepen → Polish
+## 3. How People Understand Themselves
 
-### How the Rotation Works
+### 3a. Expressive writing (Pennebaker) — what actually produces insight
+Benefit tracks: **rising insight/causal words across sessions**, pronoun flexibility (perspective shifts), and coherence *development* — an already-fossilized story retold identically shows little gain. Effects are real but modest (Frattaroli 2006: 146 RCTs, d≈.15). Boundary conditions that are now design rules:
+- **Fresh-upheaval deferral**: writing too soon after trauma (< ~1–2 months) is useless or harmful. Defer deep-processing follow-ups. *(v70)*
+- **Invite, never force, framing**: over-constrained prompts (forced positivity, forced perspective-flips) underperform open ones. Offer lenses, don't mandate them. *(v70)*
 
-```
-Pass 1: SKELETON
-  - Rotate through ALL categories
-  - One question per day
-  - Goal: get the raw story down for every chapter
-  - Duration: ~60-80 days for first pass
+### 3b. Productive introspection vs rumination
+Brooding (repetitive abstract negative self-focus) worsens outcomes; reflection helps. Design rules: the what-not-why lint (§1.8); a **rumination detector** — consecutive answers on a theme with no new events and no insight growth → rotate the theme out for weeks, return via a concrete-behavior or distancing lens. **Depth ≠ repetition.** *(v70)*
+- **Distancing toolkit** for hot material (Kross): fly-on-the-wall retelling, temporal distancing ("when you're 80, what will this chapter mean?"). Use immersed "what did it feel like" prompts for neutral/positive scene capture — distancing is for processing, immersion is for texture.
 
-Pass 2: DEPTH
-  - Review what we have per chapter
-  - Identify thin spots (categories with short/vague answers)
-  - Ask follow-up questions to deepen specific scenes
-  - Add sensory detail, dialogue, emotion
-  - Duration: ~40-60 days
-
-Pass 3: CONNECTIONS
-  - Look for themes that connect across chapters
-  - Ask "bridge" questions that link experiences across time
-  - Weave narrative threads through the story
-  - Duration: ~20-30 days
-
-Pass 4: POLISH
-  - Read chapters aloud (or use TTS)
-  - Identify awkward transitions, missing context
-  - Final gap-filling questions
-  - Duration: ongoing
-```
-
-### Gap Detection System
-
-After each pass, generate a **coverage report**:
-- Which categories have 0-30% answers? (RED — need skeleton)
-- Which categories have 30-70%? (YELLOW — need depth)
-- Which categories have 70%+? (GREEN — ready for drafting)
-
-The rotation system prioritizes RED categories, then YELLOW, then circles back to GREEN for polish.
+### 3c. Longitudinal self-knowledge
+- **Anniversary questions** (10Q model): 5–10 durable questions (success, fear, faith, marriage) re-asked yearly, delivered WITH last year's answer attached. The return-and-contrast moment is the product. *(v71)*
+- **Echo-style resurfacing**: reviewing one's own past entries measurably improved well-being (CHI 2013) — a monthly slot sends an old answer back verbatim + one reflection question. *(v71)*
+- **Values through episodes, not lists** (ACT/Schwartz): "tell me about a decision where you gave up money or status for something else — what was the something?" Evidence-linked inferred values beat self-declared ones; the importance–consistency gap is the contradiction-question generator. *(v71)*
+- **Johari coverage**: Lifehug natively mines the Hidden quadrant; the Blind quadrant needs other-perspective prompts; Unknown maps to "a time you surprised yourself."
+- Classifier-extracted **contradictions and self-understanding insights ground the self-arc prompts** — a question naming the author's actual tension cuts deeper than generic introspection. **[shipped v69]**
 
 ---
 
-## 6. Focus System
+## 4. Time Periods & Life Chapters
 
-### What Focuses Are
+The synthesized **period arc** (each stage maps to question types):
+1. **Name & bound the chapter** (McAdams TOC) — title + how it began and ended
+2. **Life-structure snapshot** (Levinson): "what were the pillars that period — work, relationships, home, a guiding Dream? Which was the keystone? What was neglected?" Track "the Dream" longitudinally: alive, modified, abandoned?
+3. **Typical-day reconstruction + era anchors** (oral history): "walk me through a typical Tuesday — waking to sleeping"; what things cost, the car, the music, the house layout room by room. The highest-yield texture prompts that exist.
+4. **Key scenes** via the five-slot probe
+5. **The transition out, two layers** (Bridges): the change ("what happened?") AND the inner transition ("when did it end *inside* you? what did you let go of?") plus the **neutral zone** ("was there a stretch when the old life was gone but the new hadn't started? what did you do in the in-between?") — the richest under-captured memoir material.
+6. **Later evaluative integration pass** (Butler's life review): "looking back at that chapter now, how do you make peace with it? what did it give you that you only see now?" Recall alone has weak evidence; the evaluative pass is what carries the meta-analytic support.
+*(v71 lands the arc template; v70 lands the question families.)*
 
-Focuses are focused collections about important people or life episodes. When the same person or event keeps appearing in answers, it's worth going deeper with targeted questions.
-
-### How Focuses Work
-- The AI watches for recurring names and themes
-- When a pattern emerges, it offers to create a Focus
-- Each Focus gets 5-10 targeted questions
-- Focuses rotate at lower frequency than main questions
-- They produce their own deliverables: letters, profiles, short stories
-
-### Focus Deliverables
-- **Character profile**: Who this person is, their relationship to the author, key moments together
-- **Letter**: A letter to or about this person
-- **Short story**: A narrative piece centered on a specific episode
-- **Essay**: A reflection on what this person or event means
+### Memory science for capture
+- **Cues**: odor > music > photos > words. Odor-cued memories peak at ages 6–10 — route smell/taste prompts at thin early-childhood coverage. Photo/song reply prompts are the deployable stand-ins. *(v70/v71)*
+- **Reminiscence bump**: authors over ~40 disproportionately recall ages 10–30 — weight there, but pair each life-script milestone with the off-script probe ("which milestone did NOT go the way the script says?").
+- **Dating memories**: never ask "what year?" Landmark anchors ("before or after the move to X? was [child] born yet?") raise correct dating from ~42% to ~68% (Zwartz 2013). Belli's event-history calendar (parallel residence/work/relationship timelines) cross-cues chronology. Store relative order as a first-class relation; flag inferred dates low-confidence (telescoping). *(v71)*
+- **Anti-fossilization**: biased retelling biases the memory itself (Tversky & Marsh); confidence ≠ accuracy (flashbulb studies). Freeze the first telling (immutable sources — **[shipped, core architecture]**), flag high-retell memories, mine new angles on depth passes (§1.10).
 
 ---
 
-## 7. Review Cycles
+## 5. Relationships & Connection
 
-- **Weekly:** Quick coverage check — how many categories are RED/YELLOW/GREEN?
-- **Monthly:** Read through recent answers, look for narrative threads and Focus opportunities
-- **Quarterly:** Draft milestone deliverables from accumulated material
+- **Aron (36 Questions)**: the mechanism is "sustained, escalating, reciprocal, personalistic self-disclosure" — the *escalating structure itself* does the work (verified nulls: goal-priming and expectation manipulations changed nothing). Design rules: enforce arc-slot ordering (never `tension`/`how_they_see_me` before earlier slots have answered sources); **mutual disclosure requires a second voice** — a bot that only extracts never creates closeness. *(v72: guest-answer flow.)*
+- **Gottman love maps**: knowledge of the other's *current* inner world decays — when a living person's mentions go stale, prefer present-tense re-asks ("what is she most worried about right now?") over unasked history.
+- **WNRS**: perception-gap questions ("what did they first assume about you that turned out wrong?") produce testable claims a guest answer can confirm; ration "dig deeper" follow-ups (one same-day per week) to keep them special; **the Final Card move** — arc completion auto-offers the letter. *(v72)*
+- **StoryCorps / family interviewing**: the unit is two people who know each other; questions organized by relationship type (parent, grandparent, mentor, co-founder, remembering a loved one). **Conflicting accounts across relatives are data to preserve, never errors to resolve** — paired immutable sources, never merged. *(v72)*
+- **Unsent letters** (grief work, Neimeyer): for the deceased or estranged — "hello again," not goodbye; owner-only, never suggested for sharing. **Legacy letters** (ethical-will tradition): values → lessons → gratitude → hopes/blessings → forgiveness — the last two are the rarest question moves in any bank. Lifehug can pre-populate from existing sources; everyone else starts blank. *(v72)*
+
+---
+
+## 6. Iteration Model: Fill → Deepen → Connect → Polish (updated)
+
+Passes as before (skeleton → depth → connections → polish), with two research-grounded amendments:
+- Multi-pass revisiting is effectively **spaced retrieval** — prefer even revisit intervals per era over one-burst exhaustion.
+- Depth passes obey §1.10 (new angles, never re-rehearsal).
+
+Coverage thresholds unchanged: RED 0–30%, YELLOW 30–70%, GREEN 70%+ (offer the chapter at GREEN — and actually offer it; see v73 book surface).
+
+---
+
+## 7. The Loop as learning system **[shipped v68–v69]**
+
+The self-improving cycle only works when signal actually flows: candidates promote under backlog-aware caps with craft-quality gates and semantic dedup; scores attribute their story function (one shared vocabulary) and owning Focus; classifier extractions (focus opportunities, contradictions, insights, output ideas) all have consumers; failures are recorded and surfaced by a scheduled doctor. Silent abandonment is countered by adaptive cadence (same-day follow-up when warm, easy re-engagement question when quiet).
 
 ---
 
 ## 8. Key References
 
-### Memoir Methodology
-- **StoryCorps Great Questions** — storycorps.org/participate/great-questions/
-- **Three-Act Structure** — standard narrative framework (setup, confrontation, resolution)
-- **"Memoir vs Autobiography"** — memoir = a slice of life with theme; autobiography = the whole life chronologically
-
-### Notable Memoirs (Structure Reference)
-- **Educated** (Tara Westover) — hybrid chronological/thematic, poverty → education
-- **Open** (Andre Agassi) — ghost-written, first person, raw honesty about contradictions
-- **Kitchen Confidential** (Bourdain) — thematic chapters, vivid sensory detail
-- **Born a Crime** (Trevor Noah) — chapters as standalone stories that build a larger narrative
-- **The Glass Castle** (Jeannette Walls) — hardship memoir, no self-pity, just truth
-
-### Notable Founder Stories (Structure Reference)
-- **Shoe Dog** (Phil Knight / Nike) — chronological, deeply personal, vulnerable
-- **The Everything Store** (Brad Stone / Amazon) — third-person, well-researched, balanced
-- **Steve Jobs** (Walter Isaacson) — authorized biography, interviews with subject + everyone around
-- **The Hard Thing About Hard Things** (Ben Horowitz) — thematic chapters, each a lesson from building a company
-
-### Oral History
-- **StoryCorps methodology** — open-ended questions, active listening, follow the narrative
-- **Studs Terkel** — master of oral history interviews; *Working*, *Hard Times*
-
----
-
-*This research feeds into the daily question system and informs how Life Hug generates questions, structures content, and produces deliverables.*
+**Narrative identity & memoir**: McAdams, *Life Story Interview II* (Foley Center); McAdams & McLean 2013; McAdams et al. 2001 (redemption/contamination, PSPB); Karr, *The Art of Memoir*; Gornick, *The Situation and the Story*; Birren, Guided Autobiography (nine themes).
+**Introspection science**: Pennebaker & Chung (expressive writing protocol); Frattaroli 2006 meta-analysis; Campbell & Pennebaker 2003 (pronoun flexibility); Kross & Ayduk 2011 (self-distancing); Nolen-Hoeksema (rumination); Treynor (brooding vs reflection); Eurich (what-not-why).
+**Transitions & life review**: Levinson, *Seasons of a Man's Life* (life structure — lens, not template); Bridges, *Transitions* (endings → neutral zone → beginnings); Butler/Westerhof 2019 (life review); Cochrane 2018 (reminiscence).
+**Memory science**: Tversky & Marsh 2000 (retelling bias); Talarico & Rubin 2003 (flashbulb confidence); Roediger & Karpicke 2006 (testing effect); Willander & Larsson (odor cues); Janata (music-evoked memories); Zwartz 2013 (landmark dating); Belli (event history calendar); Koppel & Rubin (reminiscence bump).
+**Relationships**: Aron et al. 1997 (36 Questions, PSPB); Gottman (love maps); StoryCorps Great Questions; Neimeyer (continuing bonds); Baines (ethical wills).
+**Oral history practice**: Smithsonian Interviewing Guide; Moyer, Step-by-Step Guide; Morrissey (two-sentence rule); Oral History Association best practices.
+**Structure reference memoirs** (unchanged from v1): *Educated*, *Open*, *Kitchen Confidential*, *Born a Crime*, *The Glass Castle*, *Shoe Dog*, *The Hard Thing About Hard Things*.
