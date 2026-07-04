@@ -350,6 +350,28 @@ python3 system/research_expand.py --topic "Katie" --type relationship --output l
 
 These generate **candidates** (not daily questions yet) — review and promote the good ones with `candidates-list` / `candidates-promote`, ideally into a Focus of `--type self` so they compile into the `wiki/self/` surface. The planner's reserved weekly self-knowledge slot draws from this pool; the monthly cron refills it. A neighborhood is not artifact-ready just because its arc has candidates: readiness moves `candidate → promoted question → answered source`, and `progress` only labels it ready to draft when enough arc slots have answers. Sprinkle these in — don't let them crowd out story work.
 
+### Perennials, Life Chapters & Resurfacing (v71)
+
+- **Perennial questions** are re-asked yearly WITH last year's answer attached (the
+  10Q return-and-contrast model). Mark durable questions (definition of success,
+  biggest fear, state of the marriage, faith):
+  ```bash
+  python3 system/lifehug.py perennial-add E3
+  python3 system/lifehug.py perennials                  # list
+  python3 system/lifehug.py perennials --generate-due   # monthly cron runs this
+  ```
+- **Life-chapters exercise** (`python3 system/lifehug.py chapters-exercise`): the
+  annual McAdams table-of-contents ritual — 2–7 titled chapters with transitions,
+  answered via `ingest-story`. How the chapter boundaries move between years is
+  itself signal.
+- **Monthly resurfacing**: the monthly cron sends one old answer (≥90 days) back
+  verbatim with a reflection question; the reply belongs in `reflect-source`.
+- **Weekly present-tense prompt**: the weekly summary ends with one
+  capture-the-week question; replies ingest via `ingest-story`. The archive
+  should know this year as well as it knows childhood.
+- **Timeline**: `wiki/timeline.md` compiles from classifier-extracted events
+  (author's own time words + landmark anchors — never inferred years).
+
 ## Focus Management
 
 > **Note:** Focuses are the single planning primitive (see *The Roadmap & Focuses*). The mechanics below for adding a question category still apply; a new person, theme, place, relationship, or project category automatically becomes a Focus on the next `roadmap-rebuild`.
@@ -756,6 +778,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 - Review new research-neighborhood candidates before promotion. New gap neighborhoods only open when the planner's expansion urgency ≥ 0.25 (the archive deepens before it widens — v69)
 - Review Focus recommendations and approve only the ones that should become Focuses — **approval creates the Focus for real** (category scaffolded + starter questions seeded via `roadmap.focus_new`; never a zombie — v69)
 - Check if any categories are ready for drafting (GREEN)
+- Perennial re-asks generate automatically (`perennials --generate-due`) and one old answer is resurfaced with a reflection question
 
 ### At Milestones
 - **Skeleton complete** (all categories have at least one answer): Celebrate, preview what depth pass will look like

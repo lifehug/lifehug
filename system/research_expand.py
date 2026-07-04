@@ -102,7 +102,19 @@ RELATIONSHIP_ARC = (
     ("what_i_want_them_to_know", "the thing you'd most want to say to them"),
     ("how_they_see_me", "how you think they see you — and whether it's accurate"),
 )
-ARCS = {"self": SELF_ARC, "relationship": RELATIONSHIP_ARC}
+# Time-period arc (v71) — the synthesized six-step chapter method:
+# McAdams (name & bound), Levinson (life structure + the Dream), oral
+# history (typical day, era anchors), McAdams five-slot scenes, Bridges
+# (ending → neutral zone → beginning), Butler (evaluative integration).
+PERIOD_ARC = (
+    ("foundation", "name and bound the chapter — what would you title it, how did it begin, and how did it end"),
+    ("meaning", "the life structure of those years — the pillars (work, relationships, home, a guiding Dream), which was the keystone, what was neglected"),
+    ("scene", "a typical day, waking to sleeping — where you lived, what things cost, the car, the music, the rooms"),
+    ("turning_point", "the key scenes — a high point, a low point, a turning point, each with what happened / where / who / what you felt / what it says about you"),
+    ("tension", "the transition out — what happened, AND when it ended inside you; what you let go of; the in-between stretch when the old life was gone but the new hadn't started"),
+    ("meaning", "the later look back — how you make peace with that chapter now, and what it gave you that you only see from here"),
+)
+ARCS = {"self": SELF_ARC, "relationship": RELATIONSHIP_ARC, "time_period": PERIOD_ARC}
 
 
 def arc_for(topic_type: str = "") -> tuple[tuple[str, str], ...]:
@@ -177,6 +189,14 @@ THEME_KEYWORDS: dict[str, list[str]] = {
                      "sexuality", "orientation", "culture", "heritage"],
     "creativity":   ["creative", "art", "music", "writing", "painting", "design",
                      "craft", "make things", "build", "compose", "invent"],
+    # Birren's Guided Autobiography themes most banks under-cover — high-yield
+    # domains a life story is incomplete without (v70). Money/faith already above.
+    "health_and_body": ["health", "sick", "illness", "injur", "hospital", "surgery",
+                        "body", "weight", "diagnos", "chronic", "pain", "doctor",
+                        "fitness", "workout", "aging", "energy"],
+    "death_and_mortality": ["mortality", "own death", "dying", "deathbed", "legacy",
+                            "when i die", "when i'm gone", "funeral", "bury", "afterlife",
+                            "time left", "running out of time"],
 }
 
 # ---------------------------------------------------------------------------
@@ -606,6 +626,20 @@ def build_expansion_prompt(
     lines.append("  - Narrative therapy: reframing, agency, alternative stories")
     lines.append("  - Faith/spirituality prompts: meaning, transcendence, values")
     lines.append("")
+    lines.append("Craft rules (hard requirements):")
+    lines.append("  - Two-sentence rule: at most one sentence of context, then ONE open question.")
+    lines.append("  - 'What'/'When'/'Tell me about', never 'Why', for the author's own feelings.")
+    lines.append("  - Include at least one from these high-yield families where the topic allows:")
+    lines.append("    typical-day reconstruction ('walk me through a typical Tuesday, waking to sleeping');")
+    lines.append("    era anchors (what things cost, the car, the music, the house room by room);")
+    lines.append("    photo/song cue ('what song puts you back there? where were you when you heard it?');")
+    lines.append("    perspective-taking ('tell that story the way [person] would tell it');")
+    lines.append("    off-script probe ('which milestone did NOT go the way the script says?');")
+    lines.append("    forgiveness/blessing ('what do you wish for them that you've never said out loud?').")
+    lines.append("  - For heavy themes (death, loss, shame): never open cold — one gentle framing")
+    lines.append("    sentence first, and offer a distanced variant (fly-on-the-wall, or 'when")
+    lines.append("    you're 80, what will this mean?') rather than only digging in.")
+    lines.append("")
 
     # Personalization hints from the quality profile (only when active).
     try:
@@ -651,6 +685,15 @@ def build_expansion_prompt(
         lines.append("  - what the author imagines this person feels or sees in return")
         lines.append("  - what has gone unsaid, and what the author would want them to know")
         lines.append("Surface perception gaps and the things that are hard to say out loud.")
+        lines.append("")
+    elif topic_type == "time_period":
+        lines.append("## LIFE-CHAPTER MODE")
+        lines.append("This period is a CHAPTER of a life, not a list of facts. Follow the arc order:")
+        lines.append("bound it → its life structure → a typical day with era texture → key scenes →")
+        lines.append("the transition out (including the inner ending and the neutral-zone stretch")
+        lines.append("between lives — the richest under-captured memoir material) → the later look back.")
+        lines.append("Dating rule: NEVER ask 'what year was that?' — use landmark anchors instead")
+        lines.append("('was that before or after the move? was [child] born yet?').")
         lines.append("")
     lines.append("Principles:")
     lines.append("  1. Never yes/no — always open-ended ('Tell me about...')")

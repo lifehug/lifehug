@@ -981,6 +981,55 @@ def update_index(written_pages: list[Path], dry_run=False):
         write_text(log, existing.rstrip() + "\n" + additions + "\n")
 
 
+def compile_timeline(dry_run: bool = False) -> bool:
+    """Compile wiki/timeline.md from classifier-extracted events (v71).
+
+    Events carry the author's own time words (`when_hint`) and a landmark
+    `anchor` — never guessed years (relative anchors beat absolute dating;
+    inferred dates telescope). The page grows as the weekly classifier works
+    through the archive. Skipped entirely when no events exist yet."""
+    classifications_dir = STATE_DIR / "classifications"
+    if not classifications_dir.exists():
+        return False
+    rows: list[tuple[str, str, str, str]] = []  # (source, description, when_hint, anchor)
+    for path in sorted(classifications_dir.glob("*.json")):
+        data = read_json(path, default={}) or {}
+        source = str(data.get("source_path", path.stem))
+        for event in data.get("events", []) or []:
+            if not isinstance(event, dict):
+                continue
+            desc = str(event.get("description", "")).strip()
+            if not desc:
+                continue
+            rows.append((source,
+                         desc,
+                         str(event.get("when_hint") or "").strip(),
+                         str(event.get("anchor") or "").strip()))
+    if not rows:
+        return False
+    lines = [
+        "---",
+        'title: "Timeline"',
+        "type: meta",
+        "visibility: owner_only",
+        "---",
+        "",
+        "# Timeline",
+        "",
+        "Datable moments extracted from classified sources. Dating is by the",
+        "author's own words and landmark anchors — relative order is trusted;",
+        "absolute years are deliberately NOT inferred (they telescope).",
+        "",
+    ]
+    for source, desc, when_hint, anchor in rows:
+        when = when_hint or "(undated)"
+        anchor_part = f" · anchor: {anchor}" if anchor else ""
+        lines.append(f"- **{when}** — {desc}{anchor_part}  \n  _source: {source}_")
+    lines.append("")
+    write_page(WIKI_DIR / "timeline.md", "\n".join(lines), dry_run)
+    return True
+
+
 # Entity types whose mention-graduated pages are cleaned up when their entity
 # leaves the roster. Focus/hand-authored pages are never candidates.
 _MENTION_CLEANUP_TYPES = ("person", "place", "period", "object")
@@ -1147,6 +1196,7 @@ def main():
         if write_page(d["path"], text, args.dry_run):
             written.append(d["path"])
     removed = cleanup_orphan_entity_pages(taken_slugs, args.dry_run)
+    compile_timeline(args.dry_run)
     update_index(written, args.dry_run)
 
     if not args.dry_run:

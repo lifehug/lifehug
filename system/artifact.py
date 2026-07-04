@@ -263,6 +263,15 @@ You are creating a meaningful life artifact for the author. Use the context as
 grounding, but write the final piece as a human artifact the author could send,
 post, publish, or keep.
 
+VOICE PRESERVATION (hard rules — this is where trust lives)
+- The author's words, lightly stitched, never rewritten. Quote and weave their
+  actual phrasing from the context pack; the piece should sound like THEM.
+- Never change a name, a date, or a detail. Never render their first-person
+  material in third person.
+- Never invent events, quotes, or feelings not present in the context pack.
+- COMPOSE, don't summarize: pick the thing this piece has come to say, then
+  build it from real scenes — not a stitched list of excerpts or Q&A.
+
 FORMAT INSTRUCTIONS
 {template}
 

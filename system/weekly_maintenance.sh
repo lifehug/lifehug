@@ -187,6 +187,19 @@ ${out}"
 
 run_learning_step "quality_update" python3 "$WORKSPACE/system/lifehug.py" quality-update
 
+# Synthesis→question loop (v71): non-boilerplate open questions from compiled
+# wiki pages become candidates (capped at 3/week — the wiki whispers).
+run_learning_step "wiki_harvest" python3 - <<'PY'
+import sys
+sys.path.insert(0, "system")
+from question_candidates import harvest_wiki_questions
+harvested = harvest_wiki_questions()
+if harvested:
+    print(f"✓ Harvested {len(harvested)} open question(s) from the wiki into candidates: {', '.join(harvested)}")
+else:
+    print("No new wiki open questions to harvest.")
+PY
+
 run_learning_step "auto_promote" python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote
 PROMOTE_OUT="$LAST_STEP_OUT"
 
@@ -232,6 +245,18 @@ fi
 
 safe_autocommit
 
+# Present-tense capture (v71): the system only mined the past — one weekly
+# prompt records the life being lived. Replies ingest via ingest-story.
+PRESENT_PROMPTS=(
+  "What happened this week that future-you will want to remember?"
+  "What's one moment from this week you'd put in the book, however small?"
+  "What are you carrying right now — the worry or the hope this week ran on?"
+  "Who did you connect with this week, and what did it leave you with?"
+  "What did this week teach you, or confirm, about yourself?"
+  "What's one ordinary detail of your life right now that will sound exotic in 20 years?"
+)
+PRESENT_PROMPT="${PRESENT_PROMPTS[$(( $(date +%V | sed 's/^0//') % ${#PRESENT_PROMPTS[@]} ))]}"
+
 telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
 
 ${CLASSIFY_OUT}
@@ -247,4 +272,7 @@ ${LEARNING_OUT}
 ${RECS_OUT}
 
 🩺 Doctor:
-${DOCTOR_WARNINGS:-all checks ok}"
+${DOCTOR_WARNINGS:-all checks ok}
+
+📸 This week, while it's fresh: ${PRESENT_PROMPT}
+(Reply and it saves as a story)"

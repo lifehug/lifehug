@@ -287,6 +287,59 @@ ${ETYPE_OUT}"
 done
 echo "$ROSTER_OUT"
 run_step python3 "$WORKSPACE/system/lifehug.py" compile
+
+# Perennial re-asks (v71): questions marked perennial that were last answered
+# ~a year ago get re-inserted WITH last year's answer attached (10Q model).
+run_optional python3 "$WORKSPACE/system/lifehug.py" perennials --generate-due
+
+# Echo-style resurfacing (v71): send one old answer back verbatim with a
+# reflection question — reviewing past entries is itself the intervention
+# (CHI 2013). Deterministic per month; replies become reflection sources.
+RESURFACE_OUT=$(python3 - <<'PY' 2>&1 || true
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "system")
+from datetime import datetime, timezone
+
+from lifehug_core import ANSWERS_DIR, send_telegram
+
+files = sorted(ANSWERS_DIR.glob("*.md"))
+now = datetime.now(timezone.utc)
+old_enough = []
+for f in files:
+    text = f.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r'^answered_date:\s*"?([0-9-]{10})', text, re.MULTILINE)
+    if not m:
+        continue
+    try:
+        answered = datetime.fromisoformat(m.group(1)).replace(tzinfo=timezone.utc)
+    except ValueError:
+        continue
+    if (now - answered).days >= 90:
+        old_enough.append((f, m.group(1), text))
+if not old_enough:
+    print("Resurfacing: no answers ≥90 days old yet.")
+    raise SystemExit(0)
+pick = old_enough[(now.year * 12 + now.month) % len(old_enough)]
+f, answered_date, text = pick
+parts = text.split("---")
+body = parts[-1] if len(parts) >= 3 else text
+body = re.sub(r"^#.*$", "", body, flags=re.MULTILINE)
+body = " ".join(body.split())[:900]
+message = (f"🪞 Lifehug — from your own archive\n\n"
+           f"On {answered_date} you wrote ({f.stem}):\n\n“{body}”\n\n"
+           f"Reading it now — what do you see that you couldn't see then? "
+           f"(Reply and it saves as a reflection on {f.stem})")
+if send_telegram(message):
+    print(f"✓ Resurfaced {f.stem} ({answered_date}) with a reflection question")
+else:
+    print("Resurfacing: telegram unavailable; skipped")
+PY
+)
+echo "$RESURFACE_OUT"
+
 PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
 safe_autocommit

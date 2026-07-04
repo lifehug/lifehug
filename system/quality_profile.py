@@ -55,6 +55,31 @@ MULTIPLIER_FLOOR = 0.7
 # Signal extraction
 # ---------------------------------------------------------------------------
 
+# LIWC-lite word lists (Pennebaker): rising insight/causal density across a
+# theme predicts productive processing; flat insight + high negative + high
+# I-rate is the brooding signature. Coarse but directionally useful.
+_INSIGHT_WORDS = {
+    "realize", "realized", "realizing", "understand", "understood", "understand",
+    "because", "reason", "meant", "means", "learned", "learn", "insight", "see now",
+    "makes sense", "figured", "cause", "caused", "why", "therefore", "so that",
+    "know now", "knew", "clarity", "perspective",
+}
+_NEGATIVE_WORDS = {
+    "sad", "afraid", "scared", "fear", "angry", "anger", "hate", "hated", "hurt",
+    "pain", "painful", "ashamed", "shame", "guilt", "guilty", "worthless", "alone",
+    "lonely", "hopeless", "anxious", "worried", "worry", "regret", "failure",
+    "failed", "broken", "lost", "cry", "cried", "terrible", "awful", "worst",
+}
+
+
+def _word_rate(words: list[str], vocabulary: set[str]) -> float:
+    if not words:
+        return 0.0
+    lower = [w.strip(".,!?;:'\"").lower() for w in words]
+    hits = sum(1 for w in lower if w in vocabulary)
+    return round(hits / len(lower), 4)
+
+
 _ENTITY_RE = re.compile(r"\b[A-Z][a-z]{1,}\b")
 _SKIP_WORDS = {
     "I", "It", "He", "She", "They", "We", "You", "My", "His", "Her", "Their",
@@ -82,11 +107,19 @@ def extract_signals(
     entities = {e for e in raw_entities if e not in _SKIP_WORDS}
     entity_count = len(entities)
 
+    lower_words = [w.strip(".,!?;:'\"").lower() for w in words]
+    i_rate = round(sum(1 for w in lower_words if w in ("i", "i'm", "i've", "i'd", "me", "my", "myself")) / word_count, 4) if word_count else 0.0
+
     return {
         "word_count": word_count,
         "entity_count": entity_count,
         "wiki_nodes_added": wiki_nodes_added,
         "followup_count": followup_count,
+        # Pennebaker-style processing signals (not part of richness score;
+        # consumed by the rumination detector and future trend analysis).
+        "insight_rate": _word_rate(words, _INSIGHT_WORDS),
+        "negative_rate": _word_rate(words, _NEGATIVE_WORDS),
+        "i_rate": i_rate,
         "retroactive": retroactive,
     }
 
@@ -229,6 +262,38 @@ def _top_patterns(by_story: dict, by_category: dict, global_avg: float) -> list[
     return patterns[:4]
 
 
+# Rumination detector thresholds: the last N answers in a category all show
+# the brooding signature (high negative + high self-focus + no insight growth).
+RUMINATION_WINDOW = 3
+RUMINATION_NEGATIVE_MIN = 0.02   # ≥2% negative-affect words
+RUMINATION_I_RATE_MIN = 0.08     # ≥8% first-person words
+
+
+def detect_rumination(scores: list[dict], window: int = RUMINATION_WINDOW) -> list[str]:
+    """Categories whose recent answers show brooding (Nolen-Hoeksema/Treynor):
+    repetitive negative self-focus with flat/falling insight. The planner
+    cools these categories; depth ≠ repetition — return via a distancing or
+    concrete-behavior lens after a break."""
+    by_cat: dict[str, list[dict]] = {}
+    for s in scores:
+        sig = s.get("signals") or {}
+        if "insight_rate" not in sig:
+            continue  # pre-v70 score without processing signals
+        by_cat.setdefault(str(s.get("category") or "?"), []).append(sig)
+
+    flagged: list[str] = []
+    for cat, sigs in by_cat.items():
+        recent = sigs[-window:]
+        if len(recent) < window:
+            continue
+        all_negative = all(s.get("negative_rate", 0) >= RUMINATION_NEGATIVE_MIN for s in recent)
+        all_self = all(s.get("i_rate", 0) >= RUMINATION_I_RATE_MIN for s in recent)
+        insight_flat = recent[-1].get("insight_rate", 0) <= recent[0].get("insight_rate", 0)
+        if all_negative and all_self and insight_flat:
+            flagged.append(cat)
+    return sorted(flagged)
+
+
 def compute_profile() -> dict:
     """Read answer_scores.json and compute quality_profile.json."""
     data = load_scores()
@@ -271,6 +336,7 @@ def compute_profile() -> dict:
         "by_story_function": by_story,
         "by_category": by_category,
         "by_focus": by_focus,
+        "rumination_categories": detect_rumination(scores),
         "top_patterns": patterns,
     }
     save_profile(profile)

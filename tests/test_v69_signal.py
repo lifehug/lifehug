@@ -111,12 +111,15 @@ class ClassifierConsumerTests(unittest.TestCase):
                 "contradictions": ["Claims self-sufficiency but names four rescuers"],
                 "self_understanding_insights": [{"description": "Money = safety, not status"}],
             }), encoding="utf-8")
-            orig = core.CLASSIFICATIONS_DIR
-            core.CLASSIFICATIONS_DIR = clf_dir
+            # load_classified_self_signals resolves lifehug_core via sys.modules
+            # at call time; later test files reload the module, so patch there.
+            live_core = sys.modules["lifehug_core"]
+            orig = live_core.CLASSIFICATIONS_DIR
+            live_core.CLASSIFICATIONS_DIR = clf_dir
             try:
                 signals = re_mod.load_classified_self_signals()
             finally:
-                core.CLASSIFICATIONS_DIR = orig
+                live_core.CLASSIFICATIONS_DIR = orig
             self.assertEqual(len(signals), 2)
             self.assertTrue(any(s.startswith("[contradiction]") for s in signals))
             self.assertTrue(any("Money = safety" in s for s in signals))

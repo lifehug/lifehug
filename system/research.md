@@ -27,16 +27,16 @@
 Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. *(Book-level operationalization: v73 chapter-readiness scoring.)*
 
 ### 2b. McAdams — narrative identity (Life Story Interview II)
-- **Life chapters exercise**: "think of your life as a book — 2–7 chapters, give each a title, and say how we get from one to the next." The transition clause forces boundary articulation. *(v71: TOC onboarding + annual re-run; re-chaptering deltas are signal.)*
-- **Eight key scenes** (high point, low point, turning point, positive/negative childhood memory, vivid adult memory, spiritual experience, wisdom event), each probed with the five slots. A person- or period-Focus isn't deep until it holds at least a high point, low point, and turning point. *(v70: five-slot rubric as scorer + follow-up generator.)*
+- **Life chapters exercise**: "think of your life as a book — 2–7 chapters, give each a title, and say how we get from one to the next." The transition clause forces boundary articulation. **[shipped v71: `lifehug.py chapters-exercise`, re-run yearly]**
+- **Eight key scenes** (high point, low point, turning point, positive/negative childhood memory, vivid adult memory, spiritual experience, wisdom event), each probed with the five slots. A person- or period-Focus isn't deep until it holds at least a high point, low point, and turning point. **[shipped v70: classifier extracts `scene_slots`; follow-ups target empty slots]**
 - **Redemption sequences** (bad→good) track well-being; contamination (good→bad) tracks distress. OFFER, never force, the reframe: "did anything grow out of that?" If a low-point question is refused, soften to "just a very bad experience of some kind." Note: redemption framing is culturally American — offer, don't impose.
 
 ### 2c. Guided Autobiography (Birren)
-Weekly **theme** + a fan of sensitizing questions ("react to the ones that open windows — skip the rest"; a skip is signal, not failure), ~2-page story, witnessed reading. Nine themes: branching points, family, money, life work, health/body, sexual identity, death, spiritual life, goals. **Money, health/body, sexual identity, and death are high-yield domains most question banks under-cover.** Never open a heavy theme cold — one framing sentence first. *(v70: nine-theme coverage check + framing paragraphs.)*
+Weekly **theme** + a fan of sensitizing questions ("react to the ones that open windows — skip the rest"; a skip is signal, not failure), ~2-page story, witnessed reading. Nine themes: branching points, family, money, life work, health/body, sexual identity, death, spiritual life, goals. **Money, health/body, sexual identity, and death are high-yield domains most question banks under-cover.** Never open a heavy theme cold — one framing sentence first. **[shipped v70: GAB themes in gap detection; framing rules in prompts]**
 
 ### 2d. Memoir craft (Karr / Gornick)
 - **Situation vs story** (Gornick): what happened vs "the thing one has come to say." Tag answers; situation-rich/story-empty answers get the meaning-making follow-up. Chapter drafting picks its "thing to say" FIRST, then selects scenes serving it.
-- Memoir fails when **the narrator doesn't change** — track then-vs-now deltas; additive `reflect-source` is the right primitive. *(v71: anniversary re-asks + change tracking.)*
+- Memoir fails when **the narrator doesn't change** — track then-vs-now deltas; additive `reflect-source` is the right primitive. **[shipped v71: perennials — `lifehug.py perennial-add`, monthly `--generate-due`]**
 - **Voice is the product.** "Your words, lightly cleaned, never rewritten." Never paraphrase into third person, never alter names. (Remento's AI rewrites — changed names, third-person rendering — are the canonical trust failure.)
 
 ### 2e. Competitor lessons (why people abandon these products)
@@ -51,17 +51,17 @@ Weekly **theme** + a fan of sensitizing questions ("react to the ones that open 
 
 ### 3a. Expressive writing (Pennebaker) — what actually produces insight
 Benefit tracks: **rising insight/causal words across sessions**, pronoun flexibility (perspective shifts), and coherence *development* — an already-fossilized story retold identically shows little gain. Effects are real but modest (Frattaroli 2006: 146 RCTs, d≈.15). Boundary conditions that are now design rules:
-- **Fresh-upheaval deferral**: writing too soon after trauma (< ~1–2 months) is useless or harmful. Defer deep-processing follow-ups. *(v70)*
-- **Invite, never force, framing**: over-constrained prompts (forced positivity, forced perspective-flips) underperform open ones. Offer lenses, don't mandate them. *(v70)*
+- **Fresh-upheaval deferral**: writing too soon after trauma (< ~1–2 months) is useless or harmful. Defer deep-processing follow-ups. **[shipped v70: classifier `defer` flag → 60-day hold]**
+- **Invite, never force, framing**: over-constrained prompts (forced positivity, forced perspective-flips) underperform open ones. Offer lenses, don't mandate them. **[shipped v70: prompt rules]**
 
 ### 3b. Productive introspection vs rumination
-Brooding (repetitive abstract negative self-focus) worsens outcomes; reflection helps. Design rules: the what-not-why lint (§1.8); a **rumination detector** — consecutive answers on a theme with no new events and no insight growth → rotate the theme out for weeks, return via a concrete-behavior or distancing lens. **Depth ≠ repetition.** *(v70)*
+Brooding (repetitive abstract negative self-focus) worsens outcomes; reflection helps. Design rules: the what-not-why lint (§1.8); a **rumination detector** — consecutive answers on a theme with no new events and no insight growth → rotate the theme out for weeks, return via a concrete-behavior or distancing lens. **Depth ≠ repetition.** **[shipped v70: rumination detector cools flagged categories in the planner]**
 - **Distancing toolkit** for hot material (Kross): fly-on-the-wall retelling, temporal distancing ("when you're 80, what will this chapter mean?"). Use immersed "what did it feel like" prompts for neutral/positive scene capture — distancing is for processing, immersion is for texture.
 
 ### 3c. Longitudinal self-knowledge
-- **Anniversary questions** (10Q model): 5–10 durable questions (success, fear, faith, marriage) re-asked yearly, delivered WITH last year's answer attached. The return-and-contrast moment is the product. *(v71)*
-- **Echo-style resurfacing**: reviewing one's own past entries measurably improved well-being (CHI 2013) — a monthly slot sends an old answer back verbatim + one reflection question. *(v71)*
-- **Values through episodes, not lists** (ACT/Schwartz): "tell me about a decision where you gave up money or status for something else — what was the something?" Evidence-linked inferred values beat self-declared ones; the importance–consistency gap is the contradiction-question generator. *(v71)*
+- **Anniversary questions** (10Q model): 5–10 durable questions (success, fear, faith, marriage) re-asked yearly, delivered WITH last year's answer attached. The return-and-contrast moment is the product. **[shipped v71: perennials]**
+- **Echo-style resurfacing**: reviewing one's own past entries measurably improved well-being (CHI 2013) — a monthly slot sends an old answer back verbatim + one reflection question. **[shipped v71: monthly resurfacing]**
+- **Values through episodes, not lists** (ACT/Schwartz): "tell me about a decision where you gave up money or status for something else — what was the something?" Evidence-linked inferred values beat self-declared ones; the importance–consistency gap is the contradiction-question generator. *(values ledger deferred — see follow-up issue)*
 - **Johari coverage**: Lifehug natively mines the Hidden quadrant; the Blind quadrant needs other-perspective prompts; Unknown maps to "a time you surprised yourself."
 - Classifier-extracted **contradictions and self-understanding insights ground the self-arc prompts** — a question naming the author's actual tension cuts deeper than generic introspection. **[shipped v69]**
 
@@ -76,12 +76,12 @@ The synthesized **period arc** (each stage maps to question types):
 4. **Key scenes** via the five-slot probe
 5. **The transition out, two layers** (Bridges): the change ("what happened?") AND the inner transition ("when did it end *inside* you? what did you let go of?") plus the **neutral zone** ("was there a stretch when the old life was gone but the new hadn't started? what did you do in the in-between?") — the richest under-captured memoir material.
 6. **Later evaluative integration pass** (Butler's life review): "looking back at that chapter now, how do you make peace with it? what did it give you that you only see now?" Recall alone has weak evidence; the evaluative pass is what carries the meta-analytic support.
-*(v71 lands the arc template; v70 lands the question families.)*
+**[shipped: v71 PERIOD_ARC template for time_period neighborhoods; v70 question families in all generation prompts]**
 
 ### Memory science for capture
-- **Cues**: odor > music > photos > words. Odor-cued memories peak at ages 6–10 — route smell/taste prompts at thin early-childhood coverage. Photo/song reply prompts are the deployable stand-ins. *(v70/v71)*
+- **Cues**: odor > music > photos > words. Odor-cued memories peak at ages 6–10 — route smell/taste prompts at thin early-childhood coverage. Photo/song reply prompts are the deployable stand-ins. **[shipped v70: prompt families; media ingestion itself is v72+]**
 - **Reminiscence bump**: authors over ~40 disproportionately recall ages 10–30 — weight there, but pair each life-script milestone with the off-script probe ("which milestone did NOT go the way the script says?").
-- **Dating memories**: never ask "what year?" Landmark anchors ("before or after the move to X? was [child] born yet?") raise correct dating from ~42% to ~68% (Zwartz 2013). Belli's event-history calendar (parallel residence/work/relationship timelines) cross-cues chronology. Store relative order as a first-class relation; flag inferred dates low-confidence (telescoping). *(v71)*
+- **Dating memories**: never ask "what year?" Landmark anchors ("before or after the move to X? was [child] born yet?") raise correct dating from ~42% to ~68% (Zwartz 2013). Belli's event-history calendar (parallel residence/work/relationship timelines) cross-cues chronology. Store relative order as a first-class relation; flag inferred dates low-confidence (telescoping). **[shipped v71: classifier extracts `events` with `when_hint`+`anchor` (never years); wiki/timeline.md compiles from them. Full EHC onboarding survey deferred — see follow-up issue]**
 - **Anti-fossilization**: biased retelling biases the memory itself (Tversky & Marsh); confidence ≠ accuracy (flashbulb studies). Freeze the first telling (immutable sources — **[shipped, core architecture]**), flag high-retell memories, mine new angles on depth passes (§1.10).
 
 ---
@@ -106,9 +106,9 @@ Coverage thresholds unchanged: RED 0–30%, YELLOW 30–70%, GREEN 70%+ (offer t
 
 ---
 
-## 7. The Loop as learning system **[shipped v68–v69]**
+## 7. The Loop as learning system **[shipped v68–v71]**
 
-The self-improving cycle only works when signal actually flows: candidates promote under backlog-aware caps with craft-quality gates and semantic dedup; scores attribute their story function (one shared vocabulary) and owning Focus; classifier extractions (focus opportunities, contradictions, insights, output ideas) all have consumers; failures are recorded and surfaced by a scheduled doctor. Silent abandonment is countered by adaptive cadence (same-day follow-up when warm, easy re-engagement question when quiet).
+The self-improving cycle only works when signal actually flows: candidates promote under backlog-aware caps with craft-quality gates and semantic dedup; scores attribute their story function (one shared vocabulary) and owning Focus; classifier extractions (focus opportunities, contradictions, insights, output ideas) all have consumers; failures are recorded and surfaced by a scheduled doctor. Silent abandonment is countered by adaptive cadence (same-day follow-up when warm, easy re-engagement question when quiet). v70/v71 additions: craft rules and question families live in every generation prompt (classifier, follow-ups, research); the why→what lint and quality gate park violations; the rumination detector cools brooding categories; perennials re-ask durable questions yearly with last year's answer attached; a monthly resurfacing slot returns an old answer with a reflection question; a weekly present-tense prompt captures the life being lived; compiled wiki open questions harvest back into candidates (synthesis→question); and classifier-extracted events compile into wiki/timeline.md with relative anchors.
 
 ---
 

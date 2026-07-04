@@ -260,12 +260,24 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
     }}
   ],
   "self_understanding_insights": ["list of patterns, beliefs, or values surfaced as plain strings"],
+  "scene_slots": {{
+    "what_happened": true,
+    "when_and_where": false,
+    "who_was_there": true,
+    "thought_and_felt": false,
+    "what_it_says_about_me": false
+  }},
+  "situation_vs_story": "situation_rich_story_empty|story_rich_situation_thin|balanced|neither",
+  "events": [
+    {{ "description": "string — one datable moment", "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)" }}
+  ],
   "candidate_questions": [
     {{
       "text": "string — the actual question",
       "story_function": "one of: {', '.join(STORY_FUNCTIONS)}",
       "priority": 0.75,
       "reason": "why this question matters for the memoir",
+      "defer": false,
       "target_category": "one of these category IDs or null — {', '.join(sorted(parse_categories(QUESTIONS_FILE.read_text(encoding='utf-8') if QUESTIONS_FILE.exists() else '').keys()))}"
     }}
   ]
@@ -274,9 +286,19 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 ### Guidelines
 - `people`: include every named or described person; estimate mention_count from how prominent they are
 - `themes`: use only themes from the provided taxonomy (add new ones only if truly missing)
-- `candidate_questions`: generate 3–8 high-quality follow-up questions
-  - Draw on memoir methodology (StoryCorps, oral history, narrative therapy, We're Not Really Strangers)
-  - Prioritize questions that deepen thin or unresolved areas
+- `scene_slots`: which of McAdams' five scene slots this story already fills — what happened / when & where / who was there / what the author thought & felt / what it says about them
+- `situation_vs_story` (Gornick): situation = what happened; story = the insight, the thing the author has come to say. Tag which this source has.
+- `events`: every datable moment. NEVER convert to a year — record the author's own time words (`when_hint`) and the nearest landmark event (`anchor`). Relative anchors beat guessed dates.
+- `candidate_questions`: generate 3–8 high-quality follow-up questions. **Craft rules (violations get parked, so follow them):**
+  - **Two-sentence rule**: one sentence of context quoting or referencing the author's own words, then ONE open question. One question mark per candidate.
+  - **Target the empty scene_slots.** "What does it say about you?" is the highest-value follow-up when that slot is empty.
+  - **Action↔identity ladder**: after an action answer ask what it says about them; after an identity claim ask for one specific moment that proves it.
+  - **Situation-rich/story-empty sources get the meaning-making question**; story-rich/situation-thin sources get the scene question ("pick one of those mornings — what did it smell like?").
+  - **"What"/"When"/"Tell me about", never "Why", for the author's own feelings** (why-questions about one's own emotions produce confabulation). "Why" is fine for events and other people.
+  - **Never restate the author's account with changed details** — quote exactly or ask fresh (memory reconsolidation contamination).
+  - **New angles only** — if the source retells a story the archive already holds, ask for what's NEVER been told ("a detail from that day you've never mentioned to anyone"), never a re-rehearsal.
+  - **High-negative-affect material**: offer ONE distanced question (fly-on-the-wall retelling, or "when you're 80, what will this chapter mean?") rather than digging straight in. If the story describes an upheaval within the last ~2 months, set `"defer": true` on deep-processing questions (they will wait ~60 days — expressive-writing evidence says too-soon is harmful).
+  - **Draw from the high-yield families** where they fit: typical-day reconstruction; era anchors (what things cost, the car, the music, the house room by room); photo/song cues ("what song puts you back there?"); perspective-taking ("tell it as your dad would tell it"); off-script probes ("which milestone did NOT go the way the script says?"); forgiveness/blessing ("what do you wish for them that you've never said out loud?").
   - Assign story_function from the list: {', '.join(STORY_FUNCTIONS)}
   - Set priority between 0.4 (nice-to-have) and 0.95 (critical gap)
 - `focus_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section
@@ -411,6 +433,13 @@ def build_candidates(
         }
         if target_cat:
             record["target_category"] = target_cat
+        # Fresh-upheaval deferral (Pennebaker): deep-processing questions on a
+        # recent upheaval wait ~60 days before becoming promotable.
+        if q.get("defer"):
+            from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+            defer_until = datetime.now(timezone.utc) + timedelta(days=60)
+            record["defer_until"] = defer_until.isoformat().replace("+00:00", "Z")
+            record["defer_reason"] = "fresh upheaval — deep processing deferred ~60 days"
 
         candidates.append(record)
         existing_texts.add(text.lower())
@@ -452,6 +481,11 @@ def build_classification(
             ai_result.get(LEGACY_FOCUS_KEY, []),
         ),
         "self_understanding_insights": ai_result.get("self_understanding_insights", []),
+        # v70/v71: five-slot scene coverage, Gornick tag, and datable events
+        # (relative anchors, never guessed years) for the timeline surface.
+        "scene_slots": ai_result.get("scene_slots", {}),
+        "situation_vs_story": ai_result.get("situation_vs_story", ""),
+        "events": ai_result.get("events", []),
     }
 
 

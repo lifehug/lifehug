@@ -546,6 +546,63 @@ def cmd_followups_prompt(_args: argparse.Namespace) -> int:
     return run_python("gen_followups.py", ["--prompt"])
 
 
+def cmd_perennial_add(args: argparse.Namespace) -> int:
+    from question_candidates import add_perennial
+    entry = add_perennial(args.question_id)
+    print(f"✓ {args.question_id} marked perennial (re-asked yearly with last year's answer attached)")
+    if entry.get("reasks"):
+        print(f"  prior re-asks: {', '.join(r['question_id'] for r in entry['reasks'])}")
+    return 0
+
+
+def cmd_perennials(args: argparse.Namespace) -> int:
+    from question_candidates import generate_due_perennials, load_perennials
+    if args.generate_due:
+        created = generate_due_perennials(dry_run=args.dry_run)
+        prefix = "[DRY RUN] " if args.dry_run else ""
+        if created:
+            for new_id, source_id in created:
+                print(f"{prefix}✓ Perennial re-ask created: {new_id} (from {source_id}, with last year's answer attached)")
+        else:
+            print(f"{prefix}No perennials due (≥350 days since last answer).")
+        return 0
+    data = load_perennials()
+    if not data["perennials"]:
+        print("No perennial questions yet. Mark one: lifehug.py perennial-add <question-id>")
+        print("Good perennials: definition of success, biggest fear, state of the marriage, faith.")
+        return 0
+    print("Perennial questions (re-asked yearly with last year's answer attached):")
+    for p_entry in data["perennials"]:
+        reasks = ", ".join(r["question_id"] for r in p_entry.get("reasks", [])) or "none yet"
+        print(f"  - {p_entry['question_id']} (re-asks: {reasks})")
+    return 0
+
+
+CHAPTERS_EXERCISE = """📖 Life Chapters exercise (McAdams) — do this once a year.
+
+Think about your life as if it were a book. Divide it into its chapters —
+most people land between 2 and 7. For each chapter:
+
+  1. Give it a TITLE (your words, not a date range)
+  2. Say briefly what it contains
+  3. Say how we get from that chapter to the next — what ENDED, and what began
+
+Don't overthink; the titles you reach for first are the real ones.
+
+Answer by voice or text, then save it as a story:
+
+  printf '%s' "$YOUR_ANSWER" | python3 system/lifehug.py ingest-story \\
+    --source "chapters exercise" --title "Life Chapters $(date +%Y)"
+
+Re-run this yearly — how the chapter boundaries MOVE between years is itself
+part of your story. The classifier extracts the periods automatically."""
+
+
+def cmd_chapters_exercise(_args: argparse.Namespace) -> int:
+    print(CHAPTERS_EXERCISE)
+    return 0
+
+
 def cmd_notify(_args: argparse.Namespace) -> int:
     """Read a message from stdin and send it to Telegram, chunked. Always exits
     0 — notification must never break the flow that called it."""
@@ -1051,6 +1108,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="Run local health checks")
     p.add_argument("--daily", action="store_true", help="Also run daily delivery dry-run")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("perennial-add", help="Mark a question as perennial (re-asked yearly with last year's answer)")
+    p.add_argument("question_id")
+    p.set_defaults(func=cmd_perennial_add)
+
+    p = sub.add_parser("perennials", help="List perennial questions; --generate-due inserts due yearly re-asks")
+    p.add_argument("--generate-due", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_perennials)
+
+    p = sub.add_parser("chapters-exercise", help="Print the annual McAdams life-chapters exercise")
+    p.set_defaults(func=cmd_chapters_exercise)
 
     p = sub.add_parser("notify", help="Send stdin to the configured Telegram target, chunked under the 4096-char limit")
     p.set_defaults(func=cmd_notify)

@@ -454,6 +454,11 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
             fn_data = _qprofile.get("by_story_function", {}).get(story_function, {})
             quality_multiplier = float(fn_data.get("multiplier", 1.0))
             base_weight = base_weight * quality_multiplier
+            # Rumination cooldown: recent answers in this category show the
+            # brooding signature — cool it hard rather than digging deeper.
+            # Depth ≠ repetition; it returns when the profile flag clears.
+            if category in (_qprofile.get("rumination_categories") or []):
+                base_weight = base_weight * 0.25
 
         rows.append({
             **question,

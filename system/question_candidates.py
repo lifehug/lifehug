@@ -97,6 +97,16 @@ YES_NO_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# "Why do you feel/keep/always…" aimed at the author's own recurring emotions
+# produces confabulation and fuels brooding (Eurich; rumination literature).
+# Ask "what"/"when"/"tell me about a time" instead. "Why" about events and
+# other people is fine and NOT flagged.
+SELF_WHY_PATTERN = re.compile(
+    r"\bwhy\s+(do|did|are|were|can'?t|don'?t|won'?t)\s+you\s+"
+    r"(feel|keep|always|never|still|struggle|worry|fear|avoid|hate|resent|doubt)\b",
+    re.IGNORECASE,
+)
+
 TOO_BROAD_PATTERNS = [
     re.compile(r"^tell me about \.+\.$", re.IGNORECASE),
     re.compile(r"^what (do you think|are your thoughts) about", re.IGNORECASE),
@@ -132,6 +142,12 @@ def check_quality(text: str, *, source_path: str | None = None, existing_questio
     if YES_NO_PATTERNS.match(text.strip()):
         flags.append("yes_no_wording")
         score -= 0.25
+
+    # why→what lint: introspective why-questions about the author's own
+    # feelings confabulate and brood; they should be rewritten as what/when.
+    if SELF_WHY_PATTERN.search(text):
+        flags.append("self_directed_why")
+        score -= 0.20
 
     # Check too broad/generic
     for pattern in TOO_BROAD_PATTERNS:
@@ -282,6 +298,10 @@ def expire_stale_candidates(data: dict, *, max_age_days: float = CANDIDATE_MAX_A
     expired: list[tuple[str, float]] = []
     for candidate in data.get("candidates", []):
         if candidate.get("status") not in ("candidate", "accepted", "needs_review"):
+            continue
+        # Deferred candidates (fresh-upheaval) don't age out while waiting.
+        defer_age = _candidate_age_days({"created_at": candidate.get("defer_until", "")})
+        if candidate.get("defer_until") and defer_age is not None and defer_age < 0:
             continue
         age = _candidate_age_days(candidate)
         if age is None or age <= max_age_days:
@@ -608,6 +628,80 @@ def cmd_promote(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Wiki → candidates (v71): the synthesis feeds the question loop.
+# ---------------------------------------------------------------------------
+
+# Boilerplate open questions the compiler stamps on thin pages — not signal.
+_WIKI_QUESTION_BOILERPLATE = (
+    re.compile(r"^what did .+ mean in the author'?s life\??$", re.IGNORECASE),
+    re.compile(r"^which moments make .+ matter to the story\??$", re.IGNORECASE),
+    re.compile(r"^what has gone unsaid between .+\??$", re.IGNORECASE),
+)
+
+WIKI_HARVEST_CAP = 3  # per weekly run — the wiki should whisper, not flood
+
+
+def harvest_wiki_questions(dry_run: bool = False, cap: int = WIKI_HARVEST_CAP) -> list[str]:
+    """Pull non-boilerplate 'Open Questions' from compiled wiki pages into the
+    candidate store. Before this, compile was a dead end for question
+    generation — insights the synthesis surfaced never became questions."""
+    from lifehug_core import REPO_DIR  # noqa: PLC0415
+
+    wiki_dir = REPO_DIR / "wiki"
+    if not wiki_dir.exists():
+        return []
+    data = load_store()
+    existing_pairs = [(c.get("id", ""), str(c.get("text", ""))) for c in data.get("candidates", [])]
+    try:
+        bank_questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        bank_questions = []
+    bank_pairs = [(str(q.get("id", "")), str(q.get("text", ""))) for q in bank_questions]
+
+    harvested: list[str] = []
+    for page in sorted(wiki_dir.rglob("*.md")):
+        if len(harvested) >= cap:
+            break
+        if page.name in ("index.md", "log.md", "SCHEMA.md"):
+            continue
+        text = page.read_text(encoding="utf-8", errors="replace")
+        section = re.search(r"^## Open Questions\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+        if not section:
+            continue
+        for line in section.group(1).splitlines():
+            if len(harvested) >= cap:
+                break
+            question = line.strip().lstrip("-*").strip()
+            if not question or len(question.split()) < 5 or "?" not in question:
+                continue
+            if any(rx.match(question) for rx in _WIKI_QUESTION_BOILERPLATE):
+                continue
+            if near_duplicate_of(question, existing_pairs + bank_pairs):
+                continue
+            rel = page.relative_to(REPO_DIR).as_posix()
+            cid = f"cand-wiki-{page.stem}-{len([c for c in data['candidates'] if str(c.get('id','')).startswith(f'cand-wiki-{page.stem}-')]) + 1}"
+            record = {
+                "id": cid,
+                "kind": "wiki_open_question",
+                "text": question,
+                "source_path": rel,
+                "target_page": rel,
+                "priority": 0.6,
+                "reason": f"open question surfaced by the compiled wiki page {rel}",
+                "status": "candidate",
+                "story_function": "contradiction" if "contradict" in question.lower() else "meaning",
+                "created_at": now_utc(),
+            }
+            if not dry_run:
+                data["candidates"].append(record)
+            existing_pairs.append((cid, question))
+            harvested.append(cid)
+    if harvested and not dry_run:
+        save_store(data)
+    return harvested
+
+
+# ---------------------------------------------------------------------------
 # Auto-promotion engine
 # ---------------------------------------------------------------------------
 
@@ -641,6 +735,120 @@ def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None 
         fn_data = quality_profile.get("by_story_function", {}).get(sf, {})
         multiplier = float(fn_data.get("multiplier", 1.0))
     return round(priority * multiplier, 4)
+
+
+# ---------------------------------------------------------------------------
+# Perennial questions (v71) — durable questions re-asked yearly WITH last
+# year's answer attached (10Q model). The return-and-contrast moment is the
+# product: "a year ago you said X — what's true today?"
+# ---------------------------------------------------------------------------
+
+PERENNIALS_FILE = QUESTION_CANDIDATES_FILE.parent / "perennials.json"
+PERENNIAL_INTERVAL_DAYS = 350  # a touch under a year so the slot lands annually
+
+
+def load_perennials() -> dict:
+    data = read_json(PERENNIALS_FILE, default=None)
+    if not isinstance(data, dict):
+        return {"version": 1, "perennials": []}
+    data.setdefault("perennials", [])
+    return data
+
+
+def save_perennials(data: dict) -> None:
+    data["last_updated"] = now_utc()
+    write_json(PERENNIALS_FILE, data)
+
+
+def add_perennial(question_id: str) -> dict:
+    """Mark a bank question as perennial — re-asked yearly with the prior
+    answer attached."""
+    data = load_perennials()
+    for p in data["perennials"]:
+        if p.get("question_id") == question_id:
+            return p
+    entry = {"question_id": question_id, "added_at": now_utc(), "reasks": []}
+    data["perennials"].append(entry)
+    save_perennials(data)
+    return entry
+
+
+def _latest_answer_excerpt(question_id: str, max_chars: int = 240) -> tuple[str, str] | None:
+    """(answered_date, excerpt) of the most recent answer file for a perennial
+    lineage (the original id or any prior re-ask id)."""
+    from lifehug_core import ANSWERS_DIR  # noqa: PLC0415
+    candidates_files = sorted(ANSWERS_DIR.glob(f"{question_id}*.md"))
+    if not candidates_files:
+        return None
+    latest = candidates_files[-1]
+    text = latest.read_text(encoding="utf-8", errors="replace")
+    answered = ""
+    match = re.search(r'^answered_date:\s*"?([0-9-]+)"?', text, re.MULTILINE)
+    if match:
+        answered = match.group(1)
+    # Body after frontmatter + title line
+    parts = text.split("---")
+    body = parts[-1] if len(parts) >= 3 else text
+    body = re.sub(r"^#.*$", "", body, flags=re.MULTILINE)
+    body = " ".join(body.split())
+    excerpt = body[:max_chars] + ("…" if len(body) > max_chars else "")
+    return answered, excerpt
+
+
+def generate_due_perennials(dry_run: bool = False) -> list[tuple[str, str]]:
+    """For each perennial whose lineage was last answered ≥ ~1 year ago, insert
+    a re-ask question into the bank with last year's answer attached. Returns
+    [(new_question_id, perennial_id)]."""
+    data = load_perennials()
+    if not data["perennials"]:
+        return []
+    bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
+    questions = {str(q["id"]): q for q in parse_questions(bank_text)}
+    created: list[tuple[str, str]] = []
+
+    for p in data["perennials"]:
+        qid = str(p["question_id"])
+        original = questions.get(qid)
+        if not original:
+            continue
+        lineage_ids = [qid] + [str(r.get("question_id")) for r in p.get("reasks", [])]
+        # Most recent answer in the lineage
+        latest = None
+        for lid in reversed(lineage_ids):
+            latest = _latest_answer_excerpt(lid)
+            if latest:
+                break
+        if not latest:
+            continue  # never answered — nothing to contrast against yet
+        answered_date, excerpt = latest
+        if not answered_date:
+            continue
+        age = _candidate_age_days({"created_at": answered_date + "T00:00:00Z"})
+        if age is None or age < PERENNIAL_INTERVAL_DAYS:
+            continue
+        # Guard against double-generation: skip if an unanswered re-ask exists.
+        if any(not questions[str(r.get("question_id"))]["answered"]
+               for r in p.get("reasks", []) if str(r.get("question_id")) in questions):
+            continue
+
+        year = answered_date[:4]
+        reask_text = (f"In {year} you answered this: \"{excerpt}\" — "
+                      f"a year on, here it is again: {original['text']}")
+        category = str(original["category"])
+        new_id = next_question_id(bank_text, category)
+        if not dry_run:
+            bank_text = insert_question(
+                bank_text, category, new_id, reask_text,
+                {"id": f"perennial-{qid}", "source_path": f"answers/{qid}.md"},
+                now_utc())
+            p.setdefault("reasks", []).append(
+                {"question_id": new_id, "created_at": now_utc(), "contrasts": answered_date})
+        created.append((new_id, qid))
+
+    if created and not dry_run:
+        write_text(QUESTIONS_FILE, bank_text)
+        save_perennials(data)
+    return created
 
 
 def _is_resurfaceable(candidate: dict) -> bool:
@@ -744,6 +952,12 @@ def auto_promote_candidates(
         cid = candidate["id"]
         nbhd = candidate.get("neighborhood_id", "_none")
         text = str(candidate["text"]).strip()
+
+        # Fresh-upheaval deferral: not promotable until defer_until passes.
+        defer_age = _candidate_age_days({"created_at": candidate.get("defer_until", "")})
+        if candidate.get("defer_until") and defer_age is not None and defer_age < 0:
+            skipped.append((cid, f"deferred until {str(candidate['defer_until'])[:10]}"))
+            continue
 
         # Exact duplicate check
         try:
