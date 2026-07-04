@@ -20,6 +20,22 @@ Use **the Loop** as the canonical operating term: capture source → compile wik
 
 Use **Node** and **Edge** when reasoning about graph shape. A Node is a durable life subject that usually compiles into one wiki page; an Edge is a meaningful connection between nodes. Keep `Entity` and `Entity Type` as the current product/code and frontmatter terms: most entity types are node types, while `relationship` remains the compatibility page type for a **Relationship Edge**. `wiki/relationships/` describes the bond between two nodes, not a generic node page.
 
+## Definition of Done (framework changes)
+
+A code change is not done until its paper trail ships **in the same pass**:
+
+1. **Docs** — update anything whose described behavior changed: `CLAUDE.md`,
+   `system/research.md` (the central methodology guide — its opening feeds AI
+   prompts, so staleness degrades the product), `README`/`README.template.md`,
+   and `skills/*/SKILL.md`.
+2. **GitHub issues** — comment progress on the covering issue with verification
+   results; close it when delivered. If work surfaced a new gap, file it.
+3. **Tests + changelog** — tests for new behavior; `system/version.json`
+   changelog entry on release.
+
+"Done" = code + tests + docs + issue state — never code alone. The owner should
+never have to ask whether the docs match the code.
+
 Then decide:
 
 1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
