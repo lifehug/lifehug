@@ -626,7 +626,7 @@ def loop_health_checks() -> int:
 
     # Cadence — has the weekly/monthly actually run?
     profile = read_json(STATE_DIR / "quality_profile.json", default=None) or {}
-    weekly_age = _days_since(profile.get("last_updated") or profile.get("updated_at") or "")
+    weekly_age = _days_since(profile.get("computed_at") or profile.get("last_updated") or profile.get("updated_at") or "")
     if weekly_age is None:
         warn("weekly cadence unknown", "quality profile has never been updated — has weekly_maintenance.sh ever run?")
     elif weekly_age > 9:
