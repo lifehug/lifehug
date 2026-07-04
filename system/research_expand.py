@@ -69,7 +69,9 @@ from neighborhoods import apply_readiness
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL = "claude-opus-4-20250514"
+# Non-dated alias — tracks the current Opus tier instead of pinning a snapshot
+# that ages out. Override with `research_model` in config.yaml.
+DEFAULT_MODEL = "claude-opus-4-8"
 VALID_OUTPUT_TYPES = ("chapter", "letter", "essay", "post", "profile")
 VALID_TOPIC_TYPES = ("person", "place", "time_period", "project", "theme", "event", "self", "relationship")
 
@@ -506,6 +508,30 @@ def detect_gaps(answers: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def load_classified_self_signals(limit: int = 12) -> list[str]:
+    """Contradictions and self-understanding insights the weekly classifier
+    extracted from real answers. These fields were write-only until v69 —
+    they now ground the self-arc in observed patterns instead of generic
+    introspection ('You say no one is coming to save you, but you list four
+    people who saved you' beats 'what contradictions do you carry?')."""
+    from lifehug_core import CLASSIFICATIONS_DIR  # noqa: PLC0415
+
+    signals: list[str] = []
+    seen: set[str] = set()
+    if not CLASSIFICATIONS_DIR.exists():
+        return signals
+    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
+        data = read_json(path, default={}) or {}
+        for key, prefix in (("contradictions", "contradiction"), ("self_understanding_insights", "insight")):
+            for item in data.get(key, []) or []:
+                text = str(item.get("description", item) if isinstance(item, dict) else item).strip()
+                if not text or text.lower() in seen:
+                    continue
+                seen.add(text.lower())
+                signals.append(f"[{prefix}] {text}")
+    return signals[-limit:]  # most recent classifications last → keep the freshest
+
+
 def build_expansion_prompt(
     *,
     topic: str,
@@ -516,6 +542,7 @@ def build_expansion_prompt(
     relevant_answers: list[dict],
     question_bank_categories: str,
     research_notes: str = "",
+    self_signals: list[str] | None = None,
 ) -> str:
     """Build the full AI prompt for neighborhood expansion."""
     output_guidance = {
@@ -591,8 +618,19 @@ def build_expansion_prompt(
                 lines.append(f"  - {_pattern}")
             lines.append("Lean toward these patterns when choosing framing and story functions.")
             lines.append("")
+
     except Exception:  # noqa: BLE001
         pass  # never break prompt generation
+
+    if self_signals:
+        lines.append("## OBSERVED PATTERNS IN THIS AUTHOR (from classified answers)")
+        lines.append("The weekly classifier extracted these contradictions and self-understanding")
+        lines.append("insights from the author's real answers. Ground your questions in THESE —")
+        lines.append("a question that names the author's actual tension cuts far deeper than a")
+        lines.append("generic introspective prompt. Quote or paraphrase them where it helps.")
+        for signal in self_signals:
+            lines.append(f"  - {signal}")
+        lines.append("")
 
     if topic_type == "self":
         lines.append("## SELF-KNOWLEDGE MODE")
@@ -994,6 +1032,7 @@ def _run_expansion(
         relevant_answers=relevant_answers,
         question_bank_categories=cat_summary,
         research_notes=research_notes[:800],
+        self_signals=load_classified_self_signals() if topic_type == "self" else None,
     )
 
     if prompt_only:

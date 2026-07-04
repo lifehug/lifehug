@@ -148,7 +148,10 @@ STORY_FUNCTION_KEYWORDS = {
     ],
     "tension": ["hardest", "conflict", "friction", "scared", "fear", "risk", "almost", "struggle", "pressure"],
     "turning_point": ["when did", "moment", "changed", "shift", "turning point", "decided", "realized", "clicked"],
-    "relationship": ["who", "relationship", "mom", "dad", "katie", "friend", "mentor", "family", "partner", "aj"],
+    # Generic kinship/relation words only — never a specific user's names
+    # (this file ships to every Lifehug user).
+    "relationship": ["who", "relationship", "mom", "dad", "wife", "husband", "brother",
+                     "sister", "friend", "mentor", "family", "partner", "grandma", "grandpa"],
     "meaning": ["what did", "teach", "mean", "understand", "explain", "why", "proud", "wisdom"],
     "contradiction": ["different from", "but", "contradiction", "surprised", "mismatch", "tension between"],
     "output_gap": ["letter", "chapter", "post", "essay", "missing", "unresolved", "gap", "what part"],
@@ -187,14 +190,13 @@ def default_planner_state() -> dict:
     return {
         "version": 1,
         "active_objectives": [],
+        # source_type caps were removed in v69: every queued item is
+        # source_type "question_bank" (candidates promote into the bank before
+        # they can be queued), so the cap gated nothing. group and
+        # story_function caps are both ENFORCED in build_queue.
         "caps": {
             "group": GROUP_CAPS,
             "story_function": STORY_FUNCTION_CAPS,
-            "source_type": {
-                "question_bank": 1.0,
-                "candidate": 0.20,
-                "manual_source": 0.20,
-            },
         },
         "queue": {
             "default_limit": DEFAULT_DELIVERY_QUEUE_LIMIT,
@@ -504,6 +506,8 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
     planner_state = planner_state or load_planner_state()
     story_caps = planner_state.get("caps", {}).get("story_function", STORY_FUNCTION_CAPS)
     max_by_story = max_counts(limit, story_caps)
+    group_caps = planner_state.get("caps", {}).get("group", GROUP_CAPS)
+    max_by_group = max_counts(limit, group_caps)
     policy = {**DEFAULT_LANE_POLICY, **planner_state.get("lane_policy", {})}
 
     focuses = resolve_roadmap(questions).get("focuses", [])
@@ -524,6 +528,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
     queue = []
     per_focus = Counter()
     story_counts = Counter()
+    group_counts = Counter()
     objective_counts = Counter()
     category_streak = None
     streak_count = 0
@@ -540,6 +545,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         if selected.get("focus"):
             per_focus[selected["focus"]] += 1
         story_counts[str(selected["story_function"])] += 1
+        group_counts[str(selected["group"])] += 1
         if selected.get("objective"):
             objective_counts[str(selected["objective"])] += 1
         reason_parts = [
@@ -571,6 +577,10 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         if enforce_arc and str(q["category"]) == category_streak and streak_count >= arc_max:
             return False
         if enforce_story and story_counts[str(q["story_function"])] >= max_by_story.get(str(q["story_function"]), limit):
+            return False
+        # Group caps were previously display-only (state decorated, never
+        # enforced); they now bound the queue like story-function caps do.
+        if enforce_story and group_counts[str(q["group"])] >= max_by_group.get(str(q["group"]), limit):
             return False
         return True
 

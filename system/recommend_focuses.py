@@ -30,6 +30,7 @@ from lifehug_core import (
     QUESTIONS_FILE,
     FOCUS_RECS_FILE,
     LEGACY_FOCUS_RECS_FILE,
+    WIKI_DIR,
     answer_body,
     answer_id_from_filename,
     now_utc,
@@ -390,6 +391,7 @@ def _build_entity_stats(
             _record("theme", theme, None, ew, f"Found in {src_label}")
 
     # --- Classifications ---
+    _OPPORTUNITY_BOOST = {"weak": 0.5, "moderate": 1.5, "strong": 3.0}
     for clf in classifications:
         qid = clf.get("question_id") or clf.get("answer_id")
         for person in clf.get("people", []):
@@ -404,6 +406,20 @@ def _build_entity_stats(
             name = theme.get("name") or theme if isinstance(theme, str) else None
             if name:
                 _record("theme", name, qid, 0.0, f"Theme from classification ({qid})")
+        # The classifier's explicit Focus judgments — typed, with evidence
+        # strength, written for exactly this consumer (previously write-only).
+        for opp in clf.get("focus_opportunities", []):
+            if not isinstance(opp, dict):
+                continue
+            entity = str(opp.get("entity", "")).strip()
+            opp_type = str(opp.get("type", "")).strip() or "theme"
+            if not entity or opp_type not in ("person", "place", "period", "theme", "project"):
+                continue
+            strength = str(opp.get("evidence_strength", "moderate")).lower()
+            boost = _OPPORTUNITY_BOOST.get(strength, 1.5)
+            reason = str(opp.get("reason", "")).strip() or f"Classifier flagged as Focus opportunity ({qid})"
+            record_type = "theme" if opp_type == "project" else opp_type
+            _record(record_type, entity, qid, boost, f"[classifier: {strength}] {reason}")
 
     return stats
 
@@ -453,6 +469,21 @@ def load_recommendation_state() -> dict:
 # Recommend
 # ---------------------------------------------------------------------------
 
+def _existing_wiki_page_slugs() -> set[str]:
+    """Slugs of pages the wiki already compiles — a recommendation duplicating
+    an existing theme/entity page (Money, Family, Belonging all had live theme
+    pages when they were recommended as 'new' Focuses) is noise, not signal."""
+    slugs: set[str] = set()
+    for dir_name in ("themes", "people", "places", "periods", "objects", "projects"):
+        directory = WIKI_DIR / dir_name
+        if not directory.exists():
+            continue
+        for page in directory.glob("*.md"):
+            if page.name != ".gitkeep":
+                slugs.add(page.stem)
+    return slugs
+
+
 def recommend(
     min_score: float = 3.0,
     include_dismissed: bool = False,
@@ -463,6 +494,7 @@ def recommend(
     # Existing Focus subject names, plus any roster names/aliases the curator
     # already mapped to a Focus (so 'Father'/'Mother'/'Wife' aren't re-recommended).
     existing_focuses = _existing_focus_names(md_text) | _focus_covered_aliases()
+    existing_pages = _existing_wiki_page_slugs()
 
     answers = _load_answer_texts()
     source_texts = _load_source_texts()
@@ -481,6 +513,10 @@ def recommend(
     for (entity_type, entity), s in stats.items():
         # Skip already-focused entities
         if entity.lower() in existing_focuses:
+            continue
+        # Skip entities the wiki already compiles a page for — they're covered,
+        # not new territory.
+        if slugify(entity) in existing_pages:
             continue
 
         score = _score(s)
@@ -558,7 +594,14 @@ def dismiss_recommendation(rec_id: str, reason: str = "") -> bool:
     return True
 
 
-def approve_recommendation(rec_id: str) -> bool:
+def approve_recommendation(rec_id: str, *, tier: str = "standard",
+                           deliverable: str = "chapter") -> bool:
+    """Approve a recommendation AND create the Focus. Approval used to be a
+    dead end — it set status=approved, nothing read it, and focus creation was
+    'a manual step' nobody performed (19 recommendations sat pending forever).
+    Now it scaffolds the category, registers the Focus, and seeds starter
+    questions via roadmap.focus_new — so an approved Focus always has a
+    question category (never a zombie)."""
     existing = load_recommendation_state()
     recs = existing.get("recommendations", [])
 
@@ -567,8 +610,21 @@ def approve_recommendation(rec_id: str) -> bool:
         print(f"No recommendation found with id: {rec_id}", file=sys.stderr)
         return False
 
+    entity = str(target["entity"])
+    focus_type = str(target.get("type", "theme"))
+    try:
+        from roadmap import focus_new  # noqa: PLC0415
+        result = focus_new(entity, focus_type, tier,
+                           objective=str(target.get("reason", ""))[:120],
+                           deliverable=deliverable)
+    except Exception as exc:  # noqa: BLE001
+        print(f"✗ Focus creation failed for {entity}: {exc}", file=sys.stderr)
+        return False
+
     target["status"] = "approved"
     target["approved_at"] = now_utc()
+    target["focus_id"] = result.get("focus_id")
+    target["category"] = result.get("category")
 
     write_json(FOCUS_RECS_FILE, {
         "version": existing.get("version", 1),
@@ -576,8 +632,10 @@ def approve_recommendation(rec_id: str) -> bool:
         "recommendations": recs,
         "dismissed": existing.get("dismissed", []),
     })
-    print(f"✓ Approved: {rec_id} — {target['entity']}")
-    print("  (Actual focus creation is a manual step — add category to question-bank.md)")
+    print(f"✓ Approved: {rec_id} — {entity}")
+    print(f"  Focus created: {result.get('focus_id')} (category {result.get('category')}, "
+          f"{result.get('generated', 0)} starter question(s)"
+          f"{'' if result.get('generation_ran') else ' — seed later with focus-new tooling'})")
     return True
 
 

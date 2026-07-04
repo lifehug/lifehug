@@ -36,8 +36,10 @@ QUALITY_PROFILE_FILE = REPO_DIR / "state" / "quality_profile.json"
 # Minimum scored answers before the profile activates and influences anything.
 ACTIVATION_THRESHOLD = 20
 
-# Richness score weights for live scoring (wiki delta available).
-WEIGHTS_LIVE = {"word_count": 0.30, "entity_count": 0.25, "wiki_nodes_added": 0.25, "followup_count": 0.20}
+# Richness score weights. wiki_nodes_added is retired at weight 0: it counted
+# wiki FILE creation per answer, which almost never happens, so a 0.25-weight
+# signal sat at ~zero and systematically depressed live scores vs retro ones.
+WEIGHTS_LIVE = {"word_count": 0.40, "entity_count": 0.35, "wiki_nodes_added": 0.00, "followup_count": 0.25}
 # Retroactive weights (no wiki delta signal).
 WEIGHTS_RETRO = {"word_count": 0.40, "entity_count": 0.40, "wiki_nodes_added": 0.00, "followup_count": 0.20}
 
@@ -168,10 +170,14 @@ def append_score(
 # ---------------------------------------------------------------------------
 
 def _aggregate(scores: list[dict], key: str) -> dict:
-    """Aggregate richness scores by a dimension key."""
+    """Aggregate richness scores by a dimension key. Story-function buckets
+    normalize legacy names into the canonical vocabulary so pre-v69 scores
+    keep contributing signal."""
     buckets: dict[str, list[float]] = {}
     for s in scores:
         bucket = str(s.get(key) or "unknown")
+        if key == "story_function":
+            bucket = canonical_story_function(bucket)
         buckets.setdefault(bucket, []).append(float(s["richness_score"]))
     result = {}
     for bucket, values in buckets.items():
@@ -217,8 +223,6 @@ def _top_patterns(by_story: dict, by_category: dict, global_avg: float) -> list[
                 f"Category {best_cat[0]} produces the richest answers ({pct}% above average)"
             )
 
-    # Anchor/specificity hint (derived from entity_count signal correlation)
-    high_entity = [s for s in [] if s]  # placeholder — enriched below
     if not patterns:
         patterns.append("Anchor questions to specific people, moments, or places for richer answers")
 
@@ -277,20 +281,41 @@ def compute_profile() -> dict:
 # Retroactive scoring
 # ---------------------------------------------------------------------------
 
+# One vocabulary. The profile used to run its own guesser emitting names
+# ("origin_story", "stakes_and_risk") that exist NOWHERE else — so its
+# strongest signal keyed functions the planner could never assign, and the
+# feedback multiplier applied to nothing. Legacy scores normalize on
+# aggregation; new scores classify through the planner's shared classifier.
+LEGACY_FUNCTION_MAP = {
+    "origin_story": "foundation",
+    "stakes_and_risk": "tension",
+}
+
+
+def canonical_story_function(name: str | None) -> str:
+    value = str(name or "unknown")
+    return LEGACY_FUNCTION_MAP.get(value, value)
+
+
 def _infer_story_function(text: str) -> str:
-    """Very lightweight story-function guesser for retroactive scoring."""
-    t = text.lower()
-    if any(w in t for w in ["who", "person", "friend", "family", "mom", "dad", "sister", "brother"]):
-        return "relationship"
-    if any(w in t for w in ["first", "began", "started", "origin", "grew up", "born"]):
-        return "origin_story"
-    if any(w in t for w in ["but", "however", "despite", "contradict", "yet"]):
-        return "contradiction"
-    if any(w in t for w in ["turn", "pivot", "changed", "realized", "decided"]):
-        return "turning_point"
-    if any(w in t for w in ["fear", "afraid", "scared", "worry", "risk"]):
-        return "stakes_and_risk"
-    return "foundation"
+    """Classify with the SAME keyword classifier the planner uses, so profile
+    buckets and planner assignments speak one vocabulary."""
+    from question_planner import infer_story_function  # noqa: PLC0415 — lazy: planner imports us
+
+    return infer_story_function(text)
+
+
+def focus_for_category(category: str) -> str | None:
+    """Which Focus owns a question category, per the roadmap. Attribution was
+    previously hardcoded to None everywhere, leaving by_focus 100% 'unknown'."""
+    try:
+        from roadmap import load_roadmap  # noqa: PLC0415
+        for focus in load_roadmap().get("focuses", []):
+            if category in (focus.get("categories") or []):
+                return str(focus.get("id"))
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 
 def score_all_retroactive() -> int:
@@ -332,7 +357,7 @@ def score_all_retroactive() -> int:
             "answered_at": str(q.get("answered_at", ""))[:10] or now_utc()[:10],
             "category": category,
             "story_function": story_fn,
-            "focus": None,
+            "focus": focus_for_category(category),
             "signals": signals,
             "richness_score": richness,
         })

@@ -199,6 +199,25 @@ echo "$PROGRESS_OUT"
 LEARNING_OUT=$(learning_failures_summary 2>&1 || true)
 echo "$LEARNING_OUT"
 
+# Pending Focus recommendations — 19 once sat unreviewed for weeks because no
+# scheduled surface ever mentioned them. One line, with the approve command.
+RECS_OUT=$(python3 - <<'PY' 2>/dev/null || true
+import json, sys
+from pathlib import Path
+try:
+    data = json.loads(Path("state/focus_recommendations.json").read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    sys.exit(0)
+pending = [r for r in data.get("recommendations", []) if r.get("status", "pending") == "pending"]
+if not pending:
+    sys.exit(0)
+top = ", ".join(f"{r['entity']} ({r['score']:.0f})" for r in pending[:3])
+print(f"🎯 {len(pending)} Focus recommendation(s) pending — top: {top}")
+print("   approve: lifehug.py recommend-focuses --approve <rec-id> (creates the Focus + starter questions)")
+PY
+)
+echo "$RECS_OUT"
+
 # Scheduled health check — surfaces queue expiry, backlog age, zombie Focuses,
 # cadence stalls, and roster wipes while there is still time to act.
 set +e
@@ -224,6 +243,8 @@ ${QUEUE_OUT}
 ${PROGRESS_OUT}
 
 ${LEARNING_OUT}
+
+${RECS_OUT}
 
 🩺 Doctor:
 ${DOCTOR_WARNINGS:-all checks ok}"

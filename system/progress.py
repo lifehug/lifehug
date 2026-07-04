@@ -16,9 +16,40 @@ _SYSTEM_DIR = Path(__file__).resolve().parent
 if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
-from lifehug_core import NEIGHBORHOODS_FILE, QUESTION_CANDIDATES_FILE, QUESTIONS_FILE, parse_questions, read_json
+from lifehug_core import (
+    CLASSIFICATIONS_DIR,
+    NEIGHBORHOODS_FILE,
+    QUESTION_CANDIDATES_FILE,
+    QUESTIONS_FILE,
+    parse_questions,
+    read_json,
+)
 from neighborhoods import apply_readiness
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
+
+
+def _classifier_output_suggestions(limit: int = 5) -> list[tuple[str, str]]:
+    """possible_outputs the weekly classifier extracted from real answers —
+    write-only until v69. Deduped, most recent classifications win."""
+    seen: set[str] = set()
+    rows: list[tuple[str, str]] = []
+    if not CLASSIFICATIONS_DIR.exists():
+        return rows
+    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json"), reverse=True):
+        data = read_json(path, default={}) or {}
+        for item in data.get("possible_outputs", []) or []:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type", "piece")).strip()
+            desc = str(item.get("description", "")).strip()
+            key = (kind + ":" + desc.lower())[:80]
+            if not desc or key in seen:
+                continue
+            seen.add(key)
+            rows.append((kind, desc))
+            if len(rows) >= limit:
+                return rows
+    return rows
 
 # Saturation thresholds for the readiness verdict.
 READY = 0.70
@@ -81,7 +112,10 @@ def run() -> int:
     total_answered = total_target = 0
     ready_focuses = []
     ready_neighborhoods = []
+    zombies = [f for f in roadmap["focuses"] if not f.get("categories")]
     for focus in roadmap["focuses"]:
+        if not focus.get("categories"):
+            continue  # zombie — listed separately below, excluded from totals
         fill = focus_fill(focus, questions)
         total_answered += fill["answered"]
         total_target += fill["target"]
@@ -95,6 +129,11 @@ def run() -> int:
               f"{fill['answered']:3}/{fill['target']:<3}  {tag:10} → {focus.get('deliverable','-')} ({label})")
         if tag in ("READY", "SATURATED") and fill["answered"] > 0:
             ready_focuses.append(focus)
+
+    if zombies:
+        print("\n  ⚠ Focuses with NO question category (the planner can never ask about these):")
+        for focus in zombies:
+            print(f"    - {focus.get('label', focus.get('id'))} — seed questions or remove")
 
     fullness = total_answered / total_target if total_target else 0
     print(f"\n  Overall: {total_answered}/{total_target} answered ({fullness:.0%} toward current targets)")
@@ -124,6 +163,14 @@ def run() -> int:
         for neighborhood in ready_neighborhoods:
             print(f"  • {neighborhood.get('title', '?')} ({neighborhood.get('target_output', 'draft')}):")
             print(f"      {neighborhood_artifact_hint(neighborhood)}")
+
+    # Artifact ideas the classifier spotted inside real answers
+    # (possible_outputs was write-only until v69).
+    classifier_outputs = _classifier_output_suggestions()
+    if classifier_outputs:
+        print("\nArtifact ideas spotted in your answers (weekly classifier):")
+        for kind, desc in classifier_outputs:
+            print(f"  • [{kind}] {desc}")
 
     # Expansion signal — when everything's full, it's time for new domains.
     if fullness >= 0.6:

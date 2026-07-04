@@ -130,6 +130,7 @@ PY
 
 select_gap_targets() {
   python3 - "$WORKSPACE" "$GAP_LIMIT" <<'PY'
+import json
 import sys
 from pathlib import Path
 
@@ -138,6 +139,19 @@ limit = int(sys.argv[2])
 sys.path.insert(0, str(workspace / "system"))
 
 import research_expand as research  # noqa: E402
+
+# The planner computes expansion urgency "for the cron to act on" — this is
+# the cron acting on it. Low urgency (Focuses still have room) → no new
+# neighborhoods this month; the archive deepens instead of widening.
+try:
+    queue = json.loads((workspace / "state" / "question_queue.json").read_text(encoding="utf-8"))
+    urgency = float(queue.get("allocation", {}).get("expansion", {}).get("urgency", 1.0))
+except (OSError, ValueError):
+    urgency = 1.0  # no queue signal → don't block expansion
+if urgency < 0.25:
+    print(f"expansion urgency {urgency:.2f} < 0.25 — skipping new gap neighborhoods this month",
+          file=sys.stderr)
+    raise SystemExit(0)
 
 answers = research.load_answers()
 if not answers or limit <= 0:

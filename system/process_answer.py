@@ -120,14 +120,6 @@ def compile_wiki() -> None:
     )
 
 
-def _count_wiki_files() -> int:
-    """Count .md files in wiki/ as a proxy for knowledge graph size."""
-    wiki_dir = REPO_DIR / "wiki"
-    if not wiki_dir.exists():
-        return 0
-    return sum(1 for _ in wiki_dir.rglob("*.md"))
-
-
 def maybe_send_followup_question(answered_question_id: str) -> None:
     """Adaptive cadence: after an answer lands, offer the next question the
     same day (up to max_questions_per_day, default 3). Conversation, not
@@ -263,29 +255,27 @@ def main():
     rotation.pop("pending_answer_question_id", None)
     write_json(ROTATION_FILE, rotation)
     update_readme()
-    wiki_count_before = _count_wiki_files()
 
     if not args.no_compile_wiki:
         compile_wiki()
 
     # Score this answer for the quality loop — runs silently, never fails.
-    if not args.no_compile_wiki:
-        try:
-            from quality_profile import append_score, extract_signals, score_richness  # noqa: PLC0415
-            wiki_nodes_added = _count_wiki_files() - wiki_count_before
-            followup_count = len(followups_added)
-            signals = extract_signals(answer_text, wiki_nodes_added, followup_count)
-            richness = score_richness(signals)
-            from question_planner import infer_story_function  # noqa: PLC0415
-            story_fn = infer_story_function(str(question.get("text", "")))
-            append_score(question_id, cat, story_fn, None, signals, richness)
-        except Exception as exc:  # noqa: BLE001
-            record_learning_failure(
-                "process_answer",
-                "quality_scoring",
-                exc,
-                context={"question_id": question_id},
-            )
+    # Decoupled from wiki compile: skipping compile no longer drops the score.
+    try:
+        from quality_profile import append_score, extract_signals, focus_for_category, score_richness  # noqa: PLC0415
+        followup_count = len(followups_added)
+        signals = extract_signals(answer_text, 0, followup_count)
+        richness = score_richness(signals)
+        from question_planner import infer_story_function  # noqa: PLC0415
+        story_fn = infer_story_function(str(question.get("text", "")))
+        append_score(question_id, cat, story_fn, focus_for_category(cat), signals, richness)
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "quality_scoring",
+            exc,
+            context={"question_id": question_id},
+        )
 
     # Adaptive cadence: offer the next question while the author is warm.
     try:
