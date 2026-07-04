@@ -176,6 +176,8 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
         flags.extend(["--title", args.title])
     if args.captured_at:
         flags.extend(["--captured-at", args.captured_at])
+    if getattr(args, "witness", None):
+        flags.extend(["--witness", args.witness])
     if args.no_candidates:
         flags.append("--no-candidates")
     if args.dry_run:
@@ -603,6 +605,19 @@ def cmd_chapters_exercise(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_interview_pack(args: argparse.Namespace) -> int:
+    """Tier 3 second voice: on-demand question pack for a real conversation.
+    Never scheduled — only generated when the owner asks."""
+    from research_expand import INTERVIEW_BANKS, build_interview_pack
+    relationship = args.relationship
+    if relationship not in INTERVIEW_BANKS:
+        print(f"Unknown relationship type '{relationship}'. Choose one of: {', '.join(sorted(INTERVIEW_BANKS))}",
+              file=sys.stderr)
+        return 1
+    print(build_interview_pack(args.person, relationship))
+    return 0
+
+
 def cmd_notify(_args: argparse.Namespace) -> int:
     """Read a message from stdin and send it to Telegram, chunked. Always exits
     0 — notification must never break the flow that called it."""
@@ -862,6 +877,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--captured-at", default=None)
     p.add_argument("--no-candidates", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--witness", default=None, metavar="PERSON", help="This is another person's account (second voice), e.g. --witness Mom")
     p.set_defaults(func=cmd_ingest_story)
 
     def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:
@@ -1120,6 +1136,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("chapters-exercise", help="Print the annual McAdams life-chapters exercise")
     p.set_defaults(func=cmd_chapters_exercise)
+
+    p = sub.add_parser("interview-pack", help="On-demand question pack for interviewing someone (second voice, Tier 3)")
+    p.add_argument("person", help="Who you'll be talking with, e.g. Mom")
+    p.add_argument("--relationship", default="parent",
+                   help="parent, grandparent, spouse, child, sibling, mentor, cofounder, friend, or remembering (a shared loved one)")
+    p.set_defaults(func=cmd_interview_pack)
 
     p = sub.add_parser("notify", help="Send stdin to the configured Telegram target, chunked under the 4096-char limit")
     p.set_defaults(func=cmd_notify)

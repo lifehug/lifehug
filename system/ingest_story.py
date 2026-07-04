@@ -110,6 +110,41 @@ def generate_candidates(title: str, text: str, source_path: str, created_at: str
     return candidates
 
 
+def generate_witness_candidates(witness: str, title: str, source_path: str, created_at: str) -> list[dict]:
+    """Follow-ups for a second-voice account — aimed at the AUTHOR, about the
+    gap between the two tellings. Conflicting accounts are data, not errors."""
+    subject = title.strip() or "this account"
+    templates = [
+        ("contradiction",
+         f"Where does {witness}'s telling differ from how you remember it — and what does the gap itself tell you?",
+         0.65,
+         "Perspective gaps between accounts are signal to preserve, not resolve."),
+        ("meaning",
+         f"What did {witness} notice or feel in {subject} that you had missed entirely?",
+         0.6,
+         "The second voice reveals what the author's own account couldn't see."),
+        ("relationship",
+         f"Hearing {witness} tell it — what does their version show you about what this meant to THEM?",
+         0.55,
+         "Dyadic understanding: the same event carries different weight on each side."),
+    ]
+    candidates = []
+    for index, (kind, question, priority, reason) in enumerate(templates, start=1):
+        candidates.append({
+            "id": candidate_id(source_path, index),
+            "text": question,
+            "source_path": source_path,
+            "target_page": None,
+            "kind": kind,
+            "priority": priority,
+            "reason": reason,
+            "status": "candidate",
+            "story_function": kind,
+            "created_at": created_at,
+        })
+    return candidates
+
+
 def append_candidates(candidates: list[dict]) -> None:
     data = load_candidates()
     existing_ids = {item.get("id") for item in data["candidates"]}
@@ -120,9 +155,14 @@ def append_candidates(candidates: list[dict]) -> None:
 
 
 def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[str], payload: str) -> str:
+    witness = getattr(args, "witness", None)
     values = {
         "title": args.title,
-        "type": "unprompted_story",
+        # A witness account is ANOTHER PERSON's words about shared events —
+        # a second voice. It is never merged with the author's account; when
+        # the two disagree, the wiki preserves both ("perspectives differ" is
+        # data, not an error to resolve).
+        "type": "witness_account" if witness else "unprompted_story",
         "source_id": f"manual:{Path(source_path).stem}",
         "source_medium": args.source,
         "source": args.source,
@@ -136,6 +176,9 @@ def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[
         "related_pages": [],
         "candidate_questions": candidate_ids,
     }
+    if witness:
+        values["witness"] = witness
+        values["witness_slug"] = slugify(witness)
     return format_frontmatter(values)
 
 
@@ -144,6 +187,10 @@ def main() -> int:
     parser.add_argument("--source", default="manual", help="Source label, e.g. telegram, voice, email, manual")
     parser.add_argument("--title", default=None)
     parser.add_argument("--captured-at", default=now_utc())
+    parser.add_argument("--witness", default=None, metavar="PERSON",
+                        help="This is ANOTHER PERSON's account (a second voice), e.g. --witness Mom. "
+                             "Stored as a witness_account source, attributed to them, never merged "
+                             "with the author's version of events.")
     parser.add_argument("--no-candidates", action="store_true", help="Save source without generating candidate questions")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -153,11 +200,19 @@ def main() -> int:
         print("Error: story text must be provided on stdin", file=sys.stderr)
         return 1
 
+    if args.witness:
+        default_title = f"{args.witness}'s account — {title_from_text(story)}"
+        args.title = args.title or default_title
     args.title = args.title or title_from_text(story)
     source_path = unique_source_path(args.title, args.captured_at)
     relative_source = source_path.relative_to(REPO_DIR).as_posix()
     created_at = now_utc()
-    candidates = [] if args.no_candidates else generate_candidates(args.title, story, relative_source, created_at)
+    if args.no_candidates:
+        candidates = []
+    elif args.witness:
+        candidates = generate_witness_candidates(args.witness, args.title, relative_source, created_at)
+    else:
+        candidates = generate_candidates(args.title, story, relative_source, created_at)
 
     payload = f"# {args.title}\n\n{story}\n"
     content = f"{frontmatter(args, relative_source, [c['id'] for c in candidates], payload)}\n\n{payload}"
@@ -172,7 +227,11 @@ def main() -> int:
     if candidates:
         append_candidates(candidates)
 
-    print(f"✓ Ingested story: {relative_source}")
+    if args.witness:
+        print(f"✓ Ingested witness account from {args.witness}: {relative_source}")
+        print(f"  Their words, kept separate from yours — the wiki renders both accounts side by side.")
+    else:
+        print(f"✓ Ingested story: {relative_source}")
     if candidates:
         print(f"✓ Added candidates: {', '.join(c['id'] for c in candidates)}")
     return 0

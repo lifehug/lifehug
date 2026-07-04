@@ -350,6 +350,37 @@ python3 system/research_expand.py --topic "Katie" --type relationship --output l
 
 These generate **candidates** (not daily questions yet) — review and promote the good ones with `candidates-list` / `candidates-promote`, ideally into a Focus of `--type self` so they compile into the `wiki/self/` surface. The planner's reserved weekly self-knowledge slot draws from this pool; the monthly cron refills it. A neighborhood is not artifact-ready just because its arc has candidates: readiness moves `candidate → promoted question → answered source`, and `progress` only labels it ready to draft when enough arc slots have answers. Sprinkle these in — don't let them crowd out story work.
 
+### Second Voice (v72 — Tiers 1–3; burden-first, pull not push)
+
+Other people's accounts of shared events are **witness sources** — a second
+voice, never merged with the author's version. Conflicting accounts are data
+("perspectives differ"), never errors to resolve.
+
+- **Tier 1 — ad-hoc ingest (the backbone, zero schedule):** whenever someone
+  shares something (a text from a kid, a story at dinner, a voice memo):
+  ```bash
+  printf '%s' "$THEIR_WORDS" | python3 system/lifehug.py ingest-story --witness "Mom"
+  ```
+  The wiki attributes it by name and renders both accounts side by side.
+- **Tier 2 — offers, never tasks:** at most `second_voice_offers_per_month`
+  (default 2, set 0 to disable) single-line suggestions inside the weekly
+  summary ("if it comes up naturally, ask Mom …"). Ignored offers expire
+  silently and NEVER repeat.
+- **Tier 3 — interview packs, on demand only:**
+  `python3 system/lifehug.py interview-pack "Mom" --relationship parent`
+  (types: parent, grandparent, spouse, child, sibling, mentor, cofounder,
+  friend, remembering). Never scheduled. The conversation ingests back via
+  `--witness`.
+- **Artifact delivery:** a letter isn't done until it's given —
+  `python3 system/lifehug.py artifact delivered outputs/<artifact> --to Mom --reaction "..."`
+  records the delivery; the reaction saves as the recipient's witness account.
+- Planner rules: late-arc relational questions (tension, how-they-see-me,
+  what-I-want-them-to-know) are held until earlier arc slots have ≥2 answers
+  (Aron escalation); a living person's category gone quiet ≥60 days gets a
+  love-map staleness boost.
+- Tier 4 (the bot messaging family directly) is deliberately NOT implemented —
+  see lifehug/lifehug#32.
+
 ### Perennials, Life Chapters & Resurfacing (v71)
 
 - **Perennial questions** are re-asked yearly WITH last year's answer attached (the
@@ -437,6 +468,8 @@ Keep 10–14 questions total. Tiers 2–4 should be grounded in what the answer 
 ### Focus Deliverables
 Each Focus can produce artifacts via `system/lifehug.py artifact ...`:
 - **Letter** — `--format letter --subject <name>`: A letter to or about this person.
+- **Unsent letter** — `--format unsent_letter --subject <name>`: therapeutic, owner-only, never sent and never suggested for sharing. For the deceased ("hello again," not goodbye) or the estranged.
+- **Legacy letter** — `--format legacy_letter --subject <name>`: the ethical-will tradition — values → lessons → gratitude → hopes/blessings → forgiveness, pre-populated from the author's existing material.
 - **Tweet** — `--format tweet --subject <name>`: A single moment, condensed.
 - **Instagram caption** — `--format instagram --subject <name>`: 2-4 short paragraphs.
 - **Chapter draft** — `--format chapter --subject <name>`: Narrative prose centered on the focus.

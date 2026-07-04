@@ -163,6 +163,11 @@ def run() -> int:
         for neighborhood in ready_neighborhoods:
             print(f"  • {neighborhood.get('title', '?')} ({neighborhood.get('target_output', 'draft')}):")
             print(f"      {neighborhood_artifact_hint(neighborhood)}")
+            # The WNRS Final Card move: a completed relational arc earns the
+            # letter offer + a closing reflection.
+            if neighborhood.get("type") == "relationship":
+                print("      arc complete — offer the letter, and ask: "
+                      "\"what surprised you about answering these?\"")
 
     # Artifact ideas the classifier spotted inside real answers
     # (possible_outputs was write-only until v69).

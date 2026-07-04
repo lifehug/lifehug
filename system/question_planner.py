@@ -24,6 +24,7 @@ from lifehug_core import (
     QUESTIONS_FILE,
     REPO_DIR,
     SOURCES_DIR,
+    STATE_DIR,
     FOCUS_RECS_FILE,
     LEGACY_FOCUS_RECS_FILE,
     WIKI_DIR,
@@ -406,6 +407,71 @@ def build_focus_index(focuses: list[dict], questions: list[dict]) -> dict:
     return {"cat_to_focus": cat_to_focus, "info": info}
 
 
+# ---------------------------------------------------------------------------
+# Second-voice offers (v72, Tier 2) — opportunity surfacing, never tasks.
+# Hard rules from the owner: max N/month (default 2, config
+# `second_voice_offers_per_month`, 0 disables), one line inside a summary the
+# owner already reads, no checkbox, an ignored offer expires silently and is
+# NEVER repeated.
+# ---------------------------------------------------------------------------
+
+SECOND_VOICE_OFFERS_FILE = STATE_DIR / "second_voice_offers.json"
+DEFAULT_SECOND_VOICE_OFFERS_PER_MONTH = 2
+
+
+def pick_second_voice_offer(now: datetime | None = None) -> str | None:
+    """One gentle, in-person suggestion — or None (most weeks). Draws an
+    unanswered question from a person-type Focus category and phrases it as
+    something to ask that person when it comes up naturally."""
+    from lifehug_core import load_config  # noqa: PLC0415
+
+    try:
+        per_month = int(load_config().get(
+            "second_voice_offers_per_month", DEFAULT_SECOND_VOICE_OFFERS_PER_MONTH))
+    except (TypeError, ValueError):
+        per_month = DEFAULT_SECOND_VOICE_OFFERS_PER_MONTH
+    if per_month <= 0:
+        return None
+
+    now = now or datetime.now(timezone.utc)
+    month_key = now.strftime("%Y-%m")
+    state = read_json(SECOND_VOICE_OFFERS_FILE, default=None) or {"version": 1, "offered": []}
+    offered_ids = {o.get("question_id") for o in state.get("offered", [])}
+    this_month = sum(1 for o in state.get("offered", []) if str(o.get("month")) == month_key)
+    if this_month >= per_month:
+        return None
+
+    questions, categories, _coverage = load_question_state()
+    focuses = resolve_roadmap(questions).get("focuses", [])
+    person_cats: dict[str, str] = {}  # category -> person label
+    for focus in focuses:
+        if focus.get("type") not in ("person", "relationship"):
+            continue
+        for cat in focus.get("categories", []):
+            person_cats[str(cat)] = str(focus.get("label", ""))
+
+    pool = [q for q in questions
+            if not q["answered"]
+            and str(q["category"]) in person_cats
+            and str(q["id"]) not in offered_ids
+            and len(str(q["text"]).split()) <= 40]
+    if not pool:
+        return None
+    # Deterministic pick, varies by month: stable across re-runs in a week.
+    pick = pool[(now.year * 12 + now.month) % len(pool)]
+    person = person_cats[str(pick["category"])]
+
+    state.setdefault("offered", []).append({
+        "question_id": str(pick["id"]),
+        "person": person,
+        "month": month_key,
+        "offered_at": now.isoformat().replace("+00:00", "Z"),
+    })
+    write_json(SECOND_VOICE_OFFERS_FILE, state)
+    return (f"💬 If it comes up naturally sometime: ask {person} — “{pick['text']}” — "
+            f"and forward whatever they say (it saves as their account). No rush, no need.")
+
+
 def zombie_focuses(focuses: list[dict]) -> list[dict]:
     """Focuses with no question categories: the planner can never ask about
     them (weight 0 forever). Seed them with questions (`lifehug.py focus-new`
@@ -425,6 +491,20 @@ def global_fullness(focuses: list[dict], questions: list[dict]) -> float:
     return answered / total if total else 0.0
 
 
+# Late-arc relational functions (Aron): escalation must be earned — never ask
+# these about a person until the earlier arc slots have real answered material.
+# (perception_by_others included: within a person/relationship Focus the
+# keyword classifier routes "how they see you" questions there.)
+LATE_RELATIONAL_FUNCTIONS = {"tension", "what_i_want_them_to_know", "how_they_see_me", "perception_by_others"}
+ESCALATION_MIN_ANSWERED = 2
+
+# Love-map staleness (Gottman): a living person's inner world changes — when a
+# person-Focus category hasn't been answered in this long, boost it so the
+# knowledge doesn't decay.
+LOVE_MAP_STALE_DAYS = 60
+LOVE_MAP_STALE_BOOST = 1.3
+
+
 def enriched_pending_questions(questions: list[dict], categories: dict, coverage: dict, objectives: list[dict],
                                focus_index: dict | None = None) -> list[dict]:
     rows = []
@@ -437,6 +517,27 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
         _qprofile = load_profile()
     except Exception:  # noqa: BLE001
         _qprofile = {"active": False}
+
+    # Per-category answered counts (escalation gate) and latest answer dates
+    # (love-map staleness).
+    answered_per_cat: Counter = Counter()
+    for q in questions:
+        if q["answered"]:
+            answered_per_cat[str(q["category"])] += 1
+    try:
+        latest_dates = category_latest_dates(questions, read_answer_dates())
+    except Exception:  # noqa: BLE001
+        latest_dates = {}
+
+    def _stale_days(category: str) -> float | None:
+        raw = latest_dates.get(category)
+        if not raw:
+            return None
+        try:
+            latest = datetime.fromisoformat(str(raw)[:10])
+        except ValueError:
+            return None
+        return (datetime.now() - latest).days
 
     for question in questions:
         if question["answered"]:
@@ -460,6 +561,22 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
             if category in (_qprofile.get("rumination_categories") or []):
                 base_weight = base_weight * 0.25
 
+        # Aron escalation gate: late-arc relational questions wait until the
+        # earlier slots have answered material for this person.
+        escalation_hold = (
+            story_function in LATE_RELATIONAL_FUNCTIONS
+            and finfo.get("type") in ("person", "relationship")
+            and answered_per_cat[category] < ESCALATION_MIN_ANSWERED
+        )
+        if escalation_hold:
+            base_weight = base_weight * 0.05
+
+        # Love-map staleness: living-person categories gone quiet get a boost.
+        if finfo.get("type") in ("person", "relationship"):
+            stale = _stale_days(category)
+            if stale is not None and stale >= LOVE_MAP_STALE_DAYS:
+                base_weight = base_weight * LOVE_MAP_STALE_BOOST
+
         rows.append({
             **question,
             "group": group,
@@ -471,6 +588,7 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
             "focus": focus_id,
             "focus_type": finfo.get("type", group),
             "weight": base_weight,
+            "escalation_hold": escalation_hold,
         })
     rows.sort(key=lambda q: (
         q["objective"] is None,
@@ -575,6 +693,10 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
 
     def eligible(q: dict, *, enforce_arc: bool = True, enforce_story: bool = True) -> bool:
         fid = q.get("focus")
+        # Aron escalation: never queue a late-arc relational question before
+        # the earlier slots have answers (relaxes only in the last-resort pool).
+        if enforce_story and q.get("escalation_hold"):
+            return False
         if fid and per_focus[fid] >= focus_max.get(fid, limit):
             return False
         if q.get("objective") and objective_counts[q["objective"]] >= int(q.get("objective_limit") or limit):

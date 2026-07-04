@@ -156,14 +156,16 @@ class PerennialTests(unittest.TestCase):
         answered = (datetime.now(timezone.utc) - timedelta(days=answered_days_ago)).date().isoformat()
         (answers / "E3.md").write_text(self.ANSWER.format(date=answered), encoding="utf-8")
         perennials = Path(tmp) / "perennials.json"
-        self._orig = (qc.QUESTIONS_FILE, qc.PERENNIALS_FILE, core.ANSWERS_DIR)
+        live_core = sys.modules["lifehug_core"]  # call-time import target
+        self._live_core = live_core
+        self._orig = (qc.QUESTIONS_FILE, qc.PERENNIALS_FILE, live_core.ANSWERS_DIR)
         qc.QUESTIONS_FILE = bank
         qc.PERENNIALS_FILE = perennials
-        core.ANSWERS_DIR = answers
+        live_core.ANSWERS_DIR = answers
         return bank
 
     def _teardown(self):
-        qc.QUESTIONS_FILE, qc.PERENNIALS_FILE, core.ANSWERS_DIR = self._orig
+        qc.QUESTIONS_FILE, qc.PERENNIALS_FILE, self._live_core.ANSWERS_DIR = self._orig
 
     def test_due_perennial_generates_reask_with_excerpt(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -210,13 +212,14 @@ class WikiHarvestTests(unittest.TestCase):
             (root / "wiki" / "people" / "dad.md").write_text(self.PAGE, encoding="utf-8")
             bank = root / "bank.md"
             bank.write_text("## A: Origins\n- [ ] A1: What's your earliest memory?\n", encoding="utf-8")
-            orig = (core.REPO_DIR, qc.QUESTIONS_FILE)
-            core.REPO_DIR = root
+            live_core = sys.modules["lifehug_core"]  # call-time import target
+            orig = (live_core.REPO_DIR, qc.QUESTIONS_FILE)
+            live_core.REPO_DIR = root
             qc.QUESTIONS_FILE = bank
             try:
                 harvested = qc.harvest_wiki_questions(dry_run=True)
             finally:
-                core.REPO_DIR, qc.QUESTIONS_FILE = orig
+                live_core.REPO_DIR, qc.QUESTIONS_FILE = orig
             self.assertEqual(len(harvested), 1)
             self.assertTrue(harvested[0].startswith("cand-wiki-dad-"))
 

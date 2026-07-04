@@ -46,7 +46,10 @@ from lifehug_core import (
 
 SYSTEM_DIR = Path(__file__).parent
 
-VALID_FORMATS = ("letter", "tweet", "instagram", "chapter", "post")
+# unsent_letter: therapeutic, owner-only, never suggested for sharing (v72).
+# legacy_letter: the ethical-will tradition — values → lessons → gratitude →
+# hopes/blessings → forgiveness (v72).
+VALID_FORMATS = ("letter", "tweet", "instagram", "chapter", "post", "unsent_letter", "legacy_letter")
 OLD_FOCUS_TERM = "Spot" "light"
 
 

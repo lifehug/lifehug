@@ -116,6 +116,135 @@ PERIOD_ARC = (
 )
 ARCS = {"self": SELF_ARC, "relationship": RELATIONSHIP_ARC, "time_period": PERIOD_ARC}
 
+# ---------------------------------------------------------------------------
+# Interview packs (v72, Tier 3 — on demand only, never scheduled).
+# Questions the AUTHOR asks the other person directly, StoryCorps-style —
+# organized by relationship type (mirroring the Great Questions lists).
+# The conversation records/ingests back via `ingest-story --witness <person>`.
+# ---------------------------------------------------------------------------
+
+INTERVIEW_BANKS: dict[str, list[str]] = {
+    "parent": [
+        "What do you remember about the day I was born?",
+        "What was your life like right before you became a parent — who were you then?",
+        "What's something about your own childhood I'd be surprised by?",
+        "What was the hardest season of raising me, and what got you through it?",
+        "What did your parents do that you promised yourself you'd do differently?",
+        "What's a moment with me you find yourself returning to?",
+        "What do you know now about being a parent that you wish someone had told you?",
+        "What's something you've always wanted to tell me but never quite have?",
+        "How do you want to be remembered?",
+    ],
+    "grandparent": [
+        "Where did our family come from — what's the oldest family story you know?",
+        "What was a typical day like when you were my age?",
+        "What did things cost then — and what was the first big thing you saved for?",
+        "How did you and Grandpa/Grandma meet? Tell it the long way.",
+        "What was the hardest thing your generation lived through, from where you stood?",
+        "Which of your parents do you see in yourself — and in me?",
+        "What's something you made or built that you were proud of?",
+        "What do you want your great-grandchildren to know about you?",
+    ],
+    "spouse": [
+        "What did you first assume about me that turned out to be wrong?",
+        "When did you know — actually know — about us?",
+        "What's a hard season of ours you're proud of how we survived?",
+        "What do I do that quietly drives you crazy — and what do I do that quietly holds you up?",
+        "What dream have you never fully said out loud?",
+        "What are you most worried about right now?",
+        "What do you hope the kids take from how we love each other?",
+    ],
+    "child": [
+        "What's your earliest memory — the very first thing you can see?",
+        "What's something you think I don't understand about being you right now?",
+        "What's a time I embarrassed you — and a time I made you proud?",
+        "What do you want to be like when you're my age?",
+        "If you could keep one day we've had together forever, which one?",
+        "What's something you're scared to tell me you're scared of?",
+    ],
+    "sibling": [
+        "What's your version of the story I always tell about us?",
+        "What was our house actually like from where you stood?",
+        "What did you envy about me — and what do you think I envied about you?",
+        "When did we feel most like a team?",
+        "What do you remember about Mom and Dad that I might have missed?",
+        "What's something you've forgiven me for that I never apologized for?",
+    ],
+    "mentor": [
+        "What did you see in me back then that made you invest the time?",
+        "What was I like to work with — honestly?",
+        "What's the advice you gave me that you most hoped would stick?",
+        "Who mentored you, and what did you carry forward from them?",
+        "What should I be paying attention to in the next ten years?",
+    ],
+    "cofounder": [
+        "What did you first assume about me that turned out to be wrong?",
+        "What was the moment you almost quit — and what kept you in?",
+        "Which decision do you still think we got wrong, and does it matter now?",
+        "What's the story of us you tell people when I'm not in the room?",
+        "What did building this cost you that you've never fully said?",
+        "What do you hope this thing outlives?",
+    ],
+    "friend": [
+        "What's the first thing you remember about meeting me?",
+        "What's a side of me you see that my family probably doesn't?",
+        "When did our friendship almost break — and why didn't it?",
+        "What's something we did that you'd never tell either of our spouses?",
+        "What do you count on me for?",
+    ],
+    "remembering": [
+        "Tell me about them the way you'd want a stranger to know them.",
+        "What did their voice sound like? What did they always say?",
+        "What's a moment with them you find yourself returning to?",
+        "What did they teach you without ever saying it out loud?",
+        "What would they make of your life now?",
+        "What do you wish you'd asked them?",
+    ],
+}
+
+
+def build_interview_pack(person: str, relationship: str) -> str:
+    """A forwardable question pack for a real conversation with `person`.
+    On demand only; the recording ingests via `ingest-story --witness`."""
+    bank = INTERVIEW_BANKS.get(relationship, INTERVIEW_BANKS["friend"])
+    lines = [
+        f"🎙 Interview pack — {person} ({relationship})",
+        "",
+        "Not a checklist — pick the ones that open windows and skip the rest.",
+        "Let silence work. Ask for a specific example whenever you get a general",
+        "answer. Don't interrupt tangents; tangents are where the good stuff lives.",
+        "",
+    ]
+    for i, question in enumerate(bank, 1):
+        lines.append(f"  {i}. {question}")
+
+    # Personalize from the wiki: this person's page gaps become themes to chase.
+    slug = slugify(person)
+    page_candidates = [
+        WIKI_DIR / "people" / f"{slug}.md",
+        *(sorted((WIKI_DIR / "relationships").glob(f"*{slug}*.md")) if (WIKI_DIR / "relationships").exists() else []),
+    ]
+    for page in page_candidates:
+        if not page.exists():
+            continue
+        text = page.read_text(encoding="utf-8", errors="replace")
+        section = re.search(r"^## Open Questions\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+        if not section:
+            continue
+        gaps = [ln.strip().lstrip("-*").strip() for ln in section.group(1).splitlines()
+                if ln.strip().lstrip("-*").strip()]
+        if gaps:
+            lines += ["", f"Specific to your story (gaps on their wiki page, {page.name}):"]
+            lines += [f"  • {g}" for g in gaps[:4]]
+        break
+
+    lines += [
+        "",
+        "Afterwards, save their words (voice memo transcript, notes, anything):",
+        f'  printf \'%s\' "$THEIR_WORDS" | python3 system/lifehug.py ingest-story --witness "{person}"',
+    ]
+    return "\n".join(lines)
+
 
 def arc_for(topic_type: str = "") -> tuple[tuple[str, str], ...]:
     return ARCS.get(topic_type, MEMOIR_ARC)

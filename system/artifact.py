@@ -581,6 +581,40 @@ def cmd_promote_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_delivered(args: argparse.Namespace) -> int:
+    """A letter isn't done until it's GIVEN (v72). Records the delivery on the
+    artifact, and optionally ingests the recipient's reaction as a witness
+    source — connection, closed loop."""
+    from lifehug_core import now_utc as _now_utc
+
+    out_dir = output_dir_for(args.output)
+    meta = load_artifact(out_dir)
+    meta["delivered_at"] = _now_utc()
+    if args.to:
+        meta["delivered_to"] = args.to
+    if args.note:
+        meta["delivery_note"] = args.note
+    save_artifact(out_dir, meta)
+    to_part = f" to {args.to}" if args.to else ""
+    print(f"✓ Delivered{to_part}: {out_dir.name}")
+
+    if args.reaction:
+        recipient = args.to or meta.get("subject") or "recipient"
+        import subprocess as _sub
+        import sys as _sys
+        result = _sub.run(
+            [_sys.executable, str(Path(__file__).parent / "ingest_story.py"),
+             "--witness", recipient,
+             "--source", "artifact-reaction",
+             "--title", f"{recipient}'s reaction to {meta.get('title', out_dir.name)}"],
+            input=args.reaction, text=True, cwd=REPO_DIR)
+        if result.returncode == 0:
+            print(f"✓ Reaction saved as {recipient}'s witness account")
+        else:
+            print("warn: reaction ingest failed", file=_sys.stderr)
+    return 0
+
+
 def cmd_list(_args: argparse.Namespace) -> int:
     rows = []
     if OUTPUTS_DIR.exists():
@@ -665,6 +699,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", default="final", help="final, latest, or vN")
     p.add_argument("--source", default="lifehug artifact")
     p.set_defaults(func=cmd_promote_source)
+
+    p = sub.add_parser("delivered", help="Record that an artifact was actually given to its recipient")
+    p.add_argument("output", help="outputs/<artifact> path or slug")
+    p.add_argument("--to", default=None, help="Who received it")
+    p.add_argument("--note", default=None, help="How it went")
+    p.add_argument("--reaction", default=None,
+                   help="The recipient's reaction, saved as their witness account")
+    p.set_defaults(func=cmd_delivered)
 
     p = sub.add_parser("list", help="List artifact tasks")
     p.set_defaults(func=cmd_list)

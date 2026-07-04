@@ -245,6 +245,18 @@ fi
 
 safe_autocommit
 
+# Second-voice offer (v72, Tier 2): at most N/month (config, default 2), one
+# ignorable line, offered questions never repeat. Empty most weeks by design.
+SECOND_VOICE_OUT=$(python3 - <<'PY' 2>/dev/null || true
+import sys
+sys.path.insert(0, "system")
+from question_planner import pick_second_voice_offer
+offer = pick_second_voice_offer()
+if offer:
+    print(offer)
+PY
+)
+
 # Present-tense capture (v71): the system only mined the past — one weekly
 # prompt records the life being lived. Replies ingest via ingest-story.
 PRESENT_PROMPTS=(
@@ -273,6 +285,8 @@ ${RECS_OUT}
 
 🩺 Doctor:
 ${DOCTOR_WARNINGS:-all checks ok}
+
+${SECOND_VOICE_OUT}
 
 📸 This week, while it's fresh: ${PRESENT_PROMPT}
 (Reply and it saves as a story)"

@@ -33,7 +33,7 @@ answers. If the user sends a long story without asking for an output, use
 Ask only for missing essentials:
 - subject/person/topic
 - occasion
-- format: `letter`, `tweet`, `instagram`, `post`, or `chapter`
+- format: `letter`, `tweet`, `instagram`, `post`, `chapter`, `unsent_letter` (therapeutic, owner-only, NEVER suggested for sharing — for the deceased or estranged, 'hello again' framing), or `legacy_letter` (ethical-will: values → lessons → gratitude → hopes → forgiveness, pre-populated from the author's material)
 - date, if relevant
 - audience/privacy, if relevant
 
@@ -43,7 +43,7 @@ Create the artifact task and context pack:
 python3 system/lifehug.py artifact new \
   --subject "<subject>" \
   --occasion "<occasion>" \
-  --format <letter|tweet|instagram|post|chapter> \
+  --format <letter|tweet|instagram|post|chapter|unsent_letter|legacy_letter> \
   --date <YYYY-MM-DD>
 ```
 

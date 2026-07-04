@@ -190,6 +190,7 @@ def read_manual_sources() -> dict[str, dict]:
             "title": title,
             "body": body,
             "kind": kind,
+            "witness": frontmatter_value(text, "witness", ""),
             "source_trust": str(metadata.get("source_trust", "")),
             "authority": str(metadata.get("authority", "")),
             "generated_from": [str(item) for item in generated_from],
@@ -730,17 +731,27 @@ def task_sources(desc: dict, limit: int = 14, cap: int = 1500) -> list[dict]:
         body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > cap:
             body = body[:cap].rsplit(" ", 1)[0] + "..."
-        out.append({"id": item["id"], "source": item["source"], "body": body})
+        row = {"id": item["id"], "source": item["source"], "body": body}
+        if item.get("kind") == "witness_account":
+            row["witness"] = item.get("witness") or "another person"
+            row["note"] = "second voice — attribute by name, never merge with the author's account"
+        out.append(row)
     return out
 
 
 def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     src_lines = []
+    has_witness = False
     for item in (desc["cited_items"] + desc["supporting_items"])[:14]:
         body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > 1500:
             body = body[:1500].rsplit(" ", 1)[0] + "..."
-        src_lines.append(f"[{item['id']}] ({item['source']}): {body}")
+        if item.get("kind") == "witness_account":
+            has_witness = True
+            witness = item.get("witness") or "another person"
+            src_lines.append(f"[{item['id']}] (WITNESS ACCOUNT — {witness}'s words, not the author's) ({item['source']}): {body}")
+        else:
+            src_lines.append(f"[{item['id']}] ({item['source']}): {body}")
     roster_lines = [f"- {r['slug']} — {r['title']} ({r['type']})" for r in roster]
     if desc["type"] == "life" and desc.get("origin") == "hub":
         lens = ("This page is an honest self-portrait of the author. From the source "
@@ -773,7 +784,14 @@ or feelings that are not present below:
 Artifact/context sources marked `authored_expression`, `derived_context`, or
 similar are the author's later expression or a working context pack. Use them
 as attributed support, not as independent proof of every underlying event.
-
+{'''
+WITNESS ACCOUNTS are a second voice: another person's words about shared
+events. NEVER merge a witness account into the author's account or present it
+as the author's memory. Attribute it by name ("Mom remembers it as...").
+When the two accounts disagree, PRESERVE BOTH tellings side by side —
+"perspectives differ" is data about the relationship, never an error to
+resolve or average away.
+''' if has_witness else ''}
 OTHER WIKI PAGES — choose related pages ONLY from this list, referencing them by slug:
 {chr(10).join(roster_lines) or '(none yet)'}
 
