@@ -219,7 +219,10 @@ def derive_focuses(md_text: str) -> list[dict]:
 
 # Fields a user can override; preserved across re-derivation.
 _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
-                "cap", "phase", "type", "wiki_node", "neighborhoods")
+                "cap", "phase", "type", "wiki_node", "neighborhoods",
+                # living: false on a person Focus = deceased; second-voice
+                # offers and love-map staleness skip them (you can't ask).
+                "living")
 
 
 def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:

@@ -447,14 +447,23 @@ def pick_second_voice_offer(now: datetime | None = None) -> str | None:
     for focus in focuses:
         if focus.get("type") not in ("person", "relationship"):
             continue
+        if focus.get("living") is False:
+            continue  # deceased — you can't ask them; grief work is not an errand
         for cat in focus.get("categories", []):
             person_cats[str(cat)] = str(focus.get("label", ""))
+
+    # Questions about loss/grief are FOR the author, never relayable to the
+    # person — and a question phrased about someone's death must never become
+    # "go ask them."
+    _unaskable = ("died", "death", "passed away", "funeral", "wish you'd",
+                  "never got to", "before he died", "before she died", "grief")
 
     pool = [q for q in questions
             if not q["answered"]
             and str(q["category"]) in person_cats
             and str(q["id"]) not in offered_ids
-            and len(str(q["text"]).split()) <= 40]
+            and len(str(q["text"]).split()) <= 40
+            and not any(marker in str(q["text"]).lower() for marker in _unaskable)]
     if not pool:
         return None
     # Deterministic pick, varies by month: stable across re-runs in a week.

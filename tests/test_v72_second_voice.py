@@ -115,6 +115,20 @@ class SecondVoiceOfferTests(unittest.TestCase):
         sys.modules["lifehug_core"].load_config = lambda *a, **k: {"second_voice_offers_per_month": 0}
         self.assertIsNone(qp.pick_second_voice_offer())
 
+    def test_deceased_person_never_offered(self):
+        qp.resolve_roadmap = lambda *a, **k: {"focuses": [
+            {"id": "mom", "label": "Mom", "type": "person", "categories": ["K"], "living": False}]}
+        self.assertIsNone(qp.pick_second_voice_offer())
+
+    def test_grief_questions_never_relayed(self):
+        self.QUESTIONS = [
+            {"id": "K1", "category": "K",
+             "text": "What do you wish you'd asked before he died — the question you never got to?",
+             "answered": False},
+        ]
+        qp.load_question_state = lambda: (self.QUESTIONS, {"K": {"group": "focus"}}, {"categories": {}})
+        self.assertIsNone(qp.pick_second_voice_offer())
+
     def test_cap_counts_this_month(self):
         now = datetime(2026, 7, 15, tzinfo=timezone.utc)
         core.write_json(qp.SECOND_VOICE_OFFERS_FILE, {"version": 1, "offered": [
