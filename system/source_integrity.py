@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import re
 import sys
@@ -386,6 +387,20 @@ def finding(
     }
 
 
+def _parse_sources_block(lines: list[str]) -> set[str]:
+    refs: set[str] = set()
+    for idx, line in enumerate(lines):
+        if line.strip() != "sources:":
+            continue
+        for raw in lines[idx + 1:]:
+            if not raw.startswith("  - "):
+                break
+            value = raw.split("-", 1)[1].strip().strip('"').strip("'")
+            if value:
+                refs.add(value)
+    return refs
+
+
 def _wiki_source_refs() -> dict[str, set[str]]:
     refs: dict[str, set[str]] = {}
     wiki_dir = REPO_DIR / "wiki"
@@ -395,20 +410,60 @@ def _wiki_source_refs() -> dict[str, set[str]]:
         if page.name in {"SCHEMA.md", "index.md", "log.md"}:
             continue
         text = page.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
-        page_refs: set[str] = set()
-        for idx, line in enumerate(lines):
-            if line.strip() != "sources:":
-                continue
-            for raw in lines[idx + 1:]:
-                if not raw.startswith("  - "):
-                    break
-                value = raw.split("-", 1)[1].strip().strip('"').strip("'")
-                if value:
-                    page_refs.add(value)
+        page_refs = _parse_sources_block(text.splitlines())
         if page_refs:
             refs[rel(page)] = page_refs
     return refs
+
+
+# Wiki dirs holding roster-graduated entity pages, mapped to their entity type.
+_ENTITY_PAGE_DIRS = {"people": "person", "places": "place", "periods": "period", "objects": "object"}
+# Two same-type pages whose source sets overlap at/above this Jaccard ratio (or
+# where one is a strict subset of the other) look like one entity split in two.
+DUPLICATE_SOURCE_JACCARD = 0.8
+
+
+def _frontmatter_value(text: str, key: str) -> str:
+    match = re.search(rf'^{re.escape(key)}:\s*"?(.*?)"?\s*$', text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def _wiki_entity_pages() -> list[dict]:
+    """Scan wiki entity dirs → [{path, type, origin, slug, sources}] per page."""
+    pages: list[dict] = []
+    wiki_dir = REPO_DIR / "wiki"
+    for dir_name, entity_type in _ENTITY_PAGE_DIRS.items():
+        directory = wiki_dir / dir_name
+        if not directory.exists():
+            continue
+        for page in sorted(directory.glob("*.md")):
+            if page.name == ".gitkeep":
+                continue
+            text = page.read_text(encoding="utf-8", errors="replace")
+            pages.append({
+                "path": rel(page),
+                "type": entity_type,
+                "origin": _frontmatter_value(text, "origin"),
+                "slug": page.stem,
+                "sources": _parse_sources_block(text.splitlines()),
+            })
+    return pages
+
+
+def _roster_slug_index(entity_type: str) -> set[str] | None:
+    """All slugs an entity roster accounts for (slug + name + aliases, slugified).
+    None when the roster is missing/empty — callers must skip judgment then."""
+    data = read_json(REPO_DIR / "state" / "entity_rosters" / f"{entity_type}.json", default=None)
+    entities = (data or {}).get("entities") or []
+    if not entities:
+        return None
+    slugs: set[str] = set()
+    for ent in entities:
+        for raw in [ent.get("slug", ""), ent.get("name", ""), *ent.get("aliases", [])]:
+            slug = slugify(str(raw or ""))
+            if slug:
+                slugs.add(slug)
+    return slugs
 
 
 def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> list[dict[str, str]]:
@@ -536,6 +591,55 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
                 fixability="safe",
                 recommended_action="re-run compile; if it remains, fix the compiler or restore the source",
             ))
+
+    # Entity-page sanity: catch roster/wiki drift (an entity page whose entity
+    # left the roster) and split entities (two pages that are really one).
+    entity_pages = _wiki_entity_pages()
+    roster_indexes: dict[str, set[str] | None] = {}
+    for page in entity_pages:
+        if page["origin"] != "mention":
+            continue
+        entity_type = page["type"]
+        if entity_type not in roster_indexes:
+            roster_indexes[entity_type] = _roster_slug_index(entity_type)
+        slug_index = roster_indexes[entity_type]
+        if slug_index is None:
+            continue  # no roster → cannot judge
+        if page["slug"] not in slug_index:
+            findings.append(finding(
+                "entity_page_not_in_roster",
+                "warning",
+                page["path"],
+                f"mention-origin {entity_type} page has no matching entity in the {entity_type} roster",
+                fixability="manual",
+                recommended_action="re-run compile (orphan cleanup removes it), or re-add the entity to state/entity_rosters/",
+            ))
+    by_type: dict[str, list[dict]] = {}
+    for page in entity_pages:
+        if page["sources"]:
+            by_type.setdefault(page["type"], []).append(page)
+    for entity_type, pages in by_type.items():
+        for a, b in itertools.combinations(pages, 2):
+            if a["origin"] != "mention" and b["origin"] != "mention":
+                continue  # two hand-curated pages overlapping is intentional
+            small, big = sorted((a, b), key=lambda p: len(p["sources"]))
+            if len(small["sources"]) < 2:
+                continue
+            inter = small["sources"] & big["sources"]
+            union = small["sources"] | big["sources"]
+            subset = small["sources"] <= big["sources"]
+            if not subset and len(inter) / len(union) < DUPLICATE_SOURCE_JACCARD:
+                continue
+            overlap = "a subset of" if subset else "nearly identical to"
+            findings.append(finding(
+                "duplicate_entity_suspect",
+                "warning",
+                small["path"],
+                f"sources are {overlap} {big['path']} — likely one {entity_type} split into two pages",
+                fixability="manual",
+                recommended_action="merge the roster entries into one entity with aliases, delete the duplicate page, then re-run compile",
+            ))
+
     if strict:
         for record in records:
             path = str(record["path"])

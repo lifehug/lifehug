@@ -981,6 +981,62 @@ def update_index(written_pages: list[Path], dry_run=False):
         write_text(log, existing.rstrip() + "\n" + additions + "\n")
 
 
+# Entity types whose mention-graduated pages are cleaned up when their entity
+# leaves the roster. Focus/hand-authored pages are never candidates.
+_MENTION_CLEANUP_TYPES = ("person", "place", "period", "object")
+
+
+def cleanup_orphan_entity_pages(planned_slugs: set[str], dry_run: bool = False) -> list[Path]:
+    """Remove mention-origin entity pages whose entity left the roster.
+
+    When the monthly roster refresh drops, merges, or remaps an entity, its old
+    compiled page would otherwise linger forever (and stay in the index, which
+    globs directories). Guard rails:
+      - a type is skipped entirely when its roster file is missing/empty (fresh
+        install, keyless machine, failed refresh — never delete on no signal);
+      - only pages with frontmatter `origin: mention` are candidates — focus and
+        hand-authored pages are structurally untouchable;
+      - a page is kept if its slug was planned this compile OR belongs to a
+        still page-eligible, unmapped roster entity (it may just have missed
+        the mention threshold this run). Entities demoted or mapped to a Focus
+        deliberately lose their standalone page.
+    Pages are compiled artifacts in a git repo — deletion is recoverable.
+    """
+    removed: list[Path] = []
+    for entity_type in _MENTION_CLEANUP_TYPES:
+        roster_entities = (load_roster(entity_type) or {}).get("entities") or []
+        if not roster_entities:
+            continue  # no roster signal → never delete
+        keep_slugs = set(planned_slugs)
+        for ent in roster_entities:
+            if ent.get("page_eligible") and not ent.get("maps_to_focus"):
+                slug = ent.get("slug") or slugify(ent.get("name", ""))
+                if slug:
+                    keep_slugs.add(slug)
+        directory = TYPE_DIRS[entity_type]
+        if not directory.exists():
+            continue
+        for page in sorted(directory.glob("*.md")):
+            if page.name == ".gitkeep" or page.stem in keep_slugs:
+                continue
+            text = page.read_text(encoding="utf-8", errors="replace")
+            if frontmatter_value(text, "origin") != "mention":
+                continue  # never touch focus/hand-authored pages
+            if dry_run:
+                print(f"  ✗ would remove orphan {rel(page)} — no longer in the {entity_type} roster")
+            else:
+                page.unlink()
+                print(f"  ✗ removed orphan {rel(page)} — no longer in the {entity_type} roster")
+            removed.append(page)
+    if removed and not dry_run:
+        log = WIKI_DIR / "log.md"
+        existing = log.read_text(encoding="utf-8") if log.exists() else "# Lifehug Compile Log\n"
+        stamp = datetime.now().isoformat(timespec="seconds")
+        additions = "\n".join(f"- {stamp}: removed {rel(p)} (left the roster)" for p in removed)
+        write_text(log, existing.rstrip() + "\n" + additions + "\n")
+    return removed
+
+
 def get_model(args) -> str:
     if getattr(args, "model", None):
         return args.model
@@ -1090,12 +1146,15 @@ def main():
         text = render_page(d, synths[d["slug"]], final_related[d["slug"]], backlinks[d["slug"]], slug_title)
         if write_page(d["path"], text, args.dry_run):
             written.append(d["path"])
+    removed = cleanup_orphan_entity_pages(taken_slugs, args.dry_run)
     update_index(written, args.dry_run)
 
     if not args.dry_run:
         write_json(SYNTH_CACHE_FILE, cache)
 
     suffix = f" ({preserved} preserved)" if preserved else ""
+    if removed:
+        suffix += f", {len(removed)} orphan(s) removed"
     print(f"✓ Wiki compile complete: {len(written)} page updates{suffix}")
 
 

@@ -297,8 +297,85 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
     return [dict(e) for e in previous_entities], True
 
 
+def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | None) -> tuple[list[dict], int]:
+    """Safety net: fold raw AI output back onto the previous roster's settled
+    identity decisions BEFORE normalize().
+
+    Any raw entry whose name or alias matches a previous entry (case-insensitive,
+    including slug and "the "-stripped forms via _entity_keys) is folded into that
+    previous entry's canonical name — so slugs stay stable even if the AI re-splits
+    a merged entity ('Grandma Betty Jo' → 'Grandma' + 'Betty Jo'). Two raw entries
+    hitting the same previous entry collapse into one, with aliases unioned.
+    `qualifies` is the OR of the folded raw entries (the AI can still demote an
+    entity by marking every variant unqualified); `maps_to_focus` falls back to
+    the previous value when the raw output drops it.
+
+    Tradeoff: an intentional AI re-split of a previously merged entity is
+    overridden. Splitting a wrongly merged entity requires hand-editing
+    state/entity_rosters/<type>.json (remove the merged entry, then re-resolve).
+    """
+    previous = (previous_roster or {}).get("entities") or []
+    if not previous or not raw_entities:
+        return list(raw_entities), 0
+
+    key_to_prev: dict[str, dict] = {}
+    for prev in previous:
+        for key in _entity_keys(prev):
+            key_to_prev.setdefault(key, prev)
+
+    def _match(entry: dict) -> dict | None:
+        for key in _entity_keys(entry):
+            prev = key_to_prev.get(key)
+            if prev:
+                return prev
+        return None
+
+    out: list[dict] = []
+    slots: dict[str, dict] = {}  # previous slug -> folded entry
+    forced = 0
+    for e in raw_entities:
+        name = (e.get("name") or "").strip()
+        if not name:
+            out.append(dict(e))
+            continue
+        prev = _match(e)
+        if prev is None:
+            out.append(dict(e))
+            continue
+        canonical = prev.get("name") or name
+        prev_slug = prev.get("slug") or slugify(canonical)
+        slot = slots.get(prev_slug)
+        if slot is None:
+            slot = dict(e)
+            slot["name"] = canonical
+            slots[prev_slug] = slot
+            out.append(slot)
+        else:
+            # A second raw entry collapsed into an already-folded slot.
+            slot["qualifies"] = bool(slot.get("qualifies")) or bool(e.get("qualifies"))
+            if not slot.get("maps_to_focus"):
+                slot["maps_to_focus"] = e.get("maps_to_focus") or None
+            forced += 1
+        # Union aliases: previous aliases + raw name/aliases, minus the canonical name.
+        seen = {canonical.strip().lower()}
+        merged_aliases: list[str] = []
+        for alias in [*slot.get("aliases", []), *prev.get("aliases", []), name, *e.get("aliases", [])]:
+            alias = str(alias or "").strip()
+            if not alias or alias.lower() in seen:
+                continue
+            seen.add(alias.lower())
+            merged_aliases.append(alias)
+        slot["aliases"] = merged_aliases
+        if not slot.get("maps_to_focus"):
+            slot["maps_to_focus"] = prev.get("maps_to_focus") or None
+        if name.strip().lower() != canonical.strip().lower():
+            forced += 1
+    return out, forced
+
+
 def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, str],
-                 excerpts: list[dict] | None = None) -> str:
+                 excerpts: list[dict] | None = None,
+                 previous_roster: dict | None = None) -> str:
     focuses = ", ".join(f'"{n}" (slug: {s})' for s, n in focus_map.items()) or "(none)"
     plural = {"person": "people", "place": "places", "period": "periods", "object": "objects"}[entity_type]
     lines = [
@@ -307,6 +384,28 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         "",
         f"A {entity_type} QUALIFIES if it is {QUALIFY_RULE[entity_type]}.",
         f"Existing Focus pages (don't duplicate — map to these): {focuses}",
+    ]
+    previous_entities = (previous_roster or {}).get("entities") or []
+    if previous_entities:
+        lines += [
+            "",
+            f"Previous roster — last run's settled decisions for these same {plural}:",
+        ]
+        for prev in previous_entities:
+            aliases = ", ".join(prev.get("aliases") or []) or "(none)"
+            line = f'- "{prev.get("name", "")}" (slug: {prev.get("slug", "")}) — aliases: {aliases}'
+            if prev.get("maps_to_focus"):
+                line += f'; maps_to_focus: {prev["maps_to_focus"]}'
+            lines.append(line)
+        lines += [
+            "These prior merges and mappings are settled identity decisions. Keep each "
+            "previous entry as ONE entry, reusing its exact `name` and keeping (or "
+            f"extending) its aliases and `maps_to_focus`, unless the material below clearly "
+            f"shows two different {plural} were wrongly merged. Never re-split one "
+            f"{entity_type} into multiple entries and never rename a previous entry to a "
+            "different `name`.",
+        ]
+    lines += [
         "",
         "Rules:",
         f"- Merge aliases/variants of the same {entity_type} into ONE entry (e.g. "
@@ -315,6 +414,17 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         "- If it clearly refers to an existing Focus above, set `maps_to_focus` to that slug.",
         "- Set `qualifies` false for anything that doesn't meet the bar above (fragments, "
         "pronouns, wrong type, mundane objects). When unsure, set qualifies false.",
+    ]
+    if entity_type == "person":
+        lines += [
+            "- People are often referred to BOTH by a kinship/role word (Mom, Dad, Grandma, "
+            "Coach, Wife) and by a proper name. If a role word and a proper name appear in "
+            "overlapping answers and plausibly refer to the same individual (e.g. 'Grandma' "
+            "and 'Betty Jo'), output ONE entry — the fullest natural name (or the previous "
+            "roster's name) as `name`, the role word and other variants in `aliases`. Never "
+            "emit both a role-word entry and a proper-name entry for the same individual.",
+        ]
+    lines += [
         "",
     ]
     if entity_type == "period":
@@ -406,8 +516,10 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
 
 
 def deterministic(entity_type: str, candidates: list[dict], focus_map: dict[str, str],
-                  min_score: float, min_answers: int) -> list[dict]:
-    """Conservative no-AI roster. No alias merging; objects need AI (returns [])."""
+                  min_score: float, min_answers: int,
+                  previous_roster: dict | None = None) -> list[dict]:
+    """Conservative no-AI roster. No alias merging beyond previous decisions;
+    objects need AI (returns [])."""
     if entity_type == "object":
         return []
     raw = []
@@ -424,6 +536,7 @@ def deterministic(entity_type: str, candidates: list[dict], focus_map: dict[str,
         # places/periods are less strict than person names.
         qualifies = looks_named or entity_type in ("place", "period")
         raw.append({"name": entity, "qualifies": qualifies, "maps_to_focus": None})
+    raw, _ = apply_previous_decisions(raw, previous_roster)
     return normalize(entity_type, raw, candidates, focus_map, min_score, min_answers)
 
 
@@ -493,8 +606,9 @@ def main() -> int:
     if args.emit_task:
         Path(args.emit_task).write_text(json.dumps({
             "type": t,
-            "prompt": build_prompt(t, candidates, focus_map, excerpts),
+            "prompt": build_prompt(t, candidates, focus_map, excerpts, previous_roster),
             "candidates": candidates,
+            "previous_roster": previous_roster.get("entities", []),
             "sampled_answer_ids": sampled_answer_ids,
             "focus_map": focus_map,
             "min_score": min_score, "min_answers": min_answers,
@@ -510,7 +624,10 @@ def main() -> int:
     if args.from_response:
         from research_expand import parse_ai_json
         data = parse_ai_json(Path(args.from_response).read_text(encoding="utf-8"))
-        ents = normalize(t, data.get("entities", []), candidates, focus_map, min_score, min_answers)
+        raw, forced = apply_previous_decisions(data.get("entities", []), previous_roster)
+        if forced:
+            print(f"  ↺ enforced {forced} previous roster decision(s)")
+        ents = normalize(t, raw, candidates, focus_map, min_score, min_answers)
         preserved = 0
         if t == "object" and not args.force_empty:
             ents, preserved = carry_forward_objects(ents, previous_roster)
@@ -529,15 +646,18 @@ def main() -> int:
     preserved = 0
     failure_reason = None
     try:
-        data = parse_ai_json(call_ai(build_prompt(t, candidates, focus_map, excerpts),
+        data = parse_ai_json(call_ai(build_prompt(t, candidates, focus_map, excerpts, previous_roster),
                                      args.model or DEFAULT_MODEL))
-        ents = normalize(t, data.get("entities", []), candidates, focus_map, min_score, min_answers)
+        raw, forced = apply_previous_decisions(data.get("entities", []), previous_roster)
+        if forced:
+            print(f"  ↺ enforced {forced} previous roster decision(s)")
+        ents = normalize(t, raw, candidates, focus_map, min_score, min_answers)
         if t == "object" and not args.force_empty:
             ents, preserved = carry_forward_objects(ents, previous_roster)
         source = "AI"
     except Exception as exc:  # noqa: BLE001
         print(f"  ⚠ AI resolution unavailable ({exc}); using deterministic fallback")
-        ents = deterministic(t, candidates, focus_map, min_score, min_answers)
+        ents = deterministic(t, candidates, focus_map, min_score, min_answers, previous_roster)
         source = "deterministic"
         failure_reason = str(exc)
 

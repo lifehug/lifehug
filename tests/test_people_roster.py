@@ -200,6 +200,94 @@ class ObjectRosterSafetyTests(unittest.TestCase):
         self.assertFalse(merged[0]["page_eligible"])
 
 
+PREV_ROSTER = {"entities": [
+    {"name": "Grandma Betty Jo", "slug": "grandma-betty-jo",
+     "aliases": ["Grandma", "Grandma Betty", "Betty Jo"], "qualifies": True,
+     "maps_to_focus": None, "score": 46.0, "unique_answers": 8, "page_eligible": True},
+    {"name": "Wife", "slug": "wife", "aliases": [], "qualifies": True,
+     "maps_to_focus": "katie", "score": 41.0, "unique_answers": 6, "page_eligible": False},
+]}
+
+
+class PreviousRosterPromptTests(unittest.TestCase):
+    def test_prompt_includes_previous_roster_block(self):
+        prompt = er.build_prompt("person", CANDS, FOCUS_MAP, previous_roster=PREV_ROSTER)
+        self.assertIn("Previous roster", prompt)
+        self.assertIn('"Grandma Betty Jo" (slug: grandma-betty-jo)', prompt)
+        self.assertIn("Grandma, Grandma Betty, Betty Jo", prompt)
+        self.assertIn("maps_to_focus: katie", prompt)
+        self.assertIn("Never re-split", prompt)
+
+    def test_prompt_omits_block_without_previous_roster(self):
+        for prev in (None, {"entities": []}):
+            prompt = er.build_prompt("person", CANDS, FOCUS_MAP, previous_roster=prev)
+            self.assertNotIn("Previous roster", prompt)
+
+    def test_person_coreference_rule_person_only(self):
+        person_prompt = er.build_prompt("person", CANDS, FOCUS_MAP)
+        place_prompt = er.build_prompt("place", CANDS, FOCUS_MAP)
+        self.assertIn("kinship/role word", person_prompt)
+        self.assertNotIn("kinship/role word", place_prompt)
+
+
+class ApplyPreviousDecisionsTests(unittest.TestCase):
+    def test_resplit_collapses_into_previous_entry(self):
+        # The exact regression: the AI re-split a merged person into two entries.
+        raw, forced = er.apply_previous_decisions([
+            {"name": "Grandma", "aliases": [], "qualifies": True, "maps_to_focus": None},
+            {"name": "Betty Jo", "aliases": [], "qualifies": True, "maps_to_focus": None},
+        ], PREV_ROSTER)
+        merged = [e for e in raw if e["name"] == "Grandma Betty Jo"]
+        self.assertEqual(len(raw), 1)
+        self.assertEqual(len(merged), 1)
+        self.assertGreater(forced, 0)
+        self.assertEqual(sorted(a.lower() for a in merged[0]["aliases"]),
+                         ["betty jo", "grandma", "grandma betty"])
+        self.assertTrue(merged[0]["qualifies"])
+
+    def test_end_to_end_normalize_keeps_stable_slug(self):
+        raw, _ = er.apply_previous_decisions([
+            {"name": "Grandma", "aliases": [], "qualifies": True, "maps_to_focus": None},
+            {"name": "Betty Jo", "aliases": [], "qualifies": True, "maps_to_focus": None},
+        ], PREV_ROSTER)
+        people = er.normalize("person", raw, CANDS, FOCUS_MAP, min_score=8, min_answers=2)
+        self.assertEqual(people[0]["slug"], "grandma-betty-jo")
+        self.assertTrue(people[0]["page_eligible"])  # inherits Grandma's 46.0/8 via alias stats
+
+    def test_dropped_maps_to_focus_is_restored(self):
+        raw, _ = er.apply_previous_decisions([
+            {"name": "Wife", "aliases": [], "qualifies": True, "maps_to_focus": None},
+        ], PREV_ROSTER)
+        self.assertEqual(raw[0]["maps_to_focus"], "katie")
+
+    def test_unmatched_new_names_pass_through(self):
+        raw, forced = er.apply_previous_decisions([
+            {"name": "Trevor", "aliases": [], "qualifies": True, "maps_to_focus": None},
+        ], PREV_ROSTER)
+        self.assertEqual(forced, 0)
+        self.assertEqual(raw[0]["name"], "Trevor")
+
+    def test_no_previous_roster_is_identity(self):
+        entries = [{"name": "Grandma", "aliases": [], "qualifies": True, "maps_to_focus": None}]
+        raw, forced = er.apply_previous_decisions(entries, None)
+        self.assertEqual(raw, entries)
+        self.assertEqual(forced, 0)
+
+    def test_ai_can_still_demote_via_all_variants_unqualified(self):
+        raw, _ = er.apply_previous_decisions([
+            {"name": "Grandma", "aliases": [], "qualifies": False, "maps_to_focus": None},
+            {"name": "Betty Jo", "aliases": [], "qualifies": False, "maps_to_focus": None},
+        ], PREV_ROSTER)
+        self.assertEqual(len(raw), 1)
+        self.assertFalse(raw[0]["qualifies"])
+
+    def test_deterministic_fallback_honors_previous_decisions(self):
+        people = er.deterministic("person", [
+            {"entity": "Grandma", "score": 46.0, "unique_answers": 8, "cross_categories": [], "evidence": []},
+        ], {}, min_score=8, min_answers=2, previous_roster=PREV_ROSTER)
+        self.assertEqual(people[0]["slug"], "grandma-betty-jo")
+
+
 class LoadCandidatesTests(unittest.TestCase):
     def test_two_char_initials_name_survives(self):
         # A 2-char detector candidate (AJ) must reach the AI curator, not be

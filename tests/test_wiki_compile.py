@@ -718,5 +718,82 @@ class MentionRegexTests(unittest.TestCase):
         self.assertIsNone(self.wc._mention_regex(["X"]))
 
 
+class OrphanCleanupTests(unittest.TestCase):
+    """cleanup_orphan_entity_pages: mention pages leave with their roster entry."""
+
+    PAGE = "---\ntitle: \"{title}\"\ntype: person\norigin: {origin}\n---\n\nBody.\n"
+
+    def setUp(self):
+        self.wc = load("wiki_compile")
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.wc.REPO_DIR = root
+        self.wc.WIKI_DIR = root / "wiki"
+        self.wc.TYPE_DIRS = {"person": self.wc.WIKI_DIR / "people"}
+        self.wc._MENTION_CLEANUP_TYPES = ("person",)
+        self.wc.TYPE_DIRS["person"].mkdir(parents=True)
+        self.rosters = {"person": {"entities": []}}
+        self.wc.load_roster = lambda t="person": self.rosters.get(t, {"entities": []})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def page(self, slug, origin="mention"):
+        path = self.wc.TYPE_DIRS["person"] / f"{slug}.md"
+        path.write_text(self.PAGE.format(title=slug.title(), origin=origin), encoding="utf-8")
+        return path
+
+    def roster_entity(self, name, slug, eligible=True, maps_to=None):
+        self.rosters["person"]["entities"].append({
+            "name": name, "slug": slug, "aliases": [], "qualifies": True,
+            "maps_to_focus": maps_to, "page_eligible": eligible,
+        })
+
+    def test_mention_orphan_removed(self):
+        self.roster_entity("Grandma Betty Jo", "grandma-betty-jo")
+        keep = self.page("grandma-betty-jo")
+        orphan = self.page("betty-jo")  # split remnant, not in roster
+        removed = self.wc.cleanup_orphan_entity_pages({"grandma-betty-jo"})
+        self.assertEqual([p.name for p in removed], ["betty-jo.md"])
+        self.assertTrue(keep.exists())
+        self.assertFalse(orphan.exists())
+
+    def test_focus_origin_page_never_touched(self):
+        self.roster_entity("Trevor", "trevor")
+        focus_page = self.page("katie", origin="focus")
+        removed = self.wc.cleanup_orphan_entity_pages(set())
+        self.assertEqual(removed, [])
+        self.assertTrue(focus_page.exists())
+
+    def test_empty_roster_deletes_nothing(self):
+        orphan = self.page("betty-jo")
+        removed = self.wc.cleanup_orphan_entity_pages(set())
+        self.assertEqual(removed, [])
+        self.assertTrue(orphan.exists())  # no roster signal → never delete
+
+    def test_eligible_but_unplanned_entity_kept(self):
+        # Entity still in roster/eligible but missed the mention threshold this run.
+        self.roster_entity("Trevor", "trevor")
+        page = self.page("trevor")
+        removed = self.wc.cleanup_orphan_entity_pages(set())
+        self.assertEqual(removed, [])
+        self.assertTrue(page.exists())
+
+    def test_maps_to_focus_page_removed(self):
+        # Wife remapped to the katie Focus → its standalone page must go.
+        self.roster_entity("Wife", "wife", eligible=False, maps_to="katie")
+        page = self.page("wife")
+        removed = self.wc.cleanup_orphan_entity_pages(set())
+        self.assertEqual([p.name for p in removed], ["wife.md"])
+        self.assertFalse(page.exists())
+
+    def test_dry_run_reports_without_deleting(self):
+        self.roster_entity("Trevor", "trevor")
+        orphan = self.page("betty-jo")
+        removed = self.wc.cleanup_orphan_entity_pages(set(), dry_run=True)
+        self.assertEqual([p.name for p in removed], ["betty-jo.md"])
+        self.assertTrue(orphan.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
