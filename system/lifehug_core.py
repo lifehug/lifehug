@@ -176,6 +176,88 @@ def format_learning_failures_summary(limit: int = 3, since_days: int | None = 14
     return "\n".join(lines)
 
 
+# Telegram hard limit is 4096 chars/message; leave headroom for prefixes.
+TELEGRAM_CHUNK_LIMIT = 3900
+
+
+def chunk_message(text: str, limit: int = TELEGRAM_CHUNK_LIMIT) -> list[str]:
+    """Split a long message into <=limit chunks on line boundaries so a big
+    weekly/monthly summary is delivered in parts instead of being silently
+    dropped by Telegram's 4096-char cap."""
+    text = text.rstrip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in text.split("\n"):
+        # A single pathological line longer than the limit gets hard-split.
+        while len(line) > limit:
+            if current:
+                chunks.append("\n".join(current))
+                current, current_len = [], 0
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if current_len + len(line) + 1 > limit and current:
+            chunks.append("\n".join(current))
+            current, current_len = [], 0
+        current.append(line)
+        current_len += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    total = len(chunks)
+    if total > 1:
+        chunks = [f"({i}/{total})\n{chunk}" for i, chunk in enumerate(chunks, 1)]
+    return chunks
+
+
+def resolve_telegram_target() -> tuple[str, str]:
+    """Resolve (token, chat_id) from env, config, or the OpenClaw config.
+    Returns empty strings for whatever is missing — callers no-op gracefully."""
+    import os
+
+    config = load_config()
+    chat_id = (os.environ.get("TELEGRAM_CHAT_ID")
+               or str(config.get("telegram_chat_id") or "")
+               or str(config.get("group_chat_id") or ""))
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        openclaw_cfg = Path.home() / ".openclaw" / "openclaw.json"
+        if openclaw_cfg.exists():
+            try:
+                data = json.loads(openclaw_cfg.read_text(encoding="utf-8"))
+                token = str(data.get("channels", {}).get("telegram", {}).get("botToken", ""))
+            except (OSError, json.JSONDecodeError):
+                token = ""
+    return token, chat_id
+
+
+def send_telegram(text: str) -> bool:
+    """Send a (possibly long) message to the configured Telegram target,
+    chunked under the 4096-char limit. Returns True if every chunk sent.
+    Never raises — notification must not break a Loop flow."""
+    import urllib.parse
+    import urllib.request
+
+    token, chat_id = resolve_telegram_target()
+    if not token or not chat_id or not text.strip():
+        return False
+    ok = True
+    for chunk in chunk_message(text):
+        payload = urllib.parse.urlencode({"chat_id": chat_id, "text": chunk}).encode("utf-8")
+        request = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=payload)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = json.loads(response.read().decode("utf-8", errors="replace"))
+                ok = ok and bool(body.get("ok"))
+        except Exception:  # noqa: BLE001
+            ok = False
+    return ok
+
+
 def _parse_simple_yaml(path: Path) -> dict[str, str]:
     """Read the flat top-level scalar subset of a YAML file used by scripts."""
     out: dict[str, str] = {}

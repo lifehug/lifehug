@@ -8,6 +8,7 @@ import json
 import re
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 from lifehug_core import (
@@ -24,8 +25,13 @@ from lifehug_core import (
 
 from lifehug_core import STORY_FUNCTIONS
 
-VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted", "needs_review"}
+VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted", "needs_review", "expired"}
 PROMOTABLE_STATUSES = {"candidate", "accepted", "deferred"}
+# needs_review candidates are re-scored every auto-promote run (the quality
+# profile shifts weekly), so a near-miss can graduate later instead of dying
+# in a one-way graveyard. Score-based reasons resurface; structural reasons
+# (missing category, near-duplicate) stay parked for a human.
+RESURFACEABLE_REVIEW_REASONS = ("score", "quality")
 
 # ---------------------------------------------------------------------------
 # Auto-promotion constants
@@ -37,19 +43,38 @@ AUTO_PROMOTE_THRESHOLD = 0.82
 # Below this score but above NEEDS_REVIEW_THRESHOLD → needs_review.
 NEEDS_REVIEW_THRESHOLD = 0.70
 
-# Max auto-promotions per week, keyed by unanswered-bank-count band.
-# Bank is "full" above 120; "healthy" 80-120; "thin" 40-80; "low" <40.
-def dynamic_weekly_cap(unanswered_count: int) -> int:
+# check_quality() score below which a candidate is parked for review even if
+# its promotion score clears the threshold (yes/no wording, near-dupes, vague).
+QUALITY_GATE_MIN = 0.60
+
+# Candidates older than this that were never promoted expire (kept for audit).
+# Deferred candidates are exempt — a human explicitly said "wait".
+CANDIDATE_MAX_AGE_DAYS = 45
+
+# Two questions whose normalized token sets overlap at/above this Jaccard
+# ratio are treated as the same question (semantic dedup, no AI needed).
+NEAR_DUPLICATE_JACCARD = 0.75
+
+# Max auto-promotions per week: the bank band sets a floor, but a large
+# promotable backlog raises the cap so inflow (~20/month from research +
+# classification) can actually drain instead of accumulating forever.
+def dynamic_weekly_cap(unanswered_count: int, backlog_count: int = 0) -> int:
     if unanswered_count > 120:
-        return 1
-    if unanswered_count >= 80:
-        return 2
-    if unanswered_count >= 40:
-        return 3
-    return 4
+        band_cap = 1
+    elif unanswered_count >= 80:
+        band_cap = 2
+    elif unanswered_count >= 40:
+        band_cap = 3
+    else:
+        band_cap = 4
+    drain_cap = min(8, backlog_count // 10)
+    return max(band_cap, drain_cap)
 
 # Max candidates from the same neighborhood/source promoted in one week.
+# Doubles under backlog pressure so one prolific neighborhood can't stall a drain.
 PER_NEIGHBORHOOD_CAP = 1
+PER_NEIGHBORHOOD_CAP_BACKLOG = 2
+BACKLOG_PRESSURE_THRESHOLD = 40
 
 # Infer a default bank category from neighborhood topic_type.
 TOPIC_TYPE_CATEGORY: dict[str, str] = {
@@ -196,6 +221,78 @@ def normalize_question(text: str) -> str:
     text = text.strip().lower()
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+_DEDUP_STOPWORDS = {
+    "a", "an", "the", "you", "your", "yours", "me", "my", "i", "we", "us",
+    "of", "in", "on", "at", "to", "for", "and", "or", "is", "are", "was",
+    "were", "do", "did", "does", "what", "when", "where", "how", "that",
+    "this", "it", "about", "with", "have", "has", "had", "be", "been",
+    "as", "would", "could", "should", "will", "can",
+    # contraction fragments left by normalization ("you'd" → "you d")
+    "d", "s", "ll", "re", "ve", "t", "m",
+}
+
+
+def _question_tokens(text: str) -> set[str]:
+    return {t for t in normalize_question(text).split()
+            if len(t) > 1 and t not in _DEDUP_STOPWORDS}
+
+
+def near_duplicate_of(text: str, other_texts: list[tuple[str, str]],
+                      threshold: float = NEAR_DUPLICATE_JACCARD) -> str | None:
+    """Return the label of the first near-duplicate of `text` among
+    (label, text) pairs, judged by content-token Jaccard overlap. Catches
+    reworded duplicates that exact normalization misses (e.g. three
+    'what did you promise yourself you'd do differently' variants)."""
+    tokens = _question_tokens(text)
+    if len(tokens) < 3:
+        return None  # too short to judge similarity meaningfully
+    for label, other in other_texts:
+        other_tokens = _question_tokens(other)
+        if len(other_tokens) < 3:
+            continue
+        union = tokens | other_tokens
+        if union and len(tokens & other_tokens) / len(union) >= threshold:
+            return label
+    return None
+
+
+def _candidate_age_days(candidate: dict) -> float | None:
+    raw = str(candidate.get("created_at") or "")
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            created = datetime.fromisoformat(raw[:-1] + "+00:00")
+        else:
+            created = datetime.fromisoformat(raw)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - created).total_seconds() / 86400
+
+
+def expire_stale_candidates(data: dict, *, max_age_days: float = CANDIDATE_MAX_AGE_DAYS,
+                            dry_run: bool = False) -> list[tuple[str, float]]:
+    """Expire candidates that sat unpromoted past max_age_days. Deferred
+    candidates are exempt (a human said wait). Expired records are kept in the
+    store for audit; they simply stop competing."""
+    expired: list[tuple[str, float]] = []
+    for candidate in data.get("candidates", []):
+        if candidate.get("status") not in ("candidate", "accepted", "needs_review"):
+            continue
+        age = _candidate_age_days(candidate)
+        if age is None or age <= max_age_days:
+            continue
+        expired.append((candidate["id"], round(age, 1)))
+        if not dry_run:
+            candidate["status"] = "expired"
+            candidate["expired_at"] = now_utc()
+            candidate["expired_reason"] = f"unpromoted after {age:.0f} days"
+            candidate["updated_at"] = now_utc()
+    return expired
 
 
 def next_question_id(question_bank_text: str, category: str) -> str:
@@ -546,6 +643,16 @@ def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None 
     return round(priority * multiplier, 4)
 
 
+def _is_resurfaceable(candidate: dict) -> bool:
+    """needs_review candidates whose parking reason was score/quality-based get
+    re-scored every run (the quality profile moves weekly). Structural reasons
+    (missing_category, near_duplicate) wait for a human."""
+    if candidate.get("status") != "needs_review":
+        return False
+    reason = str(candidate.get("needs_review_reason", ""))
+    return any(key in reason for key in RESURFACEABLE_REVIEW_REASONS)
+
+
 def auto_promote_candidates(
     dry_run: bool = False,
 ) -> dict:
@@ -556,16 +663,18 @@ def auto_promote_candidates(
         "promoted": [(candidate_id, question_id, score), ...],
         "needs_review": [(candidate_id, score, reason), ...],
         "skipped": [(candidate_id, reason), ...],
+        "expired": [(candidate_id, age_days), ...],
         "cap": int,
         "unanswered": int,
+        "backlog": int,
     }
     """
-    from pathlib import Path as _Path
-
     data = load_store()
     question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
     unanswered = _count_unanswered(question_bank_text)
-    weekly_cap = dynamic_weekly_cap(unanswered)
+
+    # Age out stale candidates first so they stop inflating the backlog.
+    expired = expire_stale_candidates(data, dry_run=dry_run)
 
     # Load quality profile (optional)
     quality_profile: dict | None = None
@@ -591,10 +700,10 @@ def auto_promote_candidates(
         )
         neighborhoods = {}
 
-    # Collect promotable candidates with scores
+    # Collect promotable candidates (plus resurfaceable needs_review) with scores
     eligible = []
     for c in data.get("candidates", []):
-        if c.get("status") not in PROMOTABLE_STATUSES:
+        if c.get("status") not in PROMOTABLE_STATUSES and not _is_resurfaceable(c):
             continue
         text = str(c.get("text", "")).strip()
         if not text:
@@ -602,8 +711,20 @@ def auto_promote_candidates(
         score = score_candidate_for_promotion(c, quality_profile)
         eligible.append((score, c))
 
+    backlog = len(eligible)
+    weekly_cap = dynamic_weekly_cap(unanswered, backlog)
+    neighborhood_cap = (PER_NEIGHBORHOOD_CAP_BACKLOG
+                        if backlog >= BACKLOG_PRESSURE_THRESHOLD else PER_NEIGHBORHOOD_CAP)
+
     # Sort best-first
     eligible.sort(key=lambda x: -x[0])
+
+    # Existing bank questions for the quality checker's exact-dup flag and the
+    # near-duplicate (semantic) check.
+    existing_questions = parse_questions(question_bank_text)
+    bank_texts: list[tuple[str, str]] = [
+        (str(q.get("id", "?")), str(q.get("text", ""))) for q in existing_questions
+    ]
 
     promoted: list[tuple[str, str, float]] = []
     needs_review: list[tuple[str, float, str]] = []
@@ -612,35 +733,50 @@ def auto_promote_candidates(
 
     updated_bank = question_bank_text
 
+    def park(candidate: dict, score: float, reason: str) -> None:
+        needs_review.append((candidate["id"], score, reason))
+        if not dry_run:
+            candidate["status"] = "needs_review"
+            candidate["needs_review_reason"] = reason
+            candidate["updated_at"] = now_utc()
+
     for score, candidate in eligible:
         cid = candidate["id"]
         nbhd = candidate.get("neighborhood_id", "_none")
+        text = str(candidate["text"]).strip()
 
-        # Duplicate check
+        # Exact duplicate check
         try:
-            ensure_not_duplicate(updated_bank, candidate["text"])
+            ensure_not_duplicate(updated_bank, text)
         except ValueError:
             skipped.append((cid, "duplicate"))
+            continue
+
+        # Near-duplicate (semantic) check — against the bank AND anything
+        # promoted earlier this run.
+        dup_of = near_duplicate_of(text, bank_texts)
+        if dup_of:
+            park(candidate, score, f"near_duplicate of {dup_of}")
+            continue
+
+        # Craft-quality gate (yes/no wording, vagueness, too-short — the
+        # research.md heuristics, previously display-only).
+        quality = check_quality(text, source_path=candidate.get("source_path"),
+                                existing_questions=existing_questions)
+        if quality["score"] < QUALITY_GATE_MIN:
+            park(candidate, score, f"quality {quality['score']:.2f}: {quality['notes']}")
             continue
 
         # Category inference
         category = _infer_category(candidate, neighborhoods)
         if not category:
-            needs_review.append((cid, score, "missing_category"))
-            if not dry_run:
-                candidate["status"] = "needs_review"
-                candidate["needs_review_reason"] = "missing_category"
-                candidate["updated_at"] = now_utc()
+            park(candidate, score, "missing_category")
             continue
 
-        # Quality gate
+        # Promotion-score gate
         if score < AUTO_PROMOTE_THRESHOLD:
             if score >= NEEDS_REVIEW_THRESHOLD:
-                needs_review.append((cid, score, f"score {score:.2f} below threshold"))
-                if not dry_run:
-                    candidate["status"] = "needs_review"
-                    candidate["needs_review_reason"] = f"score {score:.2f} below threshold {AUTO_PROMOTE_THRESHOLD}"
-                    candidate["updated_at"] = now_utc()
+                park(candidate, score, f"score {score:.2f} below threshold {AUTO_PROMOTE_THRESHOLD}")
             else:
                 skipped.append((cid, f"score {score:.2f} too low"))
             continue
@@ -651,7 +787,7 @@ def auto_promote_candidates(
             continue
 
         # Per-neighborhood cap
-        if per_neighborhood[nbhd] >= PER_NEIGHBORHOOD_CAP:
+        if per_neighborhood[nbhd] >= neighborhood_cap:
             skipped.append((cid, f"neighborhood_cap ({nbhd})"))
             continue
 
@@ -662,7 +798,7 @@ def auto_promote_candidates(
             promoted_at = now_utc()
             updated_bank = insert_question(
                 updated_bank, category, question_id,
-                candidate["text"], candidate, promoted_at,
+                text, candidate, promoted_at,
             )
             # Augment provenance with auto-promotion metadata
             # (insert_question writes the comment; we update candidate record)
@@ -677,10 +813,11 @@ def auto_promote_candidates(
                 candidate["updated_at"] = promoted_at
             promoted.append((cid, question_id, score))
             per_neighborhood[nbhd] += 1
+            bank_texts.append((question_id, text))  # near-dup guard for the rest of this run
         except ValueError as exc:
             skipped.append((cid, str(exc)))
 
-    if not dry_run and (promoted or needs_review):
+    if not dry_run and (promoted or needs_review or expired):
         write_text(QUESTIONS_FILE, updated_bank)
         save_store(data)
 
@@ -688,8 +825,10 @@ def auto_promote_candidates(
         "promoted": promoted,
         "needs_review": needs_review,
         "skipped": skipped,
+        "expired": expired,
         "cap": weekly_cap,
         "unanswered": unanswered,
+        "backlog": backlog,
         "dry_run": dry_run,
     }
 
@@ -713,10 +852,18 @@ def cmd_auto_promote(args: argparse.Namespace) -> int:
     promoted = result["promoted"]
     needs_review = result["needs_review"]
     skipped = result["skipped"]
+    expired = result.get("expired", [])
     prefix = "[DRY RUN] " if args.dry_run else ""
 
-    print(f"{prefix}Auto-promotion — bank: {unanswered} unanswered, weekly cap: {cap}")
+    print(f"{prefix}Auto-promotion — bank: {unanswered} unanswered, "
+          f"backlog: {result.get('backlog', '?')} promotable, weekly cap: {cap}")
     print()
+    if expired:
+        print(f"  ⌛ Expired ({len(expired)}):")
+        for cid, age in expired[:5]:
+            print(f"    {cid} — {age:.0f} days old")
+        if len(expired) > 5:
+            print(f"    ... and {len(expired) - 5} more")
     if promoted:
         print(f"  ✅ Promoted ({len(promoted)}):")
         for cid, qid, score in promoted:

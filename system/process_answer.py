@@ -128,6 +128,49 @@ def _count_wiki_files() -> int:
     return sum(1 for _ in wiki_dir.rglob("*.md"))
 
 
+def maybe_send_followup_question(answered_question_id: str) -> None:
+    """Adaptive cadence: after an answer lands, offer the next question the
+    same day (up to max_questions_per_day, default 3). Conversation, not
+    cadence — an immediate 'here's the next one while you're warm' is the
+    listening move the daily-question genre is missing. No-ops gracefully:
+    off by config, daily cap reached, late evening, pass transition pending,
+    or no Telegram credentials on this machine."""
+    from datetime import datetime as _dt
+
+    from lifehug_core import load_config, read_json as _read_json, send_telegram  # noqa: PLC0415
+
+    config = load_config()
+    if str(config.get("adaptive_cadence", "true")).strip().lower() in ("false", "0", "no", "off"):
+        return
+    if _dt.now().hour >= 20:
+        return  # don't start a new thread late at night
+
+    import ask  # noqa: PLC0415
+
+    rotation = _read_json(ROTATION_FILE, default={}) or {}
+    if rotation.get("awaiting_pass_transition"):
+        return
+    if ask.sends_today(rotation) >= ask.max_sends_per_day():
+        return
+
+    md_text = QUESTIONS_FILE.read_text()
+    questions = parse_questions(md_text)
+    categories = parse_categories(md_text)
+    question = ask.pick_next_question(questions, categories, rotation)
+    if not question or question["id"] == answered_question_id:
+        return
+
+    text = ("📖 Lifehug — since you're on a roll\n\n"
+            f"{ask.format_question(question, categories)}\n\n"
+            "(Totally optional — tomorrow's question comes either way)")
+    if send_telegram(text):
+        ask.mark_question_sent(rotation, question["id"])
+        rebuild_coverage()
+        print(f"✓ Adaptive follow-up question sent: {question['id']}")
+    else:
+        print("  (adaptive follow-up skipped: no telegram credentials on this machine)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Process a Lifehug answer")
     parser.add_argument("question_id", nargs="?", help="Question ID; defaults to rotation.last_question_id")
@@ -243,6 +286,17 @@ def main():
                 exc,
                 context={"question_id": question_id},
             )
+
+    # Adaptive cadence: offer the next question while the author is warm.
+    try:
+        maybe_send_followup_question(question_id)
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "adaptive_followup",
+            exc,
+            context={"question_id": question_id},
+        )
 
     if args.commit or args.push:
         summary = args.summary or str(question["text"])[:64]

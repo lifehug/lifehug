@@ -11,33 +11,35 @@ cd "$WORKSPACE"
 DRY_RUN="${LIFEHUG_MONTHLY_DRY_RUN:-0}"
 
 # --- Telegram notification helper ---
+# Delegates to `lifehug.py notify` (resolves chat/token, chunks under the
+# 4096-char cap). Never fails the flow.
 telegram_notify() {
-  local text="$1"
-  local chat_id
-  chat_id=$(python3 -c "
-import yaml, pathlib, sys
-cfg = pathlib.Path('$WORKSPACE/config.yaml')
-if not cfg.exists(): sys.exit(1)
-d = yaml.safe_load(cfg.read_text())
-print(d.get('telegram_chat_id') or d.get('group_chat_id') or '')
-" 2>/dev/null) || return 0
-  [[ -z "$chat_id" ]] && return 0
+  printf '%s' "$1" | python3 "$WORKSPACE/system/lifehug.py" notify || true
+}
 
-  local token="${TELEGRAM_BOT_TOKEN:-}"
-  if [[ -z "$token" ]]; then
-    local openclaw_cfg="${HOME}/.openclaw/openclaw.json"
-    [[ -f "$openclaw_cfg" ]] && token=$(python3 -c "
-import json, pathlib
-c = json.loads(pathlib.Path('$openclaw_cfg').read_text())
-print(c.get('channels',{}).get('telegram',{}).get('botToken',''))
-" 2>/dev/null) || true
-  fi
-  [[ -z "$token" ]] && return 0
+record_learning_failure() {
+  local component="$1"
+  local operation="$2"
+  local exit_code="$3"
+  local output="$4"
+  LEARNING_FAILURE_OUTPUT="$output" python3 - "$component" "$operation" "$exit_code" <<'PY' || true
+import os
+import sys
 
-  curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-    -d "chat_id=${chat_id}" \
-    --data-urlencode "text=${text}" \
-    -d "parse_mode=Markdown" > /dev/null || true
+sys.path.insert(0, "system")
+from lifehug_core import record_learning_failure
+
+try:
+    code = int(sys.argv[3])
+except (IndexError, ValueError):
+    code = None
+record_learning_failure(
+    sys.argv[1],
+    sys.argv[2],
+    os.environ.get("LEARNING_FAILURE_OUTPUT", ""),
+    exit_code=code,
+)
+PY
 }
 GAP_LIMIT="${LIFEHUG_MONTHLY_GAP_LIMIT:-2}"
 SELF_TOPIC="${LIFEHUG_MONTHLY_SELF_TOPIC:-Who I am becoming}"
@@ -57,11 +59,16 @@ run_optional() {
   echo
   echo "==> $*"
   set +e
-  "$@"
+  local out
+  out=$("$@" 2>&1)
   local status=$?
   set -e
+  echo "$out"
   if [[ "$status" -ne 0 ]]; then
     echo "warn: monthly step failed with exit ${status}: $*"
+    # The class of silent failure that caused the 2026-07 roster regression —
+    # record it so doctor and the weekly summary surface it.
+    record_learning_failure "monthly_research" "$1" "$status" "$out"
     return 0
   fi
 }
@@ -83,11 +90,23 @@ safe_autocommit() {
     [[ -e "$path" ]] && existing+=("$path")
   done
   [[ ${#existing[@]} -eq 0 ]] && return 0
-  git add -- "${existing[@]}"
-  if ! git diff --cached --quiet; then
-    git commit -m "Monthly research $(date +%Y-%m-%d)"
-    git push
+  set +e
+  local git_out
+  git_out=$(
+    git add -- "${existing[@]}" &&
+    { git diff --cached --quiet ||
+      { git commit -m "Monthly research $(date +%Y-%m-%d)" &&
+        git pull --rebase --autostash &&
+        git push; }; } 2>&1
+  )
+  local git_status=$?
+  set -e
+  if [[ "$git_status" -ne 0 ]]; then
+    echo "warn: git housekeeping failed" >&2
+    echo "$git_out" >&2
+    record_learning_failure "monthly_research" "git_autocommit" "$git_status" "$git_out"
   fi
+  return 0
 }
 
 neighborhood_exists() {
@@ -240,7 +259,16 @@ echo "$FOCUSES_OUT"
 # — grows without any human interaction.
 ROSTER_OUT=""
 for etype in person place period object; do
-  ROSTER_OUT="${ROSTER_OUT}$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" 2>&1)
+  set +e
+  ETYPE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" 2>&1)
+  ETYPE_STATUS=$?
+  set -e
+  if [[ "$ETYPE_STATUS" -ne 0 ]]; then
+    record_learning_failure "monthly_research" "entity_roster_${etype}" "$ETYPE_STATUS" "$ETYPE_OUT"
+    ETYPE_OUT="⚠ ${etype} roster refresh FAILED (exit ${ETYPE_STATUS})
+${ETYPE_OUT}"
+  fi
+  ROSTER_OUT="${ROSTER_OUT}${ETYPE_OUT}
 "
 done
 echo "$ROSTER_OUT"

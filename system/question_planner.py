@@ -404,9 +404,19 @@ def build_focus_index(focuses: list[dict], questions: list[dict]) -> dict:
     return {"cat_to_focus": cat_to_focus, "info": info}
 
 
+def zombie_focuses(focuses: list[dict]) -> list[dict]:
+    """Focuses with no question categories: the planner can never ask about
+    them (weight 0 forever). Seed them with questions (`lifehug.py focus-new`
+    scaffolds a category) or remove them."""
+    return [f for f in focuses if not f.get("categories")]
+
+
 def global_fullness(focuses: list[dict], questions: list[dict]) -> float:
     answered = total = 0
     for focus in focuses:
+        if not focus.get("categories"):
+            continue  # zombie focus — no questions can ever land; counting its
+                      # target would suppress expansion urgency with phantom room
         fill = focus_fill(focus, questions)
         answered += fill["answered"]
         total += fill["target"]
@@ -683,6 +693,14 @@ def report(limit: int = 10) -> int:
 
     print("Lifehug Planner Report")
     print()
+
+    zombies = zombie_focuses(resolve_roadmap().get("focuses", []))
+    if zombies:
+        print("⚠ Zombie Focuses (no question categories — the planner can NEVER ask about these):")
+        for focus in zombies:
+            print(f"- {focus.get('label', focus.get('id'))}: seed questions with "
+                  f"`lifehug.py focus-set {focus.get('id')} ...` + a category, or remove it")
+        print()
 
     objectives = [o for o in planner_state.get("active_objectives", []) if o.get("status", "active") == "active"]
     print("Planner state:")

@@ -15,35 +15,11 @@ EXPIRES_DAYS="${LIFEHUG_WEEKLY_EXPIRES_DAYS:-8}"
 CLASSIFY_LIMIT="${LIFEHUG_WEEKLY_CLASSIFY_LIMIT:-5}"
 
 # --- Telegram notification helper ---
-# Reads telegram_chat_id from config.yaml; token from TELEGRAM_BOT_TOKEN env
-# or falls back to reading from ~/.openclaw/openclaw.json (OpenClaw setups).
+# Delegates to `lifehug.py notify`, which resolves chat/token and CHUNKS long
+# messages under Telegram's 4096-char cap (a single oversized weekly summary
+# used to vanish silently). Never fails the flow.
 telegram_notify() {
-  local text="$1"
-  local chat_id
-  chat_id=$(python3 -c "
-import yaml, pathlib, sys
-cfg = pathlib.Path('$WORKSPACE/config.yaml')
-if not cfg.exists(): sys.exit(1)
-d = yaml.safe_load(cfg.read_text())
-print(d.get('telegram_chat_id') or d.get('group_chat_id') or '')
-" 2>/dev/null) || return 0
-  [[ -z "$chat_id" ]] && return 0
-
-  local token="${TELEGRAM_BOT_TOKEN:-}"
-  if [[ -z "$token" ]]; then
-    local openclaw_cfg="${HOME}/.openclaw/openclaw.json"
-    [[ -f "$openclaw_cfg" ]] && token=$(python3 -c "
-import json, pathlib
-c = json.loads(pathlib.Path('$openclaw_cfg').read_text())
-print(c.get('channels',{}).get('telegram',{}).get('botToken',''))
-" 2>/dev/null) || true
-  fi
-  [[ -z "$token" ]] && return 0
-
-  curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-    -d "chat_id=${chat_id}" \
-    --data-urlencode "text=${text}" \
-    -d "parse_mode=Markdown" > /dev/null || true
+  printf '%s' "$1" | python3 "$WORKSPACE/system/lifehug.py" notify || true
 }
 
 run_step() {
@@ -105,11 +81,23 @@ safe_autocommit() {
     [[ -e "$path" ]] && existing+=("$path")
   done
   [[ ${#existing[@]} -eq 0 ]] && return 0
-  git add -- "${existing[@]}"
-  if ! git diff --cached --quiet; then
-    git commit -m "Weekly maintenance $(date +%Y-%m-%d)"
-    git push
+  set +e
+  local git_out
+  git_out=$(
+    git add -- "${existing[@]}" &&
+    { git diff --cached --quiet ||
+      { git commit -m "Weekly maintenance $(date +%Y-%m-%d)" &&
+        git pull --rebase --autostash &&
+        git push; }; } 2>&1
+  )
+  local git_status=$?
+  set -e
+  if [[ "$git_status" -ne 0 ]]; then
+    echo "warn: git housekeeping failed" >&2
+    echo "$git_out" >&2
+    record_learning_failure "weekly_maintenance" "git_autocommit" "$git_status" "$git_out"
   fi
+  return 0
 }
 
 has_safe_source_findings() {
@@ -176,20 +164,53 @@ if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
   record_learning_failure "weekly_maintenance" "classify_story" "$CLASSIFY_STATUS" "$CLASSIFY_OUT"
 fi
 echo "$CLASSIFY_OUT"
-run_step python3 "$WORKSPACE/system/lifehug.py" quality-update
 
-echo
-echo "==> python3 system/lifehug.py candidates-auto-promote"
-PROMOTE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote 2>&1)
-echo "$PROMOTE_OUT"
+# Every learning-loop step below is wrapped: a failure is recorded and reported,
+# never allowed to silently kill the rest of the flow under set -e.
+run_learning_step() {
+  local component="$1"; shift
+  local out status
+  echo
+  echo "==> $*"
+  set +e
+  out=$("$@" 2>&1)
+  status=$?
+  set -e
+  echo "$out"
+  if [[ "$status" -ne 0 ]]; then
+    record_learning_failure "weekly_maintenance" "$component" "$status" "$out"
+    out="⚠ ${component} FAILED (exit ${status})
+${out}"
+  fi
+  LAST_STEP_OUT="$out"
+}
 
-QUEUE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS" 2>&1)
-echo "$QUEUE_OUT"
+run_learning_step "quality_update" python3 "$WORKSPACE/system/lifehug.py" quality-update
+
+run_learning_step "auto_promote" python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote
+PROMOTE_OUT="$LAST_STEP_OUT"
+
+run_learning_step "planner_queue" python3 "$WORKSPACE/system/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS"
+QUEUE_OUT="$LAST_STEP_OUT"
+
 run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
 PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
 LEARNING_OUT=$(learning_failures_summary 2>&1 || true)
 echo "$LEARNING_OUT"
+
+# Scheduled health check — surfaces queue expiry, backlog age, zombie Focuses,
+# cadence stalls, and roster wipes while there is still time to act.
+set +e
+DOCTOR_OUT=$(python3 "$WORKSPACE/system/lifehug.py" doctor 2>&1)
+DOCTOR_STATUS=$?
+set -e
+echo "$DOCTOR_OUT"
+DOCTOR_WARNINGS=$(printf '%s\n' "$DOCTOR_OUT" | grep -E "^(warn|fail):" || true)
+if [[ "$DOCTOR_STATUS" -ne 0 ]]; then
+  record_learning_failure "weekly_maintenance" "doctor" "$DOCTOR_STATUS" "$DOCTOR_OUT"
+fi
+
 safe_autocommit
 
 telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
@@ -202,4 +223,7 @@ ${QUEUE_OUT}
 
 ${PROGRESS_OUT}
 
-${LEARNING_OUT}"
+${LEARNING_OUT}
+
+🩺 Doctor:
+${DOCTOR_WARNINGS:-all checks ok}"

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from lifehug_core import (
     COVERAGE_FILE,
@@ -12,6 +12,7 @@ from lifehug_core import (
     QUESTIONS_FILE,
     ROTATION_FILE,
     compute_coverage,
+    load_config,
     mark_answered_in_bank,
     parse_categories,
     parse_questions,
@@ -20,6 +21,12 @@ from lifehug_core import (
     rebuild_coverage,
     write_json,
 )
+
+# Adaptive cadence defaults (config-overridable): at most this many questions
+# in one day, and after this many silent days switch to a warmer re-engagement
+# question instead of re-offering the queue head.
+DEFAULT_MAX_QUESTIONS_PER_DAY = 3
+DEFAULT_REENGAGE_AFTER_DAYS = 4
 
 
 def pick_planned_question(questions):
@@ -57,8 +64,48 @@ def planned_queue_expired(queue_data):
     return expires <= datetime.now(timezone.utc)
 
 
+def days_since_last_answer(rotation) -> float | None:
+    raw = str(rotation.get("last_answered_at") or "")
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        return (datetime.now() - value).total_seconds() / 86400
+    return (datetime.now(timezone.utc) - value).total_seconds() / 86400
+
+
+def pick_reengagement_question(questions, categories):
+    """A warm, low-stakes question for a quiet stretch. The industry's #1
+    failure is silent abandonment — re-offering the same heavy queue head
+    entrenches it. Heuristic: the shortest pending non-focus question (short
+    questions read light), avoiding heavy emotional openers."""
+    heavy = ("regret", "grief", "death", "fear", "afraid", "shame", "lost", "worst")
+    pending = [q for q in questions if not q["answered"]]
+    if not pending:
+        return None
+    def light_enough(q):
+        text = str(q["text"]).lower()
+        return not any(word in text for word in heavy)
+    pool = [q for q in pending
+            if categories.get(q["category"], {}).get("group") != "focus" and light_enough(q)]
+    if not pool:
+        pool = [q for q in pending if light_enough(q)] or pending
+    return min(pool, key=lambda q: len(str(q["text"]).split()))
+
+
 def pick_next_question(questions, categories, rotation):
     """Pick the next unanswered question using coverage + rotation logic."""
+    config = load_config()
+    reengage_days = float(config.get("reengage_after_days", DEFAULT_REENGAGE_AFTER_DAYS) or DEFAULT_REENGAGE_AFTER_DAYS)
+    silent = days_since_last_answer(rotation)
+    if silent is not None and reengage_days > 0 and silent >= reengage_days:
+        warm = pick_reengagement_question(questions, categories)
+        if warm:
+            return warm
+
     planned = pick_planned_question(questions)
     if planned:
         return planned
@@ -189,13 +236,56 @@ def print_status(questions, categories, rotation):
     print(f"\n  Pass: {current_pass} ({pass_name})")
 
 
+def mark_queue_item_sent(question_id):
+    """Mark the matching planner-queue item consumed so queue state reflects
+    reality (previously write-only) and re-picks skip it."""
+    queue_data = read_json(QUESTION_QUEUE_FILE, default=None)
+    if not queue_data:
+        return
+    changed = False
+    for item in queue_data.get("queue", []):
+        if item.get("question_id") == question_id and item.get("status", "queued") == "queued":
+            item["status"] = "sent"
+            item["sent_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            changed = True
+            break
+    if changed:
+        write_json(QUESTION_QUEUE_FILE, queue_data)
+
+
+def sends_today(rotation) -> int:
+    today = date.today().isoformat()
+    if rotation.get("sends_today_date") != today:
+        return 0
+    return int(rotation.get("sends_today", 0) or 0)
+
+
+def max_sends_per_day() -> int:
+    config = load_config()
+    try:
+        return max(1, int(config.get("max_questions_per_day", DEFAULT_MAX_QUESTIONS_PER_DAY)))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_QUESTIONS_PER_DAY
+
+
 def mark_question_sent(rotation, question_id):
     rotation["last_question_id"] = question_id
     rotation["last_asked_at"] = datetime.now().isoformat()
     rotation["questions_asked"] = rotation.get("questions_asked", 0) + 1
+    # Adaptive-cadence bookkeeping: how many went out today, and how many times
+    # each question has been offered (deliveries-per-question is the system's
+    # first negative-signal channel — a question re-delivered many times is
+    # being avoided).
+    today = date.today().isoformat()
+    rotation["sends_today"] = sends_today(rotation) + 1
+    rotation["sends_today_date"] = today
+    counts = rotation.get("delivery_counts") or {}
+    counts[question_id] = int(counts.get(question_id, 0)) + 1
+    rotation["delivery_counts"] = counts
     rotation.pop("pending_delivery_question_id", None)
     rotation.pop("pending_delivery_at", None)
     write_json(ROTATION_FILE, rotation)
+    mark_queue_item_sent(question_id)
 
 
 def set_pass_transition(rotation):
@@ -238,6 +328,16 @@ def main():
             rotation["last_answered_id"] = args.mark_answered
             rotation["last_answered_at"] = datetime.now().isoformat()
             rotation["questions_answered"] = sum(1 for q in questions if q["answered"])
+            # Latency-to-answer: engagement signal for the quality loop.
+            if rotation.get("last_question_id") == args.mark_answered and rotation.get("last_asked_at"):
+                try:
+                    asked = datetime.fromisoformat(str(rotation["last_asked_at"]))
+                    hours = (datetime.now() - asked).total_seconds() / 3600
+                    latencies = rotation.get("answer_latencies") or []
+                    latencies.append({"question_id": args.mark_answered, "hours": round(hours, 1)})
+                    rotation["answer_latencies"] = latencies[-100:]
+                except ValueError:
+                    pass
             write_json(ROTATION_FILE, rotation)
             print(f"✓ Marked {args.mark_answered} as answered")
         else:

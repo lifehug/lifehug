@@ -21,12 +21,15 @@ from lifehug_core import (
     QUESTIONS_FILE,
     REPO_DIR,
     ROTATION_FILE,
+    STATE_DIR,
     WIKI_DIR,
     format_learning_failure,
     load_config,
     parse_categories,
     parse_questions,
+    read_json,
     read_learning_failures,
+    send_telegram,
 )
 from question_candidates import VALID_STATUSES
 from question_planner import DEFAULT_DELIVERY_QUEUE_LIMIT
@@ -543,6 +546,131 @@ def cmd_followups_prompt(_args: argparse.Namespace) -> int:
     return run_python("gen_followups.py", ["--prompt"])
 
 
+def cmd_notify(_args: argparse.Namespace) -> int:
+    """Read a message from stdin and send it to Telegram, chunked. Always exits
+    0 — notification must never break the flow that called it."""
+    text = sys.stdin.read()
+    if not text.strip():
+        return 0
+    if not send_telegram(text):
+        print("warn: telegram notify incomplete (missing credentials or send failure)", file=sys.stderr)
+    return 0
+
+
+def _parse_iso_utc(raw: str):
+    from datetime import datetime, timezone
+    raw = str(raw or "")
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            value = datetime.fromisoformat(raw[:-1] + "+00:00")
+        else:
+            value = datetime.fromisoformat(raw)
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+        return value
+    except ValueError:
+        return None
+
+
+def _days_since(raw: str) -> float | None:
+    from datetime import datetime, timezone
+    value = _parse_iso_utc(raw)
+    if value is None:
+        return None
+    return (datetime.now(timezone.utc) - value).total_seconds() / 86400
+
+
+def loop_health_checks() -> int:
+    """Checks for the rot that killed the Loop silently before: expired queues,
+    aging candidate backlogs, stalled weekly/monthly cadence, zombie Focuses,
+    missing classifications, wiped rosters. Returns the number of hard failures
+    (most of these are warnings — visible but non-fatal)."""
+    failures = 0
+    print()
+
+    # Queue health — an expired queue silently reverts the daily pick to the
+    # legacy coverage algorithm.
+    queue_data = read_json(STATE_DIR / "question_queue.json", default=None)
+    if not queue_data:
+        warn("planner queue missing", "daily pick is using legacy coverage rotation; run planner-queue")
+    else:
+        expires_days = _days_since(queue_data.get("expires_at", ""))
+        remaining = sum(1 for item in queue_data.get("queue", [])
+                        if item.get("status", "queued") == "queued")
+        if expires_days is not None and expires_days > 0:
+            warn("planner queue EXPIRED", f"{expires_days:.0f} days ago — daily pick silently reverted to legacy rotation")
+        elif expires_days is not None and expires_days > -2:
+            warn("planner queue expiring soon", f"within 2 days; remaining items: {remaining}")
+        elif remaining == 0:
+            warn("planner queue exhausted", "no queued items left; daily pick falls back to legacy rotation")
+        else:
+            check("planner queue valid", True, f"{remaining} item(s) remaining")
+
+    # Candidate backlog — inflow must not permanently exceed outflow.
+    cand_data = read_json(STATE_DIR / "question_candidates.json", default=None) or {}
+    promotable = [c for c in cand_data.get("candidates", [])
+                  if c.get("status") in ("candidate", "accepted", "deferred", "needs_review")]
+    if promotable:
+        ages = [a for a in (_days_since(c.get("created_at", "")) for c in promotable) if a is not None]
+        oldest = max(ages) if ages else 0
+        if len(promotable) > 40:
+            warn("candidate backlog large", f"{len(promotable)} unresolved (oldest {oldest:.0f}d) — check auto-promote cadence")
+        elif oldest > 30:
+            warn("candidate backlog aging", f"oldest unresolved candidate is {oldest:.0f} days old")
+        else:
+            check("candidate backlog healthy", True, f"{len(promotable)} unresolved, oldest {oldest:.0f}d")
+    else:
+        check("candidate backlog healthy", True, "no unresolved candidates")
+
+    # Cadence — has the weekly/monthly actually run?
+    profile = read_json(STATE_DIR / "quality_profile.json", default=None) or {}
+    weekly_age = _days_since(profile.get("last_updated") or profile.get("updated_at") or "")
+    if weekly_age is None:
+        warn("weekly cadence unknown", "quality profile has never been updated — has weekly_maintenance.sh ever run?")
+    elif weekly_age > 9:
+        warn("weekly cadence stalled", f"quality profile last updated {weekly_age:.0f} days ago (expected ~7)")
+    else:
+        check("weekly cadence", True, f"quality profile updated {weekly_age:.0f}d ago")
+
+    roster = read_json(STATE_DIR / "entity_rosters" / "person.json", default=None) or {}
+    monthly_age = _days_since(roster.get("resolved_at", ""))
+    if monthly_age is not None and monthly_age > 35:
+        warn("monthly cadence stalled", f"person roster last resolved {monthly_age:.0f} days ago (expected ~30)")
+    elif monthly_age is not None:
+        check("monthly cadence", True, f"person roster resolved {monthly_age:.0f}d ago")
+
+    # Roster continuity — an empty roster is how the Jul-2026 regression looked.
+    for etype in ("person", "place", "period", "object"):
+        data = read_json(STATE_DIR / "entity_rosters" / f"{etype}.json", default=None)
+        if data is not None and not (data.get("entities") or []):
+            warn(f"{etype} roster is EMPTY", "a refresh may have wiped it — restore from git and re-resolve")
+
+    # Zombie Focuses — the planner can never ask about a category-less Focus.
+    try:
+        from question_planner import resolve_roadmap, zombie_focuses  # noqa: PLC0415
+        zombies = zombie_focuses(resolve_roadmap().get("focuses", []))
+        if zombies:
+            labels = ", ".join(str(f.get("label", f.get("id"))) for f in zombies[:5])
+            warn("zombie Focuses (no question categories)", labels)
+        else:
+            check("no zombie Focuses", True)
+    except Exception as exc:  # noqa: BLE001
+        warn("zombie-focus check unavailable", str(exc)[:80])
+
+    # Classification coverage — the learning loop starves without it.
+    classifications_dir = STATE_DIR / "classifications"
+    classified = len(list(classifications_dir.glob("*.json"))) if classifications_dir.exists() else 0
+    answers = len(list(ANSWERS_DIR.glob("*.md"))) if ANSWERS_DIR.exists() else 0
+    if answers and not classified:
+        warn("no sources classified", f"{answers} answers, 0 classifications — the learning loop has never run")
+    elif answers:
+        check("classification coverage", True, f"{classified}/{answers} sources classified")
+
+    return failures
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     failures = 0
     config = load_config(CONFIG_FILE)
@@ -582,6 +710,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             print(f"  - {format_learning_failure(row)}")
     else:
         check("recent learning-loop failures", True, "none recorded")
+
+    failures += loop_health_checks()
 
     print()
     print("checking next question...", flush=True)
@@ -921,6 +1051,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="Run local health checks")
     p.add_argument("--daily", action="store_true", help="Also run daily delivery dry-run")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("notify", help="Send stdin to the configured Telegram target, chunked under the 4096-char limit")
+    p.set_defaults(func=cmd_notify)
 
     return parser
 

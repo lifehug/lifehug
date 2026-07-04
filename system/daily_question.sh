@@ -53,6 +53,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
+# Git housekeeping is deliberately NON-FATAL and runs AFTER delivery: a
+# rejected push must never cost the author their daily question. Pull-rebase
+# first — a second machine (dev box) writes to the same repo.
 safe_autocommit() {
   local paths=(
     README.md
@@ -70,11 +73,23 @@ safe_autocommit() {
     [[ -e "$path" ]] && existing+=("$path")
   done
   [[ ${#existing[@]} -eq 0 ]] && return 0
-  git add -- "${existing[@]}"
-  if ! git diff --cached --quiet; then
-    git commit -m "Daily update $(date +%Y-%m-%d)"
-    git push
+  set +e
+  local git_out
+  git_out=$(
+    git add -- "${existing[@]}" &&
+    { git diff --cached --quiet ||
+      { git commit -m "Daily update $(date +%Y-%m-%d)" &&
+        git pull --rebase --autostash &&
+        git push; }; } 2>&1
+  )
+  local git_status=$?
+  set -e
+  if [[ "$git_status" -ne 0 ]]; then
+    echo "warn: git housekeeping failed (question already delivered)" >&2
+    echo "$git_out" >&2
+    record_learning_failure "daily_question" "git_autocommit" "$git_status" "$git_out"
   fi
+  return 0
 }
 
 send_message() {
@@ -136,8 +151,6 @@ if [[ "$COMPILE_STATUS" -ne 0 ]]; then
   record_learning_failure "daily_question" "wiki_compile" "$COMPILE_STATUS" "$COMPILE_OUT"
 fi
 
-safe_autocommit
-
 AWAITING=$(python3 - <<'PY'
 import json
 r = json.load(open("system/rotation.json", encoding="utf-8"))
@@ -161,6 +174,7 @@ You've finished the current pass. Reply with a model name to generate the next s
 \`${DEFAULT_MODEL}\`"
   send_message "$TEXT" >/dev/null
   echo "✓ Pass transition reminder sent"
+  safe_autocommit
   exit 0
 fi
 
@@ -179,6 +193,7 @@ Default model: \`${DEFAULT_MODEL}\`
 Reply with a model name to use a different one, or just say **go** to use the default."
   send_message "$TEXT" >/dev/null
   echo "✓ Pass ${PASS_NUM} transition prompt sent"
+  safe_autocommit
   exit 0
 fi
 
@@ -209,3 +224,6 @@ python3 "$WORKSPACE/system/ask.py" --confirm-sent "$QUESTION_ID" >/dev/null
 pin_message "$MESSAGE_ID"
 
 echo "✓ Lifehug question sent and pinned (question: $QUESTION_ID, msg_id: $MESSAGE_ID)"
+
+# Housekeeping AFTER delivery — a git failure can no longer eat the question.
+safe_autocommit
