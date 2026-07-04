@@ -609,6 +609,43 @@ def cmd_chapters_exercise(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retract_source(args: argparse.Namespace) -> int:
+    flags = ["retract", args.target]
+    if args.reason:
+        flags.extend(["--reason", args.reason])
+    for slug in args.from_page or []:
+        flags.extend(["--from-page", slug])
+    if args.title:
+        flags.extend(["--title", args.title])
+    return run_python("source_integrity.py", flags)
+
+
+def cmd_fix(args: argparse.Namespace) -> int:
+    """One-line fact repair, phone-friendly (issue #24). Two modes:
+    --right (with optional --wrong) files a CORRECTION that overrides the
+    original claim at compile time; --retract files a RETRACTION so the
+    compiler stops asserting the source (optionally only on given pages).
+    Raw sources are never touched either way."""
+    if bool(args.retract) == bool(args.right):
+        print("Error: use exactly one of --right \"the true fact\" or --retract", file=sys.stderr)
+        return 1
+    if args.retract:
+        flags = ["retract", args.target, "--reason", args.reason or "retracted via fix"]
+        for slug in args.from_page or []:
+            flags.extend(["--from-page", slug])
+        return run_python("source_integrity.py", flags)
+    body = args.right
+    if args.wrong:
+        body = f"The original says: {args.wrong}\nThe truth is: {args.right}"
+    result = subprocess.run(
+        [sys.executable, str(script("source_integrity.py")), "correct", args.target,
+         "--kind", args.kind, "--source", "fix"],
+        input=body, text=True, cwd=REPO_DIR)
+    if result.returncode == 0:
+        print("  The next compile will assert the corrected fact (cache re-keys automatically).")
+    return result.returncode
+
+
 def cmd_interview_pack(args: argparse.Namespace) -> int:
     """Tier 3 second voice: on-demand question pack for a real conversation.
     Never scheduled — only generated when the owner asks."""
@@ -1142,6 +1179,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("chapters-exercise", help="Print the annual McAdams life-chapters exercise")
     p.set_defaults(func=cmd_chapters_exercise)
+
+    p = sub.add_parser("retract-source", help="Stop the compiler asserting a source (raw file untouched)")
+    p.add_argument("target")
+    p.add_argument("--reason", default=None)
+    p.add_argument("--from-page", action="append", default=[], metavar="SLUG")
+    p.add_argument("--title", default=None)
+    p.set_defaults(func=cmd_retract_source)
+
+    p = sub.add_parser("fix", help="One-line fact repair: --right files a correction, --retract suppresses the source")
+    p.add_argument("target", help="source id or path, e.g. answers/A7.md or answer:A7")
+    p.add_argument("--right", default=None, help="The true fact (files a correction)")
+    p.add_argument("--wrong", default=None, help="What the source wrongly says (optional context)")
+    p.add_argument("--retract", action="store_true", help="Suppress the source instead of correcting it")
+    p.add_argument("--reason", default=None, help="Why (for --retract)")
+    p.add_argument("--from-page", action="append", default=[], metavar="SLUG",
+                   help="With --retract: only suppress on these page slugs")
+    p.add_argument("--kind", default="factual", help="Correction kind (factual, date, name, ...)")
+    p.set_defaults(func=cmd_fix)
 
     p = sub.add_parser("interview-pack", help="On-demand question pack for interviewing someone (second voice, Tier 3)")
     p.add_argument("person", help="Who you'll be talking with, e.g. Mom")

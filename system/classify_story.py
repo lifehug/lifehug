@@ -195,6 +195,35 @@ def _relative_path(source_path) -> str:
         return str(source_path)
 
 
+def _corrections_block(source_path: Path) -> str:
+    corrections = corrections_for(source_path)
+    if not corrections:
+        return ""
+    joined = "\n".join(f"- {c}" for c in corrections)
+    return (f"\n## LATER CORRECTIONS (authoritative — these OVERRIDE the story text "
+            f"above; never extract the corrected-away version)\n{joined}\n")
+
+
+def corrections_for(source_path: Path) -> list[str]:
+    """Later authoritative corrections targeting this source (issue #24) —
+    included in the classification prompt so a corrected-away fact is never
+    re-derived into people/places/events/candidates."""
+    corrections_dir = SOURCES_DIR / "corrections"
+    if not corrections_dir.exists():
+        return []
+    rel_target = _relative_path(source_path)
+    out: list[str] = []
+    for path in sorted(corrections_dir.glob("*.md")):
+        content = path.read_text(encoding="utf-8", errors="replace")
+        fm2, body = parse_frontmatter(content)
+        if fm2.get("type") != "source_correction":
+            continue
+        if fm2.get("corrects_path") == rel_target or fm2.get("corrects") == f"answer:{source_path.stem}":
+            body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
+            out.append(body)
+    return out
+
+
 def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
     """Construct the full AI classification prompt for a source file."""
     mission = load_mission()
@@ -223,6 +252,7 @@ Captured at: {fm.get('captured_at', 'unknown')}
 
 ## Story Text
 {story_text}
+{_corrections_block(source_path)}
 
 ---
 

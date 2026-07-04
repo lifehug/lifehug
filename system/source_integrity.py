@@ -544,8 +544,8 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
 
         target = ""
         if isinstance(metadata, dict):
-            target = str(metadata.get("corrects") or metadata.get("reflects") or "")
-        if record["type"] in {"source_correction", "source_reflection"} and target:
+            target = str(metadata.get("corrects") or metadata.get("reflects") or metadata.get("retracts") or "")
+        if record["type"] in {"source_correction", "source_reflection", "source_retraction"} and target:
             if target not in source_ids_set and target not in source_paths_set:
                 findings.append(finding(
                     "missing_correction_target",
@@ -764,17 +764,20 @@ def create_linked_source(
     title: str | None,
     source_medium: str,
     correction_kind: str | None = None,
+    suppress_on: list[str] | None = None,
 ) -> Path:
     target_path = resolve_source_target(target)
     target_record = source_record(target_path)
     captured_at = now_utc()
     target_title = str(target_record.get("title") or target_record["source_id"])
-    label = "Reflection" if source_type == "source_reflection" else "Correction"
+    label = {"source_reflection": "Reflection",
+             "source_retraction": "Retraction"}.get(source_type, "Correction")
     title = title or f"{label} for {target_title}"
     CORRECTION_SOURCES_DIR.mkdir(parents=True, exist_ok=True)
     path = _unique_path(CORRECTION_SOURCES_DIR, title, captured_at)
     payload = f"# {title}\n\n{body.strip()}\n"
-    source_id_prefix = "reflection" if source_type == "source_reflection" else "correction"
+    source_id_prefix = {"source_reflection": "reflection",
+                        "source_retraction": "retraction"}.get(source_type, "correction")
     metadata: dict[str, object] = {
         "title": title,
         "type": source_type,
@@ -790,8 +793,18 @@ def create_linked_source(
     }
     if source_type == "source_reflection":
         metadata["reflects"] = target_record["source_id"]
+    elif source_type == "source_retraction":
+        # A retraction never deletes the source — it tells the COMPILER to
+        # stop asserting it. suppress_on scopes it to specific page slugs
+        # (the mis-attribution case: a source that belongs on Katie's pages
+        # but was wrongly pulled onto the author's childhood); empty means
+        # suppress everywhere.
+        metadata["retracts"] = target_record["source_id"]
+        metadata["retracts_path"] = rel(target_path)
+        metadata["suppress_on"] = suppress_on or []
     else:
         metadata["corrects"] = target_record["source_id"]
+        metadata["corrects_path"] = rel(target_path)
         metadata["correction_kind"] = correction_kind or "other"
     write_text(path, f"{format_frontmatter(metadata)}\n\n{payload}")
     register_source(path)
@@ -866,6 +879,25 @@ def cmd_correct(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retract(args: argparse.Namespace) -> int:
+    body = (sys.stdin.read().strip() if not sys.stdin.isatty() else "") or args.reason or ""
+    if not body:
+        print("Error: provide a reason (--reason or stdin)", file=sys.stderr)
+        return 1
+    path = create_linked_source(
+        args.target,
+        body,
+        source_type="source_retraction",
+        title=args.title,
+        source_medium=args.source,
+        suppress_on=args.from_page or [],
+    )
+    scope = f"on page(s) {', '.join(args.from_page)}" if args.from_page else "everywhere"
+    print(f"✓ Created retraction source: {rel(path)}")
+    print(f"  The compiler will stop asserting the target {scope}. The raw source is untouched.")
+    return 0
+
+
 def cmd_reflect(args: argparse.Namespace) -> int:
     body = sys.stdin.read().strip()
     if not body:
@@ -885,6 +917,15 @@ def cmd_reflect(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Lifehug source integrity tools")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("retract", help="Retract a source: the compiler stops asserting it (file stays immutable)")
+    p.add_argument("target", help="source id or path, e.g. answers/L20.md")
+    p.add_argument("--reason", default=None, help="Why this is retracted (or pipe via stdin)")
+    p.add_argument("--from-page", action="append", default=[], metavar="SLUG",
+                   help="Only suppress on these wiki page slugs (repeatable); omit = everywhere")
+    p.add_argument("--title", default=None)
+    p.add_argument("--source", default="manual")
+    p.set_defaults(func=cmd_retract)
 
     p = sub.add_parser("scan", help="Summarize raw source files")
     p.add_argument("--json", action="store_true")

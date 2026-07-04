@@ -196,11 +196,90 @@ def read_manual_sources() -> dict[str, dict]:
             "kind": kind,
             "witness": frontmatter_value(text, "witness", ""),
             "sensitivity": frontmatter_value(text, "sensitivity", "private"),
+            "corrects": str(metadata.get("corrects", "") or ""),
+            "retracts": str(metadata.get("retracts", "") or ""),
+            "retracts_path": str(metadata.get("retracts_path", "") or ""),
+            "corrects_path": str(metadata.get("corrects_path", "") or ""),
+            "suppress_on": metadata.get("suppress_on", []) if isinstance(metadata.get("suppress_on"), list) else [],
             "source_trust": str(metadata.get("source_trust", "")),
             "authority": str(metadata.get("authority", "")),
             "generated_from": [str(item) for item in generated_from],
         }
     return sources
+
+
+# ---------------------------------------------------------------------------
+# Correction & retraction resolution (v74, issue #24).
+#
+# Corrections are ADDITIVE sources that OVERRIDE the original claim at compile
+# time: the correction text is appended to its target's body under an
+# authoritative marker, so every downstream consumer (synthesis prompts,
+# keyless task packs, excerpt fallbacks) sees the fix — and the changed body
+# re-keys the synthesis cache, forcing an honest re-render.
+#
+# Retractions tell the compiler to STOP ASSERTING a source: globally, or only
+# on specific page slugs (the mis-attribution case — a source that belongs on
+# one person's pages but was wrongly pulled onto another's). Raw files are
+# never touched; history stays auditable.
+# ---------------------------------------------------------------------------
+
+# Set by main() from the corrections layer; module-level so _descriptor (the
+# single choke point that knows each page's slug) can apply scoped retractions.
+_RETRACTIONS: list[dict] = []
+
+
+def split_correction_layer(manual_sources: dict) -> tuple[dict, list[dict], list[dict]]:
+    """Split corrections/retractions out of the narrative source pool.
+    Returns (narrative_sources, corrections, retractions). Reflections stay
+    narrative — they are the author's later perspective, quotable as material;
+    corrections/retractions are compiler directives, not story."""
+    narrative: dict = {}
+    corrections: list[dict] = []
+    retractions: list[dict] = []
+    for source_id, item in manual_sources.items():
+        if item.get("kind") == "source_correction":
+            corrections.append(item)
+        elif item.get("kind") == "source_retraction":
+            retractions.append(item)
+        else:
+            narrative[source_id] = item
+    return narrative, corrections, retractions
+
+
+CORRECTION_MARKER = "[LATER CORRECTION — authoritative]"
+
+
+def apply_corrections(answers: dict, manual_sources: dict, corrections: list[dict]) -> int:
+    """Append each correction to its target's body under the authoritative
+    marker. Matching is by source_id or path. Returns count applied."""
+    applied = 0
+    by_id: dict[str, dict] = {}
+    for qid, item in answers.items():
+        by_id[f"answer:{qid}"] = item
+        by_id[item.get("source", "")] = item
+    for source_id, item in manual_sources.items():
+        by_id[source_id] = item
+        by_id[item.get("source", "")] = item
+    for correction in corrections:
+        target = by_id.get(correction.get("corrects", "")) or by_id.get(correction.get("corrects_path", ""))
+        if not target:
+            continue
+        target["body"] = (f"{target.get('body', '')}\n\n{CORRECTION_MARKER} "
+                          f"{correction.get('body', '').strip()}")
+        target["corrected"] = True
+        applied += 1
+    return applied
+
+
+def _is_retracted(item: dict, slug: str) -> bool:
+    item_ids = {str(item.get("id", "")), f"answer:{item.get('id', '')}", str(item.get("source", ""))}
+    for retraction in _RETRACTIONS:
+        if not ({retraction.get("retracts", ""), retraction.get("retracts_path", "")} & item_ids):
+            continue
+        scope = retraction.get("suppress_on") or []
+        if not scope or slug in scope:
+            return True
+    return False
 
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
@@ -319,6 +398,11 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
                 seed_related=None, origin="focus", section="", chrono=None):
+    if _RETRACTIONS:
+        cited_items = [i for i in cited_items if not _is_retracted(i, slug)]
+        supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
+        kept = {i["source"] for i in cited_items + supporting_items}
+        sources = [s for s in sources if s in kept]
     return {
         "type": page_type,
         "title": title,
@@ -750,7 +834,10 @@ def task_sources(desc: dict, limit: int = 14, cap: int = 1500) -> list[dict]:
 def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     src_lines = []
     has_witness = False
+    has_corrected = False
     for item in (desc["cited_items"] + desc["supporting_items"])[:14]:
+        if item.get("corrected"):
+            has_corrected = True
         body = re.sub(r"\s+", " ", display_body(item["body"])).strip()
         if len(body) > 1500:
             body = body[:1500].rsplit(" ", 1)[0] + "..."
@@ -803,6 +890,12 @@ or feelings that are not present below:
 Artifact/context sources marked `authored_expression`, `derived_context`, or
 similar are the author's later expression or a working context pack. Use them
 as attributed support, not as independent proof of every underlying event.
+{f'''
+Text under "{CORRECTION_MARKER}" is the author's LATER, AUTHORITATIVE fix to
+the source above it: the correction overrides the original claim. Use the
+corrected fact; never assert the corrected-away version, and don't narrate
+the correction process itself unless the page is about that change.
+''' if has_corrected else ''}
 {'''
 WITNESS ACCOUNTS are a second voice: another person's words about shared
 events. NEVER merge a witness account into the author's account or present it
@@ -1153,6 +1246,13 @@ def main():
     categories = parse_categories(md_text)
     answers = read_answers()
     manual_sources = read_manual_sources()
+    # Correction/retraction resolution: corrections override their targets'
+    # claims; retractions drop targets from pages (scoped or global).
+    global _RETRACTIONS
+    manual_sources, _corrections, _RETRACTIONS = split_correction_layer(manual_sources)
+    _n_corrected = apply_corrections(answers, manual_sources, _corrections)
+    if _n_corrected or _RETRACTIONS:
+        print(f"  ⚖ corrections applied: {_n_corrected}; retractions active: {len(_RETRACTIONS)}")
     cfg = load_config()
     author = cfg.get("name", "Me")
     author_full = cfg.get("full_name") or author

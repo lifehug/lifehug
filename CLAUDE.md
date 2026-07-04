@@ -265,6 +265,22 @@ printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/{
 printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/{ID}.md
 ```
 
+**Corrections now RESOLVE at compile time (v74, issue #24).** A correction's text
+is appended to its target under an authoritative marker, so synthesis asserts the
+corrected fact and never the corrected-away version (the cache re-keys
+automatically); the classifier sees corrections too, so wrong facts don't
+re-derive. To stop the compiler asserting a source entirely — hallucinated
+inference, wrong-person attribution, privacy — file a **retraction** (the raw
+file stays immutable):
+
+```bash
+# one-line phone-friendly repair (the agent translates natural language into these):
+python3 system/lifehug.py fix answers/{ID}.md --wrong "moved in 2006" --right "moved in 2004"
+python3 system/lifehug.py fix answers/{ID}.md --retract --reason "classifier inference, never happened"
+# scoped retraction — the mis-attribution case (source belongs on HER pages, not the author's):
+python3 system/lifehug.py fix answers/L20.md --retract --from-page childhood --reason "about Katie's childhood"
+```
+
 3. **Let the follow-up loop work**:
    - Do not manually append ad hoc follow-ups in normal operation.
    - Weekly classification reads new answer/source files, extracts people, places, themes, contradictions, possible outputs, and candidate follow-up questions, then stores them in `state/question_candidates.json`.
