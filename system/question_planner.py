@@ -419,11 +419,39 @@ SECOND_VOICE_OFFERS_FILE = STATE_DIR / "second_voice_offers.json"
 DEFAULT_SECOND_VOICE_OFFERS_PER_MONTH = 2
 
 
+# Focus-label heuristics for which interview bank fits (a focus can override
+# with an explicit `relationship` field, preserved across roadmap rebuilds).
+_RELATIONSHIP_HINTS = (
+    (("mom", "mother", "dad", "father"), "parent"),
+    (("grandma", "grandpa", "grandmother", "grandfather"), "grandparent"),
+    (("wife", "husband", "spouse", "partner"), "spouse"),
+    (("son", "daughter", "kid", "child"), "child"),
+    (("brother", "sister", "sibling"), "sibling"),
+    (("mentor", "coach", "teacher"), "mentor"),
+    (("cofounder", "co-founder"), "cofounder"),
+)
+
+
+def _relationship_for(focus: dict) -> str:
+    explicit = str(focus.get("relationship") or "").strip().lower()
+    if explicit:
+        return explicit
+    haystack = f"{focus.get('label', '')} {focus.get('objective', '')}".lower()
+    for keywords, relationship in _RELATIONSHIP_HINTS:
+        if any(kw in haystack for kw in keywords):
+            return relationship
+    return "friend"
+
+
 def pick_second_voice_offer(now: datetime | None = None) -> str | None:
-    """One gentle, in-person suggestion — or None (most weeks). Draws an
-    unanswered question from a person-type Focus category and phrases it as
-    something to ask that person when it comes up naturally."""
+    """One gentle, in-person suggestion — or None (most weeks). Picks a LIVING
+    person-Focus and one question from their relationship-type interview bank.
+    Bank questions are second-person by design — actually askable of the
+    person — unlike category questions, which are the author's lens and must
+    never be relayed ('ask James whether YOU lost patience with him' is
+    nonsense; a dead parent must never become an errand)."""
     from lifehug_core import load_config  # noqa: PLC0415
+    from research_expand import INTERVIEW_BANKS  # noqa: PLC0415
 
     try:
         per_month = int(load_config().get(
@@ -436,49 +464,42 @@ def pick_second_voice_offer(now: datetime | None = None) -> str | None:
     now = now or datetime.now(timezone.utc)
     month_key = now.strftime("%Y-%m")
     state = read_json(SECOND_VOICE_OFFERS_FILE, default=None) or {"version": 1, "offered": []}
-    offered_ids = {o.get("question_id") for o in state.get("offered", [])}
+    offered_keys = {str(o.get("key")) for o in state.get("offered", [])}
     this_month = sum(1 for o in state.get("offered", []) if str(o.get("month")) == month_key)
     if this_month >= per_month:
         return None
 
-    questions, categories, _coverage = load_question_state()
-    focuses = resolve_roadmap(questions).get("focuses", [])
-    person_cats: dict[str, str] = {}  # category -> person label
+    questions, _categories, _coverage = load_question_state()
+    focuses = [f for f in resolve_roadmap(questions).get("focuses", [])
+               if f.get("type") in ("person", "relationship")
+               and f.get("living") is not False        # deceased: never an errand
+               and not f.get("primary")
+               and f.get("categories")]
+    if not focuses:
+        return None
+
+    pool: list[tuple[str, str, str]] = []  # (key, person, question)
     for focus in focuses:
-        if focus.get("type") not in ("person", "relationship"):
-            continue
-        if focus.get("living") is False:
-            continue  # deceased — you can't ask them; grief work is not an errand
-        for cat in focus.get("categories", []):
-            person_cats[str(cat)] = str(focus.get("label", ""))
-
-    # Questions about loss/grief are FOR the author, never relayable to the
-    # person — and a question phrased about someone's death must never become
-    # "go ask them."
-    _unaskable = ("died", "death", "passed away", "funeral", "wish you'd",
-                  "never got to", "before he died", "before she died", "grief")
-
-    pool = [q for q in questions
-            if not q["answered"]
-            and str(q["category"]) in person_cats
-            and str(q["id"]) not in offered_ids
-            and len(str(q["text"]).split()) <= 40
-            and not any(marker in str(q["text"]).lower() for marker in _unaskable)]
+        person = str(focus.get("label", ""))
+        bank = INTERVIEW_BANKS.get(_relationship_for(focus), INTERVIEW_BANKS["friend"])
+        for question in bank:
+            key = f"{slugify(person)}::{slugify(question)[:60]}"
+            if key not in offered_keys:
+                pool.append((key, person, question))
     if not pool:
         return None
     # Deterministic pick, varies by month: stable across re-runs in a week.
-    pick = pool[(now.year * 12 + now.month) % len(pool)]
-    person = person_cats[str(pick["category"])]
+    key, person, question = pool[(now.year * 12 + now.month) % len(pool)]
 
     state.setdefault("offered", []).append({
-        "question_id": str(pick["id"]),
+        "key": key,
         "person": person,
         "month": month_key,
         "offered_at": now.isoformat().replace("+00:00", "Z"),
     })
     write_json(SECOND_VOICE_OFFERS_FILE, state)
-    return (f"💬 If it comes up naturally sometime: ask {person} — “{pick['text']}” — "
-            f"and forward whatever they say (it saves as their account). No rush, no need.")
+    return (f"💬 If it comes up naturally sometime, ask {person}: “{question}” — "
+            f"then forward whatever they say (it saves as their account). No rush, no need.")
 
 
 def zombie_focuses(focuses: list[dict]) -> list[dict]:

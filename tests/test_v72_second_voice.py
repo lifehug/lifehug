@@ -102,14 +102,27 @@ class SecondVoiceOfferTests(unittest.TestCase):
          sys.modules["lifehug_core"].load_config) = self._orig
         self.tmp.cleanup()
 
-    def test_offer_produced_and_never_repeated(self):
+    def test_offer_is_second_person_bank_question(self):
         offer = qp.pick_second_voice_offer()
         self.assertIsNotNone(offer)
-        self.assertIn("Mom", offer)
-        self.assertIn("kitchen", offer)
+        self.assertIn("ask Mom", offer)
         self.assertIn("No rush", offer)
-        # Only one candidate question exists — once offered, never again.
-        self.assertIsNone(qp.pick_second_voice_offer())
+        # Bank questions are second-person (askable of the person) — the offer
+        # must come from the parent interview bank, not the author-lens category.
+        from research_expand import INTERVIEW_BANKS
+        self.assertTrue(any(q in offer for q in INTERVIEW_BANKS["parent"]))
+
+    def test_offers_never_repeat_a_question(self):
+        sys.modules["lifehug_core"].load_config = lambda *a, **k: {"second_voice_offers_per_month": 99}
+        seen = set()
+        while True:
+            offer = qp.pick_second_voice_offer()
+            if offer is None:
+                break
+            self.assertNotIn(offer, seen)
+            seen.add(offer)
+        from research_expand import INTERVIEW_BANKS
+        self.assertEqual(len(seen), len(INTERVIEW_BANKS["parent"]))  # pool exhausts, never loops
 
     def test_monthly_cap_enforced(self):
         sys.modules["lifehug_core"].load_config = lambda *a, **k: {"second_voice_offers_per_month": 0}
@@ -120,14 +133,11 @@ class SecondVoiceOfferTests(unittest.TestCase):
             {"id": "mom", "label": "Mom", "type": "person", "categories": ["K"], "living": False}]}
         self.assertIsNone(qp.pick_second_voice_offer())
 
-    def test_grief_questions_never_relayed(self):
-        self.QUESTIONS = [
-            {"id": "K1", "category": "K",
-             "text": "What do you wish you'd asked before he died — the question you never got to?",
-             "answered": False},
-        ]
-        qp.load_question_state = lambda: (self.QUESTIONS, {"K": {"group": "focus"}}, {"categories": {}})
-        self.assertIsNone(qp.pick_second_voice_offer())
+    def test_relationship_inference(self):
+        self.assertEqual(qp._relationship_for({"label": "Mom"}), "parent")
+        self.assertEqual(qp._relationship_for({"label": "Charlee Joy Taylor",
+                                               "relationship": "child"}), "child")
+        self.assertEqual(qp._relationship_for({"label": "Trevor"}), "friend")
 
     def test_cap_counts_this_month(self):
         now = datetime(2026, 7, 15, tzinfo=timezone.utc)

@@ -221,8 +221,10 @@ def derive_focuses(md_text: str) -> list[dict]:
 _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 "cap", "phase", "type", "wiki_node", "neighborhoods",
                 # living: false on a person Focus = deceased; second-voice
-                # offers and love-map staleness skip them (you can't ask).
-                "living")
+                # offers skip them (you can't ask). relationship: which
+                # interview bank fits (parent/spouse/child/...), overriding
+                # the label heuristic.
+                "living", "relationship")
 
 
 def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
