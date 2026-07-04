@@ -381,6 +381,23 @@ voice, never merged with the author's version. Conflicting accounts are data
 - Tier 4 (the bot messaging family directly) is deliberately NOT implemented —
   see lifehug/lifehug#32.
 
+### Privacy & Sensitivity (v73 phase 0)
+
+The full design lives in `system/privacy_design.md`. The contract, in brief:
+**raw sources never leave; the compiled wiki is the owner tier — permanently
+private and fully honest (synthesis must never sanitize); audience surfaces
+(public/friends/family) will be SEPARATE owner-reviewed builds — filter at
+build time, never at read time; everything unlabeled defaults to `private`.**
+
+- Label at capture (optional): `process-answer --sensitivity private|family|friends|public`
+  and `ingest-story --sensitivity ...` (default private).
+- The weekly classifier suggests `suggested_sensitivity` per source using the
+  taxonomy in privacy_design.md; children's material is hard-capped at family.
+- Wiki pages carry a computed `sensitivity:` floor (most-closed cited source).
+- The local viewer's **Privacy Preview** (`/views/privacy`) shows what each
+  future build would be eligible to include — preview only, never a boundary.
+- Graduated export builds and hosting auth come later (issues #30, #10).
+
 ### Perennials, Life Chapters & Resurfacing (v71)
 
 - **Perennial questions** are re-asked yearly WITH last year's answer attached (the

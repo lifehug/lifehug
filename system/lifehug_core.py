@@ -176,6 +176,46 @@ def format_learning_failures_summary(limit: int = 3, since_days: int | None = 14
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Sensitivity tiers (privacy phase 0, v73). THE CONTRACT:
+#   - Raw sources (answers/, sources/) NEVER leave the private repo. Ever.
+#   - The compiled wiki is the OWNER tier: permanently private, fully honest,
+#     never censored. Sensitivity does not gate synthesis — it exists so
+#     future audience surfaces can be generated as SEPARATE BUILDS
+#     (filter at build time, never at read time).
+#   - Everything unlabeled defaults to `private`. Tiers only ever open
+#     material through an explicit, owner-reviewed promotion — never expose it.
+# ---------------------------------------------------------------------------
+
+# Most-open → most-closed. A page/source at level X is visible to a viewer
+# tier V when rank(V) >= rank(X).
+SENSITIVITY_LEVELS = ("public", "friends", "family", "private")
+_SENSITIVITY_RANK = {level: i for i, level in enumerate(SENSITIVITY_LEVELS)}
+
+
+def sensitivity_rank(level: str | None) -> int:
+    """Unknown, blank, or legacy values ('personal') rank as private —
+    the safe default is always the closed one."""
+    return _SENSITIVITY_RANK.get(str(level or "").strip().lower(), _SENSITIVITY_RANK["private"])
+
+
+def sensitivity_floor(levels) -> str:
+    """The most-closed level among `levels` — a page is as sensitive as its
+    most sensitive source."""
+    best = 0
+    for level in levels:
+        best = max(best, sensitivity_rank(level))
+    return SENSITIVITY_LEVELS[best]
+
+
+def sensitivity_visible(content_level: str | None, viewer_level: str | None) -> bool:
+    """Would content at `content_level` be included in a `viewer_level` build?
+    The owner sees everything."""
+    if str(viewer_level or "").strip().lower() in ("owner", "private", ""):
+        return True
+    return sensitivity_rank(viewer_level) >= sensitivity_rank(content_level)
+
+
 # Telegram hard limit is 4096 chars/message; leave headroom for prefixes.
 TELEGRAM_CHUNK_LIMIT = 3900
 

@@ -24,7 +24,7 @@
 ## 2. How People Write Life Stories
 
 ### 2a. Structure: hybrid thematic-chronological (unchanged from v1)
-Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. *(Book-level operationalization: v73 chapter-readiness scoring.)*
+Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. *(Book-level operationalization: chapter-readiness scoring, remaining #30 scope.)*
 
 ### 2b. McAdams — narrative identity (Life Story Interview II)
 - **Life chapters exercise**: "think of your life as a book — 2–7 chapters, give each a title, and say how we get from one to the next." The transition clause forces boundary articulation. **[shipped v71: `lifehug.py chapters-exercise`, re-run yearly]**
@@ -108,7 +108,7 @@ Coverage thresholds unchanged: RED 0–30%, YELLOW 30–70%, GREEN 70%+ (offer t
 
 ## 7. The Loop as learning system **[shipped v68–v72]**
 
-The self-improving cycle only works when signal actually flows: candidates promote under backlog-aware caps with craft-quality gates and semantic dedup; scores attribute their story function (one shared vocabulary) and owning Focus; classifier extractions (focus opportunities, contradictions, insights, output ideas) all have consumers; failures are recorded and surfaced by a scheduled doctor. Silent abandonment is countered by adaptive cadence (same-day follow-up when warm, easy re-engagement question when quiet). v70/v71 additions: craft rules and question families live in every generation prompt (classifier, follow-ups, research); the why→what lint and quality gate park violations; the rumination detector cools brooding categories; perennials re-ask durable questions yearly with last year's answer attached; a monthly resurfacing slot returns an old answer with a reflection question; a weekly present-tense prompt captures the life being lived; compiled wiki open questions harvest back into candidates (synthesis→question); and classifier-extracted events compile into wiki/timeline.md with relative anchors.
+The self-improving cycle only works when signal actually flows: candidates promote under backlog-aware caps with craft-quality gates and semantic dedup; scores attribute their story function (one shared vocabulary) and owning Focus; classifier extractions (focus opportunities, contradictions, insights, output ideas) all have consumers; failures are recorded and surfaced by a scheduled doctor. Silent abandonment is countered by adaptive cadence (same-day follow-up when warm, easy re-engagement question when quiet). v70/v71 additions: craft rules and question families live in every generation prompt (classifier, follow-ups, research); the why→what lint and quality gate park violations; the rumination detector cools brooding categories; perennials re-ask durable questions yearly with last year's answer attached; a monthly resurfacing slot returns an old answer with a reflection question; a weekly present-tense prompt captures the life being lived; compiled wiki open questions harvest back into candidates (synthesis→question); and classifier-extracted events compile into wiki/timeline.md with relative anchors. v73 phase 0 unlocked honest synthesis under an explicit owner-only privacy contract (sources never leave; audience surfaces are separate owner-reviewed builds; unlabeled = private) — see system/privacy_design.md.
 
 ---
 

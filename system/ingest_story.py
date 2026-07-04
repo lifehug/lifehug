@@ -168,6 +168,7 @@ def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[
         "source": args.source,
         "captured_at": args.captured_at,
         "visibility": "owner_only",
+        "sensitivity": getattr(args, "sensitivity", "private"),
         "status": "raw",
         "immutable": True,
         "schema_version": SCHEMA_VERSION,
@@ -191,6 +192,9 @@ def main() -> int:
                         help="This is ANOTHER PERSON's account (a second voice), e.g. --witness Mom. "
                              "Stored as a witness_account source, attributed to them, never merged "
                              "with the author's version of events.")
+    parser.add_argument("--sensitivity", default="private",
+                        choices=["private", "family", "friends", "public"],
+                        help="Sensitivity tier for future audience builds (default private)")
     parser.add_argument("--no-candidates", action="store_true", help="Save source without generating candidate questions")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

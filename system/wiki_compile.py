@@ -89,7 +89,10 @@ THEME_KEYWORDS = {
 }
 
 # Bump to invalidate cached syntheses when the prompt/contract changes.
-CACHE_VERSION = "v2"
+# v3: the privacy-phase-0 honesty unlock — pages re-synthesize under the
+# explicit owner-only contract (no sanitizing; the tier system protects
+# sensitive material downstream, not the synthesis).
+CACHE_VERSION = "v3"
 SYNTH_CACHE_FILE = STATE_DIR / "wiki_synthesis_cache.json"
 # Drop-zone for keyless desktop synthesis: when the skill runs through Claude
 # Code, the agent writes each page's prose here (state/synthesis/<slug>.md) and
@@ -131,6 +134,7 @@ def read_answers() -> dict[str, dict]:
             "path": path,
             "source": rel(path),
             "body": answer_body(text),
+            "sensitivity": frontmatter_value(text, "sensitivity", "private"),
         }
     return answers
 
@@ -191,6 +195,7 @@ def read_manual_sources() -> dict[str, dict]:
             "body": body,
             "kind": kind,
             "witness": frontmatter_value(text, "witness", ""),
+            "sensitivity": frontmatter_value(text, "sensitivity", "private"),
             "source_trust": str(metadata.get("source_trust", "")),
             "authority": str(metadata.get("authority", "")),
             "generated_from": [str(item) for item in generated_from],
@@ -200,7 +205,7 @@ def read_manual_sources() -> dict[str, dict]:
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
                 synthesized: bool = True, origin: str = "focus", section: str = "",
-                chrono: int | None = None) -> str:
+                chrono: int | None = None, sensitivity: str = "private") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -209,7 +214,10 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         f"type: {page_type}",
         "status: active",
         "visibility: owner_only",
-        "sensitivity: personal",
+        # The most-closed level among this page's sources: which future
+        # audience BUILD could include (a re-rendered form of) this page.
+        # Metadata only — never enforcement; the wiki itself stays owner-only.
+        f"sensitivity: {sensitivity}",
         f"origin: {origin}",
         f"synthesized: {'true' if synthesized else 'false'}",
     ]
@@ -771,6 +779,17 @@ def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     return f"""You are compiling a private, owner-only life-story wiki. Write the entry for one page.
 {lens}
 
+PRIVACY CONTRACT — READ FIRST: this wiki is the author's PERMANENTLY PRIVATE
+mirror. It is never published, never shared, and raw sources never leave the
+repo; anything ever shown to anyone else is generated later as a separate,
+owner-reviewed build. Therefore: be honest and unflinching. Do NOT sanitize,
+soften, or omit difficult material — the affair, the crisis, the doubt, the
+repair — when the sources hold it. A marriage page that hides the near-ending
+and the rebuilding is a worse page, not a safer one; the rebuilding is usually
+the point. Sensitive material BELONGS here; the tier system protects it
+downstream, not you.
+
+
 PAGE TITLE: {desc['title']}
 PAGE TYPE: {desc['type']}
 
@@ -906,10 +925,15 @@ def compute_crosslinks(descs, synths):
 
 
 def render_page(desc, synth, related, backlinks, slug_title):
+    from lifehug_core import sensitivity_floor  # noqa: PLC0415
+    floor = sensitivity_floor(
+        item.get("sensitivity", "private")
+        for item in desc["cited_items"] + desc["supporting_items"])
     body = [
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
                     synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus"),
-                    section=desc.get("section", ""), chrono=desc.get("chrono")),
+                    section=desc.get("section", ""), chrono=desc.get("chrono"),
+                    sensitivity=floor),
         "",
         f"# {desc['title']}",
         "",
@@ -1177,6 +1201,12 @@ def main():
                 "type": d["type"],
                 "title": d["title"],
                 "narrative_path": str(SYNTH_DIR / f"{d['slug']}.md"),
+                "instructions": (
+                    "This wiki is the author's PERMANENTLY PRIVATE mirror — never "
+                    "published; audience surfaces are separate owner-reviewed builds. "
+                    "Be honest and unflinching: do not sanitize or omit difficult "
+                    "material the sources hold. Witness accounts are another "
+                    "person's words — attribute by name, never merge."),
                 "sources": task_sources(d),
                 "related_candidates": others,
             })

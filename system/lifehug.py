@@ -178,6 +178,8 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
         flags.extend(["--captured-at", args.captured_at])
     if getattr(args, "witness", None):
         flags.extend(["--witness", args.witness])
+    if getattr(args, "sensitivity", None):
+        flags.extend(["--sensitivity", args.sensitivity])
     if args.no_candidates:
         flags.append("--no-candidates")
     if args.dry_run:
@@ -377,6 +379,8 @@ def cmd_process_answer(args: argparse.Namespace) -> int:
         flags.append("--push")
     if args.no_compile_wiki:
         flags.append("--no-compile-wiki")
+    if getattr(args, "sensitivity", None):
+        flags.extend(["--sensitivity", args.sensitivity])
     if args.summary:
         flags.extend(["--summary", args.summary])
     for followup in args.followup or []:
@@ -878,6 +882,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-candidates", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--witness", default=None, metavar="PERSON", help="This is another person's account (second voice), e.g. --witness Mom")
+    p.add_argument("--sensitivity", default=None, choices=["private", "family", "friends", "public"])
     p.set_defaults(func=cmd_ingest_story)
 
     def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:
@@ -1099,6 +1104,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--push", action="store_true")
     p.add_argument("--summary")
     p.add_argument("--no-compile-wiki", action="store_true")
+    p.add_argument("--sensitivity", default=None, choices=["private", "family", "friends", "public"])
     p.set_defaults(func=cmd_process_answer)
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")

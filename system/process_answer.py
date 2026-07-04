@@ -174,6 +174,11 @@ def main():
     parser.add_argument("--commit", action="store_true", help="Commit changed Lifehug files")
     parser.add_argument("--push", action="store_true", help="Push after committing")
     parser.add_argument("--summary", default=None, help="Commit summary")
+    parser.add_argument("--sensitivity", default="private",
+                        choices=["private", "family", "friends", "public"],
+                        help="Sensitivity tier for future audience builds (default private — "
+                             "nothing is ever shared without explicit owner review; the wiki "
+                             "itself stays owner-only regardless)")
     parser.add_argument("--no-compile-wiki", action="store_true", help="Skip automatic wiki compile")
     args = parser.parse_args()
 
@@ -233,6 +238,7 @@ def main():
         "answered_date": args.answered_date,
         "captured_at": datetime.now().isoformat(timespec="seconds"),
         "visibility": "owner_only",
+        "sensitivity": args.sensitivity,
         "status": "raw",
         "immutable": True,
         "schema_version": SCHEMA_VERSION,

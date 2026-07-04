@@ -1005,6 +1005,48 @@ def view_graph():
     return ("Graph", _GRAPH_HTML, True)
 
 
+def view_privacy_preview():
+    """Preview of the future audience BUILDS: which pages' material could be
+    rendered into each tier's build, per page sensitivity floors. This is
+    metadata preview only — never a security boundary. The wiki itself is
+    owner-only; audience surfaces will be separate, owner-reviewed builds."""
+    from lifehug_core import sensitivity_visible
+
+    tiers = ("public", "friends", "family")
+    pages = [p for p in wiki_pages() if p.name not in ("index.md", "log.md", "SCHEMA.md", "timeline.md")]
+    rows = []
+    for page in sorted(pages):
+        level = page_field(page, "sensitivity") or "private"
+        if level == "personal":
+            level = "private"  # legacy value from pre-v73 compiles
+        rows.append((page, level))
+
+    sections = [
+        "<h1>Privacy Preview</h1>",
+        "<p><strong>Preview only — not a security boundary.</strong> The wiki you are "
+        "reading is permanently owner-only. Audience surfaces (public / friends / family) "
+        "will be generated later as separate, owner-reviewed builds; this page shows which "
+        "pages' material would be <em>eligible</em> for re-rendering into each build, based "
+        "on each page's sensitivity floor (the most sensitive source it cites). Unlabeled "
+        "sources default to <code>private</code>, so early numbers skew private — labels "
+        "accumulate as the weekly classifier suggests them and you confirm.</p>",
+    ]
+    for tier in tiers:
+        included = [(p_, lvl) for p_, lvl in rows if sensitivity_visible(lvl, tier)]
+        hidden = len(rows) - len(included)
+        sections.append(f"<h2>{tier.title()} build — {len(included)} page(s) eligible, {hidden} private to deeper tiers</h2>")
+        if included:
+            items = "".join(
+                f'<li><a href="/page/{quote(str(p_.relative_to(WIKI_DIR.parent)))}">{html.escape(page_title(p_))}</a>'
+                f' <small>({html.escape(lvl)})</small></li>'
+                for p_, lvl in included)
+            sections.append(f"<ul>{items}</ul>")
+        else:
+            sections.append("<p><em>Nothing eligible yet — label sources with --sensitivity, "
+                            "or confirm the classifier's suggestions, and floors will open up.</em></p>")
+    return "Privacy Preview", "".join(sections), False
+
+
 VIEWS = [
     # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
@@ -1020,6 +1062,7 @@ VIEWS = [
     ("coverage", "Coverage", view_coverage),
     ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
+    ("privacy", "Privacy Preview", view_privacy_preview),
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 
@@ -1036,6 +1079,7 @@ VIEW_DESCRIPTIONS = {
     "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
+    "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
 }
 

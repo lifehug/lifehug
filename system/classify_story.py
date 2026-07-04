@@ -260,6 +260,8 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
     }}
   ],
   "self_understanding_insights": ["list of patterns, beliefs, or values surfaced as plain strings"],
+  "suggested_sensitivity": "private|family|friends|public",
+  "sensitivity_reason": "string — one line on why",
   "scene_slots": {{
     "what_happened": true,
     "when_and_where": false,
@@ -286,6 +288,14 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 ### Guidelines
 - `people`: include every named or described person; estimate mention_count from how prominent they are
 - `themes`: use only themes from the provided taxonomy (add new ones only if truly missing)
+- `suggested_sensitivity`: the most-open audience tier this source could EVER be rendered for.
+  Taxonomy (default private when in doubt — the owner reviews before anything opens):
+  private = sexuality/intimacy; raw mental-health texture; active wounds involving living
+  people; other people's confided secrets; legal/deal specifics; anything a minor child
+  disclosed. family = financial specifics, health/body specifics, children's inner lives
+  (hard cap — never above family). friends = embarrassing-but-harmless stories, faith
+  struggles. public = the narrative arcs themselves (struggle-and-rebuild, scarcity-to-
+  success) told without the protected specifics.
 - `scene_slots`: which of McAdams' five scene slots this story already fills — what happened / when & where / who was there / what the author thought & felt / what it says about them
 - `situation_vs_story` (Gornick): situation = what happened; story = the insight, the thing the author has come to say. Tag which this source has.
 - `events`: every datable moment. NEVER convert to a year — record the author's own time words (`when_hint`) and the nearest landmark event (`anchor`). Relative anchors beat guessed dates.
@@ -483,6 +493,8 @@ def build_classification(
         "self_understanding_insights": ai_result.get("self_understanding_insights", []),
         # v70/v71: five-slot scene coverage, Gornick tag, and datable events
         # (relative anchors, never guessed years) for the timeline surface.
+        "suggested_sensitivity": ai_result.get("suggested_sensitivity", "private"),
+        "sensitivity_reason": ai_result.get("sensitivity_reason", ""),
         "scene_slots": ai_result.get("scene_slots", {}),
         "situation_vs_story": ai_result.get("situation_vs_story", ""),
         "events": ai_result.get("events", []),
