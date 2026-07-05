@@ -228,3 +228,13 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print("ok", name)
+
+
+def test_five_slots_match_classifier_schema_contract():
+    """book.FIVE_SLOTS must name the exact keys the classifier emits — a
+    mismatch silently reads as empty slots forever (the v76 audit found
+    when_where/meaning_for_self drift). Pin against the prompt schema."""
+    import book
+    prompt_src = (_REPO / "system" / "classify_story.py").read_text(encoding="utf-8")
+    for slot in book.FIVE_SLOTS:
+        assert f'"{slot}"' in prompt_src, f"book slot {slot!r} not in classifier schema"

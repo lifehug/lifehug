@@ -63,11 +63,11 @@ DEVELOPING = 0.40
 
 # The five-slot scene probe (McAdams via v70/research.md). A "deep" answer for
 # a memoir chapter fills all five; we count what fraction we have.
-FIVE_SLOTS = ("what_happened", "when_where", "who_was_there",
-              "thought_and_felt", "meaning_for_self")
-
-# Where an answer file lives on disk (mirrors lifehug_core layout).
-ANSWERS_DIR = _SYSTEM_DIR.parent / "answers"
+# NAMES MUST MATCH the classifier's scene_slots schema in classify_story.py —
+# a mismatch reads as permanently-empty slots (caught by the contract test in
+# tests/test_v75_book.py).
+FIVE_SLOTS = ("what_happened", "when_and_where", "who_was_there",
+              "thought_and_felt", "what_it_says_about_me")
 
 # Phase 2: word-count target per chapter is coarse on purpose. We anchor it to
 # the number of questions in the chapter (~350 words per answer's worth of
