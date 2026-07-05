@@ -159,14 +159,12 @@ def load_chapters() -> list[dict]:
 
 
 def align_chapters(chapters: list[dict], periods: list[dict],
-                   entity_placement: dict[str, str]) -> list[dict]:
-    """Best-effort chapter→period alignment so the owner's era names render
-    beside the system's periods. Two signals, in priority order:
-      1. a period NAME appearing in the chapter text ("high school era")
-      2. entities mentioned in the chapter whose dots were placed in a period
-         (majority vote over shared-source placement)
-    No signal → chapter aligns to nothing (rendered in sequence anyway); the
-    misalignment itself is feedback the owner can react to."""
+                   entity_placement: dict[str, str] | None = None) -> list[dict]:
+    """Conservative chapter→period alignment: ONLY a period NAME appearing in
+    the chapter text ("the high school era" → high-school). Entity-vote
+    alignment was tried and is too noisy — one era-spanning answer pollutes a
+    whole chapter's placement. Unaligned chapters simply stack in their own
+    order; absence of a band is honest, a wrong band is misleading."""
     period_names = {p["slug"]: p["name"].lower() for p in periods}
     aligned = []
     for chapter in chapters:
@@ -176,13 +174,6 @@ def align_chapters(chapters: list[dict], periods: list[dict],
             if name in body_lower:
                 match_slug = slug
                 break
-        if match_slug is None:
-            votes: dict[str, int] = {}
-            for entity_slug, period_slug in entity_placement.items():
-                if entity_slug.replace("-", " ") in body_lower:
-                    votes[period_slug] = votes.get(period_slug, 0) + 1
-            if votes:
-                match_slug = max(votes, key=lambda s: votes[s])
         aligned.append({**chapter, "aligned_period": match_slug})
     return aligned
 
@@ -372,9 +363,7 @@ def timeline_data() -> dict:
     events = load_events()
     event_lineup, unplaced_events = place_events(events, periods)
 
-    entity_placement = {row["slug"]: slug
-                        for slug, rows in entity_lineup.items() for row in rows}
-    chapters = align_chapters(load_chapters(), periods, entity_placement)
+    chapters = align_chapters(load_chapters(), periods)
     chapters_by_period: dict[str, list[dict]] = {}
     for chapter in chapters:
         if chapter.get("aligned_period"):

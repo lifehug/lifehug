@@ -1104,16 +1104,24 @@ def view_timeline():
                     f" <span class='tl-evidence'>({html.escape(evidence)})</span>{also}</span>")
             parts.append(f"<div class='tl-chips'>{''.join(chips)}</div>")
 
-        # Event dots.
-        for event in data["event_lineup"].get(slug, []):
+        # Event dots — dated first (the loader sorts undated last); beyond a
+        # visible cap the rest collapse so a rich period stays scannable.
+        events_here = data["event_lineup"].get(slug, [])
+
+        def _event_html(event):
             undated = "" if event["when_hint"] else " undated"
             when = (f"<strong>{html.escape(event['when_hint'])}</strong> — "
                     if event["when_hint"] else "<em>(undated)</em> — ")
             anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
                       if event["anchor"] else "")
-            parts.append(
-                f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}"
-                f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
+            return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}"
+                    f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
+
+        visible, overflow = events_here[:10], events_here[10:]
+        parts.extend(_event_html(e) for e in visible)
+        if overflow:
+            parts.append(f"<details><summary class='tl-evidence'>+ {len(overflow)} more moment(s)</summary>"
+                         + "".join(_event_html(e) for e in overflow) + "</details>")
 
         # Gap cards for this period.
         for gap in data["gaps_by_period"].get(slug, []):
