@@ -1009,11 +1009,20 @@ _TIMELINE_CSS = """<style>
 .tl { position: relative; margin: 1.5em 0 2em 0; padding-left: 34px; }
 .tl::before { content: ""; position: absolute; left: 11px; top: 0; bottom: 0;
   width: 2px; background: #987b55; opacity: .55; }
-.tl-period { position: relative; margin: 0 0 2.2em 0; }
+.tl-period { display: block; position: relative; margin: 0 0 1.1em 0; }
+.tl-period[open] { margin-bottom: 2.2em; }
 .tl-period::before { content: ""; position: absolute; left: -30px; top: .35em;
   width: 16px; height: 16px; border-radius: 50%; background: #6b5d49;
   border: 3px solid #fbfaf7; box-shadow: 0 0 0 2px #6b5d49; }
 .tl-period h2 { margin: 0 0 .1em 0; }
+.tl-period > summary { cursor: pointer; list-style: none; }
+.tl-period > summary::-webkit-details-marker { display: none; }
+.tl-period > summary h2 { display: inline; }
+.tl-period > summary h2::before { content: "▸"; display: inline-block;
+  margin-right: .35em; font-size: .8em; color: #987b55;
+  transition: transform .15s ease; }
+.tl-period[open] > summary h2::before { transform: rotate(90deg); }
+.tl-summary-counts { display: block; margin-left: 1.35em; }
 .tl-chapterband { display: inline-block; margin-left: .6em; padding: .1em .6em;
   border: 1px dashed #987b55; border-radius: 12px; color: #7c4f1d;
   font-size: .82em; background: #f8f3ea; }
@@ -1076,6 +1085,11 @@ def view_timeline():
              + (f" · {counts['events_unplaced'] + counts['entities_unplaced']} unplaced" 
                 if (counts['events_unplaced'] or counts['entities_unplaced']) else "")
              + "</p>",
+             "<p class='tl-evidence'>"
+             "<a href='#' onclick=\"document.querySelectorAll('details.tl-period')"
+             ".forEach(d=>d.open=true);return false\">expand all</a> · "
+             "<a href='#' onclick=\"document.querySelectorAll('details.tl-period')"
+             ".forEach(d=>d.open=false);return false\">collapse all</a></p>",
              "<div class='tl'>"]
 
     for period in periods:
@@ -1084,12 +1098,24 @@ def view_timeline():
         bands = "".join(
             f"<span class='tl-chapterband'>Ch.{c['number']} “{html.escape(c['title'])}”</span>"
             for c in data["chapters_by_period"].get(slug, []))
-        chrono_note = "" if period["chrono"] is not None else             " <span class='tl-evidence'>(no chronological order yet)</span>"
-        parts.append(f"<div class='tl-period'><h2>{title_html}{bands}</h2>"
-                     f"<div class='tl-evidence'>{len(period['sources'])} source(s){chrono_note}</div>")
+        chrono_note = "" if period["chrono"] is not None else             " (no chronological order yet)"
+
+        # Collapsed-row counts — the period stays informative while folded.
+        rows = data["entity_lineup"].get(slug, [])
+        events_here = data["event_lineup"].get(slug, [])
+        period_gaps = data["gaps_by_period"].get(slug, [])
+        summary_bits = [f"{len(period['sources'])} source(s)"]
+        if rows:
+            summary_bits.append(f"{len(rows)} connection(s)")
+        if events_here:
+            summary_bits.append(f"{len(events_here)} moment(s)")
+        if period_gaps:
+            summary_bits.append(f"◌ {len(period_gaps)} gap(s)")
+        parts.append(f"<details class='tl-period'><summary><h2>{title_html}{bands}</h2>"
+                     f"<span class='tl-evidence tl-summary-counts'>"
+                     f"{' · '.join(summary_bits)}{chrono_note}</span></summary>")
 
         # Entity chips — the graph lined up against this period.
-        rows = data["entity_lineup"].get(slug, [])
         if rows:
             chips = []
             for row in rows:
@@ -1106,8 +1132,6 @@ def view_timeline():
 
         # Event dots — dated first (the loader sorts undated last); beyond a
         # visible cap the rest collapse so a rich period stays scannable.
-        events_here = data["event_lineup"].get(slug, [])
-
         def _event_html(event):
             undated = "" if event["when_hint"] else " undated"
             when = (f"<strong>{html.escape(event['when_hint'])}</strong> — "
@@ -1124,11 +1148,11 @@ def view_timeline():
                          + "".join(_event_html(e) for e in overflow) + "</details>")
 
         # Gap cards for this period.
-        for gap in data["gaps_by_period"].get(slug, []):
+        for gap in period_gaps:
             hint = f" <span class='tl-evidence'>{html.escape(gap['hint'])}</span>" if gap.get("hint") else ""
             parts.append(f"<div class='tl-gap'>◌ {html.escape(gap['message'])}{hint}</div>")
 
-        parts.append("</div>")
+        parts.append("</details>")
     parts.append("</div>")
 
     # Unplaced bucket — never force what can't be proven.

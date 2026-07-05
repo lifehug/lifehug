@@ -439,7 +439,10 @@ build time, never at read time; everything unlabeled defaults to `private`.**
   onto time: chrono-ordered periods as the spine; people/places/objects/projects
   lined up by SOURCE OVERLAP with the shared sources shown as evidence; events
   as dated/undated dots; the owner's Life Chapters as a parallel band; gaps and
-  an unplaced bucket rendered explicitly. It is a validation surface — wrong
+  an unplaced bucket rendered explicitly. Periods render collapsed by default
+  (v80) — the folded row shows counts (sources · connections · moments · gaps);
+  click a period to expand its detail, or use expand all / collapse all.
+  It is a validation surface — wrong
   placements are feedback (fix via `lifehug.py fix` / scoped retraction).
   Keyless classification: `classify_story.py --from-response <json> --source
   <file> [--no-candidates]` (archive backfills suppress candidates).

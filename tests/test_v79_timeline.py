@@ -209,6 +209,19 @@ class ViewSmokeTests(TimelineFixture):
         self.assertIn("tl-gap", body)                    # gap cards
         self.assertFalse(wide)
 
+    def test_periods_are_collapsible(self):
+        sw = load("serve_wiki")
+        sys.modules["timeline"] = tl
+        _, body, _ = sw.view_timeline()
+        # v80: each period is a <details>, collapsed by default, with a
+        # counts line in the summary so the folded row stays informative.
+        self.assertIn("<details class='tl-period'>", body)
+        self.assertNotIn("<details class='tl-period' open", body)
+        self.assertIn("tl-summary-counts", body)
+        self.assertIn("moment(s)", body)
+        self.assertIn("expand all", body)
+        self.assertIn("collapse all", body)
+
     def test_view_renders_empty_tree(self):
         with tempfile.TemporaryDirectory() as empty:
             orig = tl.WIKI_DIR, tl.STATE_DIR, tl.MANUAL_SOURCES_DIR, tl.CLASSIFICATIONS_DIR
