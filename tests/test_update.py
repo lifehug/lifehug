@@ -104,6 +104,38 @@ class ApplyVersionTests(unittest.TestCase):
         self.assertEqual((self.tmp / "config.yaml").read_text(), "MY SECRETS — keep me")
         self.assertEqual((self.tmp / "README.md").read_text(), "MY PERSONAL README — keep me")
 
+    def test_apply_restores_exec_bit_on_new_and_existing_scripts(self):
+        # v84 fix: write_bytes creates NEW files as 0o644, so an executable
+        # framework script arriving via update lost its exec bit (seen live
+        # with file_answer_bg.sh landing as rw-r--r--). apply_version now
+        # mirrors the tag's git mode (100755 → chmod +x), repairing
+        # already-broken copies on the next apply too.
+        import os
+        framework_files = ["system/new_tool.sh", "system/old_tool.sh",
+                           "system/version.json"]
+        new_tool = self._write("system/new_tool.sh", "#!/bin/bash\necho new\n")
+        old_tool = self._write("system/old_tool.sh", "#!/bin/bash\necho old\n")
+        new_tool.chmod(0o755)
+        old_tool.chmod(0o755)
+        self._write("system/version.json",
+                    json.dumps({"version": 2, "framework_files": framework_files}) + "\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "v2")
+        self._git("tag", "-a", "v2", "-m", "v2")
+
+        # Stale checkout: new_tool.sh doesn't exist yet (the new-file case);
+        # old_tool.sh exists but lost its exec bit (the already-broken case).
+        new_tool.unlink()
+        old_tool.chmod(0o644)
+        self._write("system/version.json",
+                    json.dumps({"version": 1, "framework_files": framework_files}) + "\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "stale")
+
+        self.assertTrue(update.apply_version(2))
+        self.assertTrue(os.access(self.tmp / "system/new_tool.sh", os.X_OK))
+        self.assertTrue(os.access(self.tmp / "system/old_tool.sh", os.X_OK))
+
 
 if __name__ == "__main__":
     unittest.main()

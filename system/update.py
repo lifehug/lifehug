@@ -88,6 +88,20 @@ def read_repo_file_at(ref, filepath):
     return result.stdout  # bytes
 
 
+def repo_file_is_executable_at(ref, filepath):
+    """True if the file's git mode at the ref is executable (100755).
+    Path.write_bytes creates NEW files as 0o644, so without this the updater
+    ships executable framework scripts (e.g. file_answer_bg.sh) without their
+    exec bit. Returns False on any git error — mode sync is best-effort."""
+    result = subprocess.run(
+        ["git", "-C", str(REPO_DIR), "ls-tree", ref, "--", filepath],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    return result.stdout.split(None, 1)[0] == "100755"
+
+
 def is_protected(filepath):
     """True if filepath is user data the updater must never overwrite.
 
@@ -338,6 +352,8 @@ def apply_version(version):
             target = REPO_DIR / filepath
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
+            if repo_file_is_executable_at(tag, filepath):
+                target.chmod(target.stat().st_mode | 0o755)
             updated.append(filepath)
         except subprocess.CalledProcessError:
             print(f"  Warning: {filepath} not found in {tag}, skipping", file=sys.stderr)
