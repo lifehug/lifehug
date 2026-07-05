@@ -1005,6 +1005,80 @@ def view_graph():
     return ("Graph", _GRAPH_HTML, True)
 
 
+def view_artifacts():
+    """Artifacts view (v78) — every outputs/ piece, browsable: letters, posts,
+    captions, chapter drafts. Shows format, subject, version count, word count,
+    delivered/promoted state, and the latest version's full text inline (in a
+    collapsible block) since outputs/ lives outside the wiki page tree."""
+    import re as _re
+
+    from lifehug_core import REPO_DIR as _REPO  # noqa: PLC0415
+
+    outputs = _REPO / "outputs"
+    if not outputs.exists():
+        return ("Artifacts", "<h1>Artifacts</h1>" + _empty(
+            "No artifacts yet. Create one: <code>lifehug.py artifact new "
+            "--format letter --subject Mom</code>"), False)
+
+    rows = []
+    for art_dir in sorted(outputs.iterdir()):
+        if not art_dir.is_dir():
+            continue
+        meta_path = art_dir / "meta.yaml"
+        fmt = subject = created = ""
+        if meta_path.exists():
+            head = meta_path.read_text(errors="replace")
+            for key in ("format", "subject", "created"):
+                m = _re.search(rf"^{key}:\s*(.+)$", head, _re.MULTILINE)
+                if m:
+                    value = m.group(1).strip().strip("'\"")
+                    if key == "format":
+                        fmt = value
+                    elif key == "subject":
+                        subject = value
+                    else:
+                        created = value
+        versions = sorted(art_dir.glob("v*.md"),
+                          key=lambda q: int(_re.match(r"v(\d+)", q.stem).group(1))
+                          if _re.match(r"v(\d+)", q.stem) else 0)
+        if not versions and not meta_path.exists():
+            continue
+        latest = versions[-1] if versions else None
+        body = latest.read_text(errors="replace") if latest else ""
+        words = len(_re.findall(r"[\w'’-]+", body))
+        art_json = read_json(art_dir / "artifact.json", default={}) or {}
+        delivered = bool(art_json.get("delivered_at"))
+        promoted = bool(art_json.get("promotions"))
+        rows.append((art_dir.name, fmt, subject, created, len(versions),
+                     words, delivered, promoted, latest.name if latest else "", body))
+
+    if not rows:
+        return ("Artifacts", "<h1>Artifacts</h1>" + _empty("No artifacts yet."), False)
+
+    sections = ["<h1>Artifacts</h1>",
+                f"<p>{len(rows)} piece(s) in <code>outputs/</code> — the product payoff: "
+                "letters, posts, captions, chapter drafts.</p>"]
+    for (name, fmt, subject, created, n_versions, words,
+         delivered, promoted, latest_name, body) in rows:
+        badges = _badge(fmt or "?", "default")
+        if delivered:
+            badges += " " + _badge("delivered", "saturated")
+        if promoted:
+            badges += " " + _badge("promoted to source", "saturated")
+        meta_bits = [b for b in (subject and f"subject: {html.escape(subject)}",
+                                 created and f"created: {html.escape(created)}",
+                                 f"{n_versions} version(s)",
+                                 f"{words:,} words") if b]
+        sections.append(f"<h2>{html.escape(name)} {badges}</h2>")
+        sections.append(f"<p><small>{' · '.join(meta_bits)}</small></p>")
+        if body:
+            rendered = render_markdown(body)
+            sections.append(
+                f"<details><summary>Read {html.escape(latest_name)}</summary>"
+                f"<blockquote>{rendered}</blockquote></details>")
+    return "Artifacts", "".join(sections), False
+
+
 def view_privacy_preview():
     """Preview of the future audience BUILDS: which pages' material could be
     rendered into each tier's build, per page sensitivity floors. This is
@@ -1160,6 +1234,7 @@ VIEWS = [
     ("coverage", "Coverage", view_coverage),
     ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
+    ("artifacts", "Artifacts", view_artifacts),
     ("privacy", "Privacy Preview", view_privacy_preview),
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
@@ -1178,6 +1253,7 @@ VIEW_DESCRIPTIONS = {
     "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
+    "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — with format, versions, word count, delivered/promoted state, and the latest text readable inline. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
 }
