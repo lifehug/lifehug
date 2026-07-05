@@ -221,6 +221,10 @@ class ViewSmokeTests(TimelineFixture):
         self.assertIn("moment(s)", body)
         self.assertIn("expand all", body)
         self.assertIn("collapse all", body)
+        # v81: the unplaced bucket is collapsible too, and expand/collapse
+        # all reaches it.
+        self.assertIn("<details class='tl-unplaced'>", body)
+        self.assertIn("details.tl-period,details.tl-unplaced", body)
 
     def test_view_renders_empty_tree(self):
         with tempfile.TemporaryDirectory() as empty:

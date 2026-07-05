@@ -1009,20 +1009,27 @@ _TIMELINE_CSS = """<style>
 .tl { position: relative; margin: 1.5em 0 2em 0; padding-left: 34px; }
 .tl::before { content: ""; position: absolute; left: 11px; top: 0; bottom: 0;
   width: 2px; background: #987b55; opacity: .55; }
-.tl-period { display: block; position: relative; margin: 0 0 1.1em 0; }
+.tl-period { display: block; position: relative; margin: 0 0 10px 0; }
 .tl-period[open] { margin-bottom: 2.2em; }
-.tl-period::before { content: ""; position: absolute; left: -30px; top: .35em;
+.tl-period > summary::after { content: ""; position: absolute; left: -30px; top: 12px;
   width: 16px; height: 16px; border-radius: 50%; background: #6b5d49;
   border: 3px solid #fbfaf7; box-shadow: 0 0 0 2px #6b5d49; }
 .tl-period h2 { margin: 0 0 .1em 0; }
-.tl-period > summary { cursor: pointer; list-style: none; }
-.tl-period > summary::-webkit-details-marker { display: none; }
-.tl-period > summary h2 { display: inline; }
-.tl-period > summary h2::before { content: "▸"; display: inline-block;
-  margin-right: .35em; font-size: .8em; color: #987b55;
-  transition: transform .15s ease; }
-.tl-period[open] > summary h2::before { transform: rotate(90deg); }
-.tl-summary-counts { display: block; margin-left: 1.35em; }
+.tl-period > summary, .tl-unplaced > summary { cursor: pointer; list-style: none;
+  position: relative; display: flex; align-items: center; flex-wrap: wrap;
+  gap: 10px; padding: 10px 14px; background: #f4f0e8;
+  border: 1px solid #e5dfd5; border-radius: 8px; }
+.tl-period > summary:hover, .tl-unplaced > summary:hover { background: #ece5d8; }
+.tl-period > summary::-webkit-details-marker,
+.tl-unplaced > summary::-webkit-details-marker { display: none; }
+.tl-period > summary::before, .tl-unplaced > summary::before { content: "▸";
+  color: #9a8c75; font-size: 12px; flex: 0 0 auto; transition: transform .15s; }
+.tl-period[open] > summary::before, .tl-unplaced[open] > summary::before {
+  transform: rotate(90deg); }
+.tl-period > summary h2, .tl-unplaced > summary h2 { display: inline;
+  margin: 0; font-size: 1.05em; font-weight: 650; }
+.tl-period[open] > summary { margin-bottom: .5em; }
+.tl-summary-counts { margin-left: auto; text-align: right; }
 .tl-chapterband { display: inline-block; margin-left: .6em; padding: .1em .6em;
   border: 1px dashed #987b55; border-radius: 12px; color: #7c4f1d;
   font-size: .82em; background: #f8f3ea; }
@@ -1039,8 +1046,13 @@ _TIMELINE_CSS = """<style>
 .tl-chip { display: inline-block; margin: .15em .25em .15em 0; padding: .12em .55em;
   border-radius: 10px; font-size: .82em; background: #f4f0e8;
   border: 1px solid #e5dfd5; }
-.tl-unplaced { margin-top: 2em; padding: 1em; border: 1px dashed #d8c193;
-  border-radius: 10px; background: #fdf9f0; }
+.tl-unplaced { display: block; margin-top: 2em; padding: 0;
+  border: 1px dashed #d8c193; border-radius: 10px; background: #fdf9f0; }
+.tl-unplaced[open] { padding-bottom: .6em; }
+.tl-unplaced > summary { background: #f6ecd9; border: none; border-radius: 9px; }
+.tl-unplaced[open] > summary { border-radius: 9px 9px 0 0; margin-bottom: .3em; }
+.tl-unplaced > .tl-dot, .tl-unplaced > .tl-chips { margin-left: 14px;
+  margin-right: 14px; }
 .tl-foot { margin-top: 2em; color: #8a7a63; font-size: .88em;
   border-top: 1px solid #e5dfd5; padding-top: .8em; }
 </style>"""
@@ -1086,9 +1098,9 @@ def view_timeline():
                 if (counts['events_unplaced'] or counts['entities_unplaced']) else "")
              + "</p>",
              "<p class='tl-evidence'>"
-             "<a href='#' onclick=\"document.querySelectorAll('details.tl-period')"
+             "<a href='#' onclick=\"document.querySelectorAll('details.tl-period,details.tl-unplaced')"
              ".forEach(d=>d.open=true);return false\">expand all</a> · "
-             "<a href='#' onclick=\"document.querySelectorAll('details.tl-period')"
+             "<a href='#' onclick=\"document.querySelectorAll('details.tl-period,details.tl-unplaced')"
              ".forEach(d=>d.open=false);return false\">collapse all</a></p>",
              "<div class='tl'>"]
 
@@ -1157,7 +1169,15 @@ def view_timeline():
 
     # Unplaced bucket — never force what can't be proven.
     if data["unplaced_events"] or data["unplaced_entities"]:
-        parts.append("<div class='tl-unplaced'><h2>Unplaced — tell me where these belong</h2>")
+        unplaced_bits = []
+        if data["unplaced_events"]:
+            unplaced_bits.append(f"{len(data['unplaced_events'])} moment(s)")
+        if data["unplaced_entities"]:
+            unplaced_bits.append(f"{len(data['unplaced_entities'])} connection(s)")
+        parts.append("<details class='tl-unplaced'><summary>"
+                     "<h2>Unplaced — tell me where these belong</h2>"
+                     f"<span class='tl-evidence tl-summary-counts'>"
+                     f"{' · '.join(unplaced_bits)}</span></summary>")
         for event in data["unplaced_events"]:
             when = f"<strong>{html.escape(event['when_hint'])}</strong> — " if event["when_hint"] else ""
             parts.append(f"<div class='tl-dot undated' style='margin-left:0'>{when}"
@@ -1168,7 +1188,7 @@ def view_timeline():
                 f"<span class='tl-chip'>{link(row['title'], page_rel=row['page'])}</span>"
                 for row in data["unplaced_entities"])
             parts.append(f"<div class='tl-chips'>{chips}</div>")
-        parts.append("</div>")
+        parts.append("</details>")
 
     for gap in data["global_gaps"]:
         hint = f" <span class='tl-evidence'>{html.escape(gap['hint'])}</span>" if gap.get("hint") else ""
