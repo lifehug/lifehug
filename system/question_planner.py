@@ -68,6 +68,7 @@ SELF_FUNCTIONS = (
 # much weight objectives get. Overridable via planner_state["lane_policy"].
 DEFAULT_LANE_POLICY = {
     "self_floor_fraction": 0.08,   # ~1 self-knowledge slot per 12-question week
+    "chapter_boost_fraction": 0.15,  # v76: ~1-2 book chapter-gap slots per week
     "objective_boost": 2.5,        # multiplier on a question matching an objective
     "expansion_floor": 0.02,       # research-expansion residual when there's room
     "expansion_onset": 0.60,       # global fullness where expansion urgency starts
@@ -764,6 +765,25 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         record(weighted_pick(pool))
         self_taken += 1
 
+    # 1b) Chapter-gap boost (v76 phase 2) — reserve up to ~1 slot/week for the
+    # top unanswered question in a chapter that's close to READY. Filling a
+    # gap here actually tips a chapter over the READY line; without this
+    # boost those questions compete with random category picks and lose more
+    # than they should. Silent no-op when the book module is unavailable.
+    chapter_boost_taken = 0
+    chapter_boost_max = max(1, round(limit * policy.get("chapter_boost_fraction", 0.15)))
+    try:
+        import book as _book_mod  # noqa: PLC0415
+        _gap_ids = set(_book_mod.gap_question_ids(max_per_chapter=2))
+    except Exception:  # noqa: BLE001
+        _gap_ids = set()
+    while _gap_ids and chapter_boost_taken < chapter_boost_max and len(queue) < limit:
+        pool = [q for q in remaining if str(q.get("id")) in _gap_ids and eligible(q)]
+        if not pool:
+            break
+        record(weighted_pick(pool))
+        chapter_boost_taken += 1
+
     # 2) Weighted sampling for the rest, relaxing constraints only if stuck.
     while remaining and len(queue) < limit:
         pool = [q for q in remaining if eligible(q)]
@@ -809,6 +829,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
                 for fid, d in info.items()
             ],
             "self_floor": self_floor,
+            "chapter_boost": {"cap": chapter_boost_max, "taken": chapter_boost_taken},
             "expansion": {
                 "urgency": round(urgency, 3),
                 "recommended": urgency >= 0.5,

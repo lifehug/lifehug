@@ -58,9 +58,11 @@ class WikiViewsTests(unittest.TestCase):
             self.assertIn(label, menu)
 
     def test_menu_order(self):
+        # v75 inserts 'book' immediately after the system overview pair so the
+        # manuscript surface is one of the first things visible in the menu.
         order = [slug for slug, _, _ in serve_wiki.VIEWS]
         self.assertEqual(order, [
-            "status", "graph", "focuses", "recommendations",
+            "status", "graph", "book", "focuses", "recommendations",
             "question-bank", "candidates", "queue",
             "coverage", "entities", "sources", "privacy",
         ])

@@ -24,7 +24,7 @@
 ## 2. How People Write Life Stories
 
 ### 2a. Structure: hybrid thematic-chronological (unchanged from v1)
-Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. *(Book-level operationalization: chapter-readiness scoring, remaining #30 scope.)*
+Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. **[shipped v75/v76: book-status chapter map with readiness verdicts (scene-slot data), gap questions, milestone offers, planner chapter-gap boost]**
 
 ### 2b. McAdams — narrative identity (Life Story Interview II)
 - **Life chapters exercise**: "think of your life as a book — 2–7 chapters, give each a title, and say how we get from one to the next." The transition clause forces boundary articulation. **[shipped v71: `lifehug.py chapters-exercise`, re-run yearly]**

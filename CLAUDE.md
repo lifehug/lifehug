@@ -620,6 +620,33 @@ python3 system/compose.py --info outputs/title    # one output's history
 
 ---
 
+## Book Assembly (v75/v76)
+
+The manuscript surface: every Focus with a book-class deliverable becomes a
+**book**; each of its question categories becomes a **chapter** with an
+answered ratio, scene-slot depth (the classifier's five-slot data), a
+readiness verdict (EARLY / DEVELOPING / READY / SATURATED), and its top
+gap questions.
+
+```bash
+python3 system/lifehug.py book-status                  # the manuscript map
+python3 system/lifehug.py book-chapter <book> <cat>    # one chapter, deep view
+python3 system/lifehug.py book-offers [--send]         # pending READY nudges
+```
+
+- The local viewer has a matching **Book** view (`/views/book`).
+- **Milestone offers**: when an answer tips a chapter into READY,
+  `process-answer` sends a one-time Telegram nudge with the exact
+  `artifact new --format chapter` command (tracked in `state/book_offers.json`
+  — each crossing announces exactly once; drafted chapters never re-offer).
+- **Chapter-gap boost**: the weekly planner reserves ~1 slot/week
+  (`lane_policy.chapter_boost_fraction`) for the top unanswered question in a
+  near-READY chapter, so the queue actively pushes chapters over the line.
+- Drafts are matched from `outputs/` (chapter-format artifacts) into a
+  manuscript rollup: drafted/ready/total per book plus word count.
+- The owner's **Life Chapters** source (the annual `chapters-exercise`) is the
+  book's narrative spine; chapter categories map onto it during drafting.
+
 ## Nomenclature: the Life Graph
 
 The private wiki is a **graph of the author's life**. Standard terms:

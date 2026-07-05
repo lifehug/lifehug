@@ -293,6 +293,21 @@ def cmd_progress(_args: argparse.Namespace) -> int:
     return run_python("progress.py", [])
 
 
+def cmd_book_status(_args: argparse.Namespace) -> int:
+    import book  # noqa: PLC0415
+    return book.print_book_status()
+
+
+def cmd_book_chapter(args: argparse.Namespace) -> int:
+    import book  # noqa: PLC0415
+    return book.print_book_chapter(args.book, args.chapter)
+
+
+def cmd_book_offers(args: argparse.Namespace) -> int:
+    import book  # noqa: PLC0415
+    return book.print_book_offers(dry_run=not args.send)
+
+
 def cmd_quality_stats(_args: argparse.Namespace) -> int:
     return run_python("quality_profile.py", ["--show"])
 
@@ -1068,6 +1083,18 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Roadmap / Focus ---
     p = sub.add_parser("progress", help="Show progress toward deliverables (readiness dashboard)")
     p.set_defaults(func=cmd_progress)
+
+    p = sub.add_parser("book-status", help="Show book assembly: chapter list + readiness per book-project Focus")
+    p.set_defaults(func=cmd_book_status)
+
+    p = sub.add_parser("book-chapter", help="Show one chapter's readiness and top gap questions")
+    p.add_argument("book", help="Book id or slug (e.g. 'my-life' or 'etherfuse')")
+    p.add_argument("chapter", help="Chapter category id (e.g. 'A') or slug (e.g. 'origins')")
+    p.set_defaults(func=cmd_book_chapter)
+
+    p = sub.add_parser("book-offers", help="Preview (default) or fire chapter-ready Telegram offers")
+    p.add_argument("--send", action="store_true", help="Actually send + mark as offered (default is preview only)")
+    p.set_defaults(func=cmd_book_offers)
 
     p = sub.add_parser("quality-stats", help="Show answer quality profile")
     p.set_defaults(func=cmd_quality_stats)

@@ -120,6 +120,36 @@ def compile_wiki() -> None:
     )
 
 
+def maybe_send_chapter_ready_offer(answered_question_id: str) -> None:
+    """Phase 2: after an answer lands, if it just tipped a chapter into READY
+    (and we haven't offered that chapter before, and it isn't already drafted),
+    fire a one-time Telegram nudge with the artifact draft command inline.
+
+    Silent no-op on any failure (no Telegram credentials, book module missing,
+    schema surprise). This is delight, not infrastructure — never blocks capture.
+    """
+    try:
+        import book  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer", "chapter_ready_offer_import", exc,
+            context={"question_id": answered_question_id},
+        )
+        return
+    try:
+        rows = book.send_ready_offers()
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer", "chapter_ready_offer", exc,
+            context={"question_id": answered_question_id},
+        )
+        return
+    for row in rows:
+        if row.get("sent"):
+            print(f"✓ Chapter-ready offer sent: {row['book_label']} → "
+                  f"[{row['chapter_id']}] {row['chapter_name']}")
+
+
 def maybe_send_followup_question(answered_question_id: str) -> None:
     """Adaptive cadence: after an answer lands, offer the next question the
     same day (up to max_questions_per_day, default 3). Conversation, not
@@ -293,6 +323,11 @@ def main():
             exc,
             context={"question_id": question_id},
         )
+
+    # Phase 2 (v76): milestone chapter-ready offer. Fires at most once per
+    # (book, chapter) pair; process_answer never breaks if the module or the
+    # Telegram send fails — offers are delight, capture is infrastructure.
+    maybe_send_chapter_ready_offer(question_id)
 
     if args.commit or args.push:
         summary = args.summary or str(question["text"])[:64]

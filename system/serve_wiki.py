@@ -1047,10 +1047,108 @@ def view_privacy_preview():
     return "Privacy Preview", "".join(sections), False
 
 
+def view_book():
+    """Book Assembly view (v75) — a chapter map for every book-project Focus.
+
+    Each book gets a card: overall progress bar + a table of chapters with
+    answered ratio, scene-slot depth (McAdams 5-slot from classifications), a
+    verdict badge, and — for chapters not yet ready — the top few gap questions
+    to record next. When a chapter is READY, offers the artifact command that
+    would draft it. The point is a manuscript-shaped view of the archive, so
+    the flagship deliverable stops being an abstract goal.
+    """
+    try:
+        import book as book_mod  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        return ("Book Assembly",
+                f"<h1>Book Assembly</h1>{_empty(f'book module unavailable: {html.escape(str(exc))}')}",
+                False)
+    books = book_mod.compute_books()
+    if not books:
+        return ("Book Assembly",
+                "<h1>Book Assembly</h1>" + _empty(
+                    "No book-project Focuses yet. A Focus with "
+                    "<code>deliverable=book</code> produces a chapter list."),
+                False)
+
+    sections = ["<h1>Book Assembly</h1>"]
+    for b in books:
+        sat = float(b.get("saturation") or 0)
+        head_bar = _bar(sat,
+                        f"{b['answered_questions']}/{b['total_questions']} "
+                        f"answered · {_pct(sat)} · {b['chapters_ready']} of "
+                        f"{b['chapter_count']} chapters ready")
+        badges = _badge(b["verdict"], b["verdict"].lower())
+        if b.get("primary"):
+            badges = _badge("primary", "saturated") + " " + badges
+        # Phase 2: manuscript rollup on the header — words drafted vs. target.
+        drafted = int(b.get("drafted_words") or 0)
+        target = int(b.get("manuscript_target") or 0)
+        if drafted:
+            ms = (f"📄 {drafted:,}/{target:,} words drafted "
+                  f"({_pct(b.get('manuscript_ratio') or 0)})")
+        else:
+            ms = '<span class="muted">no drafts yet</span>'
+        sections.append(
+            '<div class="focus-row"><div class="focus-head">'
+            f'<span class="focus-label">📖 {html.escape(str(b.get("label", "")))}</span> {badges}</div>'
+            + head_bar
+            + f'<div class="focus-sub">{html.escape(str(b.get("objective", "")))} '
+            f'→ {html.escape(str(b.get("deliverable", "book")))} · {ms}</div></div>'
+        )
+        rows = []
+        for ch in b["chapters"]:
+            cid = html.escape(ch["category_id"])
+            name = html.escape(ch["category_name"])
+            hook = ch.get("manuscript_hook")
+            if hook:
+                name = f'<a href="/page/{quote(hook)}">{name}</a>'
+            if ch["scene_slots_total"]:
+                depth_cell = (f"{ch['scene_slots_filled']}/{ch['scene_slots_total']} "
+                              f"({_pct(ch['scene_slot_ratio'])})")
+            else:
+                depth_cell = '<span class="muted">—</span>'
+            gap_cell = "<span class='muted'>—</span>"
+            if ch["gap_questions"]:
+                bits = []
+                for gap in ch["gap_questions"][:3]:
+                    text = str(gap.get("text", ""))
+                    if len(text) > 90:
+                        text = text[:87] + "…"
+                    bits.append(f"<code>{html.escape(gap['id'])}</code> {html.escape(text)}")
+                gap_cell = "<br>".join(bits)
+            elif ch["ready_to_draft"]:
+                gap_cell = (f'<em>ready to draft — '
+                            f'<code>lifehug.py artifact new --format chapter '
+                            f'--subject "{html.escape(ch["category_name"])}" '
+                            f'--categories {cid}</code></em>')
+            # Phase 2: per-chapter draft column — word count of the latest
+            # chapter-format artifact whose meta.yaml lists this category.
+            if ch.get("has_draft"):
+                draft_cell = (f"📄 {int(ch.get('drafted_words') or 0):,} words "
+                              f"({_pct(ch.get('manuscript_ratio') or 0)})")
+            else:
+                draft_cell = '<span class="muted">—</span>'
+            rows.append([
+                cid,
+                name,
+                _bar(ch["saturation"], f"{ch['answered']}/{ch['total']} · {_pct(ch['saturation'])}"),
+                depth_cell,
+                draft_cell,
+                _badge(ch["verdict"], ch["verdict"].lower()),
+                gap_cell,
+            ])
+        sections.append(_table(["Cat", "Chapter", "Answered", "Scene depth", "Draft", "Verdict", "Next questions / draft"], rows))
+
+    return ("Book Assembly", "".join(sections), True)
+
+
 VIEWS = [
     # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
     ("graph", "Graph", view_graph),
+    # Book assembly — the flagship-deliverable surface.
+    ("book", "Book Assembly", view_book),
     # Focus block: focuses and their recommendations.
     ("focuses", "Focuses", view_focuses),
     ("recommendations", "Focus Recommendations", view_recommendations),
@@ -1071,6 +1169,7 @@ VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 # the <h1> so empty-state pages get it too.
 VIEW_DESCRIPTIONS = {
     "status": "A live snapshot of the whole system — one card per moving part of the Loop: what pass you're on, how much you've answered, how many candidates and sources are waiting, and whether the weekly queue is being delivered.",
+    "book": "The manuscript view. Every book-project Focus becomes a card; each of its question categories becomes a chapter with an answered ratio, a scene-depth score (McAdams' 5-slot probe from the classifier), a readiness verdict, and either the next few gap questions to record or the artifact command to draft it. This is the flagship deliverable made visible.",
     "focuses": "Everything you're deliberately building toward — people, themes, or books. Each bar shows how full a Focus is against its target (answered / target), its tier, and whether it's early, developing, ready to draft, or saturated.",
     "coverage": "How much of each question category you've answered. The bar and colour show your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+). Categories are sorted least-covered first, so the top of the list is where the story still needs you.",
     "graph": "Your life as a graph. Each node is a wiki page (people, places, periods, themes, Focuses); size reflects how many sources mention it and edges connect subjects that share sources. Click any node to open its page.",
