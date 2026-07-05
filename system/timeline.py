@@ -283,28 +283,92 @@ _PERIOD_KEYWORDS = {
 }
 
 
+_ERA_STOPWORDS = {
+    "the", "a", "an", "of", "in", "at", "to", "and", "or", "era", "years",
+    "year", "period", "time", "his", "her", "their", "my", "early", "late",
+    "mid", "days", "life", "stage", "approximately", "approx", "around",
+}
+
+
+def _era_tokens(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", text.lower())
+            if len(t) > 2 and t not in _ERA_STOPWORDS}
+
+
+def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str, set[str]]:
+    """Each period's era-language, LEARNED from the classifications of its own
+    member sources — the classifier described answers/H1.md with era 'founding
+    Etherfuse', and H1 belongs to a period page, so that period now understands
+    'founding'/'etherfuse'. Fully generic (no hardcoded user terms) and it gets
+    smarter as more sources classify."""
+    by_source: dict[str, set[str]] = {}
+    for event in events:
+        tokens = set()
+        for era in event["eras"]:
+            tokens |= _era_tokens(era)
+        if tokens:
+            by_source.setdefault(event["source"], set()).update(tokens)
+    vocab: dict[str, set[str]] = {}
+    for period in periods:
+        tokens = _era_tokens(period["name"])
+        for source in period["sources"]:
+            tokens |= by_source.get(source, set())
+        vocab[period["slug"]] = tokens
+    # Distinctiveness filter: a token appearing in several periods' vocabularies
+    # is era-ambiguous (an arc-spanning answer poisons every period that cites
+    # it) — only tokens UNIQUE to one period count as placement evidence.
+    token_owners: dict[str, int] = {}
+    for tokens in vocab.values():
+        for token in tokens:
+            token_owners[token] = token_owners.get(token, 0) + 1
+    for slug in vocab:
+        vocab[slug] = {t for t in vocab[slug] if token_owners[t] == 1}
+    return vocab
+
+
 def place_events(events: list[dict], periods: list[dict]) -> tuple[dict[str, list[dict]], list[dict]]:
     """({period_slug: [events...]}, unplaced). Placement order:
       1. the event's source answer appears in a period page's sources
-      2. the classification's era text (or the when_hint) matches period keywords
-      3. unplaced — an explicit bucket, never forced."""
+      2. the classification's era text (or the when_hint) matches static
+         period keywords
+      3. learned era-vocabulary overlap (each period's era-language derived
+         from its member sources' classifications) — best overlap of ≥2 tokens
+      4. unplaced — an explicit bucket, never forced."""
     placed: dict[str, list[dict]] = {p["slug"]: [] for p in periods}
     unplaced: list[dict] = []
-    for event in events:
-        slot = None
+    vocab = learned_era_vocabulary(periods, events)
+    def _keyword_slot(haystack: str) -> str | None:
         for period in periods:
-            if event["source"] in period["sources"]:
-                slot = period["slug"]
-                break
+            for keyword in _PERIOD_KEYWORDS.get(period["slug"], ()):
+                if keyword in haystack:
+                    return period["slug"]
+        return None
+
+    for event in events:
+        # 1) The event's OWN when_hint is the most specific signal — an
+        #    arc-spanning answer contributes events across many eras, so the
+        #    per-event time-words outrank the answer's period membership
+        #    ("a month before I graduated college" → college, even when the
+        #    source answer sits on the high-school page).
+        slot = _keyword_slot(event["when_hint"].lower()) if event["when_hint"] else None
+        # 2) Source membership: the answer belongs to a period page.
         if slot is None:
-            haystack = " ".join(event["eras"] + [event["when_hint"].lower()])
             for period in periods:
-                for keyword in _PERIOD_KEYWORDS.get(period["slug"], ()):
-                    if keyword in haystack:
-                        slot = period["slug"]
-                        break
-                if slot:
+                if event["source"] in period["sources"]:
+                    slot = period["slug"]
                     break
+        # 3) The classification's era text.
+        if slot is None:
+            slot = _keyword_slot(" ".join(event["eras"]))
+        # 4) Learned distinctive era-vocabulary (≥2 shared tokens).
+        if slot is None:
+            event_tokens = _era_tokens(" ".join(event["eras"] + [event["when_hint"].lower()]))
+            best_slug, best_overlap = None, 1
+            for period in periods:
+                overlap = len(event_tokens & vocab.get(period["slug"], set()))
+                if overlap > best_overlap:
+                    best_slug, best_overlap = period["slug"], overlap
+            slot = best_slug
         if slot is None:
             unplaced.append(event)
         else:
