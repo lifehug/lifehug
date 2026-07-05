@@ -237,6 +237,15 @@ If follow-up questions are already known, pass `--followup "question text"` for 
 
 The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki.
 
+**Chat / phone path (detached filing, v82/v83).** From a chat surface that must not block (wiki compile takes 30–90s and exceeds chat idle timeouts), do NOT run `process-answer` inline. Dispatch it detached, ack immediately, and end the turn — the script files the answer and sends its own Telegram confirmation when done (via `lifehug.py notify`, chunked; concurrent filings serialize on `state/.filing.lock`):
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | nohup bash system/file_answer_bg.sh {question_id} \
+  --source "telegram-voice" >/tmp/lifehug-file-{question_id}.log 2>&1 &
+```
+
+Set `TELEGRAM_CHAT_ID` (or legacy `LIFEHUG_CHAT_ID`) to steer the confirmation to the active chat; otherwise it goes to the configured `telegram_chat_id`/`group_chat_id`.
+
 Do not hand-edit old answer bodies to improve or revise history. New answer files use source metadata frontmatter:
 
 ```markdown
