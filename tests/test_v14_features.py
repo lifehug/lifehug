@@ -201,7 +201,7 @@ class ClassifyStoryTests(unittest.TestCase):
             mod.all_source_files = lambda: [Path("a.md"), Path("b.md"), Path("c.md")]
             mod.is_classified = lambda _path: False
 
-            def fake_classify(path, model, *, dry_run=False, verbose=False):
+            def fake_classify(path, model, *, dry_run=False, verbose=False, **_kwargs):
                 calls.append((path, model, dry_run, verbose))
                 return 0
 

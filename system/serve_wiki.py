@@ -1005,6 +1005,153 @@ def view_graph():
     return ("Graph", _GRAPH_HTML, True)
 
 
+_TIMELINE_CSS = """<style>
+.tl { position: relative; margin: 1.5em 0 2em 0; padding-left: 34px; }
+.tl::before { content: ""; position: absolute; left: 11px; top: 0; bottom: 0;
+  width: 2px; background: #987b55; opacity: .55; }
+.tl-period { position: relative; margin: 0 0 2.2em 0; }
+.tl-period::before { content: ""; position: absolute; left: -30px; top: .35em;
+  width: 16px; height: 16px; border-radius: 50%; background: #6b5d49;
+  border: 3px solid #fbfaf7; box-shadow: 0 0 0 2px #6b5d49; }
+.tl-period h2 { margin: 0 0 .1em 0; }
+.tl-chapterband { display: inline-block; margin-left: .6em; padding: .1em .6em;
+  border: 1px dashed #987b55; border-radius: 12px; color: #7c4f1d;
+  font-size: .82em; background: #f8f3ea; }
+.tl-dot { position: relative; margin: .55em 0 .55em 6px; padding: .45em .7em;
+  background: #fff; border: 1px solid #e5dfd5; border-radius: 8px; }
+.tl-dot::before { content: ""; position: absolute; left: -29px; top: .85em;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--dotc, #8a7a63); }
+.tl-dot.undated::before { background: #fff; border: 2px dashed #9a8c75;
+  width: 7px; height: 7px; }
+.tl-evidence { color: #8a7a63; font-size: .82em; }
+.tl-gap { margin: .55em 0 .55em 6px; padding: .5em .7em; border-radius: 8px;
+  background: #f6ecd9; border: 1px solid #d8c193; color: #8a6d3b; font-size: .9em; }
+.tl-chips { margin: .3em 0 .3em 6px; }
+.tl-chip { display: inline-block; margin: .15em .25em .15em 0; padding: .12em .55em;
+  border-radius: 10px; font-size: .82em; background: #f4f0e8;
+  border: 1px solid #e5dfd5; }
+.tl-unplaced { margin-top: 2em; padding: 1em; border: 1px dashed #d8c193;
+  border-radius: 10px; background: #fdf9f0; }
+.tl-foot { margin-top: 2em; color: #8a7a63; font-size: .88em;
+  border-top: 1px solid #e5dfd5; padding-top: .8em; }
+</style>"""
+
+_TL_TYPE_COLORS = {"person": "#7c4f1d", "place": "#8a7a3f",
+                   "object": "#8f6f3f", "project": "#3f8f6a"}
+
+
+def view_timeline():
+    """Timeline view (v79, #33) — the life graph projected onto time.
+
+    Vertical spine of chrono-ordered periods; entities lined up by SOURCE
+    OVERLAP (the shared source ids are shown as evidence); classifier events
+    as dated/undated dots; the owner's Life Chapters as a parallel band; gaps
+    rendered as first-class amber cards. Everything is a validation surface —
+    wrong placements are feedback, not failures."""
+    try:
+        import timeline as tl_mod  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        return ("Timeline", f"<h1>Timeline</h1>{_empty(f'timeline module unavailable: {html.escape(str(exc))}')}", False)
+
+    data = tl_mod.timeline_data()
+    periods = data["periods"]
+    if not periods:
+        return ("Timeline", "<h1>Timeline</h1>" + _empty(
+            "No period pages yet — periods graduate from mentions as answers "
+            "accumulate, and the timeline builds itself from them."), False)
+
+    index = page_index()
+
+    def link(title, page_rel=None, slug=None):
+        target = page_rel or (index.get(slug) if slug else None)
+        if target:
+            return f'<a href="/page/{quote(target)}">{html.escape(title)}</a>'
+        return f'<a href="/search?q={quote(title)}">{html.escape(title)}</a>'
+
+    counts = data["counts"]
+    parts = [_TIMELINE_CSS, "<h1>Timeline</h1>",
+             f"<p class='muted'>{counts['periods']} periods · "
+             f"{counts['entities_placed']} entities lined up · "
+             f"{counts['events_placed']} moments placed"
+             + (f" · {counts['events_unplaced'] + counts['entities_unplaced']} unplaced" 
+                if (counts['events_unplaced'] or counts['entities_unplaced']) else "")
+             + "</p>",
+             "<div class='tl'>"]
+
+    for period in periods:
+        slug = period["slug"]
+        title_html = link(period["name"], page_rel=period.get("page"))
+        bands = "".join(
+            f"<span class='tl-chapterband'>Ch.{c['number']} “{html.escape(c['title'])}”</span>"
+            for c in data["chapters_by_period"].get(slug, []))
+        chrono_note = "" if period["chrono"] is not None else             " <span class='tl-evidence'>(no chronological order yet)</span>"
+        parts.append(f"<div class='tl-period'><h2>{title_html}{bands}</h2>"
+                     f"<div class='tl-evidence'>{len(period['sources'])} source(s){chrono_note}</div>")
+
+        # Entity chips — the graph lined up against this period.
+        rows = data["entity_lineup"].get(slug, [])
+        if rows:
+            chips = []
+            for row in rows:
+                color = _TL_TYPE_COLORS.get(row["type"], "#8a7a63")
+                also = (f" <span class='tl-evidence'>also: "
+                        f"{', '.join(html.escape(a) for a in row['also_in'])}</span>"
+                        if row["also_in"] else "")
+                evidence = ", ".join(row["evidence"][:4])
+                chips.append(
+                    f"<span class='tl-chip' style='border-left:3px solid {color}'>"
+                    f"{link(row['title'], page_rel=row['page'])}"
+                    f" <span class='tl-evidence'>({html.escape(evidence)})</span>{also}</span>")
+            parts.append(f"<div class='tl-chips'>{''.join(chips)}</div>")
+
+        # Event dots.
+        for event in data["event_lineup"].get(slug, []):
+            undated = "" if event["when_hint"] else " undated"
+            when = (f"<strong>{html.escape(event['when_hint'])}</strong> — "
+                    if event["when_hint"] else "<em>(undated)</em> — ")
+            anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
+                      if event["anchor"] else "")
+            parts.append(
+                f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}"
+                f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
+
+        # Gap cards for this period.
+        for gap in data["gaps_by_period"].get(slug, []):
+            hint = f" <span class='tl-evidence'>{html.escape(gap['hint'])}</span>" if gap.get("hint") else ""
+            parts.append(f"<div class='tl-gap'>◌ {html.escape(gap['message'])}{hint}</div>")
+
+        parts.append("</div>")
+    parts.append("</div>")
+
+    # Unplaced bucket — never force what can't be proven.
+    if data["unplaced_events"] or data["unplaced_entities"]:
+        parts.append("<div class='tl-unplaced'><h2>Unplaced — tell me where these belong</h2>")
+        for event in data["unplaced_events"]:
+            when = f"<strong>{html.escape(event['when_hint'])}</strong> — " if event["when_hint"] else ""
+            parts.append(f"<div class='tl-dot undated' style='margin-left:0'>{when}"
+                         f"{html.escape(event['description'])}"
+                         f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
+        if data["unplaced_entities"]:
+            chips = "".join(
+                f"<span class='tl-chip'>{link(row['title'], page_rel=row['page'])}</span>"
+                for row in data["unplaced_entities"])
+            parts.append(f"<div class='tl-chips'>{chips}</div>")
+        parts.append("</div>")
+
+    for gap in data["global_gaps"]:
+        hint = f" <span class='tl-evidence'>{html.escape(gap['hint'])}</span>" if gap.get("hint") else ""
+        parts.append(f"<div class='tl-gap'>◌ {html.escape(gap['message'])}{hint}</div>")
+
+    parts.append(
+        "<div class='tl-foot'>This is what I currently understand of your chronology — "
+        "placements are proven by shared sources (shown in parentheses), never guessed. "
+        "See something wrong? <code>lifehug.py fix &lt;source&gt; --wrong … --right …</code> "
+        "or just tell the bot. Dates arrive as answers are classified — always your own "
+        "time-words and landmark anchors, never inferred years.</div>")
+
+    return "Timeline", "".join(parts), False
+
+
 def view_artifacts():
     """Artifacts view (v78) — every outputs/ piece, browsable: letters, posts,
     captions, chapter drafts. Shows format, subject, version count, word count,
@@ -1221,6 +1368,7 @@ VIEWS = [
     # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
     ("graph", "Graph", view_graph),
+    ("timeline", "Timeline", view_timeline),
     # Book assembly — the flagship-deliverable surface.
     ("book", "Book Assembly", view_book),
     # Focus block: focuses and their recommendations.
@@ -1253,6 +1401,7 @@ VIEW_DESCRIPTIONS = {
     "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
+    "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
     "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — with format, versions, word count, delivered/promoted state, and the latest text readable inline. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",

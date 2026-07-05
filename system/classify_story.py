@@ -586,8 +586,16 @@ def classify_file(
     *,
     dry_run: bool = False,
     verbose: bool = False,
+    skip_candidates: bool = False,
+    precomputed_result: dict | None = None,
 ) -> int:
-    """Classify a single source file. Returns 0 on success, 1 on error."""
+    """Classify a single source file. Returns 0 on success, 1 on error.
+
+    `precomputed_result` (keyless path, --from-response): an externally-produced
+    classification JSON that flows through the SAME validation/persistence as
+    the AI path. `skip_candidates` suppresses candidate-question generation —
+    used for archive backfills where hundreds of new candidates would flood
+    the review store without adding craft value."""
     if not source_path.exists():
         print(f"Error: file not found: {source_path}", file=sys.stderr)
         return 1
@@ -598,30 +606,32 @@ def classify_file(
         print(f"Warning: no story text found in {source_path}", file=sys.stderr)
         return 1
 
-    prompt = build_prompt(source_path, fm, story_text)
-
     if dry_run:
         clf_path = classification_path(source_path)
         print(f"[dry-run] would classify: {_relative_path(source_path)}")
         print(f"[dry-run] would call model: {model}")
         print(f"[dry-run] would write classification: {clf_path}")
-        print("[dry-run] would append candidate questions returned by the model")
+        if not skip_candidates:
+            print("[dry-run] would append candidate questions returned by the model")
         return 0
 
-    if verbose:
-        print(f"[verbose] calling model={model} for {source_path}")
-
-    try:
-        ai_result = classify_with_ai(prompt, model=model)
-    except Exception as exc:
-        print(f"Error: AI classification failed for {source_path}: {exc}", file=sys.stderr)
-        return 1
+    if precomputed_result is not None:
+        ai_result = precomputed_result
+    else:
+        prompt = build_prompt(source_path, fm, story_text)
+        if verbose:
+            print(f"[verbose] calling model={model} for {source_path}")
+        try:
+            ai_result = classify_with_ai(prompt, model=model)
+        except Exception as exc:
+            print(f"Error: AI classification failed for {source_path}: {exc}", file=sys.stderr)
+            return 1
 
     classified_at = now_utc()
 
     # Build candidate records
     store = load_candidate_store()
-    ai_questions = ai_result.get("candidate_questions", [])
+    ai_questions = [] if skip_candidates else ai_result.get("candidate_questions", [])
     new_candidates = build_candidates(ai_questions, source_path, store, classified_at)
 
     candidate_ids = [c["id"] for c in new_candidates]
@@ -656,6 +666,7 @@ def cmd_classify(args: argparse.Namespace) -> int:
         model,
         dry_run=args.dry_run,
         verbose=getattr(args, "verbose", False),
+        skip_candidates=getattr(args, "no_candidates", False),
     )
 
 
@@ -673,6 +684,29 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     prompt = build_prompt(source_path, fm, story_text)
     print(prompt)
     return 0
+
+
+def cmd_from_response(args: argparse.Namespace) -> int:
+    """Keyless ingest: a classification JSON produced externally (an agent as
+    the model) flows through the normal pipeline. Mirrors the entity_roster /
+    research_expand --from-response pattern."""
+    source_path = Path(args.source)
+    if not source_path.is_absolute():
+        source_path = REPO_DIR / source_path
+    response_path = Path(args.from_response)
+    try:
+        result = extract_json(response_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error: could not parse response JSON {response_path}: {exc}", file=sys.stderr)
+        return 1
+    return classify_file(
+        source_path,
+        model=args.model or "external-agent",
+        dry_run=args.dry_run,
+        verbose=getattr(args, "verbose", False),
+        skip_candidates=args.no_candidates,
+        precomputed_result=result,
+    )
 
 
 def cmd_classify_all(args: argparse.Namespace) -> int:
@@ -700,6 +734,7 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
             model,
             dry_run=args.dry_run,
             verbose=getattr(args, "verbose", False),
+            skip_candidates=getattr(args, "no_candidates", False),
         )
         if rc != 0:
             errors.append(str(source_path))
@@ -741,6 +776,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Batch classify source files.",
     )
+    mode.add_argument(
+        "--from-response",
+        metavar="RESPONSE_JSON",
+        help="Keyless: ingest an externally-produced classification JSON (requires --source).",
+    )
 
     parser.add_argument(
         "--unclassified",
@@ -763,6 +803,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Override the AI model (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
+        "--source",
+        metavar="SOURCE_PATH",
+        help="With --from-response: the source file the response classifies.",
+    )
+    parser.add_argument(
+        "--no-candidates",
+        action="store_true",
+        help="Skip candidate-question generation (archive backfills).",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Extra diagnostic output.",
@@ -779,6 +829,11 @@ def main() -> int:
         return cmd_classify(args)
     if args.prompt_file:
         return cmd_prompt(args)
+    if args.from_response:
+        if not args.source:
+            print("Error: --from-response requires --source <file>", file=sys.stderr)
+            return 1
+        return cmd_from_response(args)
     if args.classify_all:
         return cmd_classify_all(args)
 

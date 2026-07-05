@@ -434,7 +434,15 @@ build time, never at read time; everything unlabeled defaults to `private`.**
   capture-the-week question; replies ingest via `ingest-story`. The archive
   should know this year as well as it knows childhood.
 - **Timeline**: `wiki/timeline.md` compiles from classifier-extracted events
-  (author's own time words + landmark anchors — never inferred years).
+  (author's own time words + landmark anchors — never inferred years). The
+  **visual Timeline view** (`/views/timeline`, v79) is the life graph projected
+  onto time: chrono-ordered periods as the spine; people/places/objects/projects
+  lined up by SOURCE OVERLAP with the shared sources shown as evidence; events
+  as dated/undated dots; the owner's Life Chapters as a parallel band; gaps and
+  an unplaced bucket rendered explicitly. It is a validation surface — wrong
+  placements are feedback (fix via `lifehug.py fix` / scoped retraction).
+  Keyless classification: `classify_story.py --from-response <json> --source
+  <file> [--no-candidates]` (archive backfills suppress candidates).
 
 ## Focus Management
 
