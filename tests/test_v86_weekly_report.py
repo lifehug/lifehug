@@ -107,6 +107,18 @@ class SummaryContentTests(SummaryFixture):
         # Old classification/failure outside the window is excluded.
         self.assertNotIn("ancient failure", text)
 
+    def test_multiline_retry_noise_reduces_to_one_reason(self):
+        self.failures.insert(0, {
+            "recorded_at": FRESH, "component": "weekly_maintenance",
+            "operation": "classify_story",
+            "error": ("Classifying 5 source file(s)...\n[1/5] answers/G5C.md\n"
+                      "Error: AI classification failed for answers/G5C.md: timed out\n"
+                      "Error: timed out\nError: timed out\nretrying (2/3)..."),
+        })
+        text = wr.build_summary(SINCE, doctor_text="")
+        self.assertIn("✗ G5C — timed out", text)
+        self.assertNotIn("timed out Error: timed out", text)
+
     def test_errors_are_truncated_to_one_line(self):
         text = wr.build_summary(SINCE, doctor_text="")
         for line in text.splitlines():

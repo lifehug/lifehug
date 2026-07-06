@@ -66,13 +66,20 @@ def _one_line(text: str, limit: int = MAX_ERROR_CHARS) -> str:
 
 
 def _failure_label(row: dict) -> str:
-    """`answers/A1.md: Error ...` → `A1 — Error ...` (short, phone-sized)."""
+    """`answers/A1.md: Error ...` → `A1 — ...` (short, phone-sized).
+
+    The recorded error is often the step's ENTIRE captured output, including
+    retry noise — pick the single most informative line instead of squashing
+    everything together."""
     error = str(row.get("error", ""))
     m = re.search(r"([\w-]+)\.md", error)
     subject = m.group(1).upper() if m else str(row.get("operation", "step"))
-    reason = re.sub(r"^Error:\s*", "", error)
+    lines = [line.strip() for line in error.splitlines() if line.strip()]
+    marked = [line for line in lines if "Error" in line or "error:" in line.lower()]
+    line = marked[0] if marked else (lines[0] if lines else "")
+    reason = re.sub(r"^.*?Error:\s*", "", line)
     reason = re.sub(r"AI classification failed for \S+:\s*", "", reason)
-    return f"{subject} — {_one_line(reason)}"
+    return f"{subject} — {_one_line(reason or line)}"
 
 
 def classification_section(since: datetime) -> list[str]:
