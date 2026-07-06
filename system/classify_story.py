@@ -130,8 +130,19 @@ def load_source_text(source_path: Path) -> tuple[dict, str]:
     return fm, body
 
 
+# Longest suffix appended to a stem is ".response.json" (14 chars); capping at
+# 180 keeps every derived filename comfortably under the 255-byte filesystem
+# limit. Stems at or under the cap are byte-identical to their historical
+# values, so existing classification files keep matching.
+MAX_STEM_LEN = 180
+
+
 def classify_stem(source_path: Path) -> str:
-    """Return the stable classification file stem for a given source path."""
+    """Return the stable classification file stem for a given source path.
+
+    Over-long stems (retraction slugs embed the full question text and can
+    exceed the 255-byte filename limit by themselves) are truncated and made
+    unique with a stable hash of the full stem."""
     if not source_path.is_absolute():
         source_path = REPO_DIR / source_path
     try:
@@ -139,7 +150,13 @@ def classify_stem(source_path: Path) -> str:
         key = rel.with_suffix("").as_posix()
     except ValueError:
         key = source_path.stem
-    return slugify(key)
+    stem = slugify(key)
+    if len(stem) > MAX_STEM_LEN:
+        import hashlib  # noqa: PLC0415
+
+        digest = hashlib.sha256(stem.encode("utf-8")).hexdigest()[:12]
+        stem = f"{stem[:MAX_STEM_LEN].rstrip('-')}-{digest}"
+    return stem
 
 
 def classification_path(source_path: Path) -> Path:
