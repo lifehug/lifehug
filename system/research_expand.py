@@ -1039,14 +1039,17 @@ def find_relevant_answers(answers: list[dict], topic: str, max_answers: int = 8)
 def call_ai(prompt: str, model: str) -> str:
     """Call AI and return the response text.
 
-    Routing priority:
+    Routing (v85 — resilient, lifehug/lifehug#34):
       1. OpenClaw local gateway (no API key needed) — model remapped to
          openclaw/default so it uses whatever model OpenClaw has configured.
+         Transient failures (HTTP 5xx, timeouts, connection errors) are
+         retried up to 3 times. The gateway's 'Agent couldn't generate a
+         response' sentinel is DETERMINISTIC (its quality checker rejects
+         JSON-only output every time), so it is never retried.
       2. Anthropic SDK (needs ANTHROPIC_API_KEY or anthropic_api_key in
-         config.yaml) — used only when OpenClaw is not available.
-
-    Retries up to 3 times on transient failures (gateway returning
-    'Agent couldn\'t generate a response', HTTP 5xx, timeouts).
+         config.yaml) — the primary path when no gateway is configured, AND
+         the fall-through when the gateway fails and a key is available.
+         Without a key, the original gateway error is re-raised.
     """
     import os as _os  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
@@ -1068,6 +1071,7 @@ def call_ai(prompt: str, model: str) -> str:
     RETRY_DELAY = 10  # seconds between retries
 
     gw = _openclaw_gateway()
+    gateway_error: Exception | None = None
     if gw:
         import urllib.request  # noqa: PLC0415
         base_url, token = gw
@@ -1078,7 +1082,6 @@ def call_ai(prompt: str, model: str) -> str:
             "max_tokens": 4096,
         }).encode()
 
-        last_error = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 req = urllib.request.Request(
@@ -1092,26 +1095,30 @@ def call_ai(prompt: str, model: str) -> str:
                 with urllib.request.urlopen(req, timeout=_timeout) as resp:  # noqa: S310
                     result = json.loads(resp.read())
                 content = result["choices"][0]["message"]["content"]
-                # Check for the gateway's "couldn't generate" sentinel.
+                # The gateway's "couldn't generate" sentinel is deterministic
+                # (issue #34) -- retrying reproduces it; break straight to the
+                # SDK fall-through below.
                 if "Agent couldn\u2019t generate" in content or "Agent couldn't generate" in content:
-                    last_error = RuntimeError(content[:200])
-                    if attempt < MAX_RETRIES:
-                        print(f"  ↻ AI returned empty response, retrying ({attempt}/{MAX_RETRIES})...")
-                        _time.sleep(RETRY_DELAY)
-                        continue
-                    raise last_error
+                    gateway_error = RuntimeError(content[:200])
+                    break
                 return content
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
-                last_error = exc
+                gateway_error = exc
                 if attempt < MAX_RETRIES:
-                    print(f"  ↻ AI call failed ({exc}), retrying ({attempt}/{MAX_RETRIES})...")
+                    print(f"  ↻ gateway call failed ({exc}), retrying ({attempt}/{MAX_RETRIES})...")
                     _time.sleep(RETRY_DELAY)
-                    continue
-                raise
-        raise last_error  # should never reach here, but safety net
+        print(f"  ↻ gateway failed ({gateway_error}); falling through to Anthropic SDK...")
 
-    # Fallback: Anthropic SDK
-    client = get_client()
+    # Anthropic SDK — primary path without a gateway; fall-through when the
+    # gateway failed and a key is available. Without a key, surface the
+    # gateway error (it explains what actually happened) instead of the
+    # missing-key complaint.
+    try:
+        client = get_client()
+    except (RuntimeError, SystemExit):
+        if gateway_error is not None:
+            raise gateway_error from None
+        raise
     response = client.messages.create(
         model=model,
         max_tokens=4096,

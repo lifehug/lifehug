@@ -1,0 +1,132 @@
+"""v85 — resilient AI routing in call_ai (gateway → retry → SDK fall-through).
+
+Pins the behavior promised in issue #34's fix: the gateway's deterministic
+'Agent couldn't generate a response' sentinel is never retried and falls
+straight through to the Anthropic SDK; transient gateway failures retry up
+to 3 times, then fall through; without an API key, the original gateway
+error surfaces (not the missing-key complaint). Also pins the classifier
+default model on the current Sonnet alias.
+"""
+
+import importlib.util
+import io
+import json
+import sys
+import unittest
+import urllib.error
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+SYSTEM = ROOT / "system"
+sys.path.insert(0, str(SYSTEM))
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name, SYSTEM / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+rex = load("research_expand")
+
+SENTINEL = "⚠️ Agent couldn't generate a response."
+
+
+class _FakeResponse:
+    def __init__(self, content: str):
+        self._body = json.dumps(
+            {"choices": [{"message": {"content": content}}]}).encode()
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class _FakeSDKClient:
+    class _Messages:
+        def create(self, **kwargs):
+            block = mock.Mock()
+            block.text = "sdk says hi"
+            resp = mock.Mock()
+            resp.content = [block]
+            return resp
+
+    messages = _Messages()
+
+
+class CallAIRoutingTests(unittest.TestCase):
+    def setUp(self):
+        patches = [
+            mock.patch.object(rex, "_openclaw_gateway",
+                              return_value=("http://fake:1/v1", "tok")),
+            mock.patch("time.sleep"),
+            mock.patch.dict("os.environ", {"LIFEHUG_AI_TIMEOUT": "5"}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_sentinel_is_not_retried_and_falls_through_to_sdk(self):
+        with mock.patch("urllib.request.urlopen",
+                        return_value=_FakeResponse(SENTINEL)) as urlopen, \
+                mock.patch.object(rex, "get_client",
+                                  return_value=_FakeSDKClient()), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            result = rex.call_ai("prompt", "claude-sonnet-5")
+        self.assertEqual(result, "sdk says hi")
+        self.assertEqual(urlopen.call_count, 1)  # deterministic → no retries
+
+    def test_transient_failure_retries_then_falls_through(self):
+        err = urllib.error.URLError("boom")
+        with mock.patch("urllib.request.urlopen", side_effect=err) as urlopen, \
+                mock.patch.object(rex, "get_client",
+                                  return_value=_FakeSDKClient()), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            result = rex.call_ai("prompt", "claude-sonnet-5")
+        self.assertEqual(result, "sdk says hi")
+        self.assertEqual(urlopen.call_count, 3)  # transient → retried
+
+    def test_no_key_surfaces_gateway_error_not_missing_key(self):
+        with mock.patch("urllib.request.urlopen",
+                        return_value=_FakeResponse(SENTINEL)), \
+                mock.patch.object(rex, "get_client",
+                                  side_effect=RuntimeError("no key")), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                self.assertRaises(RuntimeError) as ctx:
+            rex.call_ai("prompt", "claude-sonnet-5")
+        self.assertIn("generate", str(ctx.exception))  # the gateway error
+
+    def test_gateway_success_never_touches_sdk(self):
+        with mock.patch("urllib.request.urlopen",
+                        return_value=_FakeResponse("gateway says hi")), \
+                mock.patch.object(rex, "get_client") as get_client:
+            result = rex.call_ai("prompt", "claude-sonnet-5")
+        self.assertEqual(result, "gateway says hi")
+        get_client.assert_not_called()
+
+    def test_no_gateway_uses_sdk_directly(self):
+        with mock.patch.object(rex, "_openclaw_gateway", return_value=None), \
+                mock.patch.object(rex, "get_client",
+                                  return_value=_FakeSDKClient()):
+            result = rex.call_ai("prompt", "claude-sonnet-5")
+        self.assertEqual(result, "sdk says hi")
+
+
+class DefaultModelTests(unittest.TestCase):
+    def test_classifier_default_is_current_sonnet(self):
+        # v85 reverted an unverified downgrade to claude-sonnet-4-6;
+        # claude-sonnet-5 is the active current Sonnet alias.
+        cls = load("classify_story")
+        self.assertEqual(cls.DEFAULT_MODEL, "claude-sonnet-5")
+
+
+if __name__ == "__main__":
+    unittest.main()

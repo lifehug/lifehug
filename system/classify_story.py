@@ -58,7 +58,11 @@ from lifehug_core import (
 # ── constants ─────────────────────────────────────────────────────────────────
 # Non-dated alias — tracks the current Sonnet tier instead of pinning a
 # snapshot that ages out. Override with `classify_model` in config.yaml.
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# claude-sonnet-5 is the current active Sonnet per Anthropic's model catalog;
+# a 2026-07-05 report of it 404ing could not be reproduced and is believed
+# misdiagnosed — if it recurs on an instance, set `classify_model:
+# claude-sonnet-4-6` in config.yaml and capture the actual error.
+DEFAULT_MODEL = "claude-sonnet-5"
 RESEARCH_FILE = SYSTEM_DIR / "research.md"
 
 # Taxonomy themes for the AI prompt

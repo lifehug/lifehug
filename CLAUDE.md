@@ -775,6 +775,14 @@ question_time: "09:00"
 channel: "telegram"
 ```
 
+Optional AI-call tuning (v85): `ai_timeout_seconds` (default 600; env override
+`LIFEHUG_AI_TIMEOUT`) bounds each gateway/SDK call, and `classify_model` /
+`research_model` override the classifier/expander model defaults. `call_ai`
+routes OpenClaw gateway → retries transient failures 3x → falls through to the
+Anthropic SDK when a key is available (the gateway's deterministic
+"couldn't generate" rejection, issue #34, skips retries and falls through
+immediately).
+
 ---
 
 ## Voice Messages
