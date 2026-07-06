@@ -310,6 +310,15 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     entity by marking every variant unqualified); `maps_to_focus` falls back to
     the previous value when the raw output drops it.
 
+    Exception — role-word promotion: when the previous canonical is a bare
+    role word (Brother, Friend, Son) and the raw entry supplies a proper name
+    for the same individual, the proper name WINS as canonical and the role
+    word demotes to an alias. A generic role word is a placeholder, not a
+    settled identity — locking it in forever would keep a real person
+    (e.g. AJ) buried under "Brother" no matter how much source material
+    names them. The slug changes with the name; cleanup_orphan_entity_pages
+    removes any stale role-word page on the next compile.
+
     Tradeoff: an intentional AI re-split of a previously merged entity is
     overridden. Splitting a wrongly merged entity requires hand-editing
     state/entity_rosters/<type>.json (remove the merged entry, then re-resolve).
@@ -342,8 +351,14 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         if prev is None:
             out.append(dict(e))
             continue
-        canonical = prev.get("name") or name
-        prev_slug = prev.get("slug") or slugify(canonical)
+        prev_name = (prev.get("name") or "").strip()
+        # Role-word promotion: a bare role-word canonical yields to a proper name.
+        promoted = (
+            prev_name.lower() in ROLE_WORDS
+            and name.lower() not in ROLE_WORDS
+        )
+        canonical = name if promoted else (prev_name or name)
+        prev_slug = prev.get("slug") or slugify(prev_name or canonical)
         slot = slots.get(prev_slug)
         if slot is None:
             slot = dict(e)
@@ -352,14 +367,18 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
             out.append(slot)
         else:
             # A second raw entry collapsed into an already-folded slot.
+            if promoted and str(slot.get("name", "")).strip().lower() in ROLE_WORDS:
+                slot["name"] = canonical  # the proper name upgrades the slot too
             slot["qualifies"] = bool(slot.get("qualifies")) or bool(e.get("qualifies"))
             if not slot.get("maps_to_focus"):
                 slot["maps_to_focus"] = e.get("maps_to_focus") or None
             forced += 1
-        # Union aliases: previous aliases + raw name/aliases, minus the canonical name.
+        canonical = str(slot.get("name") or canonical)
+        # Union aliases: previous name/aliases + raw name/aliases, minus the
+        # canonical name (a demoted role word survives here as an alias).
         seen = {canonical.strip().lower()}
         merged_aliases: list[str] = []
-        for alias in [*slot.get("aliases", []), *prev.get("aliases", []), name, *e.get("aliases", [])]:
+        for alias in [*slot.get("aliases", []), *prev.get("aliases", []), prev_name, name, *e.get("aliases", [])]:
             alias = str(alias or "").strip()
             if not alias or alias.lower() in seen:
                 continue
@@ -403,7 +422,10 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
             f"extending) its aliases and `maps_to_focus`, unless the material below clearly "
             f"shows two different {plural} were wrongly merged. Never re-split one "
             f"{entity_type} into multiple entries and never rename a previous entry to a "
-            "different `name`.",
+            "different `name` — with ONE exception: if a previous entry's `name` is a bare "
+            "kinship/role word (Brother, Friend, Son) and the material supplies that "
+            "person's proper name, use the proper name as `name` and keep the role word "
+            "in `aliases`. A role word is a placeholder, never a settled identity.",
         ]
     lines += [
         "",
@@ -420,9 +442,10 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
             "- People are often referred to BOTH by a kinship/role word (Mom, Dad, Grandma, "
             "Coach, Wife) and by a proper name. If a role word and a proper name appear in "
             "overlapping answers and plausibly refer to the same individual (e.g. 'Grandma' "
-            "and 'Betty Jo'), output ONE entry — the fullest natural name (or the previous "
-            "roster's name) as `name`, the role word and other variants in `aliases`. Never "
-            "emit both a role-word entry and a proper-name entry for the same individual.",
+            "and 'Betty Jo'), output ONE entry — the fullest proper name as `name` (even "
+            "when the previous roster used the bare role word), the role word and other "
+            "variants in `aliases`. Never emit both a role-word entry and a proper-name "
+            "entry for the same individual.",
         ]
     lines += [
         "",

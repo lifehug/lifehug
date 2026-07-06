@@ -392,18 +392,31 @@ def _build_entity_stats(
 
     # --- Classifications ---
     _OPPORTUNITY_BOOST = {"weak": 0.5, "moderate": 1.5, "strong": 3.0}
+
+    def _clf_name(item) -> str | None:
+        if isinstance(item, dict):
+            return (item.get("name") or "").strip() or None
+        if isinstance(item, str):
+            return item.strip() or None
+        return None
+
     for clf in classifications:
         qid = clf.get("question_id") or clf.get("answer_id")
+        if not qid and clf.get("source_path"):
+            # Classification files identify their source by path, not by id —
+            # without this, every classification-derived entity accrues zero
+            # unique_answers/cross_categories and never clears the roster gate.
+            qid = answer_id_from_filename(Path(clf["source_path"]))
         for person in clf.get("people", []):
-            name = person.get("name") or person if isinstance(person, str) else None
+            name = _clf_name(person)
             if name:
                 _record("person", name, qid, 0.5, f"Extracted from classification ({qid})")
         for place in clf.get("places", []):
-            name = place.get("name") or place if isinstance(place, str) else None
+            name = _clf_name(place)
             if name:
                 _record("place", name, qid, 0.0, f"Place from classification ({qid})")
         for theme in clf.get("themes", []):
-            name = theme.get("name") or theme if isinstance(theme, str) else None
+            name = _clf_name(theme)
             if name:
                 _record("theme", name, qid, 0.0, f"Theme from classification ({qid})")
         # The classifier's explicit Focus judgments — typed, with evidence
