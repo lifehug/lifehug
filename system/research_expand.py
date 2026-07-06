@@ -1063,7 +1063,20 @@ def call_ai(prompt: str, model: str) -> str:
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+        # Timeout: env override for one-off long jobs, config override, or 600s default.
+        import os as _os  # noqa: PLC0415
+        try:
+            _timeout = int(_os.environ.get("LIFEHUG_AI_TIMEOUT", "") or 0)
+        except ValueError:
+            _timeout = 0
+        if _timeout <= 0:
+            try:
+                from lifehug_core import load_config as _load_config  # noqa: PLC0415
+                _cfg = _load_config()
+                _timeout = int(_cfg.get("ai_timeout_seconds") or 600)
+            except Exception:  # noqa: BLE001
+                _timeout = 600
+        with urllib.request.urlopen(req, timeout=_timeout) as resp:  # noqa: S310
             result = json.loads(resp.read())
         return result["choices"][0]["message"]["content"]
 
