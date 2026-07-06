@@ -801,6 +801,10 @@ def create_linked_source(
         # suppress everywhere.
         metadata["retracts"] = target_record["source_id"]
         metadata["retracts_path"] = rel(target_path)
+        # Pin the CONTENT being retracted (v88): if the target's payload is
+        # later replaced (a mis-filed source swapped for a genuine one under
+        # the same id), the retraction stops applying automatically.
+        metadata["retracts_sha256"] = str(target_record.get("content_sha256", ""))
         metadata["suppress_on"] = suppress_on or []
     else:
         metadata["corrects"] = target_record["source_id"]
@@ -898,6 +902,36 @@ def cmd_retract(args: argparse.Namespace) -> int:
     return 0
 
 
+def unretract(retraction_path: Path, reason: str) -> None:
+    """Void a retraction: the compiler ignores it from the next compile on.
+    Additive in spirit — the record and its original reason are preserved for
+    the audit trail; only directive metadata (voided/voided_at/voided_reason)
+    is added. The retracted source resumes being asserted."""
+    content = retraction_path.read_text(encoding="utf-8", errors="replace")
+    metadata, payload = split_frontmatter(content)
+    if str(metadata.get("type", "")) != "source_retraction":
+        raise ValueError(f"not a retraction source: {rel(retraction_path)}")
+    if metadata.get("voided"):
+        raise ValueError(f"already voided: {rel(retraction_path)}")
+    metadata["voided"] = True
+    metadata["voided_at"] = now_utc()
+    metadata["voided_reason"] = reason
+    write_text(retraction_path, f"{format_frontmatter(metadata)}\n\n{payload.strip()}\n")
+    register_source(retraction_path)
+
+
+def cmd_unretract(args: argparse.Namespace) -> int:
+    path = resolve_source_target(args.retraction)
+    try:
+        unretract(path, args.reason or "unretracted")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"✓ Voided retraction: {rel(path)}")
+    print("  The retracted source resumes being asserted on the next compile.")
+    return 0
+
+
 def cmd_reflect(args: argparse.Namespace) -> int:
     body = sys.stdin.read().strip()
     if not body:
@@ -926,6 +960,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title", default=None)
     p.add_argument("--source", default="manual")
     p.set_defaults(func=cmd_retract)
+
+    p = sub.add_parser("unretract", help="Void a wrong retraction: the retracted source resumes being asserted")
+    p.add_argument("retraction", help="retraction source id or path under sources/corrections/")
+    p.add_argument("--reason", default=None, help="Why the retraction was wrong")
+    p.set_defaults(func=cmd_unretract)
 
     p = sub.add_parser("scan", help="Summarize raw source files")
     p.add_argument("--json", action="store_true")

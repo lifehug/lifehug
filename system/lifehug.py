@@ -645,6 +645,13 @@ def cmd_retract_source(args: argparse.Namespace) -> int:
     return run_python("source_integrity.py", flags)
 
 
+def cmd_unretract(args: argparse.Namespace) -> int:
+    flags = ["unretract", args.retraction]
+    if args.reason:
+        flags.extend(["--reason", args.reason])
+    return run_python("source_integrity.py", flags)
+
+
 def cmd_fix(args: argparse.Namespace) -> int:
     """One-line fact repair, phone-friendly (issue #24). Two modes:
     --right (with optional --wrong) files a CORRECTION that overrides the
@@ -1230,6 +1237,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-page", action="append", default=[], metavar="SLUG")
     p.add_argument("--title", default=None)
     p.set_defaults(func=cmd_retract_source)
+
+    p = sub.add_parser("unretract", help="Void a wrong retraction so the source is asserted again (v88)")
+    p.add_argument("retraction", help="Retraction file under sources/corrections/ (or its source id)")
+    p.add_argument("--reason", default=None, help="Why the retraction was wrong")
+    p.set_defaults(func=cmd_unretract)
 
     p = sub.add_parser("fix", help="One-line fact repair: --right files a correction, --retract suppresses the source")
     p.add_argument("target", help="source id or path, e.g. answers/A7.md or answer:A7")

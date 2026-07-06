@@ -288,7 +288,14 @@ python3 system/lifehug.py fix answers/{ID}.md --wrong "moved in 2006" --right "m
 python3 system/lifehug.py fix answers/{ID}.md --retract --reason "classifier inference, never happened"
 # scoped retraction — the mis-attribution case (source belongs on HER pages, not the author's):
 python3 system/lifehug.py fix answers/L20.md --retract --from-page childhood --reason "about Katie's childhood"
+# undo a WRONG retraction (v88) — the source resumes being asserted:
+python3 system/lifehug.py unretract sources/corrections/<retraction-file>.md --reason "why it was wrong"
 ```
+
+Retractions are **sha-pinned** (v88): they retract the *content* they were
+filed against, not the id forever — if the target file's payload is later
+replaced (e.g. a mis-filed source swapped for a genuine answer under the same
+question id), the retraction stops applying automatically.
 
 3. **Let the follow-up loop work**:
    - Do not manually append ad hoc follow-ups in normal operation.

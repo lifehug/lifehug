@@ -135,6 +135,7 @@ def read_answers() -> dict[str, dict]:
             "source": rel(path),
             "body": answer_body(text),
             "sensitivity": frontmatter_value(text, "sensitivity", "private"),
+            "content_sha256": frontmatter_value(text, "content_sha256", ""),
         }
     return answers
 
@@ -195,10 +196,14 @@ def read_manual_sources() -> dict[str, dict]:
             "body": body,
             "kind": kind,
             "witness": frontmatter_value(text, "witness", ""),
+            "witness_slug": frontmatter_value(text, "witness_slug", ""),
+            "content_sha256": frontmatter_value(text, "content_sha256", ""),
             "sensitivity": frontmatter_value(text, "sensitivity", "private"),
             "corrects": str(metadata.get("corrects", "") or ""),
             "retracts": str(metadata.get("retracts", "") or ""),
             "retracts_path": str(metadata.get("retracts_path", "") or ""),
+            "retracts_sha256": str(metadata.get("retracts_sha256", "") or ""),
+            "voided": bool(metadata.get("voided", False)),
             "corrects_path": str(metadata.get("corrects_path", "") or ""),
             "suppress_on": metadata.get("suppress_on", []) if isinstance(metadata.get("suppress_on"), list) else [],
             "source_trust": str(metadata.get("source_trust", "")),
@@ -274,7 +279,17 @@ def apply_corrections(answers: dict, manual_sources: dict, corrections: list[dic
 def _is_retracted(item: dict, slug: str) -> bool:
     item_ids = {str(item.get("id", "")), f"answer:{item.get('id', '')}", str(item.get("source", ""))}
     for retraction in _RETRACTIONS:
+        if retraction.get("voided"):
+            continue  # explicitly un-retracted (lifehug.py unretract)
         if not ({retraction.get("retracts", ""), retraction.get("retracts_path", "")} & item_ids):
+            continue
+        # Sha-pinned retraction (v88): it retracts the CONTENT it was filed
+        # against, not the id forever. If the target's payload has since been
+        # replaced (mis-filed source swapped for a genuine one under the same
+        # id), the retraction no longer applies.
+        pinned = retraction.get("retracts_sha256", "")
+        current = str(item.get("content_sha256", "") or "")
+        if pinned and current and pinned != current:
             continue
         scope = retraction.get("suppress_on") or []
         if not scope or slug in scope:
@@ -462,6 +477,31 @@ def scan_mentions(names, answers, manual_sources):
     return ranked(answers.values()), ranked(manual_sources.values())
 
 
+_ALIAS_STOPWORDS = {"the", "my", "our", "a", "an"}
+
+
+def _first_name_alias(title: str) -> str:
+    """'Charlee Joy Taylor' -> 'Charlee': a brand-new Focus has no roster
+    aliases until the monthly refresh, so derive the obvious one from the
+    title itself. Determiners and short tokens are skipped."""
+    first = title.split()[0] if title.split() else ""
+    if len(first) >= 3 and first.lower() not in _ALIAS_STOPWORDS and first != title:
+        return first
+    return ""
+
+
+def _witness_items(manual_sources, names):
+    """Witness accounts FROM a person are source material for that person's
+    page by definition (v88) — attach by witness_slug, never by name-mention
+    luck (a letter from Charlee may never say 'Charlee'). The witness slug is
+    usually the first name ('charlee'), so match it against every known name
+    for the page ('Charlee Joy Taylor', aliases, the first-name alias)."""
+    slugs = {slugify(n) for n in names if n}
+    return [s for s in manual_sources.values()
+            if s.get("kind") == "witness_account"
+            and s.get("witness_slug") and s.get("witness_slug") in slugs]
+
+
 def _focus_slugs(categories):
     return {
         slugify(clean_focus_name(info["name"]))
@@ -503,12 +543,23 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         # is what fills, e.g., an empty Dad Focus from his many cross-category
         # mentions. Focus *behavior* is unchanged — only the page's sources widen.
         names = [title] + sorted(n for n in alias_map.get(slug, set()) if n)
+        first_alias = _first_name_alias(title)
+        if first_alias and first_alias not in names:
+            names.append(first_alias)
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
+        # Retraction filter runs BEFORE the summary counts (v88) — the page
+        # banner must not claim prompts the compiler refuses to assert.
+        answer_items = [i for i in answer_items if not _is_retracted(i, slug)]
         cited_srcs = {a["source"] for a in answer_items}
-        extra_answers = [it for it in a_hits if it["source"] not in cited_srcs]
+        extra_answers = [it for it in a_hits if it["source"] not in cited_srcs
+                         and not _is_retracted(it, slug)]
         cited_items = answer_items + extra_answers
         src_srcs = {s["source"] for s in source_items}
         supporting_items = source_items + [it for it in m_hits if it["source"] not in src_srcs]
+        for wit in _witness_items(manual_sources, names):
+            if wit["source"] not in {s["source"] for s in supporting_items}:
+                supporting_items.append(wit)
+        supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
         sources = [x["source"] for x in cited_items] + [x["source"] for x in supporting_items]
 
         if answer_items and extra_answers:
@@ -555,6 +606,10 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
             continue  # a Focus owns it, or already emitted
         names = [ent.get("name", "")] + ent.get("aliases", [])
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
+        if entity_type == "person":
+            hit_srcs = {s["source"] for s in m_hits}
+            m_hits = m_hits + [w for w in _witness_items(manual_sources, names)
+                               if w["source"] not in hit_srcs]
         if len(a_hits) < _ENTITY_MIN_MENTIONS.get(entity_type, 1) and not m_hits:
             continue  # needs a few real mentions to be worth a page
         primary, supporting = split_primary_supporting(m_hits)
