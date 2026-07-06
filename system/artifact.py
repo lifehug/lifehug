@@ -295,6 +295,7 @@ def write_compose_meta(out_dir: Path, meta: dict) -> None:
         "title": meta["title"],
         "format": meta["format"],
         "subject": meta.get("subject", ""),
+        "occasion": meta.get("occasion", ""),
         "categories": meta.get("categories", []),
         "created": meta.get("created_at", now_utc())[:10],
         "versions": [

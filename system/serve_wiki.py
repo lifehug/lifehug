@@ -1204,11 +1204,42 @@ def view_timeline():
     return "Timeline", "".join(parts), False
 
 
+# Binary sidecar files inside an outputs/ folder that the viewer will link and
+# serve (via /artifact-file/); anything else stays invisible.
+ARTIFACT_ASSET_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+}
+
+# Format id -> the phrase used after an occasion ("Mother's Day letter").
+_FORMAT_PHRASES = {
+    "letter": "letter",
+    "unsent_letter": "unsent letter",
+    "legacy_letter": "legacy letter",
+    "tweet": "tweet",
+    "instagram": "Instagram caption",
+    "post": "post",
+    "chapter": "chapter draft",
+}
+
+
+def _artifact_title(slug: str, fmt: str, occasion: str) -> str:
+    """Human title: '<Occasion> <format phrase>' when an occasion is known,
+    else the de-slugged folder name ('my-katie' -> 'My Katie')."""
+    if occasion:
+        return f"{occasion} {_FORMAT_PHRASES.get(fmt, fmt or 'piece')}"
+    return " ".join(w.capitalize() for w in slug.split("-"))
+
+
 def view_artifacts():
-    """Artifacts view (v78) — every outputs/ piece, browsable: letters, posts,
-    captions, chapter drafts. Shows format, subject, version count, word count,
-    delivered/promoted state, and the latest version's full text inline (in a
-    collapsible block) since outputs/ lives outside the wiki page tree."""
+    """Artifacts view (v90) — outputs/ grouped by Focus, the same primitive the
+    roadmap plans by: each group is the person/project the pieces belong to
+    (resolved from the artifact's categories, subject as fallback). Occasions
+    (Mother's Day, birthdays) are badges, not groups. Metadata orphans land in
+    an Unfiled group with a repair hint; PDF/image sidecars are linked."""
     import re as _re
 
     from lifehug_core import REPO_DIR as _REPO  # noqa: PLC0415
@@ -1219,24 +1250,35 @@ def view_artifacts():
             "No artifacts yet. Create one: <code>lifehug.py artifact new "
             "--format letter --subject Mom</code>"), False)
 
-    rows = []
+    roadmap_data = load_roadmap()
+    if not roadmap_data.get("focuses"):
+        try:
+            roadmap_data = rebuild_roadmap(write=False)
+        except Exception:
+            roadmap_data = {"focuses": []}
+    focuses = roadmap_data.get("focuses", [])
+    cat_to_focus = {c: f for f in focuses for c in f.get("categories", [])}
+    label_to_focus = {str(f.get("label", "")).lower(): f for f in focuses}
+
+    arts = []
     for art_dir in sorted(outputs.iterdir()):
         if not art_dir.is_dir():
             continue
         meta_path = art_dir / "meta.yaml"
-        fmt = subject = created = ""
+        fmt = subject = created = occasion = ""
+        categories: list[str] = []
         if meta_path.exists():
             head = meta_path.read_text(errors="replace")
-            for key in ("format", "subject", "created"):
-                m = _re.search(rf"^{key}:\s*(.+)$", head, _re.MULTILINE)
-                if m:
-                    value = m.group(1).strip().strip("'\"")
-                    if key == "format":
-                        fmt = value
-                    elif key == "subject":
-                        subject = value
-                    else:
-                        created = value
+
+            def _field(key, _head=head):
+                m = _re.search(rf"^{key}:\s*(.+)$", _head, _re.MULTILINE)
+                return m.group(1).strip().strip("'\"") if m else ""
+
+            fmt, subject, created, occasion = (
+                _field(k) for k in ("format", "subject", "created", "occasion"))
+            m = _re.search(r"^categories:\s*\[(.*?)\]", head, _re.MULTILINE)
+            if m:
+                categories = [c.strip().strip("'\"") for c in m.group(1).split(",") if c.strip()]
         versions = sorted(art_dir.glob("v*.md"),
                           key=lambda q: int(_re.match(r"v(\d+)", q.stem).group(1))
                           if _re.match(r"v(\d+)", q.stem) else 0)
@@ -1244,37 +1286,90 @@ def view_artifacts():
             continue
         latest = versions[-1] if versions else None
         body = latest.read_text(errors="replace") if latest else ""
-        words = len(_re.findall(r"[\w'’-]+", body))
         art_json = read_json(art_dir / "artifact.json", default={}) or {}
-        delivered = bool(art_json.get("delivered_at"))
-        promoted = bool(art_json.get("promotions"))
-        rows.append((art_dir.name, fmt, subject, created, len(versions),
-                     words, delivered, promoted, latest.name if latest else "", body))
+        occasion = occasion or str(art_json.get("occasion") or "")
+        focus = next((cat_to_focus[c] for c in categories if c in cat_to_focus), None)
+        if focus is None and subject:
+            focus = label_to_focus.get(subject.lower())
+        arts.append({
+            "slug": art_dir.name, "fmt": fmt, "subject": subject,
+            "created": created, "occasion": occasion, "focus": focus,
+            "n_versions": len(versions),
+            "words": len(_re.findall(r"[\w'’-]+", body)),
+            "delivered": bool(art_json.get("delivered_at")),
+            "promoted": bool(art_json.get("promoted_sources")),
+            "latest_name": latest.name if latest else "", "body": body,
+            "assets": sorted(p.name for p in art_dir.iterdir()
+                             if p.is_file() and p.suffix.lower() in ARTIFACT_ASSET_TYPES),
+        })
 
-    if not rows:
+    if not arts:
         return ("Artifacts", "<h1>Artifacts</h1>" + _empty("No artifacts yet."), False)
 
+    groups: dict[str, list[dict]] = {}
+    for art in arts:
+        key = art["focus"]["id"] if art["focus"] else "__unfiled__"
+        groups.setdefault(key, []).append(art)
+    # Focus groups by most-recent artifact first; Unfiled always last.
+    ordered = sorted((kv for kv in groups.items() if kv[0] != "__unfiled__"),
+                     key=lambda kv: max(a["created"] for a in kv[1]), reverse=True)
+    if "__unfiled__" in groups:
+        ordered.append(("__unfiled__", groups["__unfiled__"]))
+
     sections = ["<h1>Artifacts</h1>",
-                f"<p>{len(rows)} piece(s) in <code>outputs/</code> — the product payoff: "
-                "letters, posts, captions, chapter drafts.</p>"]
-    for (name, fmt, subject, created, n_versions, words,
-         delivered, promoted, latest_name, body) in rows:
-        badges = _badge(fmt or "?", "default")
-        if delivered:
-            badges += " " + _badge("delivered", "saturated")
-        if promoted:
-            badges += " " + _badge("promoted to source", "saturated")
-        meta_bits = [b for b in (subject and f"subject: {html.escape(subject)}",
-                                 created and f"created: {html.escape(created)}",
-                                 f"{n_versions} version(s)",
-                                 f"{words:,} words") if b]
-        sections.append(f"<h2>{html.escape(name)} {badges}</h2>")
-        sections.append(f"<p><small>{' · '.join(meta_bits)}</small></p>")
-        if body:
-            rendered = render_markdown(body)
+                f"<p>{len(arts)} piece(s) in <code>outputs/</code>, grouped by Focus — "
+                "the product payoff: letters, posts, captions, chapter drafts.</p>"]
+    for _key, items in ordered:
+        items.sort(key=lambda a: (a["created"], a["slug"]), reverse=True)
+        focus = items[0]["focus"]
+        if focus:
+            label = str(focus.get("label", "?"))
+            head = label
+            if focus.get("type") == "person":
+                # Distinct given names from the artifacts themselves ("Mom (Desi)").
+                names = sorted({a["subject"].strip().title() for a in items
+                                if a["subject"].strip()
+                                and a["subject"].strip().lower() != label.lower()})
+                if names:
+                    head = f"{label} ({', '.join(names)})"
+            head = html.escape(head)
+            node = focus.get("wiki_node")
+            if node:
+                head = f'<a href="/page/{quote(str(node))}">{head}</a>'
+            sub = (f"{len(items)} piece(s) · {focus.get('type', '?')} "
+                   f"· → {focus.get('deliverable', '-')} "
+                   f"· categories {','.join(focus.get('categories', []))}")
+            sections.append(f"<h2>{head}</h2><p><small>{html.escape(sub)}</small></p>")
+        else:
             sections.append(
-                f"<details><summary>Read {html.escape(latest_name)}</summary>"
-                f"<blockquote>{rendered}</blockquote></details>")
+                "<h2>Unfiled</h2><p><small>"
+                f"{len(items)} piece(s) with no matching Focus — add "
+                "<code>subject:</code> / <code>categories:</code> to the folder's "
+                "<code>meta.yaml</code> to file them.</small></p>")
+        for a in items:
+            badges = _badge(a["fmt"] or "?", "default")
+            if a["occasion"]:
+                badges += " " + _badge(a["occasion"], "yellow")
+            if a["delivered"]:
+                badges += " " + _badge("delivered", "saturated")
+            if a["promoted"]:
+                badges += " " + _badge("promoted to source", "saturated")
+            title = _artifact_title(a["slug"], a["fmt"], a["occasion"])
+            meta_bits = [b for b in (
+                a["created"] and f"created: {html.escape(a['created'])}",
+                f"{a['n_versions']} version(s)",
+                f"{a['words']:,} words",
+                f"<code>{html.escape(a['slug'])}</code>") if b]
+            meta_bits += [
+                f'<a href="/artifact-file/{quote(a["slug"])}/{quote(n)}">{html.escape(n)}</a>'
+                for n in a["assets"]]
+            sections.append(f"<h3>{html.escape(title)} {badges}</h3>")
+            sections.append(f"<p><small>{' · '.join(meta_bits)}</small></p>")
+            if a["body"]:
+                rendered = render_markdown(a["body"])
+                sections.append(
+                    f"<details><summary>Read {html.escape(a['latest_name'])}</summary>"
+                    f"<blockquote>{rendered}</blockquote></details>")
     return "Artifacts", "".join(sections), False
 
 
@@ -1480,7 +1575,7 @@ VIEW_DESCRIPTIONS = {
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
-    "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — with format, versions, word count, delivered/promoted state, and the latest text readable inline. This is where the archive becomes things you can actually give, post, or publish.",
+    "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — grouped by the Focus it belongs to (the person or project, resolved from the artifact's categories), with occasions like Mother's Day as badges, versions, word count, delivered/promoted state, linked PDFs, and the latest text readable inline. Pieces missing metadata land in Unfiled with a repair hint. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
@@ -1541,6 +1636,29 @@ class Handler(BaseHTTPRequestHandler):
             title = "Search"
             body = f"<h1>Search</h1><p>{len(rows)} result(s)</p><ul>{''.join(rows)}</ul>"
             self.send_html(title, body)
+            return
+
+        if parsed.path.startswith("/artifact-file/"):
+            # Binary sidecars (PDFs, images) inside outputs/<slug>/ — the
+            # Artifacts view links them here since outputs/ lives outside the
+            # wiki page tree. Allowlisted extensions only.
+            from lifehug_core import REPO_DIR as _REPO  # noqa: PLC0415
+            rel = Path(unquote(parsed.path[len("/artifact-file/"):]))
+            if rel.is_absolute() or ".." in rel.parts or len(rel.parts) != 2:
+                self.send_html("Invalid path", "<h1>Invalid path</h1>", status=400)
+                return
+            outputs_root = (_REPO / "outputs").resolve()
+            target = _REPO / "outputs" / rel
+            ctype = ARTIFACT_ASSET_TYPES.get(target.suffix.lower())
+            if not ctype or not target.is_file() or outputs_root not in target.resolve().parents:
+                self.send_html("Not found", "<h1>Not found</h1>", status=404)
+                return
+            payload = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
             return
 
         if parsed.path == "/views/graph.json":

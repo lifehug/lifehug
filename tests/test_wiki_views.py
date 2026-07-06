@@ -13,6 +13,7 @@ sys.path.insert(0, str(SYSTEM))
 import serve_wiki  # noqa: E402
 import roadmap  # noqa: E402
 import entity_roster  # noqa: E402
+import lifehug_core  # noqa: E402
 
 
 class WikiViewsTests(unittest.TestCase):
@@ -33,6 +34,7 @@ class WikiViewsTests(unittest.TestCase):
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (entity_roster, "ENTITY_DIR"): entity_roster.ENTITY_DIR,
+            (lifehug_core, "REPO_DIR"): lifehug_core.REPO_DIR,
         }
 
     def tearDown(self):
@@ -95,6 +97,7 @@ class WikiViewsTests(unittest.TestCase):
             setattr(mod, name, self.tmp / "missing.json")
         serve_wiki.WIKI_DIR = self.tmp / "no-wiki"
         entity_roster.ENTITY_DIR = self.tmp / "no-rosters"
+        lifehug_core.REPO_DIR = self.tmp / "no-repo"  # no outputs/ either
         for slug, _, fn in serve_wiki.VIEWS:
             title, body, wide = fn()
             self.assertTrue(body, slug)
@@ -277,6 +280,78 @@ class WikiViewsTests(unittest.TestCase):
         # Candidate pipeline breakdown and detail-view links were removed.
         self.assertNotIn("Candidate pipeline", body)
         self.assertNotIn("Detail views", body)
+
+    # --- artifacts view (v90: grouped by Focus) ---
+
+    def _populate_artifacts(self):
+        roadmap.ROADMAP_FILE = self._write("roadmap.json", {"version": 1, "focuses": [
+            {"id": "mom", "label": "Mom", "type": "person", "tier": "standard",
+             "objective": "story of Mom", "deliverable": "letter", "categories": ["K"],
+             "target_depth": 22, "phase": "active", "wiki_node": "wiki/people/mom.md"},
+            {"id": "katie", "label": "Katie", "type": "person", "tier": "standard",
+             "objective": "story of Katie", "deliverable": "letter", "categories": ["L"],
+             "target_depth": 21, "phase": "active", "wiki_node": None}]})
+        out = self.tmp / "outputs"
+        self._write("outputs/mothers-day-letter-desi/meta.yaml",
+                    "title: mothers-day-letter-desi\nformat: letter\nsubject: desi\n"
+                    "occasion: Mother's Day\ncategories: [K]\ncreated: 2026-05-08\n")
+        self._write("outputs/mothers-day-letter-desi/v1.md", "Dear Mom, thank you.\n")
+        self._write("outputs/my-katie/meta.yaml",
+                    "title: my-katie\nformat: letter\nsubject: katie\n"
+                    "categories: [L]\ncreated: 2026-06-25\n")
+        self._write("outputs/my-katie/v1.md", "Katie, my love.\n")
+        (out / "my-katie" / "v1.pdf").write_bytes(b"%PDF-1.4 fake")
+        self._write("outputs/my-katie/artifact.json", {
+            "delivered_at": "2026-06-26T00:00:00Z",
+            "promoted_sources": [{"kind": "final", "path": "sources/artifacts/x.md"}]})
+        self._write("outputs/orphan-piece/v1.md", "No metadata here.\n")
+        lifehug_core.REPO_DIR = self.tmp
+        return out
+
+    def test_artifacts_grouped_by_focus(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("artifacts")
+        # Person groups: subject name appended when it differs from the label.
+        self.assertIn("Mom (Desi)", body)
+        self.assertIn("<h2>Katie</h2>", body)
+        # Focus with a wiki node links to it.
+        self.assertIn('href="/page/wiki/people/mom.md"', body)
+        # Katie's piece is newer (2026-06-25) -> her group comes first.
+        self.assertLess(body.index("<h2>Katie</h2>"), body.index("Mom (Desi)"))
+        # Humanized titles, not slugs, in the headings.
+        self.assertIn("Mother&#x27;s Day letter", body)
+        self.assertIn("<h3>My Katie", body)
+
+    def test_artifacts_badges_and_assets(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("artifacts")
+        # Occasion is a badge, never a group.
+        self.assertIn(">Mother&#x27;s Day</span>", body)
+        self.assertNotIn("<h2>Mother", body)
+        # delivered + promoted badges read the fields artifact.py actually
+        # writes (promoted_sources — the old view read a never-written key).
+        self.assertIn("delivered", body)
+        self.assertIn("promoted to source", body)
+        # The PDF sidecar is linked through the /artifact-file/ route.
+        self.assertIn('href="/artifact-file/my-katie/v1.pdf"', body)
+
+    def test_artifacts_unfiled_group_last_with_hint(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("artifacts")
+        self.assertIn("<h2>Unfiled</h2>", body)
+        self.assertIn("meta.yaml", body)  # repair hint
+        self.assertLess(body.index("<h2>Katie</h2>"), body.index("<h2>Unfiled</h2>"))
+        self.assertLess(body.index("Mom (Desi)"), body.index("<h2>Unfiled</h2>"))
+
+    def test_artifacts_safe_without_roadmap(self):
+        # Artifacts exist but roadmap.json is missing and the question bank is
+        # empty -> everything lands in Unfiled, nothing raises.
+        self._populate_artifacts()
+        roadmap.ROADMAP_FILE = self.tmp / "missing-roadmap.json"
+        roadmap.QUESTIONS_FILE = self.tmp / "missing-bank.md"
+        _, body, _ = self._view("artifacts")
+        self.assertIn("<h2>Unfiled</h2>", body)
+        self.assertIn("My Katie", body)
 
     def test_graph_nodes_edges_and_weight(self):
         self._populate()

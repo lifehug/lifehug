@@ -324,6 +324,8 @@ def write_meta(path, meta):
     lines.append(f"format: {meta['format']}")
     if meta.get("subject"):
         lines.append(f"subject: {meta['subject']}")
+    if meta.get("occasion"):
+        lines.append(f"occasion: {meta['occasion']}")
     cats = meta.get("categories") or []
     lines.append(f"categories: [{', '.join(cats)}]")
     lines.append(f"created: {meta['created']}")
