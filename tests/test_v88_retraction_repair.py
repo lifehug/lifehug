@@ -127,6 +127,22 @@ class NewRetractionPinsShaTests(unittest.TestCase):
         self.assertIn(expected, text)
 
 
+class AnswerBodyDividerTests(unittest.TestCase):
+    """v89: the --- divider before a generated follow-up section must not
+    swallow the answer text (N10's Iron Man moment compiled as its
+    follow-up list)."""
+
+    def test_body_before_followup_divider_is_kept(self):
+        import lifehug_core
+        content = ("---\ntype: \"prompted_answer\"\n---\n\n"
+                   "# Question N10: What does she say?\n\n"
+                   "one time Charlee said that I'm like Iron Man\n\n---\n\n"
+                   "## Follow-up Questions Generated\n- N10b: \"iron-man\"\n")
+        body = lifehug_core.answer_body(content)
+        self.assertIn("Iron Man", body)
+        self.assertNotIn("Follow-up", body)
+
+
 class CharleePageFixTests(unittest.TestCase):
     def test_first_name_alias_from_focus_title(self):
         self.assertEqual(wc._first_name_alias("Charlee Joy Taylor"), "Charlee")

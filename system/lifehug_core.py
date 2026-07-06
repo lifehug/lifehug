@@ -502,7 +502,14 @@ def answer_body(content: str) -> str:
     target = frontmatter_body if frontmatter_body != content else content
     body_match = re.search(r"---\n+(.*?)(?:\n+---|\Z)", target, re.DOTALL)
     if body_match:
-        return body_match.group(1).strip()
+        captured = body_match.group(1).strip()
+        if captured.startswith("## Follow-up"):
+            # v89: that --- was the divider BEFORE the generated follow-up
+            # section, not a body wrapper — the answer is what precedes it.
+            # (Without this, N10's Iron Man moment compiled as just its
+            # follow-up list.)
+            return target[: body_match.start()].strip()
+        return captured
     return target.strip()
 
 
