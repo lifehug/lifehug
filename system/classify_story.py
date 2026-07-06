@@ -58,7 +58,7 @@ from lifehug_core import (
 # ── constants ─────────────────────────────────────────────────────────────────
 # Non-dated alias — tracks the current Sonnet tier instead of pinning a
 # snapshot that ages out. Override with `classify_model` in config.yaml.
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 RESEARCH_FILE = SYSTEM_DIR / "research.md"
 
 # Taxonomy themes for the AI prompt
