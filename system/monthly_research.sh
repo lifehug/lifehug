@@ -213,6 +213,22 @@ generate_topic() {
     echo "skip: neighborhood already exists for ${topic}"
     return 0
   fi
+  if [[ "${KEYLESS:-0}" == "1" ]]; then
+    # v92 keyless agent mode: emit the expansion prompt as an agent task
+    # instead of failing the AI call. Completed via research_expand
+    # --from-response (see skills/maintenance).
+    local slug
+    slug=$(printf '%s' "$topic" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
+    mkdir -p state/agent_tasks/research
+    if python3 "$WORKSPACE/system/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output" --prompt \
+        > "state/agent_tasks/research/${slug}.prompt.md" 2>&1; then
+      echo "⏸ keyless — expansion prompt for '${topic}' emitted to state/agent_tasks/research/${slug}.prompt.md"
+      echo "  complete: python3 system/research_expand.py --topic \"$topic\" --type $topic_type --output $output --from-response <response-file>"
+    else
+      echo "skip: could not emit prompt for ${topic} (see state/agent_tasks/research/${slug}.prompt.md)"
+    fi
+    return 0
+  fi
   run_optional python3 "$WORKSPACE/system/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output"
 }
 
@@ -247,6 +263,15 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
+# v92: keyless agent mode — AI steps emit agent tasks to state/agent_tasks/
+# instead of recording raw learning failures (see skills/maintenance).
+# Keyless compile is already non-destructive (synthesis is skipped, never
+# regressed), so the compile steps run unguarded.
+python3 "$WORKSPACE/system/lifehug.py" ai-status >/dev/null 2>&1 && KEYLESS=0 || KEYLESS=1
+if [[ "$KEYLESS" == "1" ]]; then
+  echo "keyless — AI steps will emit agent tasks (complete via skills/maintenance)"
+fi
+
 run_step python3 "$WORKSPACE/system/lifehug.py" compile
 RESEARCH_OUT=""
 GAPS_OUT=$(python3 "$WORKSPACE/system/research_expand.py" --gaps 2>&1)
@@ -279,14 +304,32 @@ echo "$FOCUSES_OUT"
 # — grows without any human interaction.
 ROSTER_OUT=""
 for etype in person place period object; do
-  set +e
-  ETYPE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" 2>&1)
-  ETYPE_STATUS=$?
-  set -e
-  if [[ "$ETYPE_STATUS" -ne 0 ]]; then
-    record_learning_failure "monthly_research" "entity_roster_${etype}" "$ETYPE_STATUS" "$ETYPE_OUT"
-    ETYPE_OUT="⚠ ${etype} roster refresh FAILED (exit ${ETYPE_STATUS})
+  if [[ "$KEYLESS" == "1" ]]; then
+    # Keyless: emit the resolution task for agent completion. NEVER fall back
+    # to the deterministic roster — it stateless-refreshes junk (v90 lesson).
+    mkdir -p state/agent_tasks/roster
+    set +e
+    ETYPE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" --emit-task "state/agent_tasks/roster/${etype}.json" 2>&1)
+    ETYPE_STATUS=$?
+    set -e
+    if [[ "$ETYPE_STATUS" -ne 0 ]]; then
+      record_learning_failure "monthly_research" "entity_roster_${etype}_emit" "$ETYPE_STATUS" "$ETYPE_OUT"
+      ETYPE_OUT="⚠ ${etype} roster task emission FAILED (exit ${ETYPE_STATUS})
 ${ETYPE_OUT}"
+    else
+      ETYPE_OUT="⏸ keyless — ${etype} roster task emitted, not a failure. Complete via entity-roster --type ${etype} --from-response.
+${ETYPE_OUT}"
+    fi
+  else
+    set +e
+    ETYPE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" 2>&1)
+    ETYPE_STATUS=$?
+    set -e
+    if [[ "$ETYPE_STATUS" -ne 0 ]]; then
+      record_learning_failure "monthly_research" "entity_roster_${etype}" "$ETYPE_STATUS" "$ETYPE_OUT"
+      ETYPE_OUT="⚠ ${etype} roster refresh FAILED (exit ${ETYPE_STATUS})
+${ETYPE_OUT}"
+    fi
   fi
   ROSTER_OUT="${ROSTER_OUT}${ETYPE_OUT}
 "

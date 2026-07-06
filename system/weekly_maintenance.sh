@@ -164,14 +164,35 @@ fi
 
 run_step python3 "$WORKSPACE/system/lifehug.py" compile --no-ai
 run_source_integrity
+
+# v92: keyless agent mode. With no AI route (gateway or key), classification
+# emits agent tasks to state/agent_tasks/classify instead of recording a raw
+# learning failure. The maintenance skill (skills/maintenance) completes them
+# via --from-response — ideally BEFORE this script runs, so the planner queue
+# sees this week's classifications.
+python3 "$WORKSPACE/system/lifehug.py" ai-status >/dev/null 2>&1 && KEYLESS=0 || KEYLESS=1
 echo
-echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --limit ${CLASSIFY_LIMIT}"
-set +e
-CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1)
-CLASSIFY_STATUS=$?
-set -e
-if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
-  record_learning_failure "weekly_maintenance" "classify_story" "$CLASSIFY_STATUS" "$CLASSIFY_OUT"
+if [[ "$KEYLESS" == "1" ]]; then
+  echo "==> keyless — emitting classification tasks for agent completion"
+  set +e
+  CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --emit-prompts state/agent_tasks/classify 2>&1)
+  CLASSIFY_STATUS=$?
+  set -e
+  if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
+    record_learning_failure "weekly_maintenance" "classify_story_emit" "$CLASSIFY_STATUS" "$CLASSIFY_OUT"
+  elif ! grep -q "^No source files to classify" <<< "$CLASSIFY_OUT"; then
+    CLASSIFY_OUT="⏸ keyless — tasks emitted, not failures. Complete them via the maintenance skill (--from-response), then re-run.
+$CLASSIFY_OUT"
+  fi
+else
+  echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --limit ${CLASSIFY_LIMIT}"
+  set +e
+  CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1)
+  CLASSIFY_STATUS=$?
+  set -e
+  if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
+    record_learning_failure "weekly_maintenance" "classify_story" "$CLASSIFY_STATUS" "$CLASSIFY_OUT"
+  fi
 fi
 echo "$CLASSIFY_OUT"
 

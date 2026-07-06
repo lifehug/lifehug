@@ -151,6 +151,8 @@ LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
 
 The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, auto-promotes candidates under caps, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
 
+Both loops run on any machine (v92). Check `python3 system/lifehug.py ai-status` first: keyed (gateway or API key) runs are fully unattended; keyless runs need the agent as the model — follow `skills/maintenance/SKILL.md` (pre-complete AI work via `--emit-prompts`/`--emit-task`/`--from-response` before the run; a keyless cron emits its AI work to `state/agent_tasks/` instead of failing).
+
 Run the monthly growth loop with:
 
 ```bash

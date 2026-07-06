@@ -369,6 +369,26 @@ def get_client():
     return anthropic.Anthropic(api_key=api_key)
 
 
+def ai_available() -> str | None:
+    """Return the available AI route ('gateway' or 'sdk-key'), or None when keyless.
+
+    Mirrors call_ai's routing order without making any network call: an OpenClaw
+    gateway wins, then ANTHROPIC_API_KEY in the environment, then
+    anthropic_api_key in config.yaml. None means agent mode is required
+    (see skills/maintenance).
+    """
+    if _openclaw_gateway() is not None:
+        return "gateway"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "sdk-key"
+    try:
+        if load_config().get("anthropic_api_key"):
+            return "sdk-key"
+    except Exception:
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Neighborhood store helpers
 # ---------------------------------------------------------------------------

@@ -97,6 +97,17 @@ def cmd_status(_args: argparse.Namespace) -> int:
     return run_python("ask.py", ["--status"])
 
 
+def cmd_ai_status(_args: argparse.Namespace) -> int:
+    from research_expand import ai_available  # noqa: PLC0415
+
+    route = ai_available()
+    if route:
+        print(f"AI route: {route}")
+        return 0
+    print("keyless — agent mode required (see skills/maintenance)")
+    return 1
+
+
 def cmd_next(_args: argparse.Namespace) -> int:
     return run_python("ask.py", ["--dry-run"])
 
@@ -445,6 +456,10 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
     if args.prompt:
         flags.append("--prompt")
         flags.append(args.prompt)
+    elif args.from_response:
+        flags.extend(["--from-response", args.from_response])
+        if args.source:
+            flags.extend(["--source", args.source])
     elif args.classify:
         flags.append("--classify")
         flags.append(args.classify)
@@ -452,6 +467,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
         flags.append("--classify-all")
         if args.unclassified:
             flags.append("--unclassified")
+        if getattr(args, "emit_prompts", None):
+            flags.extend(["--emit-prompts", args.emit_prompts])
     if args.model:
         flags.extend(["--model", args.model])
     if args.verbose:
@@ -897,6 +914,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("status", help="Show coverage and pass status")
     p.set_defaults(func=cmd_status)
 
+    p = sub.add_parser("ai-status",
+                       help="Report the AI route (gateway/sdk-key); exit 1 when keyless (agent mode required)")
+    p.set_defaults(func=cmd_ai_status)
+
     p = sub.add_parser("next", help="Preview the next question without mutating state")
     p.set_defaults(func=cmd_next)
 
@@ -1022,8 +1043,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("classify-story", help="Classify a source file with AI")
     p.add_argument("--classify", metavar="PATH", help="Source file to classify")
     p.add_argument("--prompt", metavar="PATH", help="Output AI prompt only")
+    p.add_argument("--from-response", metavar="PATH",
+                   help="Ingest an agent-written classification JSON (keyless agent path)")
+    p.add_argument("--source", metavar="PATH", help="With --from-response: the source file it classifies")
     p.add_argument("--classify-all", action="store_true")
     p.add_argument("--unclassified", action="store_true")
+    p.add_argument("--emit-prompts", metavar="DIR",
+                   help="With --classify-all: write prompts + manifest for agent completion instead of calling AI")
     p.add_argument("--limit", type=int, help="With --classify-all: maximum files to classify")
     p.add_argument("--model", help="Override AI model")
     p.add_argument("--verbose", "-v", action="store_true")

@@ -713,6 +713,40 @@ def cmd_from_response(args: argparse.Namespace) -> int:
     )
 
 
+def emit_prompts(sources: list[Path], out_dir: Path) -> int:
+    """Keyless batch path: write one classification prompt per source plus a
+    manifest.json the agent works through via --from-response. Mirrors the
+    entity_roster --emit-task pattern."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    items = []
+    for source_path in sources:
+        fm, story_text = load_source_text(source_path)
+        if not story_text.strip():
+            print(f"Warning: no story text found in {source_path}", file=sys.stderr)
+            continue
+        stem = classify_stem(source_path)
+        prompt_file = out_dir / f"{stem}.prompt.md"
+        prompt_file.write_text(build_prompt(source_path, fm, story_text), encoding="utf-8")
+        items.append({
+            "source": _relative_path(source_path),
+            "prompt": prompt_file.name,
+            "response": f"{stem}.response.json",
+        })
+    manifest_path = out_dir / "manifest.json"
+    write_json(manifest_path, {
+        "task": "classify",
+        "emitted_at": now_utc(),
+        "ingest_command": (
+            "python3 system/classify_story.py --from-response <response> --source <source>"
+        ),
+        "items": items,
+    })
+    print(f"✓ Emitted {len(items)} classification prompt(s) to {out_dir}")
+    print(f"  Manifest: {manifest_path}")
+    print("  For each item: write the classification JSON to <response>, then run the ingest_command.")
+    return 0
+
+
 def cmd_classify_all(args: argparse.Namespace) -> int:
     """Batch classify all (or unclassified) source files."""
     model = get_model(args)
@@ -726,6 +760,12 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
     if not sources:
         print("No source files to classify.")
         return 0
+
+    if getattr(args, "emit_prompts", None):
+        out_dir = Path(args.emit_prompts)
+        if not out_dir.is_absolute():
+            out_dir = REPO_DIR / out_dir
+        return emit_prompts(sources, out_dir)
 
     action = "Previewing" if args.dry_run else "Classifying"
     print(f"{action} {len(sources)} source file(s) with model={model}")
@@ -790,6 +830,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--unclassified",
         action="store_true",
         help="With --classify-all: skip already-classified files.",
+    )
+    parser.add_argument(
+        "--emit-prompts",
+        metavar="DIR",
+        help="With --classify-all: keyless agent path — write one prompt per "
+             "pending source plus a manifest.json instead of calling AI.",
     )
     parser.add_argument(
         "--limit",
