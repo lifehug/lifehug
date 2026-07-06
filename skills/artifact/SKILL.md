@@ -67,7 +67,9 @@ life material should ground the argument. Subject/occasion are NOT required for
 essays. Iterate with `artifact save --feedback` until the author says done;
 "done" means `artifact final` + `promote-source --kind all` + `compile`, which
 turns the essay into source material that influences the wiki (theme pages, the
-author hub).
+author hub). Always pass `--feedback` on revisions — it becomes the revision
+note shown in the viewer's revision footer (v98), where every version is
+linked (★ = final) and Δ shows a word-level diff of what changed.
 
 Print the generation prompt:
 

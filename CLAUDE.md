@@ -360,6 +360,11 @@ printf '%s\n' "$ESSAY" | python3 system/lifehug.py artifact save outputs/<slug> 
   `artifact final` + `artifact promote-source --kind all` + `compile` — the
   promoted essay becomes source material that influences the wiki (theme pages,
   the author hub); it never directly creates a page.
+- Every revision is browsable in the viewer (v98): each piece in
+  `/views/artifacts` ends with a revision footer — numbered links to every
+  saved version (★ = final; hover shows the `--feedback` note) and Δ links
+  rendering a word-level diff of what changed between versions. Essays without
+  a Focus group under **Thoughts**.
 - The opinion source itself is a primary source under the normal contract;
   corrections/changed positions are additive (`correct-source`,
   `reflect-source`), never rewrites.

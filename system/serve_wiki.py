@@ -382,6 +382,11 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .art-group-counts {{ margin-left: auto; text-align: right; color: #8a7a63; font-size: 13px; }}
     .art-group-body {{ padding: 4px 16px 14px; }}
     .art-group-body h3 {{ margin-bottom: 2px; }}
+    .rev-footer a {{ display: inline-block; padding: 0 6px; border: 1px solid #d8cdbb;
+      border-radius: 4px; text-decoration: none; margin-right: 2px; }}
+    .rev-footer a:hover {{ background: #ece5d8; }}
+    .rev-diff ins {{ background: #dcedc8; text-decoration: none; }}
+    .rev-diff del {{ background: #f8d7d5; }}
     details.qb-cat > summary .barwrap {{ flex: 1; margin: 0; }}
     .qb-list {{ list-style: none; padding: 8px 16px 12px; margin: 0; }}
     .qb-list li {{ padding: 3px 0; }}
@@ -1237,14 +1242,151 @@ def _artifact_title(slug: str, fmt: str, occasion: str) -> str:
     return " ".join(w.capitalize() for w in slug.split("-"))
 
 
+def _artifact_output_dir(slug: str):
+    """Resolve outputs/<slug> with the same traversal guards as /artifact-file/
+    (v98). Returns the directory Path or None when the slug doesn't resolve."""
+    from lifehug_core import REPO_DIR as _REPO  # noqa: PLC0415
+
+    rel = Path(slug)
+    if not slug or rel.is_absolute() or ".." in rel.parts or len(rel.parts) != 1:
+        return None
+    outputs_root = (_REPO / "outputs").resolve()
+    target = _REPO / "outputs" / rel
+    if not target.is_dir() or outputs_root not in target.resolve().parents:
+        return None
+    return target
+
+
+def _artifact_version_numbers(art_dir) -> list[int]:
+    import re as _re
+
+    numbers = []
+    for path in art_dir.glob("v*.md"):
+        m = _re.match(r"^v(\d+)$", path.stem)
+        if m:
+            numbers.append(int(m.group(1)))
+    return sorted(numbers)
+
+
+def _artifact_version_meta(art_dir) -> tuple[dict, int | None]:
+    """{version_number: entry} from artifact.json versions[], plus final_version."""
+    data = read_json(art_dir / "artifact.json", default={}) or {}
+    meta = {}
+    for entry in data.get("versions", []) or []:
+        try:
+            meta[int(entry.get("version"))] = entry
+        except (TypeError, ValueError):
+            continue
+    final = data.get("final_version")
+    try:
+        final = int(final) if final is not None else None
+    except (TypeError, ValueError):
+        final = None
+    return meta, final
+
+
+def artifact_version_html(slug: str, n: str):
+    """(title, body) for one saved revision of an artifact, or None when the
+    request doesn't resolve (bad slug, non-numeric n, missing vN.md)."""
+    if not str(n).isdigit():
+        return None
+    number = int(n)
+    art_dir = _artifact_output_dir(slug)
+    if art_dir is None:
+        return None
+    path = art_dir / f"v{number}.md"
+    if not path.is_file():
+        return None
+    meta, final = _artifact_version_meta(art_dir)
+    numbers = _artifact_version_numbers(art_dir)
+    entry = meta.get(number, {})
+    title = _artifact_title(slug, "", "")
+    star = " ★ final" if final == number else ""
+
+    nav = ['<a href="/views/artifacts">← Artifacts</a>']
+    if number - 1 in numbers:
+        nav.append(f'<a href="/artifact-version/{quote(slug)}/{number - 1}">← v{number - 1}</a>')
+        nav.append(f'<a href="/artifact-diff/{quote(slug)}/{number - 1}/{number}">Δ what changed in v{number}</a>')
+    if number + 1 in numbers:
+        nav.append(f'<a href="/artifact-version/{quote(slug)}/{number + 1}">v{number + 1} →</a>')
+    bits = [str(entry.get("created_at", ""))[:10], str(entry.get("model", ""))]
+    detail = " · ".join(b for b in bits if b)
+
+    body = [f"<h1>{html.escape(title)} — v{number}{star}</h1>",
+            f"<p><small>{' · '.join(nav)}{' · ' + html.escape(detail) if detail else ''}</small></p>"]
+    if entry.get("feedback"):
+        body.append(f"<p><small>Revision note: {html.escape(str(entry['feedback']))}</small></p>")
+    body.append(f"<blockquote>{render_markdown(path.read_text(errors='replace'))}</blockquote>")
+    return f"{title} — v{number}", "".join(body)
+
+
+def _word_diff_html(old: str, new: str) -> tuple[str, int, int]:
+    """Word-level diff as <ins>/<del> HTML plus (words_added, words_removed).
+    Paragraph breaks are diffed as tokens so structure survives."""
+    import difflib
+    import re as _re
+
+    def tokens(text):
+        return _re.findall(r"\n{2,}|\S+", text)
+
+    def rendered(chunk):
+        return " ".join("<br><br>" if t.startswith("\n") else html.escape(t) for t in chunk)
+
+    old_tokens, new_tokens = tokens(old), tokens(new)
+    matcher = difflib.SequenceMatcher(a=old_tokens, b=new_tokens, autojunk=False)
+    parts, added, removed = [], 0, 0
+    for op, a1, a2, b1, b2 in matcher.get_opcodes():
+        if op == "equal":
+            parts.append(rendered(old_tokens[a1:a2]))
+            continue
+        if op in ("delete", "replace") and a2 > a1:
+            parts.append(f"<del>{rendered(old_tokens[a1:a2])}</del>")
+            removed += sum(1 for t in old_tokens[a1:a2] if not t.startswith("\n"))
+        if op in ("insert", "replace") and b2 > b1:
+            parts.append(f"<ins>{rendered(new_tokens[b1:b2])}</ins>")
+            added += sum(1 for t in new_tokens[b1:b2] if not t.startswith("\n"))
+    return " ".join(parts), added, removed
+
+
+def artifact_diff_html(slug: str, a: str, b: str):
+    """(title, body) comparing two revisions of an artifact, or None when the
+    request doesn't resolve."""
+    if not (str(a).isdigit() and str(b).isdigit()):
+        return None
+    va, vb = int(a), int(b)
+    art_dir = _artifact_output_dir(slug)
+    if art_dir is None:
+        return None
+    path_a, path_b = art_dir / f"v{va}.md", art_dir / f"v{vb}.md"
+    if not (path_a.is_file() and path_b.is_file()):
+        return None
+    meta, _final = _artifact_version_meta(art_dir)
+    title = _artifact_title(slug, "", "")
+    diff, added, removed = _word_diff_html(path_a.read_text(errors="replace"),
+                                           path_b.read_text(errors="replace"))
+    nav = ['<a href="/views/artifacts">← Artifacts</a>',
+           f'<a href="/artifact-version/{quote(slug)}/{va}">v{va}</a>',
+           f'<a href="/artifact-version/{quote(slug)}/{vb}">v{vb}</a>',
+           f"{added} word(s) added", f"{removed} removed"]
+    body = [f"<h1>{html.escape(title)} — v{va} → v{vb}</h1>",
+            f"<p><small>{' · '.join(nav)}</small></p>"]
+    entry = meta.get(vb, {})
+    if entry.get("feedback"):
+        body.append(f"<p><small>Revision note for v{vb}: {html.escape(str(entry['feedback']))}</small></p>")
+    body.append(f'<blockquote class="rev-diff">{diff}</blockquote>')
+    return f"{title} — v{va} → v{vb}", "".join(body)
+
+
 def view_artifacts():
     """Artifacts view (v91) — outputs/ grouped by Focus, the same primitive the
     roadmap plans by: each group is the person/project the pieces belong to
     (resolved from the artifact's categories, subject as fallback). Groups
     render as collapsed full-width bars (v92, same idiom as Question Bank /
     Timeline) so the full suite of Focuses is scannable at a glance. Occasions
-    (Mother's Day, birthdays) are badges, not groups. Metadata orphans land in
-    an Unfiled group with a repair hint; PDF/image sidecars are linked."""
+    (Mother's Day, birthdays) are badges, not groups. Essays without a Focus
+    are the author's Thoughts (v98); other metadata orphans land in an Unfiled
+    group with a repair hint. PDF/image sidecars are linked; every piece gets
+    a revision footer (v98) with numbered version links and Δ diffs."""
     import re as _re
 
     from lifehug_core import REPO_DIR as _REPO  # noqa: PLC0415
@@ -1296,10 +1438,13 @@ def view_artifacts():
         focus = next((cat_to_focus[c] for c in categories if c in cat_to_focus), None)
         if focus is None and subject:
             focus = label_to_focus.get(subject.lower())
+        version_meta, final_version = _artifact_version_meta(art_dir)
         arts.append({
             "slug": art_dir.name, "fmt": fmt, "subject": subject,
             "created": created, "occasion": occasion, "focus": focus,
             "n_versions": len(versions),
+            "version_numbers": _artifact_version_numbers(art_dir),
+            "version_meta": version_meta, "final_version": final_version,
             "words": len(_re.findall(r"[\w'’-]+", body)),
             "delivered": bool(art_json.get("delivered_at")),
             "promoted": bool(art_json.get("promoted_sources")),
@@ -1313,13 +1458,21 @@ def view_artifacts():
 
     groups: dict[str, list[dict]] = {}
     for art in arts:
-        key = art["focus"]["id"] if art["focus"] else "__unfiled__"
+        if art["focus"]:
+            key = art["focus"]["id"]
+        elif art["fmt"] == "essay":
+            # Opinion essays are the author's thoughts, not metadata orphans (v98).
+            key = "__thoughts__"
+        else:
+            key = "__unfiled__"
         groups.setdefault(key, []).append(art)
-    # Focus groups by most-recent artifact first; Unfiled always last.
-    ordered = sorted((kv for kv in groups.items() if kv[0] != "__unfiled__"),
+    # Focus groups by most-recent artifact first; Thoughts then Unfiled last.
+    special = ("__thoughts__", "__unfiled__")
+    ordered = sorted((kv for kv in groups.items() if kv[0] not in special),
                      key=lambda kv: max(a["created"] for a in kv[1]), reverse=True)
-    if "__unfiled__" in groups:
-        ordered.append(("__unfiled__", groups["__unfiled__"]))
+    for key in special:
+        if key in groups:
+            ordered.append((key, groups[key]))
 
     sections = ["<h1>Artifacts</h1>",
                 f"<p>{len(arts)} piece(s) in <code>outputs/</code>, grouped by Focus — "
@@ -1348,6 +1501,13 @@ def view_artifacts():
                 '<details class="art-group"><summary>'
                 f'<span class="art-group-title">{head}</span>'
                 f'<span class="art-group-counts">{html.escape(counts)}</span>'
+                '</summary><div class="art-group-body">')
+        elif _key == "__thoughts__":
+            sections.append(
+                '<details class="art-group"><summary>'
+                '<span class="art-group-title">Thoughts</span>'
+                f'<span class="art-group-counts">{len(items)} piece(s) · essays — '
+                "the author's stated positions</span>"
                 '</summary><div class="art-group-body">')
         else:
             sections.append(
@@ -1381,6 +1541,25 @@ def view_artifacts():
                 sections.append(
                     f"<details><summary>Read {html.escape(a['latest_name'])}</summary>"
                     f"<blockquote>{rendered}</blockquote></details>")
+            if a["version_numbers"]:
+                # Revision footer (v98): one numbered link per saved version,
+                # ★ marks the final, Δ compares a revision with its predecessor.
+                links = []
+                for vn in a["version_numbers"]:
+                    entry = a["version_meta"].get(vn, {})
+                    tip = " · ".join(str(bit) for bit in (
+                        str(entry.get("created_at", ""))[:10],
+                        entry.get("model", ""), entry.get("feedback", "")) if bit)
+                    star = "★" if a["final_version"] == vn else ""
+                    links.append(
+                        f'<a href="/artifact-version/{quote(a["slug"])}/{vn}" '
+                        f'title="{html.escape(tip)}">{vn}{star}</a>')
+                    if vn - 1 in a["version_numbers"]:
+                        links.append(
+                            f'<a href="/artifact-diff/{quote(a["slug"])}/{vn - 1}/{vn}" '
+                            f'title="what changed in v{vn}">Δ</a>')
+                sections.append(
+                    f'<p class="rev-footer"><small>Revisions: {" ".join(links)}</small></p>')
         sections.append("</div></details>")
     return "Artifacts", "".join(sections), False
 
@@ -1587,7 +1766,7 @@ VIEW_DESCRIPTIONS = {
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
-    "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — grouped by the Focus it belongs to (the person or project, resolved from the artifact's categories). Each group is a collapsed bar showing its piece count; click to expand into the pieces, with occasions like Mother's Day as badges, versions, word count, delivered/promoted state, linked PDFs, and the latest text readable inline. Pieces missing metadata land in Unfiled with a repair hint. This is where the archive becomes things you can actually give, post, or publish.",
+    "artifacts": "Every piece in outputs/ — letters, posts, captions, essays, chapter drafts — grouped by the Focus it belongs to (the person or project, resolved from the artifact's categories). Each group is a collapsed bar showing its piece count; click to expand into the pieces, with occasions like Mother's Day as badges, versions, word count, delivered/promoted state, linked PDFs, and the latest text readable inline. Each piece ends with a revision footer — numbered links to every saved version (★ = final, hover for the revision note) and Δ links showing exactly what changed between versions. Essays without a Focus group under Thoughts; other pieces missing metadata land in Unfiled with a repair hint. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
@@ -1671,6 +1850,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+            return
+
+        if parsed.path.startswith("/artifact-version/"):
+            # One saved revision of an artifact (v98) — outputs/<slug>/vN.md.
+            parts = [unquote(p) for p in parsed.path[len("/artifact-version/"):].split("/") if p]
+            result = artifact_version_html(*parts) if len(parts) == 2 else None
+            if result is None:
+                self.send_html("Not found", "<h1>Not found</h1>", status=404)
+                return
+            self.send_html(result[0], result[1])
+            return
+
+        if parsed.path.startswith("/artifact-diff/"):
+            # Word-level comparison of two revisions (v98).
+            parts = [unquote(p) for p in parsed.path[len("/artifact-diff/"):].split("/") if p]
+            result = artifact_diff_html(*parts) if len(parts) == 3 else None
+            if result is None:
+                self.send_html("Not found", "<h1>Not found</h1>", status=404)
+                return
+            self.send_html(result[0], result[1])
             return
 
         if parsed.path == "/views/graph.json":

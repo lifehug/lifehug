@@ -374,5 +374,115 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("sat", mylife)
 
 
+class RevisionFooterTests(unittest.TestCase):
+    """v98: revision footer, /artifact-version + /artifact-diff helpers,
+    Thoughts group for subjectless essays."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self._saved = {
+            (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
+            (lifehug_core, "REPO_DIR"): lifehug_core.REPO_DIR,
+        }
+        roadmap.ROADMAP_FILE = self._write("roadmap.json", {"version": 1, "focuses": [
+            {"id": "mom", "label": "Mom", "type": "person", "tier": "standard",
+             "objective": "story of Mom", "deliverable": "letter", "categories": ["K"],
+             "target_depth": 22, "phase": "active", "wiki_node": None}]})
+        # A subjectless essay with two saved revisions (the opinion lane shape).
+        self._write("outputs/mantle-essay/meta.yaml",
+                    "title: mantle-essay\nformat: essay\nsubject: ''\ncreated: 2026-07-06\n")
+        self._write("outputs/mantle-essay/v1.md",
+                    "# Mantle\n\nParents wore a mantle of duty.\n")
+        self._write("outputs/mantle-essay/v2.md",
+                    "# Mantle\n\nParents wore a heavy mantle of responsibility.\n")
+        self._write("outputs/mantle-essay/artifact.json", {
+            "versions": [
+                {"version": 1, "path": "outputs/mantle-essay/v1.md",
+                 "created_at": "2026-07-06T01:00:00Z", "model": "test-model"},
+                {"version": 2, "path": "outputs/mantle-essay/v2.md",
+                 "created_at": "2026-07-06T02:00:00Z", "model": "test-model",
+                 "feedback": "tighten the middle"},
+            ],
+            "final_version": 2})
+        # A single-version letter filed under a Focus.
+        self._write("outputs/mom-letter/meta.yaml",
+                    "title: mom-letter\nformat: letter\nsubject: mom\n"
+                    "categories: [K]\ncreated: 2026-07-01\n")
+        self._write("outputs/mom-letter/v1.md", "Dear Mom.\n")
+        lifehug_core.REPO_DIR = self.tmp
+
+    def tearDown(self):
+        for (mod, name), val in self._saved.items():
+            setattr(mod, name, val)
+
+    def _write(self, name, data):
+        p = self.tmp / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(data if isinstance(data, str) else json.dumps(data))
+        return p
+
+    def _body(self):
+        return serve_wiki.VIEW_MAP["artifacts"]()[1]
+
+    def test_footer_links_every_version_with_final_star(self):
+        body = self._body()
+        self.assertIn('href="/artifact-version/mantle-essay/1"', body)
+        self.assertIn('href="/artifact-version/mantle-essay/2"', body)
+        self.assertIn(">2★</a>", body)
+        self.assertIn('href="/artifact-diff/mantle-essay/1/2"', body)
+
+    def test_single_version_artifact_has_no_diff_link(self):
+        body = self._body()
+        self.assertIn('href="/artifact-version/mom-letter/1"', body)
+        self.assertNotIn("/artifact-diff/mom-letter", body)
+
+    def test_footer_tooltip_carries_feedback_note(self):
+        self.assertIn("tighten the middle", self._body())
+
+    def test_subjectless_essay_groups_under_thoughts(self):
+        body = self._body()
+        self.assertIn('art-group-title">Thoughts</span>', body)
+        self.assertNotIn('art-group-title">Unfiled</span>', body)
+        # Thoughts renders after Focus groups.
+        self.assertLess(body.index('art-group-title">Mom'),
+                        body.index('art-group-title">Thoughts'))
+
+    def test_version_page_renders_content_and_nav(self):
+        result = serve_wiki.artifact_version_html("mantle-essay", "1")
+        self.assertIsNotNone(result)
+        title, body = result
+        self.assertIn("v1", title)
+        self.assertIn("mantle of duty", body)
+        self.assertIn('href="/views/artifacts"', body)
+        self.assertIn('href="/artifact-version/mantle-essay/2"', body)
+
+    def test_final_version_page_marked(self):
+        _, body = serve_wiki.artifact_version_html("mantle-essay", "2")
+        self.assertIn("★ final", body)
+        self.assertIn("Revision note: tighten the middle", body)
+
+    def test_version_guards(self):
+        for slug, n in (("../mantle-essay", "1"), ("/etc", "1"),
+                        ("mantle-essay", "x"), ("nope", "1"),
+                        ("mantle-essay", "9")):
+            self.assertIsNone(serve_wiki.artifact_version_html(slug, n), (slug, n))
+
+    def test_diff_marks_insertions_and_deletions(self):
+        result = serve_wiki.artifact_diff_html("mantle-essay", "1", "2")
+        self.assertIsNotNone(result)
+        _, body = result
+        self.assertIn("<ins>", body)
+        self.assertIn("<del>", body)
+        self.assertIn("responsibility.", body[body.index("<ins>"):])
+        self.assertIn("duty.", body[body.index("<del>"):])
+        self.assertIn("word(s) added", body)
+        self.assertIn("Revision note for v2: tighten the middle", body)
+
+    def test_diff_guards(self):
+        for slug, a, b in (("../x", "1", "2"), ("mantle-essay", "1", "x"),
+                           ("mantle-essay", "1", "9"), ("nope", "1", "2")):
+            self.assertIsNone(serve_wiki.artifact_diff_html(slug, a, b), (slug, a, b))
+
+
 if __name__ == "__main__":
     unittest.main()
