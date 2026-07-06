@@ -1044,7 +1044,29 @@ def call_ai(prompt: str, model: str) -> str:
          openclaw/default so it uses whatever model OpenClaw has configured.
       2. Anthropic SDK (needs ANTHROPIC_API_KEY or anthropic_api_key in
          config.yaml) — used only when OpenClaw is not available.
+
+    Retries up to 3 times on transient failures (gateway returning
+    'Agent couldn\'t generate a response', HTTP 5xx, timeouts).
     """
+    import os as _os  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+
+    # Resolve timeout once.
+    try:
+        _timeout = int(_os.environ.get("LIFEHUG_AI_TIMEOUT", "") or 0)
+    except ValueError:
+        _timeout = 0
+    if _timeout <= 0:
+        try:
+            from lifehug_core import load_config as _load_config  # noqa: PLC0415
+            _cfg = _load_config()
+            _timeout = int(_cfg.get("ai_timeout_seconds") or 600)
+        except Exception:  # noqa: BLE001
+            _timeout = 600
+
+    MAX_RETRIES = 3
+    RETRY_DELAY = 10  # seconds between retries
+
     gw = _openclaw_gateway()
     if gw:
         import urllib.request  # noqa: PLC0415
@@ -1055,30 +1077,38 @@ def call_ai(prompt: str, model: str) -> str:
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 4096,
         }).encode()
-        req = urllib.request.Request(
-            f"{base_url}/chat/completions",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-        )
-        # Timeout: env override for one-off long jobs, config override, or 600s default.
-        import os as _os  # noqa: PLC0415
-        try:
-            _timeout = int(_os.environ.get("LIFEHUG_AI_TIMEOUT", "") or 0)
-        except ValueError:
-            _timeout = 0
-        if _timeout <= 0:
+
+        last_error = None
+        for attempt in range(1, MAX_RETRIES + 1):
             try:
-                from lifehug_core import load_config as _load_config  # noqa: PLC0415
-                _cfg = _load_config()
-                _timeout = int(_cfg.get("ai_timeout_seconds") or 600)
-            except Exception:  # noqa: BLE001
-                _timeout = 600
-        with urllib.request.urlopen(req, timeout=_timeout) as resp:  # noqa: S310
-            result = json.loads(resp.read())
-        return result["choices"][0]["message"]["content"]
+                req = urllib.request.Request(
+                    f"{base_url}/chat/completions",
+                    data=payload,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=_timeout) as resp:  # noqa: S310
+                    result = json.loads(resp.read())
+                content = result["choices"][0]["message"]["content"]
+                # Check for the gateway's "couldn't generate" sentinel.
+                if "Agent couldn\u2019t generate" in content or "Agent couldn't generate" in content:
+                    last_error = RuntimeError(content[:200])
+                    if attempt < MAX_RETRIES:
+                        print(f"  ↻ AI returned empty response, retrying ({attempt}/{MAX_RETRIES})...")
+                        _time.sleep(RETRY_DELAY)
+                        continue
+                    raise last_error
+                return content
+            except (urllib.error.URLError, OSError, TimeoutError) as exc:
+                last_error = exc
+                if attempt < MAX_RETRIES:
+                    print(f"  ↻ AI call failed ({exc}), retrying ({attempt}/{MAX_RETRIES})...")
+                    _time.sleep(RETRY_DELAY)
+                    continue
+                raise
+        raise last_error  # should never reach here, but safety net
 
     # Fallback: Anthropic SDK
     client = get_client()
