@@ -112,6 +112,23 @@ The self-improving cycle only works when signal actually flows: candidates promo
 
 ---
 
+## 7b. Opinions as source material **[shipped v95]**
+
+Gornick's distinction (The Situation and the Story): an **opinion is story
+without situation** — the author has the "story" (the insight, the lens) but
+none of the lived situation on the page yet. The essay lane supplies the
+situation from two directions: the seeded essay artifact grounds the position
+in the author's archive material, and the Socratic follow-up candidates
+(origin, counterexample, evolution, dissent, stakes — mapped to the planner's
+self-knowledge story functions) capture the lived moments behind the belief as
+future answers. Opinions are captured as immutable primary sources
+(`type: opinion`); the finished essay is promoted as `authored_artifact`
+(supporting, attributed — never circular proof). Design principle per the
+author-centric model: artifacts influence the wiki as input sources; they never
+directly create pages.
+
+---
+
 ## 8. Key References
 
 **Narrative identity & memoir**: McAdams, *Life Story Interview II* (Foley Center); McAdams & McLean 2013; McAdams et al. 2001 (redemption/contamination, PSPB); Karr, *The Art of Memoir*; Gornick, *The Situation and the Story*; Birren, Guided Autobiography (nine themes).

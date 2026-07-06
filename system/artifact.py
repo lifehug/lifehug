@@ -198,11 +198,39 @@ def prior_artifacts(subject: str | None, current_dir: Path, limit: int = 4) -> t
     return matches, paths
 
 
+def read_seed(meta: dict) -> tuple[dict | None, str | None]:
+    """Load the seed source — the author's stated position this artifact
+    develops (v95). Returns (block, title) or (None, None)."""
+    seed_rel = meta.get("seed_source")
+    if not seed_rel:
+        return None, None
+    path = REPO_DIR / seed_rel
+    if not path.exists():
+        raise SystemExit(f"Error: seed source {seed_rel} does not exist")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    metadata, body = split_frontmatter(text)
+    body = body.strip()
+    # Generous cap — the seed IS the thesis; never reduce it to a snippet.
+    if len(body) > 8000:
+        body = body[:8000].rsplit(" ", 1)[0] + "..."
+    title = str(metadata.get("title") or "").strip() or None
+    return {"source": seed_rel, "body": body}, title
+
+
 def build_context(meta: dict, out_dir: Path) -> tuple[str, list[str]]:
-    answers, answer_paths = source_answers_for(meta.get("categories", []))
-    wiki, wiki_paths = wiki_matches(meta.get("subject"))
-    artifacts, artifact_paths = prior_artifacts(meta.get("subject"), out_dir)
-    sources = answer_paths + wiki_paths + artifact_paths
+    seed, seed_title = read_seed(meta)
+    categories = meta.get("categories", [])
+    if seed and not categories:
+        # Seeded and unscoped: the seed is the material. Never fall through to
+        # the empty-categories path, which would load the whole corpus.
+        answers, answer_paths = [], []
+    else:
+        answers, answer_paths = source_answers_for(categories)
+    match_subject = meta.get("subject") or seed_title
+    wiki, wiki_paths = wiki_matches(match_subject)
+    artifacts, artifact_paths = prior_artifacts(match_subject, out_dir)
+    seed_paths = [seed["source"]] if seed else []
+    sources = seed_paths + answer_paths + wiki_paths + artifact_paths
 
     lines = [
         f"# Artifact Context: {meta['title']}",
@@ -214,9 +242,19 @@ def build_context(meta: dict, out_dir: Path) -> tuple[str, list[str]]:
         f"- Occasion date: {meta.get('occasion_date') or '(none)'}",
         f"- Audience: {meta.get('audience') or '(not specified)'}",
         f"- Privacy: {meta.get('privacy') or 'owner_only'}",
+    ]
+    if seed:
+        lines.extend([
+            "",
+            "## Seed Source — the author's stated position (verbatim)",
+            f"Source: {seed['source']}",
+            "",
+            seed["body"],
+        ])
+    lines.extend([
         "",
         "## Source Answers",
-    ]
+    ])
     if answers:
         for item in answers:
             lines.extend([
@@ -257,6 +295,18 @@ def build_prompt(meta: dict, context: str) -> str:
     if not template_path.exists():
         raise SystemExit(f"Error: missing template {display_path(template_path)}")
     template = template_path.read_text(encoding="utf-8").strip()
+    seed_rules = ""
+    if meta.get("seed_source"):
+        seed_rules = """
+
+SEED DEVELOPMENT (this artifact develops a stated position)
+- The Seed Source at the top of the context pack IS the author's position,
+  stated in their own words for the first time. It needs no corroboration
+  from the archive.
+- Develop it: extend the argument, draw implications, structure it into the
+  piece — in their voice.
+- The never-invent rule applies to biographical events, quotes, and other
+  people — NOT to reasoning that develops the seed's position."""
     return f"""LIFEHUG ARTIFACT
 
 You are creating a meaningful life artifact for the author. Use the context as
@@ -270,7 +320,7 @@ VOICE PRESERVATION (hard rules — this is where trust lives)
   material in third person.
 - Never invent events, quotes, or feelings not present in the context pack.
 - COMPOSE, don't summarize: pick the thing this piece has come to say, then
-  build it from real scenes — not a stitched list of excerpts or Q&A.
+  build it from real scenes — not a stitched list of excerpts or Q&A.{seed_rules}
 
 FORMAT INSTRUCTIONS
 {template}
@@ -322,7 +372,22 @@ def cmd_new(args: argparse.Namespace) -> int:
     if not categories and args.subject:
         categories, resolved_subject = compose.resolve_categories(args.subject, None)
 
-    title = args.title or default_title(resolved_subject or args.subject, args.occasion, args.format, args.date)
+    seed_source = None
+    seed_meta_title = None
+    if getattr(args, "seed", None):
+        seed_path = Path(args.seed)
+        if not seed_path.is_absolute():
+            seed_path = REPO_DIR / seed_path
+        if not seed_path.exists():
+            raise SystemExit(f"Error: seed source {args.seed} does not exist")
+        seed_source = rel(seed_path)
+        seed_text = seed_path.read_text(encoding="utf-8", errors="replace")
+        seed_metadata, _seed_body = split_frontmatter(seed_text)
+        seed_meta_title = str(seed_metadata.get("title") or "").strip() or None
+
+    title = args.title or default_title(
+        resolved_subject or args.subject or seed_meta_title,
+        args.occasion, args.format, args.date)
     out_dir = OUTPUTS_DIR / slugify(title)
     out_dir.mkdir(parents=True, exist_ok=True)
     if artifact_path(out_dir).exists() and not args.force:
@@ -346,6 +411,8 @@ def cmd_new(args: argparse.Namespace) -> int:
         "versions": [],
         "promoted_sources": [],
     }
+    if seed_source:
+        meta["seed_source"] = seed_source
     context, sources = build_context(meta, out_dir)
     meta["context_sources"] = sources
     write_text(out_dir / CONTEXT_FILE, context)
@@ -674,6 +741,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--audience", default="")
     p.add_argument("--privacy", default="owner_only")
     p.add_argument("--categories", help="Explicit category letters, e.g. K,L")
+    p.add_argument("--seed", help="Source file whose content is the author's stated position "
+                                  "(e.g. sources/manual/<opinion>.md); injected verbatim at the "
+                                  "top of the context pack and developed by the artifact (v95)")
     p.add_argument("--force", action="store_true", help="Rebuild context if task already exists")
     p.add_argument("--print-prompt", action="store_true")
     p.set_defaults(func=cmd_new)

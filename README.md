@@ -359,7 +359,9 @@ python3 system/lifehug.py artifact promote-source \
   outputs/2026-07-12-katie-anniversary-letter --kind all
 ```
 
-Formats: `letter`, `tweet`, `instagram`, `chapter`, `post`. Each artifact lives in `outputs/<title>/` with a `context.md`, `artifact.json`, `meta.yaml`, and versioned drafts (`v1.md`, `v2.md`, ...).
+Formats: `letter`, `tweet`, `instagram`, `chapter`, `post`, `essay`, `unsent_letter`, `legacy_letter`. Each artifact lives in `outputs/<title>/` with a `context.md`, `artifact.json`, `meta.yaml`, and versioned drafts (`v1.md`, `v2.md`, ...).
+
+**Opinions → essays (v95).** A stated position — a philosophical take, a lens on life — is its own lane: capture it with `ingest-story --kind opinion` (it gets Socratic follow-up candidates: origin, counterexample, evolution, dissent, stakes), then develop it with `artifact new --format essay --seed <opinion-source>`. The seed is the thesis, injected verbatim into the context pack; revise with `artifact save --feedback` until it's done, then promote. The promoted essay becomes source material that influences the wiki — it never directly creates a page. From the phone, start the message with `opinion:`.
 
 Promotion is opt-in. A final artifact is authoritative as **your authored expression at that moment**. It is not treated as independent proof of every underlying event. The compiler reads artifact/context sources as supporting, attributed material so Lifehug can learn from what you produce without circularly turning generated text into primary evidence.
 

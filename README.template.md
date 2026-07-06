@@ -24,7 +24,9 @@ This wiki is a **graph of {name}'s life**. Standard terms:
 *People and episodes discovered as I answer questions; each becomes a Focus on the roadmap.*
 
 ## Artifacts
-*Artifacts are the product payoff: letters, tweets, Instagram captions, posts, chapters, speeches, and other pieces made from accumulated life material. Drafts live in `outputs/`. Create them with `python3 system/lifehug.py artifact ...`; when final, promote context/final versions into `sources/artifacts/` so the wiki can learn from what was produced.*
+*Artifacts are the product payoff: letters, tweets, Instagram captions, posts, essays, chapters, speeches, and other pieces made from accumulated life material. Drafts live in `outputs/`. Create them with `python3 system/lifehug.py artifact ...`; when final, promote context/final versions into `sources/artifacts/` so the wiki can learn from what was produced.*
+
+*Opinions are a first-class lane (v95): a stated position/lens on life is captured with `ingest-story --kind opinion`, developed into an essay artifact seeded from that source (`artifact new --format essay --seed …`), and revised until done. Promoting the finished essay turns it into source material that influences the wiki — theme pages, the author hub — while the opinion itself gets Socratic follow-up questions that deepen it over time.*
 
 ## Source Integrity
 *Prompted answers in `answers/` and ingested stories in `sources/` are raw source-of-truth. Corrections and later reflections are added as new source files, not by rewriting old memories. Check with `python3 system/lifehug.py source-lint`.*

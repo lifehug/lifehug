@@ -332,6 +332,38 @@ This writes an owner-only source file under `sources/manual/` and stores initial
 
 Unprompted stories follow the same source contract as answers: they are raw source-of-truth files. Later corrections and changed perspective belong in `sources/corrections/`, not by rewriting the original story.
 
+### Opinions & Essays (v95)
+
+An **opinion** is the author's stated position — a lens on life, a philosophical
+take — not an event account. When the author states one (or a message starts
+with `opinion:` / clearly states a position and asks for an essay), capture it
+with `--kind opinion` and offer to develop it as an **essay artifact**:
+
+```bash
+printf '%s\n' "$OPINION_TEXT" | python3 system/lifehug.py ingest-story --kind opinion \
+    --source "telegram" --title "The mantle of responsibility"
+python3 system/lifehug.py artifact new --format essay --seed sources/manual/<opinion-file>.md
+python3 system/lifehug.py artifact prompt outputs/<slug>    # you write the essay
+printf '%s\n' "$ESSAY" | python3 system/lifehug.py artifact save outputs/<slug> --model <model>
+```
+
+- Opinion ingest generates **Socratic follow-up candidates** (origin,
+  counterexample, evolution, dissent, stakes) instead of narrative scene
+  prompts; they carry self-knowledge story functions, so the weekly planner's
+  reserved self slot can draw from them.
+- `--seed` injects the opinion source verbatim at the top of the context pack:
+  the seed IS the thesis and needs no corroboration from the archive. Add
+  `--categories`/`--subject` to pull supporting life material; without them the
+  pack stays scoped to the seed (no whole-corpus dump).
+- **Iterate until the author says done**: revise with
+  `artifact save --feedback "..."` (auto-bumps vN). "Done" =
+  `artifact final` + `artifact promote-source --kind all` + `compile` — the
+  promoted essay becomes source material that influences the wiki (theme pages,
+  the author hub); it never directly creates a page.
+- The opinion source itself is a primary source under the normal contract;
+  corrections/changed positions are additive (`correct-source`,
+  `reflect-source`), never rewrites.
+
 ### Candidate Review
 
 Candidate questions are the review buffer between raw source insight and daily delivery. Use the scripts instead of manually editing candidate JSON:
@@ -570,7 +602,8 @@ templates/
 When the user asks for a deliverable ("write a Mother's Day letter for Katie", "tweet about my first job", "draft the founding chapter"):
 
 1. **Decide the format and source material**:
-   - Format: `letter`, `tweet`, `instagram`, `post`, or `chapter`
+   - Format: `letter`, `tweet`, `instagram`, `post`, `essay`, or `chapter`
+   - Or a `--seed <source-path>` when developing a stated opinion (see *Opinions & Essays*)
    - Source: a `--subject <name>` (matches a focus by name) or `--categories A,B,C` (explicit category letters)
    - Occasion/date/audience when relevant
 
@@ -623,7 +656,9 @@ printf '%s\n' "$content" | python3 system/lifehug.py artifact save \
 
 ### Telegram / Phone Keyword
 
-When a Telegram/OpenClaw message starts with `/artifact` or `artifact:` — or plainly asks to write/create a letter, post, caption, speech, chapter, or similar deliverable — treat it as an artifact request, not a normal daily answer.
+When a Telegram/OpenClaw message starts with `/artifact` or `artifact:` — or plainly asks to write/create a letter, post, caption, speech, chapter, essay, or similar deliverable — treat it as an artifact request, not a normal daily answer.
+
+When a message starts with `opinion:` — or states a philosophical position/lens and asks for an essay — follow the *Opinions & Essays* flow: `ingest-story --kind opinion` first, then `artifact new --format essay --seed <source>`.
 
 If details are missing, ask short follow-ups for subject, occasion, format, and date. Then run the same script flow above. This keeps the phone path and desktop path identical.
 

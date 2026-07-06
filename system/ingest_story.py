@@ -145,6 +145,51 @@ def generate_witness_candidates(witness: str, title: str, source_path: str, crea
     return candidates
 
 
+def generate_opinion_candidates(title: str, source_path: str, created_at: str) -> list[dict]:
+    """Socratic follow-ups for a stated OPINION — deepen and test the position
+    instead of reframing it into narrative scenes. Each carries a planner
+    SELF_FUNCTIONS story_function so the weekly self-knowledge slot can draw
+    from these without any planner changes."""
+    subject = title.strip() or "this position"
+    templates = [
+        ("origin",
+         f"Where did this belief — {subject} — come from? Who taught it to you, or what moment forged it?",
+         "value", 0.62,
+         "A position becomes story when it finds its origin."),
+        ("counterexample",
+         f"What's the strongest counterexample you've lived — a time the lens of {subject} failed you?",
+         "contradiction", 0.6,
+         "Testing a position against lived experience deepens it honestly."),
+        ("evolution",
+         f"How has this position changed — what did you believe about {subject} ten years ago?",
+         "growth_edge", 0.55,
+         "A belief's trajectory is self-knowledge signal."),
+        ("dissent",
+         f"Who would disagree with you most about {subject}, and what do they see that you might not?",
+         "perception_by_others", 0.5,
+         "Steelmanning dissent reveals the position's real edges."),
+        ("stakes",
+         f"What does holding this belief about {subject} cost you — or protect you from?",
+         "fear", 0.48,
+         "The function a belief serves is part of who the author is."),
+    ]
+    candidates = []
+    for index, (kind, question, story_function, priority, reason) in enumerate(templates, start=1):
+        candidates.append({
+            "id": candidate_id(source_path, index),
+            "text": question,
+            "source_path": source_path,
+            "target_page": None,
+            "kind": kind,
+            "priority": priority,
+            "reason": reason,
+            "status": "candidate",
+            "story_function": story_function,
+            "created_at": created_at,
+        })
+    return candidates
+
+
 def append_candidates(candidates: list[dict]) -> None:
     data = load_candidates()
     existing_ids = {item.get("id") for item in data["candidates"]}
@@ -156,13 +201,21 @@ def append_candidates(candidates: list[dict]) -> None:
 
 def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[str], payload: str) -> str:
     witness = getattr(args, "witness", None)
+    # A witness account is ANOTHER PERSON's words about shared events —
+    # a second voice. It is never merged with the author's account; when
+    # the two disagree, the wiki preserves both ("perspectives differ" is
+    # data, not an error to resolve).
+    # An opinion is the author's STATED POSITION — a lens on life rather than
+    # an event account. Same raw-source contract; different content kind.
+    if witness:
+        source_type = "witness_account"
+    elif getattr(args, "kind", "story") == "opinion":
+        source_type = "opinion"
+    else:
+        source_type = "unprompted_story"
     values = {
         "title": args.title,
-        # A witness account is ANOTHER PERSON's words about shared events —
-        # a second voice. It is never merged with the author's account; when
-        # the two disagree, the wiki preserves both ("perspectives differ" is
-        # data, not an error to resolve).
-        "type": "witness_account" if witness else "unprompted_story",
+        "type": source_type,
         "source_id": f"manual:{Path(source_path).stem}",
         "source_medium": args.source,
         "source": args.source,
@@ -195,6 +248,10 @@ def main() -> int:
     parser.add_argument("--sensitivity", default="private",
                         choices=["private", "family", "friends", "public"],
                         help="Sensitivity tier for future audience builds (default private)")
+    parser.add_argument("--kind", default="story", choices=["story", "opinion"],
+                        help="Content kind: story (default) or opinion — the author's stated "
+                             "position/lens on life. Opinions get Socratic follow-ups instead "
+                             "of narrative scene prompts, and can seed essay artifacts.")
     parser.add_argument("--no-candidates", action="store_true", help="Save source without generating candidate questions")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -202,6 +259,12 @@ def main() -> int:
     story = sys.stdin.read().strip()
     if not story:
         print("Error: story text must be provided on stdin", file=sys.stderr)
+        return 1
+
+    if args.witness and args.kind == "opinion":
+        print("Error: --kind opinion cannot be combined with --witness "
+              "(a witness account is someone else's words; an opinion is the author's)",
+              file=sys.stderr)
         return 1
 
     if args.witness:
@@ -215,6 +278,8 @@ def main() -> int:
         candidates = []
     elif args.witness:
         candidates = generate_witness_candidates(args.witness, args.title, relative_source, created_at)
+    elif args.kind == "opinion":
+        candidates = generate_opinion_candidates(args.title, relative_source, created_at)
     else:
         candidates = generate_candidates(args.title, story, relative_source, created_at)
 
@@ -234,10 +299,14 @@ def main() -> int:
     if args.witness:
         print(f"✓ Ingested witness account from {args.witness}: {relative_source}")
         print(f"  Their words, kept separate from yours — the wiki renders both accounts side by side.")
+    elif args.kind == "opinion":
+        print(f"✓ Ingested opinion: {relative_source}")
     else:
         print(f"✓ Ingested story: {relative_source}")
     if candidates:
         print(f"✓ Added candidates: {', '.join(c['id'] for c in candidates)}")
+    if args.kind == "opinion":
+        print(f"Next: python3 system/lifehug.py artifact new --format essay --seed {relative_source}")
     return 0
 
 

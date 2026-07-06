@@ -1,6 +1,6 @@
 ---
 name: artifact
-description: "Create Lifehug artifacts — letters, posts, captions, chapters, speeches — from accumulated story material, then optionally promote the final work and context pack into immutable Lifehug sources. Use when the user says /artifact, artifact:, write/create/draft a letter/post/caption/chapter, or wants an occasion output like Mother's Day, birthday, anniversary, memorial, or milestone."
+description: "Create Lifehug artifacts — letters, posts, captions, chapters, essays, speeches — from accumulated story material or a stated opinion, then optionally promote the final work and context pack into immutable Lifehug sources. Use when the user says /artifact, artifact:, opinion:, write/create/draft a letter/post/caption/chapter/essay, states a philosophical position they want developed, or wants an occasion output like Mother's Day, birthday, anniversary, memorial, or milestone."
 ---
 
 # Lifehug Artifact Creator
@@ -21,19 +21,21 @@ workspace root.
 Explicit triggers:
 - `/artifact`
 - `artifact:`
-- "write/create/draft a letter/post/caption/chapter/speech"
+- `opinion:` — the author is stating a position/lens they want developed (essay lane)
+- "write/create/draft a letter/post/caption/chapter/essay/speech"
 - occasion language such as Mother's Day, birthday, anniversary, memorial, or milestone
 
 On Telegram/OpenClaw, treat those messages as artifact requests, not daily
 answers. If the user sends a long story without asking for an output, use
-`ingest-story` instead.
+`ingest-story` instead. If they state an opinion without asking for an output,
+use `ingest-story --kind opinion` and offer the essay.
 
 ## Workflow
 
 Ask only for missing essentials:
 - subject/person/topic
 - occasion
-- format: `letter`, `tweet`, `instagram`, `post`, `chapter`, `unsent_letter` (therapeutic, owner-only, NEVER suggested for sharing — for the deceased or estranged, 'hello again' framing), or `legacy_letter` (ethical-will: values → lessons → gratitude → hopes → forgiveness, pre-populated from the author's material)
+- format: `letter`, `tweet`, `instagram`, `post`, `chapter`, `essay` (develops a stated opinion/position — usually seeded, see below), `unsent_letter` (therapeutic, owner-only, NEVER suggested for sharing — for the deceased or estranged, 'hello again' framing), or `legacy_letter` (ethical-will: values → lessons → gratitude → hopes → forgiveness, pre-populated from the author's material)
 - date, if relevant
 - audience/privacy, if relevant
 
@@ -43,9 +45,29 @@ Create the artifact task and context pack:
 python3 system/lifehug.py artifact new \
   --subject "<subject>" \
   --occasion "<occasion>" \
-  --format <letter|tweet|instagram|post|chapter|unsent_letter|legacy_letter> \
+  --format <letter|tweet|instagram|post|essay|chapter|unsent_letter|legacy_letter> \
   --date <YYYY-MM-DD>
 ```
+
+### Essay from a stated opinion (v95)
+
+When the author states a philosophical position (message starts with `opinion:`
+or plainly voices a lens on life and wants it developed), ingest FIRST, then
+seed the essay from the source file:
+
+```bash
+printf '%s\n' "$OPINION_TEXT" | python3 system/lifehug.py ingest-story --kind opinion \
+  --source "<telegram|manual>" --title "<short title>"
+python3 system/lifehug.py artifact new --format essay --seed sources/manual/<opinion-file>.md
+```
+
+The seed is injected verbatim at the top of the context pack — it IS the thesis
+and needs no corroboration. Add `--categories`/`--subject` only when supporting
+life material should ground the argument. Subject/occasion are NOT required for
+essays. Iterate with `artifact save --feedback` until the author says done;
+"done" means `artifact final` + `promote-source --kind all` + `compile`, which
+turns the essay into source material that influences the wiki (theme pages, the
+author hub).
 
 Print the generation prompt:
 

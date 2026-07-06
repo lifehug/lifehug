@@ -191,6 +191,8 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
         flags.extend(["--witness", args.witness])
     if getattr(args, "sensitivity", None):
         flags.extend(["--sensitivity", args.sensitivity])
+    if getattr(args, "kind", None) and args.kind != "story":
+        flags.extend(["--kind", args.kind])
     if args.no_candidates:
         flags.append("--no-candidates")
     if args.dry_run:
@@ -973,6 +975,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--witness", default=None, metavar="PERSON", help="This is another person's account (second voice), e.g. --witness Mom")
     p.add_argument("--sensitivity", default=None, choices=["private", "family", "friends", "public"])
+    p.add_argument("--kind", default="story", choices=["story", "opinion"],
+                   help="Content kind: opinion = the author's stated position/lens; gets Socratic follow-ups and can seed an essay artifact")
     p.set_defaults(func=cmd_ingest_story)
 
     def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:

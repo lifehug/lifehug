@@ -129,6 +129,15 @@ python3 system/lifehug.py planner-report
 
 This stores the raw story under `sources/manual/` and parks suggested follow-up questions in `state/question_candidates.json`. Candidates should inform planning and future question-bank edits; they should not automatically dominate daily delivery.
 
+If the user states an **opinion** — a philosophical position or lens on life, not an event account (messages starting `opinion:` are explicit) — ingest it with `--kind opinion` and offer to develop it as an essay artifact:
+
+```bash
+printf '%s\n' "$OPINION_TEXT" | python3 system/lifehug.py ingest-story --kind opinion --source "telegram" --title "<short title>"
+python3 system/lifehug.py artifact new --format essay --seed sources/manual/<opinion-file>.md
+```
+
+Opinion ingest generates Socratic follow-up candidates (origin, counterexample, evolution, dissent, stakes) instead of scene prompts. The `--seed` puts the opinion verbatim at the top of the essay's context pack; iterate with `artifact save --feedback` until the author says done, then promote.
+
 ## Source Integrity
 
 Treat `answers/` and `sources/` as raw source-of-truth. Do not rewrite old answers or stories to improve history. If a memory was wrong, add a correction source; if understanding changed, add a reflection source:
@@ -184,14 +193,14 @@ python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 
 ## Artifact Creation
 
-If the user asks to write/create/draft a letter, post, caption, chapter, speech,
-or milestone deliverable, use the artifact workflow instead of raw compose.
-Telegram/OpenClaw messages beginning with `/artifact` or `artifact:` are
-explicit artifact requests, not daily answers.
+If the user asks to write/create/draft a letter, post, caption, essay, chapter,
+speech, or milestone deliverable, use the artifact workflow instead of raw
+compose. Telegram/OpenClaw messages beginning with `/artifact`, `artifact:`, or
+`opinion:` are explicit artifact requests, not daily answers.
 
 ```bash
 python3 system/lifehug.py artifact new \
-  --subject "<subject>" --occasion "<occasion>" --format <letter|tweet|instagram|post|chapter>
+  --subject "<subject>" --occasion "<occasion>" --format <letter|tweet|instagram|post|essay|chapter>
 python3 system/lifehug.py artifact prompt outputs/<artifact>
 printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<artifact> --final
 python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
