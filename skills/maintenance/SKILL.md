@@ -72,9 +72,12 @@ classifications — classify first so this week's queue sees this week's answers
    # read the task file, write the resolved roster JSON it asks for, then:
    python3 system/lifehug.py entity-roster --type person --from-response <your-response.json>
    ```
-   Repeat for `place`, `period`, `object`. **Never leave the deterministic
-   fallback roster in place** — it stateless-refreshes junk (the v90 lesson);
-   if a roster refresh went wrong, restore via git and re-resolve.
+   Repeat for `place`, `period`, `object`, `theme`. **Never leave the
+   deterministic fallback roster in place** — it stateless-refreshes junk (the
+   v90 lesson); if a roster refresh went wrong, restore via git and re-resolve.
+   The `theme` roster (v97) additionally asks you for `keywords` per theme —
+   the surface phrases the compiler matches sources with; a page-eligible
+   theme entry is what lets a new theme page (e.g. Parenting) graduate.
 3. **Synthesize wiki prose if needed** — keyless compile is non-destructive,
    but new/changed pages only get real prose if you write it. Follow the
    **compile** skill's Mode 1 (`compile --emit-tasks` → write drafts →

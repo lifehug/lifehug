@@ -50,7 +50,7 @@ from lifehug_core import (
 )
 from recommend_focuses import STOPWORDS, OLD_FOCUS_TERM, load_recommendation_state
 
-ENTITY_TYPES = ("person", "place", "period", "object")
+ENTITY_TYPES = ("person", "place", "period", "object", "theme")
 ENTITY_DIR = STATE_DIR / "entity_rosters"
 
 # (page_min_score, page_min_answers) defaults per type. Objects are symbolic-gated,
@@ -60,6 +60,7 @@ THRESHOLDS = {
     "place": (6.0, 2),
     "period": (6.0, 2),
     "object": (0.0, 1),
+    "theme": (6.0, 2),
 }
 
 # Pronouns / fragments / quantifiers the detectors mistake for entities.
@@ -92,11 +93,30 @@ QUALIFY_RULE = {
     "object": "a SYMBOLIC object that carries real meaning in the author's story — it stands "
               "for something larger (e.g. the cleats he couldn't afford, the stained orange "
               "shorts, the blue Toyota). NOT a mundane prop. Judge by resonance, not frequency",
+    "theme": "a recurring THEME of the author's life — a subject or tension the story keeps "
+             "returning to (parenting, faith, money, urgency). Merge synonyms and levels of "
+             "abstraction (fatherhood/raising kids → parenting); map duplicates of existing "
+             "theme pages to them. NOT a person, place, event, or one-off topic",
 }
 
 
 def roster_file(entity_type: str) -> Path:
     return ENTITY_DIR / f"{entity_type}.json"
+
+
+def _known_theme_names() -> set[str]:
+    """Names the deterministic theme fallback may accept (v97): the classifier
+    taxonomy plus existing theme page slugs. Lazy imports keep module load light."""
+    from classify_story import THEME_TAXONOMY  # noqa: PLC0415
+    from lifehug_core import WIKI_DIR  # noqa: PLC0415
+
+    names = {t.lower() for t in THEME_TAXONOMY}
+    themes_dir = WIKI_DIR / "themes"
+    if themes_dir.exists():
+        for page in themes_dir.glob("*.md"):
+            names.add(page.stem.replace("-", " ").lower())
+            names.add(page.stem.lower())
+    return names
 
 
 def _focus_map() -> dict[str, str]:
@@ -387,6 +407,10 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         slot["aliases"] = merged_aliases
         if not slot.get("maps_to_focus"):
             slot["maps_to_focus"] = prev.get("maps_to_focus") or None
+        # Themes: curated keywords are settled work — carry them forward when
+        # a refresh response drops them (harmless no-op for other types).
+        if not slot.get("keywords") and prev.get("keywords"):
+            slot["keywords"] = list(prev["keywords"])
         if name.strip().lower() != canonical.strip().lower():
             forced += 1
     return out, forced
@@ -396,7 +420,8 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
                  excerpts: list[dict] | None = None,
                  previous_roster: dict | None = None) -> str:
     focuses = ", ".join(f'"{n}" (slug: {s})' for s, n in focus_map.items()) or "(none)"
-    plural = {"person": "people", "place": "places", "period": "periods", "object": "objects"}[entity_type]
+    plural = {"person": "people", "place": "places", "period": "periods",
+              "object": "objects", "theme": "themes"}[entity_type]
     lines = [
         f"You are curating a private life-story wiki — specifically the {plural} in it. "
         f"Resolve the material below into a clean roster of distinct {plural}.",
@@ -459,6 +484,15 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
             "judgment for named eras ('the war years', 'after the divorce').",
             "",
         ]
+    if entity_type == "theme":
+        lines += [
+            "- Also set `keywords`: 4-10 lowercase surface phrases the wiki compiler will "
+            "match against source text to attach material to this theme's page (e.g. "
+            'parenting → ["parenting", "as a father", "my kids", "raise the kids", '
+            '"discipline"]). Include the theme name itself; prefer phrases the author '
+            "actually uses in the material.",
+            "",
+        ]
     if entity_type == "object":
         lines.append("Source answers (find symbolic objects mentioned in these):")
         for e in (excerpts or []):
@@ -469,11 +503,12 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
             ev = "; ".join(c["evidence"][:2])
             lines.append(f"- {c['entity']} — score {c['score']}, {c['unique_answers']} answers. {ev}")
     chrono_field = ', "chrono": 1' if entity_type == "period" else ""
+    keywords_field = ', "keywords": ["phrase"]' if entity_type == "theme" else ""
     lines += [
         "",
         "Respond with ONLY a JSON object, no prose:",
         '{"entities": [{"name": "Name", "aliases": ["Variant"], "qualifies": true, '
-        '"maps_to_focus": null' + chrono_field + "}]}",
+        '"maps_to_focus": null' + chrono_field + keywords_field + "}]}",
     ]
     return "\n".join(lines)
 
@@ -534,6 +569,14 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
                 entry["chrono"] = int(e.get("chrono"))
             except (TypeError, ValueError):
                 entry["chrono"] = None
+        if entity_type == "theme":
+            # Surface vocabulary the compiler matches sources with (v97) —
+            # the dynamic replacement for a static THEME_KEYWORDS row.
+            keywords = [str(k).strip().lower() for k in (e.get("keywords") or [])
+                        if isinstance(k, str) and str(k).strip()]
+            if name.lower() not in keywords:
+                keywords.insert(0, name.lower())
+            entry["keywords"] = keywords
         out.append(entry)
     return out
 
@@ -554,6 +597,14 @@ def deterministic(entity_type: str, candidates: list[dict], focus_map: dict[str,
             continue
         if entity_type == "person" and entity.lower() in ROLE_WORDS:
             raw.append({"name": entity, "qualifies": False, "maps_to_focus": None})
+            continue
+        if entity_type == "theme":
+            # Conservative keyless fallback: only names already vouched for by
+            # the classifier taxonomy or an existing theme page qualify; the
+            # AI path is what curates keywords and merges abstraction levels.
+            qualifies = entity.lower() in _known_theme_names()
+            raw.append({"name": entity, "qualifies": qualifies, "maps_to_focus": None,
+                        "keywords": [entity.lower()]})
             continue
         looks_named = entity[:1].isupper() and all(p.isalpha() for p in entity.split())
         # places/periods are less strict than person names.
@@ -637,7 +688,8 @@ def main() -> int:
             "min_score": min_score, "min_answers": min_answers,
             "response_format": {"entities": [dict({"name": "", "aliases": [], "qualifies": True,
                                               "maps_to_focus": None},
-                                             **({"chrono": 1} if t == "period" else {}))]},
+                                             **({"chrono": 1} if t == "period" else {}),
+                                             **({"keywords": ["phrase"]} if t == "theme" else {}))]},
         }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         n = len(excerpts or candidates)
         print(f"✓ Emitted {t} roster task ({n} items) to {args.emit_task}")

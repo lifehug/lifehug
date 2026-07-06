@@ -74,6 +74,7 @@ THEME_TAXONOMY = [
     "culture", "politics", "community", "health", "spirituality", "shame",
     "pride", "forgiveness", "betrayal", "justice", "freedom", "adventure",
     "solitude", "home", "nostalgia", "regret", "hope", "joy",
+    "parenting", "marriage", "aging",
 ]
 
 
@@ -338,7 +339,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 
 ### Guidelines
 - `people`: include every named or described person; estimate mention_count from how prominent they are
-- `themes`: use only themes from the provided taxonomy (add new ones only if truly missing)
+- `themes`: prefer taxonomy terms when a close one exists; if the story's CENTRAL theme is genuinely absent from the taxonomy, name it (one or two words, lowercase) — the monthly theme roster curates and merges what you surface
 - `suggested_sensitivity`: the most-open audience tier this source could EVER be rendered for.
   Taxonomy (default private when in doubt — the owner reviews before anything opens):
   private = sexuality/intimacy; raw mental-health texture; active wounds involving living

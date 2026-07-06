@@ -806,7 +806,7 @@ def loop_health_checks() -> int:
         check("monthly cadence", True, f"person roster resolved {monthly_age:.0f}d ago")
 
     # Roster continuity — an empty roster is how the Jul-2026 regression looked.
-    for etype in ("person", "place", "period", "object"):
+    for etype in ("person", "place", "period", "object", "theme"):
         data = read_json(STATE_DIR / "entity_rosters" / f"{etype}.json", default=None)
         if data is not None and not (data.get("entities") or []):
             warn(f"{etype} roster is EMPTY", "a refresh may have wiped it — restore from git and re-resolve")
@@ -1084,8 +1084,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_recommend_focuses)
 
     p = sub.add_parser("entity-roster",
-                       help="Resolve mentioned entities (person/place/period/object) into a canonical roster")
-    p.add_argument("--type", choices=["person", "place", "period", "object"], default="person")
+                       help="Resolve mentioned entities (person/place/period/object/theme) into a canonical roster")
+    p.add_argument("--type", choices=["person", "place", "period", "object", "theme"], default="person")
     p.add_argument("--emit-task", metavar="PATH", help="Write resolution prompt + candidates (keyless agent path)")
     p.add_argument("--from-response", metavar="PATH", help="Ingest an agent-written roster JSON")
     p.add_argument("--show", action="store_true", help="Print the current roster")

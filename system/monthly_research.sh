@@ -255,7 +255,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   preview_focuses
   echo
   echo "==> preview entity roster refreshes"
-  for etype in person place period object; do
+  for etype in person place period object theme; do
     run_step python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" --emit-task "$ROSTER_PREVIEW_DIR/${etype}.json"
   done
   run_step python3 "$WORKSPACE/system/lifehug.py" compile --dry-run --no-ai
@@ -303,7 +303,7 @@ echo "$FOCUSES_OUT"
 # fresh mentions. The whole life graph — people, places, periods, symbolic objects
 # — grows without any human interaction.
 ROSTER_OUT=""
-for etype in person place period object; do
+for etype in person place period object theme; do
   if [[ "$KEYLESS" == "1" ]]; then
     # Keyless: emit the resolution task for agent completion. NEVER fall back
     # to the deterministic roster — it stateless-refreshes junk (v90 lesson).

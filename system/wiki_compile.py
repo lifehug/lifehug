@@ -658,9 +658,40 @@ def plan_projects(categories, questions, answers, manual_sources):
     return descs
 
 
-def plan_themes(answers, manual_sources):
+def theme_keyword_map(theme_roster=None):
+    """Static THEME_KEYWORDS overlaid by page-eligible theme-roster entries (v97).
+
+    The static dict stays as the bootstrap for fresh/keyless installs and its
+    8 legacy pages keep their slugs. A roster entry wins on collision (its
+    curated keywords replace the static row) and can add NEW themes (e.g.
+    parenting) that graduate like any other roster entity. Roster-added themes
+    are origin: mention so orphan cleanup applies when they leave the roster;
+    static themes stay origin: focus (never auto-removed)."""
+    merged = {}
+    for slug, words in THEME_KEYWORDS.items():
+        merged[slug] = {"title": slug.replace("-", " ").title(),
+                        "keywords": list(words), "origin": "focus"}
+    for ent in (theme_roster or {}).get("entities") or []:
+        if not ent.get("page_eligible") or ent.get("maps_to_focus"):
+            continue
+        slug = ent.get("slug") or slugify(ent.get("name", ""))
+        if not slug:
+            continue
+        name = (ent.get("name") or "").strip() or slug.replace("-", " ").title()
+        keywords = [str(k).strip().lower() for k in (ent.get("keywords") or [])
+                    if str(k).strip()]
+        if not keywords:
+            keywords = [name.lower()]
+        merged[slug] = {"title": name.title() if name.islower() else name,
+                        "keywords": keywords,
+                        "origin": "focus" if slug in THEME_KEYWORDS else "mention"}
+    return merged
+
+
+def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
     descs = []
-    for theme, keywords in sorted(THEME_KEYWORDS.items()):
+    for theme, spec in sorted(theme_keyword_map(theme_roster).items()):
+        keywords = spec["keywords"]
         answer_hits = []
         manual_hits = []
         for item in answers.values():
@@ -675,7 +706,7 @@ def plan_themes(answers, manual_sources):
         hits = answer_hits + primary_sources
         if not hits and not supporting_sources:
             continue
-        title = theme.replace("-", " ").title()
+        title = spec["title"]
         sources = [a["source"] for a in hits + supporting_sources]
         descs.append(_descriptor(
             "theme", title, theme, sources, hits, supporting_sources,
@@ -684,6 +715,10 @@ def plan_themes(answers, manual_sources):
                 f"- Where does {title.lower()} first appear in the author's life?",
                 f"- How has {title.lower()} changed across different periods, relationships, and projects?",
             ],
+            # Themes are dimensions of the author: link each theme page to the
+            # author hub so it's reachable from Self (reciprocal backlink).
+            seed_related=[author_slug] if author_slug else None,
+            origin=spec["origin"],
         ))
     return descs
 
@@ -1222,7 +1257,7 @@ def compile_timeline(dry_run: bool = False) -> bool:
 
 # Entity types whose mention-graduated pages are cleaned up when their entity
 # leaves the roster. Focus/hand-authored pages are never candidates.
-_MENTION_CLEANUP_TYPES = ("person", "place", "period", "object")
+_MENTION_CLEANUP_TYPES = ("person", "place", "period", "object", "theme")
 
 
 def cleanup_orphan_entity_pages(planned_slugs: set[str], dry_run: bool = False) -> list[Path]:
@@ -1320,7 +1355,7 @@ def main():
     descs += plan_life_story(categories, questions, answers, manual_sources, author_full)
     descs += plan_focuses(categories, questions, answers, manual_sources, person_roster)
     descs += plan_projects(categories, questions, answers, manual_sources)
-    descs += plan_themes(answers, manual_sources)
+    descs += plan_themes(answers, manual_sources, load_roster("theme"), slugify(author_full))
     descs += plan_relationships(categories, questions, answers, manual_sources, author, person_roster)
     descs += plan_self(questions, answers)
 
