@@ -64,7 +64,7 @@ class WikiViewsTests(unittest.TestCase):
         self.assertEqual(order, [
             "status", "graph", "timeline", "book", "focuses", "recommendations",
             "question-bank", "candidates", "queue",
-            "coverage", "entities", "sources", "artifacts", "privacy",
+            "coverage", "entities", "sources", "artifacts", "reports", "privacy",
         ])
 
     def test_layout_wide_flag_and_menu(self):

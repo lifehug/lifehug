@@ -1416,6 +1416,31 @@ def view_book():
     return ("Book Assembly", "".join(sections), True)
 
 
+def view_reports():
+    """Reports view (v86, issue #35) — the full weekly/monthly maintenance
+    reports persisted under state/reports/. Telegram carries only the short
+    counts-first summary; this is the document of record."""
+    from lifehug_core import STATE_DIR as _STATE  # noqa: PLC0415
+
+    reports_dir = _STATE / "reports"
+    files = sorted(reports_dir.glob("*.md"), reverse=True) if reports_dir.exists() else []
+    if not files:
+        return ("Reports", "<h1>Reports</h1>" + _empty(
+            "No maintenance reports yet — the weekly and monthly crons write "
+            "them to <code>state/reports/</code>."), False)
+    parts = ["<h1>Reports</h1>"]
+    for i, path in enumerate(files[:24]):
+        body = html.escape(path.read_text(encoding="utf-8", errors="replace"))
+        open_attr = " open" if i == 0 else ""
+        parts.append(
+            f"<details{open_attr}><summary><strong>{html.escape(path.stem)}</strong>"
+            f" <span class='muted'>({path.stat().st_size:,} bytes)</span></summary>"
+            f"<pre style='white-space:pre-wrap'>{body}</pre></details>")
+    if len(files) > 24:
+        parts.append(f"<p class='muted'>… {len(files) - 24} older report(s) in state/reports/</p>")
+    return ("Reports", "".join(parts), False)
+
+
 VIEWS = [
     # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
@@ -1435,6 +1460,7 @@ VIEWS = [
     ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
     ("artifacts", "Artifacts", view_artifacts),
+    ("reports", "Reports", view_reports),
     ("privacy", "Privacy Preview", view_privacy_preview),
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
@@ -1456,6 +1482,7 @@ VIEW_DESCRIPTIONS = {
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
     "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — with format, versions, word count, delivered/promoted state, and the latest text readable inline. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
+    "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
 }
 

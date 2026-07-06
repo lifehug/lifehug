@@ -417,6 +417,16 @@ def cmd_weekly_maintenance(args: argparse.Namespace) -> int:
     return run(["bash", str(script("weekly_maintenance.sh"))], env=env)
 
 
+def cmd_weekly_summary(args: argparse.Namespace) -> int:
+    cmd = [sys.executable, str(script("weekly_report.py")), "--since", args.since,
+           "--kind", args.kind]
+    if args.report_path:
+        cmd += ["--report-path", args.report_path]
+    if args.doctor_file:
+        cmd += ["--doctor-file", args.doctor_file]
+    return run(cmd)
+
+
 def cmd_monthly_research(args: argparse.Namespace) -> int:
     env = os.environ.copy()
     if args.dry_run:
@@ -1177,6 +1187,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("weekly-maintenance", help="Run weekly lint/fix, quality, planner, and progress flow")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_weekly_maintenance)
+
+    p = sub.add_parser("weekly-summary", help="Build the short counts-first maintenance summary from state (issue #35)")
+    p.add_argument("--since", required=True, help="ISO timestamp — count activity at/after this moment")
+    p.add_argument("--kind", choices=("weekly", "monthly"), default="weekly")
+    p.add_argument("--report-path", help="Persisted full-report path shown as a pointer")
+    p.add_argument("--doctor-file", help="Doctor output file ('-' = stdin); omitted runs checks in-process")
+    p.set_defaults(func=cmd_weekly_summary)
 
     p = sub.add_parser("monthly-research", help="Run monthly neighborhood growth and Focus recommendations")
     p.add_argument("--dry-run", action="store_true")

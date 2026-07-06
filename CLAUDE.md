@@ -891,12 +891,13 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
-- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps (backlog-aware, quality-gated, semantically deduped — v68/v69), writes the next queue, scans gaps, reports progress, surfaces pending Focus recommendations, **runs `doctor`** (queue expiry, backlog age, cadence stalls, zombie Focuses, roster continuity), and commits real changes. Every learning step is failure-wrapped; the Telegram summary is chunked under the 4096-char limit via `lifehug.py notify`. Dry-run previews the candidate promotion gate too.
+- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps (backlog-aware, quality-gated, semantically deduped — v68/v69), writes the next queue, scans gaps, reports progress, surfaces pending Focus recommendations, **runs `doctor`** (queue expiry, backlog age, cadence stalls, zombie Focuses, roster continuity), and commits real changes. Every learning step is failure-wrapped. **The Telegram message is a short counts-first summary (v86, issue #35)** — classification ✅/❌ with one-line errors, candidates new/promoted/backlog, queue, coverage, doctor verdict — built by `lifehug.py weekly-summary` from state files; the full step-by-step output is persisted to `state/reports/weekly-YYYY-MM-DD.md` (committed, phone-readable via GitHub, browsable at the wiki viewer's `/views/reports`). Dry-run previews the candidate promotion gate and the summary too.
 - Review any manual source findings that `source-lint --fix` could not safely repair
 - Review classifier/candidate output in the weekly Telegram summary, then check queue balance, progress, and whether any Focus is ready for a deliverable
 
 ### Monthly
 - Run `python3 system/lifehug.py monthly-research` (or `LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh` to inspect first)
+- The monthly Telegram message is the same counts-first summary (`weekly-summary --kind monthly`); the full research/roster output is persisted to `state/reports/monthly-YYYY-MM-DD.md` (v86)
 - Review new research-neighborhood candidates before promotion. New gap neighborhoods only open when the planner's expansion urgency ≥ 0.25 (the archive deepens before it widens — v69)
 - Review Focus recommendations and approve only the ones that should become Focuses — **approval creates the Focus for real** (category scaffolded + starter questions seeded via `roadmap.focus_new`; never a zombie — v69)
 - Check if any categories are ready for drafting (GREEN)
@@ -938,7 +939,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 

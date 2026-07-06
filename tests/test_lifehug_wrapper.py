@@ -165,7 +165,10 @@ class LifehugWrapperTests(unittest.TestCase):
 
         self.assertIn('record_learning_failure "weekly_maintenance" "classify_story"', script)
         self.assertIn("LEARNING_OUT=$(learning_failures_summary", script)
-        self.assertIn("${LEARNING_OUT}", script)
+        # v86: learning failures go into the persisted report, not the
+        # Telegram message (the summary derives its own failure counts).
+        self.assertIn("Learning failures:LEARNING_OUT", script)
+        self.assertIn("weekly-summary", script)
 
     def test_process_answer_learning_state_is_committed(self):
         script = (SYSTEM / "process_answer.py").read_text(encoding="utf-8")
@@ -184,11 +187,14 @@ class LifehugWrapperTests(unittest.TestCase):
         self.assertLess(emit_task_index, dry_run_exit_index)
 
     def test_monthly_report_includes_research_and_roster_output(self):
+        # v86: research/roster output is persisted to the report document;
+        # Telegram carries only the counts-first summary.
         script = (SYSTEM / "monthly_research.sh").read_text(encoding="utf-8")
+        self.assertIn("Research neighborhoods:RESEARCH_OUT", script)
+        self.assertIn("Entity rosters:ROSTER_OUT", script)
         notify_index = script.index('telegram_notify "')
-
-        self.assertIn("${RESEARCH_OUT}", script[notify_index:])
-        self.assertIn("${ROSTER_OUT}", script[notify_index:])
+        self.assertIn("${SUMMARY}", script[notify_index:])
+        self.assertNotIn("${RESEARCH_OUT}", script[notify_index:])
 
 
 if __name__ == "__main__":

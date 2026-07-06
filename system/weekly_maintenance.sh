@@ -14,6 +14,14 @@ ARC_MAX="${LIFEHUG_WEEKLY_ARC_MAX:-2}"
 EXPIRES_DAYS="${LIFEHUG_WEEKLY_EXPIRES_DAYS:-8}"
 CLASSIFY_LIMIT="${LIFEHUG_WEEKLY_CLASSIFY_LIMIT:-5}"
 
+# v86 (issue #35): the Telegram message is a short counts-first summary;
+# the full step-by-step output is persisted here instead (committed with
+# state by safe_autocommit, so it's readable from the phone via GitHub
+# and on the desktop via the wiki viewer's Reports view).
+START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+REPORT_DIR="state/reports"
+REPORT_FILE="$REPORT_DIR/weekly-$(date +%F).md"
+
 # --- Telegram notification helper ---
 # Delegates to `lifehug.py notify`, which resolves chat/token and CHUNKS long
 # messages under Telegram's 4096-char cap (a single oversized weekly summary
@@ -149,6 +157,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$WORKSPACE/system/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
   run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" progress
+  SINCE_7D=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc)-timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  run_step python3 "$WORKSPACE/system/lifehug.py" weekly-summary --since "$SINCE_7D"
   exit 0
 fi
 
@@ -238,10 +248,29 @@ DOCTOR_OUT=$(python3 "$WORKSPACE/system/lifehug.py" doctor 2>&1)
 DOCTOR_STATUS=$?
 set -e
 echo "$DOCTOR_OUT"
-DOCTOR_WARNINGS=$(printf '%s\n' "$DOCTOR_OUT" | grep -E "^(warn|fail):" || true)
 if [[ "$DOCTOR_STATUS" -ne 0 ]]; then
   record_learning_failure "weekly_maintenance" "doctor" "$DOCTOR_STATUS" "$DOCTOR_OUT"
 fi
+
+# Persist the full raw report (the old wall-of-text) as a document.
+mkdir -p "$REPORT_DIR"
+{
+  echo "# Lifehug Weekly Report — $(date '+%Y-%m-%d %H:%M')"
+  for section in \
+    "Classification:CLASSIFY_OUT" \
+    "Candidate promotion:PROMOTE_OUT" \
+    "Planner queue:QUEUE_OUT" \
+    "Progress:PROGRESS_OUT" \
+    "Learning failures:LEARNING_OUT" \
+    "Focus recommendations:RECS_OUT" \
+    "Doctor:DOCTOR_OUT"; do
+    title="${section%%:*}"; var="${section##*:}"
+    echo; echo "## ${title}"; echo; echo '```'
+    printf '%s\n' "${!var:-—}"
+    echo '```'
+  done
+} > "$REPORT_FILE"
+echo "✓ Full report written to $REPORT_FILE"
 
 safe_autocommit
 
@@ -269,22 +298,14 @@ PRESENT_PROMPTS=(
 )
 PRESENT_PROMPT="${PRESENT_PROMPTS[$(( $(date +%V | sed 's/^0//') % ${#PRESENT_PROMPTS[@]} ))]}"
 
-telegram_notify "📋 Lifehug Weekly — $(date '+%B %-d')
+# v86 (issue #35): counts-first summary derived from state — never the raw
+# step output (that lives in $REPORT_FILE). Doctor output is piped in so the
+# checks don't run twice.
+SUMMARY=$(printf '%s' "$DOCTOR_OUT" | python3 "$WORKSPACE/system/lifehug.py" weekly-summary \
+  --since "$START_TS" --report-path "$REPORT_FILE" --doctor-file - 2>&1) \
+  || SUMMARY="⚠ weekly summary generation failed — see $REPORT_FILE"
 
-${CLASSIFY_OUT}
-
-${PROMOTE_OUT}
-
-${QUEUE_OUT}
-
-${PROGRESS_OUT}
-
-${LEARNING_OUT}
-
-${RECS_OUT}
-
-🩺 Doctor:
-${DOCTOR_WARNINGS:-all checks ok}
+telegram_notify "${SUMMARY}
 
 ${SECOND_VOICE_OUT}
 

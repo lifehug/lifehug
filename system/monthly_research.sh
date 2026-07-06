@@ -10,6 +10,12 @@ cd "$WORKSPACE"
 
 DRY_RUN="${LIFEHUG_MONTHLY_DRY_RUN:-0}"
 
+# v86 (issue #35): Telegram gets a short summary; the full output is
+# persisted as a committed report document.
+START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+REPORT_DIR="state/reports"
+REPORT_FILE="$REPORT_DIR/monthly-$(date +%F).md"
+
 # --- Telegram notification helper ---
 # Delegates to `lifehug.py notify` (resolves chat/token, chunks under the
 # 4096-char cap). Never fails the flow.
@@ -342,14 +348,30 @@ echo "$RESURFACE_OUT"
 
 PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
+
+# Persist the full raw report (the old wall-of-text) as a document.
+mkdir -p "$REPORT_DIR"
+{
+  echo "# Lifehug Monthly Research Report — $(date '+%Y-%m-%d %H:%M')"
+  for section in \
+    "Research neighborhoods:RESEARCH_OUT" \
+    "Focus recommendations:FOCUSES_OUT" \
+    "Entity rosters:ROSTER_OUT" \
+    "Resurfacing:RESURFACE_OUT" \
+    "Progress:PROGRESS_OUT"; do
+    title="${section%%:*}"; var="${section##*:}"
+    echo; echo "## ${title}"; echo; echo '```'
+    printf '%s\n' "${!var:-—}"
+    echo '```'
+  done
+} > "$REPORT_FILE"
+echo "✓ Full report written to $REPORT_FILE"
+
 safe_autocommit
 
-telegram_notify "🔬 Lifehug Monthly Research — $(date '+%B %-d')
+# v86 (issue #35): counts-first summary derived from state.
+SUMMARY=$(python3 "$WORKSPACE/system/lifehug.py" weekly-summary \
+  --kind monthly --since "$START_TS" --report-path "$REPORT_FILE" 2>&1) \
+  || SUMMARY="⚠ monthly summary generation failed — see $REPORT_FILE"
 
-${RESEARCH_OUT}
-
-${FOCUSES_OUT}
-
-${ROSTER_OUT}
-
-${PROGRESS_OUT}"
+telegram_notify "${SUMMARY}"
