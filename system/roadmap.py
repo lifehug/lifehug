@@ -60,6 +60,7 @@ TYPE_TO_WIKI_DIR = {
     "theme": "themes",
     "event": "events",
     "lifes_work": "lifes_work",
+    "self": "self",
 }
 
 OLD_FOCUS_TERM = "Spot" "light"

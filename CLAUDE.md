@@ -363,6 +363,12 @@ printf '%s\n' "$ESSAY" | python3 system/lifehug.py artifact save outputs/<slug> 
 - The opinion source itself is a primary source under the normal contract;
   corrections/changed positions are additive (`correct-source`,
   `reflect-source`), never rewrites.
+- **Loop behavior (v96):** the weekly classifier treats opinion sources as
+  stated positions — each distilled position lands in
+  `self_understanding_insights` prefixed `position:`, which grounds the
+  monthly self-arc (`research_expand --type self`). To deepen a specific
+  position on demand: `python3 system/research_expand.py --topic "<the
+  position>" --type self --output essay`.
 
 ### Candidate Review
 

@@ -371,6 +371,31 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 
 Respond with ONLY valid JSON. No prose, no markdown fences.
 """
+    # v96: opinion sources are STATED POSITIONS, not event accounts. The
+    # addendum is strictly conditional so every other source's prompt stays
+    # byte-identical.
+    if fm.get("type") == "opinion":
+        prompt += """
+### OPINION ADDENDUM (this source is a stated position, not an event account)
+- The author is stating a POSITION — a lens on life, a philosophical opinion.
+  Do not treat it as a factual event narrative.
+- Distill each distinct position it takes into `self_understanding_insights`,
+  each prefixed with "position: " (e.g. "position: parents who rose above
+  their natural selves deserve gratitude, not disappointment, when they
+  revert"). These feed the author's self-knowledge surfaces.
+- `contradictions`: only genuine tensions WITHIN the stated position or
+  between it and the author's other known positions — never manufacture one.
+- `events`: usually empty for an opinion; include only moments the author
+  actually narrates.
+- `candidate_questions`: use the SOCRATIC families instead of scene probes —
+  origin (who taught this / what moment forged it → story_function "value"),
+  lived counterexample (→ "contradiction"), how the position has changed
+  (→ "growth_edge"), who would disagree and what they see (→
+  "perception_by_others"), what holding it costs or protects (→ "fear").
+  The Gornick rule still applies: an opinion is story without situation, so
+  ONE grounding question asking for a specific lived moment behind the belief
+  is high-value.
+"""
     return prompt
 
 
