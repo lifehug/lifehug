@@ -370,15 +370,18 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .cov-row {{ display: flex; align-items: center; gap: 10px; padding: 5px 0; }}
     .cov-cat {{ width: 230px; font-weight: 650; flex-shrink: 0; }}
     .cov-name {{ font-weight: 400; color: #8a7a63; font-size: 13px; }}
-    details.qb-cat {{ margin-bottom: 8px; border: 1px solid #e5dfd5; border-radius: 8px; overflow: hidden; background: #fffdf9; }}
-    details.qb-cat > summary {{ list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
+    details.qb-cat, details.art-group {{ margin-bottom: 8px; border: 1px solid #e5dfd5; border-radius: 8px; overflow: hidden; background: #fffdf9; }}
+    details.qb-cat > summary, details.art-group > summary {{ list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
       padding: 10px 14px; background: #f4f0e8; }}
-    details.qb-cat > summary::-webkit-details-marker {{ display: none; }}
-    details.qb-cat > summary::before {{ content: "\\25B8"; color: #9a8c75; font-size: 12px; flex: 0 0 auto;
+    details.qb-cat > summary::-webkit-details-marker, details.art-group > summary::-webkit-details-marker {{ display: none; }}
+    details.qb-cat > summary::before, details.art-group > summary::before {{ content: "\\25B8"; color: #9a8c75; font-size: 12px; flex: 0 0 auto;
       transition: transform 0.15s; }}
-    details.qb-cat[open] > summary::before {{ transform: rotate(90deg); }}
-    details.qb-cat > summary:hover {{ background: #ece5d8; }}
-    .qb-cat-title {{ font-weight: 650; flex: 0 0 auto; min-width: 200px; }}
+    details.qb-cat[open] > summary::before, details.art-group[open] > summary::before {{ transform: rotate(90deg); }}
+    details.qb-cat > summary:hover, details.art-group > summary:hover {{ background: #ece5d8; }}
+    .qb-cat-title, .art-group-title {{ font-weight: 650; flex: 0 0 auto; min-width: 200px; }}
+    .art-group-counts {{ margin-left: auto; text-align: right; color: #8a7a63; font-size: 13px; }}
+    .art-group-body {{ padding: 4px 16px 14px; }}
+    .art-group-body h3 {{ margin-bottom: 2px; }}
     details.qb-cat > summary .barwrap {{ flex: 1; margin: 0; }}
     .qb-list {{ list-style: none; padding: 8px 16px 12px; margin: 0; }}
     .qb-list li {{ padding: 3px 0; }}
@@ -1235,9 +1238,11 @@ def _artifact_title(slug: str, fmt: str, occasion: str) -> str:
 
 
 def view_artifacts():
-    """Artifacts view (v90) — outputs/ grouped by Focus, the same primitive the
+    """Artifacts view (v91) — outputs/ grouped by Focus, the same primitive the
     roadmap plans by: each group is the person/project the pieces belong to
-    (resolved from the artifact's categories, subject as fallback). Occasions
+    (resolved from the artifact's categories, subject as fallback). Groups
+    render as collapsed full-width bars (v92, same idiom as Question Bank /
+    Timeline) so the full suite of Focuses is scannable at a glance. Occasions
     (Mother's Day, birthdays) are badges, not groups. Metadata orphans land in
     an Unfiled group with a repair hint; PDF/image sidecars are linked."""
     import re as _re
@@ -1336,16 +1341,22 @@ def view_artifacts():
             node = focus.get("wiki_node")
             if node:
                 head = f'<a href="/page/{quote(str(node))}">{head}</a>'
-            sub = (f"{len(items)} piece(s) · {focus.get('type', '?')} "
-                   f"· → {focus.get('deliverable', '-')} "
-                   f"· categories {','.join(focus.get('categories', []))}")
-            sections.append(f"<h2>{head}</h2><p><small>{html.escape(sub)}</small></p>")
+            counts = (f"{len(items)} piece(s) · {focus.get('type', '?')} "
+                      f"· → {focus.get('deliverable', '-')} "
+                      f"· categories {','.join(focus.get('categories', []))}")
+            sections.append(
+                '<details class="art-group"><summary>'
+                f'<span class="art-group-title">{head}</span>'
+                f'<span class="art-group-counts">{html.escape(counts)}</span>'
+                '</summary><div class="art-group-body">')
         else:
             sections.append(
-                "<h2>Unfiled</h2><p><small>"
-                f"{len(items)} piece(s) with no matching Focus — add "
-                "<code>subject:</code> / <code>categories:</code> to the folder's "
-                "<code>meta.yaml</code> to file them.</small></p>")
+                '<details class="art-group"><summary>'
+                '<span class="art-group-title">Unfiled</span>'
+                f'<span class="art-group-counts">{len(items)} piece(s) · no matching Focus</span>'
+                '</summary><div class="art-group-body">'
+                "<p><small>Add <code>subject:</code> / <code>categories:</code> to each "
+                "folder's <code>meta.yaml</code> to file these under a Focus.</small></p>")
         for a in items:
             badges = _badge(a["fmt"] or "?", "default")
             if a["occasion"]:
@@ -1370,6 +1381,7 @@ def view_artifacts():
                 sections.append(
                     f"<details><summary>Read {html.escape(a['latest_name'])}</summary>"
                     f"<blockquote>{rendered}</blockquote></details>")
+        sections.append("</div></details>")
     return "Artifacts", "".join(sections), False
 
 
@@ -1575,7 +1587,7 @@ VIEW_DESCRIPTIONS = {
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
-    "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — grouped by the Focus it belongs to (the person or project, resolved from the artifact's categories), with occasions like Mother's Day as badges, versions, word count, delivered/promoted state, linked PDFs, and the latest text readable inline. Pieces missing metadata land in Unfiled with a repair hint. This is where the archive becomes things you can actually give, post, or publish.",
+    "artifacts": "Every piece in outputs/ — letters, posts, captions, chapter drafts — grouped by the Focus it belongs to (the person or project, resolved from the artifact's categories). Each group is a collapsed bar showing its piece count; click to expand into the pieces, with occasions like Mother's Day as badges, versions, word count, delivered/promoted state, linked PDFs, and the latest text readable inline. Pieces missing metadata land in Unfiled with a repair hint. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",

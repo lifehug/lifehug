@@ -313,21 +313,30 @@ class WikiViewsTests(unittest.TestCase):
         _, body, _ = self._view("artifacts")
         # Person groups: subject name appended when it differs from the label.
         self.assertIn("Mom (Desi)", body)
-        self.assertIn("<h2>Katie</h2>", body)
+        self.assertIn('art-group-title">Katie</span>', body)
         # Focus with a wiki node links to it.
         self.assertIn('href="/page/wiki/people/mom.md"', body)
         # Katie's piece is newer (2026-06-25) -> her group comes first.
-        self.assertLess(body.index("<h2>Katie</h2>"), body.index("Mom (Desi)"))
+        self.assertLess(body.index('art-group-title">Katie'), body.index("Mom (Desi)"))
         # Humanized titles, not slugs, in the headings.
         self.assertIn("Mother&#x27;s Day letter", body)
         self.assertIn("<h3>My Katie", body)
+
+    def test_artifacts_groups_collapsed_by_default(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("artifacts")
+        # Every group is a collapsible bar (Question Bank / Timeline idiom) …
+        self.assertIn('<details class="art-group">', body)
+        # … starting collapsed, with the piece count visible on the bar.
+        self.assertNotIn('<details class="art-group" open', body)
+        self.assertIn("1 piece(s) · person · → letter · categories K", body)  # Mom bar counts
 
     def test_artifacts_badges_and_assets(self):
         self._populate_artifacts()
         _, body, _ = self._view("artifacts")
         # Occasion is a badge, never a group.
         self.assertIn(">Mother&#x27;s Day</span>", body)
-        self.assertNotIn("<h2>Mother", body)
+        self.assertNotIn('art-group-title">Mother', body)
         # delivered + promoted badges read the fields artifact.py actually
         # writes (promoted_sources — the old view read a never-written key).
         self.assertIn("delivered", body)
@@ -338,10 +347,11 @@ class WikiViewsTests(unittest.TestCase):
     def test_artifacts_unfiled_group_last_with_hint(self):
         self._populate_artifacts()
         _, body, _ = self._view("artifacts")
-        self.assertIn("<h2>Unfiled</h2>", body)
+        unfiled = 'art-group-title">Unfiled</span>'
+        self.assertIn(unfiled, body)
         self.assertIn("meta.yaml", body)  # repair hint
-        self.assertLess(body.index("<h2>Katie</h2>"), body.index("<h2>Unfiled</h2>"))
-        self.assertLess(body.index("Mom (Desi)"), body.index("<h2>Unfiled</h2>"))
+        self.assertLess(body.index('art-group-title">Katie'), body.index(unfiled))
+        self.assertLess(body.index("Mom (Desi)"), body.index(unfiled))
 
     def test_artifacts_safe_without_roadmap(self):
         # Artifacts exist but roadmap.json is missing and the question bank is
@@ -350,7 +360,7 @@ class WikiViewsTests(unittest.TestCase):
         roadmap.ROADMAP_FILE = self.tmp / "missing-roadmap.json"
         roadmap.QUESTIONS_FILE = self.tmp / "missing-bank.md"
         _, body, _ = self._view("artifacts")
-        self.assertIn("<h2>Unfiled</h2>", body)
+        self.assertIn('art-group-title">Unfiled</span>', body)
         self.assertIn("My Katie", body)
 
     def test_graph_nodes_edges_and_weight(self):
