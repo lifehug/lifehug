@@ -326,8 +326,61 @@ def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str,
     return vocab
 
 
-def place_events(events: list[dict], periods: list[dict]) -> tuple[dict[str, list[dict]], list[dict]]:
+# ---------------------------------------------------------------------------
+# Manual placements (v102) — the owner's curation layer.
+#
+# The timeline is a validation surface; when the owner drags an unplaced
+# moment into a period (or corrects a wrong one), that decision persists here
+# and wins over every heuristic. Raw sources stay immutable — a placement is
+# an overlay keyed by CONTENT (sha of source + description), so a
+# reclassification that rewrites the description automatically orphans the
+# placement (surfaced as `stale_placements`, never silently misapplied).
+# ---------------------------------------------------------------------------
+
+PLACEMENTS_FILE = STATE_DIR / "timeline_placements.json"
+
+
+def placement_key(event: dict) -> str:
+    import hashlib  # noqa: PLC0415
+    payload = f"{event.get('source', '')}\n{event.get('description', '')}"
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def load_placements() -> dict:
+    data = read_json(PLACEMENTS_FILE, default=None) or {"version": 1, "placements": []}
+    data.setdefault("placements", [])
+    return data
+
+
+def save_placement(key: str, source: str, description: str, period: str,
+                   when_hint: str = "", note: str = "") -> dict:
+    """Add or replace the manual placement for one event."""
+    from lifehug_core import now_utc, write_json  # noqa: PLC0415
+    data = load_placements()
+    data["placements"] = [p for p in data["placements"] if p.get("key") != key]
+    record = {"key": key, "source": source, "description": description,
+              "period": period, "when_hint": when_hint, "note": note,
+              "placed_at": now_utc()}
+    data["placements"].append(record)
+    write_json(PLACEMENTS_FILE, data)
+    return record
+
+
+def remove_placement(key: str) -> bool:
+    from lifehug_core import write_json  # noqa: PLC0415
+    data = load_placements()
+    before = len(data["placements"])
+    data["placements"] = [p for p in data["placements"] if p.get("key") != key]
+    if len(data["placements"]) == before:
+        return False
+    write_json(PLACEMENTS_FILE, data)
+    return True
+
+
+def place_events(events: list[dict], periods: list[dict],
+                 placements: dict | None = None) -> tuple[dict[str, list[dict]], list[dict]]:
     """({period_slug: [events...]}, unplaced). Placement order:
+      0. the owner's manual placement (content-keyed overlay) — always wins
       1. the event's source answer appears in a period page's sources
       2. the classification's era text (or the when_hint) matches static
          period keywords
@@ -337,6 +390,10 @@ def place_events(events: list[dict], periods: list[dict]) -> tuple[dict[str, lis
     placed: dict[str, list[dict]] = {p["slug"]: [] for p in periods}
     unplaced: list[dict] = []
     vocab = learned_era_vocabulary(periods, events)
+    manual_by_key = {}
+    if placements:
+        manual_by_key = {p["key"]: p for p in placements.get("placements", [])
+                         if p.get("period") in placed}
     def _keyword_slot(haystack: str) -> str | None:
         for period in periods:
             for keyword in _PERIOD_KEYWORDS.get(period["slug"], ()):
@@ -345,6 +402,19 @@ def place_events(events: list[dict], periods: list[dict]) -> tuple[dict[str, lis
         return None
 
     for event in events:
+        # 0) The owner said so — manual placement outranks every heuristic.
+        if manual_by_key:
+            manual = manual_by_key.get(placement_key(event))
+            if manual:
+                event = dict(event)
+                event["placement"] = "manual"
+                event["placement_key"] = manual["key"]
+                if manual.get("when_hint"):
+                    event["when_hint"] = manual["when_hint"]
+                if manual.get("note"):
+                    event["placement_note"] = manual["note"]
+                placed[manual["period"]].append(event)
+                continue
         # 1) The event's OWN when_hint is the most specific signal — an
         #    arc-spanning answer contributes events across many eras, so the
         #    per-event time-words outrank the answer's period membership
@@ -425,7 +495,17 @@ def timeline_data() -> dict:
     entities = load_entities()
     entity_lineup, unplaced_entities = line_up_entities(entities, periods)
     events = load_events()
-    event_lineup, unplaced_events = place_events(events, periods)
+    placements = load_placements()
+    event_lineup, unplaced_events = place_events(events, periods, placements)
+
+    # Placements whose event no longer exists (reclassification rewrote the
+    # description) or whose period page is gone — surfaced, never silently
+    # misapplied.
+    live_keys = {placement_key(e) for e in events}
+    period_slugs = {p["slug"] for p in periods}
+    stale_placements = [p for p in placements.get("placements", [])
+                        if p.get("key") not in live_keys
+                        or p.get("period") not in period_slugs]
 
     chapters = align_chapters(load_chapters(), periods)
     chapters_by_period: dict[str, list[dict]] = {}
@@ -451,6 +531,7 @@ def timeline_data() -> dict:
         "event_lineup": event_lineup,
         "unplaced_entities": unplaced_entities,
         "unplaced_events": unplaced_events,
+        "stale_placements": stale_placements,
         "gaps_by_period": gaps_by_period,
         "global_gaps": global_gaps,
         "counts": {

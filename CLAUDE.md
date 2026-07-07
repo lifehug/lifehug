@@ -761,6 +761,21 @@ per-process session token + localhost checks, serialized under
   never orphans a job. Keyless machines never error on AI actions — they
   queue agent tasks (`state/agent_tasks/artifact/`) instead.
 
+### Timeline curation (v102)
+
+The Timeline view's unplaced bucket is now interactive: each unplaced moment
+gets a period picker + when-hint field + **Place** button (optionally also
+filing a `--kind date` correction so the fact enters the compile layer).
+Manual placements persist in `state/timeline_placements.json` (**user data**),
+are keyed by CONTENT (`sha1(source + description)[:12]` — raw sources stay
+immutable; a reclassification that rewrites the description orphans the
+placement, surfaced as a removable "stale" notice, never silently
+misapplied), win over every placement heuristic, and render with a 📌 badge +
+unpin. `wiki/timeline.md` is now a thin **generated export** of
+`timeline.timeline_data()` — periods as headers, manual placements honored,
+unplaced section explicit — so the committed phone-readable page can never
+contradict the curated view.
+
 ### The Mirror (v100)
 
 The classifier's `contradictions` and `self_understanding_insights` (incl.
@@ -1059,4 +1074,4 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 **User data** (never touched):
 - `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
 - `answers/`, `outputs/`, `sources/`
-- `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`
+- `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`, `state/timeline_placements.json`

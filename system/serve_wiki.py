@@ -1597,6 +1597,12 @@ _TIMELINE_CSS = """<style>
   margin-right: 14px; }
 .tl-foot { margin-top: 2em; color: #8a7a63; font-size: .88em;
   border-top: 1px solid #e5dfd5; padding-top: .8em; }
+.tl-placeform { margin-top: 6px; }
+.tl-placeform select, .tl-placeform input[type=text], .tl-placeform input:not([type]) {
+  font-size: 12px; padding: 3px 6px; border: 1px solid #c8c2b8; border-radius: 5px;
+  max-width: 200px; }
+.tl-placeform .btn { font-size: 12px; padding: 3px 10px; }
+.tl-placeform form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 </style>"""
 
 _TL_TYPE_COLORS = {"person": "#7c4f1d", "place": "#8a7a3f",
@@ -1692,7 +1698,14 @@ def view_timeline():
                     if event["when_hint"] else "<em>(undated)</em> — ")
             anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
                       if event["anchor"] else "")
-            return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}"
+            pin = ""
+            if event.get("placement") == "manual":
+                unplace = (f'<form class="actform act-inline" method="post" '
+                           f'action="/actions/timeline/unplace">{_token_input()}'
+                           f'<input type="hidden" name="key" value="{html.escape(event["placement_key"])}">'
+                           f'<button class="btn quiet" type="submit" title="remove manual placement">unpin</button></form>')
+                pin = f" <span class='tl-evidence'>📌 placed by you · {unplace}</span>"
+            return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}{pin}"
                     f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
 
         visible, overflow = events_here[:10], events_here[10:]
@@ -1720,11 +1733,26 @@ def view_timeline():
                      "<h2>Unplaced — tell me where these belong</h2>"
                      f"<span class='tl-evidence tl-summary-counts'>"
                      f"{' · '.join(unplaced_bits)}</span></summary>")
+        period_options = "".join(
+            f'<option value="{html.escape(p["slug"])}">{html.escape(p["name"])}</option>'
+            for p in data["periods"])
         for event in data["unplaced_events"]:
             when = f"<strong>{html.escape(event['when_hint'])}</strong> — " if event["when_hint"] else ""
+            place_form = (
+                f'<form class="actform act-inline" method="post" action="/actions/timeline/place">'
+                f'{_token_input()}'
+                f'<input type="hidden" name="source" value="{html.escape(event["source"])}">'
+                f'<input type="hidden" name="description" value="{html.escape(event["description"])}">'
+                f'<select name="period"><option value="">where does this belong?</option>{period_options}</select>'
+                f'<input name="when_hint" placeholder="when? (your own words)" '
+                f'value="{html.escape(event["when_hint"])}">'
+                f'<label class="act-inline" style="font-size:12px;color:var(--muted)">'
+                f'<input type="checkbox" name="also_file_fix" value="1"> also file as date correction</label>'
+                f'<button class="btn" type="submit">Place</button></form>')
             parts.append(f"<div class='tl-dot undated' style='margin-left:0'>{when}"
                          f"{html.escape(event['description'])}"
-                         f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
+                         f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div>"
+                         f"<div class='tl-placeform'>{place_form}</div></div>")
         if data["unplaced_entities"]:
             chips = "".join(
                 f"<span class='tl-chip'>{link(row['title'], page_rel=row['page'])}</span>"
@@ -1736,12 +1764,24 @@ def view_timeline():
         hint = f" <span class='tl-evidence'>{html.escape(gap['hint'])}</span>" if gap.get("hint") else ""
         parts.append(f"<div class='tl-gap'>◌ {html.escape(gap['message'])}{hint}</div>")
 
+    # Manual placements orphaned by reclassification — removable, never
+    # silently misapplied.
+    for stale in data.get("stale_placements", []):
+        remove = (f'<form class="actform act-inline" method="post" action="/actions/timeline/unplace">'
+                  f'{_token_input()}<input type="hidden" name="key" value="{html.escape(str(stale.get("key", "")))}">'
+                  f'<button class="btn quiet" type="submit">remove</button></form>')
+        parts.append(f"<div class='tl-gap'>📌 A placement you made no longer matches any moment "
+                     f"(“{html.escape(str(stale.get('description', ''))[:100])}” → "
+                     f"{html.escape(str(stale.get('period', '')))}) — the source was probably "
+                     f"reclassified. {remove}</div>")
+
     parts.append(
         "<div class='tl-foot'>This is what I currently understand of your chronology — "
-        "placements are proven by shared sources (shown in parentheses), never guessed. "
-        "See something wrong? <code>lifehug.py fix &lt;source&gt; --wrong … --right …</code> "
-        "or just tell the bot. Dates arrive as answers are classified — always your own "
-        "time-words and landmark anchors, never inferred years.</div>")
+        "placements are proven by shared sources (shown in parentheses), never guessed, "
+        "except the 📌 ones you placed yourself, which outrank every heuristic. "
+        "See something wrong? Place it above, use <code>lifehug.py fix</code>, or just tell "
+        "the bot. Dates arrive as answers are classified — always your own time-words and "
+        "landmark anchors, never inferred years.</div>")
 
     return "Timeline", "".join(parts), False
 
@@ -2539,6 +2579,33 @@ def act_compile(form):
     return (back, "recompiling the wiki (30–90s)", job["id"])
 
 
+def act_timeline_place(form):
+    import timeline as tl_mod  # noqa: PLC0415
+    source = _f(form, "source")
+    description = (form.get("description") or [""])[0].strip()
+    period = _f(form, "period")
+    if not (source and description and period):
+        return ("/views/timeline", "✗ pick a period for the moment first", None)
+    when_hint = _f(form, "when_hint")
+    key = tl_mod.placement_key({"source": source, "description": description})
+    tl_mod.save_placement(key, source, description, period,
+                          when_hint=when_hint, note=_f(form, "note"))
+    flash = f"✓ placed in {period}"
+    if _f(form, "also_file_fix") and when_hint:
+        rc, out = _run_cli(["fix", source, "--right",
+                            f"“{description[:120]}” happened {when_hint}",
+                            "--kind", "date"])
+        flash += " · date correction filed" if rc == 0 else f" · ✗ correction failed: {out[-160:]}"
+    return ("/views/timeline", flash, None)
+
+
+def act_timeline_unplace(form):
+    import timeline as tl_mod  # noqa: PLC0415
+    if tl_mod.remove_placement(_f(form, "key")):
+        return ("/views/timeline", "✓ placement removed — back to the heuristics", None)
+    return ("/views/timeline", "✗ no such placement", None)
+
+
 ACTIONS = {
     "/actions/candidate": act_candidate,
     "/actions/focus-rec": act_focus_rec,
@@ -2551,6 +2618,8 @@ ACTIONS = {
     "/actions/reflect": act_reflect,
     "/actions/fix": act_fix,
     "/actions/compile": act_compile,
+    "/actions/timeline/place": act_timeline_place,
+    "/actions/timeline/unplace": act_timeline_unplace,
 }
 
 

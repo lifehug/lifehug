@@ -1207,31 +1207,38 @@ def update_index(written_pages: list[Path], dry_run=False):
 
 
 def compile_timeline(dry_run: bool = False) -> bool:
-    """Compile wiki/timeline.md from classifier-extracted events (v71).
+    """Compile wiki/timeline.md as the committed, phone-readable EXPORT of the
+    viewer's Timeline view (v102). Everything derives from
+    timeline.timeline_data() — periods as headers with their placed events
+    (the owner's manual 📌 placements honored), then the explicit unplaced
+    bucket — so the export can never contradict the curated view. Dating is
+    by the author's own words and landmark anchors; absolute years are
+    deliberately NOT inferred (they telescope). Skipped when no events exist."""
+    import timeline as tl_mod  # noqa: PLC0415
 
-    Events carry the author's own time words (`when_hint`) and a landmark
-    `anchor` — never guessed years (relative anchors beat absolute dating;
-    inferred dates telescope). The page grows as the weekly classifier works
-    through the archive. Skipped entirely when no events exist yet."""
-    classifications_dir = STATE_DIR / "classifications"
-    if not classifications_dir.exists():
+    # Honor this module's (possibly monkeypatched) roots for the call.
+    saved = (tl_mod.CLASSIFICATIONS_DIR, tl_mod.STATE_DIR, tl_mod.WIKI_DIR,
+             tl_mod.PLACEMENTS_FILE)
+    tl_mod.CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
+    tl_mod.STATE_DIR = STATE_DIR
+    tl_mod.WIKI_DIR = WIKI_DIR
+    tl_mod.PLACEMENTS_FILE = STATE_DIR / "timeline_placements.json"
+    try:
+        data = tl_mod.timeline_data()
+    finally:
+        (tl_mod.CLASSIFICATIONS_DIR, tl_mod.STATE_DIR, tl_mod.WIKI_DIR,
+         tl_mod.PLACEMENTS_FILE) = saved
+
+    total = data["counts"]["events_placed"] + data["counts"]["events_unplaced"]
+    if not total:
         return False
-    rows: list[tuple[str, str, str, str]] = []  # (source, description, when_hint, anchor)
-    for path in sorted(classifications_dir.glob("*.json")):
-        data = read_json(path, default={}) or {}
-        source = str(data.get("source_path", path.stem))
-        for event in data.get("events", []) or []:
-            if not isinstance(event, dict):
-                continue
-            desc = str(event.get("description", "")).strip()
-            if not desc:
-                continue
-            rows.append((source,
-                         desc,
-                         str(event.get("when_hint") or "").strip(),
-                         str(event.get("anchor") or "").strip()))
-    if not rows:
-        return False
+
+    def event_line(e: dict) -> str:
+        when = e["when_hint"] or "(undated)"
+        anchor_part = f" · anchor: {e['anchor']}" if e["anchor"] else ""
+        pin = " · 📌 placed by you" if e.get("placement") == "manual" else ""
+        return f"- **{when}** — {e['description']}{anchor_part}{pin}  \n  _source: {e['source']}_"
+
     lines = [
         "---",
         'title: "Timeline"',
@@ -1241,16 +1248,25 @@ def compile_timeline(dry_run: bool = False) -> bool:
         "",
         "# Timeline",
         "",
-        "Datable moments extracted from classified sources. Dating is by the",
-        "author's own words and landmark anchors — relative order is trusted;",
-        "absolute years are deliberately NOT inferred (they telescope).",
+        "Generated export of the viewer's Timeline view (/views/timeline).",
+        "Datable moments from classified sources, placed into periods by shared",
+        "sources, the author's own time words, and the owner's manual placements",
+        "(📌). Absolute years are deliberately NOT inferred (they telescope).",
         "",
     ]
-    for source, desc, when_hint, anchor in rows:
-        when = when_hint or "(undated)"
-        anchor_part = f" · anchor: {anchor}" if anchor else ""
-        lines.append(f"- **{when}** — {desc}{anchor_part}  \n  _source: {source}_")
-    lines.append("")
+    for period in data["periods"]:
+        events = data["event_lineup"].get(period["slug"], [])
+        if not events:
+            continue
+        lines.append(f"## {period['name']}")
+        lines.append("")
+        lines.extend(event_line(e) for e in events)
+        lines.append("")
+    if data["unplaced_events"]:
+        lines.append("## Unplaced")
+        lines.append("")
+        lines.extend(event_line(e) for e in data["unplaced_events"])
+        lines.append("")
     write_page(WIKI_DIR / "timeline.md", "\n".join(lines), dry_run)
     return True
 
