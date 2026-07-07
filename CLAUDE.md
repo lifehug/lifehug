@@ -736,6 +736,24 @@ compiled wiki stays in the left sidebar (index at the sidebar's Index link).
 Card sources are failure-wrapped — a broken loader drops its card, never the
 page. When nothing waits, home shows a single quiet "the loop is fed" card.
 
+### The Mirror (v100)
+
+The classifier's `contradictions` and `self_understanding_insights` (incl.
+`position:` entries) finally have a surface. `python3 system/lifehug.py
+mirror-compile` synthesizes them into `wiki/self/mirror.md` — a dated weekly
+**edition** (never a live profile) under a fixed section contract: *Tensions I
+keep circling* / *What I seem to know about myself* / *Stated positions* /
+*Sit with* (exactly 3 open questions). Voice contract: "you've said", never
+"you are"; tensions are two truths joined by **"and"** (MI discrepancy — the
+author resolves them, not the system); every claim cites its sources; a
+sentence that can't cite a source doesn't render. The weekly maintenance runs
+it after classification (keyless machines emit
+`state/agent_tasks/mirror/` for agent completion via `--from-response`; the
+emit no-ops when this week's edition already exists). `/views/mirror` renders
+the edition plus the raw signals browsable underneath; the home page's
+"worth sitting with" card draws from the edition's Sit-with picks (falling
+back to a deterministic daily pick over the raw signals).
+
 ## Nomenclature: the Life Graph
 
 The private wiki is a **graph of the author's life**. Standard terms:
@@ -961,7 +979,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
-- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, auto-promotes the best candidates under caps (backlog-aware, quality-gated, semantically deduped — v68/v69), writes the next queue, scans gaps, reports progress, surfaces pending Focus recommendations, **runs `doctor`** (queue expiry, backlog age, cadence stalls, zombie Focuses, roster continuity), and commits real changes. Every learning step is failure-wrapped. **The Telegram message is a short counts-first summary (v86, issue #35)** — classification ✅/❌ with one-line errors, candidates new/promoted/backlog, queue, coverage, doctor verdict — built by `lifehug.py weekly-summary` from state files; the full step-by-step output is persisted to `state/reports/weekly-YYYY-MM-DD.md` (committed, phone-readable via GitHub, browsable at the wiki viewer's `/views/reports`). Dry-run previews the candidate promotion gate and the summary too.
+- This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, **synthesizes the Mirror** (`mirror-compile`, v100 — keyless runs emit the task to `state/agent_tasks/mirror/`), auto-promotes the best candidates under caps (backlog-aware, quality-gated, semantically deduped — v68/v69), writes the next queue, scans gaps, reports progress, surfaces pending Focus recommendations, **runs `doctor`** (queue expiry, backlog age, cadence stalls, zombie Focuses, roster continuity), and commits real changes. Every learning step is failure-wrapped. **The Telegram message is a short counts-first summary (v86, issue #35)** — classification ✅/❌ with one-line errors, candidates new/promoted/backlog, queue, coverage, doctor verdict — built by `lifehug.py weekly-summary` from state files; the full step-by-step output is persisted to `state/reports/weekly-YYYY-MM-DD.md` (committed, phone-readable via GitHub, browsable at the wiki viewer's `/views/reports`). Dry-run previews the candidate promotion gate and the summary too.
 - Review any manual source findings that `source-lint --fix` could not safely repair
 - Review classifier/candidate output in the weekly Telegram summary, then check queue balance, progress, and whether any Focus is ready for a deliverable
 
@@ -1009,7 +1027,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 

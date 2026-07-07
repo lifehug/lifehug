@@ -329,6 +329,19 @@ def cmd_quality_update(_args: argparse.Namespace) -> int:
     return run_python("quality_profile.py", ["--update"])
 
 
+def cmd_mirror_compile(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    if getattr(args, "model", None):
+        flags.extend(["--model", args.model])
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    if getattr(args, "emit_task", None):
+        flags.extend(["--emit-task", args.emit_task])
+    if getattr(args, "from_response", None):
+        flags.extend(["--from-response", args.from_response])
+    return run_python("mirror.py", flags)
+
+
 def cmd_artifact(args: argparse.Namespace) -> int:
     artifact_args = ["--help"] if getattr(args, "artifact_help", False) else (args.artifact_args or ["--help"])
     return run_python("artifact.py", artifact_args)
@@ -1148,6 +1161,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("quality-update", help="Recompute quality profile from answer scores")
     p.set_defaults(func=cmd_quality_update)
+
+    p = sub.add_parser("mirror-compile",
+                       help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")
+    p.add_argument("--model", help="AI model override")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--emit-task", metavar="DIR",
+                   help="Keyless: emit the synthesis prompt for agent completion")
+    p.add_argument("--from-response", metavar="PATH",
+                   help="Ingest an agent-written markdown body and write the page")
+    p.set_defaults(func=cmd_mirror_compile)
 
     p = sub.add_parser("artifact", help="Create occasion artifacts and promote final works as sources", add_help=False)
     p.add_argument("-h", "--help", dest="artifact_help", action="store_true")

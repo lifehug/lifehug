@@ -13,10 +13,20 @@ sys.path.insert(0, str(SYSTEM))
 
 
 def load(name):
+    """Load a private copy of system/<name>.py WITHOUT clobbering the shared
+    sys.modules entry — other test modules bind the canonical module at import
+    time, and replacing it mid-suite splits state across two module objects."""
     spec = importlib.util.spec_from_file_location(name, SYSTEM / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
+    orig = sys.modules.get(name)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        if orig is not None:
+            sys.modules[name] = orig
+        else:
+            sys.modules.pop(name, None)
     return mod
 
 
@@ -261,7 +271,7 @@ class ClassifyKeylessTests(unittest.TestCase):
                 "candidate_questions": [{"text": "should be ignored?", "story_function": "scene", "priority": 0.9}],
             }), encoding="utf-8")
 
-            live = sys.modules["classify_story"]
+            live = cls
             orig = (live.REPO_DIR, live.CLASSIFICATIONS_DIR, live.ANSWERS_DIR,
                     live.QUESTION_CANDIDATES_FILE)
             live.REPO_DIR = root

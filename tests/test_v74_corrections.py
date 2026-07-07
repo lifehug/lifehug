@@ -11,10 +11,20 @@ sys.path.insert(0, str(SYSTEM))
 
 
 def load(name):
+    """Load a private copy of system/<name>.py WITHOUT clobbering the shared
+    sys.modules entry — other test modules bind the canonical module at import
+    time, and replacing it mid-suite splits state across two module objects."""
     spec = importlib.util.spec_from_file_location(name, SYSTEM / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
+    orig = sys.modules.get(name)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        if orig is not None:
+            sys.modules[name] = orig
+        else:
+            sys.modules.pop(name, None)
     return mod
 
 
@@ -160,7 +170,7 @@ class ClassifierCorrectionsTests(unittest.TestCase):
                 '---\ntitle: "Correction"\ntype: "source_correction"\n'
                 'corrects: "answer:A7"\ncorrects_path: "answers/A7.md"\n---\n\n'
                 "# Correction\n\nIt was 2004, not 2006.\n", encoding="utf-8")
-            live = sys.modules["classify_story"]
+            live = cls
             orig = (live.SOURCES_DIR, live.REPO_DIR)
             live.SOURCES_DIR = root / "sources"
             live.REPO_DIR = root

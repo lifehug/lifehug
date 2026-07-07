@@ -67,7 +67,7 @@ class WikiViewsTests(unittest.TestCase):
         # manuscript surface is one of the first things visible in the menu.
         order = [slug for slug, _, _ in serve_wiki.VIEWS]
         self.assertEqual(order, [
-            "status", "graph", "timeline", "book", "focuses", "recommendations",
+            "status", "mirror", "graph", "timeline", "book", "focuses", "recommendations",
             "question-bank", "candidates", "queue",
             "coverage", "entities", "sources", "artifacts", "reports", "privacy",
         ])

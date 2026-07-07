@@ -874,10 +874,31 @@ def _reflection_pool() -> list[tuple[str, str, str]]:
     return pool
 
 
+def _sit_with_from_mirror() -> list[str]:
+    """The synthesized Mirror's own Sit-with picks (v100), if the page exists."""
+    page = WIKI_DIR / "self" / "mirror.md"
+    if not page.exists():
+        return []
+    text = page.read_text(encoding="utf-8", errors="replace")
+    if "## Sit with" not in text:
+        return []
+    tail = text.split("## Sit with", 1)[1].split("\n## ", 1)[0]
+    return [ln.lstrip("-*0123456789. ").strip()
+            for ln in tail.splitlines() if ln.strip().startswith(("-", "*", "1.", "2.", "3."))]
+
+
 def _hub_card_sit_with():
-    """One classifier-noticed tension or insight to sit with — a single heavy
-    card, picked deterministically per day. (Phase 2 upgrades this to draw
-    from the synthesized Mirror's own Sit-with picks.)"""
+    """One thing to sit with — the synthesized Mirror's pick when it exists,
+    else a deterministic daily pick over the raw classifier signals. A single
+    heavy card, never more."""
+    picks = _sit_with_from_mirror()
+    if picks:
+        return _invitation(
+            "sit_with", "Worth sitting with",
+            "From this week's Mirror",
+            picks[_daily_pick(len(picks))],
+            why="distilled from your own words",
+            href="/views/mirror", cta="Open the Mirror")
     pool = _reflection_pool()
     if not pool:
         return None
@@ -890,7 +911,7 @@ def _hub_card_sit_with():
     return _invitation(
         "sit_with", "Worth sitting with", title, text,
         why=f"noticed in your own words · {stem}",
-        href=f"/search?q={quote(stem)}", cta="Find it in the wiki")
+        href="/views/mirror", cta="Open the Mirror")
 
 
 def _hub_card_next_question():
@@ -1094,6 +1115,55 @@ def view_home():
           'sidebar — or start at the <a href="/page/wiki/index.md">index</a>.</p>'
     )
     return ("Today", body, False)
+
+
+def view_mirror():
+    """The Mirror (v100): this week's synthesized introspection edition on top,
+    the raw classifier signals browsable beneath. A cadenced edition, not a
+    live profile — synthesis happens weekly, not on page load."""
+    parts = ["<h1>Mirror</h1>"]
+    page = WIKI_DIR / "self" / "mirror.md"
+    if page.exists():
+        text = page.read_text(encoding="utf-8", errors="replace")
+        generated = page_field(page, "generated_at")
+        if generated:
+            parts.append(f'<p class="muted">This week\'s edition · generated {html.escape(generated)}</p>')
+        body_html = render_markdown(text)
+        # The page carries its own "# Mirror" title; drop the duplicate h1.
+        body_html = body_html.replace("<h1>Mirror</h1>", "", 1)
+        parts.append(body_html)
+    else:
+        parts.append(_empty(
+            "No Mirror edition yet. The weekly maintenance synthesizes one from "
+            "your classified answers — or run "
+            "<code>python3 system/lifehug.py mirror-compile</code> now."))
+
+    # Raw feed beneath the synthesis — every signal, with its source.
+    try:
+        import mirror as mirror_mod  # noqa: PLC0415
+        entries = mirror_mod.load_mirror_entries()
+    except Exception:  # noqa: BLE001
+        entries = []
+    if entries:
+        parts.append(_h2("The raw signals"))
+        parts.append('<p class="muted">Everything the classifier has noticed, unsynthesized. '
+                     'Each line cites the source it came from.</p>')
+        groups = [("contradiction", "Tensions"), ("insight", "Insights"),
+                  ("position", "Stated positions")]
+        for kind, label in groups:
+            rows = [e for e in entries if e["kind"] == kind]
+            if not rows:
+                continue
+            items = "".join(
+                f'<li>{html.escape(e["text"])} '
+                f'<span class="muted">· {html.escape(e["source_short"])}</span></li>'
+                for e in rows)
+            parts.append(
+                f'<details class="qb-cat"><summary>'
+                f'<span class="qb-cat-title">{html.escape(label)}</span>'
+                f'<span class="art-group-counts">{len(rows)}</span></summary>'
+                f'<ul class="qb-list">{items}</ul></details>')
+    return ("Mirror", "".join(parts), False)
 
 
 def view_queue():
@@ -2103,6 +2173,7 @@ def view_reports():
 VIEWS = [
     # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
+    ("mirror", "Mirror", view_mirror),
     ("graph", "Graph", view_graph),
     ("timeline", "Timeline", view_timeline),
     # Book assembly — the flagship-deliverable surface.
@@ -2129,6 +2200,7 @@ VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 # the <h1> so empty-state pages get it too.
 VIEW_DESCRIPTIONS = {
     "status": "A live snapshot of the whole system — one card per moving part of the Loop: what pass you're on, how much you've answered, how many candidates and sources are waiting, and whether the weekly queue is being delivered.",
+    "mirror": "What the archive has noticed about you. The weekly synthesis distills the classifier's contradictions, self-understanding insights, and stated positions into a short edition — tensions presented as coexisting truths in your own words, every claim cited. The raw signals stay browsable underneath. A place to visit and sit with, not a feed.",
     "book": "The manuscript view. Every book-project Focus becomes a card; each of its question categories becomes a chapter with an answered ratio, a scene-depth score (McAdams' 5-slot probe from the classifier), a readiness verdict, and either the next few gap questions to record or the artifact command to draft it. This is the flagship deliverable made visible.",
     "focuses": "Everything you're deliberately building toward — people, themes, or books. Each bar shows how full a Focus is against its target (answered / target), its tier, and whether it's early, developing, ready to draft, or saturated.",
     "coverage": "How much of each question category you've answered. The bar and colour show your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+). Categories are sorted least-covered first, so the top of the list is where the story still needs you.",

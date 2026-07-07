@@ -153,6 +153,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$WORKSPACE/system/lifehug.py" source-lint --no-write-findings
   run_step python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" quality-stats
+  echo "==> (real run) lifehug.py mirror-compile — synthesizes wiki/self/mirror.md (skipped in dry run: costs an AI call)"
   run_step python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
   run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
@@ -231,6 +232,29 @@ else:
     print("No new wiki open questions to harvest.")
 PY
 
+# Mirror synthesis (v100): distill classifier contradictions/insights/positions
+# into wiki/self/mirror.md — this week's introspection edition. Runs after
+# classification so the freshest signals are in. Keyless machines emit the
+# synthesis task for agent completion instead (see skills/maintenance).
+if [[ "$KEYLESS" == "1" ]]; then
+  echo
+  echo "==> keyless — emitting mirror synthesis task for agent completion"
+  set +e
+  MIRROR_OUT=$(python3 "$WORKSPACE/system/lifehug.py" mirror-compile --emit-task state/agent_tasks/mirror 2>&1)
+  MIRROR_STATUS=$?
+  set -e
+  if [[ "$MIRROR_STATUS" -ne 0 ]]; then
+    record_learning_failure "weekly_maintenance" "mirror_emit" "$MIRROR_STATUS" "$MIRROR_OUT"
+  elif ! grep -qE "^(No mirror material|Mirror already fresh)" <<< "$MIRROR_OUT"; then
+    MIRROR_OUT="⏸ keyless — mirror task emitted, not a failure. Complete via the maintenance skill (--from-response).
+$MIRROR_OUT"
+  fi
+  echo "$MIRROR_OUT"
+else
+  run_learning_step "mirror_compile" python3 "$WORKSPACE/system/lifehug.py" mirror-compile
+  MIRROR_OUT="$LAST_STEP_OUT"
+fi
+
 run_learning_step "auto_promote" python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote
 PROMOTE_OUT="$LAST_STEP_OUT"
 
@@ -279,6 +303,7 @@ mkdir -p "$REPORT_DIR"
   echo "# Lifehug Weekly Report — $(date '+%Y-%m-%d %H:%M')"
   for section in \
     "Classification:CLASSIFY_OUT" \
+    "Mirror:MIRROR_OUT" \
     "Candidate promotion:PROMOTE_OUT" \
     "Planner queue:QUEUE_OUT" \
     "Progress:PROGRESS_OUT" \

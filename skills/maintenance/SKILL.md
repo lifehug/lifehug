@@ -52,15 +52,30 @@ classifications — classify first so this week's queue sees this week's answers
    Use only facts present in the source — never invent people, dates, or
    events. (If `manifest.json` says 0 items, nothing is pending — skip ahead.)
 
-2. **Run the script:**
+2. **Synthesize the Mirror** (v100) — the weekly introspection edition built
+   from classifier contradictions/insights/positions:
+   ```bash
+   python3 system/lifehug.py mirror-compile --emit-task state/agent_tasks/mirror
+   ```
+   Read `state/agent_tasks/mirror/mirror.prompt.md`, write the markdown BODY
+   it asks for (the four-section contract: Tensions / What I seem to know /
+   Stated positions / Sit with — every claim cited, "and" never "but", no
+   trait verdicts) to `state/agent_tasks/mirror/mirror.response.md`, then:
+   ```bash
+   python3 system/lifehug.py mirror-compile --from-response state/agent_tasks/mirror/mirror.response.md
+   ```
+   Validation rejects a body that misses a section or exceeds 3 Sit-with items.
+
+3. **Run the script:**
    ```bash
    python3 system/lifehug.py weekly-maintenance
    ```
-   The classify step finds nothing pending and passes. Everything downstream
+   The classify step finds nothing pending and passes; the mirror step emits
+   its task only when the page work above wasn't done. Everything downstream
    (quality profile, wiki harvest, auto-promotion, planner queue, doctor,
    report, commit) is deterministic and runs normally.
 
-3. **Report** the counts-first summary to the user; the full report is at
+4. **Report** the counts-first summary to the user; the full report is at
    `state/reports/weekly-YYYY-MM-DD.md` (and `/views/reports` in the viewer).
 
 ### Monthly
