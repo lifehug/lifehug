@@ -31,6 +31,9 @@ class WikiViewsTests(unittest.TestCase):
             (serve_wiki, "ROTATION_FILE"): serve_wiki.ROTATION_FILE,
             (serve_wiki, "NEIGHBORHOODS_FILE"): serve_wiki.NEIGHBORHOODS_FILE,
             (serve_wiki, "WIKI_DIR"): serve_wiki.WIKI_DIR,
+            (serve_wiki, "CLASSIFICATIONS_DIR"): serve_wiki.CLASSIFICATIONS_DIR,
+            (serve_wiki, "ANSWERS_DIR"): serve_wiki.ANSWERS_DIR,
+            (serve_wiki, "SECOND_VOICE_OFFERS_FILE"): serve_wiki.SECOND_VOICE_OFFERS_FILE,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (entity_roster, "ENTITY_DIR"): entity_roster.ENTITY_DIR,
@@ -482,6 +485,100 @@ class RevisionFooterTests(unittest.TestCase):
         for slug, a, b in (("../x", "1", "2"), ("mantle-essay", "1", "x"),
                            ("mantle-essay", "1", "9"), ("nope", "1", "2")):
             self.assertIsNone(serve_wiki.artifact_diff_html(slug, a, b), (slug, a, b))
+
+
+class HomeHubTests(WikiViewsTests):
+    """The home action hub (v99): invitations lead, stats strip below."""
+
+    def _point_at_nothing(self):
+        for name in ["QUESTIONS_FILE", "COVERAGE_FILE", "QUESTION_CANDIDATES_FILE",
+                     "QUESTION_QUEUE_FILE", "SOURCE_MANIFEST_FILE",
+                     "SOURCE_LINT_FINDINGS_FILE", "FOCUS_RECS_FILE", "ROTATION_FILE",
+                     "SECOND_VOICE_OFFERS_FILE"]:
+            setattr(serve_wiki, name, self.tmp / "missing.json")
+        serve_wiki.CLASSIFICATIONS_DIR = self.tmp / "no-classifications"
+        serve_wiki.ANSWERS_DIR = self.tmp / "no-answers"
+        serve_wiki.WIKI_DIR = self.tmp / "no-wiki"
+        roadmap.QUESTIONS_FILE = self.tmp / "missing.json"
+        roadmap.ROADMAP_FILE = self.tmp / "missing.json"
+        lifehug_core.REPO_DIR = self.tmp / "no-repo"
+
+    def test_view_groups_cover_every_view(self):
+        grouped = {s for _, slugs in serve_wiki.VIEW_GROUPS for s in slugs}
+        registered = {slug for slug, _, _ in serve_wiki.VIEWS}
+        # Every grouped slug that exists is registered; every registered slug
+        # renders in the menu (grouped or via the System fallback).
+        menu = serve_wiki.menu_html()
+        for slug in registered:
+            self.assertIn(f"/views/{slug}", menu)
+        for title, _ in serve_wiki.VIEW_GROUPS:
+            self.assertIn(title, menu)
+        # Group slugs may reference future views (e.g. mirror before Phase 2),
+        # but a registered view outside any group must land in System.
+        self.assertTrue(registered - grouped == set() or "System" in menu)
+
+    def test_home_empty_state_is_calm(self):
+        self._point_at_nothing()
+        title, body, wide = serve_wiki.view_home()
+        self.assertEqual(title, "Today")
+        self.assertFalse(wide)
+        self.assertIn("The loop is fed", body)
+        self.assertNotIn("hub-cta", body)  # the quiet card carries no verb
+
+    def test_home_full_state_cards(self):
+        self._populate()
+        serve_wiki.CLASSIFICATIONS_DIR = self.tmp / "classifications"
+        self._write("classifications/answers-a1.json", {
+            "source_path": "answers/A1.md",
+            "contradictions": ["He says X and also says Y — both feel true."],
+            "self_understanding_insights": ["Core value: people over things."]})
+        self._write("answers/A1.md",
+                    "---\nanswered_date: \"2020-01-01\"\n---\n# Question A1: Earliest?\n\nThe old porch, the dog, the summer.\n")
+        serve_wiki.ANSWERS_DIR = self.tmp / "answers"
+        serve_wiki.SECOND_VOICE_OFFERS_FILE = self.tmp / "missing.json"
+        data = serve_wiki.home_data()
+        kinds = [c["kind"] for c in data["invitations"]]
+        self.assertIn("sit_with", kinds)      # classification-backed pick
+        self.assertIn("question", kinds)      # A2 is queued and unanswered
+        self.assertIn("review", kinds)        # open candidates + pending rec
+        self.assertIn("memory", kinds)        # 2020 answer resurfaces
+        self.assertLessEqual(len(kinds), 5)
+        self.assertEqual(kinds[-1], "memory")  # the standing last slot
+        title, body, _ = serve_wiki.view_home()
+        self.assertIn("statstrip", body)
+        self.assertIn("hub-card", body)
+        # No guilt mechanics on the front page.
+        self.assertNotIn("overdue", body.lower())
+        self.assertNotIn("streak", body.lower())
+
+    def test_home_next_question_resolves_bank_text(self):
+        self._populate()
+        self._point_at_nothing_extras = None  # keep classifications/answers empty
+        serve_wiki.CLASSIFICATIONS_DIR = self.tmp / "no-classifications"
+        serve_wiki.ANSWERS_DIR = self.tmp / "no-answers"
+        serve_wiki.SECOND_VOICE_OFFERS_FILE = self.tmp / "missing.json"
+        card = serve_wiki._hub_card_next_question()
+        self.assertIsNotNone(card)
+        self.assertIn("A2", card["body"])
+        self.assertIn("Where?", card["body"])
+
+    def test_second_voice_card_this_month(self):
+        self._populate()
+        import datetime as _dt
+        month = _dt.date.today().strftime("%Y-%m")
+        serve_wiki.SECOND_VOICE_OFFERS_FILE = self._write("sv.json", {"offered": [
+            {"key": "emma::what-do-you-remember-first", "person": "Emma", "month": month},
+            {"key": "old::stale", "person": "Old", "month": "2020-01"}]})
+        card = serve_wiki._hub_card_second_voice()
+        self.assertIsNotNone(card)
+        self.assertIn("Emma", card["title"])
+        self.assertIn("what do you remember first", card["body"])
+        # Emma has a wiki page in the fixture set, so the card links to it.
+        self.assertIn("/page/wiki/people/emma.md", card["href"])
+
+    def test_daily_pick_is_stable_within_a_day(self):
+        self.assertEqual(serve_wiki._daily_pick(7), serve_wiki._daily_pick(7))
+        self.assertEqual(serve_wiki._daily_pick(1), 0)
 
 
 if __name__ == "__main__":

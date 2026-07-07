@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import hashlib
 import html
 import json
 import re
@@ -12,6 +14,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from lifehug_core import (
+    ANSWERS_DIR,
+    CLASSIFICATIONS_DIR,
     COVERAGE_FILE,
     FOCUS_RECS_FILE,
     NEIGHBORHOODS_FILE,
@@ -21,6 +25,7 @@ from lifehug_core import (
     ROTATION_FILE,
     SOURCE_LINT_FINDINGS_FILE,
     SOURCE_MANIFEST_FILE,
+    STATE_DIR,
     WIKI_DIR,
     load_config,
     parse_categories,
@@ -275,18 +280,43 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
     return text
 
 
+# Hamburger menu groups: what you can DO, what helps you REFLECT, the LIBRARY
+# of material, and the SYSTEM's internals. A view registered in VIEWS but not
+# claimed by any group falls into System automatically, so adding a view is
+# still one registry entry.
+VIEW_GROUPS = [
+    ("Do", ["queue", "candidates", "recommendations", "book"]),
+    ("Reflect", ["mirror", "timeline", "graph"]),
+    ("Library", ["artifacts", "question-bank", "sources", "privacy"]),
+    ("System", ["status", "focuses", "coverage", "entities", "reports"]),
+]
+
+
 def menu_html() -> str:
-    """The hamburger dropdown: one link per registered view. Adding a view to
-    VIEWS automatically adds it here and at /views/<slug>."""
-    links = "".join(
-        f'<a class="menu-item" href="/views/{slug}">{html.escape(label)}</a>'
-        for slug, label, _ in VIEWS
-    )
+    """The hamburger dropdown: registered views grouped by VIEW_GROUPS
+    (Do / Reflect / Library / System). Adding a view to VIEWS automatically
+    adds it here (under its group, or System if unclaimed) and at
+    /views/<slug>."""
+    labels = {slug: label for slug, label, _ in VIEWS}
+    claimed = {s for _, slugs in VIEW_GROUPS for s in slugs}
+    leftovers = [slug for slug, _, _ in VIEWS if slug not in claimed]
+    parts = []
+    for group_title, slugs in VIEW_GROUPS:
+        present = [s for s in slugs if s in labels]
+        if group_title == "System":
+            present += leftovers
+        if not present:
+            continue
+        parts.append(f'<div class="menu-title">{html.escape(group_title)}</div>')
+        parts.extend(
+            f'<a class="menu-item" href="/views/{s}">{html.escape(labels[s])}</a>'
+            for s in present
+        )
     return (
         '<div class="menu-wrap">'
         '<button class="menu-btn" id="menuBtn" aria-label="Views menu" onclick="toggleMenu(event)">'
         '<span></span><span></span><span></span></button>'
-        f'<div class="menu-dropdown" id="menuDropdown"><div class="menu-title">Views</div>{links}</div>'
+        f'<div class="menu-dropdown" id="menuDropdown">{"".join(parts)}</div>'
         '</div>'
     )
 
@@ -302,7 +332,15 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)} · Lifehug</title>
   <style>
-    body {{ margin: 0; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #202124; background: #fbfaf7; }}
+    :root {{
+      --bg: #fbfaf7; --panel: #f4f0e8; --panel-hover: #ece5d8;
+      --ink: #202124; --ink-strong: #2f271c; --ink-soft: #5a4d3c; --ink-mid: #6b5d49;
+      --muted: #8a7a63; --muted-2: #9a8c75;
+      --accent: #987b55; --link: #7c4f1d;
+      --line: #ddd8cf; --line-soft: #e5dfd5; --border-strong: #c8c2b8;
+      --card-bg: #fff; --card-warm: #fffdf9;
+    }}
+    body {{ margin: 0; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }}
     header {{ height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid #ddd8cf; background: #fff; position: sticky; top: 0; z-index: 20; }}
     header a {{ color: #202124; text-decoration: none; font-weight: 650; }}
     form {{ margin-left: auto; }}
@@ -398,6 +436,22 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .card-val {{ font-size: 26px; font-weight: 700; color: #3f3428; }}
     .card-lbl {{ font-size: 13px; color: #6b5d49; }}
     .card .sub {{ font-size: 12px; color: #9a8c75; margin-top: 2px; }}
+    /* Home action hub — calm invitations, never guilt metrics */
+    .hub {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin: 18px 0 26px; }}
+    .hub-card {{ background: var(--card-warm); border: 1px solid var(--line-soft); border-left: 4px solid var(--accent);
+      border-radius: 10px; padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 6px; }}
+    .hub-kicker {{ font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted-2); }}
+    .hub-title {{ font-weight: 650; font-size: 16px; color: var(--ink-strong); line-height: 1.3; }}
+    .hub-body {{ font-size: 14px; color: var(--ink-soft); line-height: 1.5; }}
+    .hub-why {{ font-size: 12px; color: var(--muted); }}
+    .hub-cta {{ margin-top: auto; padding-top: 8px; }}
+    .hub-cta a {{ display: inline-block; font-size: 13px; font-weight: 600; color: var(--link); text-decoration: none;
+      border: 1px solid #d8cdbb; border-radius: 6px; padding: 5px 12px; }}
+    .hub-cta a:hover {{ background: var(--panel-hover); }}
+    .statstrip {{ display: flex; flex-wrap: wrap; gap: 8px 26px; padding: 14px 2px 0; margin-top: 6px;
+      border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 13px; }}
+    .statstrip b {{ color: var(--ink-mid); font-weight: 650; }}
+    .home-foot {{ margin-top: 26px; font-size: 14px; color: var(--muted); }}
     #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
     .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-legend span {{ margin-right: 14px; }}
@@ -674,7 +728,9 @@ def view_entities():
     return ("Entity Candidates", "".join(parts), False)
 
 
-def view_status():
+def loop_stats() -> dict:
+    """One shared snapshot of the Loop's counters — feeds both The Loop view
+    and the home page's stats strip, so the numbers can never disagree."""
     rot = read_json(ROTATION_FILE, default={}) or {}
     cov = (read_json(COVERAGE_FILE, default={}) or {}).get("categories", {})
     cands = (read_json(QUESTION_CANDIDATES_FILE, default={}) or {}).get("candidates", [])
@@ -703,6 +759,28 @@ def view_status():
     cur = rot.get("current_pass")
     pass_name = names[cur - 1] if isinstance(cur, int) and 1 <= cur <= len(names) else ""
 
+    return {
+        "pass_num": cur,
+        "pass_name": pass_name,
+        "questions_asked": rot.get("questions_asked", 0),
+        "answered": answered,
+        "total": total,
+        "greens": greens,
+        "open_cands": open_cands,
+        "pending_recs": pending_recs,
+        "sources": len(manifest),
+        "lint_open": lint.get("open_count", len([f for f in lint.get("findings", []) if f.get("status", "open") == "open"])),
+        "queue_answered": q_answered,
+        "queue_total": len(q_items),
+        "queue_expires": queue.get("expires_at"),
+    }
+
+
+def view_status():
+    s = loop_stats()
+    answered, total = s["answered"], s["total"]
+    cur, pass_name = s["pass_num"], s["pass_name"]
+
     def card(label, value, sub=""):
         s = f'<div class="sub">{html.escape(sub)}</div>' if sub else ""
         return (f'<div class="card"><div class="card-val">{html.escape(str(value))}</div>'
@@ -710,17 +788,312 @@ def view_status():
 
     cards = [
         card("Pass", (f"{cur} · {pass_name}" if pass_name else cur) if cur else "—"),
-        card("Questions asked", rot.get("questions_asked", 0)),
+        card("Questions asked", s["questions_asked"]),
         card("Answered", f"{answered}/{total}", f"{_pct(answered / total if total else 0)} coverage"),
-        card("Green categories", greens),
-        card("Open candidates", open_cands),
-        card("Sources captured", len(manifest)),
-        card("Open lint findings", lint.get("open_count", len([f for f in lint.get("findings", []) if f.get("status", "open") == "open"]))),
-        card("Pending focus recs", pending_recs),
-        card("Queue answered", f"{q_answered}/{len(q_items)}", "expires " + str(queue.get("expires_at", "—"))),
+        card("Green categories", s["greens"]),
+        card("Open candidates", s["open_cands"]),
+        card("Sources captured", s["sources"]),
+        card("Open lint findings", s["lint_open"]),
+        card("Pending focus recs", s["pending_recs"]),
+        card("Queue answered", f"{s['queue_answered']}/{s['queue_total']}", "expires " + str(s["queue_expires"] or "—")),
     ]
     grid = '<div class="cards">' + "".join(cards) + "</div>"
     return ("The Loop", "<h1>The Loop — System Status</h1>" + grid, False)
+
+
+# ---------------------------------------------------------------------------
+# Home action hub (v99)
+#
+# The home page answers "what should I do next?" with a few calm invitation
+# cards — never a backlog, never guilt metrics. Each card grounds itself in
+# real material, says why it's here now, and offers one verb. A small stats
+# strip below shows state (not debt). Design notes: 3–5 cards max, at most one
+# heavy introspective card, absence reads as stillness.
+# ---------------------------------------------------------------------------
+
+SECOND_VOICE_OFFERS_FILE = STATE_DIR / "second_voice_offers.json"
+
+# Left-rule accent per invitation kind. Calm palette — no reds on the home page.
+_HUB_ACCENTS = {
+    "chapter": "#3f8f4f",
+    "sit_with": "#5a7d9a",
+    "question": "#987b55",
+    "review": "#c79a2e",
+    "perennial": "#7c4f1d",
+    "second_voice": "#8a7a63",
+    "memory": "#9a8c75",
+    "quiet": "#c8c2b8",
+}
+
+
+def _daily_pick(n: int) -> int:
+    """Stable index for today — the same pick all day, a fresh one tomorrow.
+    (hash() is salted per process, so use a real digest.)"""
+    today = datetime.date.today().isoformat()
+    return int(hashlib.sha1(today.encode("utf-8")).hexdigest(), 16) % max(1, n)
+
+
+def _invitation(kind, kicker, title, body, why="", href="", cta=""):
+    return {"kind": kind, "kicker": kicker, "title": title, "body": body,
+            "why": why, "href": href, "cta": cta}
+
+
+def _hub_card_chapter():
+    """A chapter that crossed READY and has no draft yet — the strongest verb."""
+    import book as book_mod  # noqa: PLC0415
+    for b in book_mod.compute_books():
+        for ch in b["chapters"]:
+            if ch.get("ready_to_draft") and not ch.get("has_draft"):
+                depth = (f' and {ch["scene_slots_filled"]}/{ch["scene_slots_total"]} scene slots filled'
+                         if ch.get("scene_slots_total") else "")
+                return _invitation(
+                    "chapter", "Chapter ready",
+                    f'“{ch["category_name"]}” is ready to draft',
+                    f'{ch["answered"]} of {ch["total"]} questions answered in '
+                    f'{b.get("label", "the book")} — enough material to write from.',
+                    why=f'it crossed {ch["verdict"]}{depth}',
+                    href="/views/book", cta="Open the book map")
+    return None
+
+
+def _reflection_pool() -> list[tuple[str, str, str]]:
+    """(kind, text, source) for every classifier-extracted contradiction and
+    self-understanding insight — the raw material the Mirror synthesizes."""
+    pool: list[tuple[str, str, str]] = []
+    if not CLASSIFICATIONS_DIR.exists():
+        return pool
+    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
+        data = read_json(path, default={}) or {}
+        source = str(data.get("source_path", path.stem))
+        for c in data.get("contradictions") or []:
+            if isinstance(c, str) and c.strip():
+                pool.append(("tension", c.strip(), source))
+        for i in data.get("self_understanding_insights") or []:
+            if isinstance(i, str) and i.strip():
+                pool.append(("insight", i.strip(), source))
+    return pool
+
+
+def _hub_card_sit_with():
+    """One classifier-noticed tension or insight to sit with — a single heavy
+    card, picked deterministically per day. (Phase 2 upgrades this to draw
+    from the synthesized Mirror's own Sit-with picks.)"""
+    pool = _reflection_pool()
+    if not pool:
+        return None
+    kind, text, source = pool[_daily_pick(len(pool))]
+    stem = Path(source).stem
+    if len(text) > 320:
+        text = text[:317] + "…"
+    title = ("A tension worth sitting with" if kind == "tension"
+             else "Something you seem to know about yourself")
+    return _invitation(
+        "sit_with", "Worth sitting with", title, text,
+        why=f"noticed in your own words · {stem}",
+        href=f"/search?q={quote(stem)}", cta="Find it in the wiki")
+
+
+def _hub_card_next_question():
+    """The week's next unanswered planned question, ready when the author is."""
+    queue = read_json(QUESTION_QUEUE_FILE, default={}) or {}
+    items = queue.get("queue", [])
+    if not items or not QUESTIONS_FILE.exists():
+        return None
+    md = QUESTIONS_FILE.read_text(encoding="utf-8")
+    bank = parse_questions(md)
+    text_by_id = {str(q["id"]): str(q["text"]) for q in bank}
+    answered_ids = {str(q["id"]) for q in bank if q.get("answered")}
+    for q in items:
+        qid = str(q.get("question_id", ""))
+        if qid and qid not in answered_ids:
+            text = str(q.get("text") or text_by_id.get(qid, ""))
+            if not text:
+                continue
+            why = str(q.get("reason") or q.get("story_function") or "")
+            return _invitation(
+                "question", "When you're ready",
+                "This week's next question",
+                f"[{qid}] {text}",
+                why=why, href="/views/queue", cta="See the week's plan")
+    return None
+
+
+def _hub_card_review():
+    """Candidates and focus ideas waiting for the author's eye — counts only,
+    one card, never a backlog listing."""
+    s = loop_stats()
+    open_cands, pending_recs = s["open_cands"], s["pending_recs"]
+    if not open_cands and not pending_recs:
+        return None
+    bits = []
+    if open_cands:
+        bits.append(f"{open_cands} follow-up question{'s' if open_cands != 1 else ''} "
+                    "proposed from your answers")
+    if pending_recs:
+        bits.append(f"{pending_recs} focus idea{'s' if pending_recs != 1 else ''}")
+    href = "/views/candidates" if open_cands else "/views/recommendations"
+    cta = "Review candidates" if open_cands else "Review focus ideas"
+    return _invitation(
+        "review", "For your eye",
+        "A few things wait for review",
+        " · ".join(bits) + ". They stay parked until you promote them.",
+        href=href, cta=cta)
+
+
+def _hub_card_perennial():
+    """A yearly return-and-contrast question that has come due."""
+    from question_candidates import generate_due_perennials  # noqa: PLC0415
+    due = generate_due_perennials(dry_run=True)
+    if not due:
+        return None
+    _, perennial_id = due[0]
+    return _invitation(
+        "perennial", "A yearly return",
+        f"{perennial_id} has come around again",
+        "A perennial question is due — you'll answer it with last year's "
+        "answer alongside, so the contrast becomes part of the story.",
+        href="/views/question-bank", cta="See the question bank")
+
+
+def _hub_card_second_voice():
+    """This month's gentlest offer: if it comes up naturally, ask someone."""
+    data = read_json(SECOND_VOICE_OFFERS_FILE, default={}) or {}
+    month = datetime.date.today().strftime("%Y-%m")
+    offers = [o for o in data.get("offered", [])
+              if o.get("month") == month and not o.get("acknowledged_at")]
+    if not offers:
+        return None
+    offer = offers[_daily_pick(len(offers))]
+    person = str(offer.get("person", ""))
+    key = str(offer.get("key", ""))
+    question = key.split("::", 1)[1].replace("-", " ") if "::" in key else ""
+    body = (f"If it comes up naturally, you might ask {person}: “{question}?”"
+            if question else f"If it comes up naturally, ask {person} about a shared moment.")
+    href = cta = ""
+    person_page = WIKI_DIR / "people" / f"{slugify(person)}.md"
+    if person_page.exists():
+        rel = str(person_page.relative_to(WIKI_DIR.parent))
+        href, cta = f"/page/{quote(rel)}", "Read their page"
+    return _invitation(
+        "second_voice", "If it comes up",
+        f"A question for {person}",
+        body + " Their answer becomes a second voice in the archive.",
+        why="this month's second-voice offer — it expires silently if ignored",
+        href=href, cta=cta)
+
+
+def _hub_card_memory():
+    """On This Day-style resurfacing: one old answer (≥90 days), verbatim-ish."""
+    if not ANSWERS_DIR.exists():
+        return None
+    today = datetime.date.today()
+    entries: list[tuple[str, Path]] = []
+    for p in sorted(ANSWERS_DIR.glob("*.md")):
+        try:
+            head = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r'^answered_date:\s*"?([0-9]{4}-[0-9]{2}-[0-9]{2})"?', head, re.MULTILINE)
+        if not m:
+            continue
+        try:
+            answered = datetime.date.fromisoformat(m.group(1))
+        except ValueError:
+            continue
+        if (today - answered).days >= 90:
+            entries.append((m.group(1), p))
+    if not entries:
+        return None
+    date_str, path = entries[_daily_pick(len(entries))]
+    text = path.read_text(encoding="utf-8", errors="replace")
+    parts = text.split("---")
+    body = parts[-1] if len(parts) >= 3 else text
+    body = re.sub(r"^#.*$", "", body, flags=re.MULTILINE)
+    body = " ".join(body.split())
+    excerpt = body[:260] + ("…" if len(body) > 260 else "")
+    return _invitation(
+        "memory", "From your archive",
+        f"You wrote this on {date_str}",
+        f"“{excerpt}”",
+        why=f"answer {path.stem}, resurfaced",
+        href=f"/search?q={quote(path.stem)}", cta="Find it in the wiki")
+
+
+def home_data() -> dict:
+    """Assemble the home hub: up to 4 priority invitations + the standing
+    memory slot. Every builder is failure-wrapped — one broken card must never
+    take down the front page."""
+    builders = [_hub_card_chapter, _hub_card_sit_with, _hub_card_next_question,
+                _hub_card_review, _hub_card_perennial, _hub_card_second_voice]
+    cards = []
+    for fn in builders:
+        if len(cards) >= 4:
+            break
+        try:
+            card = fn()
+        except Exception:  # noqa: BLE001 — a broken loader is that card's problem only
+            card = None
+        if card:
+            cards.append(card)
+    try:
+        memory = _hub_card_memory()
+    except Exception:  # noqa: BLE001
+        memory = None
+    if memory:
+        cards.append(memory)
+    try:
+        stats = loop_stats()
+    except Exception:  # noqa: BLE001
+        stats = {}
+    return {"invitations": cards, "stats": stats}
+
+
+def _hub_card_html(card: dict) -> str:
+    accent = _HUB_ACCENTS.get(card["kind"], _HUB_ACCENTS["quiet"])
+    why = f'<div class="hub-why">{html.escape(card["why"])}</div>' if card.get("why") else ""
+    cta = ""
+    if card.get("href") and card.get("cta"):
+        cta = (f'<div class="hub-cta"><a href="{html.escape(card["href"])}">'
+               f'{html.escape(card["cta"])}</a></div>')
+    return (f'<div class="hub-card" style="border-left-color:{accent}">'
+            f'<div class="hub-kicker">{html.escape(card["kicker"])}</div>'
+            f'<div class="hub-title">{html.escape(card["title"])}</div>'
+            f'<div class="hub-body">{html.escape(card["body"])}</div>'
+            f"{why}{cta}</div>")
+
+
+def view_home():
+    """The home page: a few invitations, then a quiet strip of state."""
+    data = home_data()
+    cards = data["invitations"]
+    if not cards:
+        cards = [_invitation(
+            "quiet", "All quiet",
+            "The loop is fed",
+            "Nothing waits on you right now. Wander the wiki, or just live "
+            "some more life — the questions will find you.")]
+    s = data["stats"]
+    strip = ""
+    if s:
+        total, answered = s.get("total", 0), s.get("answered", 0)
+        pieces = [
+            f"<span><b>{answered}</b> of <b>{total}</b> answered</span>",
+            f"<span><b>{_pct(answered / total if total else 0)}</b> coverage</span>",
+            f"<span><b>{s.get('sources', 0)}</b> sources</span>",
+            f"<span><b>{s.get('greens', 0)}</b> green categories</span>",
+        ]
+        if s.get("queue_total"):
+            pieces.append(f"<span>queue <b>{s['queue_answered']}/{s['queue_total']}</b></span>")
+        strip = '<div class="statstrip">' + "".join(pieces) + "</div>"
+    body = (
+        "<h1>Today</h1>"
+        '<p class="view-desc">A few invitations, ready when you are.</p>'
+        '<div class="hub">' + "".join(_hub_card_html(c) for c in cards) + "</div>"
+        + strip
+        + '<p class="home-foot">Browsing instead? The compiled wiki lives in the '
+          'sidebar — or start at the <a href="/page/wiki/index.md">index</a>.</p>'
+    )
+    return ("Today", body, False)
 
 
 def view_queue():
@@ -1795,9 +2168,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            index = WIKI_DIR / "index.md"
-            text = index.read_text(encoding="utf-8") if index.exists() else "# Lifehug\n\nRun `python3 system/wiki_compile.py`."
-            self.send_html("Index", render_markdown(text))
+            # Home is the action hub (v99). The wiki index stays reachable via
+            # the sidebar's Index link (/page/wiki/index.md).
+            try:
+                title, body, wide = view_home()
+            except Exception as exc:  # noqa: BLE001 — the front page must never 500
+                title, body, wide = ("Today",
+                                     f"<h1>Today</h1>{_empty('home hub error: ' + html.escape(str(exc)))}",
+                                     False)
+            self.send_html(title, body, wide=wide)
             return
 
         if parsed.path.startswith("/page/"):

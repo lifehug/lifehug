@@ -721,6 +721,21 @@ python3 system/lifehug.py book-offers [--send]         # pending READY nudges
 - The owner's **Life Chapters** source (the annual `chapters-exercise`) is the
   book's narrative spine; chapter categories map onto it during drafting.
 
+## The Viewer (serve_wiki.py, v99)
+
+`python3 system/lifehug.py serve` → http://127.0.0.1:8765. The home page is an
+**action hub**, not the wiki index: up to five calm **invitation cards** —
+chapter ready to draft, one classifier-noticed tension/insight to sit with,
+the week's next question, review counts (candidates + focus recs), a perennial
+due, this month's second-voice offer, and a standing last slot resurfacing one
+old answer (≥90 days) — over a small stats strip. Tone contract: invitations,
+never guilt metrics — no streaks, no overdue red, absence reads as stillness;
+each card grounds itself in real material and says why it's here now. The
+hamburger menu groups views into **Do / Reflect / Library / System**; the
+compiled wiki stays in the left sidebar (index at the sidebar's Index link).
+Card sources are failure-wrapped — a broken loader drops its card, never the
+page. When nothing waits, home shows a single quiet "the loop is fed" card.
+
 ## Nomenclature: the Life Graph
 
 The private wiki is a **graph of the author's life**. Standard terms:
