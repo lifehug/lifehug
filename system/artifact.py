@@ -444,12 +444,9 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_save(args: argparse.Namespace) -> int:
-    out_dir = output_dir_for(args.output)
-    meta = load_artifact(out_dir)
-    content = sys.stdin.read().strip()
-    if not content:
-        raise SystemExit("Error: artifact content must be provided on stdin")
+def save_version(out_dir: Path, meta: dict, content: str, model: str,
+                 feedback: str = "", final: bool = False) -> int:
+    """Append `content` as the next vN.md with version metadata. Returns N."""
     version = next_version_number(out_dir)
     out_file = out_dir / f"v{version}.md"
     write_text(out_file, content + "\n")
@@ -457,18 +454,65 @@ def cmd_save(args: argparse.Namespace) -> int:
         "version": version,
         "path": rel(out_file),
         "created_at": now_utc(),
-        "model": args.model or "unknown",
+        "model": model or "unknown",
     }
-    if args.feedback:
-        entry["feedback"] = args.feedback
+    if feedback:
+        entry["feedback"] = feedback
     meta.setdefault("versions", []).append(entry)
-    if args.final:
+    if final:
         meta["final_version"] = version
     save_artifact(out_dir, meta)
     write_compose_meta(out_dir, meta)
     print(f"Saved {display_path(out_file)}")
-    if args.final:
+    if final:
         print(f"Marked v{version} final")
+    return version
+
+
+def cmd_save(args: argparse.Namespace) -> int:
+    out_dir = output_dir_for(args.output)
+    meta = load_artifact(out_dir)
+    content = sys.stdin.read().strip()
+    if not content:
+        raise SystemExit("Error: artifact content must be provided on stdin")
+    save_version(out_dir, meta, content, args.model, args.feedback, args.final)
+    return 0
+
+
+def cmd_revise(args: argparse.Namespace) -> int:
+    """AI revision in one step (v101): build the revision prompt from the
+    latest version + feedback (compose's prompt assembly), call the AI, and
+    save the result as vN+1. The viewer runs this as a detached job; keyless
+    machines get an agent task instead (the viewer handles that gating)."""
+    out_dir = output_dir_for(args.output)
+    meta = load_artifact(out_dir)
+    latest = latest_version_file(out_dir)
+    if latest is None:
+        raise SystemExit("Error: no versions to revise — save a v1 first")
+    if not args.feedback:
+        raise SystemExit("Error: --feedback is required for a revision")
+    cmeta = compose.read_meta(out_dir / "meta.yaml") or {}
+    prompt = compose.build_prompt(
+        format_name=cmeta.get("format") or meta.get("format") or "letter",
+        subject_name=cmeta.get("subject") or meta.get("subject") or "",
+        categories=cmeta.get("categories") or meta.get("categories") or [],
+        title=cmeta.get("title", out_dir.name),
+        feedback=args.feedback,
+        prior_version=latest.read_text(encoding="utf-8"),
+    )
+    from lifehug_core import load_config  # noqa: PLC0415
+    from research_expand import DEFAULT_MODEL, call_ai  # noqa: PLC0415
+    cfg = load_config()
+    model = args.model or cfg.get("followup_model") or DEFAULT_MODEL
+    print(f"Revising {display_path(out_dir)} with {model}…")
+    raw = call_ai(prompt, model).strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else ""
+        if raw.rstrip().endswith("```"):
+            raw = raw.rstrip()[:-3].strip()
+    if not raw:
+        raise SystemExit("Error: the AI returned an empty revision")
+    save_version(out_dir, meta, raw, model, args.feedback)
     return 0
 
 
@@ -758,6 +802,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--feedback", default="")
     p.add_argument("--final", action="store_true", help="Mark this saved version final")
     p.set_defaults(func=cmd_save)
+
+    p = sub.add_parser("revise", help="AI-revise the latest version with feedback, saving vN+1")
+    p.add_argument("output")
+    p.add_argument("--feedback", required=True, help="Revision direction, e.g. 'warmer, shorter'")
+    p.add_argument("--model", default=None)
+    p.set_defaults(func=cmd_revise)
 
     p = sub.add_parser("final", help="Mark an artifact version final")
     p.add_argument("output")

@@ -503,6 +503,20 @@ def pick_second_voice_offer(now: datetime | None = None) -> str | None:
             f"then forward whatever they say (it saves as their account). No rush, no need.")
 
 
+def acknowledge_second_voice_offer(key: str) -> bool:
+    """Stamp `acknowledged_at` on a pending offer (v101 — the viewer's home
+    card 'got it' button). Acknowledging only hides the card; the offer still
+    never repeats, per the Tier-2 contract."""
+    now = datetime.now(timezone.utc)
+    state = read_json(SECOND_VOICE_OFFERS_FILE, default=None) or {"version": 1, "offered": []}
+    for offer in state.get("offered", []):
+        if str(offer.get("key")) == key and not offer.get("acknowledged_at"):
+            offer["acknowledged_at"] = now.isoformat().replace("+00:00", "Z")
+            write_json(SECOND_VOICE_OFFERS_FILE, state)
+            return True
+    return False
+
+
 def zombie_focuses(focuses: list[dict]) -> list[dict]:
     """Focuses with no question categories: the planner can never ask about
     them (weight 0 forever). Seed them with questions (`lifehug.py focus-new`

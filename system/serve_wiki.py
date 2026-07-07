@@ -4,14 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import html
 import json
 import re
+import secrets
+import subprocess
+import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from lifehug_core import (
     ANSWERS_DIR,
@@ -22,6 +27,7 @@ from lifehug_core import (
     QUESTION_CANDIDATES_FILE,
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
+    REPO_DIR,
     ROTATION_FILE,
     SOURCE_LINT_FINDINGS_FILE,
     SOURCE_MANIFEST_FILE,
@@ -452,6 +458,27 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 13px; }}
     .statstrip b {{ color: var(--ink-mid); font-weight: 650; }}
     .home-foot {{ margin-top: 26px; font-size: 14px; color: var(--muted); }}
+    /* Write actions (v101) */
+    .flash {{ background: #f0ead9; border: 1px solid #ddd0b2; border-radius: 8px; padding: 10px 14px;
+      margin: 0 0 18px; font-size: 14px; color: var(--ink-soft); }}
+    .jobpill {{ display: inline-block; font-size: 12px; font-weight: 650; padding: 1px 10px; border-radius: 10px;
+      background: #e7e0d2; color: var(--ink-mid); }}
+    .jobpill.done {{ background: #dcedc8; color: #33691e; }}
+    .jobpill.failed {{ background: #f8d7d5; color: #8c2f28; }}
+    .btn {{ font: inherit; font-size: 13px; font-weight: 600; color: var(--link); background: var(--card-bg);
+      border: 1px solid #d8cdbb; border-radius: 6px; padding: 5px 12px; cursor: pointer; }}
+    .btn:hover {{ background: var(--panel-hover); }}
+    .btn.quiet {{ color: var(--muted); font-weight: 500; }}
+    .act-inline {{ display: inline-flex; gap: 6px; align-items: center; margin: 0; }}
+    .act-inline select, .act-inline input {{ min-width: 0; padding: 4px 6px; font-size: 13px; }}
+    .act-row {{ margin: 8px 0 20px; }}
+    form.actform {{ margin: 0; }}
+    textarea {{ width: 100%; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 6px;
+      padding: 8px 10px; font: 14px/1.5 inherit; background: var(--card-bg); }}
+    label {{ display: block; font-size: 12px; color: var(--ink-mid); margin: 10px 0 3px; }}
+    .art-actions {{ border: 1px solid var(--line-soft); border-radius: 10px; background: var(--card-warm);
+      padding: 12px 16px 16px; margin: 14px 0; }}
+    .art-actions summary {{ cursor: pointer; font-weight: 650; font-size: 14px; color: var(--ink-mid); }}
     #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
     .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-legend span {{ margin-right: 14px; }}
@@ -487,6 +514,21 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       var d = document.getElementById('menuDropdown');
       if (w && d && !w.contains(e.target)) d.classList.remove('open');
     }});
+    // Job pill: poll a detached job's status file until it finishes (v101).
+    (function () {{
+      var pill = document.querySelector('.jobpill[data-job]');
+      if (!pill) return;
+      var id = pill.getAttribute('data-job');
+      function tick() {{
+        fetch('/jobs/' + id + '.json').then(function (r) {{ return r.json(); }}).then(function (j) {{
+          if (j.status === 'running') {{ setTimeout(tick, 3000); return; }}
+          pill.textContent = j.status === 'done' ? 'done ✓' : 'failed ✗';
+          pill.classList.add(j.status);
+          if (j.tail && j.status === 'failed') pill.title = j.tail;
+        }}).catch(function () {{ setTimeout(tick, 5000); }});
+      }}
+      setTimeout(tick, 2500);
+    }})();
   </script>
 </body>
 </html>"""
@@ -689,16 +731,45 @@ def view_candidates():
                 cat_cell = html.escape(letter + (f" ({name})" if name else ""))
             else:
                 cat_cell = '<span class="muted">unassigned</span>'
-            rows.append([
+            row = [
                 html.escape(str(c.get("text", ""))[:300]),
                 format(c.get("priority", 0) or 0, ".2f"),
                 (format(score, ".2f") if isinstance(score, (int, float)) else "—"),
                 cat_cell,
                 html.escape(str(c.get("story_function") or "—")),
                 html.escape(str(c.get("source_path") or "—")),
-            ])
-        parts.append(_table(["Question", "Priority", "Quality", "Category", "Story fn", "Source"], rows))
+            ]
+            if status in ("candidate", "needs_review"):
+                row.append(_candidate_actions(c, letter, cat_names))
+            else:
+                row.append('<span class="muted">—</span>')
+            rows.append(row)
+        parts.append(_table(["Question", "Priority", "Quality", "Category", "Story fn", "Source", "Actions"], rows))
     return ("Candidates", "".join(parts), False)
+
+
+def _candidate_actions(c: dict, inferred: str | None, cat_names: dict) -> str:
+    """Promote / defer / dismiss forms for one reviewable candidate (v101).
+    Promote requires a category — the picker defaults to the inferred one."""
+    cid = html.escape(str(c.get("id", "")))
+    options = "".join(
+        f'<option value="{html.escape(letter)}"{" selected" if letter == inferred else ""}>'
+        f'{html.escape(letter)}</option>'
+        for letter in sorted(cat_names))
+    return (
+        f'<form class="actform act-inline" method="post" action="/actions/candidate">'
+        f'{_token_input()}<input type="hidden" name="id" value="{cid}">'
+        f'<input type="hidden" name="op" value="promote">'
+        f'<select name="category">{options}</select>'
+        f'<button class="btn" type="submit">Promote</button></form> '
+        f'<form class="actform act-inline" method="post" action="/actions/candidate">'
+        f'{_token_input()}<input type="hidden" name="id" value="{cid}">'
+        f'<input type="hidden" name="op" value="defer">'
+        f'<button class="btn quiet" type="submit">Defer</button></form> '
+        f'<form class="actform act-inline" method="post" action="/actions/candidate">'
+        f'{_token_input()}<input type="hidden" name="id" value="{cid}">'
+        f'<input type="hidden" name="op" value="dismiss">'
+        f'<button class="btn quiet" type="submit">Dismiss</button></form>')
 
 
 def view_entities():
@@ -833,9 +904,9 @@ def _daily_pick(n: int) -> int:
     return int(hashlib.sha1(today.encode("utf-8")).hexdigest(), 16) % max(1, n)
 
 
-def _invitation(kind, kicker, title, body, why="", href="", cta=""):
+def _invitation(kind, kicker, title, body, why="", href="", cta="", extra=""):
     return {"kind": kind, "kicker": kicker, "title": title, "body": body,
-            "why": why, "href": href, "cta": cta}
+            "why": why, "href": href, "cta": cta, "extra": extra}
 
 
 def _hub_card_chapter():
@@ -995,12 +1066,15 @@ def _hub_card_second_voice():
     if person_page.exists():
         rel = str(person_page.relative_to(WIKI_DIR.parent))
         href, cta = f"/page/{quote(rel)}", "Read their page"
+    ack = (f'<form class="actform act-inline" method="post" action="/actions/second-voice-ack">'
+           f'{_token_input()}<input type="hidden" name="key" value="{html.escape(key)}">'
+           f'<button class="btn quiet" type="submit">Got it</button></form>')
     return _invitation(
         "second_voice", "If it comes up",
         f"A question for {person}",
         body + " Their answer becomes a second voice in the archive.",
         why="this month's second-voice offer — it expires silently if ignored",
-        href=href, cta=cta)
+        href=href, cta=cta, extra=ack)
 
 
 def _hub_card_memory():
@@ -1072,10 +1146,12 @@ def home_data() -> dict:
 def _hub_card_html(card: dict) -> str:
     accent = _HUB_ACCENTS.get(card["kind"], _HUB_ACCENTS["quiet"])
     why = f'<div class="hub-why">{html.escape(card["why"])}</div>' if card.get("why") else ""
-    cta = ""
+    cta_bits = []
     if card.get("href") and card.get("cta"):
-        cta = (f'<div class="hub-cta"><a href="{html.escape(card["href"])}">'
-               f'{html.escape(card["cta"])}</a></div>')
+        cta_bits.append(f'<a href="{html.escape(card["href"])}">{html.escape(card["cta"])}</a>')
+    if card.get("extra"):
+        cta_bits.append(card["extra"])  # pre-rendered HTML (e.g. an ack form)
+    cta = f'<div class="hub-cta">{" ".join(cta_bits)}</div>' if cta_bits else ""
     return (f'<div class="hub-card" style="border-left-color:{accent}">'
             f'<div class="hub-kicker">{html.escape(card["kicker"])}</div>'
             f'<div class="hub-title">{html.escape(card["title"])}</div>'
@@ -1156,7 +1232,8 @@ def view_mirror():
                 continue
             items = "".join(
                 f'<li>{html.escape(e["text"])} '
-                f'<span class="muted">· {html.escape(e["source_short"])}</span></li>'
+                f'<span class="muted">· {html.escape(e["source_short"])} · '
+                f'<a href="/source-actions?ref={quote(e["source"])}">act</a></span></li>'
                 for e in rows)
             parts.append(
                 f'<details class="qb-cat"><summary>'
@@ -1229,9 +1306,9 @@ def view_sources():
         parts.append(_table(["Sev", "Type", "Path", "Message", "Fix"], rows))
     else:
         parts.append(_empty("No open findings."))
-    by_type: dict[str, list[dict]] = {}
-    for s in manifest.values():
-        by_type.setdefault(s.get("type", "unknown"), []).append(s)
+    by_type: dict[str, list[tuple[str, dict]]] = {}
+    for key, s in manifest.items():
+        by_type.setdefault(s.get("type", "unknown"), []).append((key, s))
     parts.append(_h2(f"Captured sources ({len(manifest)})"))
     if not manifest:
         parts.append(_empty("No sources tracked yet."))
@@ -1242,8 +1319,9 @@ def view_sources():
             html.escape(str(s.get("captured_at") or s.get("first_seen_at") or "—")),
             html.escape(str(s.get("source_medium", "—"))),
             _badge("changed", "yellow") if s.get("changed_since_first_seen") else _badge("stable", "green"),
-        ] for s in by_type[t]]
-        parts.append(_table(["Title", "Captured", "Medium", "Integrity"], rows))
+            f'<a href="/source-actions?ref={quote(str(s.get("source_path") or key))}">act</a>',
+        ] for key, s in by_type[t]]
+        parts.append(_table(["Title", "Captured", "Medium", "Integrity", ""], rows))
     return ("Source Integrity", "".join(parts), False)
 
 
@@ -1256,6 +1334,18 @@ def view_recommendations():
     parts = ["<h1>Focus Recommendations</h1>"]
     parts.append(_h2(f"Pending ({len(pending)})"))
     if pending:
+        def rec_actions(r: dict) -> str:
+            rid = html.escape(str(r.get("id", "")))
+            return (
+                f'<form class="actform act-inline" method="post" action="/actions/focus-rec">'
+                f'{_token_input()}<input type="hidden" name="id" value="{rid}">'
+                f'<input type="hidden" name="op" value="approve">'
+                f'<button class="btn" type="submit">Approve</button></form> '
+                f'<form class="actform act-inline" method="post" action="/actions/focus-rec">'
+                f'{_token_input()}<input type="hidden" name="id" value="{rid}">'
+                f'<input type="hidden" name="op" value="dismiss">'
+                f'<button class="btn quiet" type="submit">Dismiss</button></form>')
+
         rows = [[
             html.escape(str(r.get("entity", "?"))),
             html.escape(str(r.get("type", "?"))),
@@ -1264,8 +1354,9 @@ def view_recommendations():
             str(r.get("mention_count", 0)),
             html.escape(",".join(r.get("cross_categories", []))),
             html.escape(str(r.get("reason", ""))[:240]),
+            rec_actions(r),
         ] for r in sorted(pending, key=lambda r: r.get("score", 0) or 0, reverse=True)]
-        parts.append(_table(["Entity", "Type", "Score", "Evidence", "Mentions", "Cats", "Reason"], rows))
+        parts.append(_table(["Entity", "Type", "Score", "Evidence", "Mentions", "Cats", "Reason", "Actions"], rows))
     else:
         parts.append(_empty("No pending recommendations."))
     if others:
@@ -1759,8 +1850,54 @@ def artifact_version_html(slug: str, n: str):
             f"<p><small>{' · '.join(nav)}{' · ' + html.escape(detail) if detail else ''}</small></p>"]
     if entry.get("feedback"):
         body.append(f"<p><small>Revision note: {html.escape(str(entry['feedback']))}</small></p>")
-    body.append(f"<blockquote>{render_markdown(path.read_text(errors='replace'))}</blockquote>")
+    text = path.read_text(errors="replace")
+    body.append(f"<blockquote>{render_markdown(text)}</blockquote>")
+    body.append(_artifact_actions_html(slug, number, text, is_final=(final == number)))
     return f"{title} — v{number}", "".join(body)
+
+
+def _artifact_actions_html(slug: str, number: int, text: str, is_final: bool) -> str:
+    """The write-action panel on a version page (v101): direct edit → vN+1,
+    AI revise (job or agent-task when keyless), mark final, promote, record
+    delivery. Every action shells the artifact CLI."""
+    s = html.escape(slug)
+    hidden = f'{_token_input()}<input type="hidden" name="slug" value="{s}">'
+    ai_note = "" if _ai_route() else \
+        ' <span class="muted">(keyless — will queue for agent completion)</span>'
+    parts = ['<details class="art-actions"><summary>Act on this piece</summary>']
+    parts.append(
+        f'<h3>Edit directly</h3>'
+        f'<form class="actform" method="post" action="/actions/artifact/save">{hidden}'
+        f'<textarea name="content" rows="14">{html.escape(text)}</textarea>'
+        f'<label>Note (optional — shows in the revision footer)</label>'
+        f'<input name="note" placeholder="hand-edit: tightened the middle">'
+        f'<div class="act-row"><button class="btn" type="submit">Save as v{number + 1}</button></div></form>')
+    parts.append(
+        f'<h3>Revise with AI{ai_note}</h3>'
+        f'<form class="actform" method="post" action="/actions/artifact/revise">{hidden}'
+        f'<input name="feedback" placeholder="warmer, shorter, less formal" required>'
+        f'<div class="act-row"><button class="btn" type="submit">Revise</button></div></form>')
+    lifecycle = []
+    if not is_final:
+        lifecycle.append(
+            f'<form class="actform act-inline" method="post" action="/actions/artifact/final">{hidden}'
+            f'<input type="hidden" name="version" value="{number}">'
+            f'<button class="btn" type="submit">Mark v{number} final</button></form>')
+    lifecycle.append(
+        f'<form class="actform act-inline" method="post" action="/actions/artifact/promote">{hidden}'
+        f'<button class="btn" type="submit">Promote to source</button></form>')
+    parts.append(f'<h3>Lifecycle</h3><div class="act-row">{" ".join(lifecycle)}</div>')
+    parts.append(
+        f'<h3>Record delivery</h3>'
+        f'<p class="muted">A letter isn\'t done until it\'s given — the reaction saves as their witness account.</p>'
+        f'<form class="actform" method="post" action="/actions/artifact/delivered">{hidden}'
+        f'<label>To</label><input name="to" placeholder="Mom">'
+        f'<label>How it went (optional)</label><input name="note">'
+        f'<label>Their reaction (optional)</label>'
+        f'<textarea name="reaction" rows="3" placeholder="She read it twice and…"></textarea>'
+        f'<div class="act-row"><button class="btn" type="submit">Record delivery</button></div></form>')
+    parts.append("</details>")
+    return "".join(parts)
 
 
 def _word_diff_html(old: str, new: str) -> tuple[str, int, int]:
@@ -2170,6 +2307,301 @@ def view_reports():
     return ("Reports", "".join(parts), False)
 
 
+# ---------------------------------------------------------------------------
+# Write actions (v101)
+#
+# The browser becomes a review-and-write studio: every mutation shells out to
+# the existing lifehug.py CLI (never reimplemented), guarded by a per-process
+# session token + localhost checks, serialized under a mkdir lock so browser
+# POSTs can't race the crons, and long-running work (compile, AI revision,
+# focus approval) runs as a detached job (system/jobs.py) the page polls.
+# AI-dependent actions degrade to agent-task queues on keyless machines.
+# ---------------------------------------------------------------------------
+
+SESSION_TOKEN = secrets.token_hex(16)
+ACTION_LOCK = STATE_DIR / ".viewer-action.lock"
+LIFEHUG_CLI = Path(__file__).resolve().parent / "lifehug.py"
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _f(form: dict, key: str, default: str = "") -> str:
+    return (form.get(key) or [default])[0].strip()
+
+
+def _ai_route() -> str | None:
+    try:
+        from research_expand import ai_available  # noqa: PLC0415
+        return ai_available()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _run_cli(cli_args: list[str], stdin_text: str | None = None,
+             timeout: int = 120) -> tuple[int, str]:
+    """Run a lifehug.py subcommand synchronously under the action lock."""
+    deadline = time.time() + 20
+    while True:
+        try:
+            ACTION_LOCK.parent.mkdir(parents=True, exist_ok=True)
+            ACTION_LOCK.mkdir()
+            break
+        except FileExistsError:
+            if time.time() > deadline:
+                return (1, "another action is running — try again in a moment")
+            time.sleep(0.3)
+    try:
+        proc = subprocess.run(  # noqa: S603 — argv built from our own handlers
+            [sys.executable, str(LIFEHUG_CLI), *cli_args],
+            input=stdin_text, capture_output=True, text=True,
+            cwd=str(REPO_DIR), timeout=timeout)
+        out = ((proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")).strip()
+        return (proc.returncode, out)
+    except subprocess.TimeoutExpired:
+        return (1, "action timed out")
+    finally:
+        with contextlib.suppress(OSError):
+            ACTION_LOCK.rmdir()
+
+
+def _start_job(kind: str, cli_args: list[str], stdin_text: str | None = None) -> dict:
+    import jobs  # noqa: PLC0415
+    return jobs.start_job(kind, [sys.executable, str(LIFEHUG_CLI), *cli_args],
+                          stdin_text=stdin_text)
+
+
+def _flash_of(rc: int, ok: str, out: str) -> str:
+    return f"✓ {ok}" if rc == 0 else f"✗ {out[-300:] or 'action failed'}"
+
+
+def _token_input() -> str:
+    return f'<input type="hidden" name="_token" value="{SESSION_TOKEN}">'
+
+
+def _outputs_ref(form: dict) -> str | None:
+    slug = _f(form, "slug")
+    if not _SLUG_RE.match(slug):
+        return None
+    return f"outputs/{slug}"
+
+
+# --- action handlers: each returns (redirect_path, flash_message, job_id) ---
+
+def act_candidate(form):
+    cid, op = _f(form, "id"), _f(form, "op")
+    if op == "promote":
+        cat = _f(form, "category")
+        if not cat:
+            return ("/views/candidates", "✗ pick a category before promoting", None)
+        rc, out = _run_cli(["candidates-promote", cid, "--category", cat])
+        return ("/views/candidates", _flash_of(rc, f"promoted {cid} → {cat}", out), None)
+    if op == "dismiss":
+        rc, out = _run_cli(["candidates-update", cid, "--status", "rejected",
+                            "--reason", "dismissed from viewer"])
+        return ("/views/candidates", _flash_of(rc, f"dismissed {cid}", out), None)
+    if op == "defer":
+        rc, out = _run_cli(["candidates-update", cid, "--status", "deferred",
+                            "--reason", "deferred from viewer"])
+        return ("/views/candidates", _flash_of(rc, f"deferred {cid}", out), None)
+    return ("/views/candidates", "✗ unknown candidate action", None)
+
+
+def act_focus_rec(form):
+    rid, op = _f(form, "id"), _f(form, "op")
+    if op == "approve":
+        # focus-approve scaffolds a category and generates starter questions
+        # (AI when available) — minutes, not milliseconds: run as a job.
+        job = _start_job("focus-approve", ["focus-approve", rid])
+        return ("/views/recommendations",
+                f"approving {rid} — scaffolding the Focus (starter questions may take a minute)",
+                job["id"])
+    if op == "dismiss":
+        rc, out = _run_cli(["focus-dismiss", rid,
+                            "--reason", _f(form, "reason") or "dismissed from viewer"])
+        return ("/views/recommendations", _flash_of(rc, f"dismissed {rid}", out), None)
+    return ("/views/recommendations", "✗ unknown recommendation action", None)
+
+
+def act_second_voice(form):
+    rc, out = _run_cli(["second-voice-ack", _f(form, "key")])
+    return ("/", _flash_of(rc, "noted — the card steps aside", out), None)
+
+
+def act_artifact_save(form):
+    ref = _outputs_ref(form)
+    content = (form.get("content") or [""])[0]
+    if not ref or not content.strip():
+        return ("/views/artifacts", "✗ missing artifact or empty content", None)
+    args = ["artifact", "save", ref, "--model", "manual-edit"]
+    note = _f(form, "note")
+    if note:
+        args += ["--feedback", note]
+    rc, out = _run_cli(args, stdin_text=content)
+    return (f"/views/artifacts", _flash_of(rc, f"saved a new version of {ref}", out), None)
+
+
+def act_artifact_revise(form):
+    ref = _outputs_ref(form)
+    feedback = _f(form, "feedback")
+    if not ref or not feedback:
+        return ("/views/artifacts", "✗ missing artifact or empty feedback", None)
+    if _ai_route():
+        job = _start_job("artifact-revise", ["artifact", "revise", ref, "--feedback", feedback])
+        return ("/views/artifacts", f"revising {ref} — this can take a few minutes", job["id"])
+    # Keyless: queue an agent task instead of failing (v92 doctrine).
+    task_dir = STATE_DIR / "agent_tasks" / "artifact"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    slug = _f(form, "slug")
+    task = {
+        "task": "artifact-revise",
+        "artifact": ref,
+        "feedback": feedback,
+        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "howto": (f"python3 system/compose.py --revise {ref} --feedback {feedback!r} "
+                  f"prints the prompt; write the revision, then pipe it to "
+                  f"python3 system/lifehug.py artifact save {ref} --feedback {feedback!r}"),
+    }
+    (task_dir / f"{slug}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
+    return ("/views/artifacts",
+            "keyless — revision queued for agent completion (state/agent_tasks/artifact/)", None)
+
+
+def act_artifact_final(form):
+    ref = _outputs_ref(form)
+    if not ref:
+        return ("/views/artifacts", "✗ bad artifact reference", None)
+    rc, out = _run_cli(["artifact", "final", ref, "--version", _f(form, "version") or "latest"])
+    return ("/views/artifacts", _flash_of(rc, f"marked {ref} final", out), None)
+
+
+def act_artifact_promote(form):
+    ref = _outputs_ref(form)
+    if not ref:
+        return ("/views/artifacts", "✗ bad artifact reference", None)
+    rc, out = _run_cli(["artifact", "promote-source", ref, "--kind", "all",
+                        "--source", "viewer"])
+    if rc == 0:
+        job = _start_job("compile", ["compile", "--no-ai"])
+        return ("/views/artifacts",
+                f"✓ promoted {ref} to source — recompiling the wiki", job["id"])
+    return ("/views/artifacts", _flash_of(rc, "", out), None)
+
+
+def act_artifact_delivered(form):
+    ref = _outputs_ref(form)
+    if not ref:
+        return ("/views/artifacts", "✗ bad artifact reference", None)
+    args = ["artifact", "delivered", ref]
+    for key, flag in (("to", "--to"), ("note", "--note"), ("reaction", "--reaction")):
+        val = _f(form, key)
+        if val:
+            args += [flag, val]
+    rc, out = _run_cli(args)
+    return ("/views/artifacts", _flash_of(rc, f"recorded delivery of {ref}", out), None)
+
+
+def act_reflect(form):
+    ref, body = _f(form, "ref"), (form.get("body") or [""])[0]
+    if not ref or not body.strip():
+        return ("/views/sources", "✗ missing source or empty reflection", None)
+    rc, out = _run_cli(["reflect-source", ref, "--source", "viewer"], stdin_text=body)
+    back = f"/source-actions?ref={quote(ref)}"
+    return (back, _flash_of(rc, "reflection filed — it compiles alongside the original", out), None)
+
+
+def act_fix(form):
+    ref = _f(form, "ref")
+    back = f"/source-actions?ref={quote(ref)}"
+    if not ref:
+        return ("/views/sources", "✗ missing source reference", None)
+    if _f(form, "mode") == "retract":
+        reason = _f(form, "reason")
+        if not reason:
+            return (back, "✗ a retraction needs a reason", None)
+        args = ["fix", ref, "--retract", "--reason", reason]
+        for slug in [s.strip() for s in _f(form, "from_page").split(",") if s.strip()]:
+            args += ["--from-page", slug]
+        rc, out = _run_cli(args)
+        return (back, _flash_of(rc, "retraction filed (sha-pinned, undoable via unretract)", out), None)
+    right = _f(form, "right")
+    if not right:
+        return (back, "✗ a correction needs the true fact (--right)", None)
+    args = ["fix", ref, "--right", right, "--kind", _f(form, "kind") or "factual"]
+    wrong = _f(form, "wrong")
+    if wrong:
+        args += ["--wrong", wrong]
+    rc, out = _run_cli(args)
+    return (back, _flash_of(rc, "correction filed — it resolves at compile time", out), None)
+
+
+def act_compile(form):
+    job = _start_job("compile", ["compile", "--no-ai"])
+    back = _f(form, "back") or "/views/sources"
+    return (back, "recompiling the wiki (30–90s)", job["id"])
+
+
+ACTIONS = {
+    "/actions/candidate": act_candidate,
+    "/actions/focus-rec": act_focus_rec,
+    "/actions/second-voice-ack": act_second_voice,
+    "/actions/artifact/save": act_artifact_save,
+    "/actions/artifact/revise": act_artifact_revise,
+    "/actions/artifact/final": act_artifact_final,
+    "/actions/artifact/promote": act_artifact_promote,
+    "/actions/artifact/delivered": act_artifact_delivered,
+    "/actions/reflect": act_reflect,
+    "/actions/fix": act_fix,
+    "/actions/compile": act_compile,
+}
+
+
+def source_actions_html(ref: str) -> tuple[str, str]:
+    """The Reflect / Fix form page for one source (v101). `ref` is a source
+    path or source id exactly as the CLI accepts it."""
+    safe = html.escape(ref)
+    body = [f"<h1>Act on a source</h1>",
+            f'<p class="view-desc">Raw sources are immutable — these actions file '
+            f'<em>additive</em> reflections, corrections, or retractions against '
+            f'<code>{safe}</code>. They take effect at the next compile.</p>']
+    body.append(
+        f'<h2>Reflect</h2>'
+        f'<p class="muted">A later thought on this memory — how it reads now.</p>'
+        f'<form method="post" action="/actions/reflect">{_token_input()}'
+        f'<input type="hidden" name="ref" value="{safe}">'
+        f'<textarea name="body" rows="5" placeholder="What do you see in this now?"></textarea>'
+        f'<div class="act-row"><button class="btn" type="submit">File reflection</button></div></form>')
+    body.append(
+        f'<h2>Correct a fact</h2>'
+        f'<form method="post" action="/actions/fix">{_token_input()}'
+        f'<input type="hidden" name="ref" value="{safe}">'
+        f'<input type="hidden" name="mode" value="correct">'
+        f'<label>What it wrongly says (optional)</label>'
+        f'<input name="wrong" placeholder="moved in 2006">'
+        f'<label>The true fact</label>'
+        f'<input name="right" placeholder="moved in 2004" required>'
+        f'<label>Kind</label>'
+        f'<input name="kind" value="factual">'
+        f'<div class="act-row"><button class="btn" type="submit">File correction</button></div></form>')
+    body.append(
+        f'<h2>Retract</h2>'
+        f'<p class="muted">Stops the compiler asserting this source (the raw file stays). '
+        f'Scope to specific pages with a comma-separated slug list, or leave empty for all.</p>'
+        f'<form method="post" action="/actions/fix">{_token_input()}'
+        f'<input type="hidden" name="ref" value="{safe}">'
+        f'<input type="hidden" name="mode" value="retract">'
+        f'<label>Reason</label>'
+        f'<input name="reason" placeholder="classifier inference, never happened" required>'
+        f'<label>Only on pages (optional)</label>'
+        f'<input name="from_page" placeholder="childhood, dave-and-mom">'
+        f'<div class="act-row"><button class="btn" type="submit">File retraction</button></div></form>')
+    body.append(
+        f'<h2>Recompile</h2>'
+        f'<p class="muted">Corrections and retractions apply at compile time.</p>'
+        f'<form method="post" action="/actions/compile">{_token_input()}'
+        f'<input type="hidden" name="back" value="/source-actions?ref={quote(ref)}">'
+        f'<div class="act-row"><button class="btn" type="submit">Recompile now (no AI)</button></div></form>')
+    return ("Act on source", "".join(body))
+
+
 VIEWS = [
     # System overview first, with the graph right beneath it.
     ("status", "The Loop", view_status),
@@ -2230,6 +2662,12 @@ def _with_description(body: str, desc: str) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     def send_html(self, title, body, status=200, active_rel=None, wide=False):
+        flash = getattr(self, "_flash", None)
+        if flash:
+            job = getattr(self, "_job", None)
+            pill = (f' <span class="jobpill" data-job="{html.escape(job)}">running…</span>'
+                    if job else "")
+            body = (f'<div class="flash">{html.escape(flash)}{pill}</div>') + body
         payload = layout(title, body, active_rel, wide)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2237,8 +2675,74 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def send_json(self, data, status=200):
+        payload = json.dumps(data).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _post_allowed(self, form) -> bool:
+        host = self.headers.get("Host", "")
+        if not (host.startswith("127.0.0.1") or host.startswith("localhost")):
+            return False
+        origin = self.headers.get("Origin")
+        if origin and ("127.0.0.1" not in origin and "localhost" not in origin):
+            return False
+        token = self.headers.get("X-Lifehug-Token") or _f(form, "_token")
+        return secrets.compare_digest(token or "", SESSION_TOKEN)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        form = parse_qs(body, keep_blank_values=True)
+        if not self._post_allowed(form):
+            self.send_html("Forbidden", "<h1>Forbidden</h1>", status=403)
+            return
+        handler = ACTIONS.get(parsed.path)
+        if handler is None:
+            self.send_html("Not found", "<h1>Not found</h1>", status=404)
+            return
+        try:
+            redirect, flash, job_id = handler(form)
+        except Exception as exc:  # noqa: BLE001 — an action error must not 500 the viewer
+            redirect, flash, job_id = ("/", f"✗ action failed: {exc}", None)
+        params = {"flash": flash}
+        if job_id:
+            params["job"] = job_id
+        sep = "&" if "?" in redirect else "?"
+        self.send_response(303)
+        self.send_header("Location", redirect + sep + urlencode(params))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
+        q = parse_qs(parsed.query)
+        self._flash = (q.get("flash") or [None])[0]
+        self._job = (q.get("job") or [None])[0]
+
+        if parsed.path.startswith("/jobs/") and parsed.path.endswith(".json"):
+            import jobs  # noqa: PLC0415
+            record = jobs.load_job(parsed.path[len("/jobs/"):-len(".json")])
+            if record is None:
+                self.send_json({"error": "not found"}, status=404)
+            else:
+                self.send_json(record)
+            return
+
+        if parsed.path == "/source-actions":
+            ref = (q.get("ref") or [""])[0].strip()
+            if not ref:
+                self.send_html("Act on source", "<h1>Act on a source</h1>"
+                               + _empty("No source given — open this from a source row."))
+                return
+            title, body = source_actions_html(ref)
+            self.send_html(title, body)
+            return
+
         if parsed.path == "/":
             # Home is the action hub (v99). The wiki index stays reachable via
             # the sidebar's Index link (/page/wiki/index.md).

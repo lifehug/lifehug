@@ -329,6 +329,15 @@ def cmd_quality_update(_args: argparse.Namespace) -> int:
     return run_python("quality_profile.py", ["--update"])
 
 
+def cmd_second_voice_ack(args: argparse.Namespace) -> int:
+    from question_planner import acknowledge_second_voice_offer  # noqa: PLC0415
+    if acknowledge_second_voice_offer(args.key):
+        print(f"✓ Acknowledged second-voice offer: {args.key}")
+        return 0
+    print(f"No pending offer with key: {args.key}", file=sys.stderr)
+    return 1
+
+
 def cmd_mirror_compile(args: argparse.Namespace) -> int:
     flags: list[str] = []
     if getattr(args, "model", None):
@@ -1161,6 +1170,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("quality-update", help="Recompute quality profile from answer scores")
     p.set_defaults(func=cmd_quality_update)
+
+    p = sub.add_parser("second-voice-ack", help="Acknowledge a second-voice offer (hides the home card)")
+    p.add_argument("key", help="The offer key from state/second_voice_offers.json")
+    p.set_defaults(func=cmd_second_voice_ack)
 
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")

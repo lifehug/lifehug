@@ -736,6 +736,31 @@ compiled wiki stays in the left sidebar (index at the sidebar's Index link).
 Card sources are failure-wrapped — a broken loader drops its card, never the
 page. When nothing waits, home shows a single quiet "the loop is fed" card.
 
+### Write actions (v101)
+
+The viewer is a **review-and-write studio** (capture stays voice/Telegram).
+Every mutation shells the existing CLI — never reimplemented — behind a
+per-process session token + localhost checks, serialized under
+`state/.viewer-action.lock` so browser POSTs can't race the crons:
+
+- **Review queue:** promote (category picker, defaults to the inferred one) /
+  defer / dismiss on Candidates; approve / dismiss on Focus Recommendations
+  (approve runs as a job — it scaffolds the Focus and seeds questions); a
+  "Got it" acknowledge on the home second-voice card (`second-voice-ack`).
+- **Artifact lifecycle** (on each `/artifact-version/` page): direct edit →
+  saved as vN+1 (`artifact save --model manual-edit`), **Revise with AI**
+  (new `artifact revise --feedback` subcommand; runs as a detached job),
+  mark final, promote-to-source (auto-recompiles), record delivery + the
+  recipient's reaction.
+- **Reflections & corrections:** every source row (and every Mirror raw
+  signal) links to `/source-actions?ref=…` — file a reflection, a
+  `--wrong/--right` correction, or a scoped retraction, then "Recompile now".
+- **Jobs:** long-running actions (compile 30–90s, AI revision minutes) run
+  detached via `system/jobs.py` (`state/jobs/<id>.json` + a polling pill in
+  the flash banner); the runner owns the status file, so a viewer restart
+  never orphans a job. Keyless machines never error on AI actions — they
+  queue agent tasks (`state/agent_tasks/artifact/`) instead.
+
 ### The Mirror (v100)
 
 The classifier's `contradictions` and `self_understanding_insights` (incl.
@@ -1027,7 +1052,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 
