@@ -335,6 +335,12 @@ def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str,
 # an overlay keyed by CONTENT (sha of source + description), so a
 # reclassification that rewrites the description automatically orphans the
 # placement (surfaced as `stale_placements`, never silently misapplied).
+#
+# v103: the pin is display-only; the INFORMATION lives in the date-kind
+# correction the viewer files alongside it (record's `correction` field).
+# That correction marks the source for re-classification, so eventually the
+# classification places the event itself — `placement_redundant` on a placed
+# event means the loop has caught up and the pin can retire.
 # ---------------------------------------------------------------------------
 
 PLACEMENTS_FILE = STATE_DIR / "timeline_placements.json"
@@ -353,14 +359,16 @@ def load_placements() -> dict:
 
 
 def save_placement(key: str, source: str, description: str, period: str,
-                   when_hint: str = "", note: str = "") -> dict:
-    """Add or replace the manual placement for one event."""
+                   when_hint: str = "", note: str = "", correction: str = "") -> dict:
+    """Add or replace the manual placement for one event. `correction` links
+    the pin to the correction source the placement filed (v103) — the pin is
+    the display overlay, the correction is the information."""
     from lifehug_core import now_utc, write_json  # noqa: PLC0415
     data = load_placements()
     data["placements"] = [p for p in data["placements"] if p.get("key") != key]
     record = {"key": key, "source": source, "description": description,
               "period": period, "when_hint": when_hint, "note": note,
-              "placed_at": now_utc()}
+              "correction": correction, "placed_at": now_utc()}
     data["placements"].append(record)
     write_json(PLACEMENTS_FILE, data)
     return record
@@ -401,20 +409,7 @@ def place_events(events: list[dict], periods: list[dict],
                     return period["slug"]
         return None
 
-    for event in events:
-        # 0) The owner said so — manual placement outranks every heuristic.
-        if manual_by_key:
-            manual = manual_by_key.get(placement_key(event))
-            if manual:
-                event = dict(event)
-                event["placement"] = "manual"
-                event["placement_key"] = manual["key"]
-                if manual.get("when_hint"):
-                    event["when_hint"] = manual["when_hint"]
-                if manual.get("note"):
-                    event["placement_note"] = manual["note"]
-                placed[manual["period"]].append(event)
-                continue
+    def _heuristic_slot(event: dict) -> str | None:
         # 1) The event's OWN when_hint is the most specific signal — an
         #    arc-spanning answer contributes events across many eras, so the
         #    per-event time-words outrank the answer's period membership
@@ -439,6 +434,29 @@ def place_events(events: list[dict], periods: list[dict],
                 if overlap > best_overlap:
                     best_slug, best_overlap = period["slug"], overlap
             slot = best_slug
+        return slot
+
+    for event in events:
+        # 0) The owner said so — manual placement outranks every heuristic.
+        if manual_by_key:
+            manual = manual_by_key.get(placement_key(event))
+            if manual:
+                # Redundancy check runs on the ORIGINAL event: once the
+                # classification itself places it here (the loop caught up),
+                # the pin is safe to retire.
+                redundant = _heuristic_slot(event) == manual["period"]
+                event = dict(event)
+                event["placement"] = "manual"
+                event["placement_key"] = manual["key"]
+                event["placement_correction"] = manual.get("correction", "")
+                event["placement_redundant"] = redundant
+                if manual.get("when_hint"):
+                    event["when_hint"] = manual["when_hint"]
+                if manual.get("note"):
+                    event["placement_note"] = manual["note"]
+                placed[manual["period"]].append(event)
+                continue
+        slot = _heuristic_slot(event)
         if slot is None:
             unplaced.append(event)
         else:

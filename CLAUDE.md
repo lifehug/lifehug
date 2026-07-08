@@ -764,8 +764,7 @@ per-process session token + localhost checks, serialized under
 ### Timeline curation (v102)
 
 The Timeline view's unplaced bucket is now interactive: each unplaced moment
-gets a period picker + when-hint field + **Place** button (optionally also
-filing a `--kind date` correction so the fact enters the compile layer).
+gets a period picker + when-hint field + **Place** button.
 Manual placements persist in `state/timeline_placements.json` (**user data**),
 are keyed by CONTENT (`sha1(source + description)[:12]` — raw sources stay
 immutable; a reclassification that rewrites the description orphans the
@@ -775,6 +774,30 @@ unpin. `wiki/timeline.md` is now a thin **generated export** of
 `timeline.timeline_data()` — periods as headers, manual placements honored,
 unplaced section explicit — so the committed phone-readable page can never
 contradict the curated view.
+
+### Placement feeds the Loop (v103)
+
+**Doctrine: viewer actions must create system information.** Pure view state
+is allowed only for dismissal (`second-voice-ack`) and rendering caches, and
+a cache must be derivable from filed sources.
+
+- Placing a timeline moment **always files the assertion** — `"<moment>"
+  happened during <Period>[, <when-hint>]` — as a `--kind date` correction
+  (no opt-in checkbox; the period is stated in the author's vocabulary, never
+  an inferred year). The pin in `state/timeline_placements.json` is a
+  display-only overlay that records the correction it filed. Unpinning keeps
+  the assertion — if the *fact* was wrong, retract the correction from its
+  source-actions page.
+- **Corrections invalidate classification**: filing any correction marks the
+  target's classification stale (`stale: true` in
+  `state/classifications/<slug>.json`), and the weekly `--unclassified`
+  batch (keyed AND keyless emit paths) treats stale as work — events,
+  people, and themes re-derive with the correction injected as
+  authoritative. The old classification keeps feeding the timeline/wiki
+  until the fresh one replaces it, so nothing regresses mid-week.
+- When the re-derived classification places a pinned moment in its period by
+  itself, the pin shows "the loop caught up — safe to unpin"
+  (`placement_redundant`); orphaned pins keep surfacing as stale notices.
 
 ### The Mirror (v100)
 

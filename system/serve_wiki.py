@@ -1704,7 +1704,12 @@ def view_timeline():
                            f'action="/actions/timeline/unplace">{_token_input()}'
                            f'<input type="hidden" name="key" value="{html.escape(event["placement_key"])}">'
                            f'<button class="btn quiet" type="submit" title="remove manual placement">unpin</button></form>')
-                pin = f" <span class='tl-evidence'>📌 placed by you · {unplace}</span>"
+                corr = event.get("placement_correction") or ""
+                assertion = (f' · <a href="/source-actions?ref={quote(corr)}">assertion</a>'
+                             if corr else "")
+                caught_up = (" · the loop caught up — this now places itself; safe to unpin"
+                             if event.get("placement_redundant") else "")
+                pin = f" <span class='tl-evidence'>📌 placed by you{assertion}{caught_up} · {unplace}</span>"
             return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}{pin}"
                     f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
 
@@ -1746,8 +1751,6 @@ def view_timeline():
                 f'<select name="period"><option value="">where does this belong?</option>{period_options}</select>'
                 f'<input name="when_hint" placeholder="when? (your own words)" '
                 f'value="{html.escape(event["when_hint"])}">'
-                f'<label class="act-inline" style="font-size:12px;color:var(--muted)">'
-                f'<input type="checkbox" name="also_file_fix" value="1"> also file as date correction</label>'
                 f'<button class="btn" type="submit">Place</button></form>')
             parts.append(f"<div class='tl-dot undated' style='margin-left:0'>{when}"
                          f"{html.escape(event['description'])}"
@@ -1779,7 +1782,8 @@ def view_timeline():
         "<div class='tl-foot'>This is what I currently understand of your chronology — "
         "placements are proven by shared sources (shown in parentheses), never guessed, "
         "except the 📌 ones you placed yourself, which outrank every heuristic. "
-        "See something wrong? Place it above, use <code>lifehug.py fix</code>, or just tell "
+        "See something wrong? Place it above — placing files the fact into the archive "
+        "itself, so the system relearns it — use <code>lifehug.py fix</code>, or just tell "
         "the bot. Dates arrive as answers are classified — always your own time-words and "
         "landmark anchors, never inferred years.</div>")
 
@@ -2587,22 +2591,37 @@ def act_timeline_place(form):
     if not (source and description and period):
         return ("/views/timeline", "✗ pick a period for the moment first", None)
     when_hint = _f(form, "when_hint")
+    period_label = next((p["name"] for p in tl_mod.load_periods()
+                         if p["slug"] == period), period.replace("-", " ").title())
+    # A placement IS information (v103): file the assertion into the compile
+    # layer — the period in the author's vocabulary, never an inferred year.
+    assertion = f"“{description[:120]}” happened during {period_label}"
+    if when_hint:
+        assertion += f", {when_hint}"
+    rc, out = _run_cli(["fix", source, "--right", assertion, "--kind", "date"])
+    match = re.search(r"correction source: (\S+)", out) if rc == 0 else None
     key = tl_mod.placement_key({"source": source, "description": description})
     tl_mod.save_placement(key, source, description, period,
-                          when_hint=when_hint, note=_f(form, "note"))
-    flash = f"✓ placed in {period}"
-    if _f(form, "also_file_fix") and when_hint:
-        rc, out = _run_cli(["fix", source, "--right",
-                            f"“{description[:120]}” happened {when_hint}",
-                            "--kind", "date"])
-        flash += " · date correction filed" if rc == 0 else f" · ✗ correction failed: {out[-160:]}"
+                          when_hint=when_hint, note=_f(form, "note"),
+                          correction=match.group(1) if match else "")
+    if rc == 0:
+        flash = f"✓ placed in {period_label} · assertion filed — asserts at next compile"
+    else:
+        flash = f"✓ placed in {period_label} · ✗ assertion failed to file: {out[-160:]}"
     return ("/views/timeline", flash, None)
 
 
 def act_timeline_unplace(form):
     import timeline as tl_mod  # noqa: PLC0415
-    if tl_mod.remove_placement(_f(form, "key")):
-        return ("/views/timeline", "✓ placement removed — back to the heuristics", None)
+    key = _f(form, "key")
+    record = next((p for p in tl_mod.load_placements()["placements"]
+                   if p.get("key") == key), None)
+    if tl_mod.remove_placement(key):
+        flash = "✓ placement removed — back to the heuristics"
+        if record and record.get("correction"):
+            flash += (f" · the filed assertion remains ({record['correction']}) — "
+                      f"retract it from its source-actions page if the fact was wrong")
+        return ("/views/timeline", flash, None)
     return ("/views/timeline", "✗ no such placement", None)
 
 

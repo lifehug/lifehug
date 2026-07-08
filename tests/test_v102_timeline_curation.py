@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
@@ -133,11 +134,15 @@ class TimelineActionTests(unittest.TestCase):
         tl.PLACEMENTS_FILE = self._orig
 
     def test_place_action_saves_and_unplace_removes(self):
-        redirect, flash, job = serve_wiki.act_timeline_place({
-            "source": ["answers/Z1.md"], "description": ["The porch dog summer"],
-            "period": ["childhood"], "when_hint": ["summer of first grade"],
-        })
-        self.assertIn("✓ placed in childhood", flash)
+        # v103: placing always files a date assertion via the CLI — stub it.
+        with mock.patch.object(serve_wiki, "_run_cli",
+                               lambda *a, **k: (0, "✓ Created correction source: sources/corrections/c.md")), \
+                mock.patch.object(tl, "load_periods", lambda: []):
+            redirect, flash, job = serve_wiki.act_timeline_place({
+                "source": ["answers/Z1.md"], "description": ["The porch dog summer"],
+                "period": ["childhood"], "when_hint": ["summer of first grade"],
+            })
+        self.assertIn("✓ placed in Childhood", flash)
         self.assertIsNone(job)
         data = tl.load_placements()
         self.assertEqual(len(data["placements"]), 1)

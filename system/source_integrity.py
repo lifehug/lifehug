@@ -812,6 +812,19 @@ def create_linked_source(
         metadata["correction_kind"] = correction_kind or "other"
     write_text(path, f"{format_frontmatter(metadata)}\n\n{payload}")
     register_source(path)
+    if source_type == "source_correction":
+        # v103: a corrected fact invalidates the target's derived
+        # classification — its events/people/themes were extracted from the
+        # uncorrected text. Mark it stale so the next weekly batch
+        # re-classifies (the prompt injects corrections as authoritative);
+        # the old classification keeps feeding the timeline/wiki until the
+        # fresh one replaces it.
+        try:
+            import classify_story  # noqa: PLC0415
+            if classify_story.mark_stale(target_path, reason=f"correction filed: {rel(path)}"):
+                print(f"→ marked {rel(target_path)} for re-classification")
+        except Exception as exc:  # never block the correction itself
+            print(f"warn: could not mark classification stale: {exc}", file=sys.stderr)
     return path
 
 
@@ -991,7 +1004,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("correct", help="Create an additive correction source from stdin")
     p.add_argument("target", help="Source path or source_id to correct")
-    p.add_argument("--kind", default="other", choices=["factual", "emotional", "perspective", "omission", "relationship", "other"])
+    p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
     p.add_argument("--source", default="manual")
     p.add_argument("--title")
     p.set_defaults(func=cmd_correct)

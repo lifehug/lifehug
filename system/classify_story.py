@@ -178,7 +178,37 @@ def classification_paths(source_path: Path) -> list[Path]:
 
 
 def is_classified(source_path: Path) -> bool:
-    return any(path.exists() for path in classification_paths(source_path))
+    """Classified AND current. A classification carrying `stale: true` (a
+    correction was filed against its source, v103) counts as unclassified so
+    the weekly batch re-derives it — the classify prompt already injects
+    corrections as authoritative, so the re-derivation asserts the corrected
+    facts. The stale classification stays on disk (and keeps feeding the
+    timeline/wiki) until the fresh one overwrites it."""
+    for path in classification_paths(source_path):
+        if path.exists():
+            return not _is_stale(path)
+    return False
+
+
+def _is_stale(path: Path) -> bool:
+    return bool((read_json(path, default=None) or {}).get("stale"))
+
+
+def mark_stale(source_path: Path, reason: str = "") -> bool:
+    """Flag an existing classification for re-derivation (v103). Returns True
+    if a classification file was found (already-stale counts)."""
+    marked = False
+    for path in classification_paths(source_path):
+        if not path.exists():
+            continue
+        data = read_json(path, default=None) or {}
+        if not data.get("stale"):
+            data["stale"] = True
+            data["stale_reason"] = reason
+            data["stale_at"] = now_utc()
+            write_json(path, data)
+        marked = True
+    return marked
 
 
 def all_source_files() -> list[Path]:

@@ -978,7 +978,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("correct-source", help="Create an additive correction source from stdin")
     p.add_argument("target", help="Source path or source_id to correct")
-    p.add_argument("--kind", default="other", choices=["factual", "emotional", "perspective", "omission", "relationship", "other"])
+    p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
     p.add_argument("--source", default="manual")
     p.add_argument("--title")
     p.set_defaults(func=cmd_correct_source)

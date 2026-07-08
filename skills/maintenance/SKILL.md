@@ -52,6 +52,12 @@ classifications — classify first so this week's queue sees this week's answers
    Use only facts present in the source — never invent people, dates, or
    events. (If `manifest.json` says 0 items, nothing is pending — skip ahead.)
 
+   "Unclassified" includes **stale** classifications (v103): filing a
+   correction marks its target's classification `stale: true`, so corrected
+   sources re-enter this batch automatically. Their prompts carry a LATER
+   CORRECTIONS block — those override the story text; never extract the
+   corrected-away version.
+
 2. **Synthesize the Mirror** (v100) — the weekly introspection edition built
    from classifier contradictions/insights/positions:
    ```bash
