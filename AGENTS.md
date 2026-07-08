@@ -42,6 +42,47 @@ Then decide:
 2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
 3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `python3 system/lifehug.py process-answer` for answer saves.
 
+## Git Conflict Resolution — State File Safety
+
+Lifehug state files track delivery history, coverage, and the question queue. During `git pull --rebase` or merge conflicts, **never blindly accept remote ("theirs") for state files** — doing so erases the record of what was asked, answered, and delivered, causing duplicate questions and lost answers.
+
+### State files (accept LOCAL / "ours" on conflict)
+- `system/rotation.json` — delivery counts, last question sent, send-today tracking
+- `system/coverage.json` — per-category answer counts
+- `state/question_queue.json` — planned queue with sent/queued status
+- `state/source_manifest.json` — answer and source registry
+- `system/question-bank.md` — checked-off questions
+
+### Framework files (accept REMOTE / "theirs" on conflict)
+- `system/version.json`, `system/lifehug.py`, `system/*.sh` — upstream upgrades
+- `wiki/` pages — recompiled from source on next answer filing
+
+### Safe rebase procedure
+```bash
+# Back up state before pulling
+cp system/rotation.json /tmp/rotation-backup.json
+cp state/question_queue.json /tmp/queue-backup.json
+
+# Pull
+git pull --rebase origin main
+
+# On conflict: keep local state, accept remote framework
+git checkout --ours system/rotation.json system/coverage.json state/question_queue.json
+git checkout --theirs system/version.json  # if conflicted
+git add -A && GIT_EDITOR=true git rebase --continue
+
+# Verify delivery state survived
+python3 -c "import json; print(json.load(open('system/rotation.json')).get('delivery_counts'))"
+```
+
+### If a rebase is stuck (started but never finished)
+```bash
+git rebase --abort    # get back to a clean state
+git pull --rebase origin main   # try again cleanly
+```
+
+Never leave a rebase in progress overnight — it blocks all subsequent git operations including answer filing.
+
 ## Detecting State
 
 ```
