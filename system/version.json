@@ -1,7 +1,7 @@
 {
-  "version": 103,
-  "released": "2026-07-08",
-  "changelog": "v103: Placement feeds the Loop (issue #42). Doctrine: viewer actions must create system information, not view state. Placing a timeline moment now ALWAYS files the assertion — \"<moment>\" happened during <Period>[, <when-hint>] — as a --kind date correction (the v102 opt-in checkbox is gone; it was also silently broken: 'date' was never an accepted --kind, now fixed along with 'name'). The pin in state/timeline_placements.json is a display-only overlay that records the correction it filed; unpinning keeps the assertion (retract the correction if the fact was wrong). Deeper fix: filing ANY correction now marks the target's classification stale, and the weekly --unclassified batch (keyed and keyless emit paths alike) treats stale as work — events/people/themes re-derive with the correction injected as authoritative, closing the dead end where a corrected source's classification never updated. The old classification keeps feeding the timeline/wiki until replaced, so nothing regresses mid-week. When the loop catches up (the re-derived classification places a pinned moment by itself), the pin says so — 'safe to unpin' (placement_redundant).",
+  "version": 104,
+  "released": "2026-07-18",
+  "changelog": "v104: Decouple answer filing from wiki compile. file_answer_bg.sh now passes --no-compile-wiki so filing is instant (~0.1s instead of 30-90s). A state/.compile-needed sentinel is touched on each successful filing. New compile_and_commit.sh runs via hourly launchd cron (com.lifehug.compile.plist), compiles only when the sentinel exists, then commits + pushes. Batch answers no longer cause concurrent compile conflicts, race conditions on shared state, or merge conflicts. Daily question cron still compiles before asking, acting as a guaranteed fallback.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -25,6 +25,7 @@
     "system/ask.py",
     "system/book.py",
     "system/classify_story.py",
+    "system/compile_and_commit.sh",
     "system/compose.py",
     "system/connectors/__init__.py",
     "system/daily_question.sh",

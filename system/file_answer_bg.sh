@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # file_answer_bg.sh — Detached wrapper for process-answer.
 #
-# Purpose: chat should NOT block waiting on wiki compile (which calls
-# an LLM per synthesis and routinely exceeds chat idle timeout). Instead:
+# Purpose: file an answer FAST without blocking on wiki compile.
 #   1. Chat spawns this script with nohup + &
 #   2. Chat sends an immediate "🎙️ Filing…" ack and exits the turn
-#   3. This script runs process-answer to completion
+#   3. This script runs process-answer with --no-compile-wiki (fast, ~5s)
 #   4. On finish, this script sends its OWN Telegram message with the result
+#   5. Wiki compile runs separately via hourly launchd cron
+#
+# This decoupling lets Dave rapid-fire 2-3 answers without compile conflicts.
 #
 # Usage (from a chat turn):
 #   echo "answer body" | nohup bash system/file_answer_bg.sh <QID> [flags...] \
@@ -73,9 +75,14 @@ if [[ $HAVE_LOCK -eq 0 ]]; then
   LOCK_NOTE=$'\n'"(note: filed without the lock — another filing ran long)"
 fi
 
-# Run the actual filing
-OUT=$(cat "$BODY" | python3 system/lifehug.py process-answer "$QID" "$@" 2>&1)
+# Run the actual filing — skip wiki compile (handled by hourly cron)
+OUT=$(cat "$BODY" | python3 system/lifehug.py process-answer "$QID" --no-compile-wiki "$@" 2>&1)
 RC=$?
+
+# Signal that a compile is needed (picked up by hourly cron)
+if [[ $RC -eq 0 ]]; then
+  touch "$REPO/state/.compile-needed"
+fi
 
 if [[ $RC -eq 0 ]]; then
   # Extract coverage line if present
