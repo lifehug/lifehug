@@ -340,7 +340,13 @@ def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str,
 # correction the viewer files alongside it (record's `correction` field).
 # That correction marks the source for re-classification, so eventually the
 # classification places the event itself — `placement_redundant` on a placed
-# event means the loop has caught up and the pin can retire.
+# event means the loop has caught up.
+#
+# v105: caught-up pins retire AUTOMATICALLY — the weekly maintenance runs
+# `retire_redundant_placements()` after classification, moving each redundant
+# pin into the file's `retired` list (the filed correction remains the
+# information; nothing is lost). Orphaned pins never auto-retire — they keep
+# surfacing as stale notices for the owner to resolve.
 # ---------------------------------------------------------------------------
 
 PLACEMENTS_FILE = STATE_DIR / "timeline_placements.json"
@@ -355,6 +361,7 @@ def placement_key(event: dict) -> str:
 def load_placements() -> dict:
     data = read_json(PLACEMENTS_FILE, default=None) or {"version": 1, "placements": []}
     data.setdefault("placements", [])
+    data.setdefault("retired", [])
     return data
 
 
@@ -385,16 +392,51 @@ def remove_placement(key: str) -> bool:
     return True
 
 
+def _keyword_slot(haystack: str, periods: list[dict]) -> str | None:
+    for period in periods:
+        for keyword in _PERIOD_KEYWORDS.get(period["slug"], ()):
+            if keyword in haystack:
+                return period["slug"]
+    return None
+
+
+def heuristic_slot(event: dict, periods: list[dict],
+                   vocab: dict[str, set[str]]) -> str | None:
+    """Where the system would place this event WITHOUT a manual pin.
+      1. The event's OWN when_hint is the most specific signal — an
+         arc-spanning answer contributes events across many eras, so the
+         per-event time-words outrank the answer's period membership
+         ("a month before I graduated college" → college, even when the
+         source answer sits on the high-school page).
+      2. Source membership: the answer belongs to a period page.
+      3. The classification's era text.
+      4. Learned distinctive era-vocabulary (≥2 shared tokens)."""
+    slot = _keyword_slot(event["when_hint"].lower(), periods) if event["when_hint"] else None
+    if slot is None:
+        for period in periods:
+            if event["source"] in period["sources"]:
+                slot = period["slug"]
+                break
+    if slot is None:
+        slot = _keyword_slot(" ".join(event["eras"]), periods)
+    if slot is None:
+        event_tokens = _era_tokens(" ".join(event["eras"] + [event["when_hint"].lower()]))
+        best_slug, best_overlap = None, 1
+        for period in periods:
+            overlap = len(event_tokens & vocab.get(period["slug"], set()))
+            if overlap > best_overlap:
+                best_slug, best_overlap = period["slug"], overlap
+        slot = best_slug
+    return slot
+
+
 def place_events(events: list[dict], periods: list[dict],
                  placements: dict | None = None) -> tuple[dict[str, list[dict]], list[dict]]:
     """({period_slug: [events...]}, unplaced). Placement order:
       0. the owner's manual placement (content-keyed overlay) — always wins
-      1. the event's source answer appears in a period page's sources
-      2. the classification's era text (or the when_hint) matches static
-         period keywords
-      3. learned era-vocabulary overlap (each period's era-language derived
-         from its member sources' classifications) — best overlap of ≥2 tokens
-      4. unplaced — an explicit bucket, never forced."""
+      1-4. `heuristic_slot` (when_hint keywords → source membership → era
+         text → learned era-vocabulary), then an explicit unplaced bucket —
+         never forced."""
     placed: dict[str, list[dict]] = {p["slug"]: [] for p in periods}
     unplaced: list[dict] = []
     vocab = learned_era_vocabulary(periods, events)
@@ -402,39 +444,6 @@ def place_events(events: list[dict], periods: list[dict],
     if placements:
         manual_by_key = {p["key"]: p for p in placements.get("placements", [])
                          if p.get("period") in placed}
-    def _keyword_slot(haystack: str) -> str | None:
-        for period in periods:
-            for keyword in _PERIOD_KEYWORDS.get(period["slug"], ()):
-                if keyword in haystack:
-                    return period["slug"]
-        return None
-
-    def _heuristic_slot(event: dict) -> str | None:
-        # 1) The event's OWN when_hint is the most specific signal — an
-        #    arc-spanning answer contributes events across many eras, so the
-        #    per-event time-words outrank the answer's period membership
-        #    ("a month before I graduated college" → college, even when the
-        #    source answer sits on the high-school page).
-        slot = _keyword_slot(event["when_hint"].lower()) if event["when_hint"] else None
-        # 2) Source membership: the answer belongs to a period page.
-        if slot is None:
-            for period in periods:
-                if event["source"] in period["sources"]:
-                    slot = period["slug"]
-                    break
-        # 3) The classification's era text.
-        if slot is None:
-            slot = _keyword_slot(" ".join(event["eras"]))
-        # 4) Learned distinctive era-vocabulary (≥2 shared tokens).
-        if slot is None:
-            event_tokens = _era_tokens(" ".join(event["eras"] + [event["when_hint"].lower()]))
-            best_slug, best_overlap = None, 1
-            for period in periods:
-                overlap = len(event_tokens & vocab.get(period["slug"], set()))
-                if overlap > best_overlap:
-                    best_slug, best_overlap = period["slug"], overlap
-            slot = best_slug
-        return slot
 
     for event in events:
         # 0) The owner said so — manual placement outranks every heuristic.
@@ -443,8 +452,8 @@ def place_events(events: list[dict], periods: list[dict],
             if manual:
                 # Redundancy check runs on the ORIGINAL event: once the
                 # classification itself places it here (the loop caught up),
-                # the pin is safe to retire.
-                redundant = _heuristic_slot(event) == manual["period"]
+                # the pin retires on the next weekly pass (v105).
+                redundant = heuristic_slot(event, periods, vocab) == manual["period"]
                 event = dict(event)
                 event["placement"] = "manual"
                 event["placement_key"] = manual["key"]
@@ -456,7 +465,7 @@ def place_events(events: list[dict], periods: list[dict],
                     event["placement_note"] = manual["note"]
                 placed[manual["period"]].append(event)
                 continue
-        slot = _heuristic_slot(event)
+        slot = heuristic_slot(event, periods, vocab)
         if slot is None:
             unplaced.append(event)
         else:
@@ -464,6 +473,42 @@ def place_events(events: list[dict], periods: list[dict],
     for rows in placed.values():
         rows.sort(key=lambda e: (not e["when_hint"], e["source_short"]))
     return placed, unplaced
+
+
+def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
+    """Retire pins the loop has caught up with (v105).
+
+    A pin retires only when its event is still LIVE (same content key) and
+    `heuristic_slot` on the original event lands in the pinned period — i.e.
+    the system now places the moment correctly with no pin at all. The record
+    moves to the file's `retired` list (with the correction link intact), so
+    provenance survives; the filed date assertion is untouched. Orphaned pins
+    (event rewritten, period page gone) never retire here — they surface as
+    stale notices instead. Returns the retired records."""
+    from lifehug_core import now_utc, write_json  # noqa: PLC0415
+    data = load_placements()
+    if not data["placements"]:
+        return []
+    periods = load_periods()
+    events = load_events()
+    vocab = learned_era_vocabulary(periods, events)
+    events_by_key = {placement_key(e): e for e in events}
+    period_slugs = {p["slug"] for p in periods}
+    keep: list[dict] = []
+    retired: list[dict] = []
+    for pin in data["placements"]:
+        event = events_by_key.get(pin.get("key"))
+        if (event is not None and pin.get("period") in period_slugs
+                and heuristic_slot(event, periods, vocab) == pin["period"]):
+            retired.append({**pin, "retired_at": now_utc(),
+                            "retired_reason": "loop caught up — places itself"})
+        else:
+            keep.append(pin)
+    if retired and not dry_run:
+        data["placements"] = keep
+        data["retired"].extend(retired)
+        write_json(PLACEMENTS_FILE, data)
+    return retired
 
 
 # ---------------------------------------------------------------------------

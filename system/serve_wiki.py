@@ -1707,7 +1707,7 @@ def view_timeline():
                 corr = event.get("placement_correction") or ""
                 assertion = (f' · <a href="/source-actions?ref={quote(corr)}">assertion</a>'
                              if corr else "")
-                caught_up = (" · the loop caught up — this now places itself; safe to unpin"
+                caught_up = (" · the loop caught up — this now places itself; the pin retires on the next weekly pass"
                              if event.get("placement_redundant") else "")
                 pin = f" <span class='tl-evidence'>📌 placed by you{assertion}{caught_up} · {unplace}</span>"
             return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}{pin}"

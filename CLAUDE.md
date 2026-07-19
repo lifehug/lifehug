@@ -796,8 +796,13 @@ a cache must be derivable from filed sources.
   authoritative. The old classification keeps feeding the timeline/wiki
   until the fresh one replaces it, so nothing regresses mid-week.
 - When the re-derived classification places a pinned moment in its period by
-  itself, the pin shows "the loop caught up — safe to unpin"
-  (`placement_redundant`); orphaned pins keep surfacing as stale notices.
+  itself (`placement_redundant`), the pin **retires automatically** (v105):
+  the weekly maintenance runs `python3 system/lifehug.py timeline-retire`,
+  which moves each caught-up pin into the placements file's `retired` list —
+  correction link intact, filed assertion untouched. Mid-week the viewer
+  notes "the pin retires on the next weekly pass". Orphaned pins (event
+  rewritten, period gone) never auto-retire; they keep surfacing as stale
+  notices for the owner.
 
 ### The Mirror (v100)
 

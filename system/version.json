@@ -1,7 +1,7 @@
 {
-  "version": 104,
-  "released": "2026-07-18",
-  "changelog": "v104: Decouple answer filing from wiki compile. file_answer_bg.sh now passes --no-compile-wiki so filing is instant (~0.1s instead of 30-90s). A state/.compile-needed sentinel is touched on each successful filing. New compile_and_commit.sh runs via hourly launchd cron (com.lifehug.compile.plist), compiles only when the sentinel exists, then commits + pushes. Batch answers no longer cause concurrent compile conflicts, race conditions on shared state, or merge conflicts. Daily question cron still compiles before asking, acting as a guaranteed fallback.",
+  "version": 105,
+  "released": "2026-07-19",
+  "changelog": "v105: Caught-up timeline pins retire automatically. New timeline-retire step (weekly maintenance, after classification) removes manual pins whose event the re-derived classification now places by itself \u2014 the pin moves to the placements file's retired list with its correction link intact; the filed date assertion is untouched. Orphaned pins still never auto-retire. Viewer notice updated ('the pin retires on the next weekly pass'); heuristic placement logic extracted as timeline.heuristic_slot.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -80,6 +80,7 @@
     "tests/test_people_roster.py",
     "tests/test_source_integrity.py",
     "tests/test_update.py",
+    "tests/test_v105_pin_retire.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",

@@ -338,6 +338,22 @@ def cmd_second_voice_ack(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_timeline_retire(args: argparse.Namespace) -> int:
+    import timeline  # noqa: PLC0415
+    retired = timeline.retire_redundant_placements(dry_run=args.dry_run)
+    if not retired:
+        print("No caught-up pins to retire.")
+        return 0
+    verb = "would retire" if args.dry_run else "Retired"
+    print(f"✓ {verb} {len(retired)} pin(s) — the loop caught up, they place themselves:")
+    for pin in retired:
+        line = f"  📌 {pin.get('description', '?')} → {pin.get('period', '?')}"
+        if pin.get("correction"):
+            line += f" (assertion remains: {pin['correction']})"
+        print(line)
+    return 0
+
+
 def cmd_mirror_compile(args: argparse.Namespace) -> int:
     flags: list[str] = []
     if getattr(args, "model", None):
@@ -1174,6 +1190,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("second-voice-ack", help="Acknowledge a second-voice offer (hides the home card)")
     p.add_argument("key", help="The offer key from state/second_voice_offers.json")
     p.set_defaults(func=cmd_second_voice_ack)
+
+    p = sub.add_parser("timeline-retire",
+                       help="Retire manual timeline pins the loop has caught up with (classification now places them)")
+    p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    p.set_defaults(func=cmd_timeline_retire)
 
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")

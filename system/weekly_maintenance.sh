@@ -153,6 +153,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$WORKSPACE/system/lifehug.py" source-lint --no-write-findings
   run_step python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" quality-stats
+  run_step python3 "$WORKSPACE/system/lifehug.py" timeline-retire --dry-run
   echo "==> (real run) lifehug.py mirror-compile — synthesizes wiki/self/mirror.md (skipped in dry run: costs an AI call)"
   run_step python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$WORKSPACE/system/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
@@ -218,6 +219,11 @@ ${out}"
 }
 
 run_learning_step "quality_update" python3 "$WORKSPACE/system/lifehug.py" quality-update
+
+# Pin retirement (v105): manual timeline pins whose event the (fresh)
+# classification now places by itself retire automatically — the filed date
+# assertion is the durable information; the pin was only the display overlay.
+run_learning_step "timeline_retire" python3 "$WORKSPACE/system/lifehug.py" timeline-retire
 
 # Synthesis→question loop (v71): non-boilerplate open questions from compiled
 # wiki pages become candidates (capped at 3/week — the wiki whispers).
