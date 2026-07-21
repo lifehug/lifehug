@@ -55,6 +55,8 @@ python3 system/lifehug.py source-lint       # lint source integrity and queue fi
 python3 system/lifehug.py source-lint --fix # safe metadata/manifest repairs only
 python3 system/lifehug.py source-findings   # review persisted repair findings
 python3 system/lifehug.py ingest-story      # save unprompted story source from stdin
+python3 system/lifehug.py connector-excavate gmail --dry-run # preview external-evidence promotions (rare, manual)
+python3 system/lifehug.py connector-report gmail             # connector ledger summary
 python3 system/lifehug.py artifact new --format letter --subject Mom # create artifact context
 python3 system/lifehug.py artifact prompt outputs/<artifact>          # prompt to write it
 python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all

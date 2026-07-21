@@ -332,6 +332,24 @@ This writes an owner-only source file under `sources/manual/` and stores initial
 
 Unprompted stories follow the same source contract as answers: they are raw source-of-truth files. Later corrections and changed perspective belong in `sources/corrections/`, not by rewriting the original story.
 
+### External Evidence Connectors (v106 — Gmail first)
+
+Connectors ingest external archives as **selective evidence and discovery**, never bulk import. The invariant: **the ledger is permanent; relevance is recomputed.** `connector-fetch` appends metadata-only lines (no bodies) to `state/connectors/gmail_ledger.jsonl`; `connector-excavate` re-scores the ENTIRE ledger against the current wiki/rosters/sources and delta-promotes. A thread sub-threshold today promotes on a later run once its correspondent gains a roster/wiki entry — without any re-fetch. This is a rare excavation (quarterly/yearly), not a sync service, and it is loop-adjacent: manual, owner-triggered, outside the daily/weekly/monthly rhythms.
+
+```bash
+python3 system/lifehug.py connector-auth gmail           # one-time OAuth, gmail.readonly ONLY
+python3 system/lifehug.py connector-fetch gmail          # append new metadata (cursor-based)
+python3 system/lifehug.py connector-fetch gmail --probe  # Phase 0: stratified sample + probe report
+python3 system/lifehug.py connector-calibrate gmail      # Phase 2 shadow report → state/reports/gmail_calibration.md
+python3 system/lifehug.py connector-calibrate gmail --set-threshold 0.6
+python3 system/lifehug.py connector-excavate gmail --dry-run   # preview; write nothing
+python3 system/lifehug.py connector-excavate gmail --cap 25    # re-score all, delta-promote
+python3 system/lifehug.py connector-report gmail               # ledger summary
+python3 system/lifehug.py connector-audit gmail                # promoted sources, newest first
+```
+
+Hard rules: `gmail.readonly` scope only (token gitignored at `state/connectors/gmail_token.json`); bodies are fetched ONLY for threads being promoted or calibration-sampled; promoted threads become immutable `sources/gmail/YYYY-MM-DD-<slug>.md` records (`type`/`source_trust: external_record`, `authority: third_party_record` — corroborating record, never first-person memory), idempotent by message id, capped per run, registered via `source_integrity`. Institutional mail yields `state/connectors/gmail_date_evidence.json`; unknown correspondents/threads/institutions mine into `state/question_candidates.json` (provenance `connector-mined`). The promote threshold and axis weights are the owner's one-time, versioned decision (`state/connectors/weights.json`, via `connector-calibrate`). Suppress a bad promotion with the existing `retract-source` flow; never edit or delete the source.
+
 ### Opinions & Essays (v95)
 
 An **opinion** is the author's stated position — a lens on life, a philosophical

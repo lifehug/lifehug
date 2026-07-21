@@ -288,6 +288,7 @@ All paths are relative to this workspace root:
 - Source manifest: `state/source_manifest.json`
 - Source lint findings: `state/source_lint_findings.json`
 - Question candidates: `state/question_candidates.json`
+- Connector state (ledger, cursor, date evidence, calibrated weights): `state/connectors/`
 - Planned queue: `state/question_queue.json`
 - Planner state: `state/planner_state.json`
 - Answers: `answers/`

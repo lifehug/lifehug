@@ -129,6 +129,46 @@ directly create pages.
 
 ---
 
+## 7c. External evidence connectors **[shipped v106]**
+
+Email (Gmail first) joins the source layer as a **selective evidence and
+discovery source** — not a bulk import, and not a per-item review queue. The
+methodological commitment is the same one the source contract makes elsewhere:
+trust is earned at the threshold, not at the capture.
+
+- **The ledger is permanent; relevance is recomputed.** `fetch` appends
+  metadata-only lines (no bodies) to `state/connectors/<name>_ledger.jsonl`;
+  `excavate` re-scores the ENTIRE ledger against the CURRENT wiki, rosters,
+  and sources on every run. Scores are never trusted beyond the run that
+  computed them — a 2008 thread that is noise today becomes gold the day its
+  correspondent gains a wiki page (the time-varying axes:
+  `relationship_signal`, `discovery_signal`, `novelty`). Nothing is ever
+  discarded from the ledger, so coverage is guaranteed by re-evaluation over
+  time, not by getting scoring right once.
+- **Threshold trust, signed off once.** Six deterministic axes (date_anchor,
+  relationship_signal, discovery_signal, narrative_density, novelty,
+  reciprocity) feed a weighted total; the owner calibrates weights and the
+  promote threshold ONCE against a shadow run over real history
+  (`connector-calibrate`), versioned in `state/connectors/weights.json`.
+  Bands: `<0.15` noise (ledger only) · `0.15–0.45` evidence (metadata
+  harvested, never read) · `0.45–threshold` near-band · `≥threshold`
+  auto-promote. Below the threshold, mail stays metadata-only evidence.
+- **Three missions, three products.** Corroborate: date evidence
+  (`{date, entity, kind, message_id}`) harvested from institutional mail —
+  the utility-bill rule, content ignored but date+address kept. Discover:
+  unknown high-volume correspondents, untold narrative threads, and unknown
+  institutions mined into `question_candidates.json` (provenance
+  `connector-mined`) — email as a sensor for the Loop's thin spots. Source:
+  the rare above-threshold thread becomes an immutable `sources/gmail/`
+  source (`source_trust: external_record`, `authority: third_party_record`)
+  — corroborating record, never first-person memory.
+- **Bounded automation.** Per-run promotion cap (default 25), `--dry-run`,
+  `connector-audit` listing, idempotency by message id, and the existing
+  retraction/correction flow as the escape hatch. This is a rare excavation
+  (quarterly/yearly), not a sync service.
+
+---
+
 ## 8. Key References
 
 **Narrative identity & memoir**: McAdams, *Life Story Interview II* (Foley Center); McAdams & McLean 2013; McAdams et al. 2001 (redemption/contamination, PSPB); Karr, *The Art of Memoir*; Gornick, *The Situation and the Story*; Birren, Guided Autobiography (nine themes).

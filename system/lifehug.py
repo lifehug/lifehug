@@ -709,6 +709,44 @@ def cmd_unretract(args: argparse.Namespace) -> int:
     return run_python("source_integrity.py", flags)
 
 
+def cmd_connector_auth(args: argparse.Namespace) -> int:
+    return run_python("connector.py", ["auth", args.connector])
+
+
+def cmd_connector_fetch(args: argparse.Namespace) -> int:
+    flags = ["fetch", args.connector]
+    if args.probe:
+        flags.append("--probe")
+        flags.extend(["--per-window", str(args.per_window)])
+    if args.limit is not None:
+        flags.extend(["--limit", str(args.limit)])
+    return run_python("connector.py", flags)
+
+
+def cmd_connector_excavate(args: argparse.Namespace) -> int:
+    flags = ["excavate", args.connector]
+    if args.dry_run:
+        flags.append("--dry-run")
+    if args.cap is not None:
+        flags.extend(["--cap", str(args.cap)])
+    return run_python("connector.py", flags)
+
+
+def cmd_connector_report(args: argparse.Namespace) -> int:
+    return run_python("connector.py", ["report", args.connector])
+
+
+def cmd_connector_audit(args: argparse.Namespace) -> int:
+    return run_python("connector.py", ["audit", args.connector])
+
+
+def cmd_connector_calibrate(args: argparse.Namespace) -> int:
+    flags = ["calibrate", args.connector]
+    if args.set_threshold is not None:
+        flags.extend(["--set-threshold", str(args.set_threshold)])
+    return run_python("connector.py", flags)
+
+
 def cmd_fix(args: argparse.Namespace) -> int:
     """One-line fact repair, phone-friendly (issue #24). Two modes:
     --right (with optional --wrong) files a CORRECTION that overrides the
@@ -1156,6 +1194,42 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-candidates", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_ingest)
+
+    # --- Connectors (calibrated external-evidence ingestion, v106) ---
+    p = sub.add_parser("connector-auth", help="One-time OAuth consent for a connector (gmail.readonly only)")
+    p.add_argument("connector", choices=["gmail"])
+    p.set_defaults(func=cmd_connector_auth)
+
+    p = sub.add_parser("connector-fetch", help="Append new connector metadata to the permanent ledger")
+    p.add_argument("connector", choices=["gmail"])
+    p.add_argument("--probe", action="store_true",
+                   help="Phase 0: stratified sample + probe report only (no ledger, no bodies)")
+    p.add_argument("--per-window", type=int, default=50, help="Probe sample size per era window")
+    p.add_argument("--limit", type=int, default=None, help="Max messages to list this fetch")
+    p.set_defaults(func=cmd_connector_fetch)
+
+    p = sub.add_parser("connector-excavate",
+                       help="Re-score the whole ledger against the current wiki/rosters/sources and delta-promote")
+    p.add_argument("connector", choices=["gmail"])
+    p.add_argument("--dry-run", action="store_true", help="Report what would promote; write nothing")
+    p.add_argument("--cap", type=int, default=None, help="Max threads promoted this run (default 25)")
+    p.set_defaults(func=cmd_connector_excavate)
+
+    p = sub.add_parser("connector-report", help="Connector ledger summary: volume, span, bands, threshold")
+    p.add_argument("connector", choices=["gmail"])
+    p.set_defaults(func=cmd_connector_report)
+
+    p = sub.add_parser("connector-audit", help="List auto-promoted connector sources with scores, newest first")
+    p.add_argument("connector", choices=["gmail"])
+    p.set_defaults(func=cmd_connector_audit)
+
+    p = sub.add_parser("connector-calibrate",
+                       help="Phase 2 shadow report: score distribution, bands at thresholds "
+                            "0.5/0.6/0.7/0.8, examples with reasons, discovery preview")
+    p.add_argument("connector", choices=["gmail"])
+    p.add_argument("--set-threshold", type=float, default=None, metavar="X",
+                   help="Record the chosen promote threshold in state/connectors/weights.json")
+    p.set_defaults(func=cmd_connector_calibrate)
 
     # --- Candidate Stats ---
     p = sub.add_parser("candidates-stats", help="Show candidate question statistics")

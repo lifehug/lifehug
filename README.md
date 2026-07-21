@@ -331,6 +331,15 @@ The source-integrity segment of the Loop is:
 
 This is how Lifehug keeps learning: it notices where the life model is weak, classifies new source material into structured meaning, asks for what is missing, and preserves how your understanding evolves.
 
+### Connectors: calibrated external evidence (Gmail first)
+
+Email joins the source layer as a **selective evidence and discovery source** — not a bulk import, and not a per-item review queue. The model:
+
+- **The ledger is permanent; relevance is recomputed.** `connector-fetch` appends metadata-only lines (no bodies) to `state/connectors/gmail_ledger.jsonl`; `connector-excavate` re-scores the *entire* ledger against the *current* wiki, rosters, and sources on every run. Scores are never trusted beyond the run that computed them — a thread that is noise today crosses the threshold the day its correspondent gains a wiki page. Nothing is ever discarded from the ledger.
+- **Threshold trust.** Six deterministic axes (date_anchor, relationship_signal, discovery_signal, narrative_density, novelty, reciprocity) feed a weighted total. The owner calibrates weights and the promote threshold once against a shadow run (`connector-calibrate` → `state/reports/gmail_calibration.md`), versioned in `state/connectors/weights.json`.
+- **Three products.** Corroborate: date evidence from institutional mail (`state/connectors/gmail_date_evidence.json` — the utility-bill rule: content ignored, date+address kept). Discover: unknown high-volume correspondents, untold narrative threads, and unknown institutions mined into `question_candidates.json` (provenance `connector-mined`). Source: the rare above-threshold thread becomes an immutable `sources/gmail/` record (`source_trust: external_record`, `authority: third_party_record`) — corroborating record, never first-person memory.
+- **Bounded automation.** Per-run promotion cap (default 25), `--dry-run`, `connector-audit` listing, idempotency by message id, and the existing retraction flow as the escape hatch. A rare excavation (quarterly/yearly), not a sync service.
+
 ---
 
 ## Artifacts
@@ -435,6 +444,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`gen_followups.py`** | The pass engine. At the end of a rotation pass it builds a prompt over the pass's answers, takes back AI-written follow-ups, appends them to the bank, and advances to the next, deeper pass. |
 | **`ingest_story.py`** | Captures unprompted stories. Saves a story you share (that isn't an answer) as owner-only source material and seeds candidate questions to deepen it. |
 | **`ingest.py`** | Bulk source import. Pluggable connectors (X/Twitter, Gmail, Instagram, local files) normalize external writing into source records + candidates. |
+| **`connector.py`** + **`connectors/`** | Calibrated external-evidence ingestion (Gmail first). Permanent metadata ledger + six-axis scoring + threshold promotion: `connector-fetch` appends new metadata; `connector-excavate` re-scores the whole ledger against the current wiki and delta-promotes above-threshold threads into immutable `sources/gmail/` records; `connector-calibrate` is the one-time shadow run where the owner picks the threshold. Bodies are fetched only for promoted threads. |
 | **`classify_story.py`** | The source analyzer. OpenClaw-first, Anthropic fallback. AI-extracts people, places, periods, themes, contradictions, possible outputs, self-understanding insights, Focus opportunities, and targeted follow-up questions from any answer/source file. Weekly maintenance runs it over a capped batch of unclassified files. |
 | **`recommend_focuses.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
 
@@ -529,6 +539,13 @@ python3 system/lifehug.py source-lint --fix
 python3 system/lifehug.py source-findings
 printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/A14.md --kind factual
 printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A14.md
+
+# Connectors (rare excavation — quarterly/yearly)
+python3 system/lifehug.py connector-excavate gmail --dry-run   # preview promotions, write nothing
+python3 system/lifehug.py connector-excavate gmail             # re-score whole ledger, delta-promote
+python3 system/lifehug.py connector-report gmail               # ledger summary
+python3 system/lifehug.py connector-audit gmail                # what got auto-promoted, with scores
+python3 system/lifehug.py connector-calibrate gmail            # shadow run: pick the threshold once
 
 # Full list
 python3 system/lifehug.py --help

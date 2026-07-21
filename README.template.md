@@ -104,6 +104,10 @@ capture source → compile wiki → weekly lint/fix → classify new sources →
 
 Research neighborhoods track three different stages: questions generated, questions promoted into the bank, and answers captured. A full candidate arc means Lifehug knows what to ask next; it does **not** mean Dave has enough source material to draft an artifact. `progress` only labels a neighborhood ready to draft when the answered-material score crosses the readiness threshold.
 
+## Connectors (external evidence)
+
+Gmail connects as a **selective evidence and discovery source** — not a bulk import. A permanent metadata ledger (`state/connectors/gmail_ledger.jsonl`, no bodies) is re-scored in full on every `connector-excavate` run against the current wiki/rosters/sources — the ledger is permanent, relevance is recomputed, so old mail gains value as the story grows. Threads above the calibrated threshold promote automatically into immutable `sources/gmail/` external records (bounded by a per-run cap, `--dry-run`, and `connector-audit`); everything below stays metadata-only evidence. Institutional mail yields date evidence; unknown correspondents and untold threads surface as question candidates. Threshold and weights are Dave's one-time, versioned call via `connector-calibrate`.
+
 ## Key commands
 
 ```bash
@@ -146,6 +150,12 @@ python3 system/lifehug.py source-lint --fix
 python3 system/lifehug.py source-findings
 printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/A14a.md --kind factual
 printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A14a.md
+
+# Connectors (rare excavation — quarterly/yearly)
+python3 system/lifehug.py connector-excavate gmail --dry-run   # preview promotions, write nothing
+python3 system/lifehug.py connector-excavate gmail             # re-score whole ledger, delta-promote
+python3 system/lifehug.py connector-report gmail               # ledger summary
+python3 system/lifehug.py connector-audit gmail                # what got auto-promoted, with scores
 
 # Full command list
 python3 system/lifehug.py --help
