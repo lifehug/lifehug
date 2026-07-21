@@ -652,5 +652,7 @@ def _thread_subject(entries: list[dict]) -> str:
 
 
 def _known_email(email: str, stats: dict, context) -> bool:
+    if email.lower() in (getattr(context, "known_emails", None) or set()):
+        return True
     tokens = address_tokens(str(stats.get("name") or ""), email)
     return tokens_known(tokens, context.known_any_token_sets)

@@ -166,6 +166,29 @@ trust is earned at the threshold, not at the capture.
   `connector-audit` listing, idempotency by message id, and the existing
   retraction/correction flow as the escape hatch. This is a rare excavation
   (quarterly/yearly), not a sync service.
+- **Owner-declared VIPs are calibrated knowledge, not a heuristic
+  [shipped v107].** Heuristics cannot know that `bigdaddy.jet@gmail.com` is
+  Dad. `weights.json` accepts a `vip_correspondents` map (email → label) and a
+  `vip_bonus`: declared VIPs pin `relationship_signal` to 1.0, add the bonus
+  to the thread total, and are never mined as "unknown" discoveries. A VIP
+  with no wiki page becomes a high-priority page candidate instead. The map is
+  owner-edited and versioned like the threshold — declare family once, and
+  every excavation honors it across all 20+ years of the ledger.
+- **Roster email aliases bind the wiki to exact addresses [shipped v107].**
+  Name-token matching is weak for mail (a "BigDaddy" display name shares no
+  tokens with Dad's page). Roster entities may carry email addresses in
+  `aliases`; correspondents then match by exact address in
+  `relationship_signal`, `_discovery`, and discovery mining. This is the
+  learning loop: VIP declaration → page candidate → page created with the
+  email recorded as a roster alias → future excavations score from wiki state
+  alone, no re-declaration. Importance marked in the wiki becomes the
+  authority, exactly as it is everywhere else in the Loop.
+- **Volume is era-bound; importance is not volume.** A college collaborator
+  can out-mail a sibling 10:1 and matter less. Discovery candidates are weak
+  signals by design — "not a good candidate" in the normal review flow is the
+  intended rejection path, and each new connector (work mail, exports) re-
+  balances the correspondent map. The VIP mechanism above is the corrective
+  for people the volume understates.
 
 ---
 

@@ -423,6 +423,10 @@ class GmailConnector(BaseConnector):
         # 1. Unknown significant people — ranked by volume/reciprocity/span.
         unknown_people = []
         for email, stats in context.correspondent_stats.items():
+            if email in context.vip_correspondents:
+                continue  # declared known — see the VIP-page candidates below
+            if email in context.known_emails:
+                continue  # roster entity carries this address as an alias
             if int(stats.get("messages") or 0) < MIN_DISCOVERY_MESSAGES:
                 continue
             if tokens_known(address_tokens(stats.get("name", ""), email), context.known_any_token_sets):
@@ -448,6 +452,34 @@ class GmailConnector(BaseConnector):
                            f"messages over {stats.get('span_days', 0)} days, "
                            f"owner replied {stats.get('owner_replies', 0)} time(s), "
                            "absent from all rosters and wiki."),
+                "status": "candidate",
+                "provenance": "connector-mined",
+                "connector": self.name,
+                "created_at": now,
+            })
+
+        # 1b. Declared VIPs with no wiki page — the owner said these people
+        # matter; if the graph hasn't caught up, propose the page.
+        for email, label in sorted(context.vip_correspondents.items()):
+            stats = context.correspondent_stats.get(email) or {}
+            if not stats:
+                continue  # declared but never seen in this ledger
+            if tokens_known(text_tokens(label), context.known_any_token_sets):
+                continue  # page already exists
+            first_year = str(stats.get("first_date") or "")[:4]
+            last_year = str(stats.get("last_date") or "")[:4]
+            span = f"{first_year}–{last_year}" if first_year and first_year != last_year else first_year
+            candidates.append({
+                "id": f"cand-gmail-vip-{slugify(label)}",
+                "text": (f"You declared {label} ({email}) as important — "
+                         f"{stats.get('messages', 0)} emails ({span}), but no wiki page yet. "
+                         "Who are they in your story?"),
+                "source_path": ledger_ref,
+                "target_page": None,
+                "kind": "discovery_vip",
+                "priority": 0.8,
+                "reason": ("Owner-declared VIP correspondent absent from rosters and wiki; "
+                           "declaration is first-person knowledge the heuristics can't have."),
                 "status": "candidate",
                 "provenance": "connector-mined",
                 "connector": self.name,

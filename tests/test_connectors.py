@@ -452,5 +452,97 @@ class WrapperTests(unittest.TestCase):
                 self.assertTrue(callable(args.func))
 
 
+class VipTests(ConnectorTestCase):
+    """Owner-declared VIP correspondents (v107): family emphasis is calibrated
+    knowledge, not a heuristic — pins relationship, lifts totals, is never
+    mined as 'unknown', and proposes a page when the graph lacks one."""
+
+    VIP = {"joe.taylor@example.com": "Grandpa Joe"}
+
+    def _context(self, entries, bonus=0.10):
+        config = cscoring.load_scoring_config()
+        config["vip_correspondents"] = dict(self.VIP)
+        config["vip_bonus"] = bonus
+        return cscoring.build_context(self.root, entries, config, owner_email=OWNER)
+
+    @staticmethod
+    def long_vip_thread(n=24):
+        """A 24-message two-way thread: VIP volume clears the discovery floor."""
+        days = [(2008 + (i // 12), 1 + (i % 12), 1 + (i % 27)) for i in range(n)]
+        senders = ["joe.taylor@example.com", OWNER] * (n // 2)
+        return [
+            make_entry(f"t-vip-m{i}", "t-vip", sender, "Re: family stuff", day,
+                       from_name="Joe Taylor" if sender != OWNER else "")
+            for i, (sender, day) in enumerate(zip(senders, days))
+        ]
+
+    def test_vip_pins_relationship_and_lifts_total(self):
+        entries = grandpa_thread()
+        plain = cscoring.score_thread(entries, cscoring.build_context(
+            self.root, entries, cscoring.load_scoring_config(), owner_email=OWNER))
+        context = self._context(entries)
+        scored = cscoring.score_thread(entries, context)
+        self.assertEqual(scored["scores"]["relationship_signal"], 1.0)
+        self.assertIn("declared VIP", scored["reasons"]["relationship_signal"])
+        self.assertEqual(scored["vips"], ["joe.taylor@example.com"])
+        expected = round(min(1.0, sum(scored["scores"][a] * context.weights[a]
+                                      for a in cscoring.AXES) + 0.10), 4)
+        self.assertEqual(scored["total"], expected)
+        self.assertGreater(scored["total"], plain["total"])
+
+    def test_vip_bonus_flips_band_across_threshold(self):
+        entries = grandpa_thread()
+        plain = cscoring.score_thread(entries, cscoring.build_context(
+            self.root, entries, cscoring.load_scoring_config(), owner_email=OWNER))
+        self.assertNotEqual(plain["band"], "promote")
+        scored = cscoring.score_thread(entries, self._context(entries, bonus=0.5))
+        self.assertEqual(scored["band"], "promote")
+        self.assertIn("vip_bonus", scored["reasons"])
+
+    def test_vip_never_mined_as_unknown_person(self):
+        entries = self.long_vip_thread()
+        context = self._context(entries)
+        threads = cscoring.group_threads(entries)
+        scored = {tid: cscoring.score_thread(te, context) for tid, te in threads.items()}
+        result = scored["t-vip"]
+        self.assertEqual(result["scores"]["discovery_signal"], 0.0)
+        candidates = self.connector.mine_discovery(entries, threads, scored, context)
+        ids = {c["id"] for c in candidates}
+        self.assertNotIn("cand-gmail-person-joe-taylor", ids)
+        vip_cands = [c for c in candidates if c["kind"] == "discovery_vip"]
+        self.assertEqual(len(vip_cands), 1)
+        self.assertIn("Grandpa Joe", vip_cands[0]["text"])
+
+    def test_vip_page_candidate_skipped_when_page_exists(self):
+        (self.root / "wiki" / "people" / "grandpa-joe.md").write_text("# Grandpa Joe\n")
+        entries = self.long_vip_thread()
+        context = self._context(entries)
+        threads = cscoring.group_threads(entries)
+        scored = {tid: cscoring.score_thread(te, context) for tid, te in threads.items()}
+        candidates = self.connector.mine_discovery(entries, threads, scored, context)
+        self.assertFalse([c for c in candidates if c["kind"] == "discovery_vip"])
+
+    def test_roster_email_alias_binds_exact_address(self):
+        """Wiki importance marked via a roster email alias (v107): a
+        correspondent matches by exact address even when their display name
+        shares no tokens with the page — and stops being a discovery."""
+        self.write_roster([{
+            "name": "Dad", "slug": "dad",
+            "aliases": ["Harvey Rex Taylor", "bigdaddy.jet@gmail.com"],
+        }])
+        entries = [
+            make_entry(f"t-alias-m{i}", "t-alias",
+                       "bigdaddy.jet@gmail.com" if i % 2 == 0 else OWNER,
+                       "Re: nuttin'", (2015, 6, 7 + i), from_name="BigDaddy")
+            for i in range(4)
+        ]
+        context = cscoring.build_context(
+            self.root, entries, cscoring.load_scoring_config(), owner_email=OWNER)
+        self.assertIn("bigdaddy.jet@gmail.com", context.known_emails)
+        scored = cscoring.score_thread(entries, context)
+        self.assertEqual(scored["scores"]["relationship_signal"], 1.0)
+        self.assertEqual(scored["scores"]["discovery_signal"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

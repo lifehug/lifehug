@@ -140,6 +140,9 @@ class ScoringContext:
     correspondent_stats: dict[str, dict] = field(default_factory=dict)
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     thresholds: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
+    vip_correspondents: dict[str, str] = field(default_factory=dict)
+    vip_bonus: float = 0.0
+    known_emails: set[str] = field(default_factory=set)
 
 
 def load_scoring_config(path: Path | None = None) -> dict:
@@ -149,6 +152,8 @@ def load_scoring_config(path: Path | None = None) -> dict:
         "version": SCHEMA_VERSION,
         "weights": dict(DEFAULT_WEIGHTS),
         "thresholds": dict(DEFAULT_THRESHOLDS),
+        "vip_correspondents": {},
+        "vip_bonus": 0.0,
     }
     data = read_json(path, default=None) if path else None
     if isinstance(data, dict):
@@ -158,6 +163,13 @@ def load_scoring_config(path: Path | None = None) -> dict:
         for key, value in (data.get("thresholds") or {}).items():
             if key in DEFAULT_THRESHOLDS:
                 config["thresholds"][key] = float(value)
+        vips = data.get("vip_correspondents")
+        if isinstance(vips, dict):
+            config["vip_correspondents"] = {
+                str(email).lower(): str(label) for email, label in vips.items()
+            }
+        if data.get("vip_bonus") is not None:
+            config["vip_bonus"] = float(data["vip_bonus"])
     return config
 
 
@@ -244,6 +256,7 @@ def build_context(
     covered_tokens: set[str] = set()
 
     rosters_dir = repo_dir / "state" / "entity_rosters"
+    known_emails: set[str] = set()
     if rosters_dir.exists():
         for roster_file in sorted(rosters_dir.glob("*.json")):
             data = read_json(roster_file, default=None) or {}
@@ -251,7 +264,11 @@ def build_context(
             for entity in data.get("entities") or []:
                 names = [entity.get("name", ""), entity.get("slug", ""), *(entity.get("aliases") or [])]
                 for raw in names:
-                    tokens = text_tokens(str(raw or ""))
+                    raw = str(raw or "").strip()
+                    if "@" in raw:  # email aliases bind the wiki to exact addresses
+                        known_emails.add(raw.lower())
+                        continue
+                    tokens = text_tokens(raw)
                     if tokens:
                         token_sets.append(tokens)
             known_any_token_sets.extend(token_sets)
@@ -286,6 +303,9 @@ def build_context(
         correspondent_stats=correspondent_stats(entries, owner_email),
         weights=config["weights"],
         thresholds=config["thresholds"],
+        vip_correspondents=config.get("vip_correspondents") or {},
+        vip_bonus=float(config.get("vip_bonus") or 0.0),
+        known_emails=known_emails,
     )
 
 
@@ -319,14 +339,27 @@ def date_anchor_score(entries: list[dict]) -> tuple[float, str]:
     return best, best_reason
 
 
+def _vip_hits(others: dict[str, dict], context: ScoringContext) -> list[str]:
+    """Other-correspondents the owner DECLARED as important (family etc.) in
+    weights.json — first-person knowledge heuristics can't have."""
+    return sorted(email for email in others if email in context.vip_correspondents)
+
+
 def _relationship(others: dict[str, dict], context: ScoringContext) -> tuple[float, str]:
     """Share of correspondents matching the CURRENT person roster or wiki
-    people pages. Time-varying: a roster gain re-scores old mail upward."""
+    people pages. Time-varying: a roster gain re-scores old mail upward.
+    Owner-declared VIPs pin the axis: family mail is never diluted by how
+    short or old the thread is."""
     if not others:
         return 0.0, "no other correspondents"
+    vips = _vip_hits(others, context)
+    if vips:
+        labels = ", ".join(context.vip_correspondents[v] for v in vips)
+        return 1.0, f"declared VIP correspondent: {labels}"
     known = [
         email for email, info in others.items()
-        if tokens_known(info["tokens"], context.known_person_token_sets)
+        if email in context.known_emails  # exact address alias on a roster entity
+        or tokens_known(info["tokens"], context.known_person_token_sets)
     ]
     if not known:
         return 0.0, "no correspondent in the current person roster/wiki"
@@ -335,10 +368,13 @@ def _relationship(others: dict[str, dict], context: ScoringContext) -> tuple[flo
 
 def _discovery(others: dict[str, dict], context: ScoringContext) -> tuple[float, str]:
     """Significant correspondent ABSENT from every roster and the wiki.
-    Time-varying: once they get a page, this axis stops firing."""
+    Time-varying: once they get a page, this axis stops firing. Declared VIPs
+    are known by definition — they never surface as discoveries."""
     unknown = {
         email: info for email, info in others.items()
-        if not tokens_known(info["tokens"], context.known_any_token_sets)
+        if email not in context.vip_correspondents
+        and email not in context.known_emails
+        and not tokens_known(info["tokens"], context.known_any_token_sets)
     }
     if not unknown:
         return 0.0, "all correspondents already known"
@@ -449,9 +485,15 @@ def score_thread(entries: list[dict], context: ScoringContext) -> dict:
     scores["reciprocity"], reasons["reciprocity"] = _reciprocity(owner_count, other_count, span_days)
 
     total = round(sum(scores[axis] * context.weights.get(axis, 0.0) for axis in AXES), 4)
+    vips = _vip_hits(others, context)
+    if vips and context.vip_bonus > 0:
+        labels = ", ".join(context.vip_correspondents[v] for v in vips)
+        total = round(min(1.0, total + context.vip_bonus), 4)
+        reasons["vip_bonus"] = f"+{context.vip_bonus:.2f} owner-declared VIP ({labels})"
     return {
         "scores": scores,
         "total": total,
         "band": assign_band(total, context.thresholds),
         "reasons": reasons,
+        "vips": vips,
     }
