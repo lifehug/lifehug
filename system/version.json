@@ -1,7 +1,7 @@
 {
-  "version": 111,
+  "version": 112,
   "released": "2026-07-21",
-  "changelog": "v111: timeline corroboration calibrated against live evidence (issue #44). Three false-positive classes exposed by the real 4,054-record run, fixed: entities now match moments by DESCRIPTION tokens only (eras/when_hint no longer attach them — 'Born in Redlands' stops carrying asu ×1100); badges are windowed to the moment's own year or its placement period's stated approximate_dates, so an entity stream spanning 2010–2026 badges as the in-window cluster (asu ×43 · 2011–2012) instead of its full span, and windowless badges are context-only; contradictions additionally require zero in-window records and a tight (≤5-year) out-of-window cluster, so diffuse streams (alumni mail, apple receipts) can never contradict a memory while a tight 2003-only enrollment cluster against a 2004 memory still fires.",
+  "changelog": "v112: generic-entity stoplist for date evidence (issue #44). Domain words that can never be life entities (mail.house.gov -> 'house', plus home/mail/office/service/support/info/online/store/shop/cloud/team/news/app) are dropped in extract_date_evidence, keeping timeline badges free of junk-entity noise.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

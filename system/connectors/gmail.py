@@ -47,6 +47,12 @@ _METADATA_HEADERS = ("From", "To", "Cc", "Subject", "List-Id", "List-Unsubscribe
 # about the era. Deliberately high — the miner surfaces significance, not noise.
 MIN_DISCOVERY_MESSAGES = 10
 MIN_DISCOVERY_INSTITUTION_MESSAGES = 5
+
+# Domain words that can never be life entities (mail.house.gov → "house").
+GENERIC_ENTITY_STOPLIST = {
+    "house", "home", "mail", "email", "office", "service", "support",
+    "info", "online", "store", "shop", "cloud", "team", "news", "app",
+}
 MAX_BODY_CHARS = 4000
 
 # Date-evidence kinds, first match wins on the subject line.
@@ -386,7 +392,8 @@ class GmailConnector(BaseConnector):
     def extract_date_evidence(self, entries: list[dict], thresholds: dict) -> list[dict]:
         """{date, entity, kind, message_id} assertions from institutional
         mail, refreshed every excavation. The utility-bill rule: the content
-        is ignored; the date + institution is the proof."""
+        is ignored; the date + institution is the proof. Generic domain words
+        (mail.house.gov → 'house') can never be life entities — stoplisted."""
         bar = thresholds.get("date_evidence", 0.4)
         evidence: list[dict] = []
         for entry in entries:
@@ -396,6 +403,8 @@ class GmailConnector(BaseConnector):
             domain = str(entry.get("from_email") or "").split("@")[-1].lower()
             parts = domain.split(".")
             entity = parts[-2] if len(parts) >= 2 else domain
+            if entity in GENERIC_ENTITY_STOPLIST:
+                continue
             subject = str(entry.get("subject") or "").lower()
             kind = "institutional"
             for candidate_kind, keywords in DATE_EVIDENCE_KINDS:

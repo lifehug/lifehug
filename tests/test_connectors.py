@@ -342,6 +342,21 @@ class PromotionTests(ConnectorTestCase):
 
 
 class DateEvidenceTests(ConnectorTestCase):
+    def test_generic_domain_words_never_become_evidence_entities(self):
+        """v112: mail.house.gov must not yield entity 'house' — generic domain
+        words are stoplisted out of date evidence."""
+        entries = [
+            make_entry("gov-1", "t-gov", "reprokhanna@mail.house.gov",
+                       "Congressional update", (2020, 3, 1), noreply=True, unsub=True),
+            make_entry("asu-1", "t-asu", "donotreply@asu.edu",
+                       "Enrollment verification", (2011, 8, 1), noreply=True),
+        ]
+        connector = GmailConnector(repo_dir=self.root, state_dir=self.state_dir)
+        evidence = connector.extract_date_evidence(entries, {"date_evidence": 0.0})
+        entities = {e["entity"] for e in evidence}
+        self.assertIn("asu", entities)
+        self.assertNotIn("house", entities)
+
     def test_institutional_mail_yields_date_evidence(self):
         entries = [
             make_entry("asu-1", "t-asu", "registrar@asu.edu", "Enrollment confirmation",
