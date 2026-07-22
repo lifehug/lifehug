@@ -183,6 +183,22 @@ trust is earned at the threshold, not at the capture.
   email recorded as a roster alias → future excavations score from wiki state
   alone, no re-declaration. Importance marked in the wiki becomes the
   authority, exactly as it is everywhere else in the Loop.
+- **AI dossiers auto-apply calibrated relationship knowledge [shipped v108].**
+  Declaring every VIP by hand doesn't scale against 20+ years of mail, so the
+  loop closes with the model instead of a review queue: top unclassified
+  correspondents (not declared, not roster/wiki-known, above a volume floor,
+  never automated senders) get 2–3 of their highest-narrative-density threads
+  sampled and read NARROWLY for classification — one compact JSON verdict
+  (`family|close_friend|colleague|service|unknown`, significance, suggested
+  label, confidence). Only the classification persists
+  (`state/connectors/gmail_dossiers.json`); the bodies themselves are cached
+  committed under `state/connectors/gmail_body_cache/` (owner relaxed raw
+  storage) so promotions and future passes never re-fetch. Verdicts of a
+  configured class at/over the confidence floor auto-apply as VIPs during
+  scoring — same pin, same bonus — with hand-declared VIPs always winning
+  conflicts and a `vip_blocklist` in `weights.json` as the owner's veto. The
+  excavation report lists dossier VIPs with their one-line significance, so
+  the calibration stays auditable without becoming per-item approval.
 - **Volume is era-bound; importance is not volume.** A college collaborator
   can out-mail a sibling 10:1 and matter less. Discovery candidates are weak
   signals by design — "not a good candidate" in the normal review flow is the

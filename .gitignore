@@ -11,8 +11,8 @@ system/question-bank-upstream.md
 skill/life-legacy
 state/synthesis/
 state/agent_tasks/
-# Connector secrets and caches (v106). The ledger JSONL itself IS committed —
-# it is owner-only metadata state like the rest of state/.
+# Connector secrets (v106). The ledger JSONL itself IS committed — it is
+# owner-only metadata state like the rest of state/. The body cache is
+# committed too (v108 — owner relaxed raw storage); only secrets stay ignored.
 state/connectors/gmail_token.json
 state/connectors/gmail_client_secrets.json
-state/connectors/gmail_body_cache/

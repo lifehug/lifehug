@@ -1,7 +1,7 @@
 {
-  "version": 107,
+  "version": 108,
   "released": "2026-07-21",
-  "changelog": "v107: owner-declared VIP correspondents + roster email aliases (issue #44). weights.json gains vip_correspondents (email → label map) and vip_bonus: declared VIPs (e.g. family whose importance volume understates) pin relationship_signal to 1.0, add vip_bonus to the thread total before banding, and are never mined as 'unknown' discoveries — a VIP with no wiki page instead becomes a high-priority discovery_vip candidate. Roster entities may now carry email addresses in aliases: correspondents bind by exact address even when display names share no tokens with the page, so importance marked in the wiki governs scoring on every future excavation. Docs: research.md §7c adds the VIP mechanism, email-alias binding, and the era-bound-volume caveat.",
+  "changelog": "v108: AI correspondent dossiers (issue #44) — auto-applied calibration, not per-item approval. New connector-dossier pass (and automatic pre-scoring pass inside connector-excavate) samples 2–3 highest-narrative-density threads for top unclassified correspondents (not declared VIPs, not roster/wiki-known, above a volume floor, never automated senders), reads the bodies narrowly, and persists one compact JSON verdict per correspondent to state/connectors/gmail_dossiers.json — never re-classified while fresh unless ledger stats change materially or --redossier is passed. Verdicts of a configured class (default 'family') at/over the confidence floor (default 0.6, both in weights.json) auto-apply as VIPs during scoring — same relationship pin and bonus as declared VIPs, with distinct reasons ('declared VIP' vs 'dossier: family (0.87)'); hand-declared vip_correspondents always win conflicts and a new vip_blocklist vetoes dossier VIPs. Fetched bodies now persist COMMITTED under state/connectors/gmail_body_cache/ (owner relaxed raw storage; .gitignore line removed), keyed by message id, so promotions and future passes fetch only misses. The excavation report lists dossier VIPs with their one-line significance for owner veto. AI calls are injectable; tests never touch network or a real model. Docs: research.md §7c dossier bullet, CLAUDE.md connector section.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -30,6 +30,7 @@
     "system/connector.py",
     "system/connectors/__init__.py",
     "system/connectors/base.py",
+    "system/connectors/dossier.py",
     "system/connectors/gmail.py",
     "system/connectors/scoring.py",
     "system/daily_question.sh",

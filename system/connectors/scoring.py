@@ -59,6 +59,13 @@ DEFAULT_THRESHOLDS = {
 
 BANDS = ("noise", "evidence", "near_band", "promote")
 
+# Dossier auto-VIP defaults (v108): which AI classifications act as VIPs, at
+# what confidence, and the volume floor for dossier candidacy. Overridable
+# key-by-key in state/connectors/weights.json; vip_blocklist vetoes there.
+DEFAULT_DOSSIER_VIP_CLASSES = ("family",)
+DEFAULT_DOSSIER_CONFIDENCE_FLOOR = 0.6
+DEFAULT_DOSSIER_MIN_MESSAGES = 10
+
 # Institutional/service senders whose mail carries authoritative dates and
 # places (registrar@asu.edu, airlines, banks, landlords, utilities).
 INSTITUTIONAL_DOMAIN_KEYWORDS = (
@@ -143,6 +150,7 @@ class ScoringContext:
     vip_correspondents: dict[str, str] = field(default_factory=dict)
     vip_bonus: float = 0.0
     known_emails: set[str] = field(default_factory=set)
+    dossier_vips: dict[str, dict] = field(default_factory=dict)
 
 
 def load_scoring_config(path: Path | None = None) -> dict:
@@ -154,6 +162,10 @@ def load_scoring_config(path: Path | None = None) -> dict:
         "thresholds": dict(DEFAULT_THRESHOLDS),
         "vip_correspondents": {},
         "vip_bonus": 0.0,
+        "vip_blocklist": [],
+        "dossier_vip_classes": list(DEFAULT_DOSSIER_VIP_CLASSES),
+        "dossier_confidence_floor": DEFAULT_DOSSIER_CONFIDENCE_FLOOR,
+        "dossier_min_messages": DEFAULT_DOSSIER_MIN_MESSAGES,
     }
     data = read_json(path, default=None) if path else None
     if isinstance(data, dict):
@@ -170,7 +182,43 @@ def load_scoring_config(path: Path | None = None) -> dict:
             }
         if data.get("vip_bonus") is not None:
             config["vip_bonus"] = float(data["vip_bonus"])
+        blocklist = data.get("vip_blocklist")
+        if isinstance(blocklist, list):
+            config["vip_blocklist"] = [str(email).lower() for email in blocklist]
+        classes = data.get("dossier_vip_classes")
+        if isinstance(classes, list) and classes:
+            config["dossier_vip_classes"] = [str(item) for item in classes]
+        if data.get("dossier_confidence_floor") is not None:
+            config["dossier_confidence_floor"] = float(data["dossier_confidence_floor"])
+        if data.get("dossier_min_messages") is not None:
+            config["dossier_min_messages"] = int(data["dossier_min_messages"])
     return config
+
+
+def dossier_vip_verdicts(dossiers: dict, config: dict) -> dict[str, dict]:
+    """Auto-VIPs from persisted AI dossier verdicts (v108): verdicts with a
+    configured classification at or over the confidence floor, minus the
+    owner's vip_blocklist veto. Hand-declared vip_correspondents ALWAYS win a
+    conflict — callers check them first and dossier VIPs fill the rest."""
+    classes = set(config.get("dossier_vip_classes") or DEFAULT_DOSSIER_VIP_CLASSES)
+    floor = config.get("dossier_confidence_floor")
+    floor = DEFAULT_DOSSIER_CONFIDENCE_FLOOR if floor is None else float(floor)
+    blocklist = {str(email).lower() for email in config.get("vip_blocklist") or []}
+    vips: dict[str, dict] = {}
+    for email, verdict in (dossiers or {}).items():
+        email = str(email).lower()
+        if not email or email in blocklist or not isinstance(verdict, dict):
+            continue
+        if str(verdict.get("classification") or "") not in classes:
+            continue
+        try:
+            confidence = float(verdict.get("confidence"))
+        except (TypeError, ValueError):
+            continue
+        if confidence < floor:
+            continue
+        vips[email] = verdict
+    return vips
 
 
 def assign_band(total: float, thresholds: dict[str, float]) -> str:
@@ -295,6 +343,15 @@ def build_context(
             stem = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", path.stem)
             covered_tokens |= text_tokens(stem)
 
+    # AI dossier verdicts (v108): every connector's persisted dossiers merge
+    # into auto-VIPs (configured classes, confidence floor, blocklist veto).
+    dossier_vips: dict[str, dict] = {}
+    connectors_state = repo_dir / "state" / "connectors"
+    if connectors_state.exists():
+        for dossier_file in sorted(connectors_state.glob("*_dossiers.json")):
+            data = read_json(dossier_file, default=None) or {}
+            dossier_vips.update(dossier_vip_verdicts(data.get("dossiers") or {}, config))
+
     return ScoringContext(
         owner_email=owner_email,
         known_person_token_sets=known_person_token_sets,
@@ -306,6 +363,7 @@ def build_context(
         vip_correspondents=config.get("vip_correspondents") or {},
         vip_bonus=float(config.get("vip_bonus") or 0.0),
         known_emails=known_emails,
+        dossier_vips=dossier_vips,
     )
 
 
@@ -339,23 +397,39 @@ def date_anchor_score(entries: list[dict]) -> tuple[float, str]:
     return best, best_reason
 
 
-def _vip_hits(others: dict[str, dict], context: ScoringContext) -> list[str]:
-    """Other-correspondents the owner DECLARED as important (family etc.) in
-    weights.json — first-person knowledge heuristics can't have."""
-    return sorted(email for email in others if email in context.vip_correspondents)
+def _vip_hits(others: dict[str, dict], context: ScoringContext) -> tuple[list[str], list[str]]:
+    """VIP correspondents among the thread's others, as (declared, dossier).
+    Declared (weights.json vip_correspondents) ALWAYS wins a conflict —
+    dossier VIPs (AI verdicts, v108) only fill what the owner didn't declare."""
+    declared = sorted(email for email in others if email in context.vip_correspondents)
+    dossier = sorted(
+        email for email in others
+        if email not in context.vip_correspondents and email in context.dossier_vips
+    )
+    return declared, dossier
+
+
+def _dossier_verdict_reason(verdict: dict) -> str:
+    try:
+        confidence = float(verdict.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return f"dossier: {verdict.get('classification') or '?'} ({confidence:.2f})"
 
 
 def _relationship(others: dict[str, dict], context: ScoringContext) -> tuple[float, str]:
     """Share of correspondents matching the CURRENT person roster or wiki
     people pages. Time-varying: a roster gain re-scores old mail upward.
-    Owner-declared VIPs pin the axis: family mail is never diluted by how
-    short or old the thread is."""
+    VIPs pin the axis: family mail is never diluted by how short or old the
+    thread is — whether the VIP was hand-declared or dossier-classified."""
     if not others:
         return 0.0, "no other correspondents"
-    vips = _vip_hits(others, context)
-    if vips:
-        labels = ", ".join(context.vip_correspondents[v] for v in vips)
+    declared, dossier = _vip_hits(others, context)
+    if declared:
+        labels = ", ".join(context.vip_correspondents[v] for v in declared)
         return 1.0, f"declared VIP correspondent: {labels}"
+    if dossier:
+        return 1.0, "; ".join(_dossier_verdict_reason(context.dossier_vips[v]) for v in dossier)
     known = [
         email for email, info in others.items()
         if email in context.known_emails  # exact address alias on a roster entity
@@ -368,11 +442,12 @@ def _relationship(others: dict[str, dict], context: ScoringContext) -> tuple[flo
 
 def _discovery(others: dict[str, dict], context: ScoringContext) -> tuple[float, str]:
     """Significant correspondent ABSENT from every roster and the wiki.
-    Time-varying: once they get a page, this axis stops firing. Declared VIPs
-    are known by definition — they never surface as discoveries."""
+    Time-varying: once they get a page, this axis stops firing. Declared and
+    dossier VIPs are known by definition — they never surface as discoveries."""
     unknown = {
         email: info for email, info in others.items()
         if email not in context.vip_correspondents
+        and email not in context.dossier_vips
         and email not in context.known_emails
         and not tokens_known(info["tokens"], context.known_any_token_sets)
     }
@@ -485,15 +560,19 @@ def score_thread(entries: list[dict], context: ScoringContext) -> dict:
     scores["reciprocity"], reasons["reciprocity"] = _reciprocity(owner_count, other_count, span_days)
 
     total = round(sum(scores[axis] * context.weights.get(axis, 0.0) for axis in AXES), 4)
-    vips = _vip_hits(others, context)
-    if vips and context.vip_bonus > 0:
-        labels = ", ".join(context.vip_correspondents[v] for v in vips)
+    declared, dossier = _vip_hits(others, context)
+    if (declared or dossier) and context.vip_bonus > 0:
         total = round(min(1.0, total + context.vip_bonus), 4)
-        reasons["vip_bonus"] = f"+{context.vip_bonus:.2f} owner-declared VIP ({labels})"
+        if declared:
+            labels = ", ".join(context.vip_correspondents[v] for v in declared)
+            reasons["vip_bonus"] = f"+{context.vip_bonus:.2f} owner-declared VIP ({labels})"
+        else:
+            details = ", ".join(_dossier_verdict_reason(context.dossier_vips[v]) for v in dossier)
+            reasons["vip_bonus"] = f"+{context.vip_bonus:.2f} dossier VIP ({details})"
     return {
         "scores": scores,
         "total": total,
         "band": assign_band(total, context.thresholds),
         "reasons": reasons,
-        "vips": vips,
+        "vips": declared + dossier,
     }

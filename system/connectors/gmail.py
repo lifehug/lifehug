@@ -5,9 +5,10 @@ Privacy guardrails (hard rules):
 - gmail.readonly scope ONLY — Lifehug can never send, delete, or modify mail.
 - The OAuth token lives at state/connectors/gmail_token.json (gitignored).
 - Ledger build fetches METADATA only (ids, dates, headers) — no bodies.
-  Bodies are fetched lazily, only for threads being promoted or sampled
-  during calibration, and are stored permanently only inside promoted
-  sources (owner-only, immutable).
+  Bodies are fetched lazily, only for threads being promoted or sampled for
+  calibration/dossier classification (v108); they persist inside promoted
+  sources (owner-only, immutable) and in the committed body cache
+  (state/connectors/gmail_body_cache/, keyed by message id).
 
 The google-auth / google-api-python-client imports are LAZY (inside
 functions) so the CLI and tests work without those packages installed, and
@@ -425,6 +426,8 @@ class GmailConnector(BaseConnector):
         for email, stats in context.correspondent_stats.items():
             if email in context.vip_correspondents:
                 continue  # declared known — see the VIP-page candidates below
+            if email in context.dossier_vips:
+                continue  # dossier-classified known (v108) — never mined as unknown
             if email in context.known_emails:
                 continue  # roster entity carries this address as an alias
             if int(stats.get("messages") or 0) < MIN_DISCOVERY_MESSAGES:

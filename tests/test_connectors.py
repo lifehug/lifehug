@@ -544,5 +544,271 @@ class VipTests(ConnectorTestCase):
         self.assertEqual(scored["scores"]["discovery_signal"], 0.0)
 
 
+KRIS = "kristine.t@example.com"
+
+FAMILY_VERDICT = {
+    "classification": "family",
+    "significance": "Owner's sister; holiday and parent-care coordination",
+    "suggested_label": "Kristine Thompson (sister)",
+    "confidence": 0.87,
+}
+
+
+def kristine_ledger():
+    """Two 8-message two-way threads; Kristine sends 12 (> dossier floor of 10)."""
+    entries = []
+    senders = [KRIS, KRIS, KRIS, OWNER, KRIS, KRIS, OWNER, KRIS]
+    for tid, year in (("t-kris-a", 2014), ("t-kris-b", 2015)):
+        for i, sender in enumerate(senders):
+            entries.append(make_entry(
+                f"{tid}-m{i}", tid, sender, "Re: family news", (year, 1 + (i % 2), 2 + i * 3),
+                from_name="Kristine Thompson" if sender != OWNER else ""))
+    return entries
+
+
+def kristine_bodies():
+    bodies = {}
+    for tid in ("t-kris-a", "t-kris-b"):
+        bodies[tid] = [
+            {"message_id": f"{tid}-m{i}", "date": "2014-01-02",
+             "from_name": "Kristine Thompson", "from_email": KRIS,
+             "subject": "Re: family news",
+             "body": f"message {i} about Mom and the reunion\n\n> quoted old text"}
+            for i in range(8)
+        ]
+    return bodies
+
+
+class FakeAI:
+    """Injectable stand-in for research_expand.call_ai — the real model is
+    never called in tests. Records (prompt, model) calls."""
+
+    def __init__(self, verdict):
+        self._verdict = verdict
+        self.calls = []
+
+    def __call__(self, prompt, model):
+        self.calls.append((prompt, model))
+        return json.dumps(self._verdict)
+
+
+class DossierTests(ConnectorTestCase):
+    """AI correspondent dossiers (v108): verdicts persist and skip when fresh;
+    family-class verdicts auto-apply as VIPs (declared VIPs win conflicts,
+    vip_blocklist vetoes); bodies cache by message id; dry-run calls nothing."""
+
+    def _scored_with(self, *, weights=None, verdict=None, tid="t-kris-a"):
+        entries = kristine_ledger()
+        if weights is not None:
+            (self.state_dir / "weights.json").write_text(json.dumps(weights), encoding="utf-8")
+        if verdict is not None:
+            record = {
+                **verdict,
+                "model": "fake-model",
+                "classified_at": "2026-07-21T00:00:00Z",
+                "thread_ids": ["t-kris-a", "t-kris-b"],
+                "messages_at_classification": 12,
+            }
+            self.connector.dossiers_path.write_text(
+                json.dumps({"version": 1, "dossiers": {KRIS: record}}), encoding="utf-8")
+        config = cscoring.load_scoring_config(self.connector.weights_path)
+        context = cscoring.build_context(self.root, entries, config, owner_email=OWNER)
+        threads = cscoring.group_threads(entries)
+        return context, cscoring.score_thread(threads[tid], context)
+
+    def test_dossier_persists_and_skips_when_fresh(self):
+        from connectors import dossier as cdossier
+        self.write_ledger(kristine_ledger())
+        client = FakeGmailClient(thread_bodies=kristine_bodies())
+        ai = FakeAI(FAMILY_VERDICT)
+
+        first = cdossier.run_dossier_pass(
+            self.connector, client=client, model="fake-model", ai_caller=ai)
+        self.assertEqual(first["classified"], [KRIS])
+        self.assertEqual(first["errors"], [])
+        self.assertEqual(len(ai.calls), 1)
+        prompt, model = ai.calls[0]
+        self.assertEqual(model, "fake-model")
+        self.assertIn(KRIS, prompt)
+        self.assertIn("Kristine Thompson", prompt)
+        self.assertNotIn("quoted old text", prompt)  # quoted chains stripped
+        self.assertEqual(sorted(client.thread_requests), ["t-kris-a", "t-kris-b"])
+
+        record = json.loads(self.connector.dossiers_path.read_text())["dossiers"][KRIS]
+        self.assertEqual(record["classification"], "family")
+        self.assertEqual(record["confidence"], 0.87)
+        self.assertEqual(record["suggested_label"], "Kristine Thompson (sister)")
+        self.assertEqual(record["model"], "fake-model")
+        self.assertEqual(record["thread_ids"], ["t-kris-a", "t-kris-b"])
+        self.assertEqual(record["messages_at_classification"], 12)
+        self.assertTrue(record["classified_at"])
+        self.assertEqual(len(list(self.connector.body_cache_dir.glob("*.json"))), 16)
+
+        # Fresh dossier: nothing re-classified, nothing fetched, no AI call.
+        second = cdossier.run_dossier_pass(
+            self.connector, client=client, model="fake-model", ai_caller=ai)
+        self.assertEqual(second["classified"], [])
+        self.assertEqual(second["skipped_fresh"], [KRIS])
+        self.assertEqual(len(ai.calls), 1)
+        self.assertEqual(len(client.thread_requests), 2)
+
+        # Material change (new messages since classified_at) re-classifies.
+        extra = [
+            make_entry(f"t-kris-c-m{i}", "t-kris-c", KRIS, "Re: more news",
+                       (2016, 2, 2 + i), from_name="Kristine Thompson")
+            for i in range(3)
+        ]
+        client._thread_bodies["t-kris-c"] = [
+            {"message_id": f"t-kris-c-m{i}", "date": "2016-02-02",
+             "from_name": "Kristine Thompson", "from_email": KRIS,
+             "subject": "Re: more news", "body": f"more {i}"}
+            for i in range(3)
+        ]
+        self.write_ledger(kristine_ledger() + extra)
+        third = cdossier.run_dossier_pass(
+            self.connector, client=client, model="fake-model", ai_caller=ai)
+        self.assertEqual(third["classified"], [KRIS])
+        self.assertEqual(len(ai.calls), 2)
+        # t-kris-a/t-kris-b served from the body cache; only the new thread fetched
+        self.assertEqual(client.thread_requests.count("t-kris-c"), 1)
+        self.assertEqual(len(client.thread_requests), 3)
+        record = json.loads(self.connector.dossiers_path.read_text())["dossiers"][KRIS]
+        self.assertEqual(record["messages_at_classification"], 15)
+
+        # --redossier forces re-classification even when fresh.
+        fourth = cdossier.run_dossier_pass(
+            self.connector, client=client, model="fake-model", ai_caller=ai, redossier=True)
+        self.assertEqual(fourth["classified"], [KRIS])
+        self.assertEqual(len(ai.calls), 3)
+        self.assertEqual(len(client.thread_requests), 3)  # all cached by now
+
+    def test_body_cache_hit_avoids_refetch(self):
+        entries = kristine_ledger()
+        self.write_ledger(entries)
+        client = FakeGmailClient(thread_bodies=kristine_bodies())
+        threads = cscoring.group_threads(entries)
+        first = self.connector.fetch_thread_cached(client, "t-kris-a", threads["t-kris-a"])
+        self.assertEqual(len(first), 8)
+        self.assertEqual(client.thread_requests, ["t-kris-a"])
+        again = self.connector.fetch_thread_cached(client, "t-kris-a", threads["t-kris-a"])
+        self.assertEqual(again, first)
+        self.assertEqual(client.thread_requests, ["t-kris-a"])  # no second fetch
+
+    def test_family_verdict_auto_vip_pins_and_lifts(self):
+        plain_context, plain = self._scored_with()
+        self.assertEqual(plain["scores"]["relationship_signal"], 0.0)
+        context, scored = self._scored_with(weights={"vip_bonus": 0.10}, verdict=FAMILY_VERDICT)
+        self.assertEqual(scored["scores"]["relationship_signal"], 1.0)
+        self.assertIn("dossier: family (0.87)", scored["reasons"]["relationship_signal"])
+        self.assertEqual(scored["vips"], [KRIS])
+        self.assertIn("dossier VIP", scored["reasons"]["vip_bonus"])
+        expected = round(min(1.0, sum(scored["scores"][a] * context.weights[a]
+                                      for a in cscoring.AXES) + 0.10), 4)
+        self.assertEqual(scored["total"], expected)
+        self.assertGreater(scored["total"], plain["total"])
+        # dossier VIPs are known by definition — never a discovery
+        self.assertEqual(scored["scores"]["discovery_signal"], 0.0)
+
+    def test_declared_vip_always_wins_conflict(self):
+        _context, scored = self._scored_with(
+            weights={"vip_bonus": 0.10, "vip_correspondents": {KRIS: "Sister Kristine"}},
+            verdict={"classification": "colleague", "confidence": 0.95,
+                     "significance": "x", "suggested_label": "y"})
+        self.assertEqual(scored["scores"]["relationship_signal"], 1.0)
+        self.assertIn("declared VIP correspondent: Sister Kristine",
+                      scored["reasons"]["relationship_signal"])
+        self.assertNotIn("dossier", scored["reasons"]["relationship_signal"])
+        self.assertIn("owner-declared VIP", scored["reasons"]["vip_bonus"])
+
+    def test_blocklist_vetoes_dossier_vip(self):
+        _context, scored = self._scored_with(
+            weights={"vip_blocklist": [KRIS]}, verdict=FAMILY_VERDICT)
+        self.assertEqual(scored["scores"]["relationship_signal"], 0.0)
+        self.assertEqual(scored["vips"], [])
+        self.assertNotIn("vip_bonus", scored["reasons"])
+
+    def test_non_family_verdicts_do_not_become_vips(self):
+        for classification in ("colleague", "service", "unknown", "close_friend"):
+            with self.subTest(classification=classification):
+                _context, scored = self._scored_with(verdict={
+                    "classification": classification, "confidence": 0.95,
+                    "significance": "x", "suggested_label": "y"})
+                self.assertEqual(scored["scores"]["relationship_signal"], 0.0)
+                self.assertEqual(scored["vips"], [])
+        # ...unless the owner configures that class as an auto-VIP class
+        _context, scored = self._scored_with(
+            weights={"dossier_vip_classes": ["close_friend"]},
+            verdict={"classification": "close_friend", "confidence": 0.9,
+                     "significance": "x", "suggested_label": "y"})
+        self.assertEqual(scored["scores"]["relationship_signal"], 1.0)
+        self.assertIn("dossier: close_friend (0.90)", scored["reasons"]["relationship_signal"])
+
+    def test_confidence_floor_respected(self):
+        _context, scored = self._scored_with(verdict={**FAMILY_VERDICT, "confidence": 0.59})
+        self.assertEqual(scored["vips"], [])
+        self.assertEqual(scored["scores"]["relationship_signal"], 0.0)
+        _context, scored = self._scored_with(verdict={**FAMILY_VERDICT, "confidence": 0.60})
+        self.assertEqual(scored["vips"], [KRIS])
+        # owner-raised floor: 0.87 no longer clears 0.9
+        _context, scored = self._scored_with(
+            weights={"dossier_confidence_floor": 0.9}, verdict=FAMILY_VERDICT)
+        self.assertEqual(scored["vips"], [])
+
+    def test_dry_run_makes_no_calls(self):
+        from connectors import dossier as cdossier
+        self.write_ledger(kristine_ledger())
+        client = FakeGmailClient(thread_bodies=kristine_bodies())
+        ai = FakeAI(FAMILY_VERDICT)
+        summary = cdossier.run_dossier_pass(
+            self.connector, client=client, ai_caller=ai, dry_run=True)
+        self.assertEqual([row["email"] for row in summary["candidates"]], [KRIS])
+        self.assertEqual(summary["classified"], [])
+        self.assertEqual(ai.calls, [])
+        self.assertEqual(client.thread_requests, [])
+        self.assertFalse(self.connector.dossiers_path.exists())
+        self.assertFalse(self.connector.body_cache_dir.exists())
+
+    def test_excavation_dossiers_before_scoring_and_reports_vips(self):
+        (self.state_dir / "weights.json").write_text(
+            json.dumps({"vip_bonus": 0.10}), encoding="utf-8")
+        self.write_ledger(kristine_ledger())
+        client = FakeGmailClient(thread_bodies=kristine_bodies())
+        ai = FakeAI(FAMILY_VERDICT)
+        summary = self.connector.excavate(client=client, ai_caller=ai, model="fake-model")
+        self.assertEqual(summary["dossiers"]["classified"], 1)
+        self.assertEqual(len(ai.calls), 1)
+        # the fresh verdict calibrated THIS run: pinned relationship, promoted
+        ledger = cbase.load_ledger(self.connector.ledger_path)
+        self.assertTrue(all(e["scores"]["relationship_signal"] == 1.0 for e in ledger))
+        self.assertEqual(len(summary["promoted"]), 2)
+        report = (self.root / "state" / "reports" / "gmail_excavation.md").read_text()
+        self.assertIn("Dossier VIPs", report)
+        self.assertIn("Owner's sister", report)
+        self.assertIn("vip_blocklist", report)
+
+    def test_excerpt_strips_quotes_and_truncates(self):
+        from connectors import dossier as cdossier
+        body = "fresh words here\n\n> old quoted line\nOn Jan 1, 2010, Kristine wrote:\nolder stuff"
+        self.assertEqual(cdossier.strip_quoted(body), "fresh words here")
+        long_body = " ".join(["word"] * 2500)
+        excerpt = cdossier.truncate_words(long_body, 2000)
+        self.assertTrue(excerpt.endswith("…"))
+        self.assertLessEqual(len(excerpt.split()), 2001)
+
+    def test_wrapper_parses_connector_dossier(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("lifehug", SYSTEM / "lifehug.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        parser = mod.build_parser()
+        args = parser.parse_args(["connector-dossier", "gmail", "--limit", "5",
+                                  "--model", "some-model", "--redossier", "--dry-run"])
+        self.assertTrue(callable(args.func))
+        self.assertEqual(args.limit, 5)
+        self.assertEqual(args.model, "some-model")
+        self.assertTrue(args.redossier)
+        self.assertTrue(args.dry_run)
+
+
 if __name__ == "__main__":
     unittest.main()

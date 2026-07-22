@@ -31,6 +31,7 @@ from connectors.scoring import (
     BANDS,
     address_tokens,
     build_context,
+    dossier_vip_verdicts,
     group_threads,
     load_scoring_config,
     score_thread,
@@ -162,6 +163,14 @@ class BaseConnector:
         return self.state_dir / "weights.json"
 
     @property
+    def dossiers_path(self) -> Path:
+        return self.state_dir / f"{self.name}_dossiers.json"
+
+    @property
+    def body_cache_dir(self) -> Path:
+        return self.state_dir / f"{self.name}_body_cache"
+
+    @property
     def reports_dir(self) -> Path:
         return self.repo_dir / "state" / "reports"
 
@@ -189,6 +198,27 @@ class BaseConnector:
         """Bodies for ONE thread being promoted (or calibration-sampled).
         Never called during ledger build — metadata only there."""
         raise NotImplementedError
+
+    def fetch_thread_cached(self, client, thread_id: str, entries: list[dict]) -> list[dict]:
+        """Cache-first body fetch (v108). Fetched bodies persist COMMITTED
+        under state/connectors/<name>_body_cache/ keyed by message id, so
+        promotions, dossier sampling, and future passes read the cache first
+        and fetch only misses."""
+        wanted = [str(e.get("message_id") or "") for e in entries if e.get("message_id")]
+        cached: dict[str, dict] = {}
+        for message_id in wanted:
+            row = read_json(self.body_cache_dir / f"{_cache_key(message_id)}.json", default=None)
+            if isinstance(row, dict) and row.get("message_id"):
+                cached[message_id] = row
+        if wanted and all(message_id in cached for message_id in wanted):
+            return [cached[message_id] for message_id in wanted]
+        messages = self.fetch_thread(client, thread_id, entries)
+        self.body_cache_dir.mkdir(parents=True, exist_ok=True)
+        for message in messages:
+            message_id = str(message.get("message_id") or "")
+            if message_id:
+                write_json(self.body_cache_dir / f"{_cache_key(message_id)}.json", message)
+        return messages
 
     def extract_date_evidence(self, entries: list[dict], thresholds: dict) -> list[dict]:
         return []
@@ -229,9 +259,20 @@ class BaseConnector:
                   for thread_id, thread_entries in threads.items()}
         return context, threads, scored
 
-    def excavate(self, *, dry_run: bool = False, cap: int = DEFAULT_PROMOTION_CAP, client=None) -> dict:
+    def excavate(
+        self,
+        *,
+        dry_run: bool = False,
+        cap: int = DEFAULT_PROMOTION_CAP,
+        client=None,
+        dossier_limit: int | None = None,
+        ai_caller=None,
+        model: str | None = None,
+    ) -> dict:
         """The quarterly/yearly operation: re-score the whole ledger against
-        the current repo, refresh date evidence + discovery, delta-promote."""
+        the current repo, refresh date evidence + discovery, delta-promote.
+        Runs the AI dossier pass FIRST (v108), so fresh verdicts calibrate
+        this run's scoring."""
         entries = load_ledger(self.ledger_path)
         summary: dict[str, object] = {
             "connector": self.name,
@@ -245,11 +286,23 @@ class BaseConnector:
             "promotion_errors": [],
             "date_evidence": 0,
             "candidates_added": 0,
+            "dossiers": None,
             "report_path": None,
         }
         if not entries:
             print(f"connector-{self.name}: ledger is empty — run connector-fetch {self.name} first")
             return summary
+
+        from connectors.dossier import run_dossier_pass  # local import avoids the import cycle
+        dossier_summary = run_dossier_pass(
+            self, entries=entries, client=client, limit=dossier_limit,
+            model=model, dry_run=dry_run, ai_caller=ai_caller)
+        summary["dossiers"] = {
+            "classified": len(dossier_summary["classified"]),
+            "candidates": len(dossier_summary["candidates"]),
+            "skipped_fresh": len(dossier_summary["skipped_fresh"]),
+            "errors": dossier_summary["errors"],
+        }
 
         now = now_utc()
         context, threads, scored = self.score_ledger(entries, client=client)
@@ -365,7 +418,7 @@ class BaseConnector:
     ) -> Path:
         """Write the immutable Tier-1 source: an external_record registered
         via source_integrity, provenance-pinned, owner-only."""
-        messages = self.fetch_thread(client, thread_id, entries)
+        messages = self.fetch_thread_cached(client, thread_id, entries)
         title = _thread_subject(entries)
         date = min((str(e.get("date") or "") for e in entries if e.get("date")), default="") or now[:10]
         lines = [f"# {title}", ""]
@@ -425,6 +478,15 @@ class BaseConnector:
 
     # --- reports ------------------------------------------------------------
 
+    def _dossier_vip_rows(self) -> list[tuple[str, dict]]:
+        """Persisted dossier verdicts currently acting as auto-VIPs (v108) —
+        listed in the excavation report so the owner can veto via weights.json."""
+        from connectors.dossier import load_dossiers  # local import avoids the cycle
+        config = load_scoring_config(self.weights_path)
+        data = load_dossiers(self.dossiers_path)
+        vips = dossier_vip_verdicts(data.get("dossiers") or {}, config)
+        return sorted(vips.items())
+
     def _write_excavation_report(
         self,
         summary: dict,
@@ -453,6 +515,19 @@ class BaseConnector:
         if summary["promotion_errors"]:
             lines += ["", "## Promotion errors"]
             lines += [f"- {error}" for error in summary["promotion_errors"]]
+        dossier_vips = self._dossier_vip_rows()
+        if dossier_vips:
+            lines += ["", "## Dossier VIPs (auto-applied — veto via vip_blocklist in weights.json)"]
+            for email, verdict in dossier_vips:
+                confidence = verdict.get("confidence", 0)
+                try:
+                    confidence = f"{float(confidence):.2f}"
+                except (TypeError, ValueError):
+                    confidence = "?"
+                lines.append(
+                    f"- {verdict.get('suggested_label') or email} <{email}> — "
+                    f"{verdict.get('classification', '?')} ({confidence}): "
+                    f"{verdict.get('significance') or '(no significance recorded)'}")
         near = sorted(
             ((tid, r) for tid, r in scored.items() if r["band"] == "near_band"),
             key=lambda item: -item[1]["total"],
@@ -639,6 +714,11 @@ class BaseConnector:
         })
         print(f"✓ promote threshold set to {value} in {self.weights_path} "
               "(takes effect on the next excavation)")
+
+
+def _cache_key(message_id: str) -> str:
+    """Filesystem-safe body-cache key for a message id."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(message_id)) or "unknown"
 
 
 def _thread_subject(entries: list[dict]) -> str:

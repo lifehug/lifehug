@@ -9,6 +9,7 @@ Usage:
     python3 system/connector.py auth gmail
     python3 system/connector.py fetch gmail [--probe] [--limit N]
     python3 system/connector.py excavate gmail [--dry-run] [--cap N]
+    python3 system/connector.py dossier gmail [--limit N] [--model M] [--redossier] [--dry-run]
     python3 system/connector.py report gmail
     python3 system/connector.py audit gmail
     python3 system/connector.py calibrate gmail [--set-threshold X]
@@ -54,6 +55,15 @@ def cmd_excavate(args: argparse.Namespace) -> int:
     return 1 if summary.get("promotion_errors") else 0
 
 
+def cmd_dossier(args: argparse.Namespace) -> int:
+    connector = get_connector(args.connector)
+    from connectors.dossier import run_dossier_pass
+    summary = run_dossier_pass(
+        connector, limit=args.limit, model=args.model,
+        redossier=args.redossier, dry_run=args.dry_run)
+    return 1 if summary.get("errors") else 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     return get_connector(args.connector).report()
 
@@ -95,6 +105,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cap", type=int, default=DEFAULT_PROMOTION_CAP,
                    help=f"Max threads promoted this run (default {DEFAULT_PROMOTION_CAP})")
     p.set_defaults(func=cmd_excavate)
+
+    p = sub.add_parser("dossier",
+                       help="AI correspondent dossiers (v108): classify top unclassified "
+                            "correspondents from sampled thread bodies; verdicts persist and "
+                            "family-class verdicts auto-apply as VIPs during scoring")
+    p.add_argument("connector", choices=sorted(CONNECTORS))
+    p.add_argument("--limit", type=int, default=None,
+                   help="Max correspondents dossiered this run (default 30)")
+    p.add_argument("--model", default=None, metavar="M",
+                   help="Model override (default: config.yaml classify_model, else claude-sonnet-5)")
+    p.add_argument("--redossier", action="store_true",
+                   help="Re-classify even correspondents with fresh dossiers")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Show who would be dossiered; no fetches, no AI calls, no writes")
+    p.set_defaults(func=cmd_dossier)
 
     p = sub.add_parser("report", help="Ledger summary: volume, span, bands, threshold")
     p.add_argument("connector", choices=sorted(CONNECTORS))

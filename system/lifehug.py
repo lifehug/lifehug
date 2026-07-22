@@ -732,6 +732,19 @@ def cmd_connector_excavate(args: argparse.Namespace) -> int:
     return run_python("connector.py", flags)
 
 
+def cmd_connector_dossier(args: argparse.Namespace) -> int:
+    flags = ["dossier", args.connector]
+    if args.limit is not None:
+        flags.extend(["--limit", str(args.limit)])
+    if args.model:
+        flags.extend(["--model", args.model])
+    if args.redossier:
+        flags.append("--redossier")
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("connector.py", flags)
+
+
 def cmd_connector_report(args: argparse.Namespace) -> int:
     return run_python("connector.py", ["report", args.connector])
 
@@ -1214,6 +1227,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="Report what would promote; write nothing")
     p.add_argument("--cap", type=int, default=None, help="Max threads promoted this run (default 25)")
     p.set_defaults(func=cmd_connector_excavate)
+
+    p = sub.add_parser("connector-dossier",
+                       help="AI correspondent dossiers (v108): classify top unclassified correspondents; "
+                            "family-class verdicts auto-apply as VIPs during scoring")
+    p.add_argument("connector", choices=["gmail"])
+    p.add_argument("--limit", type=int, default=None, help="Max correspondents dossiered this run (default 30)")
+    p.add_argument("--model", default=None, metavar="M", help="Model override (else config.yaml classify_model)")
+    p.add_argument("--redossier", action="store_true", help="Re-classify even fresh dossiers")
+    p.add_argument("--dry-run", action="store_true", help="Show who would be dossiered; no fetches or AI calls")
+    p.set_defaults(func=cmd_connector_dossier)
 
     p = sub.add_parser("connector-report", help="Connector ledger summary: volume, span, bands, threshold")
     p.add_argument("connector", choices=["gmail"])
