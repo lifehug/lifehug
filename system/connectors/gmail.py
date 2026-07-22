@@ -19,6 +19,7 @@ implementing GmailClient's methods).
 from __future__ import annotations
 
 import base64
+import re
 import time
 from datetime import datetime, timezone
 from email.utils import getaddresses, parseaddr
@@ -467,7 +468,10 @@ class GmailConnector(BaseConnector):
             stats = context.correspondent_stats.get(email) or {}
             if not stats:
                 continue  # declared but never seen in this ledger
-            if tokens_known(text_tokens(label), context.known_any_token_sets):
+            # Page-existence check uses the NAME only — parenthetical roles
+            # ("(sister)") are generic words that false-match unrelated pages.
+            name_tokens = text_tokens(re.sub(r"\s*\([^)]*\)", "", label))
+            if tokens_known(name_tokens, context.known_any_token_sets):
                 continue  # page already exists
             first_year = str(stats.get("first_date") or "")[:4]
             last_year = str(stats.get("last_date") or "")[:4]

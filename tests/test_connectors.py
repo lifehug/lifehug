@@ -522,6 +522,30 @@ class VipTests(ConnectorTestCase):
         candidates = self.connector.mine_discovery(entries, threads, scored, context)
         self.assertFalse([c for c in candidates if c["kind"] == "discovery_vip"])
 
+    def test_vip_label_parenthetical_role_does_not_false_match(self):
+        """Regression (v109): a VIP label like 'Kristine Thompson (sister)'
+        must not be judged page-known just because an unrelated wiki entry
+        tokenizes to {sister} — the parenthetical role is not the name."""
+        (self.root / "wiki" / "objects").mkdir(parents=True, exist_ok=True)
+        (self.root / "wiki" / "objects" / "sister-cleats.md").write_text("# The Cleats\n")
+        vip = {"kristine@example.com": "Kristine Thompson (sister)"}
+        entries = [
+            make_entry(f"t-krist-m{i}", "t-krist",
+                       "kristine@example.com" if i % 2 == 0 else OWNER,
+                       "Re: Camping", (2012, 8, 4 + i), from_name="Kristine Thompson")
+            for i in range(4)
+        ]
+        config = cscoring.load_scoring_config()
+        config["vip_correspondents"] = dict(vip)
+        config["vip_bonus"] = 0.10
+        context = cscoring.build_context(self.root, entries, config, owner_email=OWNER)
+        threads = cscoring.group_threads(entries)
+        scored = {tid: cscoring.score_thread(te, context) for tid, te in threads.items()}
+        candidates = self.connector.mine_discovery(entries, threads, scored, context)
+        vip_cands = [c for c in candidates if c["kind"] == "discovery_vip"]
+        self.assertEqual(len(vip_cands), 1)
+        self.assertIn("Kristine Thompson", vip_cands[0]["text"])
+
     def test_roster_email_alias_binds_exact_address(self):
         """Wiki importance marked via a roster email alias (v107): a
         correspondent matches by exact address even when their display name

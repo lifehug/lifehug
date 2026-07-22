@@ -1,7 +1,7 @@
 {
-  "version": 108,
+  "version": 109,
   "released": "2026-07-21",
-  "changelog": "v108: AI correspondent dossiers (issue #44) — auto-applied calibration, not per-item approval. New connector-dossier pass (and automatic pre-scoring pass inside connector-excavate) samples 2–3 highest-narrative-density threads for top unclassified correspondents (not declared VIPs, not roster/wiki-known, above a volume floor, never automated senders), reads the bodies narrowly, and persists one compact JSON verdict per correspondent to state/connectors/gmail_dossiers.json — never re-classified while fresh unless ledger stats change materially or --redossier is passed. Verdicts of a configured class (default 'family') at/over the confidence floor (default 0.6, both in weights.json) auto-apply as VIPs during scoring — same relationship pin and bonus as declared VIPs, with distinct reasons ('declared VIP' vs 'dossier: family (0.87)'); hand-declared vip_correspondents always win conflicts and a new vip_blocklist vetoes dossier VIPs. Fetched bodies now persist COMMITTED under state/connectors/gmail_body_cache/ (owner relaxed raw storage; .gitignore line removed), keyed by message id, so promotions and future passes fetch only misses. The excavation report lists dossier VIPs with their one-line significance for owner veto. AI calls are injectable; tests never touch network or a real model. Docs: research.md §7c dossier bullet, CLAUDE.md connector section.",
+  "changelog": "v109: VIP page-candidate false-match fix (issue #44). The discovery_vip page-existence check now tokenizes the VIP's NAME only — parenthetical roles like '(sister)' are generic words that subset-matched unrelated wiki entries and wrongly suppressed page candidates for declared family.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
