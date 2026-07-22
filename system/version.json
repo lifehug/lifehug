@@ -1,7 +1,7 @@
 {
-  "version": 113,
+  "version": 114,
   "released": "2026-07-21",
-  "changelog": "v113: Kimi as a model route (issue #44). call_ai routes any kimi*/moonshot*/k3* model to the Kimi OpenAI-compatible endpoint (KIMI_API_KEY env or kimi_api_key in config.yaml; default base https://api.kimi.com/coding/v1, overridable via kimi_base_url for the Kimi Platform) — model-explicit, bypassing the gateway remap and the Anthropic SDK. New dossier_model config key lets connector dossiers run on Kimi without moving the weekly classifier.",
+  "changelog": "v114: connector pattern documented as a first-class README section (issue #44). 'Connectors: calibrated external evidence ingestion' now defines the pattern's five commitments (permanent ledger, threshold trust, three products, dossier auto-apply + declared VIPs, bounded automation), inventories the shipped Gmail connector, and gives the recipe for building new ones (subclass BaseConnector, register in connector.py, fake-client tests — scoring/promotion/dossiers/timeline corroboration come free). README.template.md mirrors proportionately.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
