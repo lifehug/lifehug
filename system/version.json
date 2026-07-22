@@ -1,7 +1,7 @@
 {
-  "version": 110,
+  "version": 111,
   "released": "2026-07-21",
-  "changelog": "v110: timeline corroboration from connector date evidence (issue #44). Connector date evidence now lines up against the timeline with the connector scorer's token-subset discipline — entities match period roster names/slugs/aliases and each moment's own text — rendering compact corroboration badges (✉ asu ×1100 · 2010–2013) on the timeline view and the wiki/timeline.md export. Evidence clustering against the story's own dates (email says 2003, memory says 2004, or a period's stated approximate_dates disjoint from its records' span) surfaces as date_contradiction gap entries plus connector-mined question candidates appended on excavation — the owner answers, memory is never silently overwritten. The timeline stays read-only and zero-AI; repos without connectors render exactly as before.",
+  "changelog": "v111: timeline corroboration calibrated against live evidence (issue #44). Three false-positive classes exposed by the real 4,054-record run, fixed: entities now match moments by DESCRIPTION tokens only (eras/when_hint no longer attach them — 'Born in Redlands' stops carrying asu ×1100); badges are windowed to the moment's own year or its placement period's stated approximate_dates, so an entity stream spanning 2010–2026 badges as the in-window cluster (asu ×43 · 2011–2012) instead of its full span, and windowless badges are context-only; contradictions additionally require zero in-window records and a tight (≤5-year) out-of-window cluster, so diffuse streams (alumni mail, apple receipts) can never contradict a memory while a tight 2003-only enrollment cluster against a 2004 memory still fires.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

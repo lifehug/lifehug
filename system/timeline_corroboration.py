@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Timeline corroboration from connector date evidence (v110, issue #44).
+"""Timeline corroboration from connector date evidence (v110, issue #44;
+calibrated v111 against live data).
 
 Connector excavations harvest ``{date, entity, kind, message_id}`` assertions
 from institutional mail (``state/connectors/<name>_date_evidence.json``) — the
@@ -10,21 +11,28 @@ those assertions up against the assembled timeline, ZERO AI and read-only:
   token sets is a subset of the entity's tokens — the same token-subset
   discipline as the connector scorer (entity "asu" matches the period whose
   roster alias is "ASU");
-- an entity matches an EVENT when the entity's tokens are a subset of the
-  event's OWN text tokens (description + when_hint + era words).
+- an entity matches an EVENT only when the entity's tokens are a subset of the
+  event's DESCRIPTION tokens (v111: eras and when_hint no longer attach
+  entities — "Born in Redlands" must not carry an asu badge).
 
 What it computes:
 
-- a compact corroboration badge per period and per event — per-entity counts
-  with the matched year span, dominant entities first (``asu ×1100 ·
-  2010–2013``), the display capped at a few entities. Counts are PER MATCHED
-  ENTITY, never global totals;
-- DATE CONTRADICTIONS: matched evidence clustering in a different year than
-  the author's own time words (email says 2003, memory says 2004), or
-  concentrated outside a period's stated ``approximate_dates``. Contradictions
-  are SURFACED — as ``date_contradiction`` gap entries on the timeline and as
-  question candidates appended by the connector excavation — never
-  auto-applied. Memory is never silently overwritten.
+- a compact corroboration badge per period and per event, WINDOWED (v111):
+  only records inside the memory window count — the event's when_hint year(s),
+  else its placement period's stated ``approximate_dates`` (roster or page
+  frontmatter); for periods, the stated range itself. Alumni mail spanning
+  2010–2026 therefore badges as the in-window cluster (``asu ×43 ·
+  2011–2012``), never the entity's full span. With no window the badge shows
+  the full range but is context-only (status neutral). Counts are PER MATCHED
+  ENTITY, never global totals; dominant entities first, display capped.
+- DATE CONTRADICTIONS: description-matched evidence with ZERO records inside
+  the memory window, at least MIN_CONTRADICTION_RECORDS matched, clustering in
+  a tight span (≤ MAX_CONTRADICTION_SPAN_YEARS years) — email says 2003,
+  memory says 2004. Diffuse out-of-window records are not a date claim about
+  the moment and never contradict. Contradictions are SURFACED — as
+  ``date_contradiction`` gap entries on the timeline and as question
+  candidates appended by the connector excavation — never auto-applied.
+  Memory is never silently overwritten.
 
 Absent evidence (repos without connectors) is a clean no-op: ``available`` is
 False, nothing is attached to periods/events, and every render is byte-for-
@@ -48,6 +56,11 @@ from connectors.scoring import text_tokens, tokens_known
 # A single stray record is noise; a contradiction needs a small CLUSTER of
 # matched records disagreeing with the story.
 MIN_CONTRADICTION_RECORDS = 2
+
+# ...and that cluster must be TIGHT: out-of-window records spanning more
+# years than this are a diffuse stream (alumni mail never stops), not a date
+# claim about the moment, so they can never contradict it.
+MAX_CONTRADICTION_SPAN_YEARS = 5
 
 # Display cap: dominant entities summarize as count + range, the rest fold
 # into "+ N more".
@@ -123,8 +136,20 @@ def _span_text(first: int, last: int) -> str:
     return f"{first}–{last}" if first != last else str(first)
 
 
-def _ranges_overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
-    return not (a[1] < b[0] or a[0] > b[1])
+def _year_span(items: list[dict]) -> tuple[int, int]:
+    years = [i["year"] for i in items]
+    return min(years), max(years)
+
+
+def _in_window(items: list[dict], *, years: set[int] | None = None,
+               stated: tuple[int, int] | None = None) -> list[dict]:
+    """Records inside the memory window: exact when_hint year(s) when given,
+    else the inclusive stated range of the placement period."""
+    if years:
+        return [i for i in items if i["year"] in years]
+    if stated:
+        return [i for i in items if stated[0] <= i["year"] <= stated[1]]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -140,12 +165,6 @@ def _period_token_sets(period: dict) -> list[set[str]]:
         if tokens:
             token_sets.append(tokens)
     return token_sets
-
-
-def _event_tokens(event: dict) -> set[str]:
-    text = " ".join([event.get("description", ""), event.get("when_hint", ""),
-                     *(event.get("eras") or [])])
-    return text_tokens(text)
 
 
 # ---------------------------------------------------------------------------
@@ -228,12 +247,12 @@ def corroborate(periods: list[dict],
                 evidence: list[dict] | None = None) -> dict:
     """Match connector date evidence against periods and events.
 
-    ATTACHES a 'corroboration' badge dict onto each matched period/event (the
-    same in-place enrichment place_events already uses) and returns the
-    summary timeline_data() exposes: {available, total, contradictions}.
-    `evidence` overrides the on-disk files (the excavation passes its freshly
-    extracted assertions so candidates never lag a run). No evidence →
-    {'available': False} and NOTHING is attached."""
+    ATTACHES a 'corroboration' badge dict onto matched periods/events with
+    in-window records (the same in-place enrichment place_events already
+    uses) and returns the summary timeline_data() exposes: {available,
+    total, contradictions}. `evidence` overrides the on-disk files (the
+    excavation passes its freshly extracted assertions so candidates never
+    lag a run). No evidence → {'available': False} and NOTHING is attached."""
     if evidence is None:
         items = load_evidence(connectors_dir)
     else:
@@ -264,17 +283,23 @@ def corroborate(periods: list[dict],
                    if tokens_known(tokens, token_sets) for item in records]
         if not matched:
             continue
-        badge = _badge(matched)
         stated = stated_ranges[period["slug"]]
-        if stated:
-            overlap = _ranges_overlap((badge["first"], badge["last"]), stated)
-            badge["status"] = "corroborated" if overlap else "contradiction"
-        period["corroboration"] = badge
-        if (badge["status"] == "contradiction"
-                and badge["count"] >= MIN_CONTRADICTION_RECORDS):
-            dominant = badge["entities"][0]
+        if not stated:
+            # No stated range: full-range badge, context-only.
+            period["corroboration"] = _badge(matched)
+            continue
+        in_window = _in_window(matched, stated=stated)
+        if in_window:
+            badge = _badge(in_window)
+            badge["status"] = "corroborated"
+            period["corroboration"] = badge
+            continue
+        first, last = _year_span(matched)
+        if (len(matched) >= MIN_CONTRADICTION_RECORDS
+                and last - first <= MAX_CONTRADICTION_SPAN_YEARS):
+            dominant = _badge(matched)["entities"][0]
             memory_says = _span_text(*stated)
-            evidence_says = _span_text(badge["first"], badge["last"])
+            evidence_says = _span_text(first, last)
             contradictions.append(_contradiction(
                 "period",
                 period=period["slug"],
@@ -285,7 +310,7 @@ def corroborate(periods: list[dict],
                 connector=matched[0]["connector"],
                 memory_says=memory_says,
                 evidence_says=evidence_says,
-                evidence_count=badge["count"],
+                evidence_count=len(matched),
                 message=(f"✉ Date conflict: {dominant['entity']} email records span "
                          f"{evidence_says}, outside {period['name']}'s stated dates "
                          f"({memory_says})."),
@@ -294,53 +319,56 @@ def corroborate(periods: list[dict],
                                 f"is dated {memory_says} — which is right?"),
             ))
 
-    # --- events: entity tokens ⊆ the event's own text tokens ---------------
+    # --- events: entity tokens ⊆ the event's DESCRIPTION tokens (v111) -----
     placed = [(slug, event) for slug, rows in event_lineup.items() for event in rows]
     for slot, event in placed + [(None, e) for e in unplaced_events]:
-        tokens = _event_tokens(event)
+        tokens = text_tokens(event.get("description", ""))
         matched = [item for group_tokens, records in groups.items()
                    if tokens and group_tokens <= tokens for item in records]
         if not matched:
             continue
-        badge = _badge(matched)
         hint_years = _years_in(event.get("when_hint"))
-        evidence_years = {i["year"] for i in matched}
         stated = stated_ranges.get(slot) if slot else None
-        memory_says = ""
+        if not hint_years and not stated:
+            # No window: full-range badge, context-only — NEVER a contradiction.
+            event["corroboration"] = _badge(matched)
+            continue
+        in_window = _in_window(matched, years=hint_years or None, stated=stated)
+        if in_window:
+            badge = _badge(in_window)
+            badge["status"] = "corroborated"
+            event["corroboration"] = badge
+            continue
+        # Zero records inside the memory window. A contradiction needs the
+        # out-of-window records to form a tight cluster (rule C); out-of-window
+        # records never badge the moment either way.
+        first, last = _year_span(matched)
+        if not (len(matched) >= MIN_CONTRADICTION_RECORDS
+                and last - first <= MAX_CONTRADICTION_SPAN_YEARS):
+            continue
+        evidence_says = _span_text(first, last)
+        description = event["description"]
         if hint_years:
-            if hint_years & evidence_years:
-                badge["status"] = "corroborated"
-            elif badge["count"] >= MIN_CONTRADICTION_RECORDS:
-                badge["status"] = "contradiction"
-                memory_says = "/".join(str(y) for y in sorted(hint_years))
-        elif stated:
-            overlap = _ranges_overlap((badge["first"], badge["last"]), stated)
-            badge["status"] = "corroborated" if overlap else "contradiction"
-            if not overlap and badge["count"] >= MIN_CONTRADICTION_RECORDS:
-                memory_says = _span_text(*stated)
-        event["corroboration"] = badge
-        if badge["status"] == "contradiction" and memory_says:
-            evidence_says = _span_text(badge["first"], badge["last"])
-            description = event["description"]
-            if hint_years:
-                story_bit = f"your story says {memory_says}"
-            else:
-                story_bit = (f"your story places it in {period_names.get(slot, slot)} "
-                             f"({memory_says})")
-            contradictions.append(_contradiction(
-                "event",
-                period=slot,
-                key=f"event-{_content_key(event.get('source', ''), description)}",
-                entity=badge["entities"][0]["entity"],
-                description=description,
-                source=event.get("source", ""),
-                connector=matched[0]["connector"],
-                memory_says=memory_says,
-                evidence_says=evidence_says,
-                evidence_count=badge["count"],
-                message=(f"✉ Date conflict: email records place \"{description}\" in "
-                         f"{evidence_says}, but {story_bit}."),
-                candidate_text=(f"Email records place \"{description}\" in "
-                                f"{evidence_says} but {story_bit} — which is right?"),
-            ))
+            memory_says = "/".join(str(y) for y in sorted(hint_years))
+            story_bit = f"your story says {memory_says}"
+        else:
+            memory_says = _span_text(*stated)
+            story_bit = (f"your story places it in {period_names.get(slot, slot)} "
+                         f"({memory_says})")
+        contradictions.append(_contradiction(
+            "event",
+            period=slot,
+            key=f"event-{_content_key(event.get('source', ''), description)}",
+            entity=_badge(matched)["entities"][0]["entity"],
+            description=description,
+            source=event.get("source", ""),
+            connector=matched[0]["connector"],
+            memory_says=memory_says,
+            evidence_says=evidence_says,
+            evidence_count=len(matched),
+            message=(f"✉ Date conflict: email records place \"{description}\" in "
+                     f"{evidence_says}, but {story_bit}."),
+            candidate_text=(f"Email records place \"{description}\" in "
+                            f"{evidence_says} but {story_bit} — which is right?"),
+        ))
     return summary

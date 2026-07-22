@@ -166,18 +166,21 @@ trust is earned at the threshold, not at the capture.
   `connector-audit` listing, idempotency by message id, and the existing
   retraction/correction flow as the escape hatch. This is a rare excavation
   (quarterly/yearly), not a sync service.
-- **Date evidence corroborates the timeline [shipped v110].** The harvested
-  assertions line up against the timeline with the scorer's token-subset
-  discipline — an entity matches a period whose roster name/slug/alias tokens
-  it contains, and a moment whose own text (description, time words, era)
-  contains it — yielding compact corroboration badges (`✉ asu ×1100 ·
-  2010–2013`) on the timeline view and the `wiki/timeline.md` export. Evidence
-  clustering AGAINST the story (email says 2003, the answer says 2004; or a
-  period's stated `approximate_dates` disjoint from its records' span) becomes
-  a `date_contradiction` gap entry plus a connector-mined question candidate
-  on the next excavation — the Loop asks the owner which is right; memory is
-  never silently overwritten. The timeline layer itself stays read-only and
-  zero-AI, and repos without connectors render exactly as before.
+- **Date evidence corroborates the timeline [shipped v110, calibrated
+  v111].** The harvested assertions line up against the timeline with the
+  scorer's token-subset discipline — an entity matches a period whose roster
+  name/slug/alias tokens it contains, and a moment whose DESCRIPTION contains
+  it (eras and time-words never attach entities). Badges are windowed: only
+  records inside the moment's own year (or its placement period's stated
+  `approximate_dates`) count, so an entity whose mail spans 2010–2026 badges
+  as the in-window cluster (`✉ asu ×43 · 2011–2012`), never its full span;
+  windowless badges are context-only. Evidence clustering AGAINST the story —
+  zero records inside the memory window, a tight (≤5-year) out-of-window
+  cluster, at least two records — becomes a `date_contradiction` gap entry
+  plus a connector-mined question candidate on the next excavation — the Loop
+  asks the owner which is right; memory is never silently overwritten. The
+  timeline layer itself stays read-only and zero-AI, and repos without
+  connectors render exactly as before.
 - **Owner-declared VIPs are calibrated knowledge, not a heuristic
   [shipped v107].** Heuristics cannot know that `bigdaddy.jet@gmail.com` is
   Dad. `weights.json` accepts a `vip_correspondents` map (email → label) and a

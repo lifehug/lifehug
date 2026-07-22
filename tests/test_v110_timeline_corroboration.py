@@ -1,11 +1,13 @@
-"""v110 — timeline corroboration from connector date evidence (issue #44).
+"""v110 — timeline corroboration from connector date evidence (issue #44);
+v111 — calibrated against live data.
 
 Connector date evidence ({date, entity, kind, message_id}) lines up against
 periods (roster name/slug/alias token-subset) and events (entity tokens within
-the moment's own text): corroboration badges render on the view and the
-wiki/timeline.md export; evidence clustering against the story's own dates
-surfaces as date_contradiction gaps and connector-mined question candidates.
-No evidence file → the timeline renders exactly as before.
+the moment's DESCRIPTION text): windowed corroboration badges render on the
+view and the wiki/timeline.md export; a tight out-of-window cluster against
+the story's own dates surfaces as date_contradiction gaps and connector-mined
+question candidates. No evidence file → the timeline renders exactly as
+before.
 """
 
 import importlib.util
@@ -65,6 +67,7 @@ def _evidence(date, entity, kind="billing", mid=None):
 ASU_RECORDS = [
     _evidence("2010-08-15", "asu", "enrollment", "m1"),
     _evidence("2011-08-05", "asu", "billing", "m2"),
+    _evidence("2011-12-01", "asu", "billing", "m2b"),
     _evidence("2013-05-10", "asu", "institutional", "m3"),
 ]
 CHASE_RECORD = _evidence("2012-03-01", "chase", "billing", "m4")
@@ -145,55 +148,67 @@ class PeriodBadgeTests(CorroborationFixture):
     def test_period_badge_computed_with_range(self):
         data = tl.timeline_data()
         self.assertTrue(data["corroboration"]["available"])
-        self.assertEqual(data["corroboration"]["total"], 4)
+        self.assertEqual(data["corroboration"]["total"], 5)
         badge = data["periods"][0].get("corroboration")
         self.assertIsNotNone(badge)
-        # 3 asu records matched; the chase record matched nothing.
-        self.assertEqual(badge["count"], 3)
+        # 4 asu records matched, all inside the stated 2010–2013 range; the
+        # chase record matched nothing.
+        self.assertEqual(badge["count"], 4)
         self.assertEqual(badge["entities"], [
-            {"entity": "asu", "count": 3, "first": 2010, "last": 2013}])
+            {"entity": "asu", "count": 4, "first": 2010, "last": 2013}])
         self.assertEqual((badge["first"], badge["last"]), (2010, 2013))
-        # stated 2010–2013 overlaps the evidence range → corroborated.
         self.assertEqual(badge["status"], "corroborated")
 
     def test_badge_counts_are_per_matched_entity_not_global(self):
         data = tl.timeline_data()
         badge = data["periods"][0]["corroboration"]
-        # the ledger holds 4 records total — the badge reports only asu's 3.
-        self.assertEqual(badge["count"], 3)
-        self.assertEqual(sum(e["count"] for e in badge["entities"]), 3)
+        # the ledger holds 5 records total — the badge reports only asu's 4.
+        self.assertEqual(badge["count"], 4)
+        self.assertEqual(sum(e["count"] for e in badge["entities"]), 4)
 
     def test_badge_text_format(self):
         data = tl.timeline_data()
         self.assertEqual(tcorr.badge_text(data["periods"][0]["corroboration"]),
-                         "asu ×3 · 2010–2013")
+                         "asu ×4 · 2010–2013")
 
 
 class EventBadgeTests(CorroborationFixture):
     def test_event_badge_corroborated_by_when_hint_year(self):
+        """Windowed badge (v111): when_hint 2011 counts ONLY the 2011 records,
+        not asu's full 2010–2013 stream."""
         data = tl.timeline_data()
         slug, event = self.event_by_desc(data, "Moved into the ASU dorms")
         self.assertEqual(slug, "college")
         badge = event.get("corroboration")
         self.assertIsNotNone(badge)
-        self.assertEqual(badge["count"], 3)
-        self.assertEqual((badge["first"], badge["last"]), (2010, 2013))
-        self.assertEqual(badge["status"], "corroborated")  # 2011 ∈ 2010–2013
+        self.assertEqual(badge["count"], 2)
+        self.assertEqual((badge["first"], badge["last"]), (2011, 2011))
+        self.assertEqual(badge["status"], "corroborated")
+        self.assertEqual(tcorr.badge_text(badge), "asu ×2 · 2011")
 
-    def test_unmatched_event_has_no_badge(self):
-        # chase evidence matches no period and no event text.
+    def test_unmatched_and_contradicted_events_carry_no_badge(self):
         data = tl.timeline_data()
+        # the contradicted event's records are all out-of-window → no badge
+        _slug, football = self.event_by_desc(data, "First ASU football game")
+        self.assertNotIn("corroboration", football)
+        # and chase (matched by nothing) appears in no badge anywhere
+        for period in data["periods"]:
+            for ent in (period.get("corroboration") or {}).get("entities", []):
+                self.assertNotEqual(ent["entity"], "chase")
         for rows in data["event_lineup"].values():
             for event in rows:
-                self.assertEqual(event["corroboration"]["entities"][0]["entity"], "asu")
+                for ent in (event.get("corroboration") or {}).get("entities", []):
+                    self.assertNotEqual(ent["entity"], "chase")
 
 
 class ContradictionTests(CorroborationFixture):
     def test_event_contradiction_detected(self):
-        """Email says 2010–2013, memory says 2004 — surfaced, never applied."""
+        """Email clusters 2010–2013, memory says 2004 — surfaced, never applied.
+        The contradicted moment carries NO badge (out-of-window records don't
+        badge, v111); the conflict lives in the gap entry."""
         data = tl.timeline_data()
         slug, event = self.event_by_desc(data, "First ASU football game")
-        self.assertEqual(event["corroboration"]["status"], "contradiction")
+        self.assertNotIn("corroboration", event)
         contradictions = data["corroboration"]["contradictions"]
         self.assertEqual(len(contradictions), 1)
         record = contradictions[0]
@@ -204,7 +219,7 @@ class ContradictionTests(CorroborationFixture):
         self.assertEqual(record["connector"], "gmail")
         self.assertEqual(record["memory_says"], "2004")
         self.assertEqual(record["evidence_says"], "2010–2013")
-        self.assertEqual(record["evidence_count"], 3)
+        self.assertEqual(record["evidence_count"], 4)
         self.assertTrue(record["key"].startswith("event-"))
         self.assertIn("First ASU football game", record["candidate_text"])
         self.assertIn("which is right?", record["candidate_text"])
@@ -222,8 +237,7 @@ class ContradictionTests(CorroborationFixture):
     def test_period_contradiction_when_evidence_outside_stated_range(self):
         self.write_roster(approximate_dates="2006–2009")
         data = tl.timeline_data()
-        badge = data["periods"][0]["corroboration"]
-        self.assertEqual(badge["status"], "contradiction")
+        self.assertNotIn("corroboration", data["periods"][0])  # nothing in-window
         records = [c for c in data["corroboration"]["contradictions"]
                    if c["level"] == "period"]
         self.assertEqual(len(records), 1)
@@ -239,7 +253,7 @@ class ContradictionTests(CorroborationFixture):
         self.write_evidence([_evidence("2003-01-01", "asu", "billing", "mx")])
         data = tl.timeline_data()
         _slug, event = self.event_by_desc(data, "Moved into the ASU dorms")
-        self.assertEqual(event["corroboration"]["status"], "neutral")
+        self.assertNotIn("corroboration", event)
         self.assertEqual(data["corroboration"]["contradictions"], [])
 
 
@@ -251,7 +265,8 @@ class RenderTests(CorroborationFixture):
 
     def test_view_renders_period_and_event_badges(self):
         _title, body, _wide = self._view()
-        self.assertIn("✉ asu ×3 · 2010–2013", body)  # period summary + event dot
+        self.assertIn("✉ asu ×4 · 2010–2013", body)  # period summary
+        self.assertIn("✉ asu ×2 · 2011", body)        # windowed event badge
         self.assertIn("Date conflict", body)          # contradiction gap card
         self.assertIn("tl-gap", body)
 
@@ -266,9 +281,9 @@ class RenderTests(CorroborationFixture):
         finally:
             wc.STATE_DIR, wc.WIKI_DIR = orig
         text = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
-        self.assertIn("## College — ✉ asu ×3 · 2010–2013", text)
+        self.assertIn("## College — ✉ asu ×4 · 2010–2013", text)
         self.assertIn("Moved into the ASU dorms", text)
-        self.assertIn("· ✉ asu ×3 · 2010–2013", text)
+        self.assertIn("· ✉ asu ×2 · 2011", text)
 
 
 class NoEvidenceNoopTests(CorroborationFixture):
@@ -314,19 +329,22 @@ class NoEvidenceNoopTests(CorroborationFixture):
 
 
 class AggregationCapTests(CorroborationFixture):
+    ALIASES = ["ASU", "MIT", "Delta", "Chase", "Southwest"]
+    RECORDS = (
+        [_evidence(f"2010-0{i + 1}-01", "asu", mid=f"a{i}") for i in range(5)]
+        + [_evidence(f"2011-0{i + 1}-01", "mit", mid=f"m{i}") for i in range(3)]
+        + [_evidence(f"2012-0{i + 1}-01", "delta", mid=f"d{i}") for i in range(2)]
+        + [_evidence(f"2013-0{i + 1}-01", "chase", mid=f"c{i}") for i in range(2)]
+        + [_evidence("2014-01-01", "southwest", mid="s0")]
+    )
+
     def test_badge_caps_at_a_few_entities_with_more_folded(self):
-        aliases = ["ASU", "MIT", "Delta", "Chase", "Southwest"]
-        self.write_roster(aliases=aliases)
-        records = (
-            [_evidence(f"2010-0{i + 1}-01", "asu", mid=f"a{i}") for i in range(5)]
-            + [_evidence(f"2011-0{i + 1}-01", "mit", mid=f"m{i}") for i in range(3)]
-            + [_evidence(f"2012-0{i + 1}-01", "delta", mid=f"d{i}") for i in range(2)]
-            + [_evidence(f"2013-0{i + 1}-01", "chase", mid=f"c{i}") for i in range(2)]
-            + [_evidence("2014-01-01", "southwest", mid="s0")]
-        )
-        self.write_evidence(records)
+        # No stated range → context-only full-range badge over everything.
+        self.write_roster(aliases=self.ALIASES, approximate_dates="")
+        self.write_evidence(self.RECORDS)
         data = tl.timeline_data()
         badge = data["periods"][0]["corroboration"]
+        self.assertEqual(badge["status"], "neutral")
         self.assertEqual(badge["count"], 13)
         # dominant first, per-entity counts — never the global total per row
         self.assertEqual([e["count"] for e in badge["entities"]], [5, 3, 2, 2, 1])
@@ -335,6 +353,19 @@ class AggregationCapTests(CorroborationFixture):
         self.assertIn("mit ×3 · 2011", text)
         self.assertIn("+ 2 more", text)
         self.assertNotIn("southwest", text)
+
+    def test_windowed_period_badge_excludes_out_of_range_records(self):
+        """D (v111): with stated 2010–2013, the 2014 southwest record does not
+        badge the period at all."""
+        self.write_roster(aliases=self.ALIASES)  # fixture default: 2010–2013
+        self.write_evidence(self.RECORDS)
+        data = tl.timeline_data()
+        badge = data["periods"][0]["corroboration"]
+        self.assertEqual(badge["status"], "corroborated")
+        self.assertEqual(badge["count"], 12)  # southwest 2014 excluded
+        self.assertEqual([e["entity"] for e in badge["entities"]],
+                         ["asu", "mit", "chase", "delta"])  # count desc, name asc
+        self.assertIn("+ 1 more", tcorr.badge_text(badge))
 
 
 class PureFunctionTests(unittest.TestCase):
@@ -351,10 +382,118 @@ class PureFunctionTests(unittest.TestCase):
         summary = tcorr.corroborate(
             periods, {"college": [event]}, [], connectors_dir=None,
             evidence=[_evidence("2003-05-01", "asu"), _evidence("2004-06-01", "asu")])
-        self.assertEqual(event["corroboration"]["status"], "contradiction")
+        self.assertNotIn("corroboration", event)  # out-of-window doesn't badge
         record = summary["contradictions"][0]
         self.assertEqual(record["memory_says"], "2010–2013")
         self.assertIn("College", record["candidate_text"])
+
+    # --- A (v111): entities match DESCRIPTION tokens only -------------------
+
+    def test_eras_and_when_hint_do_not_match_entities(self):
+        """Live-data flaw 1: 'Born in Redlands' (1980s) carried asu ×1100 ·
+        2010–2026 via era tokens. Eras/when_hint no longer attach entities."""
+        event = {"description": "Born in Redlands", "when_hint": "1981",
+                 "anchor": "", "source": "answers/A2.md", "source_short": "A2",
+                 "eras": ["early childhood", "the asu years"]}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2010-08-15", "asu"), _evidence("2026-01-05", "asu")])
+        self.assertNotIn("corroboration", event)
+        self.assertEqual(summary["contradictions"], [])
+
+    # --- C (v111): contradictions need a tight out-of-window cluster --------
+
+    def test_entity_absent_from_description_never_contradicts(self):
+        """Live-data flaw 2 (root): the bankruptcy moment contradicted 'apple',
+        which appears nowhere in its description."""
+        event = {"description": "Officially went bankrupt about a month before "
+                                "graduating college",
+                 "when_hint": "2013", "anchor": "", "source": "answers/A3.md",
+                 "source_short": "A3", "eras": ["college", "apple store years"]}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2015-03-01", "apple"), _evidence("2026-02-01", "apple")])
+        self.assertNotIn("corroboration", event)
+        self.assertEqual(summary["contradictions"], [])
+
+    def test_diffuse_out_of_window_records_never_contradict(self):
+        """Even description-matched: a 2015–2026 stream (>5y span) is not a
+        date claim about a 2013 memory — no contradiction, no badge."""
+        event = {"description": "My apple store interview loop",
+                 "when_hint": "2013", "anchor": "", "source": "answers/A3.md",
+                 "source_short": "A3", "eras": []}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2015-03-01", "apple"),
+                      _evidence("2020-06-01", "apple"),
+                      _evidence("2026-02-01", "apple")])
+        self.assertNotIn("corroboration", event)
+        self.assertEqual(summary["contradictions"], [])
+
+    def test_tight_cluster_still_contradicts(self):
+        """The case that MUST keep firing: memory says 2004, a tight 2003-only
+        cluster of enrollment records says otherwise."""
+        event = {"description": "First ASU football game", "when_hint": "2004",
+                 "anchor": "", "source": "answers/A4.md", "source_short": "A4",
+                 "eras": []}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2003-03-01", "asu", "enrollment"),
+                      _evidence("2003-09-15", "asu", "enrollment")])
+        self.assertNotIn("corroboration", event)
+        self.assertEqual(len(summary["contradictions"]), 1)
+        record = summary["contradictions"][0]
+        self.assertEqual(record["memory_says"], "2004")
+        self.assertEqual(record["evidence_says"], "2003")
+
+    def test_junk_entity_diffuse_stream_badges_nothing(self):
+        """Live-data flaw 3 mitigation: a junk domain entity CAN match a
+        description, but its diffuse out-of-window records badge nothing and
+        contradict nothing."""
+        event = {"description": "We bought the house in Tempe",
+                 "when_hint": "2011", "anchor": "", "source": "answers/A5.md",
+                 "source_short": "A5", "eras": []}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2015-01-01", "house"), _evidence("2024-01-01", "house")])
+        self.assertNotIn("corroboration", event)
+        self.assertEqual(summary["contradictions"], [])
+
+    # --- B (v111): windowed badges ------------------------------------------
+
+    def test_in_window_records_win_over_outliers(self):
+        """Mixed stream: the in-window record badges; the outliers are simply
+        not about this moment — corroborated, no contradiction."""
+        event = {"description": "Moved into the ASU dorms", "when_hint": "2011",
+                 "anchor": "", "source": "answers/A6.md", "source_short": "A6",
+                 "eras": []}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2011-08-05", "asu"),
+                      _evidence("2020-01-01", "asu"),
+                      _evidence("2026-01-01", "asu")])
+        badge = event["corroboration"]
+        self.assertEqual(badge["status"], "corroborated")
+        self.assertEqual(badge["count"], 1)
+        self.assertEqual((badge["first"], badge["last"]), (2011, 2011))
+        self.assertEqual(summary["contradictions"], [])
+
+    def test_no_window_badge_is_context_only(self):
+        """No when_hint year and no placement range: full-range badge, status
+        neutral — and it can NEVER feed a contradiction."""
+        event = {"description": "ASU reunion picnic", "when_hint": "",
+                 "anchor": "", "source": "answers/A7.md", "source_short": "A7",
+                 "eras": []}
+        summary = tcorr.corroborate(
+            [], {}, [event], connectors_dir=None,
+            evidence=[_evidence("2010-08-15", "asu"), _evidence("2026-01-05", "asu")])
+        badge = event["corroboration"]
+        self.assertEqual(badge["status"], "neutral")
+        self.assertEqual(badge["count"], 2)
+        self.assertEqual((badge["first"], badge["last"]), (2010, 2026))
+        self.assertEqual(summary["contradictions"], [])
+
+    # --- existing guards -----------------------------------------------------
 
     def test_evidence_override_needs_no_files(self):
         summary = tcorr.corroborate([], {}, [], connectors_dir=None, evidence=[])
