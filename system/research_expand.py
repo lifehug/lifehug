@@ -418,7 +418,12 @@ def model_is_kimi(model: str) -> bool:
 def _kimi_call(prompt: str, model: str, timeout: int) -> str:
     """Call the Kimi OpenAI-compatible endpoint (Kimi Code API by default;
     override kimi_base_url in config for the Kimi Platform). Stdlib urllib —
-    no new dependencies."""
+    no new dependencies.
+
+    Reasoning models (kimi-k3 etc.) spend part of the completion budget on
+    reasoning_tokens: too small a cap truncates JSON or returns EMPTY content
+    when reasoning exhausts it. Default 16384 (override kimi_max_tokens in
+    config) and retry once on an empty completion."""
     import urllib.request  # noqa: PLC0415
     key = _kimi_key()
     if not key:
@@ -427,25 +432,41 @@ def _kimi_call(prompt: str, model: str, timeout: int) -> str:
             "or add kimi_api_key to config.yaml (Kimi Code Console)."
         )
     try:
-        base_url = (load_config().get("kimi_base_url") or "").strip() or KIMI_DEFAULT_BASE_URL
+        cfg = load_config()
     except Exception:
-        base_url = KIMI_DEFAULT_BASE_URL
+        cfg = {}
+    base_url = (cfg.get("kimi_base_url") or "").strip() or KIMI_DEFAULT_BASE_URL
+    try:
+        max_tokens = int(cfg.get("kimi_max_tokens") or 16384)
+    except (TypeError, ValueError):
+        max_tokens = 16384
     payload = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 4096,
+        "max_tokens": max_tokens,
     }).encode()
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/chat/completions",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-        result = json.loads(resp.read())
-    return result["choices"][0]["message"]["content"]
+    last_error: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            req = urllib.request.Request(
+                f"{base_url.rstrip('/')}/chat/completions",
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                result = json.loads(resp.read())
+            content = result["choices"][0]["message"]["content"]
+            if content and content.strip():
+                return content
+            last_error = RuntimeError(f"kimi returned empty content (attempt {attempt})")
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            last_error = exc
+        if attempt == 1:
+            print("  ↻ kimi call empty/failed, retrying with the same budget...")
+    raise last_error or RuntimeError("kimi call failed")
 
 
 # ---------------------------------------------------------------------------

@@ -194,6 +194,39 @@ class KimiRoutingTests(unittest.TestCase):
                          "https://api.moonshot.cn/v1/chat/completions")
 
 
+    def test_kimi_retries_empty_content_and_sends_budget(self):
+        """v115: reasoning models can exhaust the budget on reasoning_tokens
+        and return EMPTY content — retry once; payload carries the headroom."""
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(json.loads(req.data)["max_tokens"])
+            return _FakeResponse("" if len(calls) == 1 else "real answer")
+
+        with mock.patch.dict("os.environ", {"KIMI_API_KEY": "k"}), \
+                mock.patch.object(rex, "load_config", return_value={}), \
+                mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            result = rex.call_ai("prompt", "kimi-k3")
+        self.assertEqual(result, "real answer")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], 16384)  # reasoning headroom default
+
+    def test_kimi_max_tokens_configurable(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(json.loads(req.data)["max_tokens"])
+            return _FakeResponse("ok")
+
+        with mock.patch.dict("os.environ", {"KIMI_API_KEY": "k"}), \
+                mock.patch.object(rex, "load_config",
+                                  return_value={"kimi_max_tokens": "8192"}), \
+                mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            rex.call_ai("prompt", "kimi-k3")
+        self.assertEqual(calls, [8192])
+
+
 class DefaultModelTests(unittest.TestCase):
     def test_classifier_default_is_current_sonnet(self):
         # v85 reverted an unverified downgrade to claude-sonnet-4-6;
