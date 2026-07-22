@@ -130,6 +130,70 @@ class CallAIRoutingTests(unittest.TestCase):
         self.assertEqual(result, "sdk says hi")
 
 
+class KimiRoutingTests(unittest.TestCase):
+    """v113 — model-explicit Kimi routing: a kimi/moonshot/k3 model name sends
+    the call to the Kimi OpenAI-compatible endpoint, bypassing the gateway
+    remap and the Anthropic SDK; no key → a clear setup error."""
+
+    def test_kimi_model_bypasses_gateway_and_sdk(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["auth"] = req.headers.get("Authorization")
+            return _FakeResponse("kimi says hi")
+
+        with mock.patch.object(rex, "_openclaw_gateway",
+                               return_value=("http://fake:1/v1", "tok")), \
+                mock.patch.object(rex, "get_client") as get_client, \
+                mock.patch.dict("os.environ", {"KIMI_API_KEY": "kimi-key-123"}), \
+                mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = rex.call_ai("prompt", "kimi-for-coding")
+        self.assertEqual(result, "kimi says hi")
+        self.assertEqual(captured["url"],
+                         "https://api.kimi.com/coding/v1/chat/completions")
+        self.assertEqual(captured["auth"], "Bearer kimi-key-123")
+        get_client.assert_not_called()  # Anthropic SDK never touched
+
+    def test_kimi_key_falls_back_to_config(self):
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(rex, "load_config",
+                                  return_value={"kimi_api_key": "cfg-key"}):
+            self.assertEqual(rex._kimi_key(), "cfg-key")
+
+    def test_kimi_no_key_raises_clear_error(self):
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(rex, "load_config", return_value={}), \
+                self.assertRaises(RuntimeError) as ctx:
+            rex.call_ai("prompt", "kimi-for-coding")
+        self.assertIn("KIMI_API_KEY", str(ctx.exception))
+
+    def test_model_prefixes(self):
+        for kimi_model in ("kimi-for-coding", "kimi-for-coding-highspeed",
+                           "k3", "moonshot-v1-8k", "Kimi-K2"):
+            with self.subTest(model=kimi_model):
+                self.assertTrue(rex.model_is_kimi(kimi_model))
+        for other in ("claude-sonnet-5", "gpt-4o", ""):
+            with self.subTest(model=other):
+                self.assertFalse(rex.model_is_kimi(other))
+
+    def test_kimi_base_url_override(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return _FakeResponse("ok")
+
+        with mock.patch.dict("os.environ", {"KIMI_API_KEY": "k"}), \
+                mock.patch.object(rex, "load_config",
+                                  return_value={"kimi_api_key": "k",
+                                                "kimi_base_url": "https://api.moonshot.cn/v1"}), \
+                mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            rex.call_ai("prompt", "moonshot-v1-8k")
+        self.assertEqual(captured["url"],
+                         "https://api.moonshot.cn/v1/chat/completions")
+
+
 class DefaultModelTests(unittest.TestCase):
     def test_classifier_default_is_current_sonnet(self):
         # v85 reverted an unverified downgrade to claude-sonnet-4-6;

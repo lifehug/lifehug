@@ -157,10 +157,14 @@ def normalize_verdict(raw: dict, fallback_label: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def resolve_model(model: str | None = None) -> str:
+    """CLI flag > config.yaml dossier_model > config.yaml classify_model >
+    default. dossier_model (v113) lets the connector dossier run on a
+    different provider (e.g. Kimi) without moving the weekly classifier."""
     if model:
         return model
     from classify_story import DEFAULT_MODEL  # local import keeps tests light
-    return load_config().get("classify_model", DEFAULT_MODEL)
+    config = load_config()
+    return config.get("dossier_model") or config.get("classify_model", DEFAULT_MODEL)
 
 
 def _resolve_ai(ai_caller=None):

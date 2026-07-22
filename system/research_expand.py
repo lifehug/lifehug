@@ -370,15 +370,19 @@ def get_client():
 
 
 def ai_available() -> str | None:
-    """Return the available AI route ('gateway' or 'sdk-key'), or None when keyless.
+    """Return the available AI route ('gateway', 'kimi', or 'sdk-key'), or None
+    when keyless.
 
     Mirrors call_ai's routing order without making any network call: an OpenClaw
-    gateway wins, then ANTHROPIC_API_KEY in the environment, then
+    gateway wins, then a Kimi key (KIMI_API_KEY env / kimi_api_key in
+    config.yaml), then ANTHROPIC_API_KEY in the environment, then
     anthropic_api_key in config.yaml. None means agent mode is required
     (see skills/maintenance).
     """
     if _openclaw_gateway() is not None:
         return "gateway"
+    if _kimi_key() is not None:
+        return "kimi"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "sdk-key"
     try:
@@ -387,6 +391,61 @@ def ai_available() -> str | None:
     except Exception:
         pass
     return None
+
+
+KIMI_MODEL_PREFIXES = ("kimi", "moonshot", "k3")
+KIMI_DEFAULT_BASE_URL = "https://api.kimi.com/coding/v1"
+
+
+def _kimi_key() -> str | None:
+    """Kimi API key from env or config.yaml, else None."""
+    key = os.environ.get("KIMI_API_KEY")
+    if key:
+        return key
+    try:
+        return load_config().get("kimi_api_key") or None
+    except Exception:
+        return None
+
+
+def model_is_kimi(model: str) -> bool:
+    """Kimi routing is model-explicit: the caller picks the route by naming a
+    Kimi model (dossier_model/classify_model in config, or --model)."""
+    name = (model or "").lower()
+    return name.startswith(KIMI_MODEL_PREFIXES)
+
+
+def _kimi_call(prompt: str, model: str, timeout: int) -> str:
+    """Call the Kimi OpenAI-compatible endpoint (Kimi Code API by default;
+    override kimi_base_url in config for the Kimi Platform). Stdlib urllib —
+    no new dependencies."""
+    import urllib.request  # noqa: PLC0415
+    key = _kimi_key()
+    if not key:
+        raise RuntimeError(
+            f"model {model!r} routes to Kimi but no key found — set KIMI_API_KEY "
+            "or add kimi_api_key to config.yaml (Kimi Code Console)."
+        )
+    try:
+        base_url = (load_config().get("kimi_base_url") or "").strip() or KIMI_DEFAULT_BASE_URL
+    except Exception:
+        base_url = KIMI_DEFAULT_BASE_URL
+    payload = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 4096,
+    }).encode()
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        result = json.loads(resp.read())
+    return result["choices"][0]["message"]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -1070,6 +1129,10 @@ def call_ai(prompt: str, model: str) -> str:
          config.yaml) — the primary path when no gateway is configured, AND
          the fall-through when the gateway fails and a key is available.
          Without a key, the original gateway error is re-raised.
+      Model-explicit override (v113): a model named kimi*/moonshot*/k3*
+      bypasses the gateway remap and goes straight to the Kimi
+      OpenAI-compatible endpoint — asking for Kimi is a deliberate route
+      choice, not a fallback.
     """
     import os as _os  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
@@ -1086,6 +1149,10 @@ def call_ai(prompt: str, model: str) -> str:
             _timeout = int(_cfg.get("ai_timeout_seconds") or 600)
         except Exception:  # noqa: BLE001
             _timeout = 600
+
+    # Kimi (v113) — model-explicit routing wins over the gateway remap.
+    if model_is_kimi(model):
+        return _kimi_call(prompt, model, _timeout)
 
     MAX_RETRIES = 3
     RETRY_DELAY = 10  # seconds between retries

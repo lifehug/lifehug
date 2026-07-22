@@ -25,6 +25,17 @@ followup_model: "anthropic/claude-opus-4-6"
 # API key for the generate-tier jobs (or set ANTHROPIC_API_KEY in the environment):
 # anthropic_api_key: ""
 
+# --- Kimi models (v113) ---
+# Any model named kimi*/moonshot*/k3* routes to the Kimi OpenAI-compatible
+# endpoint instead of Anthropic. Key from the Kimi Code Console (or set
+# KIMI_API_KEY in the environment):
+# kimi_api_key: ""
+# Default endpoint is the Kimi Code API; override for the Kimi Platform:
+# kimi_base_url: "https://api.kimi.com/coding/v1"
+# Run connector dossiers on Kimi without moving the weekly classifier
+# (dossier_model wins for dossiers; classify_model stays Anthropic):
+# dossier_model: "kimi-for-coding"
+
 # --- Roadmap / Focuses ---
 # Your roadmap (state/roadmap.json) is DERIVED automatically from your question
 # bank and answers — you don't edit it here. Manage Focuses with the CLI:

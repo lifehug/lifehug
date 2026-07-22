@@ -1,7 +1,7 @@
 {
-  "version": 112,
+  "version": 113,
   "released": "2026-07-21",
-  "changelog": "v112: generic-entity stoplist for date evidence (issue #44). Domain words that can never be life entities (mail.house.gov -> 'house', plus home/mail/office/service/support/info/online/store/shop/cloud/team/news/app) are dropped in extract_date_evidence, keeping timeline badges free of junk-entity noise.",
+  "changelog": "v113: Kimi as a model route (issue #44). call_ai routes any kimi*/moonshot*/k3* model to the Kimi OpenAI-compatible endpoint (KIMI_API_KEY env or kimi_api_key in config.yaml; default base https://api.kimi.com/coding/v1, overridable via kimi_base_url for the Kimi Platform) — model-explicit, bypassing the gateway remap and the Anthropic SDK. New dossier_model config key lets connector dossiers run on Kimi without moving the weekly classifier.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

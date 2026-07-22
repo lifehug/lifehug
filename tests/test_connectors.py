@@ -636,6 +636,21 @@ class DossierTests(ConnectorTestCase):
     family-class verdicts auto-apply as VIPs (declared VIPs win conflicts,
     vip_blocklist vetoes); bodies cache by message id; dry-run calls nothing."""
 
+    def test_dossier_model_key_wins_over_classify_model(self):
+        """v113: dossier_model lets the dossier run a different provider
+        without moving the weekly classifier."""
+        from connectors import dossier as cdossier
+        from unittest import mock
+        with mock.patch.object(cdossier, "load_config",
+                               return_value={"dossier_model": "kimi-for-coding",
+                                             "classify_model": "claude-sonnet-5"}):
+            self.assertEqual(cdossier.resolve_model(), "kimi-for-coding")
+        with mock.patch.object(cdossier, "load_config",
+                               return_value={"classify_model": "claude-sonnet-5"}):
+            self.assertEqual(cdossier.resolve_model(), "claude-sonnet-5")
+        with mock.patch.object(cdossier, "load_config", return_value={}):
+            self.assertEqual(cdossier.resolve_model("flag-model"), "flag-model")
+
     def _scored_with(self, *, weights=None, verdict=None, tid="t-kris-a"):
         entries = kristine_ledger()
         if weights is not None:
