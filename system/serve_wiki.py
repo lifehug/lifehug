@@ -1619,6 +1619,7 @@ def view_timeline():
     wrong placements are feedback, not failures."""
     try:
         import timeline as tl_mod  # noqa: PLC0415
+        import timeline_corroboration as tcorr  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
         return ("Timeline", f"<h1>Timeline</h1>{_empty(f'timeline module unavailable: {html.escape(str(exc))}')}", False)
 
@@ -1671,6 +1672,9 @@ def view_timeline():
             summary_bits.append(f"{len(events_here)} moment(s)")
         if period_gaps:
             summary_bits.append(f"◌ {len(period_gaps)} gap(s)")
+        if period.get("corroboration"):
+            # v110: connector date-evidence badge — "✉ asu ×1100 · 2010–2013".
+            summary_bits.append(f"✉ {html.escape(tcorr.badge_text(period['corroboration']))}")
         parts.append(f"<details class='tl-period'><summary><h2>{title_html}{bands}</h2>"
                      f"<span class='tl-evidence tl-summary-counts'>"
                      f"{' · '.join(summary_bits)}{chrono_note}</span></summary>")
@@ -1698,6 +1702,12 @@ def view_timeline():
                     if event["when_hint"] else "<em>(undated)</em> — ")
             anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
                       if event["anchor"] else "")
+            email_badge = ""
+            if event.get("corroboration"):
+                # v110: matched connector records, count + span (contradiction
+                # conflicts surface separately as gap cards below).
+                email_badge = (f" <span class='tl-evidence'>✉ "
+                               f"{html.escape(tcorr.badge_text(event['corroboration']))}</span>")
             pin = ""
             if event.get("placement") == "manual":
                 unplace = (f'<form class="actform act-inline" method="post" '
@@ -1710,7 +1720,7 @@ def view_timeline():
                 caught_up = (" · the loop caught up — this now places itself; the pin retires on the next weekly pass"
                              if event.get("placement_redundant") else "")
                 pin = f" <span class='tl-evidence'>📌 placed by you{assertion}{caught_up} · {unplace}</span>"
-            return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}{pin}"
+            return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}{email_badge}{pin}"
                     f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
 
         visible, overflow = events_here[:10], events_here[10:]

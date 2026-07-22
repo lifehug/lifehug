@@ -15,6 +15,11 @@ and tells the owner how to correct them (`lifehug.py fix`, or just answering
 the gap questions). Unplaceable items land in an explicit "unplaced" bucket
 rather than being forced somewhere.
 
+v110: connector date evidence (state/connectors/*_date_evidence.json) lines up
+against periods and events as corroboration badges, and evidence clustering
+against the story's own dates surfaces as date_contradiction gaps — surfaced,
+never auto-applied (see timeline_corroboration.py).
+
 Zero AI calls; read-only over live state.
 """
 
@@ -28,7 +33,9 @@ _SYSTEM_DIR = Path(__file__).resolve().parent
 if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
-from lifehug_core import (
+import timeline_corroboration as tcorr  # noqa: E402
+
+from lifehug_core import (  # noqa: E402
     CLASSIFICATIONS_DIR,
     MANUAL_SOURCES_DIR,
     STATE_DIR,
@@ -92,10 +99,11 @@ def load_periods() -> list[dict]:
         by_slug[slug] = {
             "slug": slug,
             "name": ent.get("name", slug),
+            "aliases": [str(a) for a in (ent.get("aliases") or []) if str(a).strip()],
             "chrono": ent.get("chrono"),
             "sources": set(),
             "page": None,
-            "approximate_dates": "",
+            "approximate_dates": str(ent.get("approximate_dates") or ""),
         }
 
     periods_dir = WIKI_DIR / "periods"
@@ -108,6 +116,7 @@ def load_periods() -> list[dict]:
             entry = by_slug.setdefault(slug, {
                 "slug": slug,
                 "name": _frontmatter_value(text, "title", slug.replace("-", " ").title()),
+                "aliases": [],
                 "chrono": None,
                 "sources": set(),
                 "page": None,
@@ -118,6 +127,8 @@ def load_periods() -> list[dict]:
             if entry["chrono"] is None:
                 raw = _frontmatter_value(text, "chrono")
                 entry["chrono"] = int(raw) if raw.isdigit() else None
+            if not entry["approximate_dates"]:
+                entry["approximate_dates"] = _frontmatter_value(text, "approximate_dates")
 
     periods = list(by_slug.values())
     periods.sort(key=lambda p: (p["chrono"] is None, p["chrono"] or 0, p["slug"]))
@@ -553,13 +564,22 @@ def compute_gaps(periods: list[dict],
 # The assembled payload.
 # ---------------------------------------------------------------------------
 
-def timeline_data() -> dict:
+def timeline_data(evidence: list[dict] | None = None) -> dict:
     periods = load_periods()
     entities = load_entities()
     entity_lineup, unplaced_entities = line_up_entities(entities, periods)
     events = load_events()
     placements = load_placements()
     event_lineup, unplaced_events = place_events(events, periods, placements)
+
+    # v110: connector date-evidence corroboration — attaches badges to matched
+    # periods/events and returns date_contradiction records (read-only; the
+    # connector excavation turns the contradictions into question candidates).
+    # `evidence` overrides the on-disk files (excavation passes its fresh
+    # assertions so candidates never lag a run). No evidence → nothing
+    # attached, nothing renders differently.
+    corroboration = tcorr.corroborate(periods, event_lineup, unplaced_events,
+                                      STATE_DIR / "connectors", evidence=evidence)
 
     # Placements whose event no longer exists (reclassification rewrote the
     # description) or whose period page is gone — surfaced, never silently
@@ -586,6 +606,18 @@ def timeline_data() -> dict:
         else:
             global_gaps.append(gap)
 
+    # Date contradictions (v110) are gap entries like any other — the owner
+    # resolves them by answering; nothing is auto-applied.
+    for contradiction in corroboration["contradictions"]:
+        gap = {"kind": "date_contradiction",
+               "period": contradiction["period"],
+               "message": contradiction["message"],
+               "hint": contradiction["hint"]}
+        if gap["period"]:
+            gaps_by_period.setdefault(gap["period"], []).append(gap)
+        else:
+            global_gaps.append(gap)
+
     return {
         "periods": periods,
         "chapters": chapters,
@@ -597,6 +629,7 @@ def timeline_data() -> dict:
         "stale_placements": stale_placements,
         "gaps_by_period": gaps_by_period,
         "global_gaps": global_gaps,
+        "corroboration": corroboration,
         "counts": {
             "periods": len(periods),
             "entities_placed": sum(len(v) for v in entity_lineup.values()),

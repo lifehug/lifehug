@@ -240,6 +240,57 @@ class BaseConnector:
                 pass
         return str(load_cursor(self.cursor_path).get("owner") or "")
 
+    def timeline_contradiction_candidates(self, evidence: list[dict] | None = None) -> list[dict]:
+        """Timeline date contradictions as question candidates (v110, issue
+        #44). The timeline module itself stays read-only — it SURFACES
+        evidence/memory conflicts as date_contradiction gap entries; the
+        excavation (already a write path) converts them into the existing
+        candidate schema, deduped by id on append. `evidence` is this run's
+        freshly extracted assertions, so candidates never lag a run. No-op
+        without date evidence or a working timeline module."""
+        try:
+            import timeline as tl_mod  # noqa: PLC0415
+        except Exception:  # noqa: BLE001
+            return []
+        saved = (tl_mod.CLASSIFICATIONS_DIR, tl_mod.MANUAL_SOURCES_DIR,
+                 tl_mod.STATE_DIR, tl_mod.WIKI_DIR, tl_mod.PLACEMENTS_FILE)
+        tl_mod.CLASSIFICATIONS_DIR = self.repo_dir / "state" / "classifications"
+        tl_mod.MANUAL_SOURCES_DIR = self.repo_dir / "sources" / "manual"
+        tl_mod.STATE_DIR = self.repo_dir / "state"
+        tl_mod.WIKI_DIR = self.repo_dir / "wiki"
+        tl_mod.PLACEMENTS_FILE = self.repo_dir / "state" / "timeline_placements.json"
+        try:
+            data = tl_mod.timeline_data(evidence=evidence)
+        finally:
+            (tl_mod.CLASSIFICATIONS_DIR, tl_mod.MANUAL_SOURCES_DIR,
+             tl_mod.STATE_DIR, tl_mod.WIKI_DIR, tl_mod.PLACEMENTS_FILE) = saved
+        corroboration = data.get("corroboration") or {}
+        if not corroboration.get("available"):
+            return []
+        now = now_utc()
+        evidence_ref = f"state/connectors/{self.name}_date_evidence.json"
+        candidates: list[dict] = []
+        for item in corroboration.get("contradictions") or []:
+            if item.get("connector") not in (None, "", self.name):
+                continue  # raised by another connector's evidence
+            candidates.append({
+                "id": f"cand-{self.name}-date-contradiction-{item['key']}",
+                "text": item["candidate_text"],
+                "source_path": evidence_ref,
+                "target_page": None,
+                "kind": "date_contradiction",
+                "priority": 0.7,
+                "reason": (f"Connector-mined: {item['evidence_count']} {item['entity']} "
+                           f"record(s) cluster in {item['evidence_says']}; the story says "
+                           f"{item['memory_says']}. Surfaced on the timeline as a "
+                           "date_contradiction gap — never auto-applied."),
+                "status": "candidate",
+                "provenance": "connector-mined",
+                "connector": self.name,
+                "created_at": now,
+            })
+        return candidates
+
     # --- excavation ---------------------------------------------------------
 
     def _promoted_source_ids(self) -> set[str]:
@@ -328,6 +379,9 @@ class BaseConnector:
         # Discovery mining: unknown people / untold threads / unknown
         # institutions → existing question-candidates schema.
         candidates = self.mine_discovery(entries, threads, scored, context)[:MAX_DISCOVERY_PER_RUN]
+        # Timeline date contradictions (v110) join the same candidate flow —
+        # the excavation's fresh evidence, so they never lag a run.
+        candidates += self.timeline_contradiction_candidates(evidence)
 
         # Delta-promotion: band == promote, not already in the manifest,
         # highest scores first, bounded by the per-run cap.

@@ -1,7 +1,7 @@
 {
-  "version": 109,
+  "version": 110,
   "released": "2026-07-21",
-  "changelog": "v109: VIP page-candidate false-match fix (issue #44). The discovery_vip page-existence check now tokenizes the VIP's NAME only — parenthetical roles like '(sister)' are generic words that subset-matched unrelated wiki entries and wrongly suppressed page candidates for declared family.",
+  "changelog": "v110: timeline corroboration from connector date evidence (issue #44). Connector date evidence now lines up against the timeline with the connector scorer's token-subset discipline — entities match period roster names/slugs/aliases and each moment's own text — rendering compact corroboration badges (✉ asu ×1100 · 2010–2013) on the timeline view and the wiki/timeline.md export. Evidence clustering against the story's own dates (email says 2003, memory says 2004, or a period's stated approximate_dates disjoint from its records' span) surfaces as date_contradiction gap entries plus connector-mined question candidates appended on excavation — the owner answers, memory is never silently overwritten. The timeline stays read-only and zero-AI; repos without connectors render exactly as before.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -62,6 +62,7 @@
     "system/source_contract.md",
     "system/source_integrity.py",
     "system/timeline.py",
+    "system/timeline_corroboration.py",
     "system/update.py",
     "system/update_readme.py",
     "system/version.json",
@@ -87,6 +88,7 @@
     "tests/test_source_integrity.py",
     "tests/test_update.py",
     "tests/test_v105_pin_retire.py",
+    "tests/test_v110_timeline_corroboration.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",

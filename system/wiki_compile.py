@@ -1215,6 +1215,7 @@ def compile_timeline(dry_run: bool = False) -> bool:
     by the author's own words and landmark anchors; absolute years are
     deliberately NOT inferred (they telescope). Skipped when no events exist."""
     import timeline as tl_mod  # noqa: PLC0415
+    import timeline_corroboration as tcorr  # noqa: PLC0415
 
     # Honor this module's (possibly monkeypatched) roots for the call.
     saved = (tl_mod.CLASSIFICATIONS_DIR, tl_mod.STATE_DIR, tl_mod.WIKI_DIR,
@@ -1237,7 +1238,9 @@ def compile_timeline(dry_run: bool = False) -> bool:
         when = e["when_hint"] or "(undated)"
         anchor_part = f" · anchor: {e['anchor']}" if e["anchor"] else ""
         pin = " · 📌 placed by you" if e.get("placement") == "manual" else ""
-        return f"- **{when}** — {e['description']}{anchor_part}{pin}  \n  _source: {e['source']}_"
+        badge = (f" · ✉ {tcorr.badge_text(e['corroboration'])}"
+                 if e.get("corroboration") else "")
+        return f"- **{when}** — {e['description']}{anchor_part}{pin}{badge}  \n  _source: {e['source']}_"
 
     lines = [
         "---",
@@ -1258,7 +1261,11 @@ def compile_timeline(dry_run: bool = False) -> bool:
         events = data["event_lineup"].get(period["slug"], [])
         if not events:
             continue
-        lines.append(f"## {period['name']}")
+        header = f"## {period['name']}"
+        if period.get("corroboration"):
+            # v110: same connector-evidence badge as the viewer's period row.
+            header += f" — ✉ {tcorr.badge_text(period['corroboration'])}"
+        lines.append(header)
         lines.append("")
         lines.extend(event_line(e) for e in events)
         lines.append("")
