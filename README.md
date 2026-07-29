@@ -602,3 +602,8 @@ Lifehug draws on StoryCorps oral history, professional ghostwriting frameworks, 
 ---
 
 *Lifehug — because every life is a story worth telling.*
+
+
+## Hosted platform
+
+Lifehug Cloud — the hosted, multi-user platform built on this framework — lives at [lifehug/lifehug-platform](https://github.com/lifehug/lifehug-platform). Its delivery method (contracts-first, tiered agent waves, evidence-embedded PRs, owner closeouts) is documented in [docs/BUILDING.md](https://github.com/lifehug/lifehug-platform/blob/main/docs/BUILDING.md) and is the standard way of building across the Lifehug ecosystem.
