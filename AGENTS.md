@@ -30,8 +30,15 @@ A code change is not done until its paper trail ships **in the same pass**:
    and `skills/*/SKILL.md`.
 2. **GitHub issues** — comment progress on the covering issue with verification
    results; close it when delivered. If work surfaced a new gap, file it.
-3. **Tests + changelog** — tests for new behavior; `system/version.json`
-   changelog entry on release.
+3. **Tests + version bump** — tests for new behavior, and **every PR bumps
+   `system/version.json`** (owner rule, 2026-08-04): increment `version`,
+   set `released`, write the changelog entry sized to user impact — a
+   feature that changes behavior for the user gets a full changelog
+   paragraph naming what they'll notice; a small fix gets a one-liner.
+   Any new file the upgrade path should distribute goes into
+   `framework_files` in the same bump (that manifest is what
+   `system/update.py` ships to existing installs — a file missing from it
+   never reaches upgraders). No PR ships without a bump.
 
 "Done" = code + tests + docs + issue state — never code alone. The owner should
 never have to ask whether the docs match the code.
@@ -156,7 +163,7 @@ When the user replies to a daily question (via any channel):
    - Pipe the answer through `python3 system/lifehug.py process-answer {question_id}`
    - Let `process-answer` compile the private wiki automatically unless there is a clear repair reason to pass `--no-compile-wiki`
    - Commit and push if requested or part of the configured daily workflow
-3. **Acknowledge warmly** — Thank them, share a brief reflection on their answer, mention what's coming next
+3. **Acknowledge warmly** — Thank them, share a brief reflection on their answer, mention what's coming next. `python3 system/lifehug.py answer-ack-prompt` builds the canonical prompt for this (stdin: question/answer JSON) — the same tone contract the hosted platform uses, so behavior stays consistent whichever surface answered.
 
 ## Unprompted Story Ingest
 

@@ -455,6 +455,10 @@ def cmd_process_answer(args: argparse.Namespace) -> int:
     return run_python("process_answer.py", [*question_id, *flags])
 
 
+def cmd_answer_ack_prompt(_args: argparse.Namespace) -> int:
+    return run_python("answer_ack.py", [])
+
+
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["LIFEHUG_DAILY_DRY_RUN"] = "1"
@@ -1371,6 +1375,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-compile-wiki", action="store_true")
     p.add_argument("--sensitivity", default=None, choices=["private", "family", "friends", "public"])
     p.set_defaults(func=cmd_process_answer)
+
+    p = sub.add_parser("answer-ack-prompt",
+                       help="Print the warm answer-acknowledgment prompt (stdin: question/answer JSON)")
+    p.set_defaults(func=cmd_answer_ack_prompt)
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")
     p.set_defaults(func=cmd_daily_dry_run)

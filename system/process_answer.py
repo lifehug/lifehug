@@ -28,6 +28,9 @@ from lifehug_core import (
 from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
 from update_readme import update_readme
 
+FOLLOWUP_HEADER = "📖 Lifehug — since you're on a roll"
+FOLLOWUP_FOOTER = "(Totally optional — tomorrow's question comes either way)"
+
 
 def refresh_neighborhood_readiness_safely() -> None:
     """Refresh derived neighborhood lifecycle fields without blocking answer save."""
@@ -182,9 +185,9 @@ def maybe_send_followup_question(answered_question_id: str) -> None:
     if not question or question["id"] == answered_question_id:
         return
 
-    text = ("📖 Lifehug — since you're on a roll\n\n"
+    text = (f"{FOLLOWUP_HEADER}\n\n"
             f"{ask.format_question(question, categories)}\n\n"
-            "(Totally optional — tomorrow's question comes either way)")
+            f"{FOLLOWUP_FOOTER}")
     if send_telegram(text):
         ask.mark_question_sent(rotation, question["id"])
         rebuild_coverage()

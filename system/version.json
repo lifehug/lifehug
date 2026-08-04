@@ -1,7 +1,7 @@
 {
-  "version": 115,
-  "released": "2026-07-21",
-  "changelog": "v115: kimi reasoning-model token headroom (issue #44). kimi-k3 spends completion budget on reasoning_tokens — the hardcoded 4096 max_tokens truncated JSON or returned empty content, failing wiki synthesis with excerpt fallback. _kimi_call now defaults to 16384 (config kimi_max_tokens) and retries once on empty completions.",
+  "version": 116,
+  "released": "2026-08-04",
+  "changelog": "v116: answer-ack-prompt — shared acknowledgment tone contract for hosted parity (lifehug-platform#175). New `answer-ack-prompt` command (system/answer_ack.py) builds the warm post-answer acknowledgment prompt from JSON on stdin (question, answer, followup_pending) so the local skill and the hosted platform share one behavioral authority for tone. Follow-up framing copy in process_answer.py hoisted to FOLLOWUP_HEADER/FOLLOWUP_FOOTER constants (byte-identical) so downstream consumers can pin it. AGENTS.md now requires a version bump on every PR, sized to user impact.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -21,6 +21,7 @@
     "sources/corrections/.gitkeep",
     "sources/manual/.gitkeep",
     "state/.gitkeep",
+    "system/answer_ack.py",
     "system/artifact.py",
     "system/ask.py",
     "system/book.py",

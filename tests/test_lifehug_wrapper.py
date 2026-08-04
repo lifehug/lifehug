@@ -73,6 +73,7 @@ class LifehugWrapperTests(unittest.TestCase):
             ["serve", "--port", "8765"],
             ["rebuild"],
             ["process-answer", "A1", "--source", "text", "--summary", "Short answer"],
+            ["answer-ack-prompt"],
             ["daily-dry-run"],
             ["weekly-maintenance", "--dry-run"],
             ["monthly-research", "--dry-run", "--gap-limit", "2", "--self-topic", "Who I am becoming", "--focus-min-score", "15"],
