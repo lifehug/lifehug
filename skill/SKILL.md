@@ -73,6 +73,7 @@ python3 system/lifehug.py weekly-maintenance # weekly lint/fix, profile, queue, 
 python3 system/lifehug.py monthly-research  # monthly neighborhoods and focus recommendations
 python3 system/lifehug.py followups-status  # pass-transition state
 python3 system/lifehug.py followups-prompt  # prompt context for AI-generated depth questions
+python3 system/lifehug.py answer-ack-prompt  # warm acknowledgment prompt after an answer (stdin: question/answer JSON)
 ```
 
 Process an answer from stdin:
