@@ -30,8 +30,15 @@ A code change is not done until its paper trail ships **in the same pass**:
    and `skills/*/SKILL.md`.
 2. **GitHub issues** — comment progress on the covering issue with verification
    results; close it when delivered. If work surfaced a new gap, file it.
-3. **Tests + changelog** — tests for new behavior; `system/version.json`
-   changelog entry on release.
+3. **Tests + version bump** — tests for new behavior, and **every PR bumps
+   `system/version.json`** (owner rule, 2026-08-04): increment `version`,
+   set `released`, write the changelog entry sized to user impact — a
+   feature that changes behavior for the user gets a full changelog
+   paragraph naming what they'll notice; a small fix gets a one-liner.
+   Any new file the upgrade path should distribute goes into
+   `framework_files` in the same bump (that manifest is what
+   `system/update.py` ships to existing installs — a file missing from it
+   never reaches upgraders). No PR ships without a bump.
 
 "Done" = code + tests + docs + issue state — never code alone. The owner should
 never have to ask whether the docs match the code.
