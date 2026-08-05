@@ -75,6 +75,43 @@ if [[ $HAVE_LOCK -eq 0 ]]; then
   LOCK_NOTE=$'\n'"(note: filed without the lock — another filing ran long)"
 fi
 
+# Read fresh at decision time — discipline 1 of the shared-vault contract.
+# The question id is explicit here, so this pull is not about WHICH question we
+# are filing; it is about everything process-answer reads on the way through:
+# the bank's answered flags, rotation state, and — through adaptive cadence —
+# the pick for the optional same-day follow-up it may send. Filing on top of
+# the other operators' work also keeps the hourly compile_and_commit rebase
+# trivial. Non-fatal on purpose and held inside the filing lock, so it cannot
+# race another filer: if the pull fails we file against local state, which is
+# what happened before this discipline existed. A git problem never eats an
+# answer. Skipped when there is no remote (a local-only install stays quiet).
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ -n "$(git remote 2>/dev/null)" ]]; then
+  PULL_OUT=$(git pull --rebase --autostash 2>&1)
+  PULL_RC=$?
+  if [[ $PULL_RC -ne 0 ]]; then
+    echo "warn: pull before filing failed (filing against local state)" >&2
+    echo "$PULL_OUT" >&2
+    LEARNING_FAILURE_OUTPUT="$PULL_OUT" python3 - "$PULL_RC" <<'PY' || true
+import os
+import sys
+
+sys.path.insert(0, "system")
+from lifehug_core import record_learning_failure
+
+try:
+    code = int(sys.argv[1])
+except (IndexError, ValueError):
+    code = None
+record_learning_failure(
+    "file_answer_bg",
+    "git_pull_before_filing",
+    os.environ.get("LEARNING_FAILURE_OUTPUT", ""),
+    exit_code=code,
+)
+PY
+  fi
+fi
+
 # Run the actual filing — skip wiki compile (handled by hourly cron)
 OUT=$(cat "$BODY" | python3 system/lifehug.py process-answer "$QID" --no-compile-wiki "$@" 2>&1)
 RC=$?

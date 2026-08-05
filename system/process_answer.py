@@ -96,6 +96,47 @@ def append_followups(question_id: str, followups: list[str]) -> list[tuple[str, 
     return additions
 
 
+PUSH_ATTEMPTS = 2
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    """Run a git command in the workspace and capture its output (never raises)."""
+    return subprocess.run(
+        ["git", "-C", str(REPO_DIR), *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git_output(result: subprocess.CompletedProcess) -> str:
+    return f"{result.stdout or ''}{result.stderr or ''}".strip()
+
+
+def _push_failed(operation: str, result: subprocess.CompletedProcess) -> None:
+    """Report a push that never landed — honestly, and without losing the commit."""
+    detail = _git_output(result)
+    print(
+        f"✗ Answer committed locally but NOT pushed ({operation} failed).\n"
+        "  Nothing is lost: the commit exists in this workspace and the answer\n"
+        "  file is on disk. Another operator pushed to the same vault while this\n"
+        "  answer was being filed, and the retry could not replay on top of it.\n"
+        "  Recover with:  git pull --rebase --autostash && git push\n"
+        "  If rotation.json conflicts, see CLAUDE.md → 'Shared Vault: One Vault,\n"
+        "  Many Machines' for the recovery procedure.",
+        file=sys.stderr,
+    )
+    if detail:
+        print(detail, file=sys.stderr)
+    record_learning_failure(
+        "process_answer",
+        "git_push",
+        detail or f"{operation} exited {result.returncode}",
+        exit_code=result.returncode,
+        context={"operation": operation},
+    )
+    raise SystemExit(1)
+
+
 def git_commit(message: str, push: bool) -> None:
     paths = [
         "README.md",
@@ -111,8 +152,25 @@ def git_commit(message: str, push: bool) -> None:
     if diff.returncode == 0:
         return
     subprocess.run(["git", "-C", str(REPO_DIR), "commit", "-m", message], check=True)
-    if push:
-        subprocess.run(["git", "-C", str(REPO_DIR), "push"], check=True)
+    if not push:
+        return
+
+    # Discipline 3 of the shared-vault contract: on push rejection, re-pull and
+    # retry. The vault may have several writers (this machine, a dev box, a
+    # hosted environment), so a non-fast-forward rejection is an ordinary event,
+    # not a crash. Rebase onto whatever landed, then push; if the push is
+    # rejected again, someone landed a commit inside our own race window, so
+    # rebase once more and retry. Past that we stop and say plainly what state
+    # the workspace is in — the commit is safe, only the push is missing.
+    last: subprocess.CompletedProcess | None = None
+    for _ in range(PUSH_ATTEMPTS):
+        pull = _git("pull", "--rebase", "--autostash")
+        if pull.returncode != 0:
+            _push_failed("git pull --rebase --autostash", pull)
+        last = _git("push")
+        if last.returncode == 0:
+            return
+    _push_failed("git push", last)
 
 
 def compile_wiki() -> None:

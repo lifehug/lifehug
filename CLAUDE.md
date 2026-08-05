@@ -326,6 +326,103 @@ question id), the retraction stops applying automatically.
 
 ---
 
+### Shared Vault: One Vault, Many Machines
+
+One vault, one branch (`main`), any number of operators driving it — this Mac,
+a dev box, a hosted Lifehug environment. There is no "primary" machine and no
+ownership handoff: **everyone may ask, and an answer filed anywhere counts
+everywhere.** Convergence is pull-based and happens at the next natural touch
+(daily send, filing, hourly compile), so "answer on your laptop today, the
+hosted bot sees it tomorrow" is the contract, not a bug.
+
+Four disciplines make that safe. The scripts already obey them; follow them by
+hand only when you are driving git yourself.
+
+1. **Read fresh at decision time.** Pull before anything picks a question or
+   reads state to decide. `daily_question.sh` and `file_answer_bg.sh` do this
+   with a non-fatal `git pull --rebase --autostash` before they work.
+2. **Write bookkeeping promptly after acting.** Send, then mark sent; file,
+   then commit. `safe_autocommit` and `compile_and_commit.sh` close the loop
+   so the next machine's pull sees what happened here.
+3. **On push rejection: pull, replay, retry.** A non-fast-forward rejection
+   means another operator landed work first. That is ordinary. Rebase onto it
+   and push again — never force-push a vault, ever.
+4. **Rebuild derived state; never merge it.** `coverage.json`, `README.md`,
+   and `wiki/` are outputs — regenerate them instead of resolving them.
+   Genuinely stateful files (`rotation.json`, `state/question_queue.json`,
+   `state/question_candidates.json`) are the only ones worth hand-resolving.
+
+**Accepted edge:** if two machines have not converged before their send times,
+they can ask *different* questions the same day, and each active environment
+may send its own daily question. Both are real questions and both are
+answerable. State re-converges on the next pull.
+
+#### Answer with an explicit question id
+
+`process-answer` defaults to `rotation.last_question_id` when you omit the id.
+That default is only trustworthy on a single machine: another operator may have
+sent a newer question since this workspace last pulled, so the default can name
+yesterday's question — or a question this machine never sent. **Pass the id.**
+
+```bash
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer A3   # good
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer      # single-machine only
+```
+
+The id is in the question message itself (`[A3]`), which makes it the cheapest
+thing to be exact about. `file_answer_bg.sh` already requires it.
+
+#### Recovering from a `rotation.json` rebase conflict
+
+`git pull --rebase` stops on a real conflict in `rotation.json` (or another
+state file). Take the **remote** side, rebuild what is derived, then re-apply
+your local operation explicitly. The remote side is the other operators'
+record of what actually went out; your local delta is one operation you still
+know how to repeat.
+
+> **The labels are inverted during a rebase** — this trips everyone. Your local
+> commits are being replayed *onto* the remote, so `--ours` is the **remote /
+> upstream** side and `--theirs` is **your local** commit. To take remote,
+> `git checkout --ours`.
+
+```bash
+# 1. Take the remote side of the conflicted state file(s)
+git checkout --ours system/rotation.json
+git add system/rotation.json
+GIT_EDITOR=true git rebase --continue
+
+# 2. Rebuild everything derived from source truth, then check what survived
+python3 system/lifehug.py rebuild     # coverage, README, rotation counters
+python3 system/lifehug.py compile     # wiki
+python3 system/lifehug.py status
+
+# 3. Only if the interrupted operation was actually lost, re-apply it with an
+#    explicit id (check `ls answers/A3.md` first — if the answer file replayed
+#    fine, step 2 already re-derived rotation from it and you are done)
+printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer A3
+
+# 4. Push
+git add -A && git commit -m "Answer A3: <summary>" && git push
+```
+
+Taking the remote side of `rotation.json` costs you only counters, and `rebuild`
+re-derives those from the answers and the bank — which is why discipline 4 says
+rebuild rather than merge. Your answer *files* are not in the conflict; they
+replay normally.
+
+If the rebase is wedged, `git rebase --abort` returns you to a clean tree and
+nothing is lost — then pull again. Never leave a rebase in progress: it blocks
+every later answer filing.
+
+Note the difference from the **upgrade** case in `AGENTS.md` ("Git Conflict
+Resolution — State File Safety"). Pulling framework upgrades from the upstream
+template, remote is *newer framework* and local is *your only copy of your
+state*, so local state wins. Pulling from your own vault's `main`, remote is
+*another operator's state*, so remote wins and you replay your one operation on
+top. Same file, opposite answer — check which pull you are in.
+
+---
+
 ### Unprompted Story Ingest
 
 If the user shares a story that is not an answer to the pending daily question, ingest it as raw source material. Do not force it into `answers/{question_id}.md`.
