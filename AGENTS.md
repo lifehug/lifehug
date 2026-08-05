@@ -51,16 +51,23 @@ Then decide:
 
 ## Git Conflict Resolution — State File Safety
 
-Lifehug state files track delivery history, coverage, and the question queue. During `git pull --rebase` or merge conflicts, **never blindly accept remote ("theirs") for state files** — doing so erases the record of what was asked, answered, and delivered, causing duplicate questions and lost answers.
+**This section is the UPGRADE case**: pulling framework changes from the
+upstream template, where remote is newer framework and local is the only copy
+of this author's state. If instead you are pulling **the author's own vault**
+shared across several machines or a hosted environment, the answer inverts —
+remote is another operator's legitimate state and wins. See CLAUDE.md →
+"Shared Vault: One Vault, Many Machines". Check which pull you are in first.
 
-### State files (accept LOCAL / "ours" on conflict)
+Lifehug state files track delivery history, coverage, and the question queue. During `git pull --rebase` or merge conflicts, **never blindly accept remote for state files** — doing so erases the record of what was asked, answered, and delivered, causing duplicate questions and lost answers.
+
+### State files (keep LOCAL on conflict)
 - `system/rotation.json` — delivery counts, last question sent, send-today tracking
 - `system/coverage.json` — per-category answer counts
 - `state/question_queue.json` — planned queue with sent/queued status
 - `state/source_manifest.json` — answer and source registry
 - `system/question-bank.md` — checked-off questions
 
-### Framework files (accept REMOTE / "theirs" on conflict)
+### Framework files (accept REMOTE on conflict)
 - `system/version.json`, `system/lifehug.py`, `system/*.sh` — upstream upgrades
 - `wiki/` pages — recompiled from source on next answer filing
 
@@ -73,9 +80,11 @@ cp state/question_queue.json /tmp/queue-backup.json
 # Pull
 git pull --rebase origin main
 
-# On conflict: keep local state, accept remote framework
-git checkout --ours system/rotation.json system/coverage.json state/question_queue.json
-git checkout --theirs system/version.json  # if conflicted
+# On conflict: keep local state, accept remote framework.
+# DURING A REBASE THE LABELS ARE INVERTED: your commits are replayed onto the
+# remote, so --theirs is YOUR local side and --ours is the REMOTE side.
+git checkout --theirs system/rotation.json system/coverage.json state/question_queue.json  # local state
+git checkout --ours system/version.json  # remote framework, if conflicted
 git add -A && GIT_EDITOR=true git rebase --continue
 
 # Verify delivery state survived

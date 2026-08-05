@@ -53,6 +53,31 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
+# Read fresh at decision time — discipline 1 of the shared-vault contract.
+# One vault can be driven by several operators at once (this Mac, a dev box, a
+# hosted environment), and the question we are about to pick is only as good as
+# the rotation/bank state we read. So pull BEFORE picking, not just after
+# delivering. Non-fatal by the same logic as safe_autocommit: if the pull fails
+# we ask from local state, which is exactly the behavior that shipped before
+# this discipline existed — a stale question is a real question, and no git
+# problem may cost the author their daily question. Skipped when there is no
+# remote at all (a local-only install must not log a failure every morning).
+safe_pull() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  [[ -n "$(git remote 2>/dev/null)" ]] || return 0
+  set +e
+  local git_out
+  git_out=$(git pull --rebase --autostash 2>&1)
+  local git_status=$?
+  set -e
+  if [[ "$git_status" -ne 0 ]]; then
+    echo "warn: pull before pick failed (asking from local state)" >&2
+    echo "$git_out" >&2
+    record_learning_failure "daily_question" "git_pull_before_pick" "$git_status" "$git_out"
+  fi
+  return 0
+}
+
 # Git housekeeping is deliberately NON-FATAL and runs AFTER delivery: a
 # rejected push must never cost the author their daily question. Pull-rebase
 # first — a second machine (dev box) writes to the same repo.
@@ -140,6 +165,11 @@ if not payload.get("ok"):
 print(payload["result"]["message_id"])
 '
 }
+
+# Converge with the other operators before anything reads state: the compile
+# below and every pick that follows it must see what the rest of the world
+# already answered.
+safe_pull
 
 # Keep the wiki (the relational database the rest of the system reads) fresh
 # before delivering. Cheap and deterministic; failures never block the question.
