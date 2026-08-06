@@ -40,7 +40,7 @@ python3 system/lifehug.py focus-new "<label>" \
   --objective "<objective>" --deliverable <book|chapter|essay|letter|post>
 ```
 
-`focus-new` scaffolds a new question-bank category, registers the Focus on the roadmap, and **auto-generates ~8–12 starter questions** toward the objective. Generation uses the OpenClaw gateway when it's running (cron path — no API key needed), or `ANTHROPIC_API_KEY` as a fallback. If neither is available — the usual case on the desktop — the Focus is still created and you generate the questions yourself (next section). It never touches existing answers.
+`focus-new` scaffolds a new question-bank category, registers the Focus on the roadmap, and **auto-generates ~8–12 starter questions** toward the objective. Generation uses the OpenClaw gateway when it's running (cron path — no API key needed), or `ANTHROPIC_API_KEY` as a fallback. The Anthropic SDK is optional: if it is absent, the command remains keyless and the Focus is still created so you can generate the questions yourself (next section). It never touches existing answers.
 
 After it runs, confirm what happened and show the result:
 

@@ -97,6 +97,18 @@ class AiStatusCommandTests(unittest.TestCase):
         with mock.patch.object(re_live, "ai_available", return_value=None):
             self.assertEqual(lh.cmd_ai_status(None), 1)
 
+    def test_missing_optional_sdk_reports_keyless(self):
+        re_live = sys.modules["research_expand"]
+        with mock.patch.object(re_live, "_openclaw_gateway", return_value=None), \
+             mock.patch.dict(re_live.os.environ, {"ANTHROPIC_API_KEY": "synthetic-key"}, clear=True), \
+             mock.patch.object(re_live, "load_config", return_value={}), \
+             mock.patch.object(re_live, "_anthropic_sdk_available", return_value=False), \
+             mock.patch("sys.stdout") as stdout:
+            self.assertEqual(lh.cmd_ai_status(None), 1)
+        self.assertIn("keyless", "".join(
+            call.args[0] for call in stdout.write.call_args_list
+        ))
+
 
 class EmitPromptsTests(unittest.TestCase):
     def setUp(self):
@@ -190,7 +202,7 @@ class OrchestratorContractTests(unittest.TestCase):
 
     def test_weekly_checks_ai_status_and_emits(self):
         self.assertIn("ai-status", self.weekly)
-        self.assertIn("--emit-prompts state/agent_tasks/classify", self.weekly)
+        self.assertIn('--emit-prompts "$AGENT_TASKS_DIR/classify"', self.weekly)
         self.assertIn("⏸ keyless", self.weekly)
 
     def test_weekly_keyless_failure_is_distinct_operation(self):
@@ -200,7 +212,7 @@ class OrchestratorContractTests(unittest.TestCase):
 
     def test_monthly_checks_ai_status_and_emits_roster_tasks(self):
         self.assertIn("ai-status", self.monthly)
-        self.assertIn("--emit-task \"state/agent_tasks/roster/${etype}.json\"", self.monthly)
+        self.assertIn('--emit-task "$AGENT_TASKS_DIR/roster/${etype}.json"', self.monthly)
         self.assertIn("⏸ keyless", self.monthly)
 
     def test_monthly_keyless_never_runs_keyed_roster_refresh_blind(self):
@@ -209,7 +221,7 @@ class OrchestratorContractTests(unittest.TestCase):
         self.assertIn('if [[ "$KEYLESS" == "1" ]]', self.monthly)
 
     def test_monthly_research_prompts_emitted_keyless(self):
-        self.assertIn("state/agent_tasks/research", self.monthly)
+        self.assertIn('$AGENT_TASKS_DIR/research', self.monthly)
         self.assertIn("--from-response", self.monthly)
 
 

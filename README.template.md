@@ -163,6 +163,10 @@ python3 system/lifehug.py connector-audit gmail                # what got auto-p
 python3 system/lifehug.py --help
 ```
 
+The Anthropic SDK is optional. `python3 system/lifehug.py ai-status` reports
+keyless when it is absent, so an agent can complete AI tasks through the
+existing emit-task and `--from-response` paths without installing it.
+
 ## Structure
 
 ```

@@ -1080,7 +1080,8 @@ Optional AI-call tuning (v85): `ai_timeout_seconds` (default 600; env override
 routes OpenClaw gateway → retries transient failures 3x → falls through to the
 Anthropic SDK when a key is available (the gateway's deterministic
 "couldn't generate" rejection, issue #34, skips retries and falls through
-immediately).
+immediately). The Anthropic SDK is optional: when it is not importable,
+`ai-status` reports keyless and the agent-task paths remain available.
 
 ---
 
