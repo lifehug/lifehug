@@ -718,7 +718,8 @@ def main() -> int:
         print(f"✓ {t} roster written: {len(ents)} entities, {elig} page-eligible{extra} → {roster_file(t).name}")
         return 0
 
-    from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
+    from ai_provider import call_ai
+    from research_expand import DEFAULT_MODEL, parse_ai_json
     preserved = 0
     failure_reason = None
     try:

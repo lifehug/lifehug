@@ -3041,8 +3041,9 @@ def _f(form: dict, key: str, default: str = "") -> str:
 
 def _ai_route() -> str | None:
     try:
-        from research_expand import ai_available  # noqa: PLC0415
-        return ai_available()
+        from ai_provider import provider_status  # noqa: PLC0415
+        status = provider_status(probe=False)
+        return status.provider if status.ready else None
     except Exception:  # noqa: BLE001
         return None
 

@@ -170,7 +170,7 @@ def resolve_model(model: str | None = None) -> str:
 def _resolve_ai(ai_caller=None):
     if ai_caller is not None:
         return ai_caller
-    from research_expand import call_ai  # same OpenClaw-first path as classify_story
+    from ai_provider import call_ai
     return call_ai
 
 

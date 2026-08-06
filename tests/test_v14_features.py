@@ -115,10 +115,10 @@ class ClassifyStoryTests(unittest.TestCase):
         self.assertTrue(hasattr(mod, "build_prompt"))
         self.assertTrue(hasattr(mod, "main"))
 
-    def test_classify_uses_shared_openclaw_first_ai_path(self):
+    def test_classify_uses_shared_authoritative_ai_provider(self):
         mod = load("classify_story")
-        research_expand = importlib.import_module("research_expand")
-        original = research_expand.call_ai
+        ai_provider = importlib.import_module("ai_provider")
+        original = ai_provider.call_ai
         calls = []
 
         def fake_call_ai(prompt, model):
@@ -137,10 +137,10 @@ class ClassifyStoryTests(unittest.TestCase):
             })
 
         try:
-            research_expand.call_ai = fake_call_ai
+            ai_provider.call_ai = fake_call_ai
             result = mod.classify_with_ai("prompt text", "test-model")
         finally:
-            research_expand.call_ai = original
+            ai_provider.call_ai = original
 
         self.assertEqual(result["themes"], ["identity"])
         self.assertEqual(calls, [("prompt text", "test-model")])

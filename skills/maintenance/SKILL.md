@@ -1,6 +1,6 @@
 ---
 name: maintenance
-description: "Run Lifehug weekly maintenance or monthly research on any machine — keyed (API key / gateway) or keyless (you act as the model via the emit-task/from-response agent paths). Use when the user says /maintenance, 'run weekly maintenance', 'run monthly research', or when state/agent_tasks/ holds tasks a keyless cron run emitted."
+description: "Run Lifehug weekly maintenance or monthly research on any machine — ready provider (direct local model, gateway, API key) or keyless (you act as the model via emit-task/from-response paths). Use when the user says /maintenance, 'run weekly maintenance', 'run monthly research', or when state/agent_tasks/ holds tasks a keyless cron run emitted."
 ---
 
 # Lifehug Maintenance Runner
@@ -28,12 +28,15 @@ the workspace root.
 python3 system/lifehug.py ai-status
 ```
 
-- **Exit 0** (`AI route: gateway` or `sdk-key`) → keyed mode. Just run the
+- **Exit 0** (`AI readiness: ready`) → unattended mode. Just run the
   script; done:
   ```bash
   python3 system/lifehug.py weekly-maintenance    # or: monthly-research
   ```
-- **Exit 1** (`keyless`) → agent mode. **You are the model.** Follow Mode 1.
+- **Exit 1** (`AI readiness: not ready`, then `keyless`) → agent mode. **You are the model.** Follow Mode 1. A configured local route intentionally stays here when its server is offline; do not substitute a cloud provider unless the owner changes `ai_provider`.
+
+The Anthropic SDK is optional. If it is absent, provider discovery also stays
+in this clean agent-task path; do not install it merely to run Mode 1.
 
 The Anthropic SDK is optional. If it is not installed, `ai-status` still exits
 1 cleanly for keyless mode; do not install it merely to run the agent-task flow.

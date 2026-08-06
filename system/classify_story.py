@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classify ingested Lifehug stories using OpenClaw-first AI routing.
+"""Classify ingested Lifehug stories using the shared AI provider.
 
 Extracts entities, themes, story functions, and generates smart
 candidate questions from any source file or answer file.
@@ -83,8 +83,8 @@ THEME_TAXONOMY = [
 
 
 def classify_with_ai(prompt: str, model: str = DEFAULT_MODEL) -> dict:
-    """Classify via the same OpenClaw-first path used by research expansion."""
-    from research_expand import call_ai  # local import keeps prompt mode keyless
+    """Classify through the shared provider while prompt mode stays keyless."""
+    from ai_provider import call_ai  # local import keeps prompt mode keyless
 
     return extract_json(call_ai(prompt, model))
 
