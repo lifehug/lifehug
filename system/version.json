@@ -1,7 +1,7 @@
 {
-  "version": 144,
-  "released": "2026-08-10",
-  "changelog": "v144: new Answers view (System menu, next to Source Integrity) lists every answer newest-first with question, category, date, and word count, each linking to reflect/correct/retract — filing here is synchronous, so there's no in-flight status column like the hosted twin's.",
+  "version": 145,
+  "released": "2026-08-11",
+  "changelog": "v145: new Answers view (System menu, next to Source Integrity) lists every answer newest-first with question, category, date, and word count, each linking to reflect/correct/retract — filing here is synchronous, so there's no in-flight status column like the hosted twin's. Also, the local compiled-wiki viewer now works on a phone: at 820px and below, the full wiki navigation opens as a drawer instead of disappearing; search and the Views menu remain available, controls have phone-sized tap targets, and regular pages stay within the viewport while wide tables keep their own intentional scroll.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
