@@ -29,6 +29,7 @@ from lifehug_core import (
     CONNECTORS_STATE_DIR,
     REPO_DIR,
     STATE_DIR,
+    append_text,
     now_utc,
     read_json,
     slugify,
@@ -86,10 +87,13 @@ def append_ledger(path: Path, new_entries: list[dict]) -> tuple[int, int]:
         if entry.get("message_id") and entry["message_id"] not in seen
     ]
     if added:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            for entry in added:
-                handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+        append_text(
+            path,
+            "".join(
+                json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
+                for entry in added
+            ),
+        )
     return len(added), len(existing) + len(added)
 
 

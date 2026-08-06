@@ -1427,8 +1427,9 @@ def main():
                 "sources": task_sources(d),
                 "related_candidates": others,
             })
-        Path(args.emit_tasks).write_text(
-            json.dumps(tasks, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        write_text(
+            Path(args.emit_tasks), json.dumps(tasks, indent=2, ensure_ascii=False) + "\n"
+        )
         print(f"✓ Emitted {len(tasks)} synthesis task(s) to {args.emit_tasks}")
         if tasks:
             print("  Write each task's prose to its narrative_path, then run: "

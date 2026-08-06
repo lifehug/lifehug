@@ -18,7 +18,10 @@ import lifehug_core  # noqa: E402
 
 class WikiViewsTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        # Keep the fixture under the real-path worktree parent. On macOS the
+        # default /var/folders prefix traverses the /var symlink, which the
+        # production no-follow vault I/O authority correctly rejects.
+        self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
         # Save originals so each test runs against an isolated fixture set.
         self._saved = {
             (serve_wiki, "QUESTIONS_FILE"): serve_wiki.QUESTIONS_FILE,
@@ -382,7 +385,7 @@ class RevisionFooterTests(unittest.TestCase):
     Thoughts group for subjectless essays."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
         self._saved = {
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (lifehug_core, "REPO_DIR"): lifehug_core.REPO_DIR,

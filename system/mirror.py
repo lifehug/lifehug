@@ -256,7 +256,7 @@ def emit_task(out_dir: Path) -> int:
         return 0
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt_file = out_dir / "mirror.prompt.md"
-    prompt_file.write_text(build_mirror_prompt(entries), encoding="utf-8")
+    write_text(prompt_file, build_mirror_prompt(entries))
     manifest = out_dir / "manifest.json"
     write_json(manifest, {
         "task": "mirror",

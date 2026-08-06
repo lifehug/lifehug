@@ -42,6 +42,12 @@ from pathlib import Path
 from typing import Callable
 
 from vault_paths import (
+    atomic_create_vault_bytes,
+    atomic_write_vault_text,
+    ensure_vault_directory,
+    open_vault_fd,
+    read_vault_bytes,
+    read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
     validate_contained_path,
@@ -95,30 +101,20 @@ def _parse_time(value: str) -> datetime | None:
 
 def _write_json(path: Path, data: object, *, mode: int = 0o600) -> None:
     """Atomically write JSON without following a destination symlink."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        raise ValueError("refusing symlinked job storage")
-    tmp = path.parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    fd = os.open(tmp, flags, mode)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            tmp.unlink()
+    atomic_write_vault_text(
+        path,
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        vault_root=VAULT_ROOT,
+        mode=mode,
+    )
 
 
 def _read_json(path: Path) -> dict | None:
-    if path.is_symlink() or not path.is_file():
-        return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeError):
+        value = json.loads(read_vault_text(path, vault_root=VAULT_ROOT))
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, UnicodeError):
         return None
     return value if isinstance(value, dict) else None
 
@@ -130,6 +126,7 @@ def configure(vault_root: Path) -> None:
     VAULT_ROOT = resolve_vault_root(
         vault_root,
         framework_system_dir=FRAMEWORK_SYSTEM_DIR,
+        bind_process=True,
     )
     JOBS_DIR = vault_data_path(
         "jobs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
@@ -146,47 +143,22 @@ def _ensure_layout() -> None:
     state_root = vault_data_path(
         "state", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
     )
-    if state_root.is_symlink():
-        raise ValueError("vault/state may not be a symlink")
-    if state_root.exists() and not state_root.is_dir():
-        raise ValueError("vault/state must be a directory")
-    state_root.mkdir(parents=True, exist_ok=True)
-    if JOBS_DIR.exists() and (JOBS_DIR.is_symlink() or not JOBS_DIR.is_dir()):
-        raise ValueError("job directory must be a real directory under vault/state")
-    JOBS_DIR.mkdir(exist_ok=True)
-    if JOBS_DIR.resolve().parent != state_root.resolve():
-        raise ValueError("job directory escaped vault/state")
-    for directory in (PAYLOADS_DIR, RECEIPTS_DIR):
-        if directory.exists() and (directory.is_symlink() or not directory.is_dir()):
-            raise ValueError("job sidecar directories must be real directories")
-    PAYLOADS_DIR.mkdir(mode=0o700, exist_ok=True)
-    RECEIPTS_DIR.mkdir(mode=0o700, exist_ok=True)
+    for directory in (state_root, JOBS_DIR, PAYLOADS_DIR, RECEIPTS_DIR):
+        ensure_vault_directory(directory, vault_root=VAULT_ROOT)
 
 
 def _identity_key() -> bytes:
     _ensure_layout()
-    if IDENTITY_KEY_FILE.is_symlink():
-        raise ValueError("identity key may not be a symlink")
     try:
-        key = IDENTITY_KEY_FILE.read_bytes()
+        key = read_vault_bytes(IDENTITY_KEY_FILE, vault_root=VAULT_ROOT)
     except FileNotFoundError:
         key = secrets.token_bytes(32)
-        tmp = IDENTITY_KEY_FILE.parent / f".identity-key-{secrets.token_hex(8)}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(key)
-                handle.flush()
-                os.fsync(handle.fileno())
-            try:
-                # A hard-link publishes only a fully-written inode and fails
-                # atomically if another cold-start process won the race.
-                os.link(tmp, IDENTITY_KEY_FILE, follow_symlinks=False)
-            except FileExistsError:
-                key = IDENTITY_KEY_FILE.read_bytes()
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                tmp.unlink()
+            atomic_create_vault_bytes(
+                IDENTITY_KEY_FILE, key, vault_root=VAULT_ROOT, mode=0o600
+            )
+        except FileExistsError:
+            key = read_vault_bytes(IDENTITY_KEY_FILE, vault_root=VAULT_ROOT)
     if len(key) != 32:
         raise ValueError("invalid job identity key")
     return key
@@ -809,12 +781,12 @@ def _owned_lock_record(owner_id: str, lease_seconds: int) -> dict:
 
 def _open_lock_file(path: Path) -> int:
     _ensure_layout()
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        raise ValueError("lock path must be a regular local file")
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    return os.open(path, flags, 0o600)
+    return open_vault_fd(
+        path,
+        os.O_RDWR | os.O_CREAT,
+        vault_root=VAULT_ROOT,
+        mode=0o600,
+    )
 
 
 class _KernelLock:
@@ -907,17 +879,18 @@ def writer_token_is_live(token: str | None, *, vault_root: Path | None = None) -
         validate_contained_path(lock_file, jobs_dir, label="writer lock")
     except ValueError:
         return False
-    owner = _read_json(owner_file)
+    try:
+        owner_value = json.loads(read_vault_text(owner_file, vault_root=root))
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeError, ValueError):
+        return False
+    owner = owner_value if isinstance(owner_value, dict) else None
     if not owner or _owner_is_stale(owner):
         return False
     if not secrets.compare_digest(str(owner.get("owner_id", "")), token):
         return False
     try:
-        flags = os.O_RDWR
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        fd = os.open(lock_file, flags)
-    except OSError:
+        fd = open_vault_fd(lock_file, os.O_RDWR, vault_root=root)
+    except (OSError, ValueError):
         return False
     try:
         try:

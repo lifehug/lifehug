@@ -142,7 +142,16 @@ def _push_failed(operation: str, result: subprocess.CompletedProcess) -> None:
 def git_commit(message: str, push: bool) -> None:
     paths = [
         vault_relative_path(name, vault_root=REPO_DIR, framework_system_dir=SYSTEM_DIR).as_posix()
-        for name in ("readme", "question_bank", "rotation", "coverage", "answers", "state", "wiki")
+        for name in (
+            "readme",
+            "question_bank",
+            "rotation",
+            "coverage",
+            "answers",
+            "source_manifest",
+            "answer_scores",
+            "wiki",
+        )
     ]
     existing = [path for path in paths if (REPO_DIR / path).exists()]
     subprocess.run(["git", "-C", str(REPO_DIR), "add", "--", *existing], check=True)

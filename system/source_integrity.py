@@ -30,6 +30,7 @@ from lifehug_core import (
     WIKI_DIR,
     answer_id_from_filename,
     now_utc,
+    read_bytes,
     read_json,
     slugify,
     split_frontmatter,
@@ -108,11 +109,7 @@ def payload_sha256(text: str) -> str:
 
 
 def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return hashlib.sha256(read_bytes(path)).hexdigest()
 
 
 def source_payload(content: str) -> str:

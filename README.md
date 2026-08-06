@@ -448,7 +448,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`jobs.py`** + **`job_execute.py`** | Durable metadata-only queue and single-writer worker. Typed payloads stay in private sidecars and cross the child boundary through stdin, never process argv. Explicit schedule/provider identities deduplicate; ordinary repeated actions create fresh jobs. |
-| **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with fail-closed path containment and symlink checks. |
+| **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with process binding, no-follow file operations, deterministic tree preflight, and an exportable versioned contract. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
 | **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, classifies a capped batch of unclassified sources, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, scans for gaps, reports progress, then commits and sends a Telegram summary. Dry-run previews the same candidate promotion gate without writing. |
 | **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Focuses, refreshes entity rosters, reports progress, then commits real changes. |
@@ -540,15 +540,37 @@ my-private-vault/
 
 Optional `answers/`, `sources/`, `wiki/`, `outputs/`, profile/config files, and additional `state/` records are created or read under that vault as their workflows require. Code, templates, mission text, and connector implementations always stay in the framework install.
 
-Select the vault for one command with the global flag (before the subcommand), or for a process/scheduler with the environment variable:
+Select the vault for one command with the global flag (before or after the
+subcommand), or for a process/scheduler with the environment variable:
 
 ```bash
 python3 /opt/lifehug/system/lifehug.py --vault-root ~/Documents/my-private-vault status
+python3 /opt/lifehug/system/lifehug.py status --vault-root ~/Documents/my-private-vault
 LIFEHUG_VAULT_ROOT=~/Documents/my-private-vault \
   python3 /opt/lifehug/system/lifehug.py compile --no-ai
 ```
 
-Resolution is explicit `--vault-root`, then `LIFEHUG_VAULT_ROOT`, then the embedded framework checkout. Selection is process-scoped; start a new CLI invocation to switch vaults. Missing minimum files, unsupported state schemas, a vault containing `system/`, and symlinked vault roots or required paths fail before mutation. `state/hosted.json` has no stand-down meaning in the open-source runtime.
+Resolution is explicit `--vault-root`, then `LIFEHUG_VAULT_ROOT`, then the
+embedded framework checkout. Selection is process-scoped; start a new CLI
+invocation to switch vaults. Runtime reads and writes walk from a pinned vault
+directory without following symlinks, and reject a root, parent, or destination
+that changes during the operation. Missing minimum files, unsupported state
+schemas, a vault containing `system/`, symlinks, or other special files fail
+before mutation. `state/hosted.json` has no stand-down meaning in the open-source
+runtime.
+
+Integrations should consume the normalized contract rather than infer paths:
+
+```bash
+python3 /opt/lifehug/system/vault_paths.py contract
+python3 /opt/lifehug/system/vault_paths.py walk --vault-root ~/Documents/my-private-vault
+python3 /opt/lifehug/system/vault_paths.py classify state/rotation.json --authority vault
+```
+
+The `contract` output has a stable identity digest, explicit embedded/external
+data mappings, framework classifications, required shape, JSON validation
+policy, and special-file policy. It never includes a machine-local absolute
+path.
 
 ---
 

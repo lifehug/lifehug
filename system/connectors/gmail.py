@@ -250,7 +250,7 @@ class GmailConnector(BaseConnector):
             flow = InstalledAppFlow.from_client_secrets_file(str(self.client_secrets_path), SCOPES)
             credentials = flow.run_local_server(port=0)
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        self.token_path.write_text(credentials.to_json(), encoding="utf-8")
+        write_text(self.token_path, credentials.to_json())
         print(f"✓ gmail authorized (scope gmail.readonly only) — token at {self.token_path}")
         return 0
 
@@ -264,7 +264,7 @@ class GmailConnector(BaseConnector):
         credentials = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
         if credentials.expired and credentials.refresh_token:
             credentials.refresh(Request())
-            self.token_path.write_text(credentials.to_json(), encoding="utf-8")
+            write_text(self.token_path, credentials.to_json())
         service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
         return GmailClient(service)
 

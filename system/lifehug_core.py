@@ -6,22 +6,24 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from vault_paths import (
+    append_vault_text,
+    atomic_write_vault_text,
     framework_path,
+    read_vault_bytes,
+    read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
-    validate_contained_path,
     vault_data_path,
     vault_layout,
 )
 
 SYSTEM_DIR = resolve_framework_system_dir()
 FRAMEWORK_ROOT = SYSTEM_DIR.parent
-REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR)
+REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR, bind_process=True)
 VAULT_LAYOUT = vault_layout(REPO_DIR, framework_system_dir=SYSTEM_DIR)
 
 
@@ -111,45 +113,58 @@ def now_utc() -> str:
 
 def read_json(path: Path, default=None):
     try:
-        with path.open() as f:
-            return json.load(f)
+        if _is_vault_path(path):
+            return json.loads(read_vault_text(path, vault_root=REPO_DIR))
+        with path.open(encoding="utf-8") as handle:
+            return json.load(handle)
     except FileNotFoundError:
         return default
 
 
+def read_text(path: Path, *, encoding: str = "utf-8", errors: str | None = None) -> str:
+    if _is_vault_path(path):
+        return read_vault_text(path, vault_root=REPO_DIR, encoding=encoding, errors=errors)
+    return path.read_text(encoding=encoding, errors=errors)
+
+
+def read_bytes(path: Path) -> bytes:
+    if _is_vault_path(path):
+        return read_vault_bytes(path, vault_root=REPO_DIR)
+    return path.read_bytes()
+
+
 def write_json(path: Path, data) -> None:
-    _guard_private_write(path)
+    content = json.dumps(data, indent=2) + "\n"
+    if _is_vault_path(path):
+        atomic_write_vault_text(path, content, vault_root=REPO_DIR)
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-        tmp = Path(f.name)
-    tmp.replace(path)
+    path.write_text(content, encoding="utf-8")
 
 
 def write_text(path: Path, text: str) -> None:
-    _guard_private_write(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as f:
-        f.write(text)
-        tmp = Path(f.name)
-    tmp.replace(path)
-
-
-def _guard_private_write(path: Path) -> None:
-    """Prevent answer/source/output helpers from traversing symlinked refs."""
-    candidate = Path(path).absolute()
-    for root, label in (
-        (ANSWERS_DIR, "answer path"),
-        (SOURCES_DIR, "source path"),
-        (OUTPUTS_DIR, "output path"),
-    ):
-        try:
-            candidate.relative_to(Path(root).absolute())
-        except ValueError:
-            continue
-        validate_contained_path(candidate, root, label=label)
+    if _is_vault_path(path):
+        atomic_write_vault_text(path, text, vault_root=REPO_DIR)
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def append_text(path: Path, text: str) -> None:
+    if _is_vault_path(path):
+        append_vault_text(path, text, vault_root=REPO_DIR)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _is_vault_path(path: Path) -> bool:
+    try:
+        Path(os.path.abspath(path)).relative_to(REPO_DIR)
+        return True
+    except ValueError:
+        return False
 
 
 def record_learning_failure(
@@ -172,9 +187,13 @@ def record_learning_failure(
         record["exit_code"] = exit_code
     if context:
         record["context"] = context
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    if _is_vault_path(path):
+        append_vault_text(path, line, vault_root=REPO_DIR)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
     return record
 
 

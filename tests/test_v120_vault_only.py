@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import shutil
 import socket
@@ -122,32 +123,73 @@ def tree_digest(root: Path) -> dict[str, str]:
 
 class VaultContractTests(unittest.TestCase):
     def setUp(self):
+        vault_paths._reset_process_binding_for_tests()
         self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-v120-contract-", dir=ROOT.parent))
 
     def tearDown(self):
+        vault_paths._reset_process_binding_for_tests()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_versioned_contract_is_the_exported_path_and_schema_authority(self):
         raw = json.loads((SYSTEM / "vault_contract.json").read_text(encoding="utf-8"))
-        self.assertEqual(vault_paths.VAULT_CONTRACT, raw)
-        self.assertEqual(vault_paths.VAULT_DATA_PATHS, raw["data_paths"])
+        exported = vault_paths.exported_contract()
+        self.assertEqual(vault_paths.VAULT_CONTRACT, exported)
+        self.assertEqual(vault_paths.VAULT_DATA_PATHS, exported["data_paths"])
         self.assertEqual(set(vault_paths.VAULT_DATA_PATHS), EXPECTED_DATA_PATHS)
-        self.assertEqual(vault_paths.FRAMEWORK_PATHS, raw["framework_paths"])
+        self.assertEqual(vault_paths.FRAMEWORK_PATHS, exported["framework_paths"])
+        self.assertEqual(list(exported["data_paths"]), sorted(exported["data_paths"]))
+        self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
+        self.assertEqual(exported["identity"]["framework_version"], 120)
+        self.assertEqual(
+            exported["identity"]["content_digest"],
+            vault_paths._contract_digest(exported),
+        )
         self.assertEqual(
             vault_paths.MINIMUM_VAULT_SHAPE,
             ("question_bank", "rotation", "coverage"),
         )
         self.assertEqual(
-            {name: raw["data_paths"][name]["path"] for name in vault_paths.MINIMUM_VAULT_SHAPE},
+            {
+                name: exported["data_paths"][name]["external_path"]
+                for name in vault_paths.MINIMUM_VAULT_SHAPE
+            },
             {
                 "question_bank": "question-bank.md",
                 "rotation": "state/rotation.json",
                 "coverage": "state/coverage.json",
             },
         )
-        self.assertEqual(vault_paths.STATE_SCHEMA_TABLE["rotation"]["supported"], [1])
-        self.assertEqual(vault_paths.STATE_SCHEMA_TABLE["coverage"]["supported"], [1])
-        self.assertEqual(raw["external_forbidden_paths"], ["system"])
+        for entry in exported["data_paths"].values():
+            self.assertIn("external_path", entry)
+            self.assertIn("embedded_path", entry)
+            self.assertEqual(entry["classification"], "durable_data")
+            self.assertIn(entry["schema"]["validation_policy"], {"blocking", "deferred", "opaque"})
+            self.assertIn("required_keys", entry["schema"])
+            self.assertEqual(entry["schema"]["unknown_fields"], "allow")
+        self.assertEqual(vault_paths.STATE_SCHEMA_TABLE["rotation"]["supported_versions"], [1])
+        self.assertEqual(vault_paths.STATE_SCHEMA_TABLE["coverage"]["supported_versions"], [1])
+        self.assertEqual(raw["external_forbidden_paths"], ["system", "templates"])
+        serialized = json.dumps(exported, sort_keys=True)
+        self.assertNotIn(str(ROOT), serialized)
+        self.assertNotIn("hosted", serialized.lower())
+        self.assertEqual(exported["special_file_policy"]["symlinks"], "reject")
+        self.assertEqual(
+            vault_paths.classify_contract_path(
+                "state/rotation.json", authority="vault", layout="external"
+            ),
+            "durable_data",
+        )
+        self.assertEqual(
+            vault_paths.classify_contract_path("system/lifehug.py", authority="framework"),
+            "framework",
+        )
+        self.assertEqual(
+            vault_paths.classify_contract_path("mystery.bin", authority="vault"),
+            "unknown",
+        )
+
+        core = (SYSTEM / "lifehug_core.py").read_text(encoding="utf-8")
+        self.assertEqual(set(re.findall(r'_data\("([^"]+)"\)', core)), EXPECTED_DATA_PATHS)
 
     def test_precedence_is_explicit_then_environment_then_embedded(self):
         explicit = make_vault(self.tmp / "explicit")
@@ -172,6 +214,10 @@ class VaultContractTests(unittest.TestCase):
                 vault_paths.resolve_vault_root(framework_system_dir=framework_system),
                 framework.resolve(),
             )
+        self.assertEqual(vault_paths.bind_vault_root(explicit), explicit.resolve())
+        self.assertEqual(vault_paths.bind_vault_root(explicit), explicit.resolve())
+        with self.assertRaisesRegex(RuntimeError, "already bound.*start a new process"):
+            vault_paths.bind_vault_root(environment)
 
     def test_missing_invalid_forbidden_and_symlinked_shapes_fail_before_write(self):
         missing = self.tmp / "missing"
@@ -185,6 +231,13 @@ class VaultContractTests(unittest.TestCase):
         (invalid / "state" / "rotation.json").write_text('{"version": 999}\n')
         with self.assertRaisesRegex(ValueError, "unsupported schema"):
             vault_paths.resolve_vault_root(invalid)
+
+        invalid_keys = make_vault(self.tmp / "invalid-keys")
+        (invalid_keys / "state" / "coverage.json").write_text(
+            '{"version": 1, "last_updated": null}\n'
+        )
+        with self.assertRaisesRegex(ValueError, "invalid required key categories"):
+            vault_paths.resolve_vault_root(invalid_keys)
 
         forbidden = make_vault(self.tmp / "forbidden")
         (forbidden / "system").mkdir()
@@ -222,6 +275,90 @@ class VaultContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink"):
             vault_paths.resolve_vault_root(file_link)
 
+    def test_no_follow_io_rejects_traversal_special_files_and_deterministic_swaps(self):
+        vault = make_vault(self.tmp / "secure-vault")
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        outside_file = outside / "target.txt"
+        outside_file.write_text("outside stays untouched\n", encoding="utf-8")
+
+        target = vault / "state" / "target.txt"
+        vault_paths.atomic_write_vault_text(target, "original\n", vault_root=vault)
+        self.assertEqual(
+            vault_paths.read_vault_text("state/target.txt", vault_root=vault),
+            "original\n",
+        )
+        with self.assertRaisesRegex(ValueError, "escaped"):
+            vault_paths.read_vault_text("../outside/target.txt", vault_root=vault)
+        with self.assertRaisesRegex(ValueError, "escaped"):
+            vault_paths.atomic_write_vault_text(
+                outside_file.resolve(), "escape\n", vault_root=vault
+            )
+
+        def swap_final_before_read() -> None:
+            target.unlink()
+            target.symlink_to(outside_file)
+
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            vault_paths.read_vault_text(
+                target,
+                vault_root=vault,
+                _before_final_open=swap_final_before_read,
+            )
+        self.assertEqual(outside_file.read_text(encoding="utf-8"), "outside stays untouched\n")
+        target.unlink()
+        target.write_text("original\n", encoding="utf-8")
+
+        def swap_final_before_write() -> None:
+            target.unlink()
+            target.symlink_to(outside_file)
+
+        with self.assertRaisesRegex(ValueError, "regular file"):
+            vault_paths.atomic_write_vault_text(
+                target,
+                "must not escape\n",
+                vault_root=vault,
+                _before_replace=swap_final_before_write,
+            )
+        self.assertEqual(outside_file.read_text(encoding="utf-8"), "outside stays untouched\n")
+        target.unlink()
+        target.write_text("original\n", encoding="utf-8")
+
+        original_state = vault / "state-original"
+
+        def swap_parent_before_write() -> None:
+            (vault / "state").rename(original_state)
+            (vault / "state").symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(ValueError, "binding changed"):
+            vault_paths.atomic_write_vault_text(
+                target,
+                "must not escape\n",
+                vault_root=vault,
+                _before_replace=swap_parent_before_write,
+            )
+        self.assertFalse((outside / "target.txt.tmp").exists())
+        self.assertEqual(outside_file.read_text(encoding="utf-8"), "outside stays untouched\n")
+        (vault / "state").unlink()
+        original_state.rename(vault / "state")
+
+        fifo = vault / "state" / "forbidden.fifo"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "forbidden special"):
+            vault_paths.walk_vault_tree(vault)
+        fifo.unlink()
+
+        rows = vault_paths.walk_vault_tree(vault)
+        self.assertEqual([row["path"] for row in rows], sorted(row["path"] for row in rows))
+        self.assertTrue(all(row["classification"] in {"durable_data", "unknown"} for row in rows))
+
+        vault_paths.bind_vault_root(vault)
+        original_vault = self.tmp / "secure-vault-original"
+        vault.rename(original_vault)
+        make_vault(vault)
+        with self.assertRaisesRegex(ValueError, "root identity changed"):
+            vault_paths.read_vault_text("question-bank.md", vault_root=vault)
+
     def test_external_data_and_framework_assets_resolve_to_disjoint_roots(self):
         vault = make_vault(self.tmp / "vault")
         self.assertEqual(
@@ -239,6 +376,7 @@ class VaultContractTests(unittest.TestCase):
     def test_runtime_guard_rejects_competing_root_derivations_and_hosted_marker(self):
         offenders: list[str] = []
         hosted_readers: list[str] = []
+        direct_writers: list[str] = []
         for path in sorted(SYSTEM.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -251,8 +389,18 @@ class VaultContractTests(unittest.TestCase):
                     offenders.append(relative)
                 if "REPO_DIR = SYSTEM_DIR.parent" in text or "REPO_DIR = _SYSTEM_DIR.parent" in text:
                     offenders.append(relative)
+                if re.search(
+                    r'(?:REPO_DIR|VAULT_ROOT)\s*/\s*["\'](?:state|answers|outputs|sources|wiki)',
+                    text,
+                ):
+                    offenders.append(relative)
+            if path.name not in {"lifehug_core.py", "update.py", "vault_paths.py"} and re.search(
+                r"\.(?:write_text|write_bytes|open)\(", text
+            ):
+                direct_writers.append(relative)
         self.assertEqual(hosted_readers, [], "hosted marker must not affect OSS runtime")
         self.assertEqual(offenders, [], "runtime modules must import the vault authority")
+        self.assertEqual(direct_writers, [], "vault writes must use the no-follow I/O authority")
 
     def test_shell_entrypoints_validate_the_selected_root_before_cd_or_write(self):
         target = make_vault(self.tmp / "shell-target")
@@ -287,6 +435,61 @@ class VaultContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, name)
         self.assertEqual(tree_digest(target), before)
 
+        quoted = make_vault(self.tmp / "vault with spaces and 'quotes'")
+        stub_dir = self.tmp / "stub bin"
+        stub_dir.mkdir()
+        stub_log = self.tmp / "python argv.jsonl"
+        stub = stub_dir / "python3"
+        stub.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "with open(os.environ['STUB_LOG'], 'a', encoding='utf-8') as handle:\n"
+            "    handle.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "if len(sys.argv) >= 5 and sys.argv[1].endswith('vault_paths.py') and sys.argv[2] == 'root':\n"
+            "    print(sys.argv[4])\n"
+            "    raise SystemExit(0)\n"
+            "raise SystemExit(23)\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        caller_cwd = self.tmp / "unrelated caller cwd"
+        caller_cwd.mkdir()
+        framework_before = tree_digest(SYSTEM)
+        for name in (
+            "daily_question.sh",
+            "weekly_maintenance.sh",
+            "monthly_research.sh",
+            "compile_and_commit.sh",
+            "file_answer_bg.sh",
+        ):
+            stub_log.unlink(missing_ok=True)
+            env = os.environ.copy()
+            env.update({
+                "WORKSPACE": str(quoted),
+                "PATH": f"{stub_dir}{os.pathsep}{env['PATH']}",
+                "STUB_LOG": str(stub_log),
+            })
+            args = ["/bin/bash", str(SYSTEM / name)]
+            if name == "file_answer_bg.sh":
+                args.append("A1")
+            result = subprocess.run(
+                args,
+                input="synthetic answer\n",
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=caller_cwd,
+                timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0, name)
+            first = json.loads(stub_log.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(
+                first,
+                [str(SYSTEM / "vault_paths.py"), "root", "--vault-root", str(quoted)],
+                name,
+            )
+        self.assertEqual(tree_digest(SYSTEM), framework_before)
+
 
 class ExternalVaultSubprocessTests(unittest.TestCase):
     def setUp(self):
@@ -295,6 +498,8 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
         shutil.copytree(SYSTEM, self.framework / "system", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(ROOT / "templates", self.framework / "templates")
         self.script = self.framework / "system" / "lifehug.py"
+        self.caller_cwd = self.tmp / "cwd independent of framework and vault"
+        self.caller_cwd.mkdir()
         self.vault = make_vault(self.tmp / "vault")
         self.other_vault = make_vault(self.tmp / "other-vault", answered=True)
         subprocess.run(["git", "init", "-q"], cwd=self.vault, check=True)
@@ -311,6 +516,7 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
             "PYTHONDONTWRITEBYTECODE": "1",
         })
         self.env.pop("WORKSPACE", None)
+        self.env.pop("PYTHONPATH", None)
         self.framework_before = tree_digest(self.framework)
         for path in self.framework.rglob("*"):
             if path.is_file():
@@ -334,6 +540,7 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env=env or self.env,
+            cwd=self.caller_cwd,
             timeout=30,
         )
 
@@ -352,9 +559,29 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
             "process-answer",
             "A1",
             "--no-compile-wiki",
+            "--commit",
             input_text="A bright synthetic kitchen and a red toy train.\n",
         )
         self.assertIn("process-answer job succeeded", filed.stdout)
+        committed = subprocess.run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+            cwd=self.vault,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        self.assertEqual(
+            committed,
+            [
+                "answers/A1.md",
+                "question-bank.md",
+                "state/answer_scores.json",
+                "state/coverage.json",
+                "state/rotation.json",
+                "state/source_manifest.json",
+            ],
+        )
+        self.assertFalse(any(path.startswith("state/jobs/") for path in committed))
         compiled = self.assert_cli_ok("compile", "--no-ai")
         self.assertIn("compile job succeeded", compiled.stdout)
 
@@ -374,6 +601,7 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
             env=self.env,
+            cwd=self.caller_cwd,
             start_new_session=True,
         )
         try:
@@ -414,16 +642,16 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
                 for value in forbidden:
                     self.assertNotIn(value, text, path)
 
-        subprocess.run(["git", "add", "-A"], cwd=self.vault, check=True)
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only"],
+        changed = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-uall"],
             cwd=self.vault,
             check=True,
             capture_output=True,
             text=True,
-        ).stdout.splitlines()
-        self.assertTrue(staged)
-        self.assertFalse(any(path == "system" or path.startswith("system/") for path in staged))
+        ).stdout
+        self.assertTrue(changed)
+        self.assertNotIn(" system/", changed)
+        self.assertNotIn(" vault/system/", changed)
         self.assertEqual(tree_digest(self.framework), self.framework_before)
 
     def test_explicit_cli_root_beats_environment_and_embedded_default_is_identical(self):
@@ -438,9 +666,87 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
         self.assertEqual(explicit.stdout, embedded.stdout)
 
+        post_subcommand = self.run_cli(
+            "status", "--vault-root", str(self.framework), env=hostile_env
+        )
+        self.assertEqual(post_subcommand.returncode, 0, post_subcommand.stderr)
+        self.assertEqual(post_subcommand.stdout, embedded.stdout)
+
+        equals_form = self.run_cli(
+            "status", f"--vault-root={self.framework}", env=hostile_env
+        )
+        self.assertEqual(equals_form.returncode, 0, equals_form.stderr)
+        self.assertEqual(equals_form.stdout, embedded.stdout)
+
         selected_environment = self.run_cli("status", env=hostile_env)
         self.assertEqual(selected_environment.returncode, 0, selected_environment.stderr)
         self.assertIn("Total: 1/1", selected_environment.stdout)
+
+        contract = subprocess.run(
+            [sys.executable, str(self.framework / "system" / "vault_paths.py"), "contract"],
+            cwd=self.caller_cwd,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(contract.returncode, 0, contract.stderr)
+        contract_value = json.loads(contract.stdout)
+        self.assertNotIn(str(self.framework), json.dumps(contract_value))
+        self.assertNotIn(str(self.vault), json.dumps(contract_value))
+
+    def test_same_process_vault_switch_and_hostile_worker_root_reject(self):
+        program = """
+import importlib
+import os
+import sys
+sys.path.insert(0, sys.argv[1])
+os.environ['LIFEHUG_FRAMEWORK_SYSTEM_DIR'] = sys.argv[1]
+os.environ['LIFEHUG_VAULT_ROOT'] = sys.argv[2]
+import lifehug_core
+assert str(lifehug_core.REPO_DIR) == sys.argv[2]
+os.environ['LIFEHUG_VAULT_ROOT'] = sys.argv[3]
+try:
+    importlib.reload(lifehug_core)
+except RuntimeError as exc:
+    assert 'already bound' in str(exc)
+else:
+    raise SystemExit('unsafe in-process vault switch was accepted')
+print('rebind rejected')
+"""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                program,
+                str(self.framework / "system"),
+                str(self.vault),
+                str(self.other_vault),
+            ],
+            cwd=self.caller_cwd,
+            env={"PATH": self.env["PATH"], "PYTHONDONTWRITEBYTECODE": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rebind rejected", result.stdout)
+
+        root_link = self.tmp / "hostile worker root"
+        root_link.symlink_to(self.vault, target_is_directory=True)
+        hostile_env = self.env.copy()
+        hostile_env["LIFEHUG_VAULT_ROOT"] = str(root_link)
+        child = subprocess.run(
+            [sys.executable, str(self.framework / "system" / "job_execute.py")],
+            input='{"arguments": ["status"], "stdin_text": null}',
+            cwd=self.caller_cwd,
+            env=hostile_env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(child.returncode, 77, child.stderr)
+        self.assertEqual(tree_digest(self.framework), self.framework_before)
 
 
 if __name__ == "__main__":

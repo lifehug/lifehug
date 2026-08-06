@@ -36,6 +36,7 @@ from lifehug_core import (
     parse_categories,
     parse_questions,
     read_json,
+    read_text,
     slugify,
 )
 from entity_roster import ENTITY_TYPES, load_roster
@@ -92,8 +93,7 @@ _GROUP_LABELS = {
 def page_field(path: Path, key: str) -> str:
     """Read a single frontmatter scalar (e.g. `title`, `project`) from a page."""
     try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            head = fh.read(1024)
+        head = read_text(path, errors="replace")[:1024]
         m = re.search(rf'^{re.escape(key)}:\s*"?(.+?)"?\s*$', head, re.MULTILINE)
         if m:
             return m.group(1).strip()

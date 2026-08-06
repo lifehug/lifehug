@@ -93,12 +93,27 @@ def make_minimum_vault(root: Path, *, embedded: bool = False) -> None:
     )
     state_root = data_root if embedded else root / "state"
     state_root.mkdir(parents=True, exist_ok=True)
-    (state_root / "rotation.json").write_text('{"version": 1}\n', encoding="utf-8")
-    (state_root / "coverage.json").write_text('{"version": 1}\n', encoding="utf-8")
+    (state_root / "rotation.json").write_text(json.dumps({
+        "version": 1,
+        "current_pass": 1,
+        "pass_names": ["skeleton", "depth", "connections", "polish"],
+        "last_question_id": None,
+        "last_asked_at": None,
+        "questions_asked": 0,
+        "questions_answered": 0,
+        "next_question_id": None,
+        "focus_frequency": 4,
+    }) + "\n", encoding="utf-8")
+    (state_root / "coverage.json").write_text(json.dumps({
+        "version": 1,
+        "last_updated": None,
+        "categories": {},
+    }) + "\n", encoding="utf-8")
 
 
 class DurableJobsTests(unittest.TestCase):
     def setUp(self):
+        vault_paths._reset_process_binding_for_tests()
         self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-jobs-test-", dir=ROOT.parent))
         self.vault = self.tmp / "vault-only"
         make_minimum_vault(self.vault)
@@ -112,6 +127,7 @@ class DurableJobsTests(unittest.TestCase):
 
     def tearDown(self):
         jobs.FRAMEWORK_SYSTEM_DIR = self.original_framework
+        vault_paths._reset_process_binding_for_tests()
         jobs.configure(self.original_vault)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -557,7 +573,7 @@ class DurableJobsTests(unittest.TestCase):
         jobs._ensure_layout()
         shutil.rmtree(jobs.PAYLOADS_DIR)
         jobs.PAYLOADS_DIR.symlink_to(escaped, target_is_directory=True)
-        with self.assertRaisesRegex(ValueError, "real directories"):
+        with self.assertRaisesRegex(ValueError, "special, or symlinked"):
             jobs.enqueue("compile", {}, identity="symlink-payload", kick=False)
 
     def test_vault_root_authority_precedence_and_validation(self):

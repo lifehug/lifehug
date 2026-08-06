@@ -15,11 +15,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vault_paths import bootstrap_cli_vault_root
+from vault_paths import bootstrap_cli_vault_root, normalize_cli_vault_args
 
 # Global options must select the vault before lifehug_core and the command
 # modules bind their path constants. The helper is the single precedence and
 # validation authority; argparse below only exposes the public flag.
+sys.argv[1:] = normalize_cli_vault_args(sys.argv[1:])
 bootstrap_cli_vault_root(sys.argv[1:])
 
 from lifehug_core import (
