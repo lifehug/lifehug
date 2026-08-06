@@ -1,7 +1,7 @@
 {
-  "version": 120,
+  "version": 121,
   "released": "2026-08-06",
-  "changelog": "v120: direct on-machine OpenAI-compatible models are now a first-class provider for the whole Lifehug Loop. Configure an Ollama, LM Studio, llama.cpp, or equivalent endpoint/model/timeout once and compile, classification, research, entity rosters, the Mirror, artifact revision, and connector dossiers all use it. Local routing is loopback-only and fail-closed by default: its transport bypasses proxy environment variables and rejects redirects, while an invalid, timed-out, malformed, or offline server returns to the existing agent-task path without silently sending private source material to a cloud fallback. `ai-status` now reports provider, model, and a non-mutating readiness probe; deliberate OpenClaw, Kimi, and Anthropic routes remain available. The Anthropic SDK remains optional and can no longer terminate keyless discovery. The shared router uses only Python's standard library and never logs prompts, source bodies, responses, or secrets.",
+  "changelog": "v121: local Telegram answers now receive the same warm acknowledgment as hosted Lifehug. `process-answer` first makes the answer file and any requested commit durable, then generates one 2–4 sentence, detail-specific reply through the canonical `answer-ack-prompt` and shared AI provider, and only then sends the optional adaptive follow-up. Provider, generation, and Telegram failures stay best-effort and never change answer success or suppress the follow-up; keyless agent-task mode remains immediate and receives no fake acknowledgment. A metadata-only ledger keyed by the durable `answer:{ID}` source id prevents confirmed duplicates, treats lost send responses as visibly ambiguous instead of blindly repeating them, and supports an explicit operator-confirmed retry. `answer-ack-status`, `answer-ack-retry`, and doctor expose recovery without ever logging or storing answer, prompt, generated message, or secret text.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -23,6 +23,7 @@
     "state/.gitkeep",
     "system/ai_provider.py",
     "system/answer_ack.py",
+    "system/answer_ack_delivery.py",
     "system/artifact.py",
     "system/ask.py",
     "system/book.py",
@@ -92,6 +93,7 @@
     "tests/test_v105_pin_retire.py",
     "tests/test_v110_timeline_corroboration.py",
     "tests/test_v120_local_ai_provider.py",
+    "tests/test_v121_answer_ack_delivery.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",
@@ -103,6 +105,7 @@
     "tests/test_v74_corrections.py",
     "tests/test_v75_book.py",
     "tests/test_v79_timeline.py",
+    "tests/test_v83_filer.py",
     "tests/test_v90_aj_regression.py",
     "tests/test_v92_agent_mode.py",
     "tests/test_v93_stem_cap.py",

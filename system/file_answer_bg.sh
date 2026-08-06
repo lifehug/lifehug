@@ -5,8 +5,10 @@
 #   1. Chat spawns this script with nohup + &
 #   2. Chat sends an immediate "🎙️ Filing…" ack and exits the turn
 #   3. This script runs process-answer with --no-compile-wiki (fast, ~5s)
-#   4. On finish, this script sends its OWN Telegram message with the result
-#   5. Wiki compile runs separately via hourly launchd cron
+#   4. process-answer sends the warm acknowledgment, then any follow-up
+#   5. On finish, this script sends a factual filing result only when the warm
+#      acknowledgment was not confirmed (avoids a duplicate success message)
+#   6. Wiki compile runs separately via hourly launchd cron
 #
 # This decoupling lets Dave rapid-fire 2-3 answers without compile conflicts.
 #
@@ -125,10 +127,13 @@ if [[ $RC -eq 0 ]]; then
   # Extract coverage line if present
   COVERAGE=$(echo "$OUT" | grep -oE "Coverage: [0-9]+/[0-9]+" | tail -1 || true)
   FOLLOWUPS=$(echo "$OUT" | grep -oE "Adaptive follow-up question sent: [A-Z][0-9]+[a-z]?" | head -1 || true)
+  ACK_CONFIRMED=$(echo "$OUT" | grep -oE "Answer acknowledgment: confirmed" | head -1 || true)
   MSG="✅ Filed ${QID}"
   [[ -n "$COVERAGE" ]] && MSG="${MSG} · ${COVERAGE}"
   [[ -n "$FOLLOWUPS" ]] && MSG="${MSG}"$'\n'"↳ ${FOLLOWUPS}"
-  send_msg "${MSG}${LOCK_NOTE}"
+  if [[ -z "$ACK_CONFIRMED" ]]; then
+    send_msg "${MSG}${LOCK_NOTE}"
+  fi
 else
   ERR=$(echo "$OUT" | tail -20)
   send_msg "⚠️ Filing ${QID} failed (rc=${RC})${LOCK_NOTE}"$'\n\n'"${ERR}"

@@ -74,6 +74,8 @@ python3 system/lifehug.py monthly-research  # monthly neighborhoods and focus re
 python3 system/lifehug.py followups-status  # pass-transition state
 python3 system/lifehug.py followups-prompt  # prompt context for AI-generated depth questions
 python3 system/lifehug.py answer-ack-prompt  # warm acknowledgment prompt after an answer (stdin: question/answer JSON)
+python3 system/lifehug.py answer-ack-status A14a # metadata-only ack status; ambiguous sends need review
+python3 system/lifehug.py answer-ack-retry A14a  # retry only a definitively unsent ack
 ```
 
 Process an answer from stdin:
@@ -104,8 +106,10 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> \
   --followup "What did the room look like in that moment?"
 ```
 
-5. `process-answer` compiles the wiki automatically by default. Use `--no-compile-wiki` only for tests or emergency repairs.
-6. Commit only when the user asks, or when operating an explicit daily/cron workflow.
+5. After the answer is durable, `process-answer` sends the canonical warm Telegram acknowledgment through the shared AI provider, then any adaptive follow-up. Do not add a second acknowledgment. A provider or send failure never changes answer success and never suppresses the follow-up.
+6. Confirmed acknowledgments dedupe by `answer:{ID}`. Check `answer-ack-status`; retry a definitive failure with `answer-ack-retry`. Never retry an ambiguous send until Telegram has been checked, then pass `--confirm-not-sent`.
+7. `process-answer` compiles the wiki automatically by default. Use `--no-compile-wiki` only for tests or emergency repairs.
+8. Commit only when the user asks, or when operating an explicit daily/cron workflow.
 
 Never manually edit `coverage.json` or `rotation.json` unless repairing a failed script run with a clear reason.
 

@@ -8,6 +8,7 @@ import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 SYSTEM_DIR = Path(__file__).resolve().parent
 REPO_DIR = SYSTEM_DIR.parent
@@ -220,6 +221,21 @@ def sensitivity_visible(content_level: str | None, viewer_level: str | None) -> 
 TELEGRAM_CHUNK_LIMIT = 3900
 
 
+class TelegramSendResult(NamedTuple):
+    """Content-free outcome for one Telegram notification attempt.
+
+    ``ambiguous`` means bytes may have reached Telegram but no authoritative
+    success/rejection response came back.  Callers that care about duplicate
+    side effects must persist that state and require human confirmation before
+    repeating the send.
+    """
+
+    status: str
+    reason: str
+    chunks_confirmed: int
+    chunks_total: int
+
+
 def chunk_message(text: str, limit: int = TELEGRAM_CHUNK_LIMIT) -> list[str]:
     """Split a long message into <=limit chunks on line boundaries so a big
     weekly/monthly summary is delivered in parts instead of being silently
@@ -274,28 +290,64 @@ def resolve_telegram_target() -> tuple[str, str]:
     return token, chat_id
 
 
-def send_telegram(text: str) -> bool:
-    """Send a (possibly long) message to the configured Telegram target,
-    chunked under the 4096-char limit. Returns True if every chunk sent.
-    Never raises — notification must not break a Loop flow."""
+def send_telegram_result(text: str) -> TelegramSendResult:
+    """Send Telegram text and preserve confirmed-vs-ambiguous semantics.
+
+    The returned fields contain delivery metadata only.  A transport failure
+    is ambiguous because the request may have reached Telegram before the
+    response was lost; an explicit HTTP/API rejection is definitive only when
+    no earlier chunk was confirmed.  This function never raises.
+    """
+    import urllib.error
     import urllib.parse
     import urllib.request
 
     token, chat_id = resolve_telegram_target()
-    if not token or not chat_id or not text.strip():
-        return False
-    ok = True
-    for chunk in chunk_message(text):
+    chunks = chunk_message(text)
+    if not text.strip():
+        return TelegramSendResult("not_attempted", "empty_message", 0, 0)
+    if not token or not chat_id:
+        return TelegramSendResult(
+            "not_attempted", "telegram_credentials_missing", 0, len(chunks)
+        )
+    confirmed = 0
+    for chunk in chunks:
         payload = urllib.parse.urlencode({"chat_id": chat_id, "text": chunk}).encode("utf-8")
         request = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/sendMessage", data=payload)
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                body = json.loads(response.read().decode("utf-8", errors="replace"))
-                ok = ok and bool(body.get("ok"))
-        except Exception:  # noqa: BLE001
-            ok = False
-    return ok
+                raw_body = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if confirmed:
+                return TelegramSendResult(
+                    "ambiguous", "telegram_partial_delivery", confirmed, len(chunks)
+                )
+            return TelegramSendResult("rejected", "telegram_http_rejected", 0, len(chunks))
+        except Exception:  # noqa: BLE001 — no response means delivery is unknowable
+            return TelegramSendResult(
+                "ambiguous", "telegram_transport_ambiguous", confirmed, len(chunks)
+            )
+        try:
+            body = json.loads(raw_body)
+        except json.JSONDecodeError:
+            return TelegramSendResult(
+                "ambiguous", "telegram_response_ambiguous", confirmed, len(chunks)
+            )
+        if not isinstance(body, dict) or not body.get("ok"):
+            if confirmed:
+                return TelegramSendResult(
+                    "ambiguous", "telegram_partial_delivery", confirmed, len(chunks)
+                )
+            return TelegramSendResult("rejected", "telegram_api_rejected", 0, len(chunks))
+        confirmed += 1
+    return TelegramSendResult("confirmed", "telegram_confirmed", confirmed, len(chunks))
+
+
+def send_telegram(text: str) -> bool:
+    """Backward-compatible boolean Telegram helper for ordinary notices."""
+    return send_telegram_result(text).status == "confirmed"
 
 
 def _parse_simple_yaml(path: Path) -> dict[str, str]:

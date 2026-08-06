@@ -52,7 +52,7 @@ flowchart TB
     subgraph daily["🌅 every day"]
         Q["Question delivered<br/>(Telegram / WhatsApp / CLI)"]
         A["You answer<br/>(voice or text)"]
-        P["process-answer<br/>save · score · update state"]
+        P["process-answer<br/>save durably · warm ack · optional follow-up"]
         Q --> A --> P
     end
 
@@ -102,7 +102,7 @@ flowchart TB
 
 **Read it as five layers:**
 
-1. **Daily** — one question out, one answer in. The only part you touch.
+1. **Daily** — one question out, one answer in, then a warm acknowledgment before any optional follow-up. The only part you touch.
 2. **Knowledge** — every answer becomes wiki input, a completed question, and, during the weekly capped classifier pass, a structured classification record: people, places, periods, themes, contradictions, possible outputs, and follow-up candidates.
 3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly delivery queue. It applies quality multipliers so question types that have historically pulled richer answers score higher.
 4. **Growth** — classification runs in small weekly batches; broader research runs rarely. Together they inspect the wiki and source layer for thin areas, extract structured meaning, and *generate new questions* about people, themes, periods, and contradictions you haven't covered. The best candidates are automatically promoted into the bank each week under a dynamic cap; once promoted, bank questions stay available until answered or manually edited.
