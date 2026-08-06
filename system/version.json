@@ -1,7 +1,7 @@
 {
-  "version": 119,
+  "version": 120,
   "released": "2026-08-06",
-  "changelog": "v119: the local compiled-wiki viewer now works on a phone. At 820px and below, the full wiki navigation opens as a drawer instead of disappearing; search and the Views menu remain available, controls have phone-sized tap targets, and regular pages stay within the viewport while wide tables keep their own intentional scroll.",
+  "changelog": "v120: Source Integrity now opens each manifested raw answer or source as a rendered, read-only body in the owner-only local viewer, with direct links between the body, its integrity record, and reflection/correction/retraction actions. The raw-body route requires a loopback peer and Host, never caches or writes on GET, and reads exact regular files through one manifest-gated, no-follow descriptor walk that rejects traversal, encoding tricks, absolute paths, NULs, directories, untracked files, and all symlinks.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -90,6 +90,7 @@
     "tests/test_update.py",
     "tests/test_v105_pin_retire.py",
     "tests/test_v110_timeline_corroboration.py",
+    "tests/test_v120_source_view.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",

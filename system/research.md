@@ -42,7 +42,7 @@ Weekly **theme** + a fan of sensitizing questions ("react to the ones that open 
 ### 2e. Competitor lessons (why people abandon these products)
 - **StoryWorth**: #1 failure is silent abandonment — "a few get answered, then it quietly stops." No conversational follow-up; repetitive prompts. **The fix is conversation, not cadence** — immediate acknowledgment + one listening follow-up. **[shipped v68: adaptive 1–3/day + re-engagement question after silent days]**
 - **Remento**: voice-first wins completion; AI rewriting bled trust (see 2d).
-- **HereAfter AI**: shut down; users' recordings held behind a support email. Lifehug's git/markdown own-your-data model is the answer — never gate reading or export.
+- **HereAfter AI**: shut down; users' recordings held behind a support email. Lifehug's git/markdown own-your-data model is the answer — never gate reading or export. **[shipped v120: Source Integrity opens exact manifested raw bodies in the owner-only local viewer, read-only and linked to additive repair actions]**
 - **De-risk the book early**: interim artifacts (letters, posts) prevent the year-end quality shock where competitor complaints cluster.
 
 ---
