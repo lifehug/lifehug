@@ -1,7 +1,7 @@
 {
-  "version": 122,
+  "version": 123,
   "released": "2026-08-06",
-  "changelog": "v122: keyless agent mode no longer requires the optional Anthropic SDK to be installed. AI status now reports keyless cleanly when the SDK is absent, so weekly/monthly agent-task workflows can continue instead of the process exiting during provider discovery.",
+  "changelog": "v123: correction and retraction filenames are now short, portable identifiers instead of embedding full question text. New files use a bounded target-id label plus a collision-safe digest, and `source-filenames-repair` safely previews or migrates legacy names along with their manifest, classification, and generated-reference indexes before a hosted-vault import.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -120,6 +120,7 @@
     "tests/test_v90_aj_regression.py",
     "tests/test_v92_agent_mode.py",
     "tests/test_v93_stem_cap.py",
+    "tests/test_v119_bounded_correction_filenames.py",
     "tests/test_v95_opinion_essay.py",
     "tests/test_v96_opinion_loop.py",
     "tests/test_v97_theme_roster.py",

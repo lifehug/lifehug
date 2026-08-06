@@ -302,12 +302,20 @@ python3 system/lifehug.py fix answers/{ID}.md --retract --reason "classifier inf
 python3 system/lifehug.py fix answers/L20.md --retract --from-page childhood --reason "about Katie's childhood"
 # undo a WRONG retraction (v88) — the source resumes being asserted:
 python3 system/lifehug.py unretract sources/corrections/<retraction-file>.md --reason "why it was wrong"
+# once when upgrading a vault with legacy title-derived correction/retraction names:
+python3 system/lifehug.py source-filenames-repair --dry-run
+python3 system/lifehug.py source-filenames-repair
 ```
 
 Retractions are **sha-pinned** (v88): they retract the *content* they were
 filed against, not the id forever — if the target file's payload is later
 replaced (e.g. a mis-filed source swapped for a genuine answer under the same
 question id), the retraction stops applying automatically.
+
+Correction and retraction filenames are portable bounded identifiers (v119):
+they include a target-source-id label and a digest, never the full question
+text. The repair command migrates legacy files and their indexes; review the
+dry run first, then commit the resulting rename transaction.
 
 3. **Let the follow-up loop work**:
    - Do not manually append ad hoc follow-ups in normal operation.

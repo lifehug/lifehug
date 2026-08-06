@@ -237,6 +237,13 @@ def cmd_source_manifest(args: argparse.Namespace) -> int:
     return run_python("source_integrity.py", flags)
 
 
+def cmd_source_filenames_repair(args: argparse.Namespace) -> int:
+    flags = ["repair-linked-filenames"]
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("source_integrity.py", flags)
+
+
 def cmd_source_lint(args: argparse.Namespace) -> int:
     flags = ["lint"]
     if args.fix:
@@ -1266,6 +1273,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rebuild", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_source_manifest)
+
+    p = sub.add_parser(
+        "source-filenames-repair",
+        help="Migrate legacy correction/retraction filenames and state references",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
+    p.set_defaults(func=cmd_source_filenames_repair)
 
     p = sub.add_parser("source-lint", help="Lint raw source integrity and queue repair findings")
     p.add_argument("--fix", action="store_true", help="Apply safe metadata/manifest repairs")

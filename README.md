@@ -628,6 +628,7 @@ python3 system/lifehug.py source-scan
 python3 system/lifehug.py source-lint
 python3 system/lifehug.py source-lint --fix
 python3 system/lifehug.py source-findings
+python3 system/lifehug.py source-filenames-repair --dry-run  # legacy correction/retraction names
 printf '%s\n' "$CORRECTION" | python3 system/lifehug.py correct-source answers/A14.md --kind factual
 printf '%s\n' "$REFLECTION" | python3 system/lifehug.py reflect-source answers/A14.md
 

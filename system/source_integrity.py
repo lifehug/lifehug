@@ -40,6 +40,12 @@ from lifehug_core import (
 from vault_paths import validate_contained_path
 
 SCHEMA_VERSION = 1
+LINKED_SOURCE_TYPES = {"source_correction", "source_retraction"}
+# The platform imports source paths as identifiers and Windows still has a
+# conservative path budget.  Keep the *filename* well below either limit;
+# every generated character is ASCII, so characters and bytes are identical.
+MAX_LINKED_SOURCE_FILENAME_BYTES = 120
+LINKED_SOURCE_HASH_LENGTH = 16
 REQUIRED_SOURCE_KEYS = (
     "type",
     "source_id",
@@ -725,18 +731,81 @@ def summarize_records(records: list[dict[str, object]]) -> None:
         print(f"metadata needed: {missing_metadata}")
 
 
-def _unique_path(directory: Path, title: str, captured_at: str) -> Path:
-    day = captured_at[:10] if captured_at else datetime.now(timezone.utc).date().isoformat()
-    base = f"{day}-{slugify(title)}"
-    path = directory / f"{base}.md"
-    if not path.exists():
-        return path
-    index = 2
-    while True:
-        candidate = directory / f"{base}-{index}.md"
+def _linked_source_target_id(metadata: dict[str, object]) -> str:
+    """Return the authoritative target id from a linked-source record."""
+    for key in ("corrects", "retracts"):
+        value = str(metadata.get(key, "")).strip()
+        if value:
+            return value
+    for key in ("corrects_path", "retracts_path"):
+        value = str(metadata.get(key, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def _bounded_slug(value: str, maximum: int) -> str:
+    """ASCII, traversal-safe label with a hard byte bound."""
+    label = slugify(value).strip("-") or "source"
+    return label[:maximum].rstrip("-") or "source"
+
+
+def linked_source_stem(
+    target_id: str, source_type: str, payload: str, captured_at: str
+) -> str:
+    """Stable, bounded stem for correction/retraction source files.
+
+    Contract: ``YYYY-MM-DD-<kind>-<target-label>-<hash>.md``.  ``target-label``
+    is only a bounded slug of the authoritative target id; the full question
+    text is never part of the filename.  The digest includes the full target
+    id, kind, and payload, keeping distinct corrections collision-safe even
+    when their visible labels truncate to the same text.
+    """
+    day = (captured_at or now_utc())[:10]
+    kind = {"source_correction": "correction", "source_retraction": "retraction"}.get(
+        source_type, "linked"
+    )
+    suffix = ".md"
+    # Reserve separators and the full fallback digest so a collision can grow
+    # from 16 to 64 hex characters without exceeding the contract.
+    label_budget = MAX_LINKED_SOURCE_FILENAME_BYTES - len(
+        f"{day}-{kind}---{suffix}" + "f" * 64
+    )
+    target_label = _bounded_slug(target_id, max(1, label_budget))
+    identity = "\0".join((source_type, target_id, normalize_payload(payload)))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"{day}-{kind}-{target_label}-{digest[:LINKED_SOURCE_HASH_LENGTH]}"
+
+
+def _linked_source_path(
+    directory: Path,
+    target_id: str,
+    source_type: str,
+    payload: str,
+    captured_at: str,
+) -> Path:
+    """Choose a bounded name, extending the digest deterministically on a hash-prefix collision."""
+    stem = linked_source_stem(target_id, source_type, payload, captured_at)
+    prefix, short_digest = stem.rsplit("-", 1)
+    full_digest = hashlib.sha256(
+        "\0".join((source_type, target_id, normalize_payload(payload))).encode("utf-8")
+    ).hexdigest()
+    for digest_length in range(len(short_digest), len(full_digest) + 1, 16):
+        candidate = directory / f"{prefix}-{full_digest[:digest_length]}.md"
+        if candidate.is_symlink():
+            raise ValueError(f"refusing symlinked linked-source filename: {candidate}")
         if not candidate.exists():
             return candidate
-        index += 1
+        existing_metadata, existing_payload = split_frontmatter(
+            candidate.read_text(encoding="utf-8", errors="replace")
+        )
+        if (
+            str(existing_metadata.get("type", "")) == source_type
+            and _linked_source_target_id(existing_metadata) == target_id
+            and normalize_payload(existing_payload) == normalize_payload(payload)
+        ):
+            return candidate  # idempotent retry of the same linked source
+    raise RuntimeError("unable to allocate a unique linked-source filename")
 
 
 def resolve_source_target(value: str) -> Path:
@@ -777,13 +846,23 @@ def create_linked_source(
     label = {"source_reflection": "Reflection",
              "source_retraction": "Retraction"}.get(source_type, "Correction")
     title = title or f"{label} for {target_title}"
+<<<<<<< HEAD
     validate_contained_path(
         CORRECTION_SOURCES_DIR,
         CORRECTION_SOURCES_DIR.parent,
         label="correction destination",
     ).mkdir(parents=True, exist_ok=True)
-    path = _unique_path(CORRECTION_SOURCES_DIR, title, captured_at)
     payload = f"# {title}\n\n{body.strip()}\n"
+    target_id = str(target_record["source_id"])
+    if source_type in LINKED_SOURCE_TYPES:
+        path = _linked_source_path(
+            CORRECTION_SOURCES_DIR, target_id, source_type, payload, captured_at
+        )
+    else:
+        # Reflections are narrative sources and retain their historical,
+        # human-readable naming contract. This migration is intentionally
+        # scoped to compiler directives (corrections/retractions).
+        path = _unique_path(CORRECTION_SOURCES_DIR, title, captured_at)
     source_id_prefix = {"source_reflection": "reflection",
                         "source_retraction": "retraction"}.get(source_type, "correction")
     metadata: dict[str, object] = {
@@ -818,7 +897,8 @@ def create_linked_source(
         metadata["corrects"] = target_record["source_id"]
         metadata["corrects_path"] = rel(target_path)
         metadata["correction_kind"] = correction_kind or "other"
-    write_text(path, f"{format_frontmatter(metadata)}\n\n{payload}")
+    if not path.exists():
+        write_text(path, f"{format_frontmatter(metadata)}\n\n{payload}")
     register_source(path)
     if source_type == "source_correction":
         # v103: a corrected fact invalidates the target's derived
@@ -834,6 +914,240 @@ def create_linked_source(
         except Exception as exc:  # never block the correction itself
             print(f"warn: could not mark classification stale: {exc}", file=sys.stderr)
     return path
+
+
+def _unique_path(directory: Path, title: str, captured_at: str) -> Path:
+    """Historical human-readable path helper retained for reflections."""
+    day = captured_at[:10] if captured_at else datetime.now(timezone.utc).date().isoformat()
+    base = f"{day}-{slugify(title)}"
+    path = directory / f"{base}.md"
+    if not path.exists():
+        return path
+    index = 2
+    while True:
+        candidate = directory / f"{base}-{index}.md"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def _replace_path_values(value: object, replacements: dict[str, str]) -> object:
+    """Replace exact source-path values in a JSON-shaped state document."""
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    if isinstance(value, list):
+        return [_replace_path_values(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {
+            replacements.get(str(key), str(key)): _replace_path_values(item, replacements)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _assert_migration_path_safe(path: Path, *, label: str) -> None:
+    """Reject symlinks and paths resolving outside this vault before mutation."""
+    lexical_root = REPO_DIR.absolute()
+    root = lexical_root.resolve()
+    try:
+        path.resolve(strict=False).relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"unsafe {label} outside vault: {path}") from exc
+    try:
+        cursor = lexical_root / path.absolute().relative_to(lexical_root)
+    except ValueError as exc:
+        raise ValueError(f"unsafe {label} outside vault: {path}") from exc
+    while cursor != lexical_root:
+        if cursor.is_symlink():
+            raise ValueError(f"unsafe symlinked {label}: {rel(cursor)}")
+        if cursor.parent == cursor:
+            raise ValueError(f"unsafe {label}: {path}")
+        cursor = cursor.parent
+
+
+def _replace_path_text(text: str, replacements: dict[str, str]) -> str:
+    """Rewrite exact, path-bearing markdown references without touching sources."""
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
+def _repair_plan() -> tuple[list[dict[str, object]], dict[Path, object], list[tuple[Path, Path]]]:
+    """Preflight every rename and every managed reference rewrite."""
+    _assert_migration_path_safe(CORRECTION_SOURCES_DIR, label="corrections directory")
+    if not CORRECTION_SOURCES_DIR.exists():
+        return [], {}, []
+    renames: list[dict[str, object]] = []
+    replacements: dict[str, str] = {}
+    for old_path in sorted(CORRECTION_SOURCES_DIR.glob("*.md")):
+        _assert_migration_path_safe(old_path, label="correction/retraction source")
+        old_text = old_path.read_text(encoding="utf-8", errors="replace")
+        metadata, payload = split_frontmatter(old_text)
+        source_type = str(metadata.get("type", ""))
+        if source_type not in LINKED_SOURCE_TYPES:
+            continue
+        target_id = _linked_source_target_id(metadata)
+        if not target_id:
+            raise ValueError(f"cannot repair {rel(old_path)}: missing correction/retraction target")
+        new_path = _linked_source_path(
+            CORRECTION_SOURCES_DIR, target_id, source_type, payload,
+            str(metadata.get("captured_at", "")),
+        )
+        if new_path == old_path:
+            continue
+        _assert_migration_path_safe(new_path, label="correction/retraction destination")
+        if new_path.exists():
+            raise ValueError(f"cannot repair {rel(old_path)}: destination already exists: {rel(new_path)}")
+        new_metadata = dict(metadata)
+        new_metadata["source_path"] = rel(new_path)
+        renames.append({
+            "old": old_path,
+            "new": new_path,
+            "old_text": old_text,
+            "new_text": f"{format_frontmatter(new_metadata)}\n\n{payload.lstrip()}",
+        })
+        replacements[rel(old_path)] = rel(new_path)
+
+    destinations = [item["new"] for item in renames]
+    if len(destinations) != len(set(destinations)):
+        raise ValueError("cannot repair linked-source filenames: generated destination collision")
+
+    json_updates: dict[Path, object] = {}
+    state_dir = REPO_DIR / "state"
+    if replacements:
+        _assert_migration_path_safe(state_dir, label="state directory")
+    if replacements and state_dir.exists():
+        for json_path in sorted(state_dir.rglob("*.json")):
+            _assert_migration_path_safe(json_path, label="state JSON")
+            try:
+                current = json.loads(json_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"cannot repair while state JSON is invalid: {rel(json_path)}") from exc
+            updated = _replace_path_values(current, replacements)
+            if updated != current:
+                json_updates[json_path] = updated
+
+    # `wiki/` and state reports are generated surfaces, not source truth. Keep
+    # their path-bearing markdown current in the same transaction so a repair
+    # cannot leave stale visible citations before the next compile rebuild.
+    markdown_updates: dict[Path, str] = {}
+    if replacements:
+        for directory, label in ((REPO_DIR / "wiki", "wiki directory"), (state_dir, "state directory")):
+            _assert_migration_path_safe(directory, label=label)
+            if not directory.exists():
+                continue
+            for markdown_path in sorted(directory.rglob("*.md")):
+                _assert_migration_path_safe(markdown_path, label="generated markdown")
+                original = markdown_path.read_text(encoding="utf-8", errors="replace")
+                updated = _replace_path_text(original, replacements)
+                if updated != original:
+                    markdown_updates[markdown_path] = updated
+
+    classification_moves: list[tuple[Path, Path]] = []
+    if renames:
+        import classify_story  # noqa: PLC0415
+
+        for item in renames:
+            old_path, new_path = item["old"], item["new"]
+            for old_classification, new_classification in zip(
+                classify_story.classification_paths(old_path),
+                classify_story.classification_paths(new_path),
+            ):
+                _assert_migration_path_safe(old_classification, label="classification")
+                _assert_migration_path_safe(new_classification, label="classification destination")
+                if old_classification.exists() and old_classification != new_classification:
+                    if new_classification.exists():
+                        raise ValueError(
+                            f"cannot repair {rel(old_path)}: classification destination exists: "
+                            f"{rel(new_classification)}"
+                        )
+                    classification_moves.append((old_classification, new_classification))
+                    # The JSON scan above found this classification under its
+                    # old filename. Apply its source_path rewrite only after
+                    # the file moves, never recreate the old filename.
+                    if old_classification in json_updates:
+                        json_updates[new_classification] = json_updates.pop(old_classification)
+    class_destinations = [new for _old, new in classification_moves]
+    if len(class_destinations) != len(set(class_destinations)):
+        raise ValueError("cannot repair linked-source filenames: classification destination collision")
+    # Markdown updates share the transaction's atomic file-replace/rollback
+    # machinery; keep the public plan compact by attaching them to JSON updates.
+    for markdown_path, updated in markdown_updates.items():
+        json_updates[markdown_path] = updated
+    return renames, json_updates, classification_moves
+
+
+def repair_linked_source_filenames(*, dry_run: bool = False) -> list[tuple[str, str]]:
+    """Migrate legacy correction/retraction filenames without losing references.
+
+    The operation is idempotent. It preflights the full transaction and rolls
+    all touched paths back if a later filesystem write fails.
+    """
+    renames, json_updates, classification_moves = _repair_plan()
+    result = [(rel(item["old"]), rel(item["new"])) for item in renames]
+    if dry_run or not renames:
+        return result
+
+    json_backups = {
+        path: path.read_text(encoding="utf-8") if path.exists() else None
+        for path in json_updates
+    }
+    classification_backups = {
+        old_path: old_path.read_text(encoding="utf-8") for old_path, _new_path in classification_moves
+    }
+    completed_renames: list[dict[str, object]] = []
+    completed_classifications: list[tuple[Path, Path]] = []
+    try:
+        for item in renames:
+            old_path, new_path = item["old"], item["new"]
+            completed_renames.append(item)
+            write_text(old_path, str(item["new_text"]))
+            old_path.replace(new_path)
+        for old_path, new_path in classification_moves:
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            old_path.replace(new_path)
+            completed_classifications.append((old_path, new_path))
+        for state_path, updated in json_updates.items():
+            if state_path.suffix == ".json":
+                write_json(state_path, updated)
+            else:
+                write_text(state_path, str(updated))
+    except Exception:
+        for old_path, new_path in reversed(completed_classifications):
+            if new_path.exists():
+                new_path.replace(old_path)
+            write_text(old_path, classification_backups[old_path])
+        for item in reversed(completed_renames):
+            old_path, new_path = item["old"], item["new"]
+            if new_path.exists():
+                new_path.replace(old_path)
+            write_text(old_path, str(item["old_text"]))
+        for json_path, old_text in json_backups.items():
+            if old_text is None:
+                json_path.unlink(missing_ok=True)
+            else:
+                write_text(json_path, old_text)
+        raise
+    return result
+
+
+def cmd_repair_linked_filenames(args: argparse.Namespace) -> int:
+    try:
+        repaired = repair_linked_source_filenames(dry_run=args.dry_run)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"Error: linked-source filename repair failed: {exc}", file=sys.stderr)
+        return 1
+    if not repaired:
+        print("No correction/retraction filenames need repair.")
+        return 0
+    prefix = "[dry-run] would rename" if args.dry_run else "renamed"
+    for old, new in repaired:
+        print(f"{prefix}: {old} -> {new}")
+    if args.dry_run:
+        print("[dry-run] no files or state indexes were changed.")
+    else:
+        print(f"✓ Repaired {len(repaired)} correction/retraction filename(s) and references.")
+    return 0
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -995,6 +1309,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rebuild", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_manifest)
+
+    p = sub.add_parser(
+        "repair-linked-filenames",
+        help="Migrate legacy correction/retraction filenames and every state reference",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Preview the transaction without writing")
+    p.set_defaults(func=cmd_repair_linked_filenames)
 
     p = sub.add_parser("lint", help="Lint source integrity and write repair findings")
     p.add_argument("--fix", action="store_true", help="Apply safe metadata/manifest fixes")
