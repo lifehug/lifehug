@@ -28,6 +28,11 @@ The generated layer is:
 8. Finished artifacts can become sources, but they must preserve provenance:
    the final letter/post/chapter is an authored expression, while its context
    pack is derived working material.
+9. Local source-body viewing is read-only and owner-private. A body is eligible
+   only when its exact Markdown path under `answers/` or `sources/` is present
+   in the source manifest. Traversal, normalization tricks, untracked files,
+   directories, and symlinks fail closed; reading never lints, repairs, or
+   rewrites the source or state.
 
 ## Artifact Sources
 

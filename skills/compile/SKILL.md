@@ -68,6 +68,8 @@ Offer to open the local viewer so the user can click through the graph:
 python3 system/lifehug.py serve   # owner-only wiki at http://127.0.0.1:8765
 ```
 `[[wikilinks]]` resolve to real pages; unresolved ones fall back to search.
+Source Integrity opens manifested raw sources read-only and links them to the
+existing additive reflection, correction, and retraction actions.
 
 ## Notes
 - Re-compiles are **idempotent**: unchanged pages report `0 page updates`.
