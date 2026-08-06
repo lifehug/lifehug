@@ -60,6 +60,10 @@ class FilerScriptContractTests(unittest.TestCase):
         self.assertNotIn("api.telegram.org", self.text)
         self.assertNotIn("curl", self.text)
 
+    def test_confirmed_warm_ack_suppresses_duplicate_filed_notice(self):
+        self.assertIn("Answer acknowledgment: confirmed", self.text)
+        self.assertIn('if [[ -z "$ACK_CONFIRMED" ]]', self.text)
+
     def test_legacy_chat_id_env_maps_to_framework_env(self):
         self.assertIn("LIFEHUG_CHAT_ID", self.text)
         self.assertIn("TELEGRAM_CHAT_ID", self.text)

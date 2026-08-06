@@ -61,7 +61,7 @@ QUEUED_MUTATION_COMMANDS = frozenset({
     "weekly-maintenance",
 })
 READ_ONLY_COMMANDS = frozenset({
-    "ai-status", "answer-ack-prompt", "book-chapter", "book-status",
+    "ai-status", "answer-ack-prompt", "answer-ack-status", "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report", "daily-dry-run", "doctor",
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
@@ -69,6 +69,7 @@ READ_ONLY_COMMANDS = frozenset({
     "source-findings", "source-scan", "status", "weekly-summary",
 })
 DIRECT_MUTATION_COMMANDS = frozenset({
+    "answer-ack-retry",
     "book-offers", "candidates-auto-promote", "candidates-promote",
     "candidates-promote-neighborhood", "candidates-update", "classify-story",
     "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
@@ -769,6 +770,20 @@ def cmd_answer_ack_prompt(_args: argparse.Namespace) -> int:
     return run_python("answer_ack.py", [])
 
 
+def cmd_answer_ack_status(args: argparse.Namespace) -> int:
+    flags = ["status"]
+    if args.question_id:
+        flags.append(args.question_id)
+    return run_python("answer_ack_delivery.py", flags)
+
+
+def cmd_answer_ack_retry(args: argparse.Namespace) -> int:
+    flags = ["retry", args.question_id]
+    if args.confirm_not_sent:
+        flags.append("--confirm-not-sent")
+    return run_python("answer_ack_delivery.py", flags)
+
+
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["LIFEHUG_DAILY_DRY_RUN"] = "1"
@@ -1277,6 +1292,21 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         check("recent learning-loop failures", True, "none recorded")
 
+    ack_state = read_json(STATE_DIR / "answer_acknowledgments.json", default={}) or {}
+    ack_entries = ack_state.get("entries", {}) if isinstance(ack_state, dict) else {}
+    ambiguous_acks = [
+        source_id
+        for source_id, entry in ack_entries.items()
+        if isinstance(entry, dict) and entry.get("status") == "ambiguous"
+    ]
+    if ambiguous_acks:
+        warn(
+            "ambiguous answer acknowledgments",
+            f"{len(ambiguous_acks)} need Telegram verification; run answer-ack-status",
+        )
+    else:
+        check("ambiguous answer acknowledgments", True, "none")
+
     failures += loop_health_checks()
 
     print()
@@ -1724,6 +1754,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("answer-ack-prompt",
                        help="Print the warm answer-acknowledgment prompt (stdin: question/answer JSON)")
     p.set_defaults(func=cmd_answer_ack_prompt)
+
+    p = sub.add_parser("answer-ack-status",
+                       help="Show metadata-only acknowledgment delivery status")
+    p.add_argument("question_id", nargs="?")
+    p.set_defaults(func=cmd_answer_ack_status)
+
+    p = sub.add_parser("answer-ack-retry",
+                       help="Retry a definitively unsent answer acknowledgment")
+    p.add_argument("question_id")
+    p.add_argument(
+        "--confirm-not-sent",
+        action="store_true",
+        help="Retry an ambiguous send only after checking that Telegram did not receive it",
+    )
+    p.set_defaults(func=cmd_answer_ack_retry)
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")
     p.set_defaults(func=cmd_daily_dry_run)
