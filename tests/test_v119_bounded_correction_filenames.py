@@ -13,6 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 
+# Keep the canonical shared module installed while this file loads isolated
+# copies. Older correction tests intentionally verify that private test loads
+# restore, rather than remove, the process-wide source_integrity module.
+import source_integrity as _canonical_source_integrity  # noqa: E402,F401
+
 
 def load(name):
     spec = importlib.util.spec_from_file_location(name, SYSTEM / f"{name}.py")
