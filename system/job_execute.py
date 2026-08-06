@@ -19,7 +19,15 @@ import jobs
 
 
 def main() -> int:
-    vault = Path(os.environ.get("LIFEHUG_VAULT_ROOT", ""))
+    try:
+        vault = jobs.resolve_vault_root(
+            Path(os.environ.get("LIFEHUG_VAULT_ROOT", "")),
+            framework_system_dir=jobs.FRAMEWORK_SYSTEM_DIR,
+        )
+        jobs.configure(vault)
+    except ValueError:
+        return 77
+    os.environ["LIFEHUG_VAULT_ROOT"] = str(vault)
     token = os.environ.get("LIFEHUG_JOB_RUNNER_TOKEN")
     if not jobs.writer_token_is_live(token, vault_root=vault):
         return 77

@@ -46,7 +46,6 @@ from lifehug_core import (
 )
 
 SYSTEM_DIR = Path(__file__).parent
-REPO_DIR = SYSTEM_DIR.parent
 
 
 def load_json(path):

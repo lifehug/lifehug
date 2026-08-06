@@ -22,10 +22,12 @@ from pathlib import Path
 from lifehug_core import (
     ANSWERS_DIR,
     CORRECTION_SOURCES_DIR,
+    ENTITY_ROSTERS_DIR,
     REPO_DIR,
     SOURCE_LINT_FINDINGS_FILE,
     SOURCE_MANIFEST_FILE,
     SOURCES_DIR,
+    WIKI_DIR,
     answer_id_from_filename,
     now_utc,
     read_json,
@@ -404,10 +406,9 @@ def _parse_sources_block(lines: list[str]) -> set[str]:
 
 def _wiki_source_refs() -> dict[str, set[str]]:
     refs: dict[str, set[str]] = {}
-    wiki_dir = REPO_DIR / "wiki"
-    if not wiki_dir.exists():
+    if not WIKI_DIR.exists():
         return refs
-    for page in sorted(wiki_dir.rglob("*.md")):
+    for page in sorted(WIKI_DIR.rglob("*.md")):
         if page.name in {"SCHEMA.md", "index.md", "log.md"}:
             continue
         text = page.read_text(encoding="utf-8", errors="replace")
@@ -432,9 +433,8 @@ def _frontmatter_value(text: str, key: str) -> str:
 def _wiki_entity_pages() -> list[dict]:
     """Scan wiki entity dirs → [{path, type, origin, slug, sources}] per page."""
     pages: list[dict] = []
-    wiki_dir = REPO_DIR / "wiki"
     for dir_name, entity_type in _ENTITY_PAGE_DIRS.items():
-        directory = wiki_dir / dir_name
+        directory = WIKI_DIR / dir_name
         if not directory.exists():
             continue
         for page in sorted(directory.glob("*.md")):
@@ -454,7 +454,7 @@ def _wiki_entity_pages() -> list[dict]:
 def _roster_slug_index(entity_type: str) -> set[str] | None:
     """All slugs an entity roster accounts for (slug + name + aliases, slugified).
     None when the roster is missing/empty — callers must skip judgment then."""
-    data = read_json(REPO_DIR / "state" / "entity_rosters" / f"{entity_type}.json", default=None)
+    data = read_json(ENTITY_ROSTERS_DIR / f"{entity_type}.json", default=None)
     entities = (data or {}).get("entities") or []
     if not entities:
         return None

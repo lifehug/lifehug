@@ -45,13 +45,18 @@ from vault_paths import (
     resolve_framework_system_dir,
     resolve_vault_root,
     validate_contained_path,
+    vault_data_path,
 )
 
 FRAMEWORK_SYSTEM_DIR = resolve_framework_system_dir()
-DEFAULT_VAULT_ROOT = resolve_vault_root(framework_system_dir=FRAMEWORK_SYSTEM_DIR)
+DEFAULT_VAULT_ROOT = Path(
+    os.environ.get("LIFEHUG_VAULT_ROOT", str(FRAMEWORK_SYSTEM_DIR.parent))
+)
 
 VAULT_ROOT = DEFAULT_VAULT_ROOT
-JOBS_DIR = VAULT_ROOT / "state" / "jobs"
+JOBS_DIR = vault_data_path(
+    "jobs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+)
 PAYLOADS_DIR = JOBS_DIR / ".payloads"
 RECEIPTS_DIR = JOBS_DIR / ".receipts"
 WRITER_LOCK = JOBS_DIR / ".writer-v2.lock"
@@ -126,7 +131,9 @@ def configure(vault_root: Path) -> None:
         vault_root,
         framework_system_dir=FRAMEWORK_SYSTEM_DIR,
     )
-    JOBS_DIR = VAULT_ROOT / "state" / "jobs"
+    JOBS_DIR = vault_data_path(
+        "jobs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     PAYLOADS_DIR = JOBS_DIR / ".payloads"
     RECEIPTS_DIR = JOBS_DIR / ".receipts"
     WRITER_LOCK = JOBS_DIR / ".writer-v2.lock"
@@ -136,7 +143,9 @@ def configure(vault_root: Path) -> None:
 
 
 def _ensure_layout() -> None:
-    state_root = VAULT_ROOT / "state"
+    state_root = vault_data_path(
+        "state", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     if state_root.is_symlink():
         raise ValueError("vault/state may not be a symlink")
     if state_root.exists() and not state_root.is_dir():
@@ -888,7 +897,9 @@ def writer_token_is_live(token: str | None, *, vault_root: Path | None = None) -
     if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{20}", token):
         return False
     root = resolve_vault_root(vault_root, framework_system_dir=FRAMEWORK_SYSTEM_DIR)
-    jobs_dir = root / "state" / "jobs"
+    jobs_dir = vault_data_path(
+        "jobs", vault_root=root, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     owner_file = jobs_dir / ".writer-owner.json"
     lock_file = jobs_dir / ".writer-v2.lock"
     try:
@@ -947,34 +958,34 @@ def _load_payload(job_id: str, command: str) -> dict:
 
 def _validate_execution_paths(command: str, payload: dict) -> None:
     """Re-check typed refs after queueing, closing enqueue-to-run symlink races."""
+    outputs_root = vault_data_path(
+        "outputs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    sources_root = vault_data_path(
+        "sources", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    corrections_root = vault_data_path(
+        "correction_sources", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    answers_root = vault_data_path(
+        "answers", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     if command.startswith("artifact-"):
-        validate_contained_path(
-            VAULT_ROOT / "outputs",
-            VAULT_ROOT / "outputs",
-            label="output root",
-        )
+        validate_contained_path(outputs_root, outputs_root, label="output root")
         ref = payload.get("ref")
         if isinstance(ref, str):
-            validate_contained_path(VAULT_ROOT / ref, VAULT_ROOT / "outputs", label="artifact ref")
+            validate_contained_path(VAULT_ROOT / ref, outputs_root, label="artifact ref")
         seed = payload.get("seed")
         if isinstance(seed, str):
-            validate_contained_path(VAULT_ROOT / seed, VAULT_ROOT / "sources", label="source seed")
+            validate_contained_path(VAULT_ROOT / seed, sources_root, label="source seed")
     if command in {"fix-source", "reflect-source", "timeline-place"}:
         ref = payload.get("ref") if command != "timeline-place" else payload.get("source")
         if isinstance(ref, str) and ref.startswith(("answers/", "sources/")):
-            allowed = "answers" if ref.startswith("answers/") else "sources"
-            validate_contained_path(VAULT_ROOT / ref, VAULT_ROOT / allowed, label="source ref")
-        validate_contained_path(
-            VAULT_ROOT / "sources" / "corrections",
-            VAULT_ROOT / "sources",
-            label="correction destination",
-        )
+            allowed = answers_root if ref.startswith("answers/") else sources_root
+            validate_contained_path(VAULT_ROOT / ref, allowed, label="source ref")
+        validate_contained_path(corrections_root, sources_root, label="correction destination")
     if command in {"process-answer", "file-answer"}:
-        validate_contained_path(
-            VAULT_ROOT / "answers",
-            VAULT_ROOT / "answers",
-            label="answer root",
-        )
+        validate_contained_path(answers_root, answers_root, label="answer root")
 
 
 def _receipt(record: dict) -> dict | None:

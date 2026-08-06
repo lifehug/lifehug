@@ -34,7 +34,9 @@ fi
 shift
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+WORKSPACE="${WORKSPACE:-${LIFEHUG_VAULT_ROOT:-$(dirname "$SCRIPT_DIR")}}"
+WORKSPACE="$(python3 "$SCRIPT_DIR/vault_paths.py" root --vault-root "$WORKSPACE")" || exit 1
+export LIFEHUG_VAULT_ROOT="$WORKSPACE"
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 # Back-compat: v82 callers pass LIFEHUG_CHAT_ID; the framework's own
@@ -60,7 +62,7 @@ chmod 600 "$BODY"
 trap 'rm -f "$BODY"' EXIT
 cat > "$BODY"
 
-cd "$WORKSPACE"
+cd "$WORKSPACE" || exit 1
 
 # Read fresh at decision time — discipline 1 of the shared-vault contract.
 # The question id is explicit here, so this pull is not about WHICH question we
@@ -104,7 +106,8 @@ RC=$?
 
 # Signal that a compile is needed (picked up by hourly cron)
 if [[ $RC -eq 0 ]]; then
-  touch "$WORKSPACE/state/.compile-needed"
+  COMPILE_NEEDED="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path compile_needed --vault-root "$WORKSPACE")" || exit 1
+  touch "$WORKSPACE/$COMPILE_NEEDED"
 fi
 
 if [[ $RC -eq 0 ]]; then

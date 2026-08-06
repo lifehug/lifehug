@@ -25,7 +25,16 @@ import re
 from pathlib import Path
 
 import source_integrity
-from lifehug_core import REPO_DIR, STATE_DIR, now_utc, read_json, slugify, write_json, write_text
+from lifehug_core import (
+    CONNECTORS_STATE_DIR,
+    REPO_DIR,
+    STATE_DIR,
+    now_utc,
+    read_json,
+    slugify,
+    write_json,
+    write_text,
+)
 from connectors.scoring import (
     AXES,
     BANDS,
@@ -37,8 +46,6 @@ from connectors.scoring import (
     score_thread,
     tokens_known,
 )
-
-CONNECTORS_STATE_DIR = STATE_DIR / "connectors"
 
 # Safety valves on auto-promotion: at most this many threads per run, and
 # --dry-run reports without writing. The threshold itself is the owner's

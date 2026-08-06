@@ -38,10 +38,10 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 from lifehug_core import (
+    BOOK_OFFERS_FILE,
     CLASSIFICATIONS_DIR,
     OUTPUTS_DIR,
     QUESTIONS_FILE,
-    STATE_DIR,
     WIKI_DIR,
     now_utc,
     parse_categories,
@@ -77,9 +77,6 @@ WORDS_PER_QUESTION_TARGET = 350
 
 # Persisted memory of which chapter milestones have been announced so the
 # process_answer hook can fire an offer exactly once per crossing.
-BOOK_OFFERS_FILE = STATE_DIR / "book_offers.json"
-
-
 def _verdict(saturation: float, saturated: bool = False) -> tuple[str, str]:
     if saturated:
         return "SATURATED", "well-known — maintenance"

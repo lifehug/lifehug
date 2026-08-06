@@ -27,6 +27,7 @@ from lifehug_core import (
     QUESTIONS_FILE,
     REPO_DIR,
     ROTATION_FILE,
+    SECOND_VOICE_OFFERS_FILE,
     SOURCE_LINT_FINDINGS_FILE,
     SOURCE_MANIFEST_FILE,
     STATE_DIR,
@@ -893,8 +894,6 @@ def view_status():
 # strip below shows state (not debt). Design notes: 3–5 cards max, at most one
 # heavy introspective card, absence reads as stillness.
 # ---------------------------------------------------------------------------
-
-SECOND_VOICE_OFFERS_FILE = STATE_DIR / "second_voice_offers.json"
 
 # Left-rule accent per invitation kind. Calm palette — no reds on the home page.
 _HUB_ACCENTS = {

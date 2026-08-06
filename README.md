@@ -37,6 +37,7 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 - [The three clocks](#the-three-clocks-scheduling)
 - [Every script, holistically](#every-script-holistically)
 - [Getting started](#getting-started)
+- [Framework and vault layouts](#framework-and-vault-layouts)
 - [Key commands](#key-commands)
 - [Repo layout](#repo-layout)
 - [Updating](#updating) · [Methodology](#methodology)
@@ -145,12 +146,12 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Focus** | Anything you're building toward — a person, a book, a theme, your life's work. A Focus = an *objective* + a *tier* (how deep). | `state/roadmap.json` |
 | **Tier** | How much depth a Focus needs: `basic` ≈ a blog post (~8 answers), `standard` ≈ an essay / a person (~20), `extreme` ≈ a book / life's work (~50+). | — |
 | **Roadmap** | The full set of Focuses with targets and caps. *Derived* from the question bank — you never hand-edit it. | `state/roadmap.json` |
-| **Question bank** | Every question ever created, answered or not, grouped by category (A–E generic, F–J projects, K+ people). Only grows. | `system/question-bank.md` |
+| **Question bank** | Every question ever created, answered or not, grouped by category (A–E generic, F–J projects, K+ people). Only grows. | `system/question-bank.md` embedded; `question-bank.md` external |
 | **Neighborhood** | A cluster of 6–12 questions around one topic, arranged on a narrative **arc**, aimed at a deliverable. It tracks generated, promoted, and answered readiness separately; only answered material makes it draft-ready. | `state/neighborhoods.json` |
 | **Candidate** | A proposed question waiting in a review buffer. Becomes a real question only when *promoted* into the bank. | `state/question_candidates.json` |
 | **Wiki** | The cross-linked, owner-only encyclopedia of your life, synthesized from your answers. | `wiki/` |
 | **Artifact** | The product payoff: a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. | `outputs/`, `sources/artifacts/` |
-| **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` |
+| **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` embedded; `state/rotation.json` external |
 
 The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
 
@@ -515,6 +516,40 @@ Clone, run `./setup.sh`, and open the repo with any AI that reads `CLAUDE.md` (C
 0 9 * * * cd /path/to/lifehug && system/daily_question.sh
 ```
 
+### Framework and vault layouts
+
+The normal clone remains the zero-configuration **embedded layout**: executable framework files and private vault data share one checkout. Existing commands and paths remain unchanged.
+
+```text
+lifehug/
+├── system/                 # framework code + embedded question/rotation/coverage files
+├── templates/              # framework assets
+├── answers/ sources/ wiki/ outputs/
+└── state/                  # durable vault state
+```
+
+An installed framework can instead operate on a separate **data-only vault**. The vault must not contain `system/` or framework templates. Its minimum shape is the versioned contract in [`system/vault_contract.json`](system/vault_contract.json):
+
+```text
+my-private-vault/
+├── question-bank.md
+└── state/
+    ├── rotation.json       # schema version 1
+    └── coverage.json       # schema version 1
+```
+
+Optional `answers/`, `sources/`, `wiki/`, `outputs/`, profile/config files, and additional `state/` records are created or read under that vault as their workflows require. Code, templates, mission text, and connector implementations always stay in the framework install.
+
+Select the vault for one command with the global flag (before the subcommand), or for a process/scheduler with the environment variable:
+
+```bash
+python3 /opt/lifehug/system/lifehug.py --vault-root ~/Documents/my-private-vault status
+LIFEHUG_VAULT_ROOT=~/Documents/my-private-vault \
+  python3 /opt/lifehug/system/lifehug.py compile --no-ai
+```
+
+Resolution is explicit `--vault-root`, then `LIFEHUG_VAULT_ROOT`, then the embedded framework checkout. Selection is process-scoped; start a new CLI invocation to switch vaults. Missing minimum files, unsupported state schemas, a vault containing `system/`, and symlinked vault roots or required paths fail before mutation. `state/hosted.json` has no stand-down meaning in the open-source runtime.
+
 ---
 
 ## Key commands
@@ -583,6 +618,8 @@ python3 system/lifehug.py --help
 ---
 
 ## Repo layout
+
+The tree below is the embedded layout. See [Framework and vault layouts](#framework-and-vault-layouts) for a separate data-only vault.
 
 ```
 lifehug/

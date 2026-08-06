@@ -1,7 +1,7 @@
 {
-  "version": 119,
+  "version": 120,
   "released": "2026-08-06",
-  "changelog": "v119: durable restart-safe local job runner and vault-wide single-writer seam (issue #56). Viewer writes, Telegram answer filing, artifact actions, compiles, and daily/weekly/monthly schedules now converge through a typed allowlist and kernel-backed writer lock; canonical unqueued mutators acquire the same lock directly. Jobs expose metadata-only queued/running/succeeded/failed/safely-retryable states, completion receipts prevent repeat-after-finalize crashes, only success-preserving compile work is retryable after ambiguity, and failed private payloads remain mode-0600 until explicit owner purge. Re-entry is bound to a live unguessable lease token; private values cross child boundaries through stdin rather than process argv; exact loopback Host/Origin checks, symlink-safe answer/source/output containment, atomic cold-start identity keys, queue draining, cleanup, and fixed public error surfaces close the adversarial seams. Framework and vault roots now share one future-vault-only path authority, and launchd examples install the worker plus canonical schedules.",
+  "changelog": "v120: vault-only mode (issue #64). One versioned authority now separates immutable installed framework code/templates from the selected user-data vault across the CLI, queue worker, answer filing, compiler, viewer, source integrity, and scheduled maintenance flows. Explicit --vault-root overrides LIFEHUG_VAULT_ROOT, while the embedded checkout remains the zero-configuration default. External vaults require root question-bank.md plus schema-v1 state/rotation.json and state/coverage.json, forbid a system/ subtree, reject symlinked or incomplete shapes before mutation, preserve vault-relative manifests and wiki content, and ignore hosted markers. A subprocess smoke runs status, lint, queued filing, no-AI compile, and the loopback viewer against a synthetic Git vault with no code or templates; structural guards prevent competing runtime root derivations.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -72,6 +72,7 @@
     "system/timeline_corroboration.py",
     "system/update.py",
     "system/update_readme.py",
+    "system/vault_contract.json",
     "system/vault_paths.py",
     "system/version.json",
     "system/weekly_maintenance.sh",
@@ -105,6 +106,7 @@
     "tests/test_v16_focus_skill.py",
     "tests/test_v117_multi_writer.py",
     "tests/test_v119_jobs.py",
+    "tests/test_v120_vault_only.py",
     "tests/test_v68_loop.py",
     "tests/test_v69_signal.py",
     "tests/test_v70_v71_craft.py",

@@ -1,0 +1,77 @@
+{
+  "contract_version": 1,
+  "external_forbidden_paths": [
+    "system"
+  ],
+  "framework_paths": {
+    "system": "system",
+    "templates": "templates",
+    "mission": "system/mission.md",
+    "research": "system/research.md",
+    "version": "system/version.json",
+    "connectors": "system/connectors"
+  },
+  "data_paths": {
+    "question_bank": {
+      "path": "question-bank.md",
+      "embedded_path": "system/question-bank.md",
+      "kind": "file",
+      "required": true,
+      "tracked": true,
+      "schema": {"format": "markdown", "version_field": null, "supported": []}
+    },
+    "rotation": {
+      "path": "state/rotation.json",
+      "embedded_path": "system/rotation.json",
+      "kind": "file",
+      "required": true,
+      "tracked": true,
+      "schema": {"format": "json", "version_field": "version", "supported": [1]}
+    },
+    "coverage": {
+      "path": "state/coverage.json",
+      "embedded_path": "system/coverage.json",
+      "kind": "file",
+      "required": true,
+      "tracked": true,
+      "schema": {"format": "json", "version_field": "version", "supported": [1]}
+    },
+    "profile": {"path": "profile.yaml", "kind": "file", "required": false, "tracked": true, "schema": {"format": "yaml", "version_field": null, "supported": []}},
+    "config": {"path": "config.yaml", "kind": "file", "required": false, "tracked": false, "schema": {"format": "yaml", "version_field": null, "supported": []}},
+    "readme": {"path": "README.md", "kind": "file", "required": false, "tracked": true, "schema": {"format": "markdown", "version_field": null, "supported": []}},
+    "answers": {"path": "answers", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "outputs": {"path": "outputs", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "artifact_family", "version_field": null, "supported": []}},
+    "sources": {"path": "sources", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "manual_sources": {"path": "sources/manual", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "import_sources": {"path": "sources/imports", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "correction_sources": {"path": "sources/corrections", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "artifact_sources": {"path": "sources/artifacts", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "wiki": {"path": "wiki", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "compiled_markdown_family", "version_field": null, "supported": []}},
+    "state": {"path": "state", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "directory", "version_field": null, "supported": []}},
+    "question_candidates": {"path": "state/question_candidates.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "question_queue": {"path": "state/question_queue.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [2, 3]}},
+    "planner_state": {"path": "state/planner_state.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "source_manifest": {"path": "state/source_manifest.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "source_lint_findings": {"path": "state/source_lint_findings.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "learning_failures": {"path": "state/learning_failures.jsonl", "kind": "file", "required": false, "tracked": true, "schema": {"format": "jsonl", "version_field": null, "supported": []}},
+    "classifications": {"path": "state/classifications", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "json_family", "version_field": null, "supported": []}},
+    "neighborhoods": {"path": "state/neighborhoods.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "focus_recommendations": {"path": "state/focus_recommendations.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "legacy_focus_recommendations": {"path": "state/spotlight_recommendations.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "roadmap": {"path": "state/roadmap.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "quality_profile": {"path": "state/quality_profile.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "answer_scores": {"path": "state/answer_scores.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "entity_rosters": {"path": "state/entity_rosters", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "json_family", "version_field": "version", "supported": [1]}},
+    "connectors_state": {"path": "state/connectors", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "connector_family", "version_field": null, "supported": []}},
+    "second_voice_offers": {"path": "state/second_voice_offers.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "book_offers": {"path": "state/book_offers.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "timeline_placements": {"path": "state/timeline_placements.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "perennials": {"path": "state/perennials.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "wiki_synthesis_cache": {"path": "state/wiki_synthesis_cache.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": null, "supported": []}},
+    "synthesis": {"path": "state/synthesis", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": null, "supported": []}},
+    "reports": {"path": "state/reports", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": null, "supported": []}},
+    "agent_tasks": {"path": "state/agent_tasks", "kind": "directory", "required": false, "tracked": false, "schema": {"format": "task_family", "version_field": null, "supported": []}},
+    "jobs": {"path": "state/jobs", "kind": "directory", "required": false, "tracked": false, "schema": {"format": "job_family", "version_field": "record_version", "supported": [2]}},
+    "compile_needed": {"path": "state/.compile-needed", "kind": "file", "required": false, "tracked": false, "schema": {"format": "sentinel", "version_field": null, "supported": []}}
+  }
+}

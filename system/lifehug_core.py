@@ -11,50 +11,68 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from vault_paths import (
-    EMBEDDED_FRAMEWORK_SYSTEM_DIR,
+    framework_path,
+    resolve_framework_system_dir,
     resolve_vault_root,
     validate_contained_path,
+    vault_data_path,
+    vault_layout,
 )
 
-SYSTEM_DIR = EMBEDDED_FRAMEWORK_SYSTEM_DIR
+SYSTEM_DIR = resolve_framework_system_dir()
 FRAMEWORK_ROOT = SYSTEM_DIR.parent
-# Current installs embed framework + vault in one checkout.  A future
-# vault-only install (#46) points the same framework at a separate data root.
 REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR)
-_EMBEDDED_DATA = REPO_DIR / "system"
-if _EMBEDDED_DATA.is_dir():
-    QUESTIONS_FILE = _EMBEDDED_DATA / "question-bank.md"
-    ROTATION_FILE = _EMBEDDED_DATA / "rotation.json"
-    COVERAGE_FILE = _EMBEDDED_DATA / "coverage.json"
-else:
-    QUESTIONS_FILE = REPO_DIR / "question-bank.md"
-    ROTATION_FILE = REPO_DIR / "state" / "rotation.json"
-    COVERAGE_FILE = REPO_DIR / "state" / "coverage.json"
-CONFIG_FILE = REPO_DIR / "config.yaml"
-PROFILE_FILE = REPO_DIR / "profile.yaml"
-README_FILE = REPO_DIR / "README.md"
-ANSWERS_DIR = REPO_DIR / "answers"
-OUTPUTS_DIR = REPO_DIR / "outputs"
-TEMPLATES_DIR = (REPO_DIR / "templates") if (REPO_DIR / "templates").is_dir() else FRAMEWORK_ROOT / "templates"
-STATE_DIR = REPO_DIR / "state"
-WIKI_DIR = REPO_DIR / "wiki"
-SOURCES_DIR = REPO_DIR / "sources"
-MANUAL_SOURCES_DIR = SOURCES_DIR / "manual"
-IMPORT_SOURCES_DIR = SOURCES_DIR / "imports"
-CORRECTION_SOURCES_DIR = SOURCES_DIR / "corrections"
-ARTIFACT_SOURCES_DIR = SOURCES_DIR / "artifacts"
-QUESTION_CANDIDATES_FILE = STATE_DIR / "question_candidates.json"
-QUESTION_QUEUE_FILE = STATE_DIR / "question_queue.json"
-PLANNER_STATE_FILE = STATE_DIR / "planner_state.json"
-SOURCE_MANIFEST_FILE = STATE_DIR / "source_manifest.json"
-SOURCE_LINT_FINDINGS_FILE = STATE_DIR / "source_lint_findings.json"
-LEARNING_FAILURES_FILE = STATE_DIR / "learning_failures.jsonl"
-MISSION_FILE = SYSTEM_DIR / "mission.md"
-CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
-NEIGHBORHOODS_FILE = STATE_DIR / "neighborhoods.json"
-FOCUS_RECS_FILE = STATE_DIR / "focus_recommendations.json"
-LEGACY_FOCUS_RECS_FILE = STATE_DIR / ("spot" "light_recommendations.json")
-CONNECTORS_DIR = SYSTEM_DIR / "connectors"
+VAULT_LAYOUT = vault_layout(REPO_DIR, framework_system_dir=SYSTEM_DIR)
+
+
+def _data(name: str) -> Path:
+    return vault_data_path(name, vault_root=REPO_DIR, framework_system_dir=SYSTEM_DIR)
+
+
+QUESTIONS_FILE = _data("question_bank")
+ROTATION_FILE = _data("rotation")
+COVERAGE_FILE = _data("coverage")
+CONFIG_FILE = _data("config")
+PROFILE_FILE = _data("profile")
+README_FILE = _data("readme")
+ANSWERS_DIR = _data("answers")
+OUTPUTS_DIR = _data("outputs")
+STATE_DIR = _data("state")
+WIKI_DIR = _data("wiki")
+SOURCES_DIR = _data("sources")
+MANUAL_SOURCES_DIR = _data("manual_sources")
+IMPORT_SOURCES_DIR = _data("import_sources")
+CORRECTION_SOURCES_DIR = _data("correction_sources")
+ARTIFACT_SOURCES_DIR = _data("artifact_sources")
+QUESTION_CANDIDATES_FILE = _data("question_candidates")
+QUESTION_QUEUE_FILE = _data("question_queue")
+PLANNER_STATE_FILE = _data("planner_state")
+SOURCE_MANIFEST_FILE = _data("source_manifest")
+SOURCE_LINT_FINDINGS_FILE = _data("source_lint_findings")
+LEARNING_FAILURES_FILE = _data("learning_failures")
+CLASSIFICATIONS_DIR = _data("classifications")
+NEIGHBORHOODS_FILE = _data("neighborhoods")
+FOCUS_RECS_FILE = _data("focus_recommendations")
+LEGACY_FOCUS_RECS_FILE = _data("legacy_focus_recommendations")
+ROADMAP_FILE = _data("roadmap")
+QUALITY_PROFILE_FILE = _data("quality_profile")
+ANSWER_SCORES_FILE = _data("answer_scores")
+ENTITY_ROSTERS_DIR = _data("entity_rosters")
+CONNECTORS_STATE_DIR = _data("connectors_state")
+SECOND_VOICE_OFFERS_FILE = _data("second_voice_offers")
+BOOK_OFFERS_FILE = _data("book_offers")
+TIMELINE_PLACEMENTS_FILE = _data("timeline_placements")
+PERENNIALS_FILE = _data("perennials")
+WIKI_SYNTHESIS_CACHE_FILE = _data("wiki_synthesis_cache")
+SYNTHESIS_DIR = _data("synthesis")
+REPORTS_DIR = _data("reports")
+AGENT_TASKS_DIR = _data("agent_tasks")
+JOBS_DIR = _data("jobs")
+COMPILE_NEEDED_FILE = _data("compile_needed")
+
+TEMPLATES_DIR = framework_path("templates", framework_system_dir=SYSTEM_DIR)
+MISSION_FILE = framework_path("mission", framework_system_dir=SYSTEM_DIR)
+CONNECTORS_DIR = framework_path("connectors", framework_system_dir=SYSTEM_DIR)
 
 QUESTION_ID_RE = r"[A-Z]\d+[a-z]*"
 QUESTION_LINE_RE = re.compile(

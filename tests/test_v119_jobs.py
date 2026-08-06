@@ -83,11 +83,25 @@ raise SystemExit(int(control.get("exit_code", 0)))
 '''
 
 
+def make_minimum_vault(root: Path, *, embedded: bool = False) -> None:
+    """Create the issue #64 minimum shape used by queue-only fixtures."""
+    data_root = root / "system" if embedded else root
+    data_root.mkdir(parents=True, exist_ok=True)
+    (data_root / "question-bank.md").write_text(
+        "# Questions\n\n## A: Origins\n\n- [ ] A1: Test question?\n",
+        encoding="utf-8",
+    )
+    state_root = data_root if embedded else root / "state"
+    state_root.mkdir(parents=True, exist_ok=True)
+    (state_root / "rotation.json").write_text('{"version": 1}\n', encoding="utf-8")
+    (state_root / "coverage.json").write_text('{"version": 1}\n', encoding="utf-8")
+
+
 class DurableJobsTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-jobs-test-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-jobs-test-", dir=ROOT.parent))
         self.vault = self.tmp / "vault-only"
-        (self.vault / "state").mkdir(parents=True)
+        make_minimum_vault(self.vault)
         self.framework = self.tmp / "framework" / "system"
         self.framework.mkdir(parents=True)
         (self.framework / "lifehug.py").write_text(FAKE_LIFEHUG, encoding="utf-8")
@@ -97,8 +111,8 @@ class DurableJobsTests(unittest.TestCase):
         jobs.FRAMEWORK_SYSTEM_DIR = self.framework
 
     def tearDown(self):
-        jobs.configure(self.original_vault)
         jobs.FRAMEWORK_SYSTEM_DIR = self.original_framework
+        jobs.configure(self.original_vault)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def control(self, **values) -> None:
@@ -107,6 +121,7 @@ class DurableJobsTests(unittest.TestCase):
     def worker_process(self, *worker_flags: str) -> subprocess.Popen:
         env = os.environ.copy()
         env["LIFEHUG_FRAMEWORK_SYSTEM_DIR"] = str(self.framework)
+        env["LIFEHUG_VAULT_ROOT"] = str(self.vault)
         env["LIFEHUG_JOB_POLL_SECONDS"] = "0.05"
         return subprocess.Popen(
             [sys.executable, str(SYSTEM / "jobs.py"), "worker", *(worker_flags or ("--once",)),
@@ -172,7 +187,7 @@ class DurableJobsTests(unittest.TestCase):
 
     def test_cold_start_identity_key_is_atomic_across_processes(self):
         cold_vault = self.tmp / "cold-vault"
-        (cold_vault / "state").mkdir(parents=True)
+        make_minimum_vault(cold_vault)
         gate = self.tmp / "cold-start-go"
         program = (
             "import sys,time; from pathlib import Path; "
@@ -399,7 +414,13 @@ class DurableJobsTests(unittest.TestCase):
                 target.unlink()
 
     def test_file_answer_outer_queue_leaves_no_plaintext_temp(self):
-        for name in ("jobs.py", "job_execute.py", "vault_paths.py", "file_answer_bg.sh"):
+        for name in (
+            "jobs.py",
+            "job_execute.py",
+            "vault_contract.json",
+            "vault_paths.py",
+            "file_answer_bg.sh",
+        ):
             shutil.copy2(SYSTEM / name, self.framework / name)
         controlled_tmp = self.tmp / "controlled-tmp"
         controlled_tmp.mkdir()
@@ -527,10 +548,10 @@ class DurableJobsTests(unittest.TestCase):
         escaped.mkdir()
         bad_vault = self.tmp / "bad-vault"
         bad_vault.mkdir()
+        (bad_vault / "question-bank.md").write_text("# Questions\n", encoding="utf-8")
         (bad_vault / "state").symlink_to(escaped, target_is_directory=True)
-        jobs.configure(bad_vault)
         with self.assertRaisesRegex(ValueError, "symlink"):
-            jobs.enqueue("compile", {}, kick=False)
+            jobs.configure(bad_vault)
 
         jobs.configure(self.vault)
         jobs._ensure_layout()
@@ -543,24 +564,25 @@ class DurableJobsTests(unittest.TestCase):
         explicit = self.tmp / "explicit-vault"
         from_env = self.tmp / "environment-vault"
         embedded = self.tmp / "embedded-framework" / "system"
-        for path in (explicit, from_env, embedded):
-            path.mkdir(parents=True)
+        make_minimum_vault(explicit)
+        make_minimum_vault(from_env)
+        make_minimum_vault(embedded.parent, embedded=True)
         with mock.patch.dict(os.environ, {"LIFEHUG_VAULT_ROOT": str(from_env)}):
             self.assertEqual(
                 vault_paths.resolve_vault_root(
                     explicit,
                     framework_system_dir=embedded,
                 ),
-                explicit,
+                explicit.resolve(),
             )
             self.assertEqual(
                 vault_paths.resolve_vault_root(framework_system_dir=embedded),
-                from_env,
+                from_env.resolve(),
             )
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(
                 vault_paths.resolve_vault_root(framework_system_dir=embedded),
-                embedded.parent,
+                embedded.parent.resolve(),
             )
 
         symlink = self.tmp / "vault-symlink"

@@ -37,8 +37,8 @@ sys.path.insert(0, str(SYSTEM_DIR))
 
 from lifehug_core import (
     ANSWERS_DIR,
+    ENTITY_ROSTERS_DIR,
     QUESTIONS_FILE,
-    STATE_DIR,
     answer_body,
     answer_id_from_filename,
     load_config,
@@ -51,7 +51,7 @@ from lifehug_core import (
 from recommend_focuses import STOPWORDS, OLD_FOCUS_TERM, load_recommendation_state
 
 ENTITY_TYPES = ("person", "place", "period", "object", "theme")
-ENTITY_DIR = STATE_DIR / "entity_rosters"
+ENTITY_DIR = ENTITY_ROSTERS_DIR
 
 # (page_min_score, page_min_answers) defaults per type. Objects are symbolic-gated,
 # not score-gated, so their thresholds are 0/1.

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import compose
 from lifehug_core import (
+    AGENT_TASKS_DIR,
     ARTIFACT_SOURCES_DIR,
     OUTPUTS_DIR,
     REPO_DIR,
@@ -504,7 +505,7 @@ def cmd_revise(args: argparse.Namespace) -> int:
         # the durable browser job succeeds once it has safely emitted the
         # agent task.  The private feedback stays in gitignored task storage,
         # never in the job record or job log.
-        task_dir = REPO_DIR / "state" / "agent_tasks" / "artifact"
+        task_dir = AGENT_TASKS_DIR / "artifact"
         task_dir.mkdir(parents=True, exist_ok=True)
         task = {
             "task": "artifact-revise",
