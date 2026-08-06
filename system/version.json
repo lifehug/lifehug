@@ -1,7 +1,7 @@
 {
-  "version": 117,
-  "released": "2026-08-04",
-  "changelog": "v117: one vault, many machines — multi-writer git discipline (lifehug-platform ADR 0011, issue #174). Your vault can now be driven safely from several places at once: this machine, a second machine, a hosted Lifehug environment. Two flows learned to read fresh before they act — daily_question.sh pulls before it picks the question, and file_answer_bg.sh pulls before it files — so a question answered on your phone this morning is not re-asked by your laptop this evening. Both pulls are non-fatal: if git is unreachable you still get your question and your answer still files, exactly as before. process-answer's --push path no longer crashes when someone else pushed first; it rebases and retries, and if the push still cannot land it says so plainly and tells you your commit is safe and unpushed instead of dying on a traceback. CLAUDE.md gains 'Shared Vault: One Vault, Many Machines': the four disciplines, why you should answer with an explicit question id across machines, and a step-by-step recovery for a rotation.json rebase conflict. Drive-by fix: AGENTS.md's rebase snippet had --ours and --theirs backwards (during a rebase your commits replay onto the remote, so the labels invert) and would have taken the opposite side of every state-file conflict it described.",
+  "version": 118,
+  "released": "2026-08-05",
+  "changelog": "v118: cross-medium parity rule documented (AGENTS.md/CLAUDE.md) — feature equivalence between this local companion and hosted Lifehug is now a stated, bidirectional build rule; the first platform→local backfill wave is filed as issues #51–#54 (local answer capture, local warm acknowledgment, mobile-usable local UI, viewable source bodies). Docs only; no behavior change.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

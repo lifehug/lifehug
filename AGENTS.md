@@ -49,6 +49,20 @@ Then decide:
 2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
 3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `python3 system/lifehug.py process-answer` for answer saves.
 
+## Cross-Medium Parity (owner-set, 2026-08-05)
+
+Lifehug is one product in multiple mediums: this local companion, the hosted
+platform (lifehug/lifehug-platform), future mobile apps. Mediums differ in
+HOW, never in WHAT — user-facing capabilities stay feature-equivalent,
+adapted to each medium. The rule is bidirectional: **any session building a
+user-facing feature here files the twin issue on lifehug-platform in the
+same pass (and vice versa), or records in the PR why the feature doesn't
+translate to the other medium.** Hosted infrastructure (sessions, invite
+gates, durable stores) is not a feature and needs no twin. Design/theming
+parity is deliberately deferred until the platform's design settles
+(lifehug-platform#236 tracks the future shared design library).
+First backfill wave from the platform's UI build: issues #51–#54 here.
+
 ## Git Conflict Resolution — State File Safety
 
 **This section is the UPGRADE case**: pulling framework changes from the

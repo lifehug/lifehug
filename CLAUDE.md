@@ -1229,3 +1229,11 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 - `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
 - `answers/`, `outputs/`, `sources/`
 - `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`, `state/timeline_placements.json`
+
+## Cross-Medium Parity
+
+Feature equivalence across mediums (local / hosted platform / future mobile)
+is bidirectional and owner-set (2026-08-05): build a user-facing feature →
+file the twin issue on the other repo in the same pass, or record why it
+doesn't translate. Full rule: AGENTS.md §Cross-Medium Parity. Backfill wave:
+issues #51–#54.
