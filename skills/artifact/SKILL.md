@@ -10,6 +10,12 @@ letters, posts, captions, chapters, speeches, and other authored outputs. This
 skill is script-first. Use `system/lifehug.py artifact ...`; do not hand-create
 metadata or source files.
 
+Artifact mutations are typed durable jobs and share the vault-wide writer
+with answers, schedules, compiles, and viewer actions. Private drafts,
+feedback, reactions, and notes cross the worker boundary through stdin/private
+sidecars, never process argv or job metadata. A failed/ambiguous artifact job
+is not blindly replayed; report its id for owner review.
+
 ## Find The Workspace
 
 Use the current repo if it has `system/lifehug.py`. Otherwise check

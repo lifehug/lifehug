@@ -34,6 +34,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from vault_paths import validate_contained_path
 
 SCHEMA_VERSION = 1
 REQUIRED_SOURCE_KEYS = (
@@ -746,13 +747,19 @@ def resolve_source_target(value: str) -> Path:
     if not candidate.is_absolute():
         candidate = REPO_DIR / candidate
     if candidate.exists():
-        return candidate
+        for root in (ANSWERS_DIR, SOURCES_DIR):
+            try:
+                return validate_contained_path(candidate, root, label="source target")
+            except ValueError:
+                continue
+        raise ValueError("source target must stay under answers/ or sources/")
     manifest = load_manifest()
     for path, entry in manifest.get("sources", {}).items():
         if value in {path, entry.get("source_id")}:
             resolved = REPO_DIR / path
             if resolved.exists():
-                return resolved
+                root = ANSWERS_DIR if str(path).startswith("answers/") else SOURCES_DIR
+                return validate_contained_path(resolved, root, label="source target")
     raise FileNotFoundError(f"source target not found: {value}")
 
 
@@ -773,7 +780,11 @@ def create_linked_source(
     label = {"source_reflection": "Reflection",
              "source_retraction": "Retraction"}.get(source_type, "Correction")
     title = title or f"{label} for {target_title}"
-    CORRECTION_SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    validate_contained_path(
+        CORRECTION_SOURCES_DIR,
+        CORRECTION_SOURCES_DIR.parent,
+        label="correction destination",
+    ).mkdir(parents=True, exist_ok=True)
     path = _unique_path(CORRECTION_SOURCES_DIR, title, captured_at)
     payload = f"# {title}\n\n{body.strip()}\n"
     source_id_prefix = {"source_reflection": "reflection",

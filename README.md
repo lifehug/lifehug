@@ -395,6 +395,20 @@ The same workflow works from a desktop skill or from your phone. In Telegram/Ope
 
 Lifehug runs on three clocks plus per-answer events. The rule: **detect/report jobs are cheap and frequent; generate jobs cost API money and run rarely.** The wiki compiles *before* any planning or research, so everything reads a fresh graph.
 
+All real local mutations meet at one restart-safe writer. Browser actions,
+answer filing, artifact changes, compiles, and the daily/weekly/monthly scripts
+enqueue typed jobs under `state/jobs/`; a kernel lock lets only one worker (or
+one explicitly locked canonical CLI mutation) write the vault at a time. Job
+records contain operational metadata only. Private inputs live in mode-0600
+sidecars, successful sidecars are deleted, and failed/ambiguous sidecars are
+retained until the owner runs `python3 system/jobs.py purge <job-id>`. A crash
+without a completion receipt never blindly replays a possibly completed
+non-idempotent action. macOS users can install the worker and schedules from
+[`examples/launchd/`](examples/launchd/README.md); OpenClaw can keep using the
+same canonical scripts. Queue administration is intentionally exposed through
+`system/jobs.py` (`worker`, `show`, `retry`, `purge`, and `cleanup`); canonical
+vault mutations remain commands of `system/lifehug.py`.
+
 ```mermaid
 flowchart TB
     subgraph d["🌅 DAILY · free"]
@@ -432,6 +446,8 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 |---|---|
 | **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
+| **`jobs.py`** + **`job_execute.py`** | Durable metadata-only queue and single-writer worker. Typed payloads stay in private sidecars and cross the child boundary through stdin, never process argv. Explicit schedule/provider identities deduplicate; ordinary repeated actions create fresh jobs. |
+| **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with fail-closed path containment and symlink checks. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
 | **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, classifies a capped batch of unclassified sources, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, scans for gaps, reports progress, then commits and sends a Telegram summary. Dry-run previews the same candidate promotion gate without writing. |
 | **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Focuses, refreshes entity rosters, reports progress, then commits real changes. |
@@ -467,7 +483,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 |---|---|
 | **`wiki_compile.py`** | The graph builder. Plan → synthesize → cross-link → write. Turns answers into cross-linked wiki pages with cached, idempotent synthesis and a keyless desktop path (`--emit-tasks`). See [the wiki](#the-private-wiki). |
 | **`source_integrity.py`** | The source contract enforcer. Scans raw sources, maintains `state/source_manifest.json`, writes source lint findings, and creates additive correction/reflection source files instead of rewriting old memories. |
-| **`serve_wiki.py`** | The local viewer and studio. An HTTP server (`python3 system/serve_wiki.py`, http://127.0.0.1:8765) that renders the wiki as HTML and resolves `[[wikilinks]]` into real page navigation. The home page is an **action hub** (v99): up to five calm invitation cards — a chapter ready to draft, one classifier-noticed tension or insight to sit with, the week's next question, review counts, a perennial due, a second-voice offer, and one resurfaced old answer — over a small stats strip. Invitations, never guilt metrics. The header's hamburger menu groups the dashboard views into **Do** (Queue, Candidates, Recommendations, Book), **Reflect** (Timeline, Graph), **Library** (Artifacts, Question Bank, Sources, Privacy), and **System** (The Loop, Focuses, Coverage, Entities, Reports); the compiled wiki stays in the left sidebar with the index one click away. Write actions (v101) shell the CLI behind a session token: promote/defer/dismiss candidates, approve focus ideas, edit or AI-revise artifacts (vN+1), mark final / promote / record delivery, and file reflections, corrections, or retractions from any source — long work runs as detached jobs with a status pill. |
+| **`serve_wiki.py`** | The local viewer and studio. An HTTP server (`python3 system/serve_wiki.py`, http://127.0.0.1:8765) that renders the wiki as HTML and resolves `[[wikilinks]]` into real page navigation. The home page is an **action hub** (v99): up to five calm invitation cards — a chapter ready to draft, one classifier-noticed tension or insight to sit with, the week's next question, review counts, a perennial due, a second-voice offer, and one resurfaced old answer — over a small stats strip. Invitations, never guilt metrics. The header's hamburger menu groups the dashboard views into **Do** (Queue, Candidates, Recommendations, Book), **Reflect** (Timeline, Graph), **Library** (Artifacts, Question Bank, Sources, Privacy), and **System** (The Loop, Focuses, Coverage, Entities, Reports); the compiled wiki stays in the left sidebar with the index one click away. Write actions require a session token plus exact loopback Host/Origin checks and return immediately after durable enqueue; the status pill converges through queued/running/succeeded/failed metadata without exposing private payloads. |
 | **`artifact.py`** | The artifact workflow. Creates occasion tasks, writes context packs, saves versioned outputs, marks finals, and promotes context/final versions into `sources/artifacts/` with provenance. |
 | **`compose.py`** | The low-level output composer. Assembles a prompt (template + the right answers), then versions the AI's result under `outputs/`. `artifact.py` is the preferred milestone workflow. |
 | **`update_readme.py`** | Keeps the README's coverage section and progress bullets in sync with current state. |

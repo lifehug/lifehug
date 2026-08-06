@@ -11,6 +11,9 @@ system/question-bank-upstream.md
 skill/life-legacy
 state/synthesis/
 state/agent_tasks/
+# Local execution state: durable on one machine, never vault content. Job
+# records are metadata-only; opaque payload sidecars can contain private input.
+state/jobs/
 # Connector secrets (v106). The ledger JSONL itself IS committed — it is
 # owner-only metadata state like the rest of state/. The body cache is
 # committed too (v108 — owner relaxed raw storage); only secrets stay ignored.

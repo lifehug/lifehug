@@ -176,6 +176,15 @@ profile.yaml      committed identity/prefs (name, full_name, timezone); secrets 
 system/           all scripts — the system is script-first
 ```
 
+Local writes are serialized by `system/jobs.py`: viewer actions, answer
+filing, artifact changes, compiles, and scheduled loops share one restart-safe
+worker/kernel lock. Runtime records and private mode-0600 payload sidecars live
+under gitignored `state/jobs/`; failed or ambiguous payloads are retained for
+owner review and can be removed with `python3 system/jobs.py purge <job-id>`.
+See `examples/launchd/README.md` for macOS worker and schedule examples.
+Queue administration uses `system/jobs.py`; canonical vault mutations remain
+commands of `system/lifehug.py`.
+
 ## Coverage
 📊 182/343 questions answered · 8 focuses active
 

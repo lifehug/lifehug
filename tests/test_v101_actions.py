@@ -6,7 +6,6 @@ import json
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -70,17 +69,94 @@ class PostAuthTests(unittest.TestCase):
                              headers={"Host": "evil.example.com"})
         self.assertEqual(resp.status, 403)
 
+    def test_host_prefix_and_wrong_port_do_not_count_as_loopback(self):
+        for host in (f"localhost.evil:{self.port}", f"127.0.0.1.evil:{self.port}",
+                     "localhost:9"):
+            with self.subTest(host=host):
+                resp, _ = self._post(
+                    "/actions/candidate",
+                    {"id": "c1", "_token": serve_wiki.SESSION_TOKEN},
+                    headers={"Host": host},
+                )
+                self.assertEqual(resp.status, 403)
+
     def test_post_with_foreign_origin_403(self):
         resp, _ = self._post("/actions/candidate",
                              {"id": "c1", "_token": serve_wiki.SESSION_TOKEN},
                              headers={"Origin": "https://evil.example.com"})
         self.assertEqual(resp.status, 403)
 
+    def test_origin_requires_exact_loopback_authority_and_port(self):
+        for origin in (
+            f"http://localhost.evil:{self.port}",
+            f"http://localhost:{self.port + 1}",
+            f"https://localhost:{self.port}",
+        ):
+            with self.subTest(origin=origin):
+                resp, _ = self._post(
+                    "/actions/candidate",
+                    {"id": "c1", "_token": serve_wiki.SESSION_TOKEN},
+                    headers={"Origin": origin},
+                )
+                self.assertEqual(resp.status, 403)
+
     def test_valid_post_redirects_with_flash(self):
         resp, _ = self._post("/actions/candidate",
                              {"id": "c1", "_token": serve_wiki.SESSION_TOKEN})
         self.assertEqual(resp.status, 303)
         self.assertIn("flash=stub+ok", resp.getheader("Location"))
+
+    def test_action_exception_has_fixed_private_failure_surface(self):
+        secret = "private-answer-DO-NOT-LEAK"
+        submitted = "submitted-private-body"
+        logs = []
+
+        def fail(_form):
+            raise ValueError(f"bad path /private/vault/{secret}")
+
+        original = serve_wiki.ACTIONS["/actions/candidate"]
+        original_log_error = serve_wiki.Handler.log_error
+        serve_wiki.ACTIONS["/actions/candidate"] = fail
+        serve_wiki.Handler.log_error = lambda _self, fmt, *args: logs.append(fmt % args)
+        try:
+            resp, payload = self._post(
+                "/actions/candidate",
+                {
+                    "id": submitted,
+                    "_token": serve_wiki.SESSION_TOKEN,
+                },
+            )
+        finally:
+            serve_wiki.ACTIONS["/actions/candidate"] = original
+            serve_wiki.Handler.log_error = original_log_error
+
+        location = resp.getheader("Location")
+        surface = "\n".join([location, payload.decode(), *logs])
+        self.assertEqual(resp.status, 303)
+        self.assertIn("action+failed+safely", location)
+        self.assertIn("exception_class=ValueError", logs[0])
+        self.assertNotIn(secret, surface)
+        self.assertNotIn(submitted, surface)
+
+    def test_invalid_typed_payload_is_fixed_303_not_500(self):
+        original = serve_wiki.ACTIONS["/actions/candidate"]
+        original_log_error = serve_wiki.Handler.log_error
+        serve_wiki.ACTIONS["/actions/candidate"] = serve_wiki.act_candidate
+        serve_wiki.Handler.log_error = lambda *_args: None
+        try:
+            resp, _ = self._post(
+                "/actions/candidate",
+                {
+                    "id": "../../not-a-candidate",
+                    "op": "dismiss",
+                    "_token": serve_wiki.SESSION_TOKEN,
+                },
+            )
+        finally:
+            serve_wiki.ACTIONS["/actions/candidate"] = original
+            serve_wiki.Handler.log_error = original_log_error
+        self.assertEqual(resp.status, 303)
+        self.assertIn("action+failed+safely", resp.getheader("Location"))
 
     def test_unknown_action_404(self):
         resp, _ = self._post("/actions/nope",
@@ -105,51 +181,66 @@ class PostAuthTests(unittest.TestCase):
         self.assertIn('class="flash"', body)
         self.assertIn("hello there", body)
 
+    def test_get_exception_has_fixed_private_failure_surface(self):
+        secret = "GET-SECRET-private-path"
+        logs = []
+        original_builder = serve_wiki.VIEW_MAP.get("private-failure-test")
+        original_log_error = serve_wiki.Handler.log_error
 
-class JobsTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
-        self._orig = jobs.JOBS_DIR
-        jobs.JOBS_DIR = self.tmp / "jobs"
+        def fail():
+            raise RuntimeError(f"failed under /private/{secret}")
 
-    def tearDown(self):
-        jobs.JOBS_DIR = self._orig
+        serve_wiki.VIEW_MAP["private-failure-test"] = fail
+        serve_wiki.Handler.log_error = lambda _self, fmt, *args: logs.append(fmt % args)
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("GET", "/views/private-failure-test")
+            resp = conn.getresponse()
+            body = resp.read().decode()
+            conn.close()
+        finally:
+            if original_builder is None:
+                serve_wiki.VIEW_MAP.pop("private-failure-test", None)
+            else:
+                serve_wiki.VIEW_MAP["private-failure-test"] = original_builder
+            serve_wiki.Handler.log_error = original_log_error
+        surface = "\n".join([body, *logs])
+        self.assertEqual(resp.status, 200)
+        self.assertIn("temporarily unavailable", body)
+        self.assertIn("exception_class=RuntimeError", logs[0])
+        self.assertNotIn(secret, surface)
 
-    def _wait(self, job_id, timeout=10):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            record = jobs.load_job(job_id)
-            if record and record["status"] != "running":
-                return record
-            time.sleep(0.1)
-        self.fail("job never finished")
+    def test_job_endpoint_converges_from_queued_to_succeeded(self):
+        original = jobs.VAULT_ROOT
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                jobs.configure(Path(tmp))
+                record = jobs.enqueue("compile", {"no_ai": True}, kick=False)
 
-    def test_job_lifecycle_success(self):
-        record = jobs.start_job("test", [sys.executable, "-c", "print('hi there')"])
-        self.assertEqual(record["status"], "running")
-        done = self._wait(record["id"])
-        self.assertEqual(done["status"], "done")
-        self.assertEqual(done["rc"], 0)
-        self.assertIn("hi there", done["tail"])
+                def fetch():
+                    conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+                    conn.request("GET", f"/jobs/{record['id']}.json")
+                    response = conn.getresponse()
+                    payload = json.loads(response.read())
+                    conn.close()
+                    return response.status, payload
 
-    def test_job_failure_recorded(self):
-        record = jobs.start_job("test", [sys.executable, "-c", "import sys; sys.exit(3)"])
-        done = self._wait(record["id"])
-        self.assertEqual(done["status"], "failed")
-        self.assertEqual(done["rc"], 3)
-
-    def test_job_stdin_delivery_and_cleanup(self):
-        record = jobs.start_job(
-            "test", [sys.executable, "-c", "import sys; print(sys.stdin.read().upper())"],
-            stdin_text="quiet words")
-        done = self._wait(record["id"])
-        self.assertIn("QUIET WORDS", done["tail"])
-        self.assertFalse((jobs.JOBS_DIR / f"{record['id']}.stdin").exists())
-
-    def test_load_job_rejects_bad_ids(self):
-        self.assertIsNone(jobs.load_job("../../etc/passwd"))
-        self.assertIsNone(jobs.load_job(""))
-        self.assertIsNone(jobs.load_job("SHOUTY"))
+                status, payload = fetch()
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["state"], "queued")
+                payload.update({
+                    "state": "succeeded", "exit_code": 0,
+                    "finished_at": jobs._now(), "updated_at": jobs._now(),
+                    "payload_retained": False,
+                })
+                jobs._write_json(jobs._record_path(record["id"]), payload)
+                _, converged = fetch()
+                self.assertEqual(converged["state"], "succeeded")
+                page = serve_wiki.layout("test", "body").decode()
+                self.assertIn("state === 'queued'", page)
+                self.assertIn("state === 'succeeded'", page)
+            finally:
+                jobs.configure(original)
 
 
 class SecondVoiceAckTests(unittest.TestCase):

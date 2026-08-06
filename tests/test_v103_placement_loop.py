@@ -7,6 +7,7 @@ the weekly batch re-derives events/people/themes from the corrected facts.
 """
 
 import json
+import io
 import sys
 import tempfile
 import unittest
@@ -18,7 +19,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 
 import classify_story as cs  # noqa: E402
-import serve_wiki  # noqa: E402
+import lifehug  # noqa: E402
 import source_integrity as si  # noqa: E402
 import timeline as tl  # noqa: E402
 from lifehug_core import write_json  # noqa: E402
@@ -50,54 +51,56 @@ class PlaceFilesAssertionTests(unittest.TestCase):
                when_hint="summer of first grade"):
         calls = []
 
-        def fake_run_cli(args, stdin_text=None, timeout=120):
-            calls.append(args)
-            return (cli_rc, cli_out)
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+            return __import__("subprocess").CompletedProcess(args, cli_rc, cli_out, "")
 
-        with mock.patch.object(serve_wiki, "_run_cli", fake_run_cli), \
+        args = type("Args", (), {
+            "source": "answers/Z1.md", "period": "childhood",
+            "when_hint": when_hint, "note": "",
+        })()
+        with mock.patch.object(lifehug.subprocess, "run", fake_run), \
                 mock.patch.object(tl, "load_periods",
-                                  lambda: [{"slug": "childhood", "name": "Childhood"}]):
-            result = serve_wiki.act_timeline_place({
-                "source": ["answers/Z1.md"],
-                "description": ["The porch dog summer"],
-                "period": ["childhood"], "when_hint": [when_hint]})
+                                  lambda: [{"slug": "childhood", "name": "Childhood"}]), \
+                mock.patch("sys.stdin", io.StringIO("The porch dog summer")):
+            result = lifehug.cmd_timeline_place(args)
         return result, calls
 
     def test_place_always_files_date_assertion(self):
-        (redirect, flash, job), calls = self._place()
+        result, calls = self._place()
+        self.assertEqual(result, 0)
         self.assertEqual(len(calls), 1)
-        args = calls[0]
-        self.assertEqual(args[0], "fix")
-        self.assertEqual(args[1], "answers/Z1.md")
-        right = args[args.index("--right") + 1]
+        args, kwargs = calls[0]
+        self.assertTrue(str(args[1]).endswith("source_integrity.py"))
+        self.assertEqual(args[2:4], ["correct", "answers/Z1.md"])
+        right = kwargs["input"]
         self.assertIn("happened during Childhood", right)
         self.assertIn("summer of first grade", right)
         self.assertEqual(args[args.index("--kind") + 1], "date")
         rec = tl.load_placements()["placements"][0]
         self.assertEqual(rec["correction"], "sources/corrections/c1.md")
-        self.assertIn("assertion filed", flash)
-        self.assertIsNone(job)
 
     def test_place_without_when_hint_still_files(self):
-        (_, flash, _), calls = self._place(when_hint="")
-        right = calls[0][calls[0].index("--right") + 1]
+        result, calls = self._place(when_hint="")
+        self.assertEqual(result, 0)
+        right = calls[0][1]["input"]
         self.assertTrue(right.endswith("happened during Childhood"))
-        self.assertIn("assertion filed", flash)
 
-    def test_cli_failure_keeps_pin_and_flags_it(self):
-        (_, flash, _), _ = self._place(cli_rc=1, cli_out="boom")
-        rec = tl.load_placements()["placements"][0]
-        self.assertEqual(rec["correction"], "")  # nothing to link
-        self.assertIn("placed in Childhood", flash)
-        self.assertIn("✗", flash)
+    def test_cli_failure_does_not_create_pin(self):
+        result, _ = self._place(cli_rc=1, cli_out="boom")
+        self.assertEqual(result, 1)
+        self.assertEqual(tl.load_placements()["placements"], [])
 
     def test_unplace_mentions_surviving_assertion(self):
         self._place()
         key = tl.load_placements()["placements"][0]["key"]
-        _, flash, _ = serve_wiki.act_timeline_unplace({"key": [key]})
-        self.assertIn("placement removed", flash)
-        self.assertIn("assertion remains", flash)
-        self.assertIn("sources/corrections/c1.md", flash)
+        args = type("Args", (), {"key": key})()
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            result = lifehug.cmd_timeline_unplace(args)
+        self.assertEqual(result, 0)
+        self.assertIn("Placement removed", stdout.getvalue())
+        self.assertIn("assertion remains", stdout.getvalue())
+        self.assertIn("sources/corrections/c1.md", stdout.getvalue())
         self.assertEqual(tl.load_placements()["placements"], [])
 
 
@@ -180,7 +183,8 @@ class CorrectionMarksStaleTests(unittest.TestCase):
         write_json(self.clf, {"events": [{"description": "the move", "when_hint": ""}]})
 
     def _create(self, source_type):
-        with mock.patch.object(si, "CORRECTION_SOURCES_DIR", self.tmp / "corrections"), \
+        with mock.patch.object(si, "SOURCES_DIR", self.tmp), \
+                mock.patch.object(si, "CORRECTION_SOURCES_DIR", self.tmp / "corrections"), \
                 mock.patch.object(si, "resolve_source_target", lambda v: self.target), \
                 mock.patch.object(si, "register_source", lambda p: {}):
             return si.create_linked_source(

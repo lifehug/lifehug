@@ -245,7 +245,11 @@ If follow-up questions are already known, pass `--followup "question text"` for 
 
 The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki.
 
-**Chat / phone path (detached filing, v82/v83).** From a chat surface that must not block (wiki compile takes 30–90s and exceeds chat idle timeouts), do NOT run `process-answer` inline. Dispatch it detached, ack immediately, and end the turn — the script files the answer and sends its own Telegram confirmation when done (via `lifehug.py notify`, chunked; concurrent filings serialize on `state/.filing.lock`):
+**Chat / phone path (durable filing).** From a chat surface that must not block,
+dispatch the canonical wrapper, acknowledge immediately, and end the turn. The
+wrapper streams the answer into a mode-0600 queue sidecar without first leaving
+plaintext in `/tmp`; the single writer files it and sends its own Telegram
+confirmation (`lifehug.py notify`, chunked):
 
 ```bash
 printf '%s\n' "$ANSWER_TEXT" | nohup bash system/file_answer_bg.sh {question_id} \
@@ -337,6 +341,21 @@ hosted bot sees it tomorrow" is the contract, not a bug.
 
 Four disciplines make that safe. The scripts already obey them; follow them by
 hand only when you are driving git yourself.
+
+On each machine, a durable queue supplies the local half of this contract.
+Browser writes, Telegram filing, artifact actions, compiles, and all three
+scheduled loops use the same kernel-backed writer lease. Jobs survive process
+restart under gitignored `state/jobs/`; records are metadata-only and private
+inputs are mode-0600 sidecars. Successful inputs are deleted. Failed or
+ambiguous inputs are retained for owner review and are never blindly replayed
+when the command might already have completed. `python3 system/jobs.py show
+<job-id>` shows safe metadata, `retry <job-id>` accepts only explicitly
+idempotent work, and `purge <job-id>` removes retained private sidecars.
+
+Do not bypass this with `LIFEHUG_JOB_RUNNER_ACTIVE`; it is no longer trusted.
+Worker re-entry uses `LIFEHUG_JOB_RUNNER_TOKEN`, which is accepted only while
+it matches the live writer record and kernel lock. Canonical non-queued CLI
+mutators acquire that same lock directly.
 
 1. **Read fresh at decision time.** Pull before anything picks a question or
    reads state to decide. `daily_question.sh` and `file_answer_bg.sh` do this
@@ -865,9 +884,10 @@ page. When nothing waits, home shows a single quiet "the loop is fed" card.
 ### Write actions (v101)
 
 The viewer is a **review-and-write studio** (capture stays voice/Telegram).
-Every mutation shells the existing CLI — never reimplemented — behind a
-per-process session token + localhost checks, serialized under
-`state/.viewer-action.lock` so browser POSTs can't race the crons:
+Every mutation enters the typed durable runner behind a per-process session
+token and exact loopback Host/Origin checks. Browser POSTs return after durable
+enqueue, and the same kernel writer lease serializes them with answers,
+artifacts, schedules, compiles, and manual canonical mutators:
 
 - **Review queue:** promote (category picker, defaults to the inferred one) /
   defer / dismiss on Candidates; approve / dismiss on Focus Recommendations
@@ -875,17 +895,16 @@ per-process session token + localhost checks, serialized under
   "Got it" acknowledge on the home second-voice card (`second-voice-ack`).
 - **Artifact lifecycle** (on each `/artifact-version/` page): direct edit →
   saved as vN+1 (`artifact save --model manual-edit`), **Revise with AI**
-  (new `artifact revise --feedback` subcommand; runs as a detached job),
+  (new `artifact revise --feedback` subcommand; runs as a durable job),
   mark final, promote-to-source (auto-recompiles), record delivery + the
   recipient's reaction.
 - **Reflections & corrections:** every source row (and every Mirror raw
   signal) links to `/source-actions?ref=…` — file a reflection, a
   `--wrong/--right` correction, or a scoped retraction, then "Recompile now".
-- **Jobs:** long-running actions (compile 30–90s, AI revision minutes) run
-  detached via `system/jobs.py` (`state/jobs/<id>.json` + a polling pill in
-  the flash banner); the runner owns the status file, so a viewer restart
-  never orphans a job. Keyless machines never error on AI actions — they
-  queue agent tasks (`state/agent_tasks/artifact/`) instead.
+- **Jobs:** every write uses `system/jobs.py`; a metadata-only polling pill
+  converges through queued/running/succeeded/failed. A viewer restart never
+  orphans a job, and private payload/argv/output never enters the record.
+  Keyless AI actions queue agent tasks (`state/agent_tasks/artifact/`).
 
 ### Timeline curation (v102)
 

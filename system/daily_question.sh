@@ -8,6 +8,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 cd "$WORKSPACE"
 DRY_RUN="${LIFEHUG_DAILY_DRY_RUN:-0}"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+# Every real scheduled mutation enters the durable local queue.  The worker
+# re-enters this canonical script with a live lease-bound token while holding
+# the one vault writer lock. An explicit identity override is the
+# owner escape hatch after an ambiguous failed daily send; normal launchd
+# retries deduplicate by local date and cannot double-send blindly.
+if ! python3 "$SCRIPT_DIR/jobs.py" active --vault-root "$WORKSPACE" >/dev/null 2>&1 \
+    && [[ "$DRY_RUN" != "1" ]]; then
+  JOB_IDENTITY="${LIFEHUG_JOB_IDENTITY:-daily:$(date +%F)}"
+  exec python3 "$SCRIPT_DIR/jobs.py" enqueue daily --identity "$JOB_IDENTITY" \
+    --wait --vault-root "$WORKSPACE"
+fi
 
 read_config_value() {
   local key="$1"
@@ -49,7 +62,7 @@ fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY RUN: would use configured Telegram delivery target"
-  python3 "$WORKSPACE/system/ask.py" --dry-run
+  python3 "$SCRIPT_DIR/ask.py" --dry-run
   exit 0
 fi
 
@@ -84,6 +97,9 @@ safe_pull() {
 safe_autocommit() {
   local paths=(
     README.md
+    question-bank.md
+    state/rotation.json
+    state/coverage.json
     system/question-bank.md
     system/rotation.json
     system/coverage.json
@@ -139,7 +155,6 @@ record_learning_failure() {
 import os
 import sys
 
-sys.path.insert(0, "system")
 from lifehug_core import record_learning_failure
 
 try:
@@ -174,7 +189,7 @@ safe_pull
 # Keep the wiki (the relational database the rest of the system reads) fresh
 # before delivering. Cheap and deterministic; failures never block the question.
 set +e
-COMPILE_OUT=$(python3 "$WORKSPACE/system/wiki_compile.py" 2>&1)
+COMPILE_OUT=$(python3 "$SCRIPT_DIR/wiki_compile.py" 2>&1)
 COMPILE_STATUS=$?
 set -e
 if [[ "$COMPILE_STATUS" -ne 0 ]]; then
@@ -182,8 +197,8 @@ if [[ "$COMPILE_STATUS" -ne 0 ]]; then
 fi
 
 AWAITING=$(python3 - <<'PY'
-import json
-r = json.load(open("system/rotation.json", encoding="utf-8"))
+from lifehug_core import ROTATION_FILE, read_json
+r = read_json(ROTATION_FILE, default={}) or {}
 print("true" if r.get("awaiting_pass_transition") else "false")
 PY
 )
@@ -192,8 +207,8 @@ if [[ "$AWAITING" == "true" ]]; then
   DEFAULT_MODEL="$(read_config_value followup_model)"
   [[ -z "$DEFAULT_MODEL" ]] && DEFAULT_MODEL="anthropic/claude-opus-4-6"
   TARGET_PASS=$(python3 - <<'PY'
-import json
-r = json.load(open("system/rotation.json", encoding="utf-8"))
+from lifehug_core import ROTATION_FILE, read_json
+r = read_json(ROTATION_FILE, default={}) or {}
 print(r.get("target_pass") or r.get("current_pass", 1) + 1)
 PY
 )
@@ -208,10 +223,10 @@ You've finished the current pass. Reply with a model name to generate the next s
   exit 0
 fi
 
-QUESTION_OUTPUT=$(python3 "$WORKSPACE/system/ask.py" --dry-run)
+QUESTION_OUTPUT=$(python3 "$SCRIPT_DIR/ask.py" --dry-run)
 
 if [[ "$QUESTION_OUTPUT" == Pass\ *complete.* ]]; then
-  TRANSITION_OUTPUT=$(python3 "$WORKSPACE/system/ask.py" --mark-pass-complete)
+  TRANSITION_OUTPUT=$(python3 "$SCRIPT_DIR/ask.py" --mark-pass-complete)
   PASS_NUM=$(echo "$TRANSITION_OUTPUT" | cut -d: -f2)
   DEFAULT_MODEL=$(echo "$TRANSITION_OUTPUT" | cut -d: -f3-)
   TEXT="📖 Lifehug — Pass ${PASS_NUM} complete
@@ -250,7 +265,7 @@ ${QUESTION_OUTPUT}
 
 RESPONSE=$(send_message "$TEXT")
 MESSAGE_ID=$(printf '%s' "$RESPONSE" | extract_message_id)
-python3 "$WORKSPACE/system/ask.py" --confirm-sent "$QUESTION_ID" >/dev/null
+python3 "$SCRIPT_DIR/ask.py" --confirm-sent "$QUESTION_ID" >/dev/null
 pin_message "$MESSAGE_ID"
 
 echo "✓ Lifehug question sent and pinned (question: $QUESTION_ID, msg_id: $MESSAGE_ID)"

@@ -2,8 +2,8 @@
 
 The wrapper is bash, so these tests pin its contract at the text level
 (notification goes through `lifehug.py notify`, never a raw Telegram curl;
-LIFEHUG_CHAT_ID maps to the framework's TELEGRAM_CHAT_ID; a lock serializes
-filings) and exercise the framework plumbing it now relies on
+LIFEHUG_CHAT_ID maps to the framework's TELEGRAM_CHAT_ID; the durable worker
+serializes filings) and exercise the framework plumbing it now relies on
 (resolve_telegram_target's env override and group_chat_id fallback).
 """
 
@@ -64,9 +64,10 @@ class FilerScriptContractTests(unittest.TestCase):
         self.assertIn("LIFEHUG_CHAT_ID", self.text)
         self.assertIn("TELEGRAM_CHAT_ID", self.text)
 
-    def test_filings_serialize_on_lock(self):
-        self.assertIn("state/.filing.lock", self.text)
-        self.assertIn("mkdir", self.text)
+    def test_filings_use_durable_single_writer_queue(self):
+        self.assertIn("jobs.py", self.text)
+        self.assertIn("file-answer", self.text)
+        self.assertNotIn("state/.filing.lock", self.text)
 
     def test_executable(self):
         self.assertTrue(os.access(FILER, os.X_OK))

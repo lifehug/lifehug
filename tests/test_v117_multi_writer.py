@@ -12,8 +12,8 @@ The two shell entrypoints are bash. `daily_question.sh`'s new `safe_pull` is
 extracted and actually executed against a temp repo with a broken remote — the
 non-fatality claim is worth executing rather than asserting about. The pull in
 `file_answer_bg.sh` is inline rather than a function, so it is pinned at the
-text/ordering level, which is the same standard test_v83_filer.py already
-applies to that file.
+text/ordering level. Its outer invocation enters the durable worker; the pull
+and filing then run while that worker owns the vault-wide lease.
 """
 
 import contextlib
@@ -241,7 +241,7 @@ class SafePullTests(unittest.TestCase):
         text = DAILY.read_text()
         call = text.index("\nsafe_pull\n")
         self.assertLess(call, text.index("wiki_compile.py"))
-        self.assertLess(call, text.index('json.load(open("system/rotation.json"'))
+        self.assertLess(call, text.index("from lifehug_core import ROTATION_FILE"))
         # The live pick, not the dry-run branch above it (which exits early).
         self.assertLess(call, text.index("QUESTION_OUTPUT=$(python3"))
 
@@ -263,13 +263,17 @@ class FilerPullTests(unittest.TestCase):
     def test_pulls_with_rebase_and_autostash(self):
         self.assertIn("git pull --rebase --autostash", self.text)
 
-    def test_pull_happens_before_filing_and_after_the_lock(self):
+    def test_pull_happens_before_filing_inside_worker_lease(self):
         pull = self.text.index("git pull --rebase --autostash")
         # The actual invocation, not the header comment that mentions it.
-        self.assertLess(pull, self.text.index("$BODY\" | python3 system/lifehug.py process-answer"),
+        self.assertLess(pull, self.text.index('python3 "$SCRIPT_DIR/lifehug.py" process-answer'),
                         "the pull must precede the filing it informs")
-        self.assertGreater(pull, self.text.index('mkdir "$LOCK"'),
-                           "the pull must be inside the filing lock, not racing another filer")
+        active_guard = self.text.index('jobs.py" active')
+        enqueue = self.text.index('jobs.py" file-answer')
+        self.assertLess(active_guard, enqueue)
+        self.assertLess(enqueue, pull,
+                        "only the worker's active re-entry may reach the pull")
+        self.assertNotIn("state/.filing.lock", self.text)
 
     def test_pull_is_guarded_and_non_fatal(self):
         self.assertIn("git rev-parse --is-inside-work-tree", self.text)

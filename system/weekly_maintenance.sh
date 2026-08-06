@@ -9,10 +9,18 @@ WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 cd "$WORKSPACE"
 
 DRY_RUN="${LIFEHUG_WEEKLY_DRY_RUN:-0}"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 QUEUE_LIMIT="${LIFEHUG_WEEKLY_QUEUE_LIMIT:-8}"
 ARC_MAX="${LIFEHUG_WEEKLY_ARC_MAX:-2}"
 EXPIRES_DAYS="${LIFEHUG_WEEKLY_EXPIRES_DAYS:-8}"
 CLASSIFY_LIMIT="${LIFEHUG_WEEKLY_CLASSIFY_LIMIT:-5}"
+
+if ! python3 "$SCRIPT_DIR/jobs.py" active --vault-root "$WORKSPACE" >/dev/null 2>&1 \
+    && [[ "$DRY_RUN" != "1" ]]; then
+  JOB_IDENTITY="${LIFEHUG_JOB_IDENTITY:-weekly:$(date +%G-W%V)}"
+  exec python3 "$SCRIPT_DIR/jobs.py" enqueue weekly --identity "$JOB_IDENTITY" \
+    --wait --vault-root "$WORKSPACE"
+fi
 
 # v86 (issue #35): the Telegram message is a short counts-first summary;
 # the full step-by-step output is persisted here instead (committed with
@@ -27,7 +35,7 @@ REPORT_FILE="$REPORT_DIR/weekly-$(date +%F).md"
 # messages under Telegram's 4096-char cap (a single oversized weekly summary
 # used to vanish silently). Never fails the flow.
 telegram_notify() {
-  printf '%s' "$1" | python3 "$WORKSPACE/system/lifehug.py" notify || true
+  printf '%s' "$1" | python3 "$SCRIPT_DIR/lifehug.py" notify || true
 }
 
 run_step() {
@@ -45,7 +53,6 @@ record_learning_failure() {
 import os
 import sys
 
-sys.path.insert(0, "system")
 from lifehug_core import record_learning_failure
 
 try:
@@ -65,7 +72,6 @@ learning_failures_summary() {
   python3 - <<'PY'
 import sys
 
-sys.path.insert(0, "system")
 from lifehug_core import format_learning_failures_summary
 
 print(format_learning_failures_summary(limit=3, since_days=14))
@@ -75,6 +81,9 @@ PY
 safe_autocommit() {
   local paths=(
     README.md
+    question-bank.md
+    state/rotation.json
+    state/coverage.json
     system/question-bank.md
     system/rotation.json
     system/coverage.json
@@ -132,14 +141,14 @@ run_source_integrity() {
   echo
   echo "==> python3 system/lifehug.py source-lint"
   set +e
-  python3 "$WORKSPACE/system/lifehug.py" source-lint
+  python3 "$SCRIPT_DIR/lifehug.py" source-lint
   local lint_status=$?
   set -e
 
   if has_safe_source_findings; then
     echo
     echo "==> python3 system/lifehug.py source-lint --fix"
-    if ! python3 "$WORKSPACE/system/lifehug.py" source-lint --fix; then
+    if ! python3 "$SCRIPT_DIR/lifehug.py" source-lint --fix; then
       echo "warn: source lint still has manual findings after safe fixes"
     fi
   elif [[ "$lint_status" -ne 0 ]]; then
@@ -149,22 +158,22 @@ run_source_integrity() {
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY RUN: weekly maintenance"
-  run_step python3 "$WORKSPACE/system/lifehug.py" compile --dry-run --no-ai
-  run_step python3 "$WORKSPACE/system/lifehug.py" source-lint --no-write-findings
-  run_step python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
-  run_step python3 "$WORKSPACE/system/lifehug.py" quality-stats
-  run_step python3 "$WORKSPACE/system/lifehug.py" timeline-retire --dry-run
+  run_step python3 "$SCRIPT_DIR/lifehug.py" compile --dry-run --no-ai
+  run_step python3 "$SCRIPT_DIR/lifehug.py" source-lint --no-write-findings
+  run_step python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
+  run_step python3 "$SCRIPT_DIR/lifehug.py" quality-stats
+  run_step python3 "$SCRIPT_DIR/lifehug.py" timeline-retire --dry-run
   echo "==> (real run) lifehug.py mirror-compile — synthesizes wiki/self/mirror.md (skipped in dry run: costs an AI call)"
-  run_step python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote --dry-run
-  run_step python3 "$WORKSPACE/system/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
-  run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
-  run_step python3 "$WORKSPACE/system/lifehug.py" progress
+  run_step python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote --dry-run
+  run_step python3 "$SCRIPT_DIR/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
+  run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
+  run_step python3 "$SCRIPT_DIR/lifehug.py" progress
   SINCE_7D=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc)-timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
-  run_step python3 "$WORKSPACE/system/lifehug.py" weekly-summary --since "$SINCE_7D"
+  run_step python3 "$SCRIPT_DIR/lifehug.py" weekly-summary --since "$SINCE_7D"
   exit 0
 fi
 
-run_step python3 "$WORKSPACE/system/lifehug.py" compile --no-ai
+run_step python3 "$SCRIPT_DIR/lifehug.py" compile --no-ai
 run_source_integrity
 
 # v92: keyless agent mode. With no AI route (gateway or key), classification
@@ -172,12 +181,12 @@ run_source_integrity
 # learning failure. The maintenance skill (skills/maintenance) completes them
 # via --from-response — ideally BEFORE this script runs, so the planner queue
 # sees this week's classifications.
-python3 "$WORKSPACE/system/lifehug.py" ai-status >/dev/null 2>&1 && KEYLESS=0 || KEYLESS=1
+python3 "$SCRIPT_DIR/lifehug.py" ai-status >/dev/null 2>&1 && KEYLESS=0 || KEYLESS=1
 echo
 if [[ "$KEYLESS" == "1" ]]; then
   echo "==> keyless — emitting classification tasks for agent completion"
   set +e
-  CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --emit-prompts state/agent_tasks/classify 2>&1)
+  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --emit-prompts state/agent_tasks/classify 2>&1)
   CLASSIFY_STATUS=$?
   set -e
   if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
@@ -189,7 +198,7 @@ $CLASSIFY_OUT"
 else
   echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --limit ${CLASSIFY_LIMIT}"
   set +e
-  CLASSIFY_OUT=$(python3 "$WORKSPACE/system/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1)
+  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1)
   CLASSIFY_STATUS=$?
   set -e
   if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
@@ -218,18 +227,17 @@ ${out}"
   LAST_STEP_OUT="$out"
 }
 
-run_learning_step "quality_update" python3 "$WORKSPACE/system/lifehug.py" quality-update
+run_learning_step "quality_update" python3 "$SCRIPT_DIR/lifehug.py" quality-update
 
 # Pin retirement (v105): manual timeline pins whose event the (fresh)
 # classification now places by itself retire automatically — the filed date
 # assertion is the durable information; the pin was only the display overlay.
-run_learning_step "timeline_retire" python3 "$WORKSPACE/system/lifehug.py" timeline-retire
+run_learning_step "timeline_retire" python3 "$SCRIPT_DIR/lifehug.py" timeline-retire
 
 # Synthesis→question loop (v71): non-boilerplate open questions from compiled
 # wiki pages become candidates (capped at 3/week — the wiki whispers).
 run_learning_step "wiki_harvest" python3 - <<'PY'
 import sys
-sys.path.insert(0, "system")
 from question_candidates import harvest_wiki_questions
 harvested = harvest_wiki_questions()
 if harvested:
@@ -246,7 +254,7 @@ if [[ "$KEYLESS" == "1" ]]; then
   echo
   echo "==> keyless — emitting mirror synthesis task for agent completion"
   set +e
-  MIRROR_OUT=$(python3 "$WORKSPACE/system/lifehug.py" mirror-compile --emit-task state/agent_tasks/mirror 2>&1)
+  MIRROR_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" mirror-compile --emit-task state/agent_tasks/mirror 2>&1)
   MIRROR_STATUS=$?
   set -e
   if [[ "$MIRROR_STATUS" -ne 0 ]]; then
@@ -257,18 +265,18 @@ $MIRROR_OUT"
   fi
   echo "$MIRROR_OUT"
 else
-  run_learning_step "mirror_compile" python3 "$WORKSPACE/system/lifehug.py" mirror-compile
+  run_learning_step "mirror_compile" python3 "$SCRIPT_DIR/lifehug.py" mirror-compile
   MIRROR_OUT="$LAST_STEP_OUT"
 fi
 
-run_learning_step "auto_promote" python3 "$WORKSPACE/system/lifehug.py" candidates-auto-promote
+run_learning_step "auto_promote" python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote
 PROMOTE_OUT="$LAST_STEP_OUT"
 
-run_learning_step "planner_queue" python3 "$WORKSPACE/system/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS"
+run_learning_step "planner_queue" python3 "$SCRIPT_DIR/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS"
 QUEUE_OUT="$LAST_STEP_OUT"
 
-run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
-PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
+run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
+PROGRESS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
 LEARNING_OUT=$(learning_failures_summary 2>&1 || true)
 echo "$LEARNING_OUT"
@@ -295,7 +303,7 @@ echo "$RECS_OUT"
 # Scheduled health check — surfaces queue expiry, backlog age, zombie Focuses,
 # cadence stalls, and roster wipes while there is still time to act.
 set +e
-DOCTOR_OUT=$(python3 "$WORKSPACE/system/lifehug.py" doctor 2>&1)
+DOCTOR_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" doctor 2>&1)
 DOCTOR_STATUS=$?
 set -e
 echo "$DOCTOR_OUT"
@@ -330,7 +338,6 @@ safe_autocommit
 # ignorable line, offered questions never repeat. Empty most weeks by design.
 SECOND_VOICE_OUT=$(python3 - <<'PY' 2>/dev/null || true
 import sys
-sys.path.insert(0, "system")
 from question_planner import pick_second_voice_offer
 offer = pick_second_voice_offer()
 if offer:
@@ -353,7 +360,7 @@ PRESENT_PROMPT="${PRESENT_PROMPTS[$(( $(date +%V | sed 's/^0//') % ${#PRESENT_PR
 # v86 (issue #35): counts-first summary derived from state — never the raw
 # step output (that lives in $REPORT_FILE). Doctor output is piped in so the
 # checks don't run twice.
-SUMMARY=$(printf '%s' "$DOCTOR_OUT" | python3 "$WORKSPACE/system/lifehug.py" weekly-summary \
+SUMMARY=$(printf '%s' "$DOCTOR_OUT" | python3 "$SCRIPT_DIR/lifehug.py" weekly-summary \
   --since "$START_TS" --report-path "$REPORT_FILE" --doctor-file - 2>&1) \
   || SUMMARY="⚠ weekly summary generation failed — see $REPORT_FILE"
 
