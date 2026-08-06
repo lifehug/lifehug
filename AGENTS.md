@@ -79,6 +79,7 @@ Lifehug state files track delivery history, coverage, and the question queue. Du
 - `system/coverage.json` — per-category answer counts
 - `state/question_queue.json` — planned queue with sent/queued status
 - `state/source_manifest.json` — answer and source registry
+- `state/answer_acknowledgments.json` — metadata-only acknowledgment delivery/dedupe ledger
 - `system/question-bank.md` — checked-off questions
 
 ### Framework files (accept REMOTE on conflict)
@@ -186,7 +187,7 @@ When the user replies to a daily question (via any channel):
    - Pipe the answer through `python3 system/lifehug.py process-answer {question_id}`
    - Let `process-answer` compile the private wiki automatically unless there is a clear repair reason to pass `--no-compile-wiki`
    - Commit and push if requested or part of the configured daily workflow
-3. **Acknowledge warmly** — Thank them, share a brief reflection on their answer, mention what's coming next. `python3 system/lifehug.py answer-ack-prompt` builds the canonical prompt for this (stdin: question/answer JSON) — the same tone contract the hosted platform uses, so behavior stays consistent whichever surface answered.
+3. **Acknowledge warmly** — `process-answer` now does this automatically after the answer is durable and before any adaptive follow-up, using the shared `ai_provider` plus the canonical `answer-ack-prompt` tone contract. Do not send a second hand-written acknowledgment. Provider/generation/Telegram failure degrades to silence without failing capture or suppressing the follow-up; inspect metadata-only status with `python3 system/lifehug.py answer-ack-status`.
 
 ## Unprompted Story Ingest
 

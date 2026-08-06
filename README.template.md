@@ -58,7 +58,7 @@ Focuses drive the weekly question allocation. **David James Taylor** is the prim
 
 1. **Question arrives** — drawn from the weekly queue (Focus-weighted, variety-capped)
 2. **Dave answers** — voice or text, whenever he wants
-3. **Answer is processed** — saved as source material, richness scored silently. Wiki compile is decoupled and runs hourly (or at daily question time), so batch answers never conflict
+3. **Answer is processed conversationally** — saved durably as source material and scored silently; then one warm, detail-specific acknowledgment arrives before any optional same-day follow-up. AI or Telegram failure never risks the answer or the follow-up. Wiki compile is decoupled and runs hourly (or at daily question time), so batch answers never conflict
 4. **Weekly source integrity checks run** — metadata, citations, and repair findings stay visible; safe metadata/manifest fixes apply automatically
 5. **New sources are classified** — a capped weekly pass extracts structured meaning and adds reviewable follow-up candidates without rewriting the raw file
 6. **Profile updates weekly** — aggregates scores by story function and category

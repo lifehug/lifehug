@@ -243,16 +243,23 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer {questio
 
 If follow-up questions are already known, pass `--followup "question text"` for each.
 
-The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki.
+The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki. After the answer file (and a requested local commit) is durable, it builds the canonical `answer-ack-prompt` through the shared `ai_provider`, sends the warm acknowledgment on Telegram, and only then sends any adaptive follow-up. Model, provider, malformed-generation, and Telegram failures are best-effort: they never fail the saved answer or suppress the follow-up.
 
-**Chat / phone path (detached filing, v82/v83).** From a chat surface that must not block (wiki compile takes 30–90s and exceeds chat idle timeouts), do NOT run `process-answer` inline. Dispatch it detached, ack immediately, and end the turn — the script files the answer and sends its own Telegram confirmation when done (via `lifehug.py notify`, chunked; concurrent filings serialize on `state/.filing.lock`):
+**Chat / phone path (detached filing, v82/v83/v121).** From a chat surface that must not block (wiki compile takes 30–90s and exceeds chat idle timeouts), do NOT run `process-answer` inline. Dispatch it detached, send only the immediate procedural “filing” signal, and end the turn — after durability the script sends the warm acknowledgment itself, then any optional follow-up (concurrent filings serialize on `state/.filing.lock`):
 
 ```bash
 printf '%s\n' "$ANSWER_TEXT" | nohup bash system/file_answer_bg.sh {question_id} \
   --source "telegram-voice" >/tmp/lifehug-file-{question_id}.log 2>&1 &
 ```
 
-Set `TELEGRAM_CHAT_ID` (or legacy `LIFEHUG_CHAT_ID`) to steer the confirmation to the active chat; otherwise it goes to the configured `telegram_chat_id`/`group_chat_id`.
+Set `TELEGRAM_CHAT_ID` (or legacy `LIFEHUG_CHAT_ID`) to steer the acknowledgment to the active chat; otherwise it goes to the configured `telegram_chat_id`/`group_chat_id`. Delivery metadata is stored under `state/answer_acknowledgments.json`, keyed by the durable `answer:{ID}` source id and containing no answer, prompt, or generated message text. Confirmed sends never repeat. A transport-ambiguous send stays visible in `doctor` / `answer-ack-status` and is not retried unless you first verify Telegram did not receive it:
+
+```bash
+python3 system/lifehug.py answer-ack-status A3
+python3 system/lifehug.py answer-ack-retry A3
+# Only after checking Telegram:
+python3 system/lifehug.py answer-ack-retry A3 --confirm-not-sent
+```
 
 Do not hand-edit old answer bodies to improve or revise history. New answer files use source metadata frontmatter:
 
@@ -1058,12 +1065,14 @@ channel: "telegram"
 Optional AI-call tuning (v85): `ai_timeout_seconds` (default 600; env override
 `LIFEHUG_AI_TIMEOUT`) bounds each gateway/SDK call, and `classify_model` /
 `research_model` override the classifier/expander model defaults.
+`answer_ack_model` selects the warm acknowledgment model (default
+`claude-sonnet-5`; a configured local provider still uses its own local model).
 
 Direct on-machine AI (v120): put `ai_provider: local`,
 `local_ai_base_url`, `local_ai_model`, and `local_ai_timeout_seconds` in
 gitignored `config.yaml`. The shared `system/ai_provider.py` route powers
 compile, classification, research, rosters, the Mirror, artifact revision,
-connector dossiers, and future web acknowledgments. Ollama, LM Studio,
+connector dossiers, and warm answer acknowledgments. Ollama, LM Studio,
 llama.cpp, and equivalent OpenAI-compatible servers work through
 `/v1/chat/completions`; `ai-status` probes `/v1/models` without generating
 content. Loopback is mandatory unless `local_ai_allow_non_loopback: true` is
@@ -1236,14 +1245,14 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ai_provider.py`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ai_provider.py`, `system/answer_ack.py`, `system/answer_ack_delivery.py`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 
 **User data** (never touched):
 - `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
 - `answers/`, `outputs/`, `sources/`
-- `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`, `state/timeline_placements.json`
+- `state/answer_acknowledgments.json`, `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`, `state/timeline_placements.json`
 
 ## Cross-Medium Parity
 

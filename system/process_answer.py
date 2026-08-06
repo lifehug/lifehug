@@ -30,6 +30,7 @@ from update_readme import update_readme
 
 FOLLOWUP_HEADER = "📖 Lifehug — since you're on a roll"
 FOLLOWUP_FOOTER = "(Totally optional — tomorrow's question comes either way)"
+_FOLLOWUP_UNSET = object()
 
 
 def refresh_neighborhood_readiness_safely() -> None:
@@ -211,47 +212,153 @@ def maybe_send_chapter_ready_offer(answered_question_id: str) -> None:
                   f"[{row['chapter_id']}] {row['chapter_name']}")
 
 
-def maybe_send_followup_question(answered_question_id: str) -> None:
-    """Adaptive cadence: after an answer lands, offer the next question the
-    same day (up to max_questions_per_day, default 3). Conversation, not
-    cadence — an immediate 'here's the next one while you're warm' is the
-    listening move the daily-question genre is missing. No-ops gracefully:
-    off by config, daily cap reached, late evening, pass transition pending,
-    or no Telegram credentials on this machine."""
+def plan_adaptive_followup(answered_question_id: str):
+    """Choose the optional follow-up without sending or mutating state."""
     from datetime import datetime as _dt
 
-    from lifehug_core import load_config, read_json as _read_json, send_telegram  # noqa: PLC0415
+    from lifehug_core import load_config, read_json as _read_json  # noqa: PLC0415
 
     config = load_config()
     if str(config.get("adaptive_cadence", "true")).strip().lower() in ("false", "0", "no", "off"):
-        return
+        return None
     if _dt.now().hour >= 20:
-        return  # don't start a new thread late at night
+        return None  # don't start a new thread late at night
 
     import ask  # noqa: PLC0415
 
     rotation = _read_json(ROTATION_FILE, default={}) or {}
     if rotation.get("awaiting_pass_transition"):
-        return
+        return None
     if ask.sends_today(rotation) >= ask.max_sends_per_day():
-        return
+        return None
 
     md_text = QUESTIONS_FILE.read_text()
     questions = parse_questions(md_text)
     categories = parse_categories(md_text)
     question = ask.pick_next_question(questions, categories, rotation)
     if not question or question["id"] == answered_question_id:
+        return None
+    return question
+
+
+def maybe_send_followup_question(answered_question_id: str, planned_question=_FOLLOWUP_UNSET) -> None:
+    """Adaptive cadence: send the already-planned optional follow-up.
+
+    Planning is separated so the acknowledgment prompt can honestly say
+    whether a follow-up is pending, while the actual send remains strictly
+    after the acknowledgment attempt.  A direct caller may omit the plan and
+    retain the historical choose-and-send behavior.
+    """
+    from lifehug_core import read_json as _read_json, send_telegram  # noqa: PLC0415
+
+    import ask  # noqa: PLC0415
+
+    question = (
+        plan_adaptive_followup(answered_question_id)
+        if planned_question is _FOLLOWUP_UNSET
+        else planned_question
+    )
+    if question is None:
         return
+    categories = parse_categories(QUESTIONS_FILE.read_text())
 
     text = (f"{FOLLOWUP_HEADER}\n\n"
             f"{ask.format_question(question, categories)}\n\n"
             f"{FOLLOWUP_FOOTER}")
     if send_telegram(text):
+        rotation = _read_json(ROTATION_FILE, default={}) or {}
         ask.mark_question_sent(rotation, question["id"])
         rebuild_coverage()
         print(f"✓ Adaptive follow-up question sent: {question['id']}")
     else:
         print("  (adaptive follow-up skipped: no telegram credentials on this machine)")
+
+
+def run_post_answer_delivery(
+    *,
+    source_id: str,
+    question_id: str,
+    question_text: str,
+    question_category: str,
+    answer_text: str,
+):
+    """After durability: acknowledgment attempt, then adaptive follow-up.
+
+    Every acknowledgment failure is swallowed before the follow-up step.  No
+    diagnostic receives answer, prompt, or generated message text.
+    """
+    planned_question = None
+    try:
+        planned_question = plan_adaptive_followup(question_id)
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "adaptive_followup_plan",
+            type(exc).__name__,
+            context={"source_id": source_id},
+        )
+
+    outcome = None
+    try:
+        from answer_ack_delivery import acknowledge_answer  # noqa: PLC0415
+
+        outcome = acknowledge_answer(
+            source_id=source_id,
+            question_id=question_id,
+            question_text=question_text,
+            question_category=question_category,
+            answer_text=answer_text,
+            followup_pending=planned_question is not None,
+        )
+        print(
+            f"✓ Answer acknowledgment: {outcome.status} "
+            f"({outcome.reason}; {source_id})"
+        )
+    except Exception as exc:  # noqa: BLE001 — acknowledgment is never capture
+        record_learning_failure(
+            "process_answer",
+            "answer_acknowledgment",
+            type(exc).__name__,
+            context={"source_id": source_id},
+        )
+        print(f"  (answer acknowledgment skipped: internal_error; {source_id})")
+
+    try:
+        maybe_send_followup_question(question_id, planned_question)
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "adaptive_followup",
+            type(exc).__name__,
+            context={"source_id": source_id},
+        )
+    return outcome
+
+
+def finalize_answer_delivery(
+    *,
+    source_id: str,
+    question_id: str,
+    question_text: str,
+    question_category: str,
+    answer_text: str,
+    commit_requested: bool,
+    push_requested: bool,
+    summary: str,
+) -> None:
+    """Cross the durability boundary, then run ordered conversational effects."""
+    if commit_requested:
+        git_commit(f"Answer {question_id}: {summary}", False)
+    run_post_answer_delivery(
+        source_id=source_id,
+        question_id=question_id,
+        question_text=question_text,
+        question_category=question_category,
+        answer_text=answer_text,
+    )
+    maybe_send_chapter_ready_offer(question_id)
+    if commit_requested:
+        git_commit(f"Record answer {question_id} delivery metadata", push_requested)
 
 
 def main():
@@ -374,25 +481,24 @@ def main():
             context={"question_id": question_id},
         )
 
-    # Adaptive cadence: offer the next question while the author is warm.
-    try:
-        maybe_send_followup_question(question_id)
-    except Exception as exc:  # noqa: BLE001
-        record_learning_failure(
-            "process_answer",
-            "adaptive_followup",
-            exc,
-            context={"question_id": question_id},
-        )
-
-    # Phase 2 (v76): milestone chapter-ready offer. Fires at most once per
-    # (book, chapter) pair; process_answer never breaks if the module or the
-    # Telegram send fails — offers are delight, capture is infrastructure.
-    maybe_send_chapter_ready_offer(question_id)
-
-    if args.commit or args.push:
-        summary = args.summary or str(question["text"])[:64]
-        git_commit(f"Answer {question_id}: {summary}", args.push)
+    # Durability is the hard boundary.  When the caller requested a commit,
+    # land it locally BEFORE either outbound conversational effect.  The later
+    # bookkeeping commit records acknowledgment/follow-up metadata and pushes
+    # both commits together when --push was requested.
+    summary = args.summary or str(question["text"])[:64]
+    # Contractual order: durable answer first, warm acknowledgment attempt
+    # second, adaptive follow-up third.  The acknowledgment layer swallows
+    # provider/generation/Telegram failures and carries metadata only.
+    finalize_answer_delivery(
+        source_id=str(metadata["source_id"]),
+        question_id=question_id,
+        question_text=str(question["text"]),
+        question_category=cat,
+        answer_text=answer_text,
+        commit_requested=bool(args.commit or args.push),
+        push_requested=bool(args.push),
+        summary=summary,
+    )
 
     print(f"✓ Saved answer {question_id} to {out_file.relative_to(REPO_DIR)}")
     print(f"✓ Coverage: {answered_count}/{sum(c['total'] for c in coverage['categories'].values())}")

@@ -15,6 +15,8 @@
 # --- AI models ---
 # Pass-transition question generation:
 followup_model: "anthropic/claude-opus-4-6"
+# Warm 2–4 sentence answer acknowledgment (shared provider; default Sonnet):
+# answer_ack_model: "claude-sonnet-5"
 # Research neighborhood expansion (self-knowledge, gaps, topics):
 # research_model: "claude-opus-4-20250514"
 # Story/source classification:
