@@ -21,15 +21,14 @@ Use the current repo if it has `system/lifehug.py`. Otherwise check `~/Workspace
 A page's prose can be written four ways. The script picks the first available, per page:
 
 1. **Cached** — a prior synthesis for unchanged source material (`state/wiki_synthesis_cache.json`). This cache is **committed to the repo**, so prose synthesized on one machine (the compile machine) travels to every other machine. A page is only re-synthesized when its inputs change.
-2. **Agent draft** — prose you (Claude) wrote to `state/synthesis/<slug>.md` (the keyless desktop path — see Mode 1).
-3. **Gateway/API** — `call_ai` via the OpenClaw gateway (keyless, if running) or `ANTHROPIC_API_KEY` (the cron path — Mode 2).
+2. **Agent draft** — prose the desktop agent wrote to `state/synthesis/<slug>.md` (the keyless path — see Mode 1).
+3. **Shared provider** — `system/ai_provider.py` can use a configured on-machine OpenAI-compatible model, OpenClaw, explicit Kimi, or Anthropic (the unattended path — Mode 2). A local route never falls through to cloud.
 4. **Excerpt fallback** — deterministic source excerpts, **only for a page that was never synthesized**. Compile will **never** downgrade an already-synthesized page (frontmatter `synthesized: true`) to excerpts — it preserves the last good prose and logs `↻ preserved <slug>`. So a bare `compile` on a keyless machine is safe; at worst a changed page keeps its prior prose until a real synthesis runs.
 
-The Anthropic SDK is optional. If it is absent, `ai-status` reports keyless and
-this agent-draft path remains available; do not install the SDK just to compile
-through an agent.
+The Anthropic SDK is optional. When it is absent, `ai-status` reports not
+ready and the agent-draft path remains available without installing it.
 
-## Mode 1 — Desktop through Claude Code (keyless; YOU synthesize)
+## Mode 1 — Desktop agent (keyless; YOU synthesize)
 
 On the desktop there is usually no API key and no OpenClaw gateway. That's fine: **you are the model.** Do the synthesis yourself, then let the script assemble the graph.
 
@@ -54,9 +53,11 @@ On the desktop there is usually no API key and no OpenClaw gateway. That's fine:
 
 Because results are cached, a later `--emit-tasks` only re-asks for pages whose source material changed — you won't redo work.
 
-## Mode 2 — Cron / OpenClaw (unattended)
+## Mode 2 — Unattended provider
 
-When run by cron with the OpenClaw gateway up (or `ANTHROPIC_API_KEY` set), a single command synthesizes everything programmatically — no agent in the loop:
+When `python3 system/lifehug.py ai-status` reports ready (direct local model,
+OpenClaw, explicit Kimi, or Anthropic), a single command synthesizes everything
+programmatically — no agent in the loop:
 ```bash
 python3 system/lifehug.py compile
 ```
@@ -67,7 +68,7 @@ This is what `system/daily_question.sh` / the cron job invokes. Same script, sam
 ```bash
 python3 system/lifehug.py compile --no-ai     # deterministic excerpts only (no prose, still builds the graph)
 python3 system/lifehug.py compile --dry-run    # preview which pages would change, write nothing
-python3 system/lifehug.py compile --model <id> # override the synthesis model (gateway/API path)
+python3 system/lifehug.py compile --model <id> # override model for non-local routes; local uses local_ai_model
 ```
 
 ## View the result

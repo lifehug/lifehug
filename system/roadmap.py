@@ -503,8 +503,14 @@ def cli(argv: list[str] | None = None) -> int:
         elif res["generation_ran"]:
             print(f"  Generated and promoted {res['generated']} starter question(s) → category {res['category']}.")
         else:
-            print("  ⚠ Could not generate starter questions (no AI available — needs OpenClaw running or ANTHROPIC_API_KEY).")
-            print(f"     With OpenClaw up (or a key set), run: python3 system/research_expand.py --topic \"{args.label}\" --type {RESEARCH_TYPE.get(args.type,'theme')}")
+            print(
+                "  ⚠ Could not generate starter questions (selected AI provider "
+                "is not ready — use ai-status or the keyless agent flow)."
+            )
+            print(
+                "     With ai-status ready, run: python3 system/research_expand.py "
+                f"--topic \"{args.label}\" --type {RESEARCH_TYPE.get(args.type, 'theme')}"
+            )
             print(f"     then: python3 system/question_candidates.py promote-neighborhood --neighborhood nbhd-{slugify(args.label)} --category {res['category']}")
         print()
         _print_roadmap(load_roadmap())
