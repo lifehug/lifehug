@@ -20,10 +20,30 @@ followup_model: "anthropic/claude-opus-4-6"
 # Story/source classification:
 # classify_model: "claude-sonnet-4-20250514"
 # Wiki page synthesis (system/lifehug.py compile); falls back to deterministic
-# excerpts when no LLM (OpenClaw or ANTHROPIC_API_KEY) is available:
+# excerpts when the selected shared provider is unavailable:
 # wiki_model: "claude-opus-4-20250514"
-# API key for the generate-tier jobs (or set ANTHROPIC_API_KEY in the environment):
+# Anthropic API key, when that provider is selected (or set ANTHROPIC_API_KEY):
 # anthropic_api_key: ""
+
+# --- On-machine OpenAI-compatible model (v120) ---
+# Ollama, LM Studio, llama.cpp, or another OpenAI-compatible server can run
+# every model-backed Loop surface without sending source material off-device.
+# All three values are required. `ai_provider: local` is fail-closed: if the
+# endpoint is invalid or offline, Lifehug uses agent-task/keyless mode and does
+# NOT fall through to OpenClaw, Kimi, or Anthropic.
+# ai_provider: "local"
+# local_ai_base_url: "http://127.0.0.1:11434/v1"
+# local_ai_model: "qwen3:8b"
+# local_ai_timeout_seconds: 120
+# Optional, only if the local server requires a bearer token:
+# local_ai_api_key: ""
+# Non-loopback hosts are rejected by default. This explicit escape hatch means
+# accepting that private source material will leave this machine:
+# local_ai_allow_non_loopback: false
+# Local requests ignore HTTP(S)_PROXY and refuse redirects, so a validated
+# loopback destination cannot be changed underneath the privacy boundary.
+# Check the selected provider/model and make a non-mutating GET /models probe:
+#   python3 system/lifehug.py ai-status
 
 # --- Kimi models (v113) ---
 # Any model named kimi*/moonshot*/k3* routes to the Kimi OpenAI-compatible

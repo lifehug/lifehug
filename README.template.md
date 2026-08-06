@@ -163,6 +163,15 @@ python3 system/lifehug.py connector-audit gmail                # what got auto-p
 python3 system/lifehug.py --help
 ```
 
+## Local model (optional)
+
+Every model-backed Loop surface can use an on-machine OpenAI-compatible server
+such as Ollama, LM Studio, or llama.cpp. In gitignored `config.yaml`, set
+`ai_provider: local`, `local_ai_base_url`, `local_ai_model`, and
+`local_ai_timeout_seconds`, then run `python3 system/lifehug.py ai-status`.
+Lifehug accepts loopback endpoints by default; an offline server returns to
+keyless agent-task mode without sending source material to a cloud fallback.
+
 ## Structure
 
 ```

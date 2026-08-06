@@ -40,6 +40,12 @@ _SYSTEM_DIR = Path(__file__).resolve().parent
 if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
+from ai_provider import (
+    ai_available,
+    call_ai,
+    get_anthropic_client,
+    model_is_kimi,
+)
 from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
@@ -64,6 +70,8 @@ from lifehug_core import (
     write_json,
 )
 from neighborhoods import apply_readiness
+
+__all__ = ["ai_available", "call_ai", "get_client", "model_is_kimi"]
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -328,145 +336,9 @@ THEME_KEYWORDS: dict[str, list[str]] = {
                             "time left", "running out of time"],
 }
 
-# ---------------------------------------------------------------------------
-# AI client — OpenClaw-first, Anthropic fallback
-# ---------------------------------------------------------------------------
-
-
-def _openclaw_gateway() -> tuple[str, str] | None:
-    """Return (base_url, token) if OpenClaw gateway is configured, else None."""
-    import json  # noqa: PLC0415
-    cfg_path = os.path.expanduser("~/.openclaw/openclaw.json")
-    try:
-        with open(cfg_path, encoding="utf-8") as f:
-            cfg = json.load(f)
-        gw = cfg.get("gateway", {})
-        port = gw.get("port", 18789)
-        token = gw.get("auth", {}).get("token", "")
-        if token:
-            return f"http://localhost:{port}/v1", token
-    except Exception:
-        pass
-    return None
-
-
-def get_client():
-    """Return an Anthropic client, reading API key from env or config."""
-    try:
-        import anthropic  # noqa: PLC0415
-    except ImportError:
-        print("Error: anthropic package not installed. Run: pip install anthropic", file=sys.stderr)
-        sys.exit(1)
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        config = load_config()
-        api_key = config.get("anthropic_api_key")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY not set. Export it or add anthropic_api_key to config.yaml."
-        )
-    return anthropic.Anthropic(api_key=api_key)
-
-
-def ai_available() -> str | None:
-    """Return the available AI route ('gateway', 'kimi', or 'sdk-key'), or None
-    when keyless.
-
-    Mirrors call_ai's routing order without making any network call: an OpenClaw
-    gateway wins, then a Kimi key (KIMI_API_KEY env / kimi_api_key in
-    config.yaml), then ANTHROPIC_API_KEY in the environment, then
-    anthropic_api_key in config.yaml. None means agent mode is required
-    (see skills/maintenance).
-    """
-    if _openclaw_gateway() is not None:
-        return "gateway"
-    if _kimi_key() is not None:
-        return "kimi"
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "sdk-key"
-    try:
-        if load_config().get("anthropic_api_key"):
-            return "sdk-key"
-    except Exception:
-        pass
-    return None
-
-
-KIMI_MODEL_PREFIXES = ("kimi", "moonshot", "k3")
-KIMI_DEFAULT_BASE_URL = "https://api.kimi.com/coding/v1"
-
-
-def _kimi_key() -> str | None:
-    """Kimi API key from env or config.yaml, else None."""
-    key = os.environ.get("KIMI_API_KEY")
-    if key:
-        return key
-    try:
-        return load_config().get("kimi_api_key") or None
-    except Exception:
-        return None
-
-
-def model_is_kimi(model: str) -> bool:
-    """Kimi routing is model-explicit: the caller picks the route by naming a
-    Kimi model (dossier_model/classify_model in config, or --model)."""
-    name = (model or "").lower()
-    return name.startswith(KIMI_MODEL_PREFIXES)
-
-
-def _kimi_call(prompt: str, model: str, timeout: int) -> str:
-    """Call the Kimi OpenAI-compatible endpoint (Kimi Code API by default;
-    override kimi_base_url in config for the Kimi Platform). Stdlib urllib —
-    no new dependencies.
-
-    Reasoning models (kimi-k3 etc.) spend part of the completion budget on
-    reasoning_tokens: too small a cap truncates JSON or returns EMPTY content
-    when reasoning exhausts it. Default 16384 (override kimi_max_tokens in
-    config) and retry once on an empty completion."""
-    import urllib.request  # noqa: PLC0415
-    key = _kimi_key()
-    if not key:
-        raise RuntimeError(
-            f"model {model!r} routes to Kimi but no key found — set KIMI_API_KEY "
-            "or add kimi_api_key to config.yaml (Kimi Code Console)."
-        )
-    try:
-        cfg = load_config()
-    except Exception:
-        cfg = {}
-    base_url = (cfg.get("kimi_base_url") or "").strip() or KIMI_DEFAULT_BASE_URL
-    try:
-        max_tokens = int(cfg.get("kimi_max_tokens") or 16384)
-    except (TypeError, ValueError):
-        max_tokens = 16384
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
-    }).encode()
-    last_error: Exception | None = None
-    for attempt in (1, 2):
-        try:
-            req = urllib.request.Request(
-                f"{base_url.rstrip('/')}/chat/completions",
-                data=payload,
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-                result = json.loads(resp.read())
-            content = result["choices"][0]["message"]["content"]
-            if content and content.strip():
-                return content
-            last_error = RuntimeError(f"kimi returned empty content (attempt {attempt})")
-        except (urllib.error.URLError, OSError, TimeoutError) as exc:
-            last_error = exc
-        if attempt == 1:
-            print("  ↻ kimi call empty/failed, retrying with the same budget...")
-    raise last_error or RuntimeError("kimi call failed")
+# Backward-compatible name for callers that previously imported this helper
+# from research_expand. Provider construction now lives in ai_provider.
+get_client = get_anthropic_client
 
 
 # ---------------------------------------------------------------------------
@@ -1136,105 +1008,6 @@ def find_relevant_answers(answers: list[dict], topic: str, max_answers: int = 8)
     return [a for _, a in scored[:max_answers]]
 
 
-def call_ai(prompt: str, model: str) -> str:
-    """Call AI and return the response text.
-
-    Routing (v85 — resilient, lifehug/lifehug#34):
-      1. OpenClaw local gateway (no API key needed) — model remapped to
-         openclaw/default so it uses whatever model OpenClaw has configured.
-         Transient failures (HTTP 5xx, timeouts, connection errors) are
-         retried up to 3 times. The gateway's 'Agent couldn't generate a
-         response' sentinel is DETERMINISTIC (its quality checker rejects
-         JSON-only output every time), so it is never retried.
-      2. Anthropic SDK (needs ANTHROPIC_API_KEY or anthropic_api_key in
-         config.yaml) — the primary path when no gateway is configured, AND
-         the fall-through when the gateway fails and a key is available.
-         Without a key, the original gateway error is re-raised.
-      Model-explicit override (v113): a model named kimi*/moonshot*/k3*
-      bypasses the gateway remap and goes straight to the Kimi
-      OpenAI-compatible endpoint — asking for Kimi is a deliberate route
-      choice, not a fallback.
-    """
-    import os as _os  # noqa: PLC0415
-    import time as _time  # noqa: PLC0415
-
-    # Resolve timeout once.
-    try:
-        _timeout = int(_os.environ.get("LIFEHUG_AI_TIMEOUT", "") or 0)
-    except ValueError:
-        _timeout = 0
-    if _timeout <= 0:
-        try:
-            from lifehug_core import load_config as _load_config  # noqa: PLC0415
-            _cfg = _load_config()
-            _timeout = int(_cfg.get("ai_timeout_seconds") or 600)
-        except Exception:  # noqa: BLE001
-            _timeout = 600
-
-    # Kimi (v113) — model-explicit routing wins over the gateway remap.
-    if model_is_kimi(model):
-        return _kimi_call(prompt, model, _timeout)
-
-    MAX_RETRIES = 3
-    RETRY_DELAY = 10  # seconds between retries
-
-    gw = _openclaw_gateway()
-    gateway_error: Exception | None = None
-    if gw:
-        import urllib.request  # noqa: PLC0415
-        base_url, token = gw
-        oc_model = "openclaw/default"
-        payload = json.dumps({
-            "model": oc_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 4096,
-        }).encode()
-
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                req = urllib.request.Request(
-                    f"{base_url}/chat/completions",
-                    data=payload,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=_timeout) as resp:  # noqa: S310
-                    result = json.loads(resp.read())
-                content = result["choices"][0]["message"]["content"]
-                # The gateway's "couldn't generate" sentinel is deterministic
-                # (issue #34) -- retrying reproduces it; break straight to the
-                # SDK fall-through below.
-                if "Agent couldn\u2019t generate" in content or "Agent couldn't generate" in content:
-                    gateway_error = RuntimeError(content[:200])
-                    break
-                return content
-            except (urllib.error.URLError, OSError, TimeoutError) as exc:
-                gateway_error = exc
-                if attempt < MAX_RETRIES:
-                    print(f"  ↻ gateway call failed ({exc}), retrying ({attempt}/{MAX_RETRIES})...")
-                    _time.sleep(RETRY_DELAY)
-        print(f"  ↻ gateway failed ({gateway_error}); falling through to Anthropic SDK...")
-
-    # Anthropic SDK — primary path without a gateway; fall-through when the
-    # gateway failed and a key is available. Without a key, surface the
-    # gateway error (it explains what actually happened) instead of the
-    # missing-key complaint.
-    try:
-        client = get_client()
-    except (RuntimeError, SystemExit):
-        if gateway_error is not None:
-            raise gateway_error from None
-        raise
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response.content[0].text if response.content else ""
-
-
 def parse_ai_json(raw: str) -> dict:
     """Parse AI JSON response, handling markdown code fences."""
     raw = raw.strip()
@@ -1384,7 +1157,7 @@ def _run_expansion(
         return 0
 
     # Get the model response: from an agent-written file (keyless desktop path)
-    # or by calling the AI (OpenClaw gateway / Anthropic key).
+    # or by calling the shared AI provider.
     if from_response:
         resp_path = Path(from_response)
         if not resp_path.exists():

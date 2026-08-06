@@ -40,6 +40,7 @@ def load(name):
 
 
 re_mod = load("research_expand")
+aip = sys.modules["ai_provider"]
 cs = load("classify_story")
 lh = load("lifehug")
 
@@ -57,44 +58,57 @@ Running through the orange grove behind Grandma's house in Mesa.
 
 class AiAvailableTests(unittest.TestCase):
     def test_keyless_when_no_gateway_no_key_no_config(self):
-        with mock.patch.object(re_mod, "_openclaw_gateway", return_value=None), \
-             mock.patch.dict(re_mod.os.environ, {}, clear=True), \
-             mock.patch.object(re_mod, "load_config", return_value={}):
-            self.assertIsNone(re_mod.ai_available())
+        with mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+             mock.patch.dict(aip.os.environ, {}, clear=True), \
+             mock.patch.object(aip, "load_config", return_value={}):
+            self.assertIsNone(aip.ai_available())
 
     def test_gateway_wins(self):
-        with mock.patch.object(re_mod, "_openclaw_gateway",
+        with mock.patch.object(aip, "_openclaw_gateway",
                                return_value=("http://localhost:18789/v1", "tok")):
-            self.assertEqual(re_mod.ai_available(), "gateway")
+            self.assertEqual(aip.ai_available(), "openclaw")
 
     def test_env_key_detected(self):
-        with mock.patch.object(re_mod, "_openclaw_gateway", return_value=None), \
-             mock.patch.dict(re_mod.os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
-            self.assertEqual(re_mod.ai_available(), "sdk-key")
+        with mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+             mock.patch.dict(aip.os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True), \
+             mock.patch.object(aip, "_anthropic_sdk_available", return_value=True):
+            self.assertEqual(aip.ai_available(), "anthropic")
 
     def test_config_key_detected(self):
-        with mock.patch.object(re_mod, "_openclaw_gateway", return_value=None), \
-             mock.patch.dict(re_mod.os.environ, {}, clear=True), \
-             mock.patch.object(re_mod, "load_config",
-                               return_value={"anthropic_api_key": "sk-test"}):
-            self.assertEqual(re_mod.ai_available(), "sdk-key")
+        with mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+             mock.patch.dict(aip.os.environ, {}, clear=True), \
+             mock.patch.object(aip, "load_config",
+                               return_value={"anthropic_api_key": "sk-test"}), \
+             mock.patch.object(aip, "_anthropic_sdk_available", return_value=True):
+            self.assertEqual(aip.ai_available(), "anthropic")
 
     def test_config_read_failure_means_keyless_not_crash(self):
-        with mock.patch.object(re_mod, "_openclaw_gateway", return_value=None), \
-             mock.patch.dict(re_mod.os.environ, {}, clear=True), \
-             mock.patch.object(re_mod, "load_config", side_effect=OSError("boom")):
-            self.assertIsNone(re_mod.ai_available())
+        with mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+             mock.patch.dict(aip.os.environ, {}, clear=True), \
+             mock.patch.object(aip, "load_config", side_effect=OSError("boom")):
+            self.assertIsNone(aip.ai_available())
 
 
 class AiStatusCommandTests(unittest.TestCase):
     def test_exit_codes(self):
-        # cmd_ai_status resolves research_expand through sys.modules at call
-        # time — patch the live module, not this file's import-time reference
-        # (another test file may have reloaded it since).
-        re_live = sys.modules["research_expand"]
-        with mock.patch.object(re_live, "ai_available", return_value="gateway"):
+        ready = aip.ProviderStatus("openclaw", "openclaw/default", True, "configured")
+        missing = aip.ProviderStatus("agent-task", "claude-sonnet-5", False,
+                                     "no unattended provider configured")
+        with mock.patch.object(aip, "provider_status", return_value=ready):
             self.assertEqual(lh.cmd_ai_status(None), 0)
-        with mock.patch.object(re_live, "ai_available", return_value=None):
+        with mock.patch.object(aip, "provider_status", return_value=missing):
+            self.assertEqual(lh.cmd_ai_status(None), 1)
+
+    def test_missing_optional_sdk_reports_agent_task_without_exit(self):
+        with mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+             mock.patch.dict(aip.os.environ,
+                             {"ANTHROPIC_API_KEY": "synthetic-key"}, clear=True), \
+             mock.patch.object(aip, "load_config", return_value={}), \
+             mock.patch.object(aip, "_anthropic_sdk_available", return_value=False):
+            status = aip.provider_status()
+            self.assertFalse(status.ready)
+            self.assertEqual(status.provider, "anthropic")
+            self.assertIn("not installed", status.detail)
             self.assertEqual(lh.cmd_ai_status(None), 1)
 
 

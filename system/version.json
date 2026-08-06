@@ -1,7 +1,7 @@
 {
-  "version": 118,
-  "released": "2026-08-05",
-  "changelog": "v118: cross-medium parity rule documented (AGENTS.md/CLAUDE.md) — feature equivalence between this local companion and hosted Lifehug is now a stated, bidirectional build rule; the first platform→local backfill wave is filed as issues #51–#54 (local answer capture, local warm acknowledgment, mobile-usable local UI, viewable source bodies). Docs only; no behavior change.",
+  "version": 120,
+  "released": "2026-08-06",
+  "changelog": "v120: direct on-machine OpenAI-compatible models are now a first-class provider for the whole Lifehug Loop. Configure an Ollama, LM Studio, llama.cpp, or equivalent endpoint/model/timeout once and compile, classification, research, entity rosters, the Mirror, artifact revision, and connector dossiers all use it. Local routing is loopback-only and fail-closed by default: its transport bypasses proxy environment variables and rejects redirects, while an invalid, timed-out, malformed, or offline server returns to the existing agent-task path without silently sending private source material to a cloud fallback. `ai-status` now reports provider, model, and a non-mutating readiness probe; deliberate OpenClaw, Kimi, and Anthropic routes remain available. The Anthropic SDK remains optional and can no longer terminate keyless discovery. The shared router uses only Python's standard library and never logs prompts, source bodies, responses, or secrets.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -21,6 +21,7 @@
     "sources/corrections/.gitkeep",
     "sources/manual/.gitkeep",
     "state/.gitkeep",
+    "system/ai_provider.py",
     "system/answer_ack.py",
     "system/artifact.py",
     "system/ask.py",
@@ -90,6 +91,7 @@
     "tests/test_update.py",
     "tests/test_v105_pin_retire.py",
     "tests/test_v110_timeline_corroboration.py",
+    "tests/test_v120_local_ai_provider.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",

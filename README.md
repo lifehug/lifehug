@@ -276,11 +276,24 @@ python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
 
 ### Where the AI comes from (keyless by default)
 
-Generation tries, in order:
+All model-backed surfaces — wiki compile, classification, research, entity
+rosters, the Mirror, artifact revision, connector dossiers, and future web
+acknowledgments — use one provider router. Run
+`python3 system/lifehug.py ai-status` to see its provider, model, and
+non-mutating readiness result.
 
-1. **Keyless desktop path** — Claude Code (or any `CLAUDE.md`-aware agent) reads an emitted prompt, writes the questions, and the script deposits them. No API key, no gateway. This is the normal desktop flow.
-2. **OpenClaw gateway** — if running locally (`~/.openclaw/openclaw.json`), used keylessly. This is what cron uses.
-3. **Anthropic SDK** — falls back to `ANTHROPIC_API_KEY` (or `anthropic_api_key` in `config.yaml`).
+Generation can use:
+
+1. **Keyless desktop path** — any `CLAUDE.md`-aware agent reads an emitted prompt, writes the questions, and the script deposits them. No API key, no gateway. This remains the fallback when an unattended provider is not ready.
+2. **Direct on-machine model** — set `ai_provider: local`,
+   `local_ai_base_url`, `local_ai_model`, and `local_ai_timeout_seconds` in
+   gitignored `config.yaml` for Ollama, LM Studio, llama.cpp, or equivalent.
+   Loopback is enforced by default; local transport ignores proxy environment
+   variables and refuses redirects. If the server is absent, Lifehug returns
+   to keyless agent-task mode; it never spills the prompt to a cloud fallback.
+3. **OpenClaw gateway** — selected automatically when locally configured, or deliberately with `ai_provider: openclaw`.
+4. **Kimi** — selected deliberately by a `kimi*`, `moonshot*`, or `k3*` model (or `ai_provider: kimi`) plus `KIMI_API_KEY`.
+5. **Anthropic SDK** — selected by a configured key in backward-compatible auto mode, or deliberately with `ai_provider: anthropic`. The SDK is optional; if absent, status stays keyless without terminating the process.
 
 If none is available, Focuses and stories are still scaffolded — the script just tells you how to seed questions later.
 
@@ -412,7 +425,7 @@ flowchart TB
     d --> w --> m
 ```
 
-The daily job needs **no model call**. Weekly maintenance is capped and keyless when OpenClaw is running; if no model is available, the rest of the weekly Loop segment still runs and classification can catch up later. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
+The daily job needs **no model call**. Weekly maintenance is capped and can run unattended through a ready local model, OpenClaw, Kimi, or Anthropic; if none is ready, the rest of the weekly Loop segment still runs and emits agent tasks for its AI work. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
 
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending
@@ -452,13 +465,14 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 
 | Script | What it does |
 |---|---|
-| **`research_expand.py`** | The growth engine. Opens question **neighborhoods** along memoir/self/relationship arcs, detects coverage **gaps**, and generates new questions as **candidates** (keyless desktop → OpenClaw → Anthropic). The biggest script — see [research & neighborhoods](#research--neighborhoods-finding-new-questions). |
+| **`ai_provider.py`** | The single privacy-aware provider/router shared by every model-backed surface. Supports fail-closed on-machine OpenAI-compatible models plus deliberate OpenClaw, Kimi, Anthropic, and keyless agent-task routes. |
+| **`research_expand.py`** | The growth engine. Opens question **neighborhoods** along memoir/self/relationship arcs, detects coverage **gaps**, and generates new questions as **candidates** through the shared provider. The biggest script — see [research & neighborhoods](#research--neighborhoods-finding-new-questions). |
 | **`question_candidates.py`** | The review buffer. Manages the candidate lifecycle (list / review / update / promote), quality-checks each candidate (flags yes/no wording, vagueness, duplicates), and promotes accepted ones into the bank with provenance. |
 | **`gen_followups.py`** | The pass engine. At the end of a rotation pass it builds a prompt over the pass's answers, takes back AI-written follow-ups, appends them to the bank, and advances to the next, deeper pass. |
 | **`ingest_story.py`** | Captures unprompted stories. Saves a story you share (that isn't an answer) as owner-only source material and seeds candidate questions to deepen it. |
 | **`ingest.py`** | Bulk source import. Pluggable connectors (X/Twitter, Gmail, Instagram, local files) normalize external writing into source records + candidates. |
 | **`connector.py`** + **`connectors/`** | Calibrated external-evidence ingestion (Gmail first). Permanent metadata ledger + six-axis scoring + threshold promotion: `connector-fetch` appends new metadata; `connector-excavate` re-scores the whole ledger against the current wiki and delta-promotes above-threshold threads into immutable `sources/gmail/` records; `connector-calibrate` is the one-time shadow run where the owner picks the threshold; `connector-dossier` classifies top unknown correspondents with AI (family auto-applies as VIPs). Bodies are fetched only for promotions/dossier samples and cached (committed) so nothing re-fetches. |
-| **`classify_story.py`** | The source analyzer. OpenClaw-first, Anthropic fallback. AI-extracts people, places, periods, themes, contradictions, possible outputs, self-understanding insights, Focus opportunities, and targeted follow-up questions from any answer/source file. Weekly maintenance runs it over a capped batch of unclassified files. |
+| **`classify_story.py`** | The source analyzer. Uses the shared provider to AI-extract people, places, periods, themes, contradictions, possible outputs, self-understanding insights, Focus opportunities, and targeted follow-up questions from any answer/source file. Weekly maintenance runs it over a capped batch of unclassified files. |
 | **`recommend_focuses.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
 
 ### Wiki, artifacts & maintenance

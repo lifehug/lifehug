@@ -5,8 +5,8 @@ Pipeline: plan → synthesize → cross-link → write.
 
 1. plan       — gather every page that will exist as a descriptor (no writes).
 2. synthesize — turn each page's cited sources into flowing prose + content-
-                derived related links via an LLM (OpenClaw-first, Anthropic
-                fallback). Falls back to the deterministic excerpt list when no
+                derived related links via the shared AI provider. Falls back
+                to the deterministic excerpt list when no
                 LLM is available, and caches results so re-compiles are cheap.
 3. cross-link — derive backlinks (reverse of related) and shared-source "see
                 also" edges so the wiki is a navigable graph, not a flat list.
@@ -43,7 +43,8 @@ from lifehug_core import (
     write_json,
     write_text,
 )
-from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
+from ai_provider import call_ai
+from research_expand import DEFAULT_MODEL, parse_ai_json
 from entity_roster import load_roster
 from roadmap import load_roadmap
 
@@ -1022,7 +1023,7 @@ def synthesize(desc, roster, model, cache, mission, use_ai, dry_run):
         cached = cache[key]
         return {"narrative": cached["narrative"], "related": cached.get("related", []), "synthesized": True}
     # Keyless desktop path: prose written by the agent (via the /compile skill).
-    # Takes precedence over call_ai so Claude Code can synthesize without a key.
+    # Takes precedence over call_ai so a desktop agent can synthesize keylessly.
     agent_file = SYNTH_DIR / f"{desc['slug']}.md"
     if agent_file.exists():
         raw = agent_file.read_text(encoding="utf-8", errors="replace").strip()

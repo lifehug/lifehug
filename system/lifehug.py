@@ -98,14 +98,16 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 
 def cmd_ai_status(_args: argparse.Namespace) -> int:
-    from research_expand import ai_available  # noqa: PLC0415
+    from ai_provider import provider_status  # noqa: PLC0415
 
-    route = ai_available()
-    if route:
-        print(f"AI route: {route}")
-        return 0
-    print("keyless — agent mode required (see skills/maintenance)")
-    return 1
+    status = provider_status()
+    print(f"AI provider: {status.provider}")
+    print(f"AI model: {status.model}")
+    readiness = "ready" if status.ready else "not ready"
+    print(f"AI readiness: {readiness} — {status.detail}")
+    if not status.ready:
+        print("keyless — agent-task mode required (see skills/maintenance)")
+    return 0 if status.ready else 1
 
 
 def cmd_next(_args: argparse.Namespace) -> int:
@@ -1009,8 +1011,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("status", help="Show coverage and pass status")
     p.set_defaults(func=cmd_status)
 
-    p = sub.add_parser("ai-status",
-                       help="Report the AI route (gateway/sdk-key); exit 1 when keyless (agent mode required)")
+    p = sub.add_parser(
+        "ai-status",
+        help="Report provider/model/readiness; exit 1 when agent-task mode is required",
+    )
     p.set_defaults(func=cmd_ai_status)
 
     p = sub.add_parser("next", help="Preview the next question without mutating state")
