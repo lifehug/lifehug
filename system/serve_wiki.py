@@ -4,16 +4,22 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import html
 import ipaddress
 import json
 import logging
+import os
 import re
 import secrets
 import socket
+import stat
+import subprocess
 import sys
+import time
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
@@ -33,6 +39,7 @@ from lifehug_core import (
     SECOND_VOICE_OFFERS_FILE,
     SOURCE_LINT_FINDINGS_FILE,
     SOURCE_MANIFEST_FILE,
+    SOURCES_DIR,
     STATE_DIR,
     WIKI_DIR,
     answer_body,
@@ -529,6 +536,14 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .art-actions {{ border: 1px solid var(--line-soft); border-radius: 10px; background: var(--card-warm);
       padding: 12px 16px 16px; margin: 14px 0; }}
     .art-actions summary {{ cursor: pointer; font-weight: 650; font-size: 14px; color: var(--ink-mid); }}
+    .source-toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 20px; }}
+    .source-toolbar a {{ display: inline-flex; align-items: center; min-height: 36px; box-sizing: border-box;
+      border: 1px solid #d8cdbb; border-radius: 6px; padding: 6px 12px; text-decoration: none; font-size: 13px; font-weight: 600; }}
+    .source-toolbar a:hover {{ background: var(--panel-hover); }}
+    .source-meta {{ background: var(--card-warm); border: 1px solid var(--line-soft); border-radius: 10px;
+      padding: 4px 16px 2px; margin: 0 0 26px; }}
+    .source-meta table {{ margin-bottom: 8px; }}
+    .source-body {{ overflow-wrap: anywhere; }}
     #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
     .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-legend span {{ margin-right: 14px; }}
@@ -565,6 +580,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       .cards {{ grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }}
       .qb-cat-title, .art-group-title {{ min-width: 0; }}
       .art-group-counts {{ white-space: nowrap; }}
+      .source-toolbar a {{ min-height: 44px; }}
       table.dash {{ display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
       #graph {{ min-width: 0; height: calc(100vh - 180px); }}
     }}
@@ -1577,6 +1593,163 @@ def view_queue():
     return ("Question Queue", "<h1>Question Queue</h1>" + head + _table(["ID", "Category", "Question", "Why", "Status"], rows), False)
 
 
+@dataclass(frozen=True)
+class SourceBodyRead:
+    """One source captured through its already-validated, no-follow fd."""
+
+    ref: str
+    text: str | None
+    manifest_record: dict
+
+
+def _manifest_source_record(ref: str) -> dict | None:
+    """Manifest membership is the approval boundary for raw body reads."""
+    manifest = (read_json(SOURCE_MANIFEST_FILE, default={}) or {}).get("sources", {})
+    if not isinstance(manifest, dict):
+        return None
+    direct = manifest.get(ref)
+    if isinstance(direct, dict):
+        return direct
+    matches = [record for record in manifest.values()
+               if isinstance(record, dict) and record.get("source_path") == ref]
+    return matches[0] if len(matches) == 1 else None
+
+
+def read_source_ref(ref: str, *, include_body: bool = False) -> SourceBodyRead | None:
+    """Validate and read one exact manifested source through no-follow fds.
+
+    Deliberately reject normalization instead of repairing a request: absolute
+    paths, dot segments, duplicate separators, encoded leftovers, backslashes,
+    NULs, non-Markdown targets, directories, untracked files, and symlinks at
+    any level fail closed. Directory descriptors pin the walked tree and the
+    final regular-file descriptor supplies the bytes, closing the validate /
+    reopen race. This is the only raw source-body reader; route and link code
+    must not resolve or open a source path itself.
+    """
+    if not isinstance(ref, str):
+        return None
+    raw = ref
+    if not raw or raw != raw.strip() or "\x00" in raw or "\\" in raw or "%" in raw:
+        return None
+    try:
+        relative = Path(raw)
+    except (TypeError, ValueError):
+        return None
+    if relative.is_absolute() or relative.as_posix() != raw:
+        return None
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        return None
+    if relative.suffix.lower() != ".md":
+        return None
+    if relative.parts[0] == "answers":
+        root, tail = ANSWERS_DIR, relative.parts[1:]
+    elif relative.parts[0] == "sources":
+        root, tail = SOURCES_DIR, relative.parts[1:]
+    else:
+        return None
+    if not tail:
+        return None
+    record = _manifest_source_record(raw)
+    if record is None:
+        return None
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    directory_fds: list[int] = []
+    file_fd: int | None = None
+    try:
+        current_fd = os.open(root, directory_flags)
+        directory_fds.append(current_fd)
+        if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
+            return None
+        for part in tail[:-1]:
+            current_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            directory_fds.append(current_fd)
+            if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
+                return None
+        file_fd = os.open(tail[-1], file_flags, dir_fd=current_fd)
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            return None
+        text: str | None = None
+        if include_body:
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(file_fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            text = b"".join(chunks).decode("utf-8", "replace")
+        return SourceBodyRead(raw, text, dict(record))
+    except (OSError, TypeError, ValueError):
+        return None
+    finally:
+        if file_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(file_fd)
+        for fd in reversed(directory_fds):
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
+def source_href(ref: str) -> str | None:
+    """Return the canonical viewer URL only for a manifested file readable now."""
+    return f"/source/{quote(ref, safe='/')}" if read_source_ref(ref) else None
+
+
+_SAFE_SOURCE_METADATA = (
+    ("title", "Title"),
+    ("type", "Type"),
+    ("source_id", "Source ID"),
+    ("question_id", "Question"),
+    ("captured_at", "Captured"),
+    ("source_medium", "Medium"),
+    ("source_trust", "Trust"),
+    ("authority", "Authority"),
+    ("visibility", "Visibility"),
+    ("status", "Status"),
+    ("immutable", "Immutable"),
+    ("schema_version", "Schema"),
+    ("content_sha256", "Content hash"),
+)
+
+
+def source_document_html(ref: str) -> tuple[str, str] | None:
+    """Render an approved raw source without changing it or derived state."""
+    source = read_source_ref(ref, include_body=True)
+    if source is None or source.text is None:
+        return None
+    frontmatter, body_text = split_frontmatter(source.text)
+    metadata = dict(source.manifest_record)
+    metadata.update({key: value for key, value in frontmatter.items()
+                     if key in {name for name, _label in _SAFE_SOURCE_METADATA}})
+    metadata["source_path"] = ref
+    heading = re.search(r"^#\s+(.+?)\s*$", body_text, re.MULTILINE)
+    title = str(metadata.get("title") or (heading.group(1).strip() if heading else "")
+                or Path(source.ref).stem.replace("-", " ").title())
+    rows = [[html.escape(label), html.escape(str(metadata[name]))]
+            for name, label in _SAFE_SOURCE_METADATA
+            if name in metadata and metadata[name] not in (None, "")]
+    rows.insert(0, ["Path", f"<code>{html.escape(ref)}</code>"])
+    toolbar = (
+        '<div class="source-toolbar">'
+        '<a href="/views/sources">Source Integrity</a>'
+        f'<a href="/source-actions?ref={quote(ref)}">Reflect, correct, or retract</a>'
+        '</div>'
+    )
+    body = (
+        f"<h1>{html.escape(title)}</h1>"
+        '<p class="view-desc">Read-only owner source. The original file remains immutable; '
+        'changes belong in an additive reflection, correction, or retraction.</p>'
+        + toolbar
+        + '<div class="source-meta"><h2>Safe metadata</h2>'
+        + _table(["Field", "Value"], rows)
+        + '</div><article class="source-body">'
+        + render_markdown(body_text)
+        + "</article>"
+    )
+    return title, body
+
+
 def view_sources():
     manifest = (read_json(SOURCE_MANIFEST_FILE, default={}) or {}).get("sources", {})
     findings = (read_json(SOURCE_LINT_FINDINGS_FILE, default={}) or {}).get("findings", [])
@@ -1602,13 +1775,19 @@ def view_sources():
         parts.append(_empty("No sources tracked yet."))
     for t in sorted(by_type):
         parts.append(f"<h3>{html.escape(t)} ({len(by_type[t])})</h3>")
-        rows = [[
-            html.escape(str(s.get("title", s.get("source_id", "?")))),
-            html.escape(str(s.get("captured_at") or s.get("first_seen_at") or "—")),
-            html.escape(str(s.get("source_medium", "—"))),
-            _badge("changed", "yellow") if s.get("changed_since_first_seen") else _badge("stable", "green"),
-            f'<a href="/source-actions?ref={quote(str(s.get("source_path") or key))}">act</a>',
-        ] for key, s in by_type[t]]
+        rows = []
+        for key, s in by_type[t]:
+            ref = str(s.get("source_path") or key)
+            href = source_href(ref)
+            label = html.escape(str(s.get("title", s.get("source_id", "?"))))
+            title_cell = f'<a href="{href}">{label}</a>' if href else label
+            rows.append([
+                title_cell,
+                html.escape(str(s.get("captured_at") or s.get("first_seen_at") or "—")),
+                html.escape(str(s.get("source_medium", "—"))),
+                _badge("changed", "yellow") if s.get("changed_since_first_seen") else _badge("stable", "green"),
+                f'<a href="/source-actions?ref={quote(ref)}">act</a>',
+            ])
         parts.append(_table(["Title", "Captured", "Medium", "Integrity", ""], rows))
     return ("Source Integrity", "".join(parts), False)
 
@@ -3192,10 +3371,16 @@ def source_actions_html(ref: str) -> tuple[str, str]:
     """The Reflect / Fix form page for one source (v101). `ref` is a source
     path or source id exactly as the CLI accepts it."""
     safe = html.escape(ref)
+    read_href = source_href(ref)
+    toolbar = '<div class="source-toolbar"><a href="/views/sources">Source Integrity</a>'
+    if read_href:
+        toolbar += f'<a href="{read_href}">Read source</a>'
+    toolbar += "</div>"
     body = [f"<h1>Act on a source</h1>",
             f'<p class="view-desc">Raw sources are immutable — these actions file '
             f'<em>additive</em> reflections, corrections, or retractions against '
-            f'<code>{safe}</code>. They take effect at the next compile.</p>']
+            f'<code>{safe}</code>. They take effect at the next compile.</p>',
+            toolbar]
     body.append(
         f'<h2>Reflect</h2>'
         f'<p class="muted">A later thought on this memory — how it reads now.</p>'
@@ -3333,7 +3518,7 @@ class Handler(BaseHTTPRequestHandler):
     def reject_owner_boundary(self):
         self.send_simple_html("Forbidden", "<h1>Forbidden</h1>", status=403)
 
-    def send_html(self, title, body, status=200, active_rel=None, wide=False):
+    def send_html(self, title, body, status=200, active_rel=None, wide=False, no_store=False):
         flash = getattr(self, "_flash", None)
         if flash:
             job = getattr(self, "_job", None)
@@ -3343,6 +3528,8 @@ class Handler(BaseHTTPRequestHandler):
         payload = layout(title, body, active_rel, wide)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        if no_store:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(payload)))
         self.send_owner_headers()
         self.end_headers()
@@ -3367,6 +3554,26 @@ class Handler(BaseHTTPRequestHandler):
             return False
         token = self.headers.get("X-Lifehug-Token") or _f(form, "_token")
         return secrets.compare_digest(token or "", SESSION_TOKEN)
+
+    def _source_get_allowed(self) -> bool:
+        """Raw source bodies are available only to a loopback peer + Host."""
+        try:
+            peer = ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            return False
+        if not peer.is_loopback:
+            return False
+        host = self.headers.get("Host", "")
+        try:
+            hostname = urlparse(f"//{host}").hostname or ""
+        except ValueError:
+            return False
+        if hostname.lower().rstrip(".") == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            return False
 
     def do_POST(self):
         if not self.peer_allowed() or not self.host_allowed():
@@ -3425,6 +3632,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "not found"}, status=404)
             else:
                 self.send_json(record)
+            return
+
+        if parsed.path.startswith("/source/"):
+            if not self._source_get_allowed():
+                self.send_html("Forbidden", "<h1>Forbidden</h1>"
+                               + _empty("Raw sources are available only on this device."),
+                               status=403, no_store=True)
+                return
+            ref = unquote(parsed.path[len("/source/"):], errors="replace")
+            result = source_document_html(ref)
+            if result is None:
+                self.send_html("Source unavailable", "<h1>Source unavailable</h1>"
+                               + _empty("Only exact regular Markdown files in approved source folders can be read."),
+                               status=404, no_store=True)
+                return
+            self.send_html(result[0], result[1], no_store=True)
             return
 
         if parsed.path == "/source-actions":

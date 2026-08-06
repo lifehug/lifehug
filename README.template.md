@@ -142,6 +142,8 @@ python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
 # Explore the wiki
 python3 system/lifehug.py compile
 python3 system/lifehug.py serve
+# In the local viewer, Source Integrity opens each manifested raw source
+# read-only and links to additive reflection/correction/retraction actions.
 
 # Grow the story graph
 python3 system/lifehug.py weekly-maintenance
