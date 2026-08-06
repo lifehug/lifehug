@@ -77,6 +77,33 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn('main class="wide"', out)
         self.assertIn("menu-dropdown", out)
 
+    def test_layout_has_a_phone_wiki_drawer_without_replacing_existing_nav(self):
+        """At phone width the same compiled-wiki links move into a drawer.
+
+        The nav is rendered once, so a new page type cannot accidentally be
+        reachable from the desktop sidebar but omitted from the phone path.
+        """
+        self._populate()
+        out = serve_wiki.layout("T", "<h1>x</h1>").decode()
+        self.assertIn('id="drawerToggle"', out)
+        self.assertIn('aria-label="Open wiki navigation"', out)
+        self.assertIn('id="wikiDrawer"', out)
+        self.assertIn('class="drawer-scrim"', out)
+        self.assertIn('onclick="openDrawer()"', out)
+        self.assertIn('function closeDrawer()', out)
+        self.assertIn('body.drawer-open nav', out)
+        self.assertIn('nav { display: block; position: fixed;', out)
+        # Existing sidebar content is inside the drawer rather than duplicated
+        # or maintained in a second mobile-only registry.
+        self.assertEqual(out.count('/page/wiki/index.md'), 1)
+
+    def test_layout_phone_rules_keep_controls_touch_sized_and_content_contained(self):
+        out = serve_wiki.layout("T", "<h1>x</h1>").decode()
+        self.assertIn('overflow-x: hidden', out)
+        self.assertIn('min-height: 44px', out)
+        self.assertIn('table.dash { display: block; max-width: 100%; overflow-x: auto;', out)
+        self.assertIn('header form input { box-sizing: border-box; width: 100%; min-width: 0;', out)
+
     def test_sidebar_groups_default_collapsed(self):
         self._populate()
         nav = serve_wiki.nav_html()

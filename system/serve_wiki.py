@@ -346,11 +346,13 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       --line: #ddd8cf; --line-soft: #e5dfd5; --border-strong: #c8c2b8;
       --card-bg: #fff; --card-warm: #fffdf9;
     }}
-    body {{ margin: 0; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }}
+    body {{ margin: 0; overflow-x: hidden; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }}
     header {{ height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid #ddd8cf; background: #fff; position: sticky; top: 0; z-index: 20; }}
     header a {{ color: #202124; text-decoration: none; font-weight: 650; }}
     form {{ margin-left: auto; }}
     input {{ border: 1px solid #c8c2b8; border-radius: 6px; padding: 7px 9px; min-width: 220px; }}
+    .drawer-toggle, .drawer-close, .drawer-head {{ display: none; }}
+    .drawer-scrim {{ display: none; }}
     /* Hamburger menu */
     .menu-wrap {{ position: relative; }}
     .menu-btn {{ display: flex; flex-direction: column; justify-content: center; gap: 4px; width: 36px; height: 34px;
@@ -364,7 +366,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .menu-title {{ font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: #9a8c75; padding: 6px 10px 4px; }}
     .menu-item {{ display: block; color: #3f3428; text-decoration: none; padding: 7px 10px; border-radius: 6px; font-size: 14px; }}
     .menu-item:hover {{ background: #f0eadd; }}
-    .shell {{ display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 53px); }}
+    .shell {{ display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 53px); }}
     nav {{ border-right: 1px solid #ddd8cf; padding: 14px 10px; overflow: auto; background: #f4f0e8; }}
     .sidebar-top {{ display: block; color: #3f3428; text-decoration: none; padding: 5px 8px; font-size: 14px; font-weight: 600; }}
     .sidebar-meta {{ margin-top: 14px; padding-top: 8px; border-top: 1px solid #ddd8cf; }}
@@ -387,7 +389,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .sidebar-item.sub {{ padding-left: 34px; }}
     .sidebar-item:hover {{ background: #ece5d8; }}
     .sidebar-item.active {{ background: #e6dcc8; border-left-color: #987b55; color: #2f271c; font-weight: 600; }}
-    main {{ max-width: 860px; padding: 32px 44px 80px; }}
+    main {{ max-width: 860px; min-width: 0; padding: 32px 44px 80px; }}
     main.wide {{ max-width: none; padding: 24px 28px 28px; }}
     h1 {{ font-size: 34px; line-height: 1.15; margin: 0 0 20px; }}
     h2 {{ margin-top: 34px; border-bottom: 1px solid #e5dfd5; padding-bottom: 6px; }}
@@ -482,16 +484,53 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
     .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-legend span {{ margin-right: 14px; }}
-    @media (max-width: 820px) {{ .shell {{ grid-template-columns: 1fr; }} nav {{ display: none; }} main {{ padding: 24px; }} }}
+    @media (max-width: 820px) {{
+      header {{ height: 60px; gap: 8px; padding: 0 12px; }}
+      header > a {{ flex: 0 0 auto; }}
+      header form {{ flex: 1 1 auto; min-width: 0; margin-left: 0; }}
+      header form input {{ box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; }}
+      .drawer-toggle, .drawer-close {{ display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px;
+        padding: 0; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--ink-soft); background: var(--card-bg); font: inherit; cursor: pointer; }}
+      .drawer-toggle:hover, .drawer-close:hover {{ background: var(--panel-hover); }}
+      .drawer-toggle {{ font-size: 22px; line-height: 1; }}
+      .drawer-close {{ font-size: 14px; font-weight: 650; }}
+      .menu-btn {{ width: 44px; height: 44px; }}
+      .menu-dropdown {{ position: fixed; right: 12px; top: 66px; width: min(300px, calc(100vw - 24px)); min-width: 0; max-height: calc(100vh - 78px); overflow-y: auto; }}
+      .menu-item {{ min-height: 44px; box-sizing: border-box; padding: 11px 10px; }}
+      .shell {{ grid-template-columns: minmax(0, 1fr); }}
+      .drawer-scrim {{ position: fixed; inset: 0; z-index: 29; background: rgba(32, 33, 36, 0.32); }}
+      body.drawer-open .drawer-scrim {{ display: block; }}
+      nav {{ display: block; position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; box-sizing: border-box; width: min(340px, 88vw); padding: 10px;
+        transform: translateX(-105%); transition: transform 0.18s ease-out; box-shadow: 4px 0 22px rgba(60, 50, 30, 0.16); }}
+      body.drawer-open nav {{ transform: translateX(0); }}
+      .drawer-head {{ display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 2px 8px; border-bottom: 1px solid var(--line); }}
+      .drawer-title {{ color: var(--ink-strong); font-weight: 650; }}
+      .sidebar-top {{ min-height: 44px; box-sizing: border-box; padding: 12px 8px; }}
+      .sidebar-group-header {{ min-height: 44px; box-sizing: border-box; padding: 10px 8px; }}
+      .sidebar-item {{ min-height: 44px; box-sizing: border-box; padding-top: 12px; padding-bottom: 12px; }}
+      .sidebar-item.sub {{ padding-left: 34px; }}
+      main, main.wide {{ box-sizing: border-box; width: 100%; padding: 24px 16px 48px; }}
+      h1 {{ font-size: 30px; overflow-wrap: anywhere; }}
+      .cov-row {{ align-items: flex-start; flex-wrap: wrap; }}
+      .cov-cat {{ width: auto; flex: 1 1 180px; }}
+      .hub {{ grid-template-columns: minmax(0, 1fr); }}
+      .cards {{ grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }}
+      .qb-cat-title, .art-group-title {{ min-width: 0; }}
+      .art-group-counts {{ white-space: nowrap; }}
+      table.dash {{ display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+      #graph {{ min-width: 0; height: calc(100vh - 180px); }}
+    }}
   </style>
 </head>
 <body>
   <header>
+    <button class="drawer-toggle" id="drawerToggle" aria-label="Open wiki navigation" aria-controls="wikiDrawer" aria-expanded="false" onclick="openDrawer()">&#9776;</button>
     <a href="/">Lifehug</a>
     <form action="/search"><input name="q" placeholder="Search"></form>
     {menu}
   </header>
-  <div class="shell"><nav>{nav}</nav><main class="{main_cls}">{body}</main></div>
+  <div class="drawer-scrim" id="drawerScrim" onclick="closeDrawer()"></div>
+  <div class="shell"><nav id="wikiDrawer" aria-label="Compiled wiki navigation"><div class="drawer-head"><span class="drawer-title">Compiled wiki</span><button class="drawer-close" aria-label="Close wiki navigation" onclick="closeDrawer()">Close</button></div>{nav}</nav><main class="{main_cls}">{body}</main></div>
   <script>
     var KEY = "lifehug.expandedGroups";
     function loadExpanded() {{ try {{ return new Set(JSON.parse(localStorage.getItem(KEY)) || []); }} catch (e) {{ return new Set(); }} }}
@@ -514,6 +553,17 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       var d = document.getElementById('menuDropdown');
       if (w && d && !w.contains(e.target)) d.classList.remove('open');
     }});
+    function openDrawer() {{
+      document.body.classList.add('drawer-open');
+      document.getElementById('drawerToggle').setAttribute('aria-expanded', 'true');
+      document.querySelector('#wikiDrawer .drawer-close').focus();
+    }}
+    function closeDrawer() {{
+      document.body.classList.remove('drawer-open');
+      document.getElementById('drawerToggle').setAttribute('aria-expanded', 'false');
+    }}
+    document.addEventListener('keydown', function (e) {{ if (e.key === 'Escape') closeDrawer(); }});
+    document.querySelectorAll('#wikiDrawer a').forEach(function (link) {{ link.addEventListener('click', closeDrawer); }});
     // Job pill: poll a detached job's status file until it finishes (v101).
     (function () {{
       var pill = document.querySelector('.jobpill[data-job]');
