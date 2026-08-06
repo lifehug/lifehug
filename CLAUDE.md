@@ -862,6 +862,12 @@ compiled wiki stays in the left sidebar (index at the sidebar's Index link).
 Card sources are failure-wrapped — a broken loader drops its card, never the
 page. When nothing waits, home shows a single quiet "the loop is fed" card.
 
+**Phone use (v119):** at widths up to 820px, the compiled-wiki sidebar becomes
+an open/close drawer, so every compiled page remains reachable without crowding
+the reading surface. Search and the Views menu stay in the header; controls use
+phone-sized targets and ordinary page content does not create horizontal page
+scrolling (wide data tables retain their own intentional horizontal scroll).
+
 ### Write actions (v101)
 
 The viewer is a **review-and-write studio** (capture stays voice/Telegram).

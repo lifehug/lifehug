@@ -1,7 +1,7 @@
 {
-  "version": 118,
-  "released": "2026-08-05",
-  "changelog": "v118: cross-medium parity rule documented (AGENTS.md/CLAUDE.md) — feature equivalence between this local companion and hosted Lifehug is now a stated, bidirectional build rule; the first platform→local backfill wave is filed as issues #51–#54 (local answer capture, local warm acknowledgment, mobile-usable local UI, viewable source bodies). Docs only; no behavior change.",
+  "version": 119,
+  "released": "2026-08-06",
+  "changelog": "v119: the local compiled-wiki viewer now works on a phone. At 820px and below, the full wiki navigation opens as a drawer instead of disappearing; search and the Views menu remain available, controls have phone-sized tap targets, and regular pages stay within the viewport while wide tables keep their own intentional scroll.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
