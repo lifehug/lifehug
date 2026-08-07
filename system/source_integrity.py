@@ -846,7 +846,6 @@ def create_linked_source(
     label = {"source_reflection": "Reflection",
              "source_retraction": "Retraction"}.get(source_type, "Correction")
     title = title or f"{label} for {target_title}"
-<<<<<<< HEAD
     validate_contained_path(
         CORRECTION_SOURCES_DIR,
         CORRECTION_SOURCES_DIR.parent,
