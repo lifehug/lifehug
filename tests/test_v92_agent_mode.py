@@ -67,16 +67,18 @@ class AiAvailableTests(unittest.TestCase):
                                return_value=("http://localhost:18789/v1", "tok")):
             self.assertEqual(re_mod.ai_available(), "gateway")
 
-    def test_env_key_detected(self):
+    def test_env_key_detected_when_sdk_available(self):
         with mock.patch.object(re_mod, "_openclaw_gateway", return_value=None), \
-             mock.patch.dict(re_mod.os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+             mock.patch.dict(re_mod.os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True), \
+             mock.patch.object(re_mod, "_anthropic_sdk_available", return_value=True):
             self.assertEqual(re_mod.ai_available(), "sdk-key")
 
-    def test_config_key_detected(self):
+    def test_config_key_detected_when_sdk_available(self):
         with mock.patch.object(re_mod, "_openclaw_gateway", return_value=None), \
              mock.patch.dict(re_mod.os.environ, {}, clear=True), \
              mock.patch.object(re_mod, "load_config",
-                               return_value={"anthropic_api_key": "sk-test"}):
+                               return_value={"anthropic_api_key": "sk-test"}), \
+             mock.patch.object(re_mod, "_anthropic_sdk_available", return_value=True):
             self.assertEqual(re_mod.ai_available(), "sdk-key")
 
     def test_config_read_failure_means_keyless_not_crash(self):
