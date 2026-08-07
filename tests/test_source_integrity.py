@@ -100,11 +100,23 @@ class EntityPageLintTests(unittest.TestCase):
         self.src = load("source_integrity")
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        self.original_paths = (
+            self.src.REPO_DIR,
+            self.src.WIKI_DIR,
+            self.src.ENTITY_ROSTERS_DIR,
+        )
         self.src.REPO_DIR = self.root
+        self.src.WIKI_DIR = self.root / "wiki"
+        self.src.ENTITY_ROSTERS_DIR = self.root / "state" / "entity_rosters"
         (self.root / "wiki" / "people").mkdir(parents=True)
         (self.root / "state" / "entity_rosters").mkdir(parents=True)
 
     def tearDown(self):
+        (
+            self.src.REPO_DIR,
+            self.src.WIKI_DIR,
+            self.src.ENTITY_ROSTERS_DIR,
+        ) = self.original_paths
         self.tmp.cleanup()
 
     def write_page(self, slug, sources, origin="mention"):

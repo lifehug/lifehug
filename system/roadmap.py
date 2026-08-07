@@ -27,6 +27,7 @@ if str(_SYSTEM_DIR) not in sys.path:
 
 from lifehug_core import (  # noqa: E402
     QUESTIONS_FILE,
+    ROADMAP_FILE,
     STATE_DIR,
     WIKI_DIR,
     load_config,
@@ -39,8 +40,6 @@ from lifehug_core import (  # noqa: E402
     write_json,
     write_text,
 )
-
-ROADMAP_FILE = STATE_DIR / "roadmap.json"
 
 # Tier → default target depth (number of answers that count as "well-known").
 TIER_TARGETS = {"basic": 8, "standard": 20, "extreme": 50}

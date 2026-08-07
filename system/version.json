@@ -1,7 +1,7 @@
 {
-  "version": 119,
+  "version": 121,
   "released": "2026-08-06",
-  "changelog": "v119: durable restart-safe local job runner and vault-wide single-writer seam (issue #56). Viewer writes, Telegram answer filing, artifact actions, compiles, and daily/weekly/monthly schedules now converge through a typed allowlist and kernel-backed writer lock; canonical unqueued mutators acquire the same lock directly. Jobs expose metadata-only queued/running/succeeded/failed/safely-retryable states, completion receipts prevent repeat-after-finalize crashes, only success-preserving compile work is retryable after ambiguity, and failed private payloads remain mode-0600 until explicit owner purge. Re-entry is bound to a live unguessable lease token; private values cross child boundaries through stdin rather than process argv; exact loopback Host/Origin checks, symlink-safe answer/source/output containment, atomic cold-start identity keys, queue draining, cleanup, and fixed public error surfaces close the adversarial seams. Framework and vault roots now share one future-vault-only path authority, and launchd examples install the worker plus canonical schedules.",
+  "changelog": "v121: vault-root descendants retain the same no-follow authority as named durable paths. A source symlink introduced after process binding is now rejected consistently by compilation and source-prompt flows, so it cannot cause Lifehug to read outside the selected vault. The guard test prevents later runtime code from downcasting the selected vault root back to ordinary pathlib I/O.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -72,6 +72,7 @@
     "system/timeline_corroboration.py",
     "system/update.py",
     "system/update_readme.py",
+    "system/vault_contract.json",
     "system/vault_paths.py",
     "system/version.json",
     "system/weekly_maintenance.sh",
@@ -106,6 +107,7 @@
     "tests/test_v16_focus_skill.py",
     "tests/test_v117_multi_writer.py",
     "tests/test_v119_jobs.py",
+    "tests/test_v120_vault_only.py",
     "tests/test_v68_loop.py",
     "tests/test_v69_signal.py",
     "tests/test_v70_v71_craft.py",

@@ -15,6 +15,7 @@ from lifehug_core import (
     README_FILE,
     REPO_DIR,
     ROTATION_FILE,
+    SYSTEM_DIR,
     mark_answered_in_bank,
     parse_categories,
     parse_questions,
@@ -27,6 +28,7 @@ from lifehug_core import (
 )
 from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
 from update_readme import update_readme
+from vault_paths import vault_relative_path
 
 FOLLOWUP_HEADER = "📖 Lifehug — since you're on a roll"
 FOLLOWUP_FOOTER = "(Totally optional — tomorrow's question comes either way)"
@@ -139,15 +141,20 @@ def _push_failed(operation: str, result: subprocess.CompletedProcess) -> None:
 
 def git_commit(message: str, push: bool) -> None:
     paths = [
-        "README.md",
-        "system/question-bank.md",
-        "system/rotation.json",
-        "system/coverage.json",
-        "answers",
-        "state",
-        "wiki",
+        vault_relative_path(name, vault_root=REPO_DIR, framework_system_dir=SYSTEM_DIR).as_posix()
+        for name in (
+            "readme",
+            "question_bank",
+            "rotation",
+            "coverage",
+            "answers",
+            "source_manifest",
+            "answer_scores",
+            "wiki",
+        )
     ]
-    subprocess.run(["git", "-C", str(REPO_DIR), "add", "--", *paths], check=True)
+    existing = [path for path in paths if (REPO_DIR / path).exists()]
+    subprocess.run(["git", "-C", str(REPO_DIR), "add", "--", *existing], check=True)
     diff = subprocess.run(["git", "-C", str(REPO_DIR), "diff", "--cached", "--quiet"])
     if diff.returncode == 0:
         return
@@ -175,7 +182,7 @@ def git_commit(message: str, push: bool) -> None:
 
 def compile_wiki() -> None:
     subprocess.run(
-        [sys.executable, str(REPO_DIR / "system" / "wiki_compile.py")],
+        [sys.executable, str(SYSTEM_DIR / "wiki_compile.py")],
         cwd=REPO_DIR,
         check=True,
     )

@@ -12,8 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lifehug_core import (
+    PERENNIALS_FILE,
     QUESTION_CANDIDATES_FILE,
     QUESTIONS_FILE,
+    REPO_DIR,
+    WIKI_DIR,
     now_utc,
     parse_categories,
     parse_questions,
@@ -645,10 +648,7 @@ def harvest_wiki_questions(dry_run: bool = False, cap: int = WIKI_HARVEST_CAP) -
     """Pull non-boilerplate 'Open Questions' from compiled wiki pages into the
     candidate store. Before this, compile was a dead end for question
     generation — insights the synthesis surfaced never became questions."""
-    from lifehug_core import REPO_DIR  # noqa: PLC0415
-
-    wiki_dir = REPO_DIR / "wiki"
-    if not wiki_dir.exists():
+    if not WIKI_DIR.exists():
         return []
     data = load_store()
     existing_pairs = [(c.get("id", ""), str(c.get("text", ""))) for c in data.get("candidates", [])]
@@ -659,7 +659,7 @@ def harvest_wiki_questions(dry_run: bool = False, cap: int = WIKI_HARVEST_CAP) -
     bank_pairs = [(str(q.get("id", "")), str(q.get("text", ""))) for q in bank_questions]
 
     harvested: list[str] = []
-    for page in sorted(wiki_dir.rglob("*.md")):
+    for page in sorted(WIKI_DIR.rglob("*.md")):
         if len(harvested) >= cap:
             break
         if page.name in ("index.md", "log.md", "SCHEMA.md"):
@@ -743,7 +743,6 @@ def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None 
 # product: "a year ago you said X — what's true today?"
 # ---------------------------------------------------------------------------
 
-PERENNIALS_FILE = QUESTION_CANDIDATES_FILE.parent / "perennials.json"
 PERENNIAL_INTERVAL_DAYS = 350  # a touch under a year so the slot lands annually
 
 

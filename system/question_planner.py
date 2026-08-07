@@ -23,6 +23,7 @@ from lifehug_core import (
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
     REPO_DIR,
+    SECOND_VOICE_OFFERS_FILE,
     SOURCES_DIR,
     STATE_DIR,
     FOCUS_RECS_FILE,
@@ -416,7 +417,6 @@ def build_focus_index(focuses: list[dict], questions: list[dict]) -> dict:
 # NEVER repeated.
 # ---------------------------------------------------------------------------
 
-SECOND_VOICE_OFFERS_FILE = STATE_DIR / "second_voice_offers.json"
 DEFAULT_SECOND_VOICE_OFFERS_PER_MONTH = 2
 
 

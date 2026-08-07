@@ -37,8 +37,11 @@ import timeline_corroboration as tcorr  # noqa: E402
 
 from lifehug_core import (  # noqa: E402
     CLASSIFICATIONS_DIR,
+    CONNECTORS_STATE_DIR,
+    ENTITY_ROSTERS_DIR,
     MANUAL_SOURCES_DIR,
     STATE_DIR,
+    TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
     read_json,
     slugify,
@@ -90,7 +93,7 @@ def load_periods() -> list[dict]:
     """Chrono-ordered periods: roster entries joined with their wiki pages'
     source lists. Falls back to page frontmatter `chrono:` when the roster is
     missing. Periods without a chrono sort last (a visible gap in itself)."""
-    roster = read_json(STATE_DIR / "entity_rosters" / "period.json", default=None) or {}
+    roster = read_json(ENTITY_ROSTERS_DIR / "period.json", default=None) or {}
     by_slug: dict[str, dict] = {}
     for ent in roster.get("entities", []) or []:
         if not ent.get("page_eligible"):
@@ -360,7 +363,7 @@ def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str,
 # surfacing as stale notices for the owner to resolve.
 # ---------------------------------------------------------------------------
 
-PLACEMENTS_FILE = STATE_DIR / "timeline_placements.json"
+PLACEMENTS_FILE = TIMELINE_PLACEMENTS_FILE
 
 
 def placement_key(event: dict) -> str:
@@ -578,8 +581,13 @@ def timeline_data(evidence: list[dict] | None = None) -> dict:
     # `evidence` overrides the on-disk files (excavation passes its fresh
     # assertions so candidates never lag a run). No evidence → nothing
     # attached, nothing renders differently.
-    corroboration = tcorr.corroborate(periods, event_lineup, unplaced_events,
-                                      STATE_DIR / "connectors", evidence=evidence)
+    corroboration = tcorr.corroborate(
+        periods,
+        event_lineup,
+        unplaced_events,
+        CONNECTORS_STATE_DIR,
+        evidence=evidence,
+    )
 
     # Placements whose event no longer exists (reclassification rewrote the
     # description) or whose period page is gone — surfaced, never silently

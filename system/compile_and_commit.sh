@@ -11,11 +11,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+WORKSPACE="${WORKSPACE:-${LIFEHUG_VAULT_ROOT:-$(dirname "$SCRIPT_DIR")}}"
+WORKSPACE="$(python3 "$SCRIPT_DIR/vault_paths.py" root --vault-root "$WORKSPACE")" || exit 1
+export LIFEHUG_VAULT_ROOT="$WORKSPACE"
 cd "$WORKSPACE"
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-SENTINEL="state/.compile-needed"
+SENTINEL="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path compile_needed --vault-root "$WORKSPACE")"
+LEARNING_FAILURES_FILE="$WORKSPACE/$(python3 "$SCRIPT_DIR/vault_paths.py" data-path learning_failures --vault-root "$WORKSPACE")"
+export LEARNING_FAILURES_FILE
 
 # Nothing to do?
 if [[ ! -f "$SENTINEL" ]]; then
@@ -34,11 +38,11 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') compile needed — worker owns vault writer l
 # Record failure for the learning loop (same pattern as daily_question.sh)
 record_learning_failure() {
   python3 - "$@" <<'PY'
-import json, sys, datetime
+import datetime, json, os, sys
 scope, action, status, detail = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else ""
 entry = {"ts": datetime.datetime.now().isoformat(), "scope": scope, "action": action,
          "status": status, "detail": detail[:500]}
-with open("state/learning_failures.jsonl", "a") as f:
+with open(os.environ["LEARNING_FAILURES_FILE"], "a") as f:
     f.write(json.dumps(entry) + "\n")
 PY
 }
@@ -63,20 +67,10 @@ echo "$COMPILE_OUT"
 rm -f "$SENTINEL"
 
 # Git: add, commit, pull-rebase, push (non-fatal)
-PATHS=(
-  README.md
-  question-bank.md
-  state/rotation.json
-  state/coverage.json
-  system/question-bank.md
-  system/rotation.json
-  system/coverage.json
-  answers
-  outputs
-  sources
-  state
-  wiki
-)
+PATHS=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] && PATHS+=("$path")
+done < <(python3 "$SCRIPT_DIR/vault_paths.py" git-paths --vault-root "$WORKSPACE")
 EXISTING=()
 for path in "${PATHS[@]}"; do
   [[ -e "$path" ]] && EXISTING+=("$path")

@@ -5,7 +5,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+WORKSPACE="${WORKSPACE:-${LIFEHUG_VAULT_ROOT:-$(dirname "$SCRIPT_DIR")}}"
+WORKSPACE="$(python3 "$SCRIPT_DIR/vault_paths.py" root --vault-root "$WORKSPACE")" || exit 1
+export LIFEHUG_VAULT_ROOT="$WORKSPACE"
 cd "$WORKSPACE"
 
 DRY_RUN="${LIFEHUG_MONTHLY_DRY_RUN:-0}"
@@ -21,8 +23,11 @@ fi
 # v86 (issue #35): Telegram gets a short summary; the full output is
 # persisted as a committed report document.
 START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-REPORT_DIR="state/reports"
+REPORT_DIR="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path reports --vault-root "$WORKSPACE")"
 REPORT_FILE="$REPORT_DIR/monthly-$(date +%F).md"
+QUESTION_QUEUE_PATH="$WORKSPACE/$(python3 "$SCRIPT_DIR/vault_paths.py" data-path question_queue --vault-root "$WORKSPACE")"
+AGENT_TASKS_DIR="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path agent_tasks --vault-root "$WORKSPACE")"
+export QUESTION_QUEUE_PATH
 
 # --- Telegram notification helper ---
 # Delegates to `lifehug.py notify` (resolves chat/token, chunks under the
@@ -87,20 +92,10 @@ run_optional() {
 }
 
 safe_autocommit() {
-  local paths=(
-    README.md
-    question-bank.md
-    state/rotation.json
-    state/coverage.json
-    system/question-bank.md
-    system/rotation.json
-    system/coverage.json
-    answers
-    outputs
-    sources
-    state
-    wiki
-  )
+  local paths=()
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && paths+=("$path")
+  done < <(python3 "$SCRIPT_DIR/vault_paths.py" git-paths --vault-root "$WORKSPACE")
   local existing=()
   for path in "${paths[@]}"; do
     [[ -e "$path" ]] && existing+=("$path")
@@ -146,6 +141,7 @@ PY
 select_gap_targets() {
   python3 - "$WORKSPACE" "$GAP_LIMIT" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -158,7 +154,7 @@ import research_expand as research  # noqa: E402
 # the cron acting on it. Low urgency (Focuses still have room) → no new
 # neighborhoods this month; the archive deepens instead of widening.
 try:
-    queue = json.loads((workspace / "state" / "question_queue.json").read_text(encoding="utf-8"))
+    queue = json.loads(Path(os.environ["QUESTION_QUEUE_PATH"]).read_text(encoding="utf-8"))
     urgency = float(queue.get("allocation", {}).get("expansion", {}).get("urgency", 1.0))
 except (OSError, ValueError):
     urgency = 1.0  # no queue signal → don't block expansion
@@ -226,13 +222,13 @@ generate_topic() {
     # --from-response (see skills/maintenance).
     local slug
     slug=$(printf '%s' "$topic" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
-    mkdir -p state/agent_tasks/research
+    mkdir -p "$AGENT_TASKS_DIR/research"
     if python3 "$SCRIPT_DIR/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output" --prompt \
-        > "state/agent_tasks/research/${slug}.prompt.md" 2>&1; then
-      echo "⏸ keyless — expansion prompt for '${topic}' emitted to state/agent_tasks/research/${slug}.prompt.md"
+        > "$AGENT_TASKS_DIR/research/${slug}.prompt.md" 2>&1; then
+      echo "⏸ keyless — expansion prompt for '${topic}' emitted to $AGENT_TASKS_DIR/research/${slug}.prompt.md"
       echo "  complete: python3 system/research_expand.py --topic \"$topic\" --type $topic_type --output $output --from-response <response-file>"
     else
-      echo "skip: could not emit prompt for ${topic} (see state/agent_tasks/research/${slug}.prompt.md)"
+      echo "skip: could not emit prompt for ${topic} (see $AGENT_TASKS_DIR/research/${slug}.prompt.md)"
     fi
     return 0
   fi
@@ -314,9 +310,9 @@ for etype in person place period object theme; do
   if [[ "$KEYLESS" == "1" ]]; then
     # Keyless: emit the resolution task for agent completion. NEVER fall back
     # to the deterministic roster — it stateless-refreshes junk (v90 lesson).
-    mkdir -p state/agent_tasks/roster
+    mkdir -p "$AGENT_TASKS_DIR/roster"
     set +e
-    ETYPE_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" entity-roster --type "$etype" --emit-task "state/agent_tasks/roster/${etype}.json" 2>&1)
+    ETYPE_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" entity-roster --type "$etype" --emit-task "$AGENT_TASKS_DIR/roster/${etype}.json" 2>&1)
     ETYPE_STATUS=$?
     set -e
     if [[ "$ETYPE_STATUS" -ne 0 ]]; then

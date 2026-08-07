@@ -27,6 +27,7 @@ from lifehug_core import (
     QUESTIONS_FILE,
     REPO_DIR,
     ROTATION_FILE,
+    SECOND_VOICE_OFFERS_FILE,
     SOURCE_LINT_FINDINGS_FILE,
     SOURCE_MANIFEST_FILE,
     STATE_DIR,
@@ -35,6 +36,7 @@ from lifehug_core import (
     parse_categories,
     parse_questions,
     read_json,
+    read_text,
     slugify,
 )
 from entity_roster import ENTITY_TYPES, load_roster
@@ -91,8 +93,7 @@ _GROUP_LABELS = {
 def page_field(path: Path, key: str) -> str:
     """Read a single frontmatter scalar (e.g. `title`, `project`) from a page."""
     try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            head = fh.read(1024)
+        head = read_text(path, errors="replace")[:1024]
         m = re.search(rf'^{re.escape(key)}:\s*"?(.+?)"?\s*$', head, re.MULTILINE)
         if m:
             return m.group(1).strip()
@@ -895,8 +896,6 @@ def view_status():
 # strip below shows state (not debt). Design notes: 3–5 cards max, at most one
 # heavy introspective card, absence reads as stillness.
 # ---------------------------------------------------------------------------
-
-SECOND_VOICE_OFFERS_FILE = STATE_DIR / "second_voice_offers.json"
 
 # Left-rule accent per invitation kind. Calm palette — no reds on the home page.
 _HUB_ACCENTS = {

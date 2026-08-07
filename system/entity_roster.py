@@ -37,8 +37,8 @@ sys.path.insert(0, str(SYSTEM_DIR))
 
 from lifehug_core import (
     ANSWERS_DIR,
+    ENTITY_ROSTERS_DIR,
     QUESTIONS_FILE,
-    STATE_DIR,
     answer_body,
     answer_id_from_filename,
     load_config,
@@ -47,11 +47,12 @@ from lifehug_core import (
     read_json,
     slugify,
     write_json,
+    write_text,
 )
 from recommend_focuses import STOPWORDS, OLD_FOCUS_TERM, load_recommendation_state
 
 ENTITY_TYPES = ("person", "place", "period", "object", "theme")
-ENTITY_DIR = STATE_DIR / "entity_rosters"
+ENTITY_DIR = ENTITY_ROSTERS_DIR
 
 # (page_min_score, page_min_answers) defaults per type. Objects are symbolic-gated,
 # not score-gated, so their thresholds are 0/1.
@@ -678,7 +679,7 @@ def main() -> int:
     previous_roster = load_roster(t)
 
     if args.emit_task:
-        Path(args.emit_task).write_text(json.dumps({
+        write_text(Path(args.emit_task), json.dumps({
             "type": t,
             "prompt": build_prompt(t, candidates, focus_map, excerpts, previous_roster),
             "candidates": candidates,
@@ -690,7 +691,7 @@ def main() -> int:
                                               "maps_to_focus": None},
                                              **({"chrono": 1} if t == "period" else {}),
                                              **({"keywords": ["phrase"]} if t == "theme" else {}))]},
-        }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        }, indent=2, ensure_ascii=False) + "\n")
         n = len(excerpts or candidates)
         print(f"✓ Emitted {t} roster task ({n} items) to {args.emit_task}")
         print(f"  Write the roster JSON, then: python3 system/entity_roster.py --type {t} --from-response <file>")

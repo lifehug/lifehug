@@ -18,6 +18,7 @@ sys.path.insert(0, str(SYSTEM))
 import jobs  # noqa: E402
 import question_planner as qp  # noqa: E402
 import serve_wiki  # noqa: E402
+import vault_paths  # noqa: E402
 
 
 class PostAuthTests(unittest.TestCase):
@@ -212,9 +213,38 @@ class PostAuthTests(unittest.TestCase):
 
     def test_job_endpoint_converges_from_queued_to_succeeded(self):
         original = jobs.VAULT_ROOT
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir=ROOT.parent) as tmp:
             try:
-                jobs.configure(Path(tmp))
+                vault_paths._reset_process_binding_for_tests()
+                vault = Path(tmp)
+                (vault / "question-bank.md").write_text(
+                    "# Questions\n\n## A: Origins\n- [ ] A1: Test?\n",
+                    encoding="utf-8",
+                )
+                (vault / "state").mkdir()
+                (vault / "state" / "rotation.json").write_text(
+                    json.dumps({
+                        "version": 1,
+                        "current_pass": 1,
+                        "pass_names": ["skeleton", "depth", "connections", "polish"],
+                        "last_question_id": None,
+                        "last_asked_at": None,
+                        "questions_asked": 0,
+                        "questions_answered": 0,
+                        "next_question_id": None,
+                        "focus_frequency": 4,
+                    }) + "\n",
+                    encoding="utf-8",
+                )
+                (vault / "state" / "coverage.json").write_text(
+                    json.dumps({
+                        "version": 1,
+                        "last_updated": None,
+                        "categories": {},
+                    }) + "\n",
+                    encoding="utf-8",
+                )
+                jobs.configure(vault)
                 record = jobs.enqueue("compile", {"no_ai": True}, kick=False)
 
                 def fetch():
@@ -243,6 +273,7 @@ class PostAuthTests(unittest.TestCase):
                 self.assertIn("min-width: 0", page)
                 self.assertIn("overflow-x: auto", page)
             finally:
+                vault_paths._reset_process_binding_for_tests()
                 jobs.configure(original)
 
 

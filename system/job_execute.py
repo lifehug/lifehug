@@ -15,11 +15,24 @@ import runpy
 import sys
 from pathlib import Path
 
-import jobs
+from vault_paths import resolve_framework_system_dir, resolve_vault_root
 
 
 def main() -> int:
-    vault = Path(os.environ.get("LIFEHUG_VAULT_ROOT", ""))
+    try:
+        framework_system = resolve_framework_system_dir()
+        selected = os.environ.get("LIFEHUG_VAULT_ROOT")
+        vault = resolve_vault_root(
+            Path(selected) if selected else None,
+            framework_system_dir=framework_system,
+            bind_process=True,
+        )
+        import jobs  # noqa: PLC0415
+
+        jobs.configure(vault)
+    except (RuntimeError, ValueError):
+        return 77
+    os.environ["LIFEHUG_VAULT_ROOT"] = str(vault)
     token = os.environ.get("LIFEHUG_JOB_RUNNER_TOKEN")
     if not jobs.writer_token_is_live(token, vault_root=vault):
         return 77

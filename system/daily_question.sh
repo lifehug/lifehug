@@ -5,7 +5,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+WORKSPACE="${WORKSPACE:-${LIFEHUG_VAULT_ROOT:-$(dirname "$SCRIPT_DIR")}}"
+WORKSPACE="$(python3 "$SCRIPT_DIR/vault_paths.py" root --vault-root "$WORKSPACE")" || exit 1
+export LIFEHUG_VAULT_ROOT="$WORKSPACE"
 cd "$WORKSPACE"
 DRY_RUN="${LIFEHUG_DAILY_DRY_RUN:-0}"
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
@@ -95,20 +97,10 @@ safe_pull() {
 # rejected push must never cost the author their daily question. Pull-rebase
 # first — a second machine (dev box) writes to the same repo.
 safe_autocommit() {
-  local paths=(
-    README.md
-    question-bank.md
-    state/rotation.json
-    state/coverage.json
-    system/question-bank.md
-    system/rotation.json
-    system/coverage.json
-    answers
-    outputs
-    sources
-    state
-    wiki
-  )
+  local paths=()
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && paths+=("$path")
+  done < <(python3 "$SCRIPT_DIR/vault_paths.py" git-paths --vault-root "$WORKSPACE")
   local existing=()
   for path in "${paths[@]}"; do
     [[ -e "$path" ]] && existing+=("$path")

@@ -174,7 +174,8 @@ class LifehugWrapperTests(unittest.TestCase):
     def test_process_answer_learning_state_is_committed(self):
         script = (SYSTEM / "process_answer.py").read_text(encoding="utf-8")
 
-        self.assertIn('"state"', script)
+        self.assertIn('"answer_scores"', script)
+        self.assertIn('"source_manifest"', script)
         self.assertIn('"quality_scoring"', script)
 
     def test_monthly_dry_run_previews_entity_roster_refresh(self):

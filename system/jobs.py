@@ -42,16 +42,28 @@ from pathlib import Path
 from typing import Callable
 
 from vault_paths import (
+    atomic_create_vault_bytes,
+    atomic_write_vault_text,
+    ensure_vault_directory,
+    open_vault_fd,
+    read_vault_bytes,
+    read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
+    unlink_vault_file,
     validate_contained_path,
+    vault_data_path,
 )
 
 FRAMEWORK_SYSTEM_DIR = resolve_framework_system_dir()
-DEFAULT_VAULT_ROOT = resolve_vault_root(framework_system_dir=FRAMEWORK_SYSTEM_DIR)
+DEFAULT_VAULT_ROOT = Path(
+    os.environ.get("LIFEHUG_VAULT_ROOT", str(FRAMEWORK_SYSTEM_DIR.parent))
+)
 
 VAULT_ROOT = DEFAULT_VAULT_ROOT
-JOBS_DIR = VAULT_ROOT / "state" / "jobs"
+JOBS_DIR = vault_data_path(
+    "jobs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+)
 PAYLOADS_DIR = JOBS_DIR / ".payloads"
 RECEIPTS_DIR = JOBS_DIR / ".receipts"
 WRITER_LOCK = JOBS_DIR / ".writer-v2.lock"
@@ -90,30 +102,20 @@ def _parse_time(value: str) -> datetime | None:
 
 def _write_json(path: Path, data: object, *, mode: int = 0o600) -> None:
     """Atomically write JSON without following a destination symlink."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        raise ValueError("refusing symlinked job storage")
-    tmp = path.parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    fd = os.open(tmp, flags, mode)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            tmp.unlink()
+    atomic_write_vault_text(
+        path,
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        vault_root=VAULT_ROOT,
+        mode=mode,
+    )
 
 
 def _read_json(path: Path) -> dict | None:
-    if path.is_symlink() or not path.is_file():
-        return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeError):
+        value = json.loads(read_vault_text(path, vault_root=VAULT_ROOT))
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, UnicodeError):
         return None
     return value if isinstance(value, dict) else None
 
@@ -125,8 +127,11 @@ def configure(vault_root: Path) -> None:
     VAULT_ROOT = resolve_vault_root(
         vault_root,
         framework_system_dir=FRAMEWORK_SYSTEM_DIR,
+        bind_process=True,
     )
-    JOBS_DIR = VAULT_ROOT / "state" / "jobs"
+    JOBS_DIR = vault_data_path(
+        "jobs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     PAYLOADS_DIR = JOBS_DIR / ".payloads"
     RECEIPTS_DIR = JOBS_DIR / ".receipts"
     WRITER_LOCK = JOBS_DIR / ".writer-v2.lock"
@@ -136,48 +141,25 @@ def configure(vault_root: Path) -> None:
 
 
 def _ensure_layout() -> None:
-    state_root = VAULT_ROOT / "state"
-    if state_root.is_symlink():
-        raise ValueError("vault/state may not be a symlink")
-    if state_root.exists() and not state_root.is_dir():
-        raise ValueError("vault/state must be a directory")
-    state_root.mkdir(parents=True, exist_ok=True)
-    if JOBS_DIR.exists() and (JOBS_DIR.is_symlink() or not JOBS_DIR.is_dir()):
-        raise ValueError("job directory must be a real directory under vault/state")
-    JOBS_DIR.mkdir(exist_ok=True)
-    if JOBS_DIR.resolve().parent != state_root.resolve():
-        raise ValueError("job directory escaped vault/state")
-    for directory in (PAYLOADS_DIR, RECEIPTS_DIR):
-        if directory.exists() and (directory.is_symlink() or not directory.is_dir()):
-            raise ValueError("job sidecar directories must be real directories")
-    PAYLOADS_DIR.mkdir(mode=0o700, exist_ok=True)
-    RECEIPTS_DIR.mkdir(mode=0o700, exist_ok=True)
+    state_root = vault_data_path(
+        "state", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    for directory in (state_root, JOBS_DIR, PAYLOADS_DIR, RECEIPTS_DIR):
+        ensure_vault_directory(directory, vault_root=VAULT_ROOT)
 
 
 def _identity_key() -> bytes:
     _ensure_layout()
-    if IDENTITY_KEY_FILE.is_symlink():
-        raise ValueError("identity key may not be a symlink")
     try:
-        key = IDENTITY_KEY_FILE.read_bytes()
+        key = read_vault_bytes(IDENTITY_KEY_FILE, vault_root=VAULT_ROOT)
     except FileNotFoundError:
         key = secrets.token_bytes(32)
-        tmp = IDENTITY_KEY_FILE.parent / f".identity-key-{secrets.token_hex(8)}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(key)
-                handle.flush()
-                os.fsync(handle.fileno())
-            try:
-                # A hard-link publishes only a fully-written inode and fails
-                # atomically if another cold-start process won the race.
-                os.link(tmp, IDENTITY_KEY_FILE, follow_symlinks=False)
-            except FileExistsError:
-                key = IDENTITY_KEY_FILE.read_bytes()
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                tmp.unlink()
+            atomic_create_vault_bytes(
+                IDENTITY_KEY_FILE, key, vault_root=VAULT_ROOT, mode=0o600
+            )
+        except FileExistsError:
+            key = read_vault_bytes(IDENTITY_KEY_FILE, vault_root=VAULT_ROOT)
     if len(key) != 32:
         raise ValueError("invalid job identity key")
     return key
@@ -800,12 +782,12 @@ def _owned_lock_record(owner_id: str, lease_seconds: int) -> dict:
 
 def _open_lock_file(path: Path) -> int:
     _ensure_layout()
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        raise ValueError("lock path must be a regular local file")
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    return os.open(path, flags, 0o600)
+    return open_vault_fd(
+        path,
+        os.O_RDWR | os.O_CREAT,
+        vault_root=VAULT_ROOT,
+        mode=0o600,
+    )
 
 
 class _KernelLock:
@@ -876,8 +858,8 @@ class _WriterLease:
             self.thread.join(timeout=2)
         owner = _read_json(WRITER_OWNER_FILE)
         if owner and owner.get("owner_id") == self.owner_id:
-            with contextlib.suppress(FileNotFoundError):
-                WRITER_OWNER_FILE.unlink()
+            with contextlib.suppress(FileNotFoundError, ValueError):
+                unlink_vault_file(WRITER_OWNER_FILE, vault_root=VAULT_ROOT)
         if self.lock is not None:
             self.lock.__exit__(_exc_type, _exc, _tb)
             self.lock = None
@@ -888,7 +870,9 @@ def writer_token_is_live(token: str | None, *, vault_root: Path | None = None) -
     if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{20}", token):
         return False
     root = resolve_vault_root(vault_root, framework_system_dir=FRAMEWORK_SYSTEM_DIR)
-    jobs_dir = root / "state" / "jobs"
+    jobs_dir = vault_data_path(
+        "jobs", vault_root=root, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     owner_file = jobs_dir / ".writer-owner.json"
     lock_file = jobs_dir / ".writer-v2.lock"
     try:
@@ -896,17 +880,18 @@ def writer_token_is_live(token: str | None, *, vault_root: Path | None = None) -
         validate_contained_path(lock_file, jobs_dir, label="writer lock")
     except ValueError:
         return False
-    owner = _read_json(owner_file)
+    try:
+        owner_value = json.loads(read_vault_text(owner_file, vault_root=root))
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeError, ValueError):
+        return False
+    owner = owner_value if isinstance(owner_value, dict) else None
     if not owner or _owner_is_stale(owner):
         return False
     if not secrets.compare_digest(str(owner.get("owner_id", "")), token):
         return False
     try:
-        flags = os.O_RDWR
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        fd = os.open(lock_file, flags)
-    except OSError:
+        fd = open_vault_fd(lock_file, os.O_RDWR, vault_root=root)
+    except (OSError, ValueError):
         return False
     try:
         try:
@@ -947,34 +932,34 @@ def _load_payload(job_id: str, command: str) -> dict:
 
 def _validate_execution_paths(command: str, payload: dict) -> None:
     """Re-check typed refs after queueing, closing enqueue-to-run symlink races."""
+    outputs_root = vault_data_path(
+        "outputs", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    sources_root = vault_data_path(
+        "sources", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    corrections_root = vault_data_path(
+        "correction_sources", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
+    answers_root = vault_data_path(
+        "answers", vault_root=VAULT_ROOT, framework_system_dir=FRAMEWORK_SYSTEM_DIR
+    )
     if command.startswith("artifact-"):
-        validate_contained_path(
-            VAULT_ROOT / "outputs",
-            VAULT_ROOT / "outputs",
-            label="output root",
-        )
+        validate_contained_path(outputs_root, outputs_root, label="output root")
         ref = payload.get("ref")
         if isinstance(ref, str):
-            validate_contained_path(VAULT_ROOT / ref, VAULT_ROOT / "outputs", label="artifact ref")
+            validate_contained_path(VAULT_ROOT / ref, outputs_root, label="artifact ref")
         seed = payload.get("seed")
         if isinstance(seed, str):
-            validate_contained_path(VAULT_ROOT / seed, VAULT_ROOT / "sources", label="source seed")
+            validate_contained_path(VAULT_ROOT / seed, sources_root, label="source seed")
     if command in {"fix-source", "reflect-source", "timeline-place"}:
         ref = payload.get("ref") if command != "timeline-place" else payload.get("source")
         if isinstance(ref, str) and ref.startswith(("answers/", "sources/")):
-            allowed = "answers" if ref.startswith("answers/") else "sources"
-            validate_contained_path(VAULT_ROOT / ref, VAULT_ROOT / allowed, label="source ref")
-        validate_contained_path(
-            VAULT_ROOT / "sources" / "corrections",
-            VAULT_ROOT / "sources",
-            label="correction destination",
-        )
+            allowed = answers_root if ref.startswith("answers/") else sources_root
+            validate_contained_path(VAULT_ROOT / ref, allowed, label="source ref")
+        validate_contained_path(corrections_root, sources_root, label="correction destination")
     if command in {"process-answer", "file-answer"}:
-        validate_contained_path(
-            VAULT_ROOT / "answers",
-            VAULT_ROOT / "answers",
-            label="answer root",
-        )
+        validate_contained_path(answers_root, answers_root, label="answer root")
 
 
 def _receipt(record: dict) -> dict | None:
@@ -993,8 +978,8 @@ def _finalize_from_receipt(record: dict, receipt: dict) -> dict:
     exit_code = receipt["exit_code"]
     payload_path = _payload_path(record["id"])
     if exit_code == 0:
-        with contextlib.suppress(OSError):
-            payload_path.unlink()
+        with contextlib.suppress(OSError, ValueError):
+            unlink_vault_file(payload_path, vault_root=VAULT_ROOT)
     payload_retained = payload_path.exists()
     record.update({
         "state": "succeeded" if exit_code == 0 else "failed",
@@ -1082,23 +1067,23 @@ def cleanup_sidecars(*, grace_seconds: int = ORPHAN_GRACE_SECONDS) -> dict[str, 
             continue
         record = load_job(path.stem)
         if record and record["state"] == "succeeded":
-            with contextlib.suppress(OSError):
-                path.unlink()
+            with contextlib.suppress(OSError, ValueError):
+                unlink_vault_file(path, vault_root=VAULT_ROOT)
                 removed["successful_payloads"] += 1
             if not path.exists() and record.get("payload_retained"):
                 record.update({"payload_retained": False, "updated_at": _now()})
                 _write_json(_record_path(record["id"]), record)
         elif record is None and path.stat().st_mtime <= cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
+            with contextlib.suppress(OSError, ValueError):
+                unlink_vault_file(path, vault_root=VAULT_ROOT)
                 removed["orphan_payloads"] += 1
     for path in RECEIPTS_DIR.glob("*.json"):
         if path.is_symlink():
             continue
         job_id = path.name.split("-", 1)[0]
         if _ID_RE.fullmatch(job_id) and load_job(job_id) is None and path.stat().st_mtime <= cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
+            with contextlib.suppress(OSError, ValueError):
+                unlink_vault_file(path, vault_root=VAULT_ROOT)
                 removed["orphan_receipts"] += 1
     return removed
 
@@ -1111,12 +1096,12 @@ def purge_job(job_id: str) -> dict:
             raise ValueError("unknown job")
         if record["state"] not in TERMINAL_STATES:
             raise ValueError("only terminal jobs can be purged")
-        with contextlib.suppress(OSError):
-            _payload_path(job_id).unlink()
+        with contextlib.suppress(OSError, ValueError):
+            unlink_vault_file(_payload_path(job_id), vault_root=VAULT_ROOT)
         for receipt in RECEIPTS_DIR.glob(f"{job_id}-*.json"):
             if not receipt.is_symlink():
-                with contextlib.suppress(OSError):
-                    receipt.unlink()
+                with contextlib.suppress(OSError, ValueError):
+                    unlink_vault_file(receipt, vault_root=VAULT_ROOT)
         record.update({
             "payload_retained": False,
             "purged_at": _now(),

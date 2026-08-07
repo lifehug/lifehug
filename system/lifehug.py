@@ -15,14 +15,26 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vault_paths import bootstrap_cli_vault_root, normalize_cli_vault_args
+
+# Global options must select the vault before lifehug_core and the command
+# modules bind their path constants. The helper is the single precedence and
+# validation authority; argparse below only exposes the public flag.
+sys.argv[1:] = normalize_cli_vault_args(sys.argv[1:])
+bootstrap_cli_vault_root(sys.argv[1:])
+
 from lifehug_core import (
     ANSWERS_DIR,
+    CLASSIFICATIONS_DIR,
     CONFIG_FILE,
     COVERAGE_FILE,
+    ENTITY_ROSTERS_DIR,
+    QUALITY_PROFILE_FILE,
+    QUESTION_CANDIDATES_FILE,
+    QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
     REPO_DIR,
     ROTATION_FILE,
-    STATE_DIR,
     WIKI_DIR,
     format_learning_failure,
     load_config,
@@ -1066,7 +1078,7 @@ def loop_health_checks() -> int:
 
     # Queue health — an expired queue silently reverts the daily pick to the
     # legacy coverage algorithm.
-    queue_data = read_json(STATE_DIR / "question_queue.json", default=None)
+    queue_data = read_json(QUESTION_QUEUE_FILE, default=None)
     if not queue_data:
         warn("planner queue missing", "daily pick is using legacy coverage rotation; run planner-queue")
     else:
@@ -1083,7 +1095,7 @@ def loop_health_checks() -> int:
             check("planner queue valid", True, f"{remaining} item(s) remaining")
 
     # Candidate backlog — inflow must not permanently exceed outflow.
-    cand_data = read_json(STATE_DIR / "question_candidates.json", default=None) or {}
+    cand_data = read_json(QUESTION_CANDIDATES_FILE, default=None) or {}
     promotable = [c for c in cand_data.get("candidates", [])
                   if c.get("status") in ("candidate", "accepted", "deferred", "needs_review")]
     if promotable:
@@ -1099,7 +1111,7 @@ def loop_health_checks() -> int:
         check("candidate backlog healthy", True, "no unresolved candidates")
 
     # Cadence — has the weekly/monthly actually run?
-    profile = read_json(STATE_DIR / "quality_profile.json", default=None) or {}
+    profile = read_json(QUALITY_PROFILE_FILE, default=None) or {}
     weekly_age = _days_since(profile.get("computed_at") or profile.get("last_updated") or profile.get("updated_at") or "")
     if weekly_age is None:
         warn("weekly cadence unknown", "quality profile has never been updated — has weekly_maintenance.sh ever run?")
@@ -1108,7 +1120,7 @@ def loop_health_checks() -> int:
     else:
         check("weekly cadence", True, f"quality profile updated {weekly_age:.0f}d ago")
 
-    roster = read_json(STATE_DIR / "entity_rosters" / "person.json", default=None) or {}
+    roster = read_json(ENTITY_ROSTERS_DIR / "person.json", default=None) or {}
     monthly_age = _days_since(roster.get("resolved_at", ""))
     if monthly_age is not None and monthly_age > 35:
         warn("monthly cadence stalled", f"person roster last resolved {monthly_age:.0f} days ago (expected ~30)")
@@ -1117,7 +1129,7 @@ def loop_health_checks() -> int:
 
     # Roster continuity — an empty roster is how the Jul-2026 regression looked.
     for etype in ("person", "place", "period", "object", "theme"):
-        data = read_json(STATE_DIR / "entity_rosters" / f"{etype}.json", default=None)
+        data = read_json(ENTITY_ROSTERS_DIR / f"{etype}.json", default=None)
         if data is not None and not (data.get("entities") or []):
             warn(f"{etype} roster is EMPTY", "a refresh may have wiped it — restore from git and re-resolve")
 
@@ -1134,8 +1146,7 @@ def loop_health_checks() -> int:
         warn("zombie-focus check unavailable", str(exc)[:80])
 
     # Classification coverage — the learning loop starves without it.
-    classifications_dir = STATE_DIR / "classifications"
-    classified = len(list(classifications_dir.glob("*.json"))) if classifications_dir.exists() else 0
+    classified = len(list(CLASSIFICATIONS_DIR.glob("*.json"))) if CLASSIFICATIONS_DIR.exists() else 0
     answers = len(list(ANSWERS_DIR.glob("*.md"))) if ANSWERS_DIR.exists() else 0
     if answers and not classified:
         warn("no sources classified", f"{answers} answers, 0 classifications — the learning loop has never run")
@@ -1221,6 +1232,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Lifehug script-first workflow wrapper")
+    parser.add_argument(
+        "--vault-root",
+        type=Path,
+        default=REPO_DIR,
+        help="Data-only vault root (overrides LIFEHUG_VAULT_ROOT)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("status", help="Show coverage and pass status")

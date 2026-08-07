@@ -5,7 +5,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+WORKSPACE="${WORKSPACE:-${LIFEHUG_VAULT_ROOT:-$(dirname "$SCRIPT_DIR")}}"
+WORKSPACE="$(python3 "$SCRIPT_DIR/vault_paths.py" root --vault-root "$WORKSPACE")" || exit 1
+export LIFEHUG_VAULT_ROOT="$WORKSPACE"
 cd "$WORKSPACE"
 
 DRY_RUN="${LIFEHUG_WEEKLY_DRY_RUN:-0}"
@@ -27,8 +29,12 @@ fi
 # state by safe_autocommit, so it's readable from the phone via GitHub
 # and on the desktop via the wiki viewer's Reports view).
 START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-REPORT_DIR="state/reports"
+REPORT_DIR="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path reports --vault-root "$WORKSPACE")"
 REPORT_FILE="$REPORT_DIR/weekly-$(date +%F).md"
+SOURCE_FINDINGS_FILE="$WORKSPACE/$(python3 "$SCRIPT_DIR/vault_paths.py" data-path source_lint_findings --vault-root "$WORKSPACE")"
+FOCUS_RECS_FILE="$WORKSPACE/$(python3 "$SCRIPT_DIR/vault_paths.py" data-path focus_recommendations --vault-root "$WORKSPACE")"
+AGENT_TASKS_DIR="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path agent_tasks --vault-root "$WORKSPACE")"
+export FOCUS_RECS_FILE
 
 # --- Telegram notification helper ---
 # Delegates to `lifehug.py notify`, which resolves chat/token and CHUNKS long
@@ -79,20 +85,10 @@ PY
 }
 
 safe_autocommit() {
-  local paths=(
-    README.md
-    question-bank.md
-    state/rotation.json
-    state/coverage.json
-    system/question-bank.md
-    system/rotation.json
-    system/coverage.json
-    answers
-    outputs
-    sources
-    state
-    wiki
-  )
+  local paths=()
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && paths+=("$path")
+  done < <(python3 "$SCRIPT_DIR/vault_paths.py" git-paths --vault-root "$WORKSPACE")
   local existing=()
   for path in "${paths[@]}"; do
     [[ -e "$path" ]] && existing+=("$path")
@@ -118,7 +114,7 @@ safe_autocommit() {
 }
 
 has_safe_source_findings() {
-  python3 - "$WORKSPACE/state/source_lint_findings.json" <<'PY'
+  python3 - "$SOURCE_FINDINGS_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -186,7 +182,7 @@ echo
 if [[ "$KEYLESS" == "1" ]]; then
   echo "==> keyless — emitting classification tasks for agent completion"
   set +e
-  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --emit-prompts state/agent_tasks/classify 2>&1)
+  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --emit-prompts "$AGENT_TASKS_DIR/classify" 2>&1)
   CLASSIFY_STATUS=$?
   set -e
   if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
@@ -254,7 +250,7 @@ if [[ "$KEYLESS" == "1" ]]; then
   echo
   echo "==> keyless — emitting mirror synthesis task for agent completion"
   set +e
-  MIRROR_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" mirror-compile --emit-task state/agent_tasks/mirror 2>&1)
+  MIRROR_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" mirror-compile --emit-task "$AGENT_TASKS_DIR/mirror" 2>&1)
   MIRROR_STATUS=$?
   set -e
   if [[ "$MIRROR_STATUS" -ne 0 ]]; then
@@ -270,9 +266,13 @@ else
 fi
 
 run_learning_step "auto_promote" python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote
+# Read indirectly by the report section table below.
+# shellcheck disable=SC2034
 PROMOTE_OUT="$LAST_STEP_OUT"
 
 run_learning_step "planner_queue" python3 "$SCRIPT_DIR/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS"
+# Read indirectly by the report section table below.
+# shellcheck disable=SC2034
 QUEUE_OUT="$LAST_STEP_OUT"
 
 run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
@@ -284,10 +284,10 @@ echo "$LEARNING_OUT"
 # Pending Focus recommendations — 19 once sat unreviewed for weeks because no
 # scheduled surface ever mentioned them. One line, with the approve command.
 RECS_OUT=$(python3 - <<'PY' 2>/dev/null || true
-import json, sys
+import json, os, sys
 from pathlib import Path
 try:
-    data = json.loads(Path("state/focus_recommendations.json").read_text(encoding="utf-8"))
+    data = json.loads(Path(os.environ["FOCUS_RECS_FILE"]).read_text(encoding="utf-8"))
 except (OSError, ValueError):
     sys.exit(0)
 pending = [r for r in data.get("recommendations", []) if r.get("status", "pending") == "pending"]

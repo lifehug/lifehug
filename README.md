@@ -37,6 +37,7 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 - [The three clocks](#the-three-clocks-scheduling)
 - [Every script, holistically](#every-script-holistically)
 - [Getting started](#getting-started)
+- [Framework and vault layouts](#framework-and-vault-layouts)
 - [Key commands](#key-commands)
 - [Repo layout](#repo-layout)
 - [Updating](#updating) · [Methodology](#methodology)
@@ -145,12 +146,12 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Focus** | Anything you're building toward — a person, a book, a theme, your life's work. A Focus = an *objective* + a *tier* (how deep). | `state/roadmap.json` |
 | **Tier** | How much depth a Focus needs: `basic` ≈ a blog post (~8 answers), `standard` ≈ an essay / a person (~20), `extreme` ≈ a book / life's work (~50+). | — |
 | **Roadmap** | The full set of Focuses with targets and caps. *Derived* from the question bank — you never hand-edit it. | `state/roadmap.json` |
-| **Question bank** | Every question ever created, answered or not, grouped by category (A–E generic, F–J projects, K+ people). Only grows. | `system/question-bank.md` |
+| **Question bank** | Every question ever created, answered or not, grouped by category (A–E generic, F–J projects, K+ people). Only grows. | `system/question-bank.md` embedded; `question-bank.md` external |
 | **Neighborhood** | A cluster of 6–12 questions around one topic, arranged on a narrative **arc**, aimed at a deliverable. It tracks generated, promoted, and answered readiness separately; only answered material makes it draft-ready. | `state/neighborhoods.json` |
 | **Candidate** | A proposed question waiting in a review buffer. Becomes a real question only when *promoted* into the bank. | `state/question_candidates.json` |
 | **Wiki** | The cross-linked, owner-only encyclopedia of your life, synthesized from your answers. | `wiki/` |
 | **Artifact** | The product payoff: a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. | `outputs/`, `sources/artifacts/` |
-| **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` |
+| **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` embedded; `state/rotation.json` external |
 
 The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
 
@@ -447,7 +448,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`jobs.py`** + **`job_execute.py`** | Durable metadata-only queue and single-writer worker. Typed payloads stay in private sidecars and cross the child boundary through stdin, never process argv. Explicit schedule/provider identities deduplicate; ordinary repeated actions create fresh jobs. |
-| **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with fail-closed path containment and symlink checks. |
+| **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with process binding, no-follow file operations, deterministic tree preflight, and an exportable versioned contract. |
 | **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
 | **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, classifies a capped batch of unclassified sources, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, scans for gaps, reports progress, then commits and sends a Telegram summary. Dry-run previews the same candidate promotion gate without writing. |
 | **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Focuses, refreshes entity rosters, reports progress, then commits real changes. |
@@ -514,6 +515,67 @@ Clone, run `./setup.sh`, and open the repo with any AI that reads `CLAUDE.md` (C
 ```cron
 0 9 * * * cd /path/to/lifehug && system/daily_question.sh
 ```
+
+### Framework and vault layouts
+
+The normal clone remains the zero-configuration **embedded layout**: executable framework files and private vault data share one checkout. Existing commands and paths remain unchanged.
+
+```text
+lifehug/
+├── system/                 # framework code + embedded question/rotation/coverage files
+├── templates/              # framework assets
+├── answers/ sources/ wiki/ outputs/
+└── state/                  # durable vault state
+```
+
+An installed framework can instead operate on a separate **data-only vault**. The vault must not contain `system/` or framework templates. Its minimum shape is the versioned contract in [`system/vault_contract.json`](system/vault_contract.json):
+
+```text
+my-private-vault/
+├── question-bank.md
+└── state/
+    ├── rotation.json       # schema version 1
+    └── coverage.json       # schema version 1
+```
+
+Optional `answers/`, `sources/`, `wiki/`, `outputs/`, profile/config files, and additional `state/` records are created or read under that vault as their workflows require. Code, templates, mission text, and connector implementations always stay in the framework install.
+
+Select the vault for one command with the global flag (before or after the
+subcommand), or for a process/scheduler with the environment variable:
+
+```bash
+python3 /opt/lifehug/system/lifehug.py --vault-root ~/Documents/my-private-vault status
+python3 /opt/lifehug/system/lifehug.py status --vault-root ~/Documents/my-private-vault
+LIFEHUG_VAULT_ROOT=~/Documents/my-private-vault \
+  python3 /opt/lifehug/system/lifehug.py compile --no-ai
+```
+
+Resolution is explicit `--vault-root`, then `LIFEHUG_VAULT_ROOT`, then the
+embedded framework checkout. Selection is process-scoped; start a new CLI
+invocation to switch vaults. Runtime reads and writes walk from a pinned vault
+directory without following symlinks, and reject a root, parent, or destination
+that changes during the operation. Missing minimum files, unsupported state
+schemas, a vault containing `system/`, symlinks, or other special files fail
+before mutation. `state/hosted.json` has no stand-down meaning in the open-source
+runtime.
+
+This applies equally to a durable path assembled from the selected vault root
+at runtime (for example, a user-selected source path): those descendants retain
+the same no-follow authority after process binding rather than falling back to
+ordinary `pathlib` I/O.
+
+Integrations should consume the normalized contract rather than infer paths:
+
+```bash
+python3 /opt/lifehug/system/vault_paths.py contract
+python3 /opt/lifehug/system/vault_paths.py walk --vault-root ~/Documents/my-private-vault
+python3 /opt/lifehug/system/vault_paths.py classify state/rotation.json --authority vault
+```
+
+The `contract` output has a stable identity digest, explicit embedded/external
+data mappings, framework classifications, required shape, JSON validation
+policy, and special-file policy. It never includes a machine-local absolute
+path.
 
 ---
 
@@ -583,6 +645,8 @@ python3 system/lifehug.py --help
 ---
 
 ## Repo layout
+
+The tree below is the embedded layout. See [Framework and vault layouts](#framework-and-vault-layouts) for a separate data-only vault.
 
 ```
 lifehug/

@@ -42,6 +42,7 @@ from lifehug_core import (
     TEMPLATES_DIR,
     answer_body,
     answer_id_from_filename,
+    write_text,
 )
 
 SYSTEM_DIR = Path(__file__).parent
@@ -339,7 +340,7 @@ def write_meta(path, meta):
         if v.get("feedback"):
             fb = v["feedback"].replace("'", "''")
             lines.append(f"    feedback: '{fb}'")
-    path.write_text("\n".join(lines) + "\n")
+    write_text(path, "\n".join(lines) + "\n")
 
 
 def read_meta(path):
@@ -462,7 +463,7 @@ def cmd_save(args):
     if not content.strip():
         print("Error: no content on stdin", file=sys.stderr)
         sys.exit(1)
-    out_file.write_text(content if content.endswith("\n") else content + "\n")
+    write_text(out_file, content if content.endswith("\n") else content + "\n")
 
     # Build/update meta.yaml
     meta_path = out_dir / "meta.yaml"

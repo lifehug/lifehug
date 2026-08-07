@@ -21,17 +21,15 @@ import sys
 from pathlib import Path
 
 from lifehug_core import (
+    ANSWER_SCORES_FILE,
     ANSWERS_DIR,
     QUESTIONS_FILE,
-    REPO_DIR,
+    QUALITY_PROFILE_FILE,
     now_utc,
     parse_questions,
     read_json,
     write_json,
 )
-
-ANSWER_SCORES_FILE = REPO_DIR / "state" / "answer_scores.json"
-QUALITY_PROFILE_FILE = REPO_DIR / "state" / "quality_profile.json"
 
 # Minimum scored answers before the profile activates and influences anything.
 ACTIVATION_THRESHOLD = 20

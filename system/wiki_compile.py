@@ -26,11 +26,15 @@ from pathlib import Path
 
 from lifehug_core import (
     ANSWERS_DIR,
+    CLASSIFICATIONS_DIR,
     QUESTIONS_FILE,
     REPO_DIR,
     SOURCES_DIR,
     STATE_DIR,
+    SYNTHESIS_DIR,
+    TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
+    WIKI_SYNTHESIS_CACHE_FILE,
     answer_body,
     answer_id_from_filename,
     load_config,
@@ -93,11 +97,11 @@ THEME_KEYWORDS = {
 # explicit owner-only contract (no sanitizing; the tier system protects
 # sensitive material downstream, not the synthesis).
 CACHE_VERSION = "v3"
-SYNTH_CACHE_FILE = STATE_DIR / "wiki_synthesis_cache.json"
+SYNTH_CACHE_FILE = WIKI_SYNTHESIS_CACHE_FILE
 # Drop-zone for keyless desktop synthesis: when the skill runs through Claude
 # Code, the agent writes each page's prose here (state/synthesis/<slug>.md) and
 # the next compile consumes it into the cache. No API key / gateway needed.
-SYNTH_DIR = STATE_DIR / "synthesis"
+SYNTH_DIR = SYNTHESIS_DIR
 
 MAX_RELATED = 12  # total related links per page
 MAX_SHARED = 8    # shared-source links added per page
@@ -1220,10 +1224,10 @@ def compile_timeline(dry_run: bool = False) -> bool:
     # Honor this module's (possibly monkeypatched) roots for the call.
     saved = (tl_mod.CLASSIFICATIONS_DIR, tl_mod.STATE_DIR, tl_mod.WIKI_DIR,
              tl_mod.PLACEMENTS_FILE)
-    tl_mod.CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
+    tl_mod.CLASSIFICATIONS_DIR = CLASSIFICATIONS_DIR
     tl_mod.STATE_DIR = STATE_DIR
     tl_mod.WIKI_DIR = WIKI_DIR
-    tl_mod.PLACEMENTS_FILE = STATE_DIR / "timeline_placements.json"
+    tl_mod.PLACEMENTS_FILE = TIMELINE_PLACEMENTS_FILE
     try:
         data = tl_mod.timeline_data()
     finally:
@@ -1423,8 +1427,9 @@ def main():
                 "sources": task_sources(d),
                 "related_candidates": others,
             })
-        Path(args.emit_tasks).write_text(
-            json.dumps(tasks, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        write_text(
+            Path(args.emit_tasks), json.dumps(tasks, indent=2, ensure_ascii=False) + "\n"
+        )
         print(f"✓ Emitted {len(tasks)} synthesis task(s) to {args.emit_tasks}")
         if tasks:
             print("  Write each task's prose to its narrative_path, then run: "

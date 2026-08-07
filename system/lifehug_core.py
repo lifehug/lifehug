@@ -6,55 +6,187 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from vault_paths import (
-    EMBEDDED_FRAMEWORK_SYSTEM_DIR,
+    append_vault_text,
+    atomic_write_vault_text,
+    framework_path,
+    ensure_vault_directory,
+    open_vault_file,
+    read_vault_bytes,
+    read_vault_text,
+    resolve_framework_system_dir,
     resolve_vault_root,
-    validate_contained_path,
+    vault_data_path,
+    vault_layout,
+    unlink_vault_file,
 )
 
-SYSTEM_DIR = EMBEDDED_FRAMEWORK_SYSTEM_DIR
+SYSTEM_DIR = resolve_framework_system_dir()
 FRAMEWORK_ROOT = SYSTEM_DIR.parent
-# Current installs embed framework + vault in one checkout.  A future
-# vault-only install (#46) points the same framework at a separate data root.
-REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR)
-_EMBEDDED_DATA = REPO_DIR / "system"
-if _EMBEDDED_DATA.is_dir():
-    QUESTIONS_FILE = _EMBEDDED_DATA / "question-bank.md"
-    ROTATION_FILE = _EMBEDDED_DATA / "rotation.json"
-    COVERAGE_FILE = _EMBEDDED_DATA / "coverage.json"
-else:
-    QUESTIONS_FILE = REPO_DIR / "question-bank.md"
-    ROTATION_FILE = REPO_DIR / "state" / "rotation.json"
-    COVERAGE_FILE = REPO_DIR / "state" / "coverage.json"
-CONFIG_FILE = REPO_DIR / "config.yaml"
-PROFILE_FILE = REPO_DIR / "profile.yaml"
-README_FILE = REPO_DIR / "README.md"
-ANSWERS_DIR = REPO_DIR / "answers"
-OUTPUTS_DIR = REPO_DIR / "outputs"
-TEMPLATES_DIR = (REPO_DIR / "templates") if (REPO_DIR / "templates").is_dir() else FRAMEWORK_ROOT / "templates"
-STATE_DIR = REPO_DIR / "state"
-WIKI_DIR = REPO_DIR / "wiki"
-SOURCES_DIR = REPO_DIR / "sources"
-MANUAL_SOURCES_DIR = SOURCES_DIR / "manual"
-IMPORT_SOURCES_DIR = SOURCES_DIR / "imports"
-CORRECTION_SOURCES_DIR = SOURCES_DIR / "corrections"
-ARTIFACT_SOURCES_DIR = SOURCES_DIR / "artifacts"
-QUESTION_CANDIDATES_FILE = STATE_DIR / "question_candidates.json"
-QUESTION_QUEUE_FILE = STATE_DIR / "question_queue.json"
-PLANNER_STATE_FILE = STATE_DIR / "planner_state.json"
-SOURCE_MANIFEST_FILE = STATE_DIR / "source_manifest.json"
-SOURCE_LINT_FINDINGS_FILE = STATE_DIR / "source_lint_findings.json"
-LEARNING_FAILURES_FILE = STATE_DIR / "learning_failures.jsonl"
-MISSION_FILE = SYSTEM_DIR / "mission.md"
-CLASSIFICATIONS_DIR = STATE_DIR / "classifications"
-NEIGHBORHOODS_FILE = STATE_DIR / "neighborhoods.json"
-FOCUS_RECS_FILE = STATE_DIR / "focus_recommendations.json"
-LEGACY_FOCUS_RECS_FILE = STATE_DIR / ("spot" "light_recommendations.json")
-CONNECTORS_DIR = SYSTEM_DIR / "connectors"
+_RESOLVED_VAULT_ROOT = resolve_vault_root(
+    framework_system_dir=SYSTEM_DIR,
+    bind_process=True,
+)
+VAULT_LAYOUT = vault_layout(_RESOLVED_VAULT_ROOT, framework_system_dir=SYSTEM_DIR)
+
+
+class VaultPath(type(Path())):
+    """A durable-data path whose ordinary pathlib I/O stays no-follow.
+
+    ``Path`` preserves its concrete class through joins and globbing.  Making
+    every contract-derived durable path a ``VaultPath`` therefore keeps legacy
+    callers that use ``.read_text()`` or ``.mkdir()`` inside the single
+    no-follow authority, including paths discovered after the initial vault
+    preflight.
+    """
+
+    def _inside_selected_vault(self) -> bool:
+        try:
+            Path(os.path.abspath(self)).relative_to(REPO_DIR)
+            return True
+        except ValueError:
+            return False
+
+    def read_text(self, encoding: str | None = None, errors: str | None = None) -> str:
+        if not self._inside_selected_vault():
+            return super().read_text(encoding=encoding, errors=errors)
+        return read_vault_text(self, vault_root=REPO_DIR, encoding=encoding or "utf-8", errors=errors)
+
+    def read_bytes(self) -> bytes:
+        if not self._inside_selected_vault():
+            return super().read_bytes()
+        return read_vault_bytes(self, vault_root=REPO_DIR)
+
+    def write_text(
+        self,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if not self._inside_selected_vault():
+            return super().write_text(data, encoding=encoding, errors=errors, newline=newline)
+        if errors is not None or newline is not None:
+            raise ValueError("VaultPath writes support UTF-8 without newline conversion")
+        atomic_write_vault_text(self, data, vault_root=REPO_DIR, encoding=encoding or "utf-8")
+        return len(data)
+
+    def write_bytes(self, data: bytes) -> int:
+        if not self._inside_selected_vault():
+            return super().write_bytes(data)
+        from vault_paths import atomic_write_vault_bytes
+
+        atomic_write_vault_bytes(self, data, vault_root=REPO_DIR)
+        return len(data)
+
+    def open(
+        self,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ):
+        if not self._inside_selected_vault():
+            return super().open(
+                mode=mode, buffering=buffering, encoding=encoding, errors=errors, newline=newline
+            )
+        if buffering != -1 or newline is not None:
+            raise ValueError("VaultPath open does not support buffering or newline overrides")
+        return open_vault_file(
+            self,
+            mode,
+            vault_root=REPO_DIR,
+            encoding=encoding,
+            errors=errors,
+            create_parents=mode in {"w", "wb", "a", "ab", "x", "xb"},
+        )
+
+    def mkdir(self, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+        if not self._inside_selected_vault():
+            return super().mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+        if self.exists() and not exist_ok:
+            raise FileExistsError(self)
+        ensure_vault_directory(self, vault_root=REPO_DIR)
+
+    def touch(self, mode: int = 0o666, exist_ok: bool = True) -> None:
+        if not self._inside_selected_vault():
+            return super().touch(mode=mode, exist_ok=exist_ok)
+        if self.exists():
+            if not exist_ok:
+                raise FileExistsError(self)
+            with open_vault_file(self, "a", vault_root=REPO_DIR, file_mode=mode):
+                return
+        with open_vault_file(
+            self, "x", vault_root=REPO_DIR, create_parents=True, file_mode=mode
+        ):
+            return
+
+    def unlink(self, missing_ok: bool = False) -> None:
+        if not self._inside_selected_vault():
+            return super().unlink(missing_ok=missing_ok)
+        unlink_vault_file(self, vault_root=REPO_DIR, missing_ok=missing_ok)
+
+
+# The root itself must retain the authority too: many runtime commands build
+# user-selected descendants with ``REPO_DIR / relative_path`` rather than a
+# named contract constant.  pathlib preserves this subclass through joins,
+# globbing, and rglobbing, so those legacy call sites cannot silently fall
+# back to symlink-following I/O after process binding.
+REPO_DIR = VaultPath(_RESOLVED_VAULT_ROOT)
+
+
+def _data(name: str) -> Path:
+    return VaultPath(vault_data_path(name, vault_root=REPO_DIR, framework_system_dir=SYSTEM_DIR))
+
+
+QUESTIONS_FILE = _data("question_bank")
+ROTATION_FILE = _data("rotation")
+COVERAGE_FILE = _data("coverage")
+CONFIG_FILE = _data("config")
+PROFILE_FILE = _data("profile")
+README_FILE = _data("readme")
+ANSWERS_DIR = _data("answers")
+OUTPUTS_DIR = _data("outputs")
+STATE_DIR = _data("state")
+WIKI_DIR = _data("wiki")
+SOURCES_DIR = _data("sources")
+MANUAL_SOURCES_DIR = _data("manual_sources")
+IMPORT_SOURCES_DIR = _data("import_sources")
+CORRECTION_SOURCES_DIR = _data("correction_sources")
+ARTIFACT_SOURCES_DIR = _data("artifact_sources")
+QUESTION_CANDIDATES_FILE = _data("question_candidates")
+QUESTION_QUEUE_FILE = _data("question_queue")
+PLANNER_STATE_FILE = _data("planner_state")
+SOURCE_MANIFEST_FILE = _data("source_manifest")
+SOURCE_LINT_FINDINGS_FILE = _data("source_lint_findings")
+LEARNING_FAILURES_FILE = _data("learning_failures")
+CLASSIFICATIONS_DIR = _data("classifications")
+NEIGHBORHOODS_FILE = _data("neighborhoods")
+FOCUS_RECS_FILE = _data("focus_recommendations")
+LEGACY_FOCUS_RECS_FILE = _data("legacy_focus_recommendations")
+ROADMAP_FILE = _data("roadmap")
+QUALITY_PROFILE_FILE = _data("quality_profile")
+ANSWER_SCORES_FILE = _data("answer_scores")
+ENTITY_ROSTERS_DIR = _data("entity_rosters")
+CONNECTORS_STATE_DIR = _data("connectors_state")
+SECOND_VOICE_OFFERS_FILE = _data("second_voice_offers")
+BOOK_OFFERS_FILE = _data("book_offers")
+TIMELINE_PLACEMENTS_FILE = _data("timeline_placements")
+PERENNIALS_FILE = _data("perennials")
+WIKI_SYNTHESIS_CACHE_FILE = _data("wiki_synthesis_cache")
+SYNTHESIS_DIR = _data("synthesis")
+REPORTS_DIR = _data("reports")
+AGENT_TASKS_DIR = _data("agent_tasks")
+JOBS_DIR = _data("jobs")
+COMPILE_NEEDED_FILE = _data("compile_needed")
+
+TEMPLATES_DIR = framework_path("templates", framework_system_dir=SYSTEM_DIR)
+MISSION_FILE = framework_path("mission", framework_system_dir=SYSTEM_DIR)
+CONNECTORS_DIR = framework_path("connectors", framework_system_dir=SYSTEM_DIR)
 
 QUESTION_ID_RE = r"[A-Z]\d+[a-z]*"
 QUESTION_LINE_RE = re.compile(
@@ -93,45 +225,58 @@ def now_utc() -> str:
 
 def read_json(path: Path, default=None):
     try:
-        with path.open() as f:
-            return json.load(f)
+        if _is_vault_path(path):
+            return json.loads(read_vault_text(path, vault_root=REPO_DIR))
+        with path.open(encoding="utf-8") as handle:
+            return json.load(handle)
     except FileNotFoundError:
         return default
 
 
+def read_text(path: Path, *, encoding: str = "utf-8", errors: str | None = None) -> str:
+    if _is_vault_path(path):
+        return read_vault_text(path, vault_root=REPO_DIR, encoding=encoding, errors=errors)
+    return path.read_text(encoding=encoding, errors=errors)
+
+
+def read_bytes(path: Path) -> bytes:
+    if _is_vault_path(path):
+        return read_vault_bytes(path, vault_root=REPO_DIR)
+    return path.read_bytes()
+
+
 def write_json(path: Path, data) -> None:
-    _guard_private_write(path)
+    content = json.dumps(data, indent=2) + "\n"
+    if _is_vault_path(path):
+        atomic_write_vault_text(path, content, vault_root=REPO_DIR)
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-        tmp = Path(f.name)
-    tmp.replace(path)
+    path.write_text(content, encoding="utf-8")
 
 
 def write_text(path: Path, text: str) -> None:
-    _guard_private_write(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as f:
-        f.write(text)
-        tmp = Path(f.name)
-    tmp.replace(path)
-
-
-def _guard_private_write(path: Path) -> None:
-    """Prevent answer/source/output helpers from traversing symlinked refs."""
-    candidate = Path(path).absolute()
-    for root, label in (
-        (ANSWERS_DIR, "answer path"),
-        (SOURCES_DIR, "source path"),
-        (OUTPUTS_DIR, "output path"),
-    ):
-        try:
-            candidate.relative_to(Path(root).absolute())
-        except ValueError:
-            continue
-        validate_contained_path(candidate, root, label=label)
+    if _is_vault_path(path):
+        atomic_write_vault_text(path, text, vault_root=REPO_DIR)
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def append_text(path: Path, text: str) -> None:
+    if _is_vault_path(path):
+        append_vault_text(path, text, vault_root=REPO_DIR)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _is_vault_path(path: Path) -> bool:
+    try:
+        Path(os.path.abspath(path)).relative_to(REPO_DIR)
+        return True
+    except ValueError:
+        return False
 
 
 def record_learning_failure(
@@ -154,9 +299,13 @@ def record_learning_failure(
         record["exit_code"] = exit_code
     if context:
         record["context"] = context
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    if _is_vault_path(path):
+        append_vault_text(path, line, vault_root=REPO_DIR)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
     return record
 
 

@@ -53,6 +53,7 @@ from lifehug_core import (
     read_json,
     slugify,
     write_json,
+    write_text,
 )
 
 # ── constants ─────────────────────────────────────────────────────────────────
@@ -799,7 +800,7 @@ def emit_prompts(sources: list[Path], out_dir: Path) -> int:
             continue
         stem = classify_stem(source_path)
         prompt_file = out_dir / f"{stem}.prompt.md"
-        prompt_file.write_text(build_prompt(source_path, fm, story_text), encoding="utf-8")
+        write_text(prompt_file, build_prompt(source_path, fm, story_text))
         items.append({
             "source": _relative_path(source_path),
             "prompt": prompt_file.name,
