@@ -54,16 +54,17 @@ class BoundedLinkedFilenameTests(unittest.TestCase):
         )
         self.originals = (
             self.src.REPO_DIR, self.src.CORRECTION_SOURCES_DIR,
-            self.src.SOURCE_MANIFEST_FILE, self.src.ANSWERS_DIR,
+            self.src.SOURCE_MANIFEST_FILE, self.src.ANSWERS_DIR, self.src.WIKI_DIR,
         )
         self.src.REPO_DIR = self.root
         self.src.CORRECTION_SOURCES_DIR = self.corrections
         self.src.SOURCE_MANIFEST_FILE = self.root / "state" / "source_manifest.json"
         self.src.ANSWERS_DIR = self.answers
+        self.src.WIKI_DIR = self.root / "wiki"
 
     def tearDown(self):
         (self.src.REPO_DIR, self.src.CORRECTION_SOURCES_DIR,
-         self.src.SOURCE_MANIFEST_FILE, self.src.ANSWERS_DIR) = self.originals
+         self.src.SOURCE_MANIFEST_FILE, self.src.ANSWERS_DIR, self.src.WIKI_DIR) = self.originals
         self.tmp.cleanup()
 
     def test_new_names_are_bounded_ascii_and_never_embed_question_text(self):
@@ -86,6 +87,13 @@ class BoundedLinkedFilenameTests(unittest.TestCase):
             self.corrections, "answer:A1", "source_correction", "# Correction\n\nTwo\n", "2026-08-06T00:00:00Z"
         )
         self.assertNotEqual(one, two)
+
+    def test_malformed_capture_time_cannot_escape_the_corrections_directory(self):
+        path = self.src._linked_source_path(
+            self.corrections, "answer:A1", "source_correction", "# Correction\n\nOne\n", "../../escape"
+        )
+        self.assertEqual(path.resolve().parent, self.corrections.resolve())
+        self.assertRegex(path.name, r"^1970-01-01-correction-answer-a1-[0-9a-f]+\.md$")
 
     def test_hash_prefix_collision_extends_deterministically_without_counter_suffix(self):
         payload = "# Correction\n\nOne\n"
@@ -130,6 +138,7 @@ class BoundedLinkedFilenameTests(unittest.TestCase):
 
     def test_repair_is_dry_run_idempotent_and_updates_indexes(self):
         old, old_rel = self._legacy_retraction()
+        target_before = self.target.read_text(encoding="utf-8")
         self.src.SOURCE_MANIFEST_FILE.parent.mkdir(parents=True)
         self.src.SOURCE_MANIFEST_FILE.write_text(
             json.dumps({"version": 1, "sources": {old_rel: {"source_id": "retraction:legacy-long-name"}}}),
@@ -171,6 +180,7 @@ class BoundedLinkedFilenameTests(unittest.TestCase):
             self.assertTrue(new_classification.exists())
             self.assertFalse(old_classification.exists())
             self.assertEqual(json.loads(new_classification.read_text(encoding="utf-8"))["source_path"], repaired[0][1])
+            self.assertEqual(self.target.read_text(encoding="utf-8"), target_before)
             self.assertEqual(self.src.repair_linked_source_filenames(), [])
         finally:
             classifier.REPO_DIR, classifier.CLASSIFICATIONS_DIR = classifier_original

@@ -750,6 +750,12 @@ def _bounded_slug(value: str, maximum: int) -> str:
     return label[:maximum].rstrip("-") or "source"
 
 
+def _linked_source_day(captured_at: str) -> str:
+    """Return a filename-safe ISO day even when repairing malformed metadata."""
+    day = (captured_at or "")[:10]
+    return day if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else "1970-01-01"
+
+
 def linked_source_stem(
     target_id: str, source_type: str, payload: str, captured_at: str
 ) -> str:
@@ -761,7 +767,7 @@ def linked_source_stem(
     id, kind, and payload, keeping distinct corrections collision-safe even
     when their visible labels truncate to the same text.
     """
-    day = (captured_at or now_utc())[:10]
+    day = _linked_source_day(captured_at or now_utc())
     kind = {"source_correction": "correction", "source_retraction": "retraction"}.get(
         source_type, "linked"
     )
@@ -1012,7 +1018,7 @@ def _repair_plan() -> tuple[list[dict[str, object]], dict[Path, object], list[tu
         raise ValueError("cannot repair linked-source filenames: generated destination collision")
 
     json_updates: dict[Path, object] = {}
-    state_dir = REPO_DIR / "state"
+    state_dir = SOURCE_MANIFEST_FILE.parent
     if replacements:
         _assert_migration_path_safe(state_dir, label="state directory")
     if replacements and state_dir.exists():
@@ -1031,7 +1037,7 @@ def _repair_plan() -> tuple[list[dict[str, object]], dict[Path, object], list[tu
     # cannot leave stale visible citations before the next compile rebuild.
     markdown_updates: dict[Path, str] = {}
     if replacements:
-        for directory, label in ((REPO_DIR / "wiki", "wiki directory"), (state_dir, "state directory")):
+        for directory, label in ((WIKI_DIR, "wiki directory"), (state_dir, "state directory")):
             _assert_migration_path_safe(directory, label=label)
             if not directory.exists():
                 continue
