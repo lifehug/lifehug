@@ -41,8 +41,10 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 from ai_provider import (
+    AIResponseError,
     ai_available,
     call_ai,
+    failure_metadata,
     get_anthropic_client,
     model_is_kimi,
 )
@@ -1010,6 +1012,7 @@ def find_relevant_answers(answers: list[dict], topic: str, max_answers: int = 8)
 
 def parse_ai_json(raw: str) -> dict:
     """Parse AI JSON response, handling markdown code fences."""
+    response_bytes = len(raw.encode("utf-8", errors="replace"))
     raw = raw.strip()
     # Strip markdown fences
     if raw.startswith("```"):
@@ -1021,7 +1024,16 @@ def parse_ai_json(raw: str) -> dict:
                 end = i
                 break
         raw = "\n".join(lines[start:end])
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise AIResponseError(
+            "AI response was not valid JSON",
+            provider="ai",
+            operation="parse-json",
+            status="malformed",
+            response_bytes=response_bytes,
+        ) from None
 
 
 # ---------------------------------------------------------------------------
@@ -1171,10 +1183,17 @@ def _run_expansion(
 
     try:
         ai_data = parse_ai_json(raw_response)
-    except (json.JSONDecodeError, ValueError) as e:
-        print(f"Error: AI returned invalid JSON: {e}", file=sys.stderr)
-        print("--- Raw response ---", file=sys.stderr)
-        print(raw_response[:1000], file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 — report metadata, never response text
+        print(
+            "Error: AI returned invalid JSON: "
+            + failure_metadata(
+                "research-expand-parse",
+                exc,
+                provider="ai",
+                response_bytes=len(raw_response.encode("utf-8", errors="replace")),
+            ),
+            file=sys.stderr,
+        )
         return 1
 
     ai_questions = ai_data.get("questions", [])

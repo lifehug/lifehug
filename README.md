@@ -289,14 +289,17 @@ Generation can use:
 2. **Direct on-machine model** — set `ai_provider: local`,
    `local_ai_base_url`, `local_ai_model`, and `local_ai_timeout_seconds` in
    gitignored `config.yaml` for Ollama, LM Studio, llama.cpp, or equivalent.
-   Loopback is enforced by default; local transport ignores proxy environment
-   variables and refuses redirects. If the server is absent, Lifehug returns
+   Loopback is enforced by default; every loopback transport (including
+   OpenClaw) ignores proxy environment variables and refuses redirects. If the server is absent, Lifehug returns
    to keyless agent-task mode; it never spills the prompt to a cloud fallback.
-3. **OpenClaw gateway** — selected automatically when locally configured, or deliberately with `ai_provider: openclaw`.
+3. **OpenClaw gateway** — selected automatically when locally configured, or deliberately with `ai_provider: openclaw`. Its fixed localhost destination and port are validated before any request.
 4. **Kimi** — selected deliberately by a `kimi*`, `moonshot*`, or `k3*` model (or `ai_provider: kimi`) plus `KIMI_API_KEY`.
 5. **Anthropic SDK** — selected by a configured key in backward-compatible auto mode, or deliberately with `ai_provider: anthropic`. The SDK is optional; if absent, status stays keyless without terminating the process.
 
 If none is available, Focuses and stories are still scaffolded — the script just tells you how to seed questions later.
+Provider configuration errors fail closed, chat and readiness bodies are size-bounded,
+and operational failure records contain only bounded metadata — never prompts,
+source bodies, response excerpts, URLs, or tokens.
 
 ---
 

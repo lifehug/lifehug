@@ -47,7 +47,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
-from ai_provider import call_ai
+from ai_provider import call_ai, failure_metadata
 from research_expand import DEFAULT_MODEL, parse_ai_json
 from entity_roster import load_roster
 from roadmap import load_roadmap
@@ -1050,7 +1050,8 @@ def synthesize(desc, roster, model, cache, mission, use_ai, dry_run):
         cache[key] = {"narrative": narrative, "related": related}
         return {"narrative": narrative, "related": related, "synthesized": True}
     except Exception as exc:  # noqa: BLE001 — any LLM/parse failure → safe fallback
-        print(f"  ⚠ synthesis failed for {desc['slug']} ({exc}); using excerpt fallback")
+        safe_failure = failure_metadata("wiki-synthesis", exc, provider="ai")
+        print(f"  ⚠ synthesis failed ({safe_failure}); using excerpt fallback")
         return fallback_synthesis(desc)
 
 

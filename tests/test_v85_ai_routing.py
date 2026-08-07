@@ -50,9 +50,10 @@ class _FakeResponse:
     def __init__(self, content: str):
         self._body = json.dumps(
             {"choices": [{"message": {"content": content}}]}).encode()
+        self.headers = {"Content-Length": str(len(self._body))}
 
-    def read(self):
-        return self._body
+    def read(self, size=-1):
+        return self._body if size < 0 else self._body[:size]
 
     def __enter__(self):
         return self
@@ -77,7 +78,7 @@ class CallAIRoutingTests(unittest.TestCase):
     def setUp(self):
         patches = [
             mock.patch.object(aip, "_openclaw_gateway",
-                              return_value=("http://fake:1/v1", "tok")),
+                              return_value=("http://localhost:1/v1", "tok")),
             mock.patch("time.sleep"),
             mock.patch.dict("os.environ", {
                 "LIFEHUG_AI_TIMEOUT": "5",
@@ -89,28 +90,32 @@ class CallAIRoutingTests(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def test_sentinel_is_not_retried_and_falls_through_to_sdk(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse(SENTINEL)) as urlopen, \
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch.object(aip, "get_anthropic_client",
                                   return_value=_FakeSDKClient()), \
                 mock.patch("sys.stdout", new_callable=io.StringIO):
             result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "sdk says hi")
-        self.assertEqual(urlopen.call_count, 1)  # deterministic → no retries
+        self.assertEqual(opener.open.call_count, 1)  # deterministic → no retries
 
     def test_transient_failure_retries_then_falls_through(self):
         err = urllib.error.URLError("boom")
-        with mock.patch("urllib.request.urlopen", side_effect=err) as urlopen, \
+        opener = mock.Mock()
+        opener.open.side_effect = err
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch.object(aip, "get_anthropic_client",
                                   return_value=_FakeSDKClient()), \
                 mock.patch("sys.stdout", new_callable=io.StringIO):
             result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "sdk says hi")
-        self.assertEqual(urlopen.call_count, 3)  # transient → retried
+        self.assertEqual(opener.open.call_count, 3)  # transient → retried
 
     def test_no_key_surfaces_gateway_error_not_missing_key(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse(SENTINEL)), \
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch.dict("os.environ", {"LIFEHUG_AI_TIMEOUT": "5"}, clear=True), \
                 mock.patch("sys.stdout", new_callable=io.StringIO), \
                 self.assertRaises(RuntimeError) as ctx:
@@ -118,8 +123,9 @@ class CallAIRoutingTests(unittest.TestCase):
         self.assertIn("openclaw", str(ctx.exception))  # metadata-only gateway error
 
     def test_gateway_success_never_touches_sdk(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse("gateway says hi")), \
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse("gateway says hi")
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch.object(aip, "get_anthropic_client") as get_client:
             result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "gateway says hi")
@@ -133,8 +139,9 @@ class CallAIRoutingTests(unittest.TestCase):
         self.assertEqual(result, "sdk says hi")
 
     def test_gateway_error_survives_missing_optional_anthropic_sdk(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse(SENTINEL)), \
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch.object(
                     aip,
                     "get_anthropic_client",
@@ -170,15 +177,17 @@ class OptionalAnthropicSdkTests(unittest.TestCase):
                 aip.get_anthropic_client()
 
     def test_gateway_failure_remains_catchable_when_sdk_is_absent(self):
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
         with mock.patch("builtins.__import__", side_effect=self._missing_anthropic_import), \
                 mock.patch.object(aip, "_openclaw_gateway",
-                                  return_value=("http://fake:1/v1", "tok")), \
+                                  return_value=("http://localhost:1/v1", "tok")), \
                 mock.patch.dict(aip.os.environ,
                                 {"LIFEHUG_AI_TIMEOUT": "5", "ANTHROPIC_API_KEY": "synthetic-key"},
                                 clear=True), \
                 mock.patch.object(aip, "load_config", return_value={}), \
                 mock.patch("time.sleep"), \
-                mock.patch("urllib.request.urlopen", return_value=_FakeResponse(SENTINEL)), \
+                mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch("sys.stdout", new_callable=io.StringIO), \
                 self.assertRaises(RuntimeError) as ctx:
             aip.call_ai("prompt", "claude-sonnet-5")
@@ -199,7 +208,7 @@ class KimiRoutingTests(unittest.TestCase):
             return _FakeResponse("kimi says hi")
 
         with mock.patch.object(aip, "_openclaw_gateway",
-                               return_value=("http://fake:1/v1", "tok")), \
+                               return_value=("http://localhost:1/v1", "tok")), \
                 mock.patch.object(aip, "get_anthropic_client") as get_client, \
                 mock.patch.dict("os.environ", {"KIMI_API_KEY": "kimi-key-123"}), \
                 mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):

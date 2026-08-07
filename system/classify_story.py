@@ -34,6 +34,8 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 LEGACY_FOCUS_KEY = "spot" "light_opportunities"
 
+from ai_provider import AIResponseError, failure_metadata
+
 from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
@@ -458,7 +460,13 @@ def extract_json(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    raise ValueError(f"Could not extract JSON from AI response (first 200 chars): {stripped[:200]}")
+    raise AIResponseError(
+        "AI response was not valid JSON",
+        provider="ai",
+        operation="classify-parse",
+        status="malformed",
+        response_bytes=len(text.encode("utf-8", errors="replace")),
+    )
 
 
 # ── candidate store helpers ───────────────────────────────────────────────────
@@ -702,7 +710,11 @@ def classify_file(
         try:
             ai_result = classify_with_ai(prompt, model=model)
         except Exception as exc:
-            print(f"Error: AI classification failed for {source_path}: {exc}", file=sys.stderr)
+            print(
+                "Error: AI classification failed: "
+                + failure_metadata("classify", exc, provider="ai"),
+                file=sys.stderr,
+            )
             return 1
 
     classified_at = now_utc()
@@ -773,9 +785,14 @@ def cmd_from_response(args: argparse.Namespace) -> int:
         source_path = REPO_DIR / source_path
     response_path = Path(args.from_response)
     try:
-        result = extract_json(response_path.read_text(encoding="utf-8"))
+        raw_response = response_path.read_text(encoding="utf-8")
+        result = extract_json(raw_response)
     except Exception as exc:  # noqa: BLE001
-        print(f"Error: could not parse response JSON {response_path}: {exc}", file=sys.stderr)
+        print(
+            "Error: could not parse response JSON: "
+            + failure_metadata("classify-from-response", exc, provider="agent"),
+            file=sys.stderr,
+        )
         return 1
     return classify_file(
         source_path,
