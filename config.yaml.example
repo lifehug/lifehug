@@ -40,8 +40,9 @@ followup_model: "anthropic/claude-opus-4-6"
 # Non-loopback hosts are rejected by default. This explicit escape hatch means
 # accepting that private source material will leave this machine:
 # local_ai_allow_non_loopback: false
-# Local requests ignore HTTP(S)_PROXY and refuse redirects, so a validated
-# loopback destination cannot be changed underneath the privacy boundary.
+# Local and OpenClaw requests ignore HTTP(S)_PROXY and refuse redirects, so a
+# validated loopback destination cannot be changed underneath the privacy
+# boundary. Configuration errors fail closed; response bodies are size-bounded.
 # Check the selected provider/model and make a non-mutating GET /models probe:
 #   python3 system/lifehug.py ai-status
 

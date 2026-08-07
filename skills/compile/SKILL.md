@@ -22,7 +22,7 @@ A page's prose can be written four ways. The script picks the first available, p
 
 1. **Cached** — a prior synthesis for unchanged source material (`state/wiki_synthesis_cache.json`). This cache is **committed to the repo**, so prose synthesized on one machine (the compile machine) travels to every other machine. A page is only re-synthesized when its inputs change.
 2. **Agent draft** — prose the desktop agent wrote to `state/synthesis/<slug>.md` (the keyless path — see Mode 1).
-3. **Shared provider** — `system/ai_provider.py` can use a configured on-machine OpenAI-compatible model, OpenClaw, explicit Kimi, or Anthropic (the unattended path — Mode 2). A local route never falls through to cloud.
+3. **Shared provider** — `system/ai_provider.py` can use a configured on-machine OpenAI-compatible model, OpenClaw, explicit Kimi, or Anthropic (the unattended path — Mode 2). A local route never falls through to cloud; local and OpenClaw loopback requests bypass proxies, refuse redirects, bound responses, and report metadata-only failures.
 4. **Excerpt fallback** — deterministic source excerpts, **only for a page that was never synthesized**. Compile will **never** downgrade an already-synthesized page (frontmatter `synthesized: true`) to excerpts — it preserves the last good prose and logs `↻ preserved <slug>`. So a bare `compile` on a keyless machine is safe; at worst a changed page keeps its prior prose until a real synthesis runs.
 
 The Anthropic SDK is optional. When it is absent, `ai-status` reports not

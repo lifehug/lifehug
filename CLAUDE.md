@@ -1145,16 +1145,19 @@ connector dossiers, and future web acknowledgments. Ollama, LM Studio,
 llama.cpp, and equivalent OpenAI-compatible servers work through
 `/v1/chat/completions`; `ai-status` probes `/v1/models` without generating
 content. Loopback is mandatory unless `local_ai_allow_non_loopback: true` is
-deliberately set. Local transport ignores HTTP(S) proxy environment variables
-and refuses redirects, so a validated loopback destination cannot change after
-the check. The local route is exclusive and fail-closed: an invalid or offline
+deliberately set. Local and OpenClaw loopback transports ignore HTTP(S) proxy
+environment variables and refuse redirects, so a validated loopback destination
+cannot change after the check. The local route is exclusive and fail-closed: an invalid or offline
 server returns the Loop to agent-task mode and never sends the prompt to
 OpenClaw, Kimi, or Anthropic. Without local configuration, backward-
 compatible auto routing remains OpenClaw → Anthropic; a Kimi model name is
 still an explicit Kimi choice. `ai_provider: openclaw|kimi|anthropic` makes
 any of those alternatives deliberate and exclusive. The Anthropic SDK remains
 optional: if it is not installed, `ai-status` reports not ready and the
-agent-task paths remain available without terminating the process.
+agent-task paths remain available without terminating the process. Configuration
+load failures are invalid rather than silently resetting provider choice; chat
+and readiness responses are size-bounded, and errors expose bounded provider /
+operation / failure-class metadata only.
 
 ---
 

@@ -9,8 +9,10 @@ OpenAI-compatible route is loopback-only and fail-closed by default: when it
 is invalid or absent, work remains durable and moves to the existing agent-task
 path rather than sending source material to a cloud fallback. Provider logs are
 metadata-only; prompts, source bodies, responses, and secrets are never logged.
-The local transport bypasses proxy environment variables and rejects redirects
-so the validated loopback boundary also holds at request time.
+Local and OpenClaw loopback transports bypass proxy environment variables and
+reject redirects, so the validated boundary also holds at request time. Chat
+and readiness responses are size-bounded, configuration decode failures fail
+closed, and operational errors retain bounded metadata only.
 
 ---
 

@@ -179,6 +179,8 @@ such as Ollama, LM Studio, or llama.cpp. In gitignored `config.yaml`, set
 `local_ai_timeout_seconds`, then run `python3 system/lifehug.py ai-status`.
 Lifehug accepts loopback endpoints by default; an offline server returns to
 keyless agent-task mode without sending source material to a cloud fallback.
+Local and OpenClaw loopback requests bypass ambient proxies and refuse redirects;
+responses are size-bounded and failures expose metadata only.
 The Anthropic SDK is optional. When it is absent, `ai-status` reports the
 Anthropic route as not ready and the existing agent-task paths remain usable.
 
