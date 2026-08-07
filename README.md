@@ -559,6 +559,11 @@ schemas, a vault containing `system/`, symlinks, or other special files fail
 before mutation. `state/hosted.json` has no stand-down meaning in the open-source
 runtime.
 
+This applies equally to a durable path assembled from the selected vault root
+at runtime (for example, a user-selected source path): those descendants retain
+the same no-follow authority after process binding rather than falling back to
+ordinary `pathlib` I/O.
+
 Integrations should consume the normalized contract rather than infer paths:
 
 ```bash

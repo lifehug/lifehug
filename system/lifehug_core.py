@@ -26,8 +26,11 @@ from vault_paths import (
 
 SYSTEM_DIR = resolve_framework_system_dir()
 FRAMEWORK_ROOT = SYSTEM_DIR.parent
-REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR, bind_process=True)
-VAULT_LAYOUT = vault_layout(REPO_DIR, framework_system_dir=SYSTEM_DIR)
+_RESOLVED_VAULT_ROOT = resolve_vault_root(
+    framework_system_dir=SYSTEM_DIR,
+    bind_process=True,
+)
+VAULT_LAYOUT = vault_layout(_RESOLVED_VAULT_ROOT, framework_system_dir=SYSTEM_DIR)
 
 
 class VaultPath(type(Path())):
@@ -126,6 +129,14 @@ class VaultPath(type(Path())):
         if not self._inside_selected_vault():
             return super().unlink(missing_ok=missing_ok)
         unlink_vault_file(self, vault_root=REPO_DIR, missing_ok=missing_ok)
+
+
+# The root itself must retain the authority too: many runtime commands build
+# user-selected descendants with ``REPO_DIR / relative_path`` rather than a
+# named contract constant.  pathlib preserves this subclass through joins,
+# globbing, and rglobbing, so those legacy call sites cannot silently fall
+# back to symlink-following I/O after process binding.
+REPO_DIR = VaultPath(_RESOLVED_VAULT_ROOT)
 
 
 def _data(name: str) -> Path:

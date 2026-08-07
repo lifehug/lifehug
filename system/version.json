@@ -1,7 +1,7 @@
 {
-  "version": 120,
+  "version": 121,
   "released": "2026-08-06",
-  "changelog": "v120: vault-only mode (issue #64). One versioned authority now separates immutable installed framework code/templates from the selected user-data vault across the CLI, queue worker, answer filing, compiler, viewer, source integrity, and scheduled maintenance flows. Explicit --vault-root overrides LIFEHUG_VAULT_ROOT, while the embedded checkout remains the zero-configuration default. External vaults require root question-bank.md plus schema-v1 state/rotation.json and state/coverage.json, forbid a system/ subtree, reject symlinked or incomplete shapes before mutation, preserve vault-relative manifests and wiki content, and ignore hosted markers. A subprocess smoke runs status, lint, queued filing, no-AI compile, and the loopback viewer against a synthetic Git vault with no code or templates; structural guards prevent competing runtime root derivations.",
+  "changelog": "v121: vault-root descendants retain the same no-follow authority as named durable paths. A source symlink introduced after process binding is now rejected consistently by compilation and source-prompt flows, so it cannot cause Lifehug to read outside the selected vault. The guard test prevents later runtime code from downcasting the selected vault root back to ordinary pathlib I/O.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

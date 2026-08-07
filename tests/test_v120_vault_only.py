@@ -377,6 +377,7 @@ class VaultContractTests(unittest.TestCase):
         offenders: list[str] = []
         hosted_readers: list[str] = []
         direct_writers: list[str] = []
+        authority_escapes: list[str] = []
         for path in sorted(SYSTEM.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -398,9 +399,15 @@ class VaultContractTests(unittest.TestCase):
                 r"\.(?:write_text|write_bytes|open)\(", text
             ):
                 direct_writers.append(relative)
+            if path.name != "update.py" and re.search(
+                r"Path\(REPO_DIR\)|REPO_DIR\.(?:joinpath|open|read_text|read_bytes|write_text|write_bytes|unlink|mkdir|touch)",
+                text,
+            ):
+                authority_escapes.append(relative)
         self.assertEqual(hosted_readers, [], "hosted marker must not affect OSS runtime")
         self.assertEqual(offenders, [], "runtime modules must import the vault authority")
         self.assertEqual(direct_writers, [], "vault writes must use the no-follow I/O authority")
+        self.assertEqual(authority_escapes, [], "runtime paths must preserve VaultPath authority")
 
     def test_shell_entrypoints_validate_the_selected_root_before_cd_or_write(self):
         target = make_vault(self.tmp / "shell-target")
@@ -756,18 +763,27 @@ import os
 import sys
 from pathlib import Path
 sys.path.insert(0, os.environ['LIFEHUG_FRAMEWORK_SYSTEM_DIR'])
-from lifehug_core import SOURCES_DIR
+from lifehug_core import REPO_DIR, SOURCES_DIR, VaultPath
+import classify_story
 import wiki_compile
 
 outside = Path(os.environ['LIFEHUG_TEST_OUTSIDE_SOURCE'])
 SOURCES_DIR.mkdir(parents=True, exist_ok=True)
 (SOURCES_DIR / 'post-bind.md').symlink_to(outside)
+assert isinstance(REPO_DIR, VaultPath)
+assert isinstance(REPO_DIR / 'sources' / 'post-bind.md', VaultPath)
 try:
     wiki_compile.read_manual_sources()
 except ValueError as exc:
     assert 'symlink' in str(exc)
 else:
     raise SystemExit('post-bind source symlink was followed')
+try:
+    classify_story.cmd_prompt(type('Args', (), {'prompt_file': 'sources/post-bind.md'})())
+except ValueError as exc:
+    assert 'symlink' in str(exc)
+else:
+    raise SystemExit('post-bind classify prompt symlink was followed')
 """
         env = self.env.copy()
         env["LIFEHUG_TEST_OUTSIDE_SOURCE"] = str(outside)
