@@ -817,6 +817,41 @@ def append_vault_text(
         os.fsync(handle.fileno())
 
 
+def unlink_vault_file(
+    path: str | os.PathLike[str],
+    *,
+    vault_root: str | os.PathLike[str],
+    missing_ok: bool = False,
+) -> None:
+    """Remove one regular vault file without following its parent or final node."""
+    relative = _relative_to_vault(path, vault_root)
+    root_fd = _open_absolute_dir_no_follow(vault_root)
+    parent_fd: int | None = None
+    try:
+        parent_fd = _open_relative_dir_no_follow(
+            root_fd,
+            relative.parent if relative.parent != Path(".") else Path(),
+            create=False,
+        )
+        _verify_directory_binding(vault_root, relative.parent, parent_fd)
+        try:
+            info = os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            if missing_ok:
+                return
+            raise
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("vault path must be a regular file")
+        os.unlink(relative.name, dir_fd=parent_fd)
+        os.fsync(parent_fd)
+    except OSError as exc:
+        raise ValueError("vault delete target is special, symlinked, or changed") from exc
+    finally:
+        if parent_fd is not None:
+            os.close(parent_fd)
+        os.close(root_fd)
+
+
 def classify_contract_path(
     relative_path: str | os.PathLike[str],
     *,

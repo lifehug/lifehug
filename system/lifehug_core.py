@@ -13,12 +13,15 @@ from vault_paths import (
     append_vault_text,
     atomic_write_vault_text,
     framework_path,
+    ensure_vault_directory,
+    open_vault_file,
     read_vault_bytes,
     read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
     vault_data_path,
     vault_layout,
+    unlink_vault_file,
 )
 
 SYSTEM_DIR = resolve_framework_system_dir()
@@ -27,8 +30,106 @@ REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR, bind_process=True
 VAULT_LAYOUT = vault_layout(REPO_DIR, framework_system_dir=SYSTEM_DIR)
 
 
+class VaultPath(type(Path())):
+    """A durable-data path whose ordinary pathlib I/O stays no-follow.
+
+    ``Path`` preserves its concrete class through joins and globbing.  Making
+    every contract-derived durable path a ``VaultPath`` therefore keeps legacy
+    callers that use ``.read_text()`` or ``.mkdir()`` inside the single
+    no-follow authority, including paths discovered after the initial vault
+    preflight.
+    """
+
+    def _inside_selected_vault(self) -> bool:
+        try:
+            Path(os.path.abspath(self)).relative_to(REPO_DIR)
+            return True
+        except ValueError:
+            return False
+
+    def read_text(self, encoding: str | None = None, errors: str | None = None) -> str:
+        if not self._inside_selected_vault():
+            return super().read_text(encoding=encoding, errors=errors)
+        return read_vault_text(self, vault_root=REPO_DIR, encoding=encoding or "utf-8", errors=errors)
+
+    def read_bytes(self) -> bytes:
+        if not self._inside_selected_vault():
+            return super().read_bytes()
+        return read_vault_bytes(self, vault_root=REPO_DIR)
+
+    def write_text(
+        self,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if not self._inside_selected_vault():
+            return super().write_text(data, encoding=encoding, errors=errors, newline=newline)
+        if errors is not None or newline is not None:
+            raise ValueError("VaultPath writes support UTF-8 without newline conversion")
+        atomic_write_vault_text(self, data, vault_root=REPO_DIR, encoding=encoding or "utf-8")
+        return len(data)
+
+    def write_bytes(self, data: bytes) -> int:
+        if not self._inside_selected_vault():
+            return super().write_bytes(data)
+        from vault_paths import atomic_write_vault_bytes
+
+        atomic_write_vault_bytes(self, data, vault_root=REPO_DIR)
+        return len(data)
+
+    def open(
+        self,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ):
+        if not self._inside_selected_vault():
+            return super().open(
+                mode=mode, buffering=buffering, encoding=encoding, errors=errors, newline=newline
+            )
+        if buffering != -1 or newline is not None:
+            raise ValueError("VaultPath open does not support buffering or newline overrides")
+        return open_vault_file(
+            self,
+            mode,
+            vault_root=REPO_DIR,
+            encoding=encoding,
+            errors=errors,
+            create_parents=mode in {"w", "wb", "a", "ab", "x", "xb"},
+        )
+
+    def mkdir(self, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+        if not self._inside_selected_vault():
+            return super().mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+        if self.exists() and not exist_ok:
+            raise FileExistsError(self)
+        ensure_vault_directory(self, vault_root=REPO_DIR)
+
+    def touch(self, mode: int = 0o666, exist_ok: bool = True) -> None:
+        if not self._inside_selected_vault():
+            return super().touch(mode=mode, exist_ok=exist_ok)
+        if self.exists():
+            if not exist_ok:
+                raise FileExistsError(self)
+            with open_vault_file(self, "a", vault_root=REPO_DIR, file_mode=mode):
+                return
+        with open_vault_file(
+            self, "x", vault_root=REPO_DIR, create_parents=True, file_mode=mode
+        ):
+            return
+
+    def unlink(self, missing_ok: bool = False) -> None:
+        if not self._inside_selected_vault():
+            return super().unlink(missing_ok=missing_ok)
+        unlink_vault_file(self, vault_root=REPO_DIR, missing_ok=missing_ok)
+
+
 def _data(name: str) -> Path:
-    return vault_data_path(name, vault_root=REPO_DIR, framework_system_dir=SYSTEM_DIR)
+    return VaultPath(vault_data_path(name, vault_root=REPO_DIR, framework_system_dir=SYSTEM_DIR))
 
 
 QUESTIONS_FILE = _data("question_bank")

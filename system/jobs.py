@@ -50,6 +50,7 @@ from vault_paths import (
     read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
+    unlink_vault_file,
     validate_contained_path,
     vault_data_path,
 )
@@ -857,8 +858,8 @@ class _WriterLease:
             self.thread.join(timeout=2)
         owner = _read_json(WRITER_OWNER_FILE)
         if owner and owner.get("owner_id") == self.owner_id:
-            with contextlib.suppress(FileNotFoundError):
-                WRITER_OWNER_FILE.unlink()
+            with contextlib.suppress(FileNotFoundError, ValueError):
+                unlink_vault_file(WRITER_OWNER_FILE, vault_root=VAULT_ROOT)
         if self.lock is not None:
             self.lock.__exit__(_exc_type, _exc, _tb)
             self.lock = None
@@ -977,8 +978,8 @@ def _finalize_from_receipt(record: dict, receipt: dict) -> dict:
     exit_code = receipt["exit_code"]
     payload_path = _payload_path(record["id"])
     if exit_code == 0:
-        with contextlib.suppress(OSError):
-            payload_path.unlink()
+        with contextlib.suppress(OSError, ValueError):
+            unlink_vault_file(payload_path, vault_root=VAULT_ROOT)
     payload_retained = payload_path.exists()
     record.update({
         "state": "succeeded" if exit_code == 0 else "failed",
@@ -1066,23 +1067,23 @@ def cleanup_sidecars(*, grace_seconds: int = ORPHAN_GRACE_SECONDS) -> dict[str, 
             continue
         record = load_job(path.stem)
         if record and record["state"] == "succeeded":
-            with contextlib.suppress(OSError):
-                path.unlink()
+            with contextlib.suppress(OSError, ValueError):
+                unlink_vault_file(path, vault_root=VAULT_ROOT)
                 removed["successful_payloads"] += 1
             if not path.exists() and record.get("payload_retained"):
                 record.update({"payload_retained": False, "updated_at": _now()})
                 _write_json(_record_path(record["id"]), record)
         elif record is None and path.stat().st_mtime <= cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
+            with contextlib.suppress(OSError, ValueError):
+                unlink_vault_file(path, vault_root=VAULT_ROOT)
                 removed["orphan_payloads"] += 1
     for path in RECEIPTS_DIR.glob("*.json"):
         if path.is_symlink():
             continue
         job_id = path.name.split("-", 1)[0]
         if _ID_RE.fullmatch(job_id) and load_job(job_id) is None and path.stat().st_mtime <= cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
+            with contextlib.suppress(OSError, ValueError):
+                unlink_vault_file(path, vault_root=VAULT_ROOT)
                 removed["orphan_receipts"] += 1
     return removed
 
@@ -1095,12 +1096,12 @@ def purge_job(job_id: str) -> dict:
             raise ValueError("unknown job")
         if record["state"] not in TERMINAL_STATES:
             raise ValueError("only terminal jobs can be purged")
-        with contextlib.suppress(OSError):
-            _payload_path(job_id).unlink()
+        with contextlib.suppress(OSError, ValueError):
+            unlink_vault_file(_payload_path(job_id), vault_root=VAULT_ROOT)
         for receipt in RECEIPTS_DIR.glob(f"{job_id}-*.json"):
             if not receipt.is_symlink():
-                with contextlib.suppress(OSError):
-                    receipt.unlink()
+                with contextlib.suppress(OSError, ValueError):
+                    unlink_vault_file(receipt, vault_root=VAULT_ROOT)
         record.update({
             "payload_retained": False,
             "purged_at": _now(),

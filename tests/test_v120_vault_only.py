@@ -748,6 +748,39 @@ print('rebind rejected')
         self.assertEqual(child.returncode, 77, child.stderr)
         self.assertEqual(tree_digest(self.framework), self.framework_before)
 
+    def test_post_bind_symlinked_source_is_never_followed(self):
+        outside = self.tmp / "outside-source.md"
+        outside.write_text("outside sentinel must stay private\n", encoding="utf-8")
+        program = """
+import os
+import sys
+from pathlib import Path
+sys.path.insert(0, os.environ['LIFEHUG_FRAMEWORK_SYSTEM_DIR'])
+from lifehug_core import SOURCES_DIR
+import wiki_compile
+
+outside = Path(os.environ['LIFEHUG_TEST_OUTSIDE_SOURCE'])
+SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+(SOURCES_DIR / 'post-bind.md').symlink_to(outside)
+try:
+    wiki_compile.read_manual_sources()
+except ValueError as exc:
+    assert 'symlink' in str(exc)
+else:
+    raise SystemExit('post-bind source symlink was followed')
+"""
+        env = self.env.copy()
+        env["LIFEHUG_TEST_OUTSIDE_SOURCE"] = str(outside)
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=self.caller_cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
