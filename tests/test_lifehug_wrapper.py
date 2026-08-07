@@ -47,6 +47,7 @@ class LifehugWrapperTests(unittest.TestCase):
             ["compile", "--dry-run"],
             ["source-scan"],
             ["source-manifest", "--rebuild"],
+            ["source-filenames-repair", "--dry-run"],
             ["source-lint", "--fix", "--no-write-findings"],
             ["source-findings"],
             ["correct-source", "answers/A1.md", "--kind", "factual"],

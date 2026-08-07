@@ -135,6 +135,11 @@ downstream learning steps see the results.
 
 ## Notes
 
+- If `source-filenames-repair --dry-run` reports legacy correction/retraction
+  filenames, run the non-dry command before a platform import. It is a
+  loop-adjacent vault repair: it updates generated/state references without
+  changing any captured source payload.
+
 - `state/agent_tasks/` is transient and gitignored — completed tasks can be
   deleted; the next emission rewrites the directory.
 - Without a Telegram token the summary send degrades gracefully; the report

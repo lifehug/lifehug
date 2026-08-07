@@ -60,3 +60,32 @@ python3 system/lifehug.py reflect-source answers/A1.md
 
 Corrections and reflections are themselves source files, so the wiki can compile
 the original memory and the later understanding together.
+
+### Portable correction and retraction filenames
+
+New correction and retraction files use the bounded, ASCII-only contract
+`YYYY-MM-DD-<correction|retraction>-<target-id-label>-<hash>.md`. The visible
+label comes from the target's stable source id (for example `answer-a1`), never
+from the question text. The digest covers the full target id, directive kind,
+and payload, so Unicode, traversal-like prose, and matching truncated labels
+cannot collide.
+
+The date prefix preserves a valid `captured_at` calendar day. Missing,
+malformed, or impossible calendar dates in legacy metadata normalize
+deterministically to `1970-01-01`; they never become a misleading filename
+date or alter the linked-source body.
+
+Existing vaults can migrate legacy title-derived names safely:
+
+```bash
+python3 system/lifehug.py source-filenames-repair --dry-run
+python3 system/lifehug.py source-filenames-repair
+```
+
+The repair is idempotent. It preflights every rename, refuses symlinked or
+out-of-vault paths, then updates linked-source frontmatter, state indexes,
+classification filenames, and generated wiki/report references together. Each
+individual write is atomic and an in-process error rolls the completed writes
+back. A forced process termination or power loss cannot make a multi-file
+transaction atomic; rerun the repair after restoring any interrupted vault
+write before committing or importing it.
