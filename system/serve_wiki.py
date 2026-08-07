@@ -490,7 +490,8 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
     .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-legend span {{ margin-right: 14px; }}
-    @media (max-width: 820px) {{ .shell {{ grid-template-columns: 1fr; }} nav {{ display: none; }} main {{ padding: 24px; }} }}
+    @media (max-width: 820px) {{ .shell {{ grid-template-columns: 1fr; }} nav {{ display: none; }}
+      main {{ box-sizing: border-box; min-width: 0; padding: 24px; overflow-x: auto; }} }}
   </style>
 </head>
 <body>

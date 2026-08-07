@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -130,7 +131,41 @@ def _capture_state(page, url: str, label: str, artifacts: Path, width: int, heig
     pill = page.locator(".jobpill")
     if pill.text_content() != expected:
         raise RuntimeError(f"{label} pill rendered {pill.text_content()!r}, expected {expected!r}")
-    page.screenshot(path=str(artifacts / f"job-pill-{label}-{width}x{height}.png"), full_page=True)
+    if width == 390:
+        overflow = page.evaluate(
+            """() => ({
+                page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                main: document.querySelector('main').scrollWidth - document.querySelector('main').clientWidth,
+            })"""
+        )
+        if overflow["page"] != 0 or overflow["main"] <= 0:
+            raise RuntimeError(f"mobile table overflow is not safely contained: {overflow}")
+    page.screenshot(path=str(artifacts / f"job-pill-{label}-{width}x{height}.png"), full_page=False)
+
+
+def _png_dimensions(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:24]
+    if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        raise RuntimeError(f"still is not a valid PNG: {path}")
+    return struct.unpack(">II", header[16:24])
+
+
+def _make_compact_gif(webm: Path, gif: Path) -> None:
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("ffmpeg is required to create the compact evidence GIF")
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error", "-i", str(webm),
+            "-vf",
+            (
+                "fps=10,scale=640:-1:flags=lanczos,split[s0][s1];"
+                "[s0]palettegen=max_colors=128[p];"
+                "[s1][p]paletteuse=dither=bayer:bayer_scale=3"
+            ),
+            "-loop", "0", str(gif),
+        ],
+        check=True,
+    )
 
 
 def main() -> int:
@@ -234,7 +269,25 @@ def main() -> int:
     screenshots = list(artifacts.glob("job-pill-*.png"))
     if len(screenshots) != expected_count:
         raise RuntimeError(f"expected {expected_count} screenshots, found {len(screenshots)}")
-    print(f"captured {expected_count} screenshots and job-pill-action-sequence.webm in {artifacts}")
+    expected_dimensions = {
+        artifacts / f"job-pill-{label}-{width}x{height}.png": (width, height)
+        for label, _values in STATE_SPECS
+        for width, height in ((1440, 900), (390, 844))
+    }
+    for screenshot in screenshots:
+        expected = expected_dimensions.get(screenshot)
+        if expected is None:
+            raise RuntimeError(f"unexpected still filename: {screenshot.name}")
+        actual = _png_dimensions(screenshot)
+        if actual != expected:
+            raise RuntimeError(
+                f"{screenshot.name} is {actual[0]}x{actual[1]}, expected {expected[0]}x{expected[1]}"
+            )
+    _make_compact_gif(
+        artifacts / "job-pill-action-sequence.webm",
+        artifacts / "job-pill-action-sequence.gif",
+    )
+    print(f"captured {expected_count} exact-size screenshots, WebM, and compact GIF in {artifacts}")
     return 0
 
 

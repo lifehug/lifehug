@@ -240,6 +240,8 @@ class PostAuthTests(unittest.TestCase):
                 self.assertIn("state === 'queued'", page)
                 self.assertIn("state === 'succeeded'", page)
                 self.assertIn("ready to retry…", page)
+                self.assertIn("min-width: 0", page)
+                self.assertIn("overflow-x: auto", page)
             finally:
                 jobs.configure(original)
 
