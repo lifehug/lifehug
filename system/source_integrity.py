@@ -753,7 +753,16 @@ def _bounded_slug(value: str, maximum: int) -> str:
 def _linked_source_day(captured_at: str) -> str:
     """Return a filename-safe ISO day even when repairing malformed metadata."""
     day = (captured_at or "")[:10]
-    return day if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else "1970-01-01"
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return "1970-01-01"
+    try:
+        # Regex shape alone admits impossible legacy values such as
+        # ``2026-99-99``.  Parse before reusing the day in a path so every
+        # malformed timestamp follows the same deterministic fallback.
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return "1970-01-01"
+    return day
 
 
 def linked_source_stem(

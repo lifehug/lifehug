@@ -70,6 +70,11 @@ from the question text. The digest covers the full target id, directive kind,
 and payload, so Unicode, traversal-like prose, and matching truncated labels
 cannot collide.
 
+The date prefix preserves a valid `captured_at` calendar day. Missing,
+malformed, or impossible calendar dates in legacy metadata normalize
+deterministically to `1970-01-01`; they never become a misleading filename
+date or alter the linked-source body.
+
 Existing vaults can migrate legacy title-derived names safely:
 
 ```bash

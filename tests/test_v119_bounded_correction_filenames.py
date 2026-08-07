@@ -95,6 +95,24 @@ class BoundedLinkedFilenameTests(unittest.TestCase):
         self.assertEqual(path.resolve().parent, self.corrections.resolve())
         self.assertRegex(path.name, r"^1970-01-01-correction-answer-a1-[0-9a-f]+\.md$")
 
+    def test_impossible_capture_dates_use_the_deterministic_fallback(self):
+        payload = "# Correction\n\nOne\n"
+        for captured_at in ("2026-99-99T00:00:00Z", "2026-02-30T00:00:00Z"):
+            path = self.src._linked_source_path(
+                self.corrections, "answer:A1", "source_correction", payload, captured_at
+            )
+            self.assertRegex(path.name, r"^1970-01-01-correction-answer-a1-[0-9a-f]+\.md$")
+
+    def test_valid_capture_date_is_preserved_in_linked_source_name(self):
+        path = self.src._linked_source_path(
+            self.corrections,
+            "answer:A1",
+            "source_correction",
+            "# Correction\n\nOne\n",
+            "2026-02-28T23:59:59Z",
+        )
+        self.assertRegex(path.name, r"^2026-02-28-correction-answer-a1-[0-9a-f]+\.md$")
+
     def test_hash_prefix_collision_extends_deterministically_without_counter_suffix(self):
         payload = "# Correction\n\nOne\n"
         first = self.src._linked_source_path(
