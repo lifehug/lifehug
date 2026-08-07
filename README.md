@@ -304,6 +304,8 @@ If none is available, Focuses and stories are still scaffolded — the script ju
 Provider configuration errors fail closed, chat and readiness bodies are size-bounded,
 and operational failure records contain only bounded metadata — never prompts,
 source bodies, response excerpts, URLs, or tokens.
+AI-routing entries use the documented flat `key: value` syntax; malformed or
+unknown routing keys are rejected instead of being ignored into automatic cloud routing.
 
 ---
 

@@ -121,9 +121,51 @@ def failure_metadata(
     return " ".join(parts)
 
 
+def normalize_question_records(records: object, *, operation: str) -> list[dict]:
+    """Validate shared model-question schema without echoing field values."""
+    if not isinstance(records, list):
+        raise AIResponseError(
+            "AI question records had an invalid schema",
+            provider="ai",
+            operation=operation,
+            status="invalid_schema",
+        )
+    normalized: list[dict] = []
+    for item in records:
+        if not isinstance(item, dict):
+            raise AIResponseError(
+                "AI question records had an invalid schema",
+                provider="ai",
+                operation=operation,
+                status="invalid_schema",
+            )
+        try:
+            priority = float(item.get("priority", 0.5))
+        except (TypeError, ValueError, OverflowError):
+            raise AIResponseError(
+                "AI question priority had an invalid schema",
+                provider="ai",
+                operation=operation,
+                status="invalid_schema",
+            ) from None
+        if not math.isfinite(priority):
+            raise AIResponseError(
+                "AI question priority had an invalid schema",
+                provider="ai",
+                operation=operation,
+                status="invalid_schema",
+            )
+        record = dict(item)
+        record["priority"] = max(0.0, min(1.0, priority))
+        if not isinstance(record.get("story_function", ""), str):
+            record["story_function"] = ""
+        normalized.append(record)
+    return normalized
+
+
 def _config() -> dict[str, object]:
     try:
-        cfg = load_config()
+        cfg = load_config(validate_ai_routing=True)
     except Exception:  # noqa: BLE001 — a lost privacy choice must fail closed
         raise AIConfigurationError(
             "provider configuration could not be loaded",
@@ -239,9 +281,18 @@ def _provider_choice(requested_model: str, cfg: dict[str, object]) -> str:
         )
     if explicit != "auto":
         return explicit
-    # Merely defining the local route opts into its fail-closed boundary.
-    if (_setting(cfg, "LIFEHUG_LOCAL_AI_BASE_URL", "local_ai_base_url") or
-            _setting(cfg, "LIFEHUG_LOCAL_AI_MODEL", "local_ai_model")):
+    # Merely declaring any local setting opts into its fail-closed boundary,
+    # including an empty or incomplete setting that the generic parser would
+    # otherwise erase into auto routing.
+    local_settings = {
+        "LIFEHUG_LOCAL_AI_ALLOW_NON_LOOPBACK": "local_ai_allow_non_loopback",
+        "LIFEHUG_LOCAL_AI_API_KEY": "local_ai_api_key",
+        "LIFEHUG_LOCAL_AI_BASE_URL": "local_ai_base_url",
+        "LIFEHUG_LOCAL_AI_MODEL": "local_ai_model",
+        "LIFEHUG_LOCAL_AI_TIMEOUT": "local_ai_timeout_seconds",
+    }
+    if any(env_name in os.environ or config_name in cfg
+           for env_name, config_name in local_settings.items()):
         return "local"
     if model_is_kimi(requested_model):
         return "kimi"
@@ -315,7 +366,9 @@ def _validated_base_url(
         port = parsed.port  # Force validation of a malformed port.
     except ValueError:
         raise AIConfigurationError(f"{field} is not a valid URL") from None
-    del port
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    if authority.endswith(":") or port == 0:
+        raise AIConfigurationError(f"{field} has an invalid explicit port")
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise AIConfigurationError(f"{field} must be an http(s) URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -664,8 +717,13 @@ def _call_anthropic(prompt: str, model: str, cfg: dict[str, object]):
         ) from None
     try:
         content = response.content[0].text if response.content else ""
-    except (AttributeError, IndexError, TypeError):
-        content = ""
+    except Exception:  # noqa: BLE001 — SDK accessors can expose response content
+        raise AIResponseError(
+            "anthropic response could not be decoded",
+            provider="anthropic",
+            operation="decode-chat",
+            status="malformed",
+        ) from None
     if not isinstance(content, str) or not content.strip():
         raise AIResponseError(
             "anthropic returned an empty completion",

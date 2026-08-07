@@ -19,6 +19,7 @@ sys.path.insert(0, str(SYSTEM))
 
 import ai_provider as aip  # noqa: E402
 import classify_story  # noqa: E402
+import lifehug_core  # noqa: E402
 import lifehug as lh  # noqa: E402
 import research_expand  # noqa: E402
 import serve_wiki  # noqa: E402
@@ -181,6 +182,81 @@ class LocalProviderTests(unittest.TestCase):
                 self.assertRaises(aip.AIConfigurationError):
             aip.call_ai("private", "cloud-model")
         urlopen.assert_not_called()
+        anthropic.assert_not_called()
+
+    def test_zero_and_empty_explicit_ports_are_rejected_before_opener(self):
+        for base_url in (
+            "http://localhost:0/v1",
+            "http://localhost:/v1",
+            "http://[::1]:/v1",
+        ):
+            with self.subTest(base_url=base_url), \
+                    mock.patch.object(
+                        aip, "load_config", return_value=local_config(base_url)
+                    ), \
+                    mock.patch.dict(aip.os.environ, {}, clear=True), \
+                    mock.patch.object(aip, "_local_opener") as opener, \
+                    self.assertRaises(aip.AIConfigurationError):
+                aip.call_ai("private", "cloud-model")
+            opener.assert_not_called()
+
+    def test_real_parser_rejects_malformed_or_unknown_ai_routing_syntax(self):
+        unsafe_lines = (
+            "local_ai_base_url http: //127.0.0.1:11434/v1\n",
+            "local_ai_destination: http://127.0.0.1:11434/v1\n",
+        )
+        for config_text in unsafe_lines:
+            with self.subTest(config_text=config_text), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                profile = root / "profile.yaml"
+                config = root / "config.yaml"
+                profile.write_text("name: Synthetic\n", encoding="utf-8")
+                config.write_text(config_text, encoding="utf-8")
+                with mock.patch.object(lifehug_core, "PROFILE_FILE", profile), \
+                        mock.patch.object(lifehug_core, "CONFIG_FILE", config), \
+                        mock.patch.dict(
+                            aip.os.environ,
+                            {"ANTHROPIC_API_KEY": "synthetic-cloud-key"},
+                            clear=True,
+                        ), \
+                        mock.patch.object(aip, "_call_openclaw") as openclaw, \
+                        mock.patch.object(aip, "_call_anthropic") as anthropic, \
+                        self.assertRaises(aip.AIConfigurationError):
+                    aip.call_ai("private source", "claude-sonnet-5")
+                openclaw.assert_not_called()
+                anthropic.assert_not_called()
+
+    def test_real_parser_preserves_legacy_flat_and_quoted_key_syntax(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                fake_openai_server() as (base_url, state):
+            root = Path(directory)
+            profile = root / "profile.yaml"
+            config = root / "config.yaml"
+            profile.write_text("name: Synthetic\nlegacy line ignored\n", encoding="utf-8")
+            config.write_text(
+                f'"ai_provider": "local"\n'
+                "legacy_note: local_ai_base_url remains optional text\n"
+                f"local_ai_base_url: {base_url}\n"
+                "local_ai_model: qwen-local\n"
+                "local_ai_timeout_seconds: 1\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(lifehug_core, "PROFILE_FILE", profile), \
+                    mock.patch.object(lifehug_core, "CONFIG_FILE", config), \
+                    mock.patch.dict(aip.os.environ, {}, clear=True):
+                self.assertEqual(aip.call_ai("private", "cloud-model"), "local answer")
+        self.assertEqual(state["posts"], ["/v1/chat/completions"])
+
+    def test_empty_local_declaration_fails_closed_before_cloud(self):
+        cfg = {"local_ai_base_url": "", "anthropic_api_key": "cloud-key"}
+        with mock.patch.object(aip, "load_config", return_value=cfg), \
+                mock.patch.dict(aip.os.environ, {}, clear=True), \
+                mock.patch.object(aip, "_call_openclaw") as openclaw, \
+                mock.patch.object(aip, "_call_anthropic") as anthropic, \
+                self.assertRaises(aip.AIConfigurationError):
+            aip.call_ai("private", "claude-sonnet-5")
+        openclaw.assert_not_called()
         anthropic.assert_not_called()
 
     def test_local_transport_refuses_redirect_without_fallback(self):
@@ -451,6 +527,38 @@ class SharedRoutingTests(unittest.TestCase):
         self.assertFalse(status.ready)
         self.assertNotIn(secret, status.detail)
 
+    def test_anthropic_response_accessor_failure_is_typed_and_private(self):
+        secret = "PRIVATE_ANTHROPIC_RESPONSE_ACCESSOR"
+
+        class ExplodingResponse:
+            @property
+            def content(self):
+                raise RuntimeError(secret)
+
+        client = mock.Mock()
+        client.messages.create.return_value = ExplodingResponse()
+        with mock.patch.object(aip, "get_anthropic_client", return_value=client), \
+                self.assertRaises(aip.AIResponseError) as caught:
+            aip._call_anthropic("private prompt", "synthetic-model", {})
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertEqual(caught.exception.operation, "decode-chat")
+
+    def test_anthropic_response_accessor_preserves_control_signals(self):
+        for signal in (KeyboardInterrupt, SystemExit):
+            class InterruptedResponse:
+                @property
+                def content(self):
+                    raise signal
+
+            client = mock.Mock()
+            client.messages.create.return_value = InterruptedResponse()
+            with self.subTest(signal=signal.__name__), \
+                    mock.patch.object(
+                        aip, "get_anthropic_client", return_value=client
+                    ), \
+                    self.assertRaises(signal):
+                aip._call_anthropic("private prompt", "synthetic-model", {})
+
     def test_explicit_anthropic_bypasses_openclaw(self):
         cfg = {"ai_provider": "anthropic", "anthropic_api_key": "cloud-key"}
         with mock.patch.object(aip, "load_config", return_value=cfg), \
@@ -518,6 +626,78 @@ class FailureRedactionTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertNotIn(secret, errors.getvalue())
         self.assertIn("response_bytes", errors.getvalue())
+
+    def test_classifier_valid_json_bad_priority_never_reaches_report_or_store(self):
+        secret = "PRIVATE_CLASSIFIER_PRIORITY_MARKER"
+        response = json.dumps({
+            "candidate_questions": [{
+                "text": "Synthetic question?",
+                "story_function": "scene",
+                "priority": secret,
+            }],
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "synthetic.md"
+            classifications = root / "classifications"
+            candidates = root / "question_candidates.json"
+            source.write_text(
+                "---\ntype: manual_story\n---\nSynthetic story.\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(aip, "call_ai", return_value=response), \
+                    mock.patch.object(
+                        classify_story, "CLASSIFICATIONS_DIR", classifications
+                    ), \
+                    mock.patch.object(
+                        classify_story, "QUESTION_CANDIDATES_FILE", candidates
+                    ), \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                result = classify_story.classify_file(source, "synthetic-model")
+            maintenance_report = "## Classification\n\n" + errors.getvalue()
+            self.assertEqual(result, 1)
+            self.assertNotIn(secret, maintenance_report)
+            self.assertIn("status=invalid_schema", maintenance_report)
+            self.assertFalse(classifications.exists())
+            self.assertFalse(candidates.exists())
+
+    def test_research_valid_json_bad_priority_never_reaches_report_or_store(self):
+        secret = "PRIVATE_RESEARCH_PRIORITY_MARKER"
+        response = json.dumps({
+            "questions": [{
+                "text": "Synthetic question?",
+                "story_function": "scene",
+                "priority": secret,
+            }],
+        })
+        args = mock.Mock(
+            output="essay", dry_run=False, prompt=False, from_response=None,
+            force=True, model="synthetic-model",
+        )
+        with mock.patch.object(research_expand, "load_config", return_value={}), \
+                mock.patch.object(
+                    research_expand,
+                    "load_neighborhoods",
+                    return_value={"version": 1, "neighborhoods": []},
+                ), \
+                mock.patch.object(research_expand, "load_mission", return_value={}), \
+                mock.patch.object(research_expand, "load_answers", return_value=[]), \
+                mock.patch.object(research_expand, "call_ai", return_value=response), \
+                mock.patch.object(research_expand, "save_candidates") as save_candidates, \
+                mock.patch.object(
+                    research_expand, "save_neighborhoods"
+                ) as save_neighborhoods, \
+                contextlib.redirect_stderr(io.StringIO()) as errors, \
+                contextlib.redirect_stdout(io.StringIO()):
+            result = research_expand._run_expansion(
+                args, "Synthetic topic", "theme", "synthetic", "Synthetic source"
+            )
+        maintenance_report = "## Research neighborhoods\n\n" + errors.getvalue()
+        self.assertEqual(result, 1)
+        self.assertNotIn(secret, maintenance_report)
+        self.assertIn("status=invalid_schema", maintenance_report)
+        save_candidates.assert_not_called()
+        save_neighborhoods.assert_not_called()
 
     def test_model_callsite_guard_rejects_raw_exception_or_response_logging(self):
         guarded = [

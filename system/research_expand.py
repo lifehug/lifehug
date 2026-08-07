@@ -47,6 +47,7 @@ from ai_provider import (
     failure_metadata,
     get_anthropic_client,
     model_is_kimi,
+    normalize_question_records,
 )
 from lifehug_core import (
     ANSWERS_DIR,
@@ -1025,7 +1026,7 @@ def parse_ai_json(raw: str) -> dict:
                 break
         raw = "\n".join(lines[start:end])
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
         raise AIResponseError(
             "AI response was not valid JSON",
@@ -1034,6 +1035,15 @@ def parse_ai_json(raw: str) -> dict:
             status="malformed",
             response_bytes=response_bytes,
         ) from None
+    if not isinstance(parsed, dict):
+        raise AIResponseError(
+            "AI response JSON had an invalid schema",
+            provider="ai",
+            operation="parse-json",
+            status="invalid_schema",
+            response_bytes=response_bytes,
+        )
+    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -1183,6 +1193,10 @@ def _run_expansion(
 
     try:
         ai_data = parse_ai_json(raw_response)
+        ai_questions = normalize_question_records(
+            ai_data.get("questions", []),
+            operation="research-expand-schema",
+        )
     except Exception as exc:  # noqa: BLE001 — report metadata, never response text
         print(
             "Error: AI returned invalid JSON: "
@@ -1196,7 +1210,6 @@ def _run_expansion(
         )
         return 1
 
-    ai_questions = ai_data.get("questions", [])
     if not ai_questions:
         print("Error: AI returned no questions.", file=sys.stderr)
         return 1
@@ -1213,8 +1226,6 @@ def _run_expansion(
     new_cand_ids = add_candidates_from_ai(
         cands_data, ai_questions, nbhd_id, source_path
     )
-    save_candidates(cands_data)
-
     # Map first candidate of each story_function into the arc
     fn_to_cand_id: dict[str, str] = {}
     for q, cand_id in zip(ai_questions, new_cand_ids):
@@ -1261,6 +1272,7 @@ def _run_expansion(
         nbhd_data["neighborhoods"].append(neighborhood)
         print(f"✓ Created neighborhood: {nbhd_id}")
 
+    save_candidates(cands_data)
     save_neighborhoods(nbhd_data)
 
     # Report
