@@ -1,7 +1,7 @@
 {
-  "version": 122,
+  "version": 123,
   "released": "2026-08-06",
-  "changelog": "v122: keyless agent mode no longer requires the optional Anthropic SDK to be installed. AI status now reports keyless cleanly when the SDK is absent, so weekly/monthly agent-task workflows can continue instead of the process exiting during provider discovery.",
+  "changelog": "v123: direct on-machine OpenAI-compatible models are now a first-class provider for the whole Lifehug Loop. Configure an Ollama, LM Studio, llama.cpp, or equivalent endpoint/model/timeout once and compile, classification, research, entity rosters, the Mirror, artifact revision, and connector dossiers all use it. Local routing is loopback-only and fail-closed by default: its transport bypasses proxy environment variables and rejects redirects, while an invalid, timed-out, malformed, or offline server returns to the existing agent-task path without silently sending private source material to a cloud fallback. The inherited OpenClaw loopback route now shares the same proxy-bypass and no-redirect boundary, validates its fixed localhost destination and port, and preserves explicit-versus-auto fallback semantics (#73). Configuration decode errors, malformed or unknown AI-routing syntax, incomplete local declarations, zero/empty ports, non-finite timeouts, and unsafe URL/header values fail closed instead of erasing privacy choices. Request construction/open/read failures and Anthropic response accessors are typed and metadata-only; chat and readiness bodies are bounded for declared and chunked responses; structured question fields are normalized before classification or research persistence. `ai-status` explicitly performs a non-mutating readiness probe and reports provider and model, while viewer discovery remains network-free. Deliberate OpenClaw, Kimi, and Anthropic routes remain available, and the optional Anthropic SDK keeps v122's keyless/no-process-exit behavior. The shared router uses only Python's standard library and never logs prompts, source bodies, responses, or secrets.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -26,6 +26,7 @@
     "sources/corrections/.gitkeep",
     "sources/manual/.gitkeep",
     "state/.gitkeep",
+    "system/ai_provider.py",
     "system/answer_ack.py",
     "system/artifact.py",
     "system/ask.py",
@@ -102,6 +103,7 @@
     "tests/v119_job_pill_evidence.py",
     "tests/test_v105_pin_retire.py",
     "tests/test_v110_timeline_corroboration.py",
+    "tests/test_v123_local_ai_provider.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",
@@ -117,6 +119,7 @@
     "tests/test_v75_book.py",
     "tests/test_v79_timeline.py",
     "tests/test_v83_filer.py",
+    "tests/test_v85_ai_routing.py",
     "tests/test_v90_aj_regression.py",
     "tests/test_v92_agent_mode.py",
     "tests/test_v93_stem_cap.py",

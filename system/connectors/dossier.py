@@ -30,6 +30,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ai_provider import failure_metadata
 from lifehug_core import load_config, now_utc, read_json, write_json
 from connectors.scoring import (
     address_tokens,
@@ -170,7 +171,7 @@ def resolve_model(model: str | None = None) -> str:
 def _resolve_ai(ai_caller=None):
     if ai_caller is not None:
         return ai_caller
-    from research_expand import call_ai  # same OpenClaw-first path as classify_story
+    from ai_provider import call_ai
     return call_ai
 
 
@@ -329,7 +330,9 @@ def run_dossier_pass(
             print(f"  {email}: {verdict['classification']} ({verdict['confidence']:.2f}) — "
                   f"{verdict['suggested_label']}")
         except Exception as exc:  # noqa: BLE001 — one bad correspondent must not kill the run
-            summary["errors"].append(f"{email}: {exc}")
+            summary["errors"].append(
+                failure_metadata("connector-dossier", exc, provider="ai")
+            )
     if summary["errors"]:
         print(f"  {len(summary['errors'])} dossier error(s) — see excavation report/summary")
     return summary

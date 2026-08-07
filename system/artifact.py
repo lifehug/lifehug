@@ -531,8 +531,9 @@ def cmd_revise(args: argparse.Namespace) -> int:
         feedback=args.feedback,
         prior_version=latest.read_text(encoding="utf-8"),
     )
+    from ai_provider import call_ai  # noqa: PLC0415
     from lifehug_core import load_config  # noqa: PLC0415
-    from research_expand import DEFAULT_MODEL, call_ai  # noqa: PLC0415
+    from research_expand import DEFAULT_MODEL  # noqa: PLC0415
     cfg = load_config()
     model = args.model or cfg.get("followup_model") or DEFAULT_MODEL
     print(f"Revising {display_path(out_dir)} with {model}…")

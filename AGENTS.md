@@ -243,7 +243,7 @@ LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
 
 The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, auto-promotes candidates under caps, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
 
-Both loops run on any machine (v92). Check `python3 system/lifehug.py ai-status` first: keyed (gateway or API key) runs are fully unattended; keyless runs need the agent as the model — follow `skills/maintenance/SKILL.md` (pre-complete AI work via `--emit-prompts`/`--emit-task`/`--from-response` before the run; a keyless cron emits its AI work to `state/agent_tasks/` instead of failing). The Anthropic SDK is optional: if it is not installed, `ai-status` reports keyless rather than stopping the process.
+Both loops run on any machine (v92/v123). Check `python3 system/lifehug.py ai-status` first: a ready direct local model, gateway, or keyed provider runs fully unattended; unavailable providers use agent-task mode — follow `skills/maintenance/SKILL.md` (pre-complete AI work via `--emit-prompts`/`--emit-task`/`--from-response` before the run; a keyless cron emits its AI work to `state/agent_tasks/` instead of failing). The direct local route is fail-closed: it never sends source material to another provider when its configured endpoint is offline or rejected. Local and OpenClaw loopback transports bypass proxies and refuse redirects; their errors expose metadata only. The Anthropic SDK is optional; if absent, status stays keyless instead of exiting.
 
 Run the monthly growth loop with:
 

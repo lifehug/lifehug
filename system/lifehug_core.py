@@ -481,23 +481,78 @@ def send_telegram(text: str) -> bool:
     return ok
 
 
-def _parse_simple_yaml(path: Path) -> dict[str, str]:
+class ConfigSyntaxError(ValueError):
+    """A security-relevant config entry could not be parsed safely."""
+
+
+AI_ROUTING_CONFIG_KEYS = frozenset({
+    "ai_provider",
+    "ai_timeout_seconds",
+    "anthropic_api_key",
+    "kimi_api_key",
+    "kimi_base_url",
+    "kimi_max_tokens",
+    "kimi_model",
+    "local_ai_allow_non_loopback",
+    "local_ai_api_key",
+    "local_ai_base_url",
+    "local_ai_model",
+    "local_ai_timeout_seconds",
+})
+_AI_ROUTING_PREFIXES = ("ai_", "anthropic_", "kimi_", "local_ai_")
+
+
+def _parse_simple_yaml(
+    path: Path,
+    *,
+    validate_ai_routing: bool = False,
+) -> dict[str, str]:
     """Read the flat top-level scalar subset of a YAML file used by scripts."""
     out: dict[str, str] = {}
     if not path.exists():
         return out
     for raw in path.read_text().splitlines():
         line = raw.strip()
-        if not line or line.startswith("#") or ":" not in line:
+        if not line or line.startswith("#"):
+            continue
+        content = line.split("#", 1)[0].strip()
+        has_colon = ":" in content
+        raw_key = content.partition(":")[0].strip() if has_colon else content
+        key_candidate = raw_key.strip('"').strip("'")
+        if validate_ai_routing:
+            leading = content.lstrip("- ").lstrip('"').lstrip("'")
+            references_known_key = any(
+                re.match(rf"{re.escape(key)}(?![A-Za-z0-9_])", leading)
+                for key in AI_ROUTING_CONFIG_KEYS
+            )
+            namespaced_key = key_candidate.startswith(_AI_ROUTING_PREFIXES)
+            valid_known_shape = has_colon and key_candidate in AI_ROUTING_CONFIG_KEYS
+            if (
+                (references_known_key and not valid_known_shape)
+                or (namespaced_key and key_candidate not in AI_ROUTING_CONFIG_KEYS)
+            ):
+                raise ConfigSyntaxError(
+                    "invalid AI routing configuration syntax"
+                )
+        if not has_colon:
             continue
         key, _, val = line.partition(":")
-        if not key.strip() or val.strip().startswith("|"):
+        key = key.strip().strip('"').strip("'")
+        if not key or val.strip().startswith("|"):
+            if validate_ai_routing and key in AI_ROUTING_CONFIG_KEYS:
+                raise ConfigSyntaxError(
+                    "AI routing configuration values must be flat scalars"
+                )
             continue
-        out[key.strip()] = val.split("#", 1)[0].strip().strip('"').strip("'")
+        out[key] = val.split("#", 1)[0].strip().strip('"').strip("'")
     return out
 
 
-def load_config(path: Path | None = None) -> dict[str, str]:
+def load_config(
+    path: Path | None = None,
+    *,
+    validate_ai_routing: bool = False,
+) -> dict[str, str]:
     """Merge committed identity/preferences with local secrets.
 
     `profile.yaml` (committed to the repo — safe to share: name, full_name,
@@ -507,10 +562,14 @@ def load_config(path: Path | None = None) -> dict[str, str]:
     unchanged. Passing an explicit path other than config.yaml reads just that
     file (back-compat for callers/tests)."""
     if path is None or path == CONFIG_FILE:
-        merged = _parse_simple_yaml(PROFILE_FILE)
-        merged.update(_parse_simple_yaml(CONFIG_FILE))
+        merged = _parse_simple_yaml(
+            PROFILE_FILE, validate_ai_routing=validate_ai_routing
+        )
+        merged.update(_parse_simple_yaml(
+            CONFIG_FILE, validate_ai_routing=validate_ai_routing
+        ))
         return merged
-    return _parse_simple_yaml(path)
+    return _parse_simple_yaml(path, validate_ai_routing=validate_ai_routing)
 
 
 def normalize_group(group: str | None) -> str:

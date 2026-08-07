@@ -163,9 +163,18 @@ python3 system/lifehug.py connector-audit gmail                # what got auto-p
 python3 system/lifehug.py --help
 ```
 
-The Anthropic SDK is optional. `python3 system/lifehug.py ai-status` reports
-keyless when it is absent, so an agent can complete AI tasks through the
-existing emit-task and `--from-response` paths without installing it.
+## Local model (optional)
+
+Every model-backed Loop surface can use an on-machine OpenAI-compatible server
+such as Ollama, LM Studio, or llama.cpp. In gitignored `config.yaml`, set
+`ai_provider: local`, `local_ai_base_url`, `local_ai_model`, and
+`local_ai_timeout_seconds`, then run `python3 system/lifehug.py ai-status`.
+Lifehug accepts loopback endpoints by default; an offline server returns to
+keyless agent-task mode without sending source material to a cloud fallback.
+Local and OpenClaw loopback requests bypass ambient proxies and refuse redirects;
+responses are size-bounded and failures expose metadata only.
+The Anthropic SDK is optional. When it is absent, `ai-status` reports the
+Anthropic route as not ready and the existing agent-task paths remain usable.
 
 ## Structure
 
