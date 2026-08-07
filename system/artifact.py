@@ -22,6 +22,7 @@ from lifehug_core import (
     ARTIFACT_SOURCES_DIR,
     OUTPUTS_DIR,
     REPO_DIR,
+    SOURCES_DIR,
     TEMPLATES_DIR,
     WIKI_DIR,
     now_utc,
@@ -31,6 +32,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from vault_paths import validate_contained_path
 from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
 
 ARTIFACT_FILE = "artifact.json"
@@ -81,7 +83,7 @@ def output_dir_for(ref: str) -> Path:
             path = OUTPUTS_DIR / path
         else:
             path = REPO_DIR / path
-    return path
+    return validate_contained_path(path, OUTPUTS_DIR, label="artifact output")
 
 
 def artifact_path(out_dir: Path) -> Path:
@@ -378,6 +380,7 @@ def cmd_new(args: argparse.Namespace) -> int:
         seed_path = Path(args.seed)
         if not seed_path.is_absolute():
             seed_path = REPO_DIR / seed_path
+        seed_path = validate_contained_path(seed_path, SOURCES_DIR, label="artifact seed")
         if not seed_path.exists():
             raise SystemExit(f"Error: seed source {args.seed} does not exist")
         seed_source = rel(seed_path)
@@ -388,7 +391,11 @@ def cmd_new(args: argparse.Namespace) -> int:
     title = args.title or default_title(
         resolved_subject or args.subject or seed_meta_title,
         args.occasion, args.format, args.date)
-    out_dir = OUTPUTS_DIR / slugify(title)
+    out_dir = validate_contained_path(
+        OUTPUTS_DIR / slugify(title),
+        OUTPUTS_DIR,
+        label="artifact output",
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     if artifact_path(out_dir).exists() and not args.force:
         raise SystemExit(f"Error: artifact already exists at {display_path(out_dir)} (use --force to rebuild context)")
@@ -491,6 +498,29 @@ def cmd_revise(args: argparse.Namespace) -> int:
         raise SystemExit("Error: no versions to revise — save a v1 first")
     if not args.feedback:
         raise SystemExit("Error: --feedback is required for a revision")
+    from research_expand import ai_available  # noqa: PLC0415
+    if not ai_available():
+        # Canonical keyless behavior (previously duplicated in serve_wiki):
+        # the durable browser job succeeds once it has safely emitted the
+        # agent task.  The private feedback stays in gitignored task storage,
+        # never in the job record or job log.
+        task_dir = REPO_DIR / "state" / "agent_tasks" / "artifact"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        task = {
+            "task": "artifact-revise",
+            "artifact": display_path(out_dir),
+            "feedback": args.feedback,
+            "requested_at": now_utc(),
+            "howto": (
+                f"python3 system/compose.py --revise {display_path(out_dir)} "
+                "--feedback <private-feedback> prints the prompt; write the revision, then "
+                f"pipe it to python3 system/lifehug.py artifact save {display_path(out_dir)} "
+                "--feedback <private-feedback>"
+            ),
+        }
+        write_json(task_dir / f"{out_dir.name}.json", task)
+        print("Keyless: revision task queued in state/agent_tasks/artifact/")
+        return 0
     cmeta = compose.read_meta(out_dir / "meta.yaml") or {}
     prompt = compose.build_prompt(
         format_name=cmeta.get("format") or meta.get("format") or "letter",

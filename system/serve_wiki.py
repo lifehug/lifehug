@@ -4,16 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import datetime
 import hashlib
 import html
 import json
+import logging
 import re
 import secrets
-import subprocess
 import sys
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
@@ -43,6 +41,16 @@ from entity_roster import ENTITY_TYPES, load_roster
 from question_candidates import check_quality, _infer_category
 from progress import verdict
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
+
+VIEWER_LOG = logging.getLogger("lifehug.viewer")
+
+
+def _record_view_failure(operation: str, exc: Exception) -> None:
+    VIEWER_LOG.error(
+        "viewer read failed operation=%s exception_class=%s",
+        operation,
+        type(exc).__name__,
+    )
 
 
 def wiki_pages():
@@ -463,7 +471,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       margin: 0 0 18px; font-size: 14px; color: var(--ink-soft); }}
     .jobpill {{ display: inline-block; font-size: 12px; font-weight: 650; padding: 1px 10px; border-radius: 10px;
       background: #e7e0d2; color: var(--ink-mid); }}
-    .jobpill.done {{ background: #dcedc8; color: #33691e; }}
+    .jobpill.succeeded {{ background: #dcedc8; color: #33691e; }}
     .jobpill.failed {{ background: #f8d7d5; color: #8c2f28; }}
     .btn {{ font: inherit; font-size: 13px; font-weight: 600; color: var(--link); background: var(--card-bg);
       border: 1px solid #d8cdbb; border-radius: 6px; padding: 5px 12px; cursor: pointer; }}
@@ -482,7 +490,8 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
     .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-legend span {{ margin-right: 14px; }}
-    @media (max-width: 820px) {{ .shell {{ grid-template-columns: 1fr; }} nav {{ display: none; }} main {{ padding: 24px; }} }}
+    @media (max-width: 820px) {{ .shell {{ grid-template-columns: 1fr; }} nav {{ display: none; }}
+      main {{ box-sizing: border-box; min-width: 0; padding: 24px; overflow-x: auto; }} }}
   </style>
 </head>
 <body>
@@ -521,10 +530,15 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       var id = pill.getAttribute('data-job');
       function tick() {{
         fetch('/jobs/' + id + '.json').then(function (r) {{ return r.json(); }}).then(function (j) {{
-          if (j.status === 'running') {{ setTimeout(tick, 3000); return; }}
-          pill.textContent = j.status === 'done' ? 'done ✓' : 'failed ✗';
-          pill.classList.add(j.status);
-          if (j.tail && j.status === 'failed') pill.title = j.tail;
+          var state = j.state || j.status;
+          if (state === 'queued' || state === 'running' || state === 'safely-retryable') {{
+            pill.textContent = state === 'running' ? 'running…' :
+              (state === 'safely-retryable' ? 'ready to retry…' : 'queued…');
+            setTimeout(tick, 3000); return;
+          }}
+          pill.textContent = state === 'succeeded' ? 'done ✓' : 'failed ✗';
+          pill.classList.add(state);
+          if (state === 'failed') pill.title = j.failure_code || 'command failed';
         }}).catch(function () {{ setTimeout(tick, 5000); }});
       }}
       setTimeout(tick, 2500);
@@ -1621,7 +1635,8 @@ def view_timeline():
         import timeline as tl_mod  # noqa: PLC0415
         import timeline_corroboration as tcorr  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
-        return ("Timeline", f"<h1>Timeline</h1>{_empty(f'timeline module unavailable: {html.escape(str(exc))}')}", False)
+        _record_view_failure("timeline-import", exc)
+        return ("Timeline", f"<h1>Timeline</h1>{_empty('timeline temporarily unavailable')}", False)
 
     data = tl_mod.timeline_data()
     periods = data["periods"]
@@ -2253,8 +2268,9 @@ def view_book():
     try:
         import book as book_mod  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
+        _record_view_failure("book-import", exc)
         return ("Book Assembly",
-                f"<h1>Book Assembly</h1>{_empty(f'book module unavailable: {html.escape(str(exc))}')}",
+                f"<h1>Book Assembly</h1>{_empty('book view temporarily unavailable')}",
                 False)
     books = book_mod.compute_books()
     if not books:
@@ -2366,15 +2382,13 @@ def view_reports():
 #
 # The browser becomes a review-and-write studio: every mutation shells out to
 # the existing lifehug.py CLI (never reimplemented), guarded by a per-process
-# session token + localhost checks, serialized under a mkdir lock so browser
-# POSTs can't race the crons, and long-running work (compile, AI revision,
-# focus approval) runs as a detached job (system/jobs.py) the page polls.
+# session token + exact loopback checks. Every browser mutation is durably
+# queued; system/jobs.py's worker executes the canonical CLI outside the HTTP
+# request while holding the same writer lease as Telegram and schedules.
 # AI-dependent actions degrade to agent-task queues on keyless machines.
 # ---------------------------------------------------------------------------
 
 SESSION_TOKEN = secrets.token_hex(16)
-ACTION_LOCK = STATE_DIR / ".viewer-action.lock"
-LIFEHUG_CLI = Path(__file__).resolve().parent / "lifehug.py"
 _SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -2390,41 +2404,9 @@ def _ai_route() -> str | None:
         return None
 
 
-def _run_cli(cli_args: list[str], stdin_text: str | None = None,
-             timeout: int = 120) -> tuple[int, str]:
-    """Run a lifehug.py subcommand synchronously under the action lock."""
-    deadline = time.time() + 20
-    while True:
-        try:
-            ACTION_LOCK.parent.mkdir(parents=True, exist_ok=True)
-            ACTION_LOCK.mkdir()
-            break
-        except FileExistsError:
-            if time.time() > deadline:
-                return (1, "another action is running — try again in a moment")
-            time.sleep(0.3)
-    try:
-        proc = subprocess.run(  # noqa: S603 — argv built from our own handlers
-            [sys.executable, str(LIFEHUG_CLI), *cli_args],
-            input=stdin_text, capture_output=True, text=True,
-            cwd=str(REPO_DIR), timeout=timeout)
-        out = ((proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")).strip()
-        return (proc.returncode, out)
-    except subprocess.TimeoutExpired:
-        return (1, "action timed out")
-    finally:
-        with contextlib.suppress(OSError):
-            ACTION_LOCK.rmdir()
-
-
-def _start_job(kind: str, cli_args: list[str], stdin_text: str | None = None) -> dict:
+def _start_job(kind: str, payload: dict | None = None) -> dict:
     import jobs  # noqa: PLC0415
-    return jobs.start_job(kind, [sys.executable, str(LIFEHUG_CLI), *cli_args],
-                          stdin_text=stdin_text)
-
-
-def _flash_of(rc: int, ok: str, out: str) -> str:
-    return f"✓ {ok}" if rc == 0 else f"✗ {out[-300:] or 'action failed'}"
+    return jobs.enqueue(kind, payload or {})
 
 
 def _token_input() -> str:
@@ -2446,16 +2428,18 @@ def act_candidate(form):
         cat = _f(form, "category")
         if not cat:
             return ("/views/candidates", "✗ pick a category before promoting", None)
-        rc, out = _run_cli(["candidates-promote", cid, "--category", cat])
-        return ("/views/candidates", _flash_of(rc, f"promoted {cid} → {cat}", out), None)
+        job = _start_job("candidate-promote", {"candidate_id": cid, "category": cat})
+        return ("/views/candidates", f"queued promotion {cid} → {cat}", job["id"])
     if op == "dismiss":
-        rc, out = _run_cli(["candidates-update", cid, "--status", "rejected",
-                            "--reason", "dismissed from viewer"])
-        return ("/views/candidates", _flash_of(rc, f"dismissed {cid}", out), None)
+        job = _start_job("candidate-update", {
+            "candidate_id": cid, "status": "rejected", "reason": "dismissed from viewer",
+        })
+        return ("/views/candidates", f"queued dismissal of {cid}", job["id"])
     if op == "defer":
-        rc, out = _run_cli(["candidates-update", cid, "--status", "deferred",
-                            "--reason", "deferred from viewer"])
-        return ("/views/candidates", _flash_of(rc, f"deferred {cid}", out), None)
+        job = _start_job("candidate-update", {
+            "candidate_id": cid, "status": "deferred", "reason": "deferred from viewer",
+        })
+        return ("/views/candidates", f"queued deferral of {cid}", job["id"])
     return ("/views/candidates", "✗ unknown candidate action", None)
 
 
@@ -2464,20 +2448,22 @@ def act_focus_rec(form):
     if op == "approve":
         # focus-approve scaffolds a category and generates starter questions
         # (AI when available) — minutes, not milliseconds: run as a job.
-        job = _start_job("focus-approve", ["focus-approve", rid])
+        job = _start_job("focus-approve", {"recommendation_id": rid})
         return ("/views/recommendations",
                 f"approving {rid} — scaffolding the Focus (starter questions may take a minute)",
                 job["id"])
     if op == "dismiss":
-        rc, out = _run_cli(["focus-dismiss", rid,
-                            "--reason", _f(form, "reason") or "dismissed from viewer"])
-        return ("/views/recommendations", _flash_of(rc, f"dismissed {rid}", out), None)
+        job = _start_job("focus-dismiss", {
+            "recommendation_id": rid,
+            "reason": _f(form, "reason") or "dismissed from viewer",
+        })
+        return ("/views/recommendations", f"queued dismissal of {rid}", job["id"])
     return ("/views/recommendations", "✗ unknown recommendation action", None)
 
 
 def act_second_voice(form):
-    rc, out = _run_cli(["second-voice-ack", _f(form, "key")])
-    return ("/", _flash_of(rc, "noted — the card steps aside", out), None)
+    job = _start_job("second-voice-ack", {"key": _f(form, "key")})
+    return ("/", "queued acknowledgment — the card will step aside", job["id"])
 
 
 def act_artifact_save(form):
@@ -2485,12 +2471,9 @@ def act_artifact_save(form):
     content = (form.get("content") or [""])[0]
     if not ref or not content.strip():
         return ("/views/artifacts", "✗ missing artifact or empty content", None)
-    args = ["artifact", "save", ref, "--model", "manual-edit"]
     note = _f(form, "note")
-    if note:
-        args += ["--feedback", note]
-    rc, out = _run_cli(args, stdin_text=content)
-    return (f"/views/artifacts", _flash_of(rc, f"saved a new version of {ref}", out), None)
+    job = _start_job("artifact-save", {"ref": ref, "content": content, "note": note})
+    return ("/views/artifacts", f"queued a new version of {ref}", job["id"])
 
 
 def act_artifact_revise(form):
@@ -2498,68 +2481,48 @@ def act_artifact_revise(form):
     feedback = _f(form, "feedback")
     if not ref or not feedback:
         return ("/views/artifacts", "✗ missing artifact or empty feedback", None)
-    if _ai_route():
-        job = _start_job("artifact-revise", ["artifact", "revise", ref, "--feedback", feedback])
-        return ("/views/artifacts", f"revising {ref} — this can take a few minutes", job["id"])
-    # Keyless: queue an agent task instead of failing (v92 doctrine).
-    task_dir = STATE_DIR / "agent_tasks" / "artifact"
-    task_dir.mkdir(parents=True, exist_ok=True)
-    slug = _f(form, "slug")
-    task = {
-        "task": "artifact-revise",
-        "artifact": ref,
-        "feedback": feedback,
-        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "howto": (f"python3 system/compose.py --revise {ref} --feedback {feedback!r} "
-                  f"prints the prompt; write the revision, then pipe it to "
-                  f"python3 system/lifehug.py artifact save {ref} --feedback {feedback!r}"),
-    }
-    (task_dir / f"{slug}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
-    return ("/views/artifacts",
-            "keyless — revision queued for agent completion (state/agent_tasks/artifact/)", None)
+    job = _start_job("artifact-revise", {"ref": ref, "feedback": feedback})
+    return ("/views/artifacts", f"queued revision of {ref} — this can take a few minutes", job["id"])
 
 
 def act_artifact_final(form):
     ref = _outputs_ref(form)
     if not ref:
         return ("/views/artifacts", "✗ bad artifact reference", None)
-    rc, out = _run_cli(["artifact", "final", ref, "--version", _f(form, "version") or "latest"])
-    return ("/views/artifacts", _flash_of(rc, f"marked {ref} final", out), None)
+    job = _start_job("artifact-final", {
+        "ref": ref, "version": _f(form, "version") or "latest",
+    })
+    return ("/views/artifacts", f"queued final marking for {ref}", job["id"])
 
 
 def act_artifact_promote(form):
     ref = _outputs_ref(form)
     if not ref:
         return ("/views/artifacts", "✗ bad artifact reference", None)
-    rc, out = _run_cli(["artifact", "promote-source", ref, "--kind", "all",
-                        "--source", "viewer"])
-    if rc == 0:
-        job = _start_job("compile", ["compile", "--no-ai"])
-        return ("/views/artifacts",
-                f"✓ promoted {ref} to source — recompiling the wiki", job["id"])
-    return ("/views/artifacts", _flash_of(rc, "", out), None)
+    job = _start_job("artifact-promote", {"ref": ref})
+    return ("/views/artifacts", f"queued promotion of {ref} and wiki compile", job["id"])
 
 
 def act_artifact_delivered(form):
     ref = _outputs_ref(form)
     if not ref:
         return ("/views/artifacts", "✗ bad artifact reference", None)
-    args = ["artifact", "delivered", ref]
-    for key, flag in (("to", "--to"), ("note", "--note"), ("reaction", "--reaction")):
+    payload = {"ref": ref}
+    for key in ("to", "note", "reaction"):
         val = _f(form, key)
         if val:
-            args += [flag, val]
-    rc, out = _run_cli(args)
-    return ("/views/artifacts", _flash_of(rc, f"recorded delivery of {ref}", out), None)
+            payload[key] = val
+    job = _start_job("artifact-delivered", payload)
+    return ("/views/artifacts", f"queued delivery record for {ref}", job["id"])
 
 
 def act_reflect(form):
     ref, body = _f(form, "ref"), (form.get("body") or [""])[0]
     if not ref or not body.strip():
         return ("/views/sources", "✗ missing source or empty reflection", None)
-    rc, out = _run_cli(["reflect-source", ref, "--source", "viewer"], stdin_text=body)
+    job = _start_job("reflect-source", {"ref": ref, "body": body})
     back = f"/source-actions?ref={quote(ref)}"
-    return (back, _flash_of(rc, "reflection filed — it compiles alongside the original", out), None)
+    return (back, "queued reflection — it will compile alongside the original", job["id"])
 
 
 def act_fix(form):
@@ -2571,68 +2534,54 @@ def act_fix(form):
         reason = _f(form, "reason")
         if not reason:
             return (back, "✗ a retraction needs a reason", None)
-        args = ["fix", ref, "--retract", "--reason", reason]
-        for slug in [s.strip() for s in _f(form, "from_page").split(",") if s.strip()]:
-            args += ["--from-page", slug]
-        rc, out = _run_cli(args)
-        return (back, _flash_of(rc, "retraction filed (sha-pinned, undoable via unretract)", out), None)
+        pages = [s.strip() for s in _f(form, "from_page").split(",") if s.strip()]
+        job = _start_job("fix-source", {
+            "ref": ref, "mode": "retract", "reason": reason, "from_pages": pages,
+        })
+        return (back, "queued retraction (sha-pinned, undoable via unretract)", job["id"])
     right = _f(form, "right")
     if not right:
         return (back, "✗ a correction needs the true fact (--right)", None)
-    args = ["fix", ref, "--right", right, "--kind", _f(form, "kind") or "factual"]
+    payload = {
+        "ref": ref, "mode": "correct", "right": right,
+        "kind": _f(form, "kind") or "factual",
+    }
     wrong = _f(form, "wrong")
     if wrong:
-        args += ["--wrong", wrong]
-    rc, out = _run_cli(args)
-    return (back, _flash_of(rc, "correction filed — it resolves at compile time", out), None)
+        payload["wrong"] = wrong
+    job = _start_job("fix-source", payload)
+    return (back, "queued correction — it resolves at compile time", job["id"])
 
 
 def act_compile(form):
-    job = _start_job("compile", ["compile", "--no-ai"])
+    job = _start_job("compile", {"no_ai": True})
     back = _f(form, "back") or "/views/sources"
     return (back, "recompiling the wiki (30–90s)", job["id"])
 
 
 def act_timeline_place(form):
-    import timeline as tl_mod  # noqa: PLC0415
     source = _f(form, "source")
     description = (form.get("description") or [""])[0].strip()
     period = _f(form, "period")
     if not (source and description and period):
         return ("/views/timeline", "✗ pick a period for the moment first", None)
     when_hint = _f(form, "when_hint")
-    period_label = next((p["name"] for p in tl_mod.load_periods()
-                         if p["slug"] == period), period.replace("-", " ").title())
-    # A placement IS information (v103): file the assertion into the compile
-    # layer — the period in the author's vocabulary, never an inferred year.
-    assertion = f"“{description[:120]}” happened during {period_label}"
-    if when_hint:
-        assertion += f", {when_hint}"
-    rc, out = _run_cli(["fix", source, "--right", assertion, "--kind", "date"])
-    match = re.search(r"correction source: (\S+)", out) if rc == 0 else None
-    key = tl_mod.placement_key({"source": source, "description": description})
-    tl_mod.save_placement(key, source, description, period,
-                          when_hint=when_hint, note=_f(form, "note"),
-                          correction=match.group(1) if match else "")
-    if rc == 0:
-        flash = f"✓ placed in {period_label} · assertion filed — asserts at next compile"
-    else:
-        flash = f"✓ placed in {period_label} · ✗ assertion failed to file: {out[-160:]}"
-    return ("/views/timeline", flash, None)
+    job = _start_job("timeline-place", {
+        "source": source,
+        "description": description,
+        "period": period,
+        "when_hint": when_hint,
+        "note": _f(form, "note"),
+    })
+    return ("/views/timeline", "queued placement and its durable date assertion", job["id"])
 
 
 def act_timeline_unplace(form):
-    import timeline as tl_mod  # noqa: PLC0415
     key = _f(form, "key")
-    record = next((p for p in tl_mod.load_placements()["placements"]
-                   if p.get("key") == key), None)
-    if tl_mod.remove_placement(key):
-        flash = "✓ placement removed — back to the heuristics"
-        if record and record.get("correction"):
-            flash += (f" · the filed assertion remains ({record['correction']}) — "
-                      f"retract it from its source-actions page if the fact was wrong")
-        return ("/views/timeline", flash, None)
-    return ("/views/timeline", "✗ no such placement", None)
+    if not re.fullmatch(r"[0-9a-f]{12}", key):
+        return ("/views/timeline", "✗ no such placement", None)
+    job = _start_job("timeline-unplace", {"key": key})
+    return ("/views/timeline", "queued placement removal — the filed assertion remains", job["id"])
 
 
 ACTIONS = {
@@ -2650,6 +2599,24 @@ ACTIONS = {
     "/actions/timeline/place": act_timeline_place,
     "/actions/timeline/unplace": act_timeline_unplace,
 }
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _loopback_authority(value: str, expected_port: int, *, origin: bool = False) -> bool:
+    """Require an exact loopback hostname and this viewer instance's port."""
+    try:
+        parsed = urlparse(value if origin else f"//{value}")
+        if origin and parsed.scheme != "http":
+            return False
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            return False
+        if parsed.path != "":
+            return False
+        return parsed.hostname in _LOOPBACK_HOSTS and parsed.port == expected_port
+    except ValueError:
+        return False
 
 
 def source_actions_html(ref: str) -> tuple[str, str]:
@@ -2783,10 +2750,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post_allowed(self, form) -> bool:
         host = self.headers.get("Host", "")
-        if not (host.startswith("127.0.0.1") or host.startswith("localhost")):
+        port = int(self.server.server_address[1])
+        if not _loopback_authority(host, port):
             return False
         origin = self.headers.get("Origin")
-        if origin and ("127.0.0.1" not in origin and "localhost" not in origin):
+        if origin and not _loopback_authority(origin, port, origin=True):
             return False
         token = self.headers.get("X-Lifehug-Token") or _f(form, "_token")
         return secrets.compare_digest(token or "", SESSION_TOKEN)
@@ -2805,8 +2773,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             redirect, flash, job_id = handler(form)
-        except Exception as exc:  # noqa: BLE001 — an action error must not 500 the viewer
-            redirect, flash, job_id = ("/", f"✗ action failed: {exc}", None)
+        except Exception as exc:  # noqa: BLE001 — action failures stay typed and private
+            # Exception messages can contain absolute paths, provider details, or
+            # submitted text.  The public redirect and HTTP log deliberately expose
+            # only a fixed operation code plus the exception class.
+            operation = parsed.path.removeprefix("/actions/").replace("/", "-")
+            self.log_error(
+                "viewer action failed operation=%s exception_class=%s",
+                operation,
+                type(exc).__name__,
+            )
+            redirect, flash, job_id = (
+                "/",
+                "✗ action failed safely; nothing was queued",
+                None,
+            )
         params = {"flash": flash}
         if job_id:
             params["job"] = job_id
@@ -2847,8 +2828,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 title, body, wide = view_home()
             except Exception as exc:  # noqa: BLE001 — the front page must never 500
+                self.log_error(
+                    "viewer read failed operation=home exception_class=%s",
+                    type(exc).__name__,
+                )
                 title, body, wide = ("Today",
-                                     f"<h1>Today</h1>{_empty('home hub error: ' + html.escape(str(exc)))}",
+                                     f"<h1>Today</h1>{_empty('home view temporarily unavailable')}",
                                      False)
             self.send_html(title, body, wide=wide)
             return
@@ -2946,7 +2931,16 @@ class Handler(BaseHTTPRequestHandler):
                 if desc:
                     body = _with_description(body, desc)
             except Exception as exc:  # a broken view shouldn't take down the server
-                title, body, wide = ("View error", f"<h1>View error</h1><pre>{html.escape(repr(exc))}</pre>", False)
+                self.log_error(
+                    "viewer read failed operation=view-%s exception_class=%s",
+                    slug,
+                    type(exc).__name__,
+                )
+                title, body, wide = (
+                    "View error",
+                    "<h1>View error</h1><p>This view is temporarily unavailable.</p>",
+                    False,
+                )
             self.send_html(title, body, wide=wide)
             return
 

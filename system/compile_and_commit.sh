@@ -11,11 +11,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/.."
+WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+cd "$WORKSPACE"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 SENTINEL="state/.compile-needed"
-LOCK="state/.filing.lock"
-HAVE_LOCK=0
 
 # Nothing to do?
 if [[ ! -f "$SENTINEL" ]]; then
@@ -23,26 +23,13 @@ if [[ ! -f "$SENTINEL" ]]; then
   exit 0
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') compile needed — acquiring lock"
-
-# Serialize with the filing lock so we don't collide with an active filing.
-# Wait up to ~2 min; a lock older than 15 min is stolen.
-trap '[[ $HAVE_LOCK -eq 1 ]] && rmdir "$LOCK" 2>/dev/null' EXIT
-for _ in $(seq 1 60); do
-  if mkdir "$LOCK" 2>/dev/null; then
-    HAVE_LOCK=1
-    break
-  fi
-  if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +15 2>/dev/null)" ]]; then
-    rmdir "$LOCK" 2>/dev/null || true
-    continue
-  fi
-  sleep 2
-done
-
-if [[ $HAVE_LOCK -eq 0 ]]; then
-  echo "warn: proceeding without lock (filing ran long)" >&2
+if ! python3 "$SCRIPT_DIR/jobs.py" active --vault-root "$WORKSPACE" >/dev/null 2>&1; then
+  JOB_IDENTITY="${LIFEHUG_JOB_IDENTITY:-compile-pending:$(date +%Y-%m-%dT%H)}"
+  exec python3 "$SCRIPT_DIR/jobs.py" enqueue compile-pending --identity "$JOB_IDENTITY" \
+    --wait --vault-root "$WORKSPACE"
 fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') compile needed — worker owns vault writer lease"
 
 # Record failure for the learning loop (same pattern as daily_question.sh)
 record_learning_failure() {
@@ -58,7 +45,7 @@ PY
 
 # Compile
 set +e
-COMPILE_OUT=$(python3 system/lifehug.py compile 2>&1)
+COMPILE_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" compile 2>&1)
 COMPILE_RC=$?
 set -e
 
@@ -78,6 +65,9 @@ rm -f "$SENTINEL"
 # Git: add, commit, pull-rebase, push (non-fatal)
 PATHS=(
   README.md
+  question-bank.md
+  state/rotation.json
+  state/coverage.json
   system/question-bank.md
   system/rotation.json
   system/coverage.json
@@ -111,6 +101,6 @@ if [[ ${#EXISTING[@]} -gt 0 ]]; then
 fi
 
 # Notify
-printf '✅ Wiki compiled' | python3 system/lifehug.py notify || true
+printf '✅ Wiki compiled' | python3 "$SCRIPT_DIR/lifehug.py" notify || true
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') done"

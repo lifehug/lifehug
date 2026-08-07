@@ -9,6 +9,7 @@ workflow logic.
 from __future__ import annotations
 
 import argparse
+import runpy
 import os
 import subprocess
 import sys
@@ -39,6 +40,35 @@ from research_expand import VALID_OUTPUT_TYPES, VALID_TOPIC_TYPES
 SYSTEM_DIR = Path(__file__).resolve().parent
 CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
 
+# Every canonical command is classified exactly once. Durable operations keep
+# their existing typed queue route; every other possible vault mutator takes
+# the same kernel writer lock directly. Read-only commands never block behind
+# a long job.
+QUEUED_MUTATION_COMMANDS = frozenset({
+    "artifact", "compile", "monthly-research", "process-answer", "weekly-maintenance",
+})
+READ_ONLY_COMMANDS = frozenset({
+    "ai-status", "answer-ack-prompt", "book-chapter", "book-status",
+    "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
+    "connector-audit", "connector-report", "daily-dry-run", "doctor",
+    "followups-prompt", "followups-status", "interview-pack", "next", "notify",
+    "planner-report", "progress", "quality-stats", "roadmap", "serve",
+    "source-findings", "source-scan", "status", "weekly-summary",
+})
+DIRECT_MUTATION_COMMANDS = frozenset({
+    "book-offers", "candidates-auto-promote", "candidates-promote",
+    "candidates-promote-neighborhood", "candidates-update", "classify-story",
+    "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
+    "connector-fetch", "correct-source", "entity-roster", "fix", "focus-add",
+    "focus-approve", "focus-dismiss", "focus-finish", "focus-new", "focus-set",
+    "ingest", "ingest-story", "mirror-compile", "perennial-add", "perennials",
+    "planner-clear", "planner-objective-add", "planner-objective-clear", "planner-queue",
+    "planner-state", "quality-update", "rebuild", "recommend-focuses", "reflect-source",
+    "research-expand", "retract-source", "roadmap-rebuild", "second-voice-ack",
+    "source-lint", "source-manifest", "timeline-place", "timeline-retire",
+    "timeline-unplace", "unretract",
+})
+
 
 def script(name: str) -> Path:
     return SYSTEM_DIR / name
@@ -49,7 +79,50 @@ def run(args: list[str], *, env: dict[str, str] | None = None) -> int:
 
 
 def run_python(script_name: str, args: list[str]) -> int:
+    if os.environ.get("LIFEHUG_JOB_IN_PROCESS") == "1":
+        target = script(script_name)
+        previous_argv = sys.argv
+        sys.argv = [str(target), *args]
+        try:
+            runpy.run_path(str(target), run_name="__main__")
+        except SystemExit as exc:
+            return int(exc.code or 0) if isinstance(exc.code, int | type(None)) else 1
+        finally:
+            sys.argv = previous_argv
+        return 0
     return run([sys.executable, str(script(script_name)), *args])
+
+
+def _job_runner_active() -> bool:
+    import jobs  # noqa: PLC0415
+
+    return jobs.writer_token_is_live(
+        os.environ.get("LIFEHUG_JOB_RUNNER_TOKEN"),
+        vault_root=REPO_DIR,
+    )
+
+
+def _queue_and_wait(command: str, payload: dict) -> int:
+    """Run a mutation through the local durable worker and wait for truth."""
+    import jobs  # noqa: PLC0415
+
+    jobs.configure(REPO_DIR)
+    try:
+        record = jobs.enqueue(command, payload)
+        print(f"Queued {command} job {record['id']}")
+        record = jobs.wait_for_job(record["id"])
+    except (TimeoutError, ValueError) as exc:
+        print(f"Error: local job could not complete ({exc})", file=sys.stderr)
+        return 1
+    if record["state"] == "succeeded":
+        print(f"✓ {command} job succeeded")
+        return 0
+    print(
+        f"Error: {command} job failed ({record.get('failure_code', 'command_failed')}); "
+        f"payload retained locally: {str(record.get('payload_retained', False)).lower()}",
+        file=sys.stderr,
+    )
+    return int(record.get("exit_code") or 1)
 
 
 def has_telegram_target(config: dict[str, str]) -> bool:
@@ -113,6 +186,12 @@ def cmd_next(_args: argparse.Namespace) -> int:
 
 
 def cmd_compile(args: argparse.Namespace) -> int:
+    if (not _job_runner_active() and not args.dry_run
+            and not getattr(args, "emit_tasks", None)):
+        payload = {"no_ai": bool(args.no_ai)}
+        if args.model:
+            payload["model"] = args.model
+        return _queue_and_wait("compile", payload)
     flags = []
     if args.dry_run:
         flags.append("--dry-run")
@@ -122,6 +201,11 @@ def cmd_compile(args: argparse.Namespace) -> int:
         flags.extend(["--model", args.model])
     if getattr(args, "emit_tasks", None):
         flags.extend(["--emit-tasks", args.emit_tasks])
+    if not _job_runner_active() and not args.dry_run:
+        import jobs  # noqa: PLC0415
+
+        with jobs.writer_session(REPO_DIR):
+            return run_python("wiki_compile.py", flags)
     return run_python("wiki_compile.py", flags)
 
 
@@ -354,6 +438,67 @@ def cmd_timeline_retire(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_timeline_place(args: argparse.Namespace) -> int:
+    """File the owner's date assertion, then persist its display placement."""
+    import re as _re
+
+    import timeline  # noqa: PLC0415
+
+    description = sys.stdin.read().strip()
+    if not description:
+        print("Error: timeline description must be provided on stdin", file=sys.stderr)
+        return 1
+    period_label = next(
+        (period["name"] for period in timeline.load_periods() if period["slug"] == args.period),
+        args.period.replace("-", " ").title(),
+    )
+    assertion = f"“{description[:120]}” happened during {period_label}"
+    if args.when_hint:
+        assertion += f", {args.when_hint}"
+    result = subprocess.run(
+        [sys.executable, str(script("source_integrity.py")), "correct", args.source,
+         "--kind", "date", "--source", "fix"],
+        input=assertion,
+        text=True,
+        capture_output=True,
+        cwd=REPO_DIR,
+    )
+    if result.returncode != 0:
+        print("Error: timeline assertion could not be filed", file=sys.stderr)
+        return result.returncode
+    output = (result.stdout or "") + (result.stderr or "")
+    match = _re.search(r"correction source: (\S+)", output)
+    key = timeline.placement_key({"source": args.source, "description": description})
+    timeline.save_placement(
+        key,
+        args.source,
+        description,
+        args.period,
+        when_hint=args.when_hint or "",
+        note=args.note or "",
+        correction=match.group(1) if match else "",
+    )
+    print(f"✓ Placed {key} in {period_label}; durable assertion filed")
+    return 0
+
+
+def cmd_timeline_unplace(args: argparse.Namespace) -> int:
+    import timeline  # noqa: PLC0415
+
+    record = next(
+        (row for row in timeline.load_placements()["placements"] if row.get("key") == args.key),
+        None,
+    )
+    if not timeline.remove_placement(args.key):
+        print("Error: no such placement", file=sys.stderr)
+        return 1
+    message = "✓ Placement removed; heuristics apply again"
+    if record and record.get("correction"):
+        message += f" (filed assertion remains: {record['correction']})"
+    print(message)
+    return 0
+
+
 def cmd_mirror_compile(args: argparse.Namespace) -> int:
     flags: list[str] = []
     if getattr(args, "model", None):
@@ -369,6 +514,60 @@ def cmd_mirror_compile(args: argparse.Namespace) -> int:
 
 def cmd_artifact(args: argparse.Namespace) -> int:
     artifact_args = ["--help"] if getattr(args, "artifact_help", False) else (args.artifact_args or ["--help"])
+    if not _job_runner_active() and artifact_args[0] in {
+        "new", "save", "revise", "final", "promote-source", "delivered",
+    }:
+        import artifact as artifact_mod  # noqa: PLC0415
+
+        parsed = artifact_mod.build_parser().parse_args(artifact_args)
+
+        def ref(value: str) -> str:
+            return value if value.startswith("outputs/") else f"outputs/{value}"
+
+        if parsed.command == "new" and not parsed.print_prompt:
+            payload = {"format": parsed.format, "force": bool(parsed.force)}
+            for key in (
+                "subject", "occasion", "date", "title", "audience", "privacy",
+                "categories", "seed",
+            ):
+                value = getattr(parsed, key, None)
+                if value:
+                    payload[key] = value
+            return _queue_and_wait("artifact-new", payload)
+        if parsed.command == "save":
+            return _queue_and_wait("artifact-save", {
+                "ref": ref(parsed.output),
+                "content": sys.stdin.read(),
+                "model": parsed.model,
+                "note": parsed.feedback,
+                "final": bool(parsed.final),
+            })
+        if parsed.command == "revise":
+            payload = {"ref": ref(parsed.output), "feedback": parsed.feedback}
+            if parsed.model:
+                payload["model"] = parsed.model
+            return _queue_and_wait("artifact-revise", payload)
+        if parsed.command == "final":
+            return _queue_and_wait("artifact-final", {
+                "ref": ref(parsed.output), "version": parsed.version,
+            })
+        if parsed.command == "promote-source":
+            return _queue_and_wait("artifact-promote", {
+                "ref": ref(parsed.output), "kind": parsed.kind,
+                "version": parsed.version, "source": parsed.source,
+            })
+        if parsed.command == "delivered":
+            payload = {"ref": ref(parsed.output)}
+            for key in ("to", "note", "reaction"):
+                value = getattr(parsed, key, None)
+                if value:
+                    payload[key] = value
+            return _queue_and_wait("artifact-delivered", payload)
+    if not _job_runner_active() and artifact_args[0] != "--help":
+        import jobs  # noqa: PLC0415
+
+        with jobs.writer_session(REPO_DIR):
+            return run_python("artifact.py", artifact_args)
     return run_python("artifact.py", artifact_args)
 
 
@@ -430,6 +629,24 @@ def cmd_rebuild(_args: argparse.Namespace) -> int:
 
 
 def cmd_process_answer(args: argparse.Namespace) -> int:
+    if not _job_runner_active():
+        question_id = args.question_id or (read_json(ROTATION_FILE, default={}) or {}).get(
+            "last_question_id", ""
+        )
+        payload: dict[str, object] = {
+            "question_id": question_id,
+            "answer": sys.stdin.read(),
+            "followups": list(args.followup or []),
+            "force": bool(args.force),
+            "commit": bool(args.commit),
+            "push": bool(args.push),
+            "no_compile_wiki": bool(args.no_compile_wiki),
+        }
+        for key in ("source", "answered_date", "asked_date", "summary", "sensitivity"):
+            value = getattr(args, key, None)
+            if value:
+                payload[key] = value
+        return _queue_and_wait("process-answer", payload)
     flags: list[str] = []
     if args.source:
         flags.extend(["--source", args.source])
@@ -1297,6 +1514,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="Preview without writing")
     p.set_defaults(func=cmd_timeline_retire)
 
+    p = sub.add_parser("timeline-place",
+                       help="Place a timeline moment and file its date assertion (description on stdin)")
+    p.add_argument("source", help="Raw source reference")
+    p.add_argument("--period", required=True, help="Timeline period slug")
+    p.add_argument("--when-hint")
+    p.add_argument("--note")
+    p.set_defaults(func=cmd_timeline_place)
+
+    p = sub.add_parser("timeline-unplace",
+                       help="Remove a manual timeline placement (filed assertion remains)")
+    p.add_argument("key", help="12-character content placement key")
+    p.set_defaults(func=cmd_timeline_unplace)
+
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")
     p.add_argument("--model", help="AI model override")
@@ -1461,6 +1691,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.command in DIRECT_MUTATION_COMMANDS and not _job_runner_active():
+        import jobs  # noqa: PLC0415
+
+        with jobs.writer_session(REPO_DIR):
+            return args.func(args)
     return args.func(args)
 
 

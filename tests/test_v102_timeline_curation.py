@@ -134,22 +134,28 @@ class TimelineActionTests(unittest.TestCase):
         tl.PLACEMENTS_FILE = self._orig
 
     def test_place_action_saves_and_unplace_removes(self):
-        # v103: placing always files a date assertion via the CLI — stub it.
-        with mock.patch.object(serve_wiki, "_run_cli",
-                               lambda *a, **k: (0, "✓ Created correction source: sources/corrections/c.md")), \
-                mock.patch.object(tl, "load_periods", lambda: []):
+        queued = []
+
+        def fake_start(command, payload=None):
+            queued.append((command, payload))
+            return {"id": "a" * 20}
+
+        with mock.patch.object(serve_wiki, "_start_job", fake_start):
             redirect, flash, job = serve_wiki.act_timeline_place({
                 "source": ["answers/Z1.md"], "description": ["The porch dog summer"],
                 "period": ["childhood"], "when_hint": ["summer of first grade"],
             })
-        self.assertIn("✓ placed in Childhood", flash)
-        self.assertIsNone(job)
-        data = tl.load_placements()
-        self.assertEqual(len(data["placements"]), 1)
-        key = data["placements"][0]["key"]
-        redirect, flash, _ = serve_wiki.act_timeline_unplace({"key": [key]})
-        self.assertIn("✓ placement removed", flash)
+        self.assertIn("queued placement", flash)
+        self.assertEqual(job, "a" * 20)
+        self.assertEqual(queued[0][0], "timeline-place")
+        self.assertEqual(queued[0][1]["description"], "The porch dog summer")
         self.assertEqual(tl.load_placements()["placements"], [])
+
+        with mock.patch.object(serve_wiki, "_start_job", fake_start):
+            _, flash, job = serve_wiki.act_timeline_unplace({"key": ["deadbeef0000"]})
+        self.assertIn("queued placement removal", flash)
+        self.assertEqual(job, "a" * 20)
+        self.assertEqual(queued[-1], ("timeline-unplace", {"key": "deadbeef0000"}))
 
     def test_place_action_requires_period(self):
         _, flash, _ = serve_wiki.act_timeline_place({

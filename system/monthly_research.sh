@@ -9,6 +9,14 @@ WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 cd "$WORKSPACE"
 
 DRY_RUN="${LIFEHUG_MONTHLY_DRY_RUN:-0}"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+if ! python3 "$SCRIPT_DIR/jobs.py" active --vault-root "$WORKSPACE" >/dev/null 2>&1 \
+    && [[ "$DRY_RUN" != "1" ]]; then
+  JOB_IDENTITY="${LIFEHUG_JOB_IDENTITY:-monthly:$(date +%Y-%m)}"
+  exec python3 "$SCRIPT_DIR/jobs.py" enqueue monthly --identity "$JOB_IDENTITY" \
+    --wait --vault-root "$WORKSPACE"
+fi
 
 # v86 (issue #35): Telegram gets a short summary; the full output is
 # persisted as a committed report document.
@@ -20,7 +28,7 @@ REPORT_FILE="$REPORT_DIR/monthly-$(date +%F).md"
 # Delegates to `lifehug.py notify` (resolves chat/token, chunks under the
 # 4096-char cap). Never fails the flow.
 telegram_notify() {
-  printf '%s' "$1" | python3 "$WORKSPACE/system/lifehug.py" notify || true
+  printf '%s' "$1" | python3 "$SCRIPT_DIR/lifehug.py" notify || true
 }
 
 record_learning_failure() {
@@ -32,7 +40,6 @@ record_learning_failure() {
 import os
 import sys
 
-sys.path.insert(0, "system")
 from lifehug_core import record_learning_failure
 
 try:
@@ -82,6 +89,9 @@ run_optional() {
 safe_autocommit() {
   local paths=(
     README.md
+    question-bank.md
+    state/rotation.json
+    state/coverage.json
     system/question-bank.md
     system/rotation.json
     system/coverage.json
@@ -122,7 +132,6 @@ from pathlib import Path
 
 workspace = Path(sys.argv[1])
 topic = sys.argv[2]
-sys.path.insert(0, str(workspace / "system"))
 
 import research_expand as research  # noqa: E402
 
@@ -142,7 +151,6 @@ from pathlib import Path
 
 workspace = Path(sys.argv[1])
 limit = int(sys.argv[2])
-sys.path.insert(0, str(workspace / "system"))
 
 import research_expand as research  # noqa: E402
 
@@ -196,7 +204,6 @@ from pathlib import Path
 
 workspace = Path(sys.argv[1])
 min_score = float(sys.argv[2])
-sys.path.insert(0, str(workspace / "system"))
 
 import recommend_focuses as focuses  # noqa: E402
 
@@ -220,7 +227,7 @@ generate_topic() {
     local slug
     slug=$(printf '%s' "$topic" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
     mkdir -p state/agent_tasks/research
-    if python3 "$WORKSPACE/system/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output" --prompt \
+    if python3 "$SCRIPT_DIR/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output" --prompt \
         > "state/agent_tasks/research/${slug}.prompt.md" 2>&1; then
       echo "⏸ keyless — expansion prompt for '${topic}' emitted to state/agent_tasks/research/${slug}.prompt.md"
       echo "  complete: python3 system/research_expand.py --topic \"$topic\" --type $topic_type --output $output --from-response <response-file>"
@@ -229,13 +236,13 @@ generate_topic() {
     fi
     return 0
   fi
-  run_optional python3 "$WORKSPACE/system/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output"
+  run_optional python3 "$SCRIPT_DIR/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output"
 }
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY RUN: monthly research"
-  run_step python3 "$WORKSPACE/system/lifehug.py" compile --dry-run --no-ai
-  run_step python3 "$WORKSPACE/system/research_expand.py" --gaps --dry-run
+  run_step python3 "$SCRIPT_DIR/lifehug.py" compile --dry-run --no-ai
+  run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
   select_gap_targets > "$TARGETS_FILE"
   if [[ ! -s "$TARGETS_FILE" ]]; then
     echo
@@ -243,12 +250,12 @@ if [[ "$DRY_RUN" == "1" ]]; then
   fi
   while IFS=$'\t' read -r topic topic_type output; do
     [[ -z "${topic:-}" ]] && continue
-    run_step python3 "$WORKSPACE/system/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output" --dry-run
+    run_step python3 "$SCRIPT_DIR/research_expand.py" --topic "$topic" --type "$topic_type" --output "$output" --dry-run
   done < "$TARGETS_FILE"
   if neighborhood_exists "$SELF_TOPIC"; then
     echo "skip: neighborhood already exists for ${SELF_TOPIC}"
   else
-    run_step python3 "$WORKSPACE/system/research_expand.py" --topic "$SELF_TOPIC" --type self --output "$SELF_OUTPUT" --dry-run
+    run_step python3 "$SCRIPT_DIR/research_expand.py" --topic "$SELF_TOPIC" --type self --output "$SELF_OUTPUT" --dry-run
   fi
   echo
   echo "==> preview Focus recommendations"
@@ -256,10 +263,10 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo
   echo "==> preview entity roster refreshes"
   for etype in person place period object theme; do
-    run_step python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" --emit-task "$ROSTER_PREVIEW_DIR/${etype}.json"
+    run_step python3 "$SCRIPT_DIR/lifehug.py" entity-roster --type "$etype" --emit-task "$ROSTER_PREVIEW_DIR/${etype}.json"
   done
-  run_step python3 "$WORKSPACE/system/lifehug.py" compile --dry-run --no-ai
-  run_step python3 "$WORKSPACE/system/lifehug.py" progress
+  run_step python3 "$SCRIPT_DIR/lifehug.py" compile --dry-run --no-ai
+  run_step python3 "$SCRIPT_DIR/lifehug.py" progress
   exit 0
 fi
 
@@ -267,14 +274,14 @@ fi
 # instead of recording raw learning failures (see skills/maintenance).
 # Keyless compile is already non-destructive (synthesis is skipped, never
 # regressed), so the compile steps run unguarded.
-python3 "$WORKSPACE/system/lifehug.py" ai-status >/dev/null 2>&1 && KEYLESS=0 || KEYLESS=1
+python3 "$SCRIPT_DIR/lifehug.py" ai-status >/dev/null 2>&1 && KEYLESS=0 || KEYLESS=1
 if [[ "$KEYLESS" == "1" ]]; then
   echo "keyless — AI steps will emit agent tasks (complete via skills/maintenance)"
 fi
 
-run_step python3 "$WORKSPACE/system/lifehug.py" compile
+run_step python3 "$SCRIPT_DIR/lifehug.py" compile
 RESEARCH_OUT=""
-GAPS_OUT=$(python3 "$WORKSPACE/system/research_expand.py" --gaps 2>&1)
+GAPS_OUT=$(python3 "$SCRIPT_DIR/research_expand.py" --gaps 2>&1)
 echo "$GAPS_OUT"
 RESEARCH_OUT="${RESEARCH_OUT}${GAPS_OUT}
 "
@@ -296,7 +303,7 @@ SELF_OUT=$(generate_topic "$SELF_TOPIC" self "$SELF_OUTPUT" 2>&1)
 echo "$SELF_OUT"
 RESEARCH_OUT="${RESEARCH_OUT}${SELF_OUT}
 "
-FOCUSES_OUT=$(python3 "$WORKSPACE/system/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE" 2>&1) || true
+FOCUSES_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE" 2>&1) || true
 echo "$FOCUSES_OUT"
 # Refresh the canonical entity rosters (AI-curated) for every entity type, then
 # recompile so newly-eligible entities graduate into pages and Focus pages pick up
@@ -309,7 +316,7 @@ for etype in person place period object theme; do
     # to the deterministic roster — it stateless-refreshes junk (v90 lesson).
     mkdir -p state/agent_tasks/roster
     set +e
-    ETYPE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" --emit-task "state/agent_tasks/roster/${etype}.json" 2>&1)
+    ETYPE_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" entity-roster --type "$etype" --emit-task "state/agent_tasks/roster/${etype}.json" 2>&1)
     ETYPE_STATUS=$?
     set -e
     if [[ "$ETYPE_STATUS" -ne 0 ]]; then
@@ -322,7 +329,7 @@ ${ETYPE_OUT}"
     fi
   else
     set +e
-    ETYPE_OUT=$(python3 "$WORKSPACE/system/lifehug.py" entity-roster --type "$etype" 2>&1)
+    ETYPE_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" entity-roster --type "$etype" 2>&1)
     ETYPE_STATUS=$?
     set -e
     if [[ "$ETYPE_STATUS" -ne 0 ]]; then
@@ -335,21 +342,19 @@ ${ETYPE_OUT}"
 "
 done
 echo "$ROSTER_OUT"
-run_step python3 "$WORKSPACE/system/lifehug.py" compile
+run_step python3 "$SCRIPT_DIR/lifehug.py" compile
 
 # Perennial re-asks (v71): questions marked perennial that were last answered
 # ~a year ago get re-inserted WITH last year's answer attached (10Q model).
-run_optional python3 "$WORKSPACE/system/lifehug.py" perennials --generate-due
+run_optional python3 "$SCRIPT_DIR/lifehug.py" perennials --generate-due
 
 # Echo-style resurfacing (v71): send one old answer back verbatim with a
 # reflection question — reviewing past entries is itself the intervention
 # (CHI 2013). Deterministic per month; replies become reflection sources.
 RESURFACE_OUT=$(python3 - <<'PY' 2>&1 || true
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, "system")
 from datetime import datetime, timezone
 
 from lifehug_core import ANSWERS_DIR, send_telegram
@@ -389,7 +394,7 @@ PY
 )
 echo "$RESURFACE_OUT"
 
-PROGRESS_OUT=$(python3 "$WORKSPACE/system/lifehug.py" progress 2>&1)
+PROGRESS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
 
 # Persist the full raw report (the old wall-of-text) as a document.
@@ -413,7 +418,7 @@ echo "✓ Full report written to $REPORT_FILE"
 safe_autocommit
 
 # v86 (issue #35): counts-first summary derived from state.
-SUMMARY=$(python3 "$WORKSPACE/system/lifehug.py" weekly-summary \
+SUMMARY=$(python3 "$SCRIPT_DIR/lifehug.py" weekly-summary \
   --kind monthly --since "$START_TS" --report-path "$REPORT_FILE" 2>&1) \
   || SUMMARY="⚠ monthly summary generation failed — see $REPORT_FILE"
 

@@ -10,6 +10,12 @@ script-first: `system/weekly_maintenance.sh` and `system/monthly_research.sh`
 own the flow — your job is only to supply the AI steps when the machine is
 keyless. Never reimplement classification, promotion, or queue planning by hand.
 
+Real weekly/monthly runs enqueue into `system/jobs.py`; the worker shares one
+kernel writer lock with viewer, answer, artifact, and manual CLI mutations.
+Do not add an ambient bypass flag or a second lock. Dry-runs stay direct and
+non-mutating. If a run fails, report its job id and fixed failure code; never
+print the retained payload or blindly replay a non-idempotent job.
+
 ## Find the workspace
 
 Use the current repo if it has `system/lifehug.py`. Otherwise check

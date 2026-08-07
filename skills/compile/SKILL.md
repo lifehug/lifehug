@@ -7,6 +7,11 @@ description: "Compile the private Lifehug wiki from answers and story sources �
 
 Compiles `answers/` and `sources/manual/` into the private, owner-only wiki under `wiki/`. Each page becomes synthesized prose with content-derived `related:` links, auto-derived **backlinks**, and shared-source "see also" edges — a navigable graph, not an excerpt dump. This skill is script-first: `system/wiki_compile.py` (via `system/lifehug.py compile`) owns the structure, citations, cross-linking, and index. Never hand-edit pages under `wiki/` — they are regenerated.
 
+A real `lifehug.py compile` is a typed durable job and shares the vault-wide
+writer lock; `--dry-run` remains direct. Repeating an identical manual compile
+creates a fresh job, while an explicit schedule identity deduplicates scheduler
+retries. Do not call `wiki_compile.py` directly for a real write.
+
 ## Find the workspace
 
 Use the current repo if it has `system/lifehug.py`. Otherwise check `~/Workspace/dave`, `~/Workspace/lifehug`, `~/lifehug`. Run all commands from the workspace root.

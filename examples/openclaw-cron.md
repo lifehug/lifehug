@@ -12,6 +12,12 @@ Use `system/daily_question.sh` for scheduled delivery. It:
 4. Marks the question sent only after delivery succeeds.
 5. Pins the message when Telegram supports it.
 
+Real invocations enqueue a typed, durable job and wait for its metadata state;
+the worker is the only local writer. OpenClaw needs no custom locking. A
+best-effort fallback worker drains the queue even before a service is loaded.
+For a persistent macOS worker and equivalent native schedules, see
+[`launchd/README.md`](launchd/README.md).
+
 Telegram delivery needs one target:
 
 ```yaml

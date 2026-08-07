@@ -33,7 +33,9 @@ if [[ -z "$QID" ]]; then
 fi
 shift
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 # Back-compat: v82 callers pass LIFEHUG_CHAT_ID; the framework's own
 # override is TELEGRAM_CHAT_ID (lifehug_core.resolve_telegram_target).
@@ -42,38 +44,23 @@ if [[ -n "${LIFEHUG_CHAT_ID:-}" && -z "${TELEGRAM_CHAT_ID:-}" ]]; then
 fi
 
 send_msg() {
-  printf '%s' "$1" | python3 system/lifehug.py notify || true
+  printf '%s' "$1" | python3 "$SCRIPT_DIR/lifehug.py" notify || true
 }
 
-# Capture stdin body to a temp file so we can retry or debug
-BODY=$(mktemp -t lifehug-answer-XXXXXX)
-LOCK="$REPO/state/.filing.lock"
-HAVE_LOCK=0
-trap '[[ $HAVE_LOCK -eq 1 ]] && rmdir "$LOCK" 2>/dev/null; rm -f "$BODY"' EXIT
+# The outer invocation streams stdin directly into the queue; it never writes a
+# plaintext answer to /tmp. Only the lease-bound worker re-entry needs a local
+# file because the canonical filing and notification steps both consume it.
+if ! python3 "$SCRIPT_DIR/jobs.py" active --vault-root "$WORKSPACE" >/dev/null 2>&1; then
+  exec python3 "$SCRIPT_DIR/jobs.py" file-answer --wait --vault-root "$WORKSPACE" \
+    "$QID" "$@"
+fi
+
+BODY=$(mktemp "${TMPDIR:-/tmp}/lifehug-answer.XXXXXX")
+chmod 600 "$BODY"
+trap 'rm -f "$BODY"' EXIT
 cat > "$BODY"
 
-cd "$REPO"
-
-# Serialize concurrent filings: process-answer mutates shared state
-# (rotation.json, coverage, manifest, git), so two detached filers must not
-# interleave. Portable mkdir lock (macOS has no flock binary); a lock older
-# than 15 min is stolen so a killed filer can't wedge future filings; after
-# ~4 min of waiting we proceed anyway — a rare race beats a dropped answer.
-LOCK_NOTE=""
-for _ in $(seq 1 120); do
-  if mkdir "$LOCK" 2>/dev/null; then
-    HAVE_LOCK=1
-    break
-  fi
-  if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +15 2>/dev/null)" ]]; then
-    rmdir "$LOCK" 2>/dev/null || true
-    continue
-  fi
-  sleep 2
-done
-if [[ $HAVE_LOCK -eq 0 ]]; then
-  LOCK_NOTE=$'\n'"(note: filed without the lock — another filing ran long)"
-fi
+cd "$WORKSPACE"
 
 # Read fresh at decision time — discipline 1 of the shared-vault contract.
 # The question id is explicit here, so this pull is not about WHICH question we
@@ -81,10 +68,10 @@ fi
 # the bank's answered flags, rotation state, and — through adaptive cadence —
 # the pick for the optional same-day follow-up it may send. Filing on top of
 # the other operators' work also keeps the hourly compile_and_commit rebase
-# trivial. Non-fatal on purpose and held inside the filing lock, so it cannot
-# race another filer: if the pull fails we file against local state, which is
-# what happened before this discipline existed. A git problem never eats an
-# answer. Skipped when there is no remote (a local-only install stays quiet).
+# trivial. Non-fatal on purpose; if the pull fails we file against local state,
+# which is what happened before this discipline existed. The worker lease spans
+# this pull and the filing, so no other local surface can mutate the vault in
+# between. A git problem never eats an answer. Skipped when there is no remote.
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ -n "$(git remote 2>/dev/null)" ]]; then
   PULL_OUT=$(git pull --rebase --autostash 2>&1)
   PULL_RC=$?
@@ -95,7 +82,6 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ -n "$(git remote 2>
 import os
 import sys
 
-sys.path.insert(0, "system")
 from lifehug_core import record_learning_failure
 
 try:
@@ -113,12 +99,12 @@ PY
 fi
 
 # Run the actual filing — skip wiki compile (handled by hourly cron)
-OUT=$(cat "$BODY" | python3 system/lifehug.py process-answer "$QID" --no-compile-wiki "$@" 2>&1)
+OUT=$(python3 "$SCRIPT_DIR/lifehug.py" process-answer "$QID" --no-compile-wiki "$@" < "$BODY" 2>&1)
 RC=$?
 
 # Signal that a compile is needed (picked up by hourly cron)
 if [[ $RC -eq 0 ]]; then
-  touch "$REPO/state/.compile-needed"
+  touch "$WORKSPACE/state/.compile-needed"
 fi
 
 if [[ $RC -eq 0 ]]; then
@@ -128,10 +114,10 @@ if [[ $RC -eq 0 ]]; then
   MSG="✅ Filed ${QID}"
   [[ -n "$COVERAGE" ]] && MSG="${MSG} · ${COVERAGE}"
   [[ -n "$FOLLOWUPS" ]] && MSG="${MSG}"$'\n'"↳ ${FOLLOWUPS}"
-  send_msg "${MSG}${LOCK_NOTE}"
+  send_msg "$MSG"
 else
   ERR=$(echo "$OUT" | tail -20)
-  send_msg "⚠️ Filing ${QID} failed (rc=${RC})${LOCK_NOTE}"$'\n\n'"${ERR}"
+  send_msg "⚠️ Filing ${QID} failed (rc=${RC})"$'\n\n'"${ERR}"
 fi
 
 exit $RC

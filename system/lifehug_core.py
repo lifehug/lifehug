@@ -4,22 +4,38 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SYSTEM_DIR = Path(__file__).resolve().parent
-REPO_DIR = SYSTEM_DIR.parent
-QUESTIONS_FILE = SYSTEM_DIR / "question-bank.md"
-ROTATION_FILE = SYSTEM_DIR / "rotation.json"
-COVERAGE_FILE = SYSTEM_DIR / "coverage.json"
+from vault_paths import (
+    EMBEDDED_FRAMEWORK_SYSTEM_DIR,
+    resolve_vault_root,
+    validate_contained_path,
+)
+
+SYSTEM_DIR = EMBEDDED_FRAMEWORK_SYSTEM_DIR
+FRAMEWORK_ROOT = SYSTEM_DIR.parent
+# Current installs embed framework + vault in one checkout.  A future
+# vault-only install (#46) points the same framework at a separate data root.
+REPO_DIR = resolve_vault_root(framework_system_dir=SYSTEM_DIR)
+_EMBEDDED_DATA = REPO_DIR / "system"
+if _EMBEDDED_DATA.is_dir():
+    QUESTIONS_FILE = _EMBEDDED_DATA / "question-bank.md"
+    ROTATION_FILE = _EMBEDDED_DATA / "rotation.json"
+    COVERAGE_FILE = _EMBEDDED_DATA / "coverage.json"
+else:
+    QUESTIONS_FILE = REPO_DIR / "question-bank.md"
+    ROTATION_FILE = REPO_DIR / "state" / "rotation.json"
+    COVERAGE_FILE = REPO_DIR / "state" / "coverage.json"
 CONFIG_FILE = REPO_DIR / "config.yaml"
 PROFILE_FILE = REPO_DIR / "profile.yaml"
 README_FILE = REPO_DIR / "README.md"
 ANSWERS_DIR = REPO_DIR / "answers"
 OUTPUTS_DIR = REPO_DIR / "outputs"
-TEMPLATES_DIR = REPO_DIR / "templates"
+TEMPLATES_DIR = (REPO_DIR / "templates") if (REPO_DIR / "templates").is_dir() else FRAMEWORK_ROOT / "templates"
 STATE_DIR = REPO_DIR / "state"
 WIKI_DIR = REPO_DIR / "wiki"
 SOURCES_DIR = REPO_DIR / "sources"
@@ -84,6 +100,7 @@ def read_json(path: Path, default=None):
 
 
 def write_json(path: Path, data) -> None:
+    _guard_private_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as f:
         json.dump(data, f, indent=2)
@@ -93,11 +110,28 @@ def write_json(path: Path, data) -> None:
 
 
 def write_text(path: Path, text: str) -> None:
+    _guard_private_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as f:
         f.write(text)
         tmp = Path(f.name)
     tmp.replace(path)
+
+
+def _guard_private_write(path: Path) -> None:
+    """Prevent answer/source/output helpers from traversing symlinked refs."""
+    candidate = Path(path).absolute()
+    for root, label in (
+        (ANSWERS_DIR, "answer path"),
+        (SOURCES_DIR, "source path"),
+        (OUTPUTS_DIR, "output path"),
+    ):
+        try:
+            candidate.relative_to(Path(root).absolute())
+        except ValueError:
+            continue
+        validate_contained_path(candidate, root, label=label)
+        return
 
 
 def record_learning_failure(

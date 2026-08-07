@@ -148,6 +148,18 @@ After setup, create a cron job for daily question delivery. The cron task should
 2. Let that script pick, send, pin when supported, and mark sent only after delivery succeeds
 3. Avoid custom state mutation outside the script
 
+Real runs of the daily, weekly, and monthly scripts enqueue into the durable
+single-writer worker under `state/jobs/`; dry-runs remain direct and
+non-mutating. On macOS, install the persistent worker plus canonical schedules
+from `examples/launchd/README.md`. The fallback worker makes scripts usable
+before launchd is loaded, but a persistent worker is the normal setup.
+
+Never set a fake `LIFEHUG_JOB_RUNNER_TOKEN`. Re-entry is valid only while that
+unguessable token matches the live kernel-locked writer owner for this vault.
+For a failed job, inspect only metadata with `python3 system/jobs.py show
+<job-id>`; use `retry` only when the record says it is safe, or `purge` to
+delete retained private payload/receipts while keeping the audit metadata.
+
 ### OpenClaw Cron
 
 Tell the user to run this (or do it for them if you have access):
