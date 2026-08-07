@@ -43,6 +43,8 @@ followup_model: "anthropic/claude-opus-4-6"
 # Local and OpenClaw requests ignore HTTP(S)_PROXY and refuse redirects, so a
 # validated loopback destination cannot be changed underneath the privacy
 # boundary. Configuration errors fail closed; response bodies are size-bounded.
+# Keep AI-routing entries in this flat `key: value` form. Malformed or unknown
+# `ai_`/`local_ai_`/`kimi_`/`anthropic_` keys fail closed rather than auto-route.
 # Check the selected provider/model and make a non-mutating GET /models probe:
 #   python3 system/lifehug.py ai-status
 

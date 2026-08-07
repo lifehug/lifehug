@@ -12,7 +12,9 @@ metadata-only; prompts, source bodies, responses, and secrets are never logged.
 Local and OpenClaw loopback transports bypass proxy environment variables and
 reject redirects, so the validated boundary also holds at request time. Chat
 and readiness responses are size-bounded, configuration decode failures fail
-closed, and operational errors retain bounded metadata only.
+closed, malformed/unknown routing syntax cannot collapse into auto routing,
+structured model fields are normalized before persistence, and operational
+errors retain bounded metadata only.
 
 ---
 

@@ -34,7 +34,7 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 LEGACY_FOCUS_KEY = "spot" "light_opportunities"
 
-from ai_provider import AIResponseError, failure_metadata
+from ai_provider import AIResponseError, failure_metadata, normalize_question_records
 
 from lifehug_core import (
     ANSWERS_DIR,
@@ -437,10 +437,21 @@ Respond with ONLY valid JSON. No prose, no markdown fences.
 
 def extract_json(text: str) -> dict:
     """Extract a JSON object from the AI response text."""
+    def require_object(value: object) -> dict:
+        if isinstance(value, dict):
+            return value
+        raise AIResponseError(
+            "AI response JSON had an invalid schema",
+            provider="ai",
+            operation="classify-parse",
+            status="invalid_schema",
+            response_bytes=len(text.encode("utf-8", errors="replace")),
+        )
+
     # Try direct parse first
     stripped = text.strip()
     try:
-        return json.loads(stripped)
+        return require_object(json.loads(stripped))
     except json.JSONDecodeError:
         pass
 
@@ -448,7 +459,7 @@ def extract_json(text: str) -> dict:
     fence_match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", stripped)
     if fence_match:
         try:
-            return json.loads(fence_match.group(1))
+            return require_object(json.loads(fence_match.group(1)))
         except json.JSONDecodeError:
             pass
 
@@ -456,7 +467,7 @@ def extract_json(text: str) -> dict:
     brace_match = re.search(r"\{[\s\S]+\}", stripped)
     if brace_match:
         try:
-            return json.loads(brace_match.group(0))
+            return require_object(json.loads(brace_match.group(0)))
         except json.JSONDecodeError:
             pass
 
@@ -719,15 +730,27 @@ def classify_file(
 
     classified_at = now_utc()
 
-    # Build candidate records
-    store = load_candidate_store()
-    ai_questions = [] if skip_candidates else ai_result.get("candidate_questions", [])
-    new_candidates = build_candidates(ai_questions, source_path, store, classified_at)
-
-    candidate_ids = [c["id"] for c in new_candidates]
-    classification = build_classification(
-        source_path, fm, ai_result, model, classified_at, candidate_ids
-    )
+    try:
+        # Validate every model-derived coercion before any persistence.
+        store = load_candidate_store()
+        ai_questions = [] if skip_candidates else normalize_question_records(
+            ai_result.get("candidate_questions", []),
+            operation="classify-schema",
+        )
+        new_candidates = build_candidates(
+            ai_questions, source_path, store, classified_at
+        )
+        candidate_ids = [c["id"] for c in new_candidates]
+        classification = build_classification(
+            source_path, fm, ai_result, model, classified_at, candidate_ids
+        )
+    except Exception as exc:  # noqa: BLE001 — model schema failures stay private
+        print(
+            "Error: AI classification schema failed: "
+            + failure_metadata("classify-schema", exc, provider="ai"),
+            file=sys.stderr,
+        )
+        return 1
 
     clf_path = classification_path(source_path)
 

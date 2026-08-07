@@ -1098,7 +1098,10 @@ optional: if it is not installed, `ai-status` reports not ready and the
 agent-task paths remain available without terminating the process. Configuration
 load failures are invalid rather than silently resetting provider choice; chat
 and readiness responses are size-bounded, and errors expose bounded provider /
-operation / failure-class metadata only.
+operation / failure-class metadata only. AI-routing entries are validated using
+the documented flat `key: value` syntax, so malformed or unknown routing keys
+cannot disappear into automatic cloud selection. Structured question fields
+are schema-normalized before maintenance writes anything.
 
 ---
 
