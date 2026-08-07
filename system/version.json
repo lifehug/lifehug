@@ -98,6 +98,7 @@
     "tests/test_v101_actions.py",
     "tests/test_v102_timeline_curation.py",
     "tests/test_v103_placement_loop.py",
+    "tests/v119_job_pill_evidence.py",
     "tests/test_v105_pin_retire.py",
     "tests/test_v110_timeline_corroboration.py",
     "tests/test_v14_features.py",

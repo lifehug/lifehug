@@ -531,7 +531,8 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
         fetch('/jobs/' + id + '.json').then(function (r) {{ return r.json(); }}).then(function (j) {{
           var state = j.state || j.status;
           if (state === 'queued' || state === 'running' || state === 'safely-retryable') {{
-            pill.textContent = state === 'running' ? 'running…' : 'queued…';
+            pill.textContent = state === 'running' ? 'running…' :
+              (state === 'safely-retryable' ? 'ready to retry…' : 'queued…');
             setTimeout(tick, 3000); return;
           }}
           pill.textContent = state === 'succeeded' ? 'done ✓' : 'failed ✗';

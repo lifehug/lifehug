@@ -239,6 +239,7 @@ class PostAuthTests(unittest.TestCase):
                 page = serve_wiki.layout("test", "body").decode()
                 self.assertIn("state === 'queued'", page)
                 self.assertIn("state === 'succeeded'", page)
+                self.assertIn("ready to retry…", page)
             finally:
                 jobs.configure(original)
 
