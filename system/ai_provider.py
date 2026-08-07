@@ -685,7 +685,7 @@ def get_anthropic_client(cfg: dict[str, object] | None = None):
     _validate_token(key, field="Anthropic authorization token")
     try:
         import anthropic  # noqa: PLC0415
-    except ImportError:
+    except Exception:  # noqa: BLE001 — SDK import hooks can expose local config
         raise AIUnavailableError(
             "Anthropic is selected but its optional SDK is not installed"
         ) from None
@@ -701,7 +701,22 @@ def get_anthropic_client(cfg: dict[str, object] | None = None):
 
 
 def _call_anthropic(prompt: str, model: str, cfg: dict[str, object]):
-    client = get_anthropic_client(cfg)
+    # Keep the SDK boundary here rather than relying on callers to redact an
+    # arbitrary third-party exception.  ``get_anthropic_client`` normally
+    # returns typed failures itself, but this final guard also covers SDK
+    # import/construction hooks and preserves a single safe error contract for
+    # every call_ai caller.
+    try:
+        client = get_anthropic_client(cfg)
+    except AIProviderError:
+        raise
+    except Exception:  # noqa: BLE001 — injected/SDK factory errors may echo secrets
+        raise AIUnavailableError(
+            "Anthropic client initialization failed",
+            provider="anthropic",
+            operation="client-init",
+            status="unavailable",
+        ) from None
     try:
         response = client.messages.create(
             model=model,

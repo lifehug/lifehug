@@ -543,6 +543,44 @@ class SharedRoutingTests(unittest.TestCase):
         self.assertNotIn(secret, str(caught.exception))
         self.assertEqual(caught.exception.operation, "decode-chat")
 
+    def test_explicit_anthropic_sdk_failures_are_unavailable_and_private(self):
+        secret = "SYNTHETIC_ANTHROPIC_SDK_SECRET"
+        cfg = {"ai_provider": "anthropic", "anthropic_api_key": "cloud-key"}
+        for stage, client in (
+            ("construction", None),
+            ("request", mock.Mock()),
+        ):
+            with self.subTest(stage=stage), \
+                    mock.patch.object(aip, "load_config", return_value=cfg), \
+                    mock.patch.dict(aip.os.environ, {}, clear=True):
+                if client is None:
+                    client_patch = mock.patch.object(
+                        aip, "get_anthropic_client", side_effect=RuntimeError(secret)
+                    )
+                else:
+                    client.messages.create.side_effect = RuntimeError(secret)
+                    client_patch = mock.patch.object(
+                        aip, "get_anthropic_client", return_value=client
+                    )
+                with client_patch, self.assertRaises(aip.AIUnavailableError) as caught:
+                    aip.call_ai("private prompt", "synthetic-model")
+            self.assertNotIn(secret, str(caught.exception))
+            self.assertEqual(caught.exception.provider, "anthropic")
+            self.assertEqual(
+                caught.exception.operation,
+                "client-init" if stage == "construction" else "chat-completion",
+            )
+
+    def test_empty_anthropic_completion_remains_a_response_error(self):
+        client = mock.Mock()
+        client.messages.create.return_value = mock.Mock(content=[])
+        with mock.patch.object(aip, "get_anthropic_client", return_value=client), \
+                self.assertRaises(aip.AIResponseError) as caught:
+            aip._call_anthropic("private prompt", "synthetic-model", {})
+        self.assertEqual(caught.exception.provider, "anthropic")
+        self.assertEqual(caught.exception.operation, "decode-chat")
+        self.assertEqual(caught.exception.status, "empty")
+
     def test_anthropic_response_accessor_preserves_control_signals(self):
         for signal in (KeyboardInterrupt, SystemExit):
             class InterruptedResponse:
@@ -619,13 +657,20 @@ class FailureRedactionTests(unittest.TestCase):
                 mock.patch.object(research_expand, "load_answers", return_value=[]), \
                 mock.patch.object(research_expand, "call_ai", return_value=secret), \
                 contextlib.redirect_stderr(io.StringIO()) as errors, \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(io.StringIO()) as output:
             result = research_expand._run_expansion(
                 args, "Synthetic topic", "theme", "synthetic", "Synthetic source"
             )
+        # monthly_research.sh captures generate_topic with ``2>&1`` in
+        # TOPIC_OUT, appends it to RESEARCH_OUT, and writes that value into the
+        # committed monthly report.  Exercise the exact captured channels.
+        monthly_report = (
+            "## Research neighborhoods\n\n```\n"
+            + output.getvalue() + errors.getvalue() + "\n```"
+        )
         self.assertEqual(result, 1)
-        self.assertNotIn(secret, errors.getvalue())
-        self.assertIn("response_bytes", errors.getvalue())
+        self.assertNotIn(secret, monthly_report)
+        self.assertIn("response_bytes", monthly_report)
 
     def test_classifier_valid_json_bad_priority_never_reaches_report_or_store(self):
         secret = "PRIVATE_CLASSIFIER_PRIORITY_MARKER"
