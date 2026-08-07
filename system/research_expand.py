@@ -350,20 +350,44 @@ def _openclaw_gateway() -> tuple[str, str] | None:
     return None
 
 
-def get_client():
-    """Return an Anthropic client, reading API key from env or config."""
+class AIProviderUnavailableError(RuntimeError):
+    """A configured optional AI provider cannot be used in this environment."""
+
+
+def _anthropic_module():
+    """Import Anthropic only when its route is selected.
+
+    The SDK is optional: agent-task mode must remain usable in installations
+    that deliberately do not install it.
+    """
     try:
         import anthropic  # noqa: PLC0415
-    except ImportError:
-        print("Error: anthropic package not installed. Run: pip install anthropic", file=sys.stderr)
-        sys.exit(1)
+    except ImportError as exc:
+        raise AIProviderUnavailableError(
+            "Anthropic SDK is not installed; use agent mode or install anthropic for SDK calls."
+        ) from exc
+    return anthropic
+
+
+def _anthropic_sdk_available() -> bool:
+    """Whether the optional Anthropic SDK can be imported without exiting."""
+    try:
+        _anthropic_module()
+    except AIProviderUnavailableError:
+        return False
+    return True
+
+
+def get_client():
+    """Return an Anthropic client, reading API key from env or config."""
+    anthropic = _anthropic_module()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         config = load_config()
         api_key = config.get("anthropic_api_key")
     if not api_key:
-        raise RuntimeError(
+        raise AIProviderUnavailableError(
             "ANTHROPIC_API_KEY not set. Export it or add anthropic_api_key to config.yaml."
         )
     return anthropic.Anthropic(api_key=api_key)
@@ -384,10 +408,10 @@ def ai_available() -> str | None:
     if _kimi_key() is not None:
         return "kimi"
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return "sdk-key"
+        return "sdk-key" if _anthropic_sdk_available() else None
     try:
         if load_config().get("anthropic_api_key"):
-            return "sdk-key"
+            return "sdk-key" if _anthropic_sdk_available() else None
     except Exception:
         pass
     return None
@@ -1223,7 +1247,7 @@ def call_ai(prompt: str, model: str) -> str:
     # missing-key complaint.
     try:
         client = get_client()
-    except (RuntimeError, SystemExit):
+    except RuntimeError:
         if gateway_error is not None:
             raise gateway_error from None
         raise

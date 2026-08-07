@@ -427,7 +427,7 @@ flowchart TB
     d --> w --> m
 ```
 
-The daily job needs **no model call**. Weekly maintenance is capped and keyless when OpenClaw is running; if no model is available, the rest of the weekly Loop segment still runs and classification can catch up later. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
+The daily job needs **no model call**. Weekly maintenance is capped and keyless when OpenClaw is running; if no model is available, the rest of the weekly Loop segment still runs and classification can catch up later. The Anthropic SDK is optional: `python3 system/lifehug.py ai-status` reports keyless when it is absent, so agent-task workflows stay available without installing it. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
 
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending

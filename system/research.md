@@ -223,7 +223,15 @@ trust is earned at the threshold, not at the capture.
 
 ---
 
-## 8. Key References
+## 8. Operational constraint: model providers are optional
+
+The Loop must keep its agent-completion path available on machines without an
+API key **or an installed provider SDK**. Provider discovery therefore returns
+a catchable unavailable result; `lifehug.py ai-status` reports keyless and the
+existing emit-task/`--from-response` workflow completes the AI step. Optional
+provider imports must never terminate the process.
+
+## 9. Key References
 
 **Narrative identity & memoir**: McAdams, *Life Story Interview II* (Foley Center); McAdams & McLean 2013; McAdams et al. 2001 (redemption/contamination, PSPB); Karr, *The Art of Memoir*; Gornick, *The Situation and the Story*; Birren, Guided Autobiography (nine themes).
 **Introspection science**: Pennebaker & Chung (expressive writing protocol); Frattaroli 2006 meta-analysis; Campbell & Pennebaker 2003 (pronoun flexibility); Kross & Ayduk 2011 (self-distancing); Nolen-Hoeksema (rumination); Treynor (brooding vs reflection); Eurich (what-not-why).

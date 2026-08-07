@@ -25,6 +25,10 @@ A page's prose can be written four ways. The script picks the first available, p
 3. **Gateway/API** — `call_ai` via the OpenClaw gateway (keyless, if running) or `ANTHROPIC_API_KEY` (the cron path — Mode 2).
 4. **Excerpt fallback** — deterministic source excerpts, **only for a page that was never synthesized**. Compile will **never** downgrade an already-synthesized page (frontmatter `synthesized: true`) to excerpts — it preserves the last good prose and logs `↻ preserved <slug>`. So a bare `compile` on a keyless machine is safe; at worst a changed page keeps its prior prose until a real synthesis runs.
 
+The Anthropic SDK is optional. If it is absent, `ai-status` reports keyless and
+this agent-draft path remains available; do not install the SDK just to compile
+through an agent.
+
 ## Mode 1 — Desktop through Claude Code (keyless; YOU synthesize)
 
 On the desktop there is usually no API key and no OpenClaw gateway. That's fine: **you are the model.** Do the synthesis yourself, then let the script assemble the graph.

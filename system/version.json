@@ -1,7 +1,7 @@
 {
-  "version": 121,
+  "version": 122,
   "released": "2026-08-06",
-  "changelog": "v121: vault-root descendants retain the same no-follow authority as named durable paths. A source symlink introduced after process binding is now rejected consistently by compilation and source-prompt flows, so it cannot cause Lifehug to read outside the selected vault. The guard test prevents later runtime code from downcasting the selected vault root back to ordinary pathlib I/O.",
+  "changelog": "v122: keyless agent mode no longer requires the optional Anthropic SDK to be installed. AI status now reports keyless cleanly when the SDK is absent, so weekly/monthly agent-task workflows can continue instead of the process exiting during provider discovery.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

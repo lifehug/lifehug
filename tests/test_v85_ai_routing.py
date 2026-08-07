@@ -130,6 +130,43 @@ class CallAIRoutingTests(unittest.TestCase):
         self.assertEqual(result, "sdk says hi")
 
 
+class OptionalAnthropicSdkTests(unittest.TestCase):
+    """The optional SDK must not turn keyless mode into a process exit."""
+
+    def setUp(self):
+        self._real_import = __import__
+
+    def _missing_anthropic_import(self, name, *args, **kwargs):
+        if name == "anthropic":
+            raise ImportError("No module named 'anthropic'")
+        return self._real_import(name, *args, **kwargs)
+
+    def test_missing_sdk_is_catchable_and_ai_status_is_keyless(self):
+        """Simulate absence directly so this test does not depend on the host."""
+        with mock.patch("builtins.__import__", side_effect=self._missing_anthropic_import), \
+                mock.patch.object(rex, "_openclaw_gateway", return_value=None), \
+                mock.patch.dict(rex.os.environ, {"ANTHROPIC_API_KEY": "synthetic-key"}, clear=True), \
+                mock.patch.object(rex, "load_config", return_value={}):
+            self.assertIsNone(rex.ai_available())
+            with self.assertRaises(rex.AIProviderUnavailableError):
+                rex.get_client()
+
+    def test_gateway_failure_remains_catchable_when_sdk_is_absent(self):
+        with mock.patch("builtins.__import__", side_effect=self._missing_anthropic_import), \
+                mock.patch.object(rex, "_openclaw_gateway",
+                                  return_value=("http://fake:1/v1", "tok")), \
+                mock.patch.dict(rex.os.environ,
+                                {"LIFEHUG_AI_TIMEOUT": "5", "ANTHROPIC_API_KEY": "synthetic-key"},
+                                clear=True), \
+                mock.patch.object(rex, "load_config", return_value={}), \
+                mock.patch("time.sleep"), \
+                mock.patch("urllib.request.urlopen", return_value=_FakeResponse(SENTINEL)), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                self.assertRaises(RuntimeError) as ctx:
+            rex.call_ai("prompt", "claude-sonnet-5")
+        self.assertIn("generate", str(ctx.exception))
+
+
 class KimiRoutingTests(unittest.TestCase):
     """v113 — model-explicit Kimi routing: a kimi/moonshot/k3 model name sends
     the call to the Kimi OpenAI-compatible endpoint, bypassing the gateway

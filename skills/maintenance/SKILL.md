@@ -35,6 +35,9 @@ python3 system/lifehug.py ai-status
   ```
 - **Exit 1** (`keyless`) → agent mode. **You are the model.** Follow Mode 1.
 
+The Anthropic SDK is optional. If it is not installed, `ai-status` still exits
+1 cleanly for keyless mode; do not install it merely to run the agent-task flow.
+
 ## Mode 1 — Keyless desktop (YOU are the model)
 
 **Pre-complete the AI work BEFORE running the script.** Ordering matters:
