@@ -1,0 +1,59 @@
+{
+  "id": "unsent_letter",
+  "label": "Unsent Letter",
+  "kind": "single",
+  "summary": "A letter you'll never send — to someone gone or unreachable — for saying what you couldn't say aloud.",
+  "template": "templates/unsent_letter.md",
+  "subject_kind": "person",
+  "composable": true,
+  "length": {"min_words": 300, "max_words": 1200},
+  "slots": [
+    {
+      "id": "who_this_is_to",
+      "label": "Who This Is To",
+      "description": "The relationship and why this letter has to stay unsent — someone who died, is estranged, or where the relationship holds too much tension to say it aloud.",
+      "story_functions": ["foundation"],
+      "min_answers": 1
+    },
+    {
+      "id": "anchor_scene",
+      "label": "Anchor Scene",
+      "description": "One real, specific scene that carries the weight of what's between them — the afternoon, not three paragraphs of sentiment.",
+      "story_functions": ["scene"],
+      "min_answers": 2
+    },
+    {
+      "id": "the_unsaid_thing",
+      "label": "The Unsaid Thing",
+      "description": "The thing under the thing: the hurt, the wish, the boundary, or the question never asked — asked anyway here.",
+      "story_functions": ["what_i_want_them_to_know"],
+      "min_answers": 2
+    },
+    {
+      "id": "tension_that_remains",
+      "label": "Tension That Remains",
+      "description": "The friction, distance, or unresolved difficulty that stays — named honestly, not smoothed over.",
+      "story_functions": ["tension"],
+      "min_answers": 1
+    },
+    {
+      "id": "what_it_means_now",
+      "label": "What It Means Now",
+      "description": "What the author sees now, from this distance, that they couldn't see then; what's still carried, daily.",
+      "story_functions": ["meaning"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "Continuing bonds theory (Klass, Silverman & Nickman 1996) replaced the older detachment model of grief — an ongoing bond with someone who died is normal and often adaptive, which is why this format is a resumed conversation rather than a farewell. Expressive-writing research shows unsent letters help process unfinished business and support benefit-finding, but effects are modest and forcing a positive reframe underperforms open processing — the basis for never forcing resolution. Because deep-processing writing very soon after a fresh loss or rupture can be null or harmful, slots let the unsaid thing and the tension surface without requiring them to resolve.",
+    "citations": [
+      "Klass, Silverman & Nickman 1996 — Continuing Bonds: maintaining a bond with the deceased is a normal, often adaptive, part of grief, not something to sever.",
+      "Neimeyer — meaning reconstruction in grief; unsent letters as a technique for continued dialogue with the dead or estranged.",
+      "Pennebaker & Chung; Frattaroli 2006 meta-analysis (146 RCTs, d≈.15) — expressive-writing benefits are real but modest; forced-positivity or forced-resolution framing underperforms open framing, and writing too soon after a fresh rupture (under roughly 1-2 months) shows null or harmful effects."
+    ]
+  },
+  "ai_context": [
+    "If the source material signals the loss or rupture is very recent (roughly under two months), favor surfacing the unsaid thing plainly over pushing toward what-it-means-now reflection — deep-processing writing this soon after a fresh rupture shows null or harmful effects in the literature."
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "id": "instagram",
+  "label": "Instagram",
+  "kind": "single",
+  "summary": "A short caption built from one real moment and what it means, longer than a tweet but never a summary.",
+  "template": "templates/instagram.md",
+  "subject_kind": "any",
+  "composable": true,
+  "length": {"min_words": 30, "max_words": 150},
+  "slots": [
+    {
+      "id": "moment",
+      "label": "Moment",
+      "description": "The vivid scene, image, or specific instance the caption opens with or centers on — one occasion, not a habitual or generalized account.",
+      "story_functions": ["scene", "foundation", "shared_history"],
+      "min_answers": 1
+    },
+    {
+      "id": "meaning",
+      "label": "Meaning",
+      "description": "The reflection, feeling, or realization that follows from the moment — what it means now, or what it says about the author or the relationship.",
+      "story_functions": ["meaning", "growth_edge", "value"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "Instagram captions read best as a short story arc: a concrete moment first, one line of reflection after — concreteness research supports the vivid opening, and Orwell's concrete-over-abstract rule argues against padding the reflection into more than it's earned.",
+    "citations": [
+      "Sadoski, Goetz & Rodriguez 2000 — concreteness effect: concrete/imageable text beats abstract text on interest and recall",
+      "Orwell, Politics and the English Language — never use an abstract word where a concrete one will do",
+      "Green & Brock 2000 — narrative transportation: imagery and affect during the scene do most of the engagement work, reflection anchors rather than drives it"
+    ]
+  },
+  "ai_context": []
+}

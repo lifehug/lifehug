@@ -41,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
+import format_frameworks
 from vault_paths import (
     atomic_create_vault_bytes,
     atomic_write_vault_text,
@@ -370,10 +371,7 @@ def _build_artifact_new(payload: dict) -> tuple[Invocation, ...]:
         },
     )
     format_name = _text(payload, "format", maximum=32)
-    if format_name not in {
-        "letter", "tweet", "instagram", "post", "essay", "chapter",
-        "unsent_letter", "legacy_letter",
-    }:
+    if format_name not in format_frameworks.valid_formats():
         raise ValueError("invalid artifact format")
     args = ["artifact", "new", "--format", format_name]
     for key, flag, maximum in (

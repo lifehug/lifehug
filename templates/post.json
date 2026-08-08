@@ -1,0 +1,44 @@
+{
+  "id": "post",
+  "label": "Post",
+  "kind": "single",
+  "summary": "A longer personal post built from one story: an opening scene, what develops from it, and what it means now.",
+  "template": "templates/post.md",
+  "subject_kind": "any",
+  "composable": true,
+  "length": {"min_words": 400, "max_words": 1000},
+  "slots": [
+    {
+      "id": "hook_scene",
+      "label": "Hook Scene",
+      "description": "The specific moment, image, or honest claim the post opens on — concrete enough to picture, not a topic statement.",
+      "story_functions": ["scene", "foundation"],
+      "min_answers": 1
+    },
+    {
+      "id": "development",
+      "label": "Development",
+      "description": "The memory or relationship thread that builds from the opening scene — the tension, turn, or complication the post moves through.",
+      "story_functions": ["tension", "turning_point", "relationship", "contradiction"],
+      "min_answers": 1
+    },
+    {
+      "id": "takeaway",
+      "label": "Takeaway",
+      "description": "What the moment means now — the earned reflection the post lands on, not a generic or unearned lesson.",
+      "story_functions": ["meaning", "growth_edge", "value"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "'One story, one point' at essay length maps onto the classic scene-complication-reflection arc and Gornick's situation-vs-story split; concreteness and narrative transportation both argue for opening on a scene rather than a thesis.",
+    "citations": [
+      "Graham (paulgraham.com/essay.html) — surprise without generality is gossip, generality without surprise is a textbook; an essay lands on one idea",
+      "Gornick, The Situation and the Story — situation (what happened) vs story (what the author has come to say) as two layers a piece must combine",
+      "Sadoski, Goetz & Rodriguez 2000 — concreteness effect: abstract openings measurably lose readers before the story starts",
+      "Green & Brock 2000 — narrative transportation: sustained space allows real absorption, though the effect remains modest"
+    ]
+  },
+  "ai_context": []
+}

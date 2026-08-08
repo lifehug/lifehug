@@ -1,0 +1,53 @@
+{
+  "id": "essay",
+  "label": "Essay",
+  "kind": "single",
+  "summary": "A reflective, argumentative essay that develops a stated opinion or lens on life into a full position piece.",
+  "template": "templates/essay.md",
+  "subject_kind": "any",
+  "composable": true,
+  "length": {"min_words": 600, "max_words": 1500},
+  "slots": [
+    {
+      "id": "the_position",
+      "label": "The Position",
+      "description": "The thesis in the author's own words — the stated opinion or lens on life the essay develops.",
+      "story_functions": ["meaning", "value"],
+      "min_answers": 1
+    },
+    {
+      "id": "evidence_scenes",
+      "label": "Evidence Scenes",
+      "description": "Concrete lived moments that ground the argument — one scene is worth three paragraphs of theory.",
+      "story_functions": ["scene", "turning_point"],
+      "min_answers": 2
+    },
+    {
+      "id": "counter_tension",
+      "label": "Counter-Tension",
+      "description": "The strongest opposing view or internal doubt, steelmanned honestly rather than dismissed.",
+      "story_functions": ["contradiction", "tension"],
+      "min_answers": 1
+    },
+    {
+      "id": "earned_resolution",
+      "label": "Earned Resolution",
+      "description": "Where the argument lands — what this lens changes about how to see, grown out of the evidence rather than asserted.",
+      "story_functions": ["meaning", "growth_edge"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "Slots operationalize Gornick's situation-vs-story distinction — the thesis is 'the thing one has come to say,' evidence scenes are the situation that must be made to speak — and steelmanning research showing that engaging the strongest opposing view increases perceived credibility more than an undefended assertion.",
+    "citations": [
+      "Gornick 2001, The Situation and the Story — separates the situation (circumstance, plot) from the story (the insight the writer has come to say); the personal essay's persona is 'the instrument of illumination'",
+      "Mill, On Liberty (via contemporary rhetoric/argumentation research) — steelmanning the opposing view before answering it signals intellectual honesty and increases argument credibility",
+      "McAdams & McLean 2013 — redemption sequences (bad-to-good arcs) track with well-being and read as more earned than asserted conclusions"
+    ]
+  },
+  "ai_context": [
+    "Distinguish situation from story in evidence_scenes: a scene that's situation-rich but hasn't yet said what it means needs the 'what does this say about the position' pass before it can serve as evidence.",
+    "If the position emerged through a hardship or reversal, naming that arc in earned_resolution (what grew out of it) makes the insight read as earned rather than stated."
+  ]
+}
