@@ -88,6 +88,7 @@ _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$")
 _QUESTION_ID_RE = re.compile(r"^[A-Z][0-9]+[a-z]*$")
 _ARTIFACT_REF_RE = re.compile(r"^outputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PLACEMENT_KEY_RE = re.compile(r"^[0-9a-f]{12}$")
+_FOCUS_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def _now() -> str:
@@ -400,6 +401,20 @@ def _build_artifact_new(payload: dict) -> tuple[Invocation, ...]:
     return (_cli(*args),)
 
 
+def _build_artifact_assemble(payload: dict) -> tuple[Invocation, ...]:
+    _expect_payload(payload, required={"focus"}, optional={"force"})
+    focus = _text(payload, "focus", maximum=64)
+    if not _FOCUS_ID_RE.fullmatch(focus):
+        raise ValueError("invalid focus id")
+    args = ["book-assemble", "--focus", focus]
+    force = payload.get("force", False)
+    if not isinstance(force, bool):
+        raise ValueError("invalid force flag")
+    if force:
+        args.append("--force")
+    return (_cli(*args),)
+
+
 def _build_compile(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(payload, optional={"no_ai", "model"})
     args = ["compile"]
@@ -580,6 +595,7 @@ def _build_file_answer(payload: dict) -> tuple[Invocation, ...]:
 # This is the complete executable registry.  Job files cannot extend it and no
 # record field is ever treated as argv or a filesystem path.
 COMMANDS: dict[str, CommandSpec] = {
+    "artifact-assemble": CommandSpec(_build_artifact_assemble, "never"),
     "artifact-delivered": CommandSpec(_build_artifact_delivered, "never"),
     "artifact-final": CommandSpec(_build_artifact_final, "never"),
     "artifact-new": CommandSpec(_build_artifact_new, "never"),

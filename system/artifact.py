@@ -293,11 +293,59 @@ def build_context(meta: dict, out_dir: Path) -> tuple[str, list[str]]:
     return "\n".join(lines).rstrip() + "\n", sources
 
 
+def build_framework_section(meta: dict) -> str:
+    """The researched slot structure for this format, as prompt text (v126).
+
+    Additive: returns "" whenever the format has no framework with slots, so
+    every other byte of the prompt is unchanged for formats that don't (yet)
+    have a researched structure. The per-slot "Covered by answers" line names
+    the answered question ids that already supply that slot's story function,
+    which tells the writer where the real material is — it is omitted entirely
+    when the artifact has no categories to score against.
+
+    Never raises: a broken/absent question bank degrades to no coverage lines,
+    never to a failed prompt build.
+    """
+    import format_frameworks  # noqa: PLC0415
+    import format_readiness  # noqa: PLC0415
+
+    framework = format_frameworks.get_or_none(str(meta.get("format", "")))
+    if not isinstance(framework, dict):
+        return ""
+    slots = framework.get("slots") or []
+    if not slots:
+        return ""
+
+    categories = list(meta.get("categories", []) or [])
+    matched_by_slot: dict[str, list[str]] = {}
+    if categories:
+        try:
+            result = format_readiness.compute_readiness(
+                framework, categories, format_readiness.load_bank_questions())
+            matched_by_slot = {row["id"]: row["matched"] for row in result["slots"]}
+        except Exception:  # noqa: BLE001 — enrichment must never break drafting
+            matched_by_slot = {}
+
+    lines = ["FORMAT FRAMEWORK (researched structure — fill from the context pack):"]
+    for i, slot in enumerate(slots, start=1):
+        lines.append(f"{i}. {slot.get('label', '')}: {slot.get('description', '')}")
+        if categories:
+            matched = matched_by_slot.get(str(slot.get("id", "")), [])
+            covered = ", ".join(matched) if matched else "none yet — draft from what's available"
+            lines.append(f"   Covered by answers: {covered}")
+    for note in framework.get("ai_context") or []:
+        lines.append(str(note))
+    return "\n".join(lines)
+
+
 def build_prompt(meta: dict, context: str) -> str:
     template_path = TEMPLATES_DIR / f"{meta['format']}.md"
     if not template_path.exists():
         raise SystemExit(f"Error: missing template {display_path(template_path)}")
     template = template_path.read_text(encoding="utf-8").strip()
+    framework_section = build_framework_section(meta)
+    if framework_section:
+        framework_section = "\n\n" + framework_section
     seed_rules = ""
     if meta.get("seed_source"):
         seed_rules = """
@@ -326,7 +374,7 @@ VOICE PRESERVATION (hard rules — this is where trust lives)
   build it from real scenes — not a stitched list of excerpts or Q&A.{seed_rules}
 
 FORMAT INSTRUCTIONS
-{template}
+{template}{framework_section}
 
 ARTIFACT DETAILS
 - Title: {meta['title']}

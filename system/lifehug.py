@@ -57,7 +57,8 @@ CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
 # the same kernel writer lock directly. Read-only commands never block behind
 # a long job.
 QUEUED_MUTATION_COMMANDS = frozenset({
-    "artifact", "compile", "monthly-research", "process-answer", "weekly-maintenance",
+    "artifact", "book-assemble", "compile", "monthly-research", "process-answer",
+    "weekly-maintenance",
 })
 READ_ONLY_COMMANDS = frozenset({
     "ai-status", "answer-ack-prompt", "book-chapter", "book-status",
@@ -424,6 +425,32 @@ def cmd_book_offers(args: argparse.Namespace) -> int:
     return book.print_book_offers(dry_run=not args.send)
 
 
+def cmd_book_assemble(args: argparse.Namespace) -> int:
+    """Compose a book-project Focus's drafted chapters into one manuscript
+    artifact under outputs/. A mutation (writes/versions an artifact), so it
+    goes through the durable job queue like other mutations (see
+    cmd_artifact); the in-process worker call (LIFEHUG_JOB_IN_PROCESS) calls
+    studio.assemble_book directly instead of re-queueing."""
+    if not _job_runner_active():
+        payload: dict[str, object] = {"focus": args.focus}
+        if args.force:
+            payload["force"] = True
+        return _queue_and_wait("artifact-assemble", payload)
+    import studio  # noqa: PLC0415
+
+    try:
+        result = studio.assemble_book(args.focus, force=bool(args.force))
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Assembled outputs/{result['slug']} v{result['version']} "
+          f"({result['chapters_included']} chapter(s) drafted, "
+          f"{result['chapters_placeholder']} placeholder(s), "
+          f"{result['words']:,} words)")
+    print(f"  {result['path']}")
+    return 0
+
+
 def cmd_quality_stats(_args: argparse.Namespace) -> int:
     return run_python("quality_profile.py", ["--show"])
 
@@ -531,8 +558,48 @@ def cmd_mirror_compile(args: argparse.Namespace) -> int:
     return run_python("mirror.py", flags)
 
 
+def cmd_artifact_readiness(argv: list[str]) -> int:
+    """`lifehug.py artifact readiness --format letter --subject Mom` (v126).
+
+    READ-ONLY: it inspects the question bank against a format framework and
+    prints, so it neither enqueues an artifact job nor takes the writer lock —
+    it dispatches like `roadmap`/`progress`, in-process. Always exits 0; this
+    is an informational view, and a missing subject is a nudge, not a failure.
+    """
+    import compose  # noqa: PLC0415
+    import format_readiness  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(
+        prog="lifehug.py artifact readiness",
+        description="Show how much material exists for a format before drafting it",
+    )
+    parser.add_argument("--format", default="letter",
+                        help="Format framework to score against (default: letter)")
+    parser.add_argument("--subject", help="Focus subject, e.g. Mom — resolved to its category")
+    parser.add_argument("--categories", help="Explicit category letters, e.g. K or K,L")
+    args = parser.parse_args(argv)
+
+    if not args.subject and not args.categories:
+        print("Nothing to score: pass --subject <focus> or --categories <letters>.")
+        return 0
+
+    try:
+        categories, _resolved = compose.resolve_categories(args.subject, args.categories)
+    except SystemExit:
+        # resolve_categories already explained the problem on stderr; this
+        # view stays exit-0 so a shell loop over focuses never aborts.
+        return 0
+
+    questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) \
+        if QUESTIONS_FILE.exists() else []
+    return format_readiness.print_readiness(args.format, categories, questions)
+
+
 def cmd_artifact(args: argparse.Namespace) -> int:
     artifact_args = ["--help"] if getattr(args, "artifact_help", False) else (args.artifact_args or ["--help"])
+    # Read-only artifact views run in-process: no job queue, no writer lock.
+    if artifact_args[0] == "readiness":
+        return cmd_artifact_readiness(artifact_args[1:])
     if not _job_runner_active() and artifact_args[0] in {
         "new", "save", "revise", "final", "promote-source", "delivered",
     }:
@@ -1530,6 +1597,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--send", action="store_true", help="Actually send + mark as offered (default is preview only)")
     p.set_defaults(func=cmd_book_offers)
 
+    p = sub.add_parser("book-assemble", help="Assemble a book-project Focus's drafted chapters into one manuscript artifact")
+    p.add_argument("--focus", required=True, help="Book Focus id or slug (e.g. 'my-life' or 'etherfuse')")
+    p.add_argument("--force", action="store_true", help="Write a new version even if the manuscript is unchanged")
+    p.set_defaults(func=cmd_book_assemble)
+
     p = sub.add_parser("quality-stats", help="Show answer quality profile")
     p.set_defaults(func=cmd_quality_stats)
 
@@ -1568,7 +1640,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Ingest an agent-written markdown body and write the page")
     p.set_defaults(func=cmd_mirror_compile)
 
-    p = sub.add_parser("artifact", help="Create occasion artifacts and promote final works as sources", add_help=False)
+    p = sub.add_parser("artifact",
+                       help="Create occasion artifacts, promote final works as sources, and "
+                            "check format readiness (`artifact readiness --format letter --subject Mom`)",
+                       add_help=False)
     p.add_argument("-h", "--help", dest="artifact_help", action="store_true")
     p.add_argument("artifact_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_artifact)

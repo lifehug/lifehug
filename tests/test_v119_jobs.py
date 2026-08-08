@@ -27,6 +27,7 @@ import vault_paths  # noqa: E402
 
 
 EXPECTED_COMMANDS = frozenset({
+    "artifact-assemble",
     "artifact-delivered",
     "artifact-final",
     "artifact-new",
