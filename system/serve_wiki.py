@@ -302,8 +302,8 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
 VIEW_GROUPS = [
     ("Do", ["queue", "candidates", "recommendations", "book"]),
     ("Reflect", ["mirror", "timeline", "graph"]),
-    ("Library", ["artifacts", "question-bank", "sources", "privacy"]),
-    ("System", ["status", "focuses", "coverage", "entities", "reports"]),
+    ("Library", ["foundation", "artifacts", "sources", "privacy"]),
+    ("System", ["status", "entities", "reports"]),
 ]
 
 
@@ -420,9 +420,6 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .focus-head {{ display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }}
     .focus-label {{ font-weight: 650; }}
     .focus-sub {{ color: #8a7a63; font-size: 13px; margin-top: 2px; }}
-    .cov-row {{ display: flex; align-items: center; gap: 10px; padding: 5px 0; }}
-    .cov-cat {{ width: 230px; font-weight: 650; flex-shrink: 0; }}
-    .cov-name {{ font-weight: 400; color: #8a7a63; font-size: 13px; }}
     details.qb-cat, details.art-group {{ margin-bottom: 8px; border: 1px solid #e5dfd5; border-radius: 8px; overflow: hidden; background: #fffdf9; }}
     details.qb-cat > summary, details.art-group > summary {{ list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
       padding: 10px 14px; background: #f4f0e8; }}
@@ -441,6 +438,17 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .rev-diff ins {{ background: #dcedc8; text-decoration: none; }}
     .rev-diff del {{ background: #f8d7d5; }}
     details.qb-cat > summary .barwrap {{ flex: 1; margin: 0; }}
+    details.fnd-focus {{ margin-bottom: 10px; border: 1px solid #e5dfd5; border-radius: 8px; background: #fffdf9; overflow: hidden; }}
+    details.fnd-focus > summary {{ list-style: none; cursor: pointer; padding: 12px 16px; }}
+    details.fnd-focus > summary::-webkit-details-marker {{ display: none; }}
+    details.fnd-focus > summary:hover {{ background: #f6f1e8; }}
+    details.fnd-focus[open] > summary {{ border-bottom: 1px solid #eee5d8; }}
+    details.fnd-focus > summary .focus-head::before {{ content: "\\25B8"; color: #9a8c75; font-size: 12px;
+      margin-right: 2px; transition: transform 0.15s; }}
+    details.fnd-focus[open] > summary .focus-head::before {{ transform: rotate(90deg); }}
+    .fnd-cats {{ padding: 10px 14px 12px; }}
+    .fnd-cats details.qb-cat {{ background: #fff; }}
+    h2.fnd-orphans {{ margin-top: 28px; }}
     .qb-list {{ list-style: none; padding: 8px 16px 12px; margin: 0; }}
     .qb-list li {{ padding: 3px 0; }}
     .qb-list .q-done {{ color: #6b5d49; }}
@@ -609,19 +617,75 @@ def _pct(x: float) -> str:
     return format(x, ".0%")
 
 
-def view_focuses():
-    roadmap = load_roadmap()
-    if not roadmap.get("focuses"):
+def _category_status(ratio: float) -> str:
+    """Category status colour — same thresholds as lifehug_core.compute_coverage."""
+    if ratio >= 0.7:
+        return "green"
+    if ratio >= 0.3:
+        return "yellow"
+    return "red"
+
+
+def _foundation_category(cid: str, name: str, qs: list[dict]) -> str:
+    """One collapsible category row: coverage bar, status badge, question list."""
+    total = len(qs)
+    answered = sum(1 for q in qs if q["answered"])
+    ratio = answered / total if total else 0
+    status = _category_status(ratio)
+    head = cid + (": " + name if name else "")
+    lis = []
+    for q in qs:
+        done = bool(q["answered"])
+        mark = "✓" if done else "○"
+        cls = "q-done" if done else "q-open"
+        lis.append(
+            f'<li class="{cls}"><span class="q-mark">{mark}</span>'
+            f'<span class="q-id">{html.escape(str(q["id"]))}</span>'
+            f'{html.escape(str(q["text"]))}</li>'
+        )
+    return (
+        '<details class="qb-cat"><summary>'
+        f'<span class="qb-cat-title">{html.escape(head)}</span>'
+        + _bar(ratio, f"{answered}/{total} · {_pct(ratio)}")
+        + " " + _badge(status, status)
+        + '</summary><ul class="qb-list">' + "".join(lis) + "</ul></details>"
+    )
+
+
+def view_foundation():
+    """Focus → category → question drill-down: the supply side on one screen.
+
+    Consolidates the old Focuses / Coverage / Question Bank views (v124).
+    Every number is computed live from the question bank, so the levels can
+    never disagree with each other the way the cached coverage.json could.
+    The focus bar stays a saturation measure (answered / tier target); the
+    category bars stay coverage measures (answered / total in the bank).
+    """
+    roadmap_data = load_roadmap()
+    if not roadmap_data.get("focuses"):
         try:
-            roadmap = rebuild_roadmap(write=False)
+            roadmap_data = rebuild_roadmap(write=False)
         except Exception:
-            roadmap = {"focuses": []}
-    focuses = roadmap.get("focuses", [])
-    if not focuses:
-        return ("Focuses", "<h1>Focuses</h1>" + _empty("No focuses yet — add one with <code>lifehug focus-new</code>."), False)
-    questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
-    rows = []
+            roadmap_data = {"focuses": []}
+    focuses = roadmap_data.get("focuses", [])
+    md = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
+    questions = parse_questions(md)
+    cat_names = parse_categories(md)
+    by_cat: dict[str, list[dict]] = {}
+    for q in questions:
+        by_cat.setdefault(str(q["category"]), []).append(q)
+    if not focuses and not by_cat:
+        return ("Foundation", "<h1>Foundation</h1>" + _empty(
+            "No material yet — add a question bank, or a focus with "
+            "<code>lifehug focus-new</code>."), False)
+
+    def cat_ratio(cid: str) -> float:
+        qs = by_cat.get(cid, [])
+        return (sum(1 for q in qs if q["answered"]) / len(qs)) if qs else 0.0
+
+    parts = ["<h1>Foundation</h1>"]
     total_answered = total_target = 0
+    claimed: set[str] = set()
     for focus in focuses:
         fill = focus_fill(focus, questions)
         total_answered += fill["answered"]
@@ -640,79 +704,39 @@ def view_focuses():
             badges += " " + _badge(phase)
         badges += " " + _badge(tag, tag.lower())
         meta = (html.escape(str(focus.get("objective", ""))) + " → "
-                + html.escape(str(focus.get("deliverable", "-"))) + " ["
-                + html.escape(",".join(focus.get("categories", []))) + "]")
+                + html.escape(str(focus.get("deliverable", "-"))))
         barlabel = f"{fill['answered']}/{fill['target']} · {_pct(sat)} · {label}"
-        rows.append(
-            '<div class="focus-row"><div class="focus-head">'
+        cats = list(focus.get("categories", []))
+        claimed.update(cats)
+        # Least-covered first within the focus — the top row is where the
+        # story still needs you (the old Coverage view's ordering, kept).
+        cats.sort(key=cat_ratio)
+        cat_html = "".join(
+            _foundation_category(c, (cat_names.get(c) or {}).get("name", ""),
+                                 by_cat.get(c, []))
+            for c in cats)
+        parts.append(
+            '<details class="fnd-focus"><summary>'
+            '<div class="focus-head">'
             f'<span class="focus-label">{lbl}</span> {badges}</div>'
             + _bar(sat, barlabel)
-            + f'<div class="focus-sub">{meta}</div></div>'
+            + f'<div class="focus-sub">{meta}</div>'
+            + "</summary>"
+            + '<div class="fnd-cats">'
+            + (cat_html or _empty("No categories in this focus yet."))
+            + "</div></details>"
         )
-    overall = total_answered / total_target if total_target else 0
-    foot = (f'<p class="muted">Overall: {total_answered}/{total_target} answered '
-            f'({_pct(overall)} toward current targets)</p>')
-    return ("Focuses", "<h1>Focuses</h1>" + "".join(rows) + foot, False)
-
-
-def view_coverage():
-    cats = (read_json(COVERAGE_FILE, default={}) or {}).get("categories", {})
-    if not cats:
-        return ("Coverage", "<h1>Coverage</h1>" + _empty("No coverage data yet."), False)
-    names = parse_categories(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else {}
-    items = []
-    for cid, c in cats.items():
-        total = c.get("total", 0)
-        answered = c.get("answered", 0)
-        ratio = answered / total if total else 0
-        name = (names.get(cid) or {}).get("name", "")
-        items.append((ratio, cid, name, answered, total, c.get("status", "red")))
-    items.sort(key=lambda x: x[0])
-    rows = [
-        '<div class="cov-row"><span class="cov-cat">'
-        + html.escape(cid) + (f' <span class="cov-name">({html.escape(name)})</span>' if name else "")
-        + "</span>"
-        + _bar(ratio, f"{answered}/{total} · {_pct(ratio)}")
-        + " " + _badge(status, status) + "</div>"
-        for ratio, cid, name, answered, total, status in items
-    ]
-    return ("Coverage", "<h1>Coverage</h1>" + "".join(rows), False)
-
-
-def view_question_bank():
-    if not QUESTIONS_FILE.exists():
-        return ("Question Bank", "<h1>Question Bank</h1>" + _empty("No question bank."), False)
-    md = QUESTIONS_FILE.read_text(encoding="utf-8")
-    questions = parse_questions(md)
-    cats = parse_categories(md)
-    by_cat: dict[str, list[dict]] = {}
-    for q in questions:
-        by_cat.setdefault(str(q["category"]), []).append(q)
-    parts = ["<h1>Question Bank</h1>"]
-    for cid in sorted(by_cat):
-        qs = by_cat[cid]
-        answered = sum(1 for q in qs if q["answered"])
-        total = len(qs)
-        ratio = answered / total if total else 0
-        name = (cats.get(cid) or {}).get("name", "")
-        head = cid + (": " + name if name else "")
-        lis = []
-        for q in qs:
-            done = bool(q["answered"])
-            mark = "✓" if done else "○"
-            cls = "q-done" if done else "q-open"
-            lis.append(
-                f'<li class="{cls}"><span class="q-mark">{mark}</span>'
-                f'<span class="q-id">{html.escape(str(q["id"]))}</span>'
-                f'{html.escape(str(q["text"]))}</li>'
-            )
-        parts.append(
-            '<details class="qb-cat"><summary>'
-            f'<span class="qb-cat-title">{html.escape(head)}</span>'
-            + _bar(ratio, f"{answered}/{total} · {_pct(ratio)}")
-            + '</summary><ul class="qb-list">' + "".join(lis) + "</ul></details>"
-        )
-    return ("Question Bank", "".join(parts), False)
+    orphans = sorted(c for c in by_cat if c not in claimed)
+    if orphans:
+        parts.append('<h2 class="fnd-orphans">Not part of any focus</h2>')
+        parts.extend(
+            _foundation_category(c, (cat_names.get(c) or {}).get("name", ""), by_cat[c])
+            for c in orphans)
+    if total_target:
+        overall = total_answered / total_target
+        parts.append(f'<p class="muted">Overall: {total_answered}/{total_target} answered '
+                     f'({_pct(overall)} toward current targets)</p>')
+    return ("Foundation", "".join(parts), False)
 
 
 def view_candidates():
@@ -1057,7 +1081,7 @@ def _hub_card_perennial():
         f"{perennial_id} has come around again",
         "A perennial question is due — you'll answer it with last year's "
         "answer alongside, so the contrast becomes part of the story.",
-        href="/views/question-bank", cta="See the question bank")
+        href="/views/foundation", cta="Open the Foundation")
 
 
 def _hub_card_second_voice():
@@ -2674,15 +2698,14 @@ VIEWS = [
     ("timeline", "Timeline", view_timeline),
     # Book assembly — the flagship-deliverable surface.
     ("book", "Book Assembly", view_book),
-    # Focus block: focuses and their recommendations.
-    ("focuses", "Focuses", view_focuses),
+    # Foundation: the consolidated supply-side review (v124) — absorbed the
+    # separate Focuses / Coverage / Question Bank views.
+    ("foundation", "Foundation", view_foundation),
     ("recommendations", "Focus Recommendations", view_recommendations),
     # The question surfaces.
-    ("question-bank", "Question Bank", view_question_bank),
     ("candidates", "Question Candidates", view_candidates),
     ("queue", "Question Queue", view_queue),
     # The rest.
-    ("coverage", "Coverage", view_coverage),
     ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
     ("artifacts", "Artifacts", view_artifacts),
@@ -2691,6 +2714,14 @@ VIEWS = [
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 
+# Old bookmarks and links keep working: the three views Foundation absorbed
+# (v124) redirect permanently to it.
+LEGACY_VIEW_REDIRECTS = {
+    "focuses": "foundation",
+    "coverage": "foundation",
+    "question-bank": "foundation",
+}
+
 # One-line explainer shown under each view's title: what the page is and what the
 # data on it means. Plain text (may include simple inline HTML); injected after
 # the <h1> so empty-state pages get it too.
@@ -2698,10 +2729,8 @@ VIEW_DESCRIPTIONS = {
     "status": "A live snapshot of the whole system — one card per moving part of the Loop: what pass you're on, how much you've answered, how many candidates and sources are waiting, and whether the weekly queue is being delivered.",
     "mirror": "What the archive has noticed about you. The weekly synthesis distills the classifier's contradictions, self-understanding insights, and stated positions into a short edition — tensions presented as coexisting truths in your own words, every claim cited. The raw signals stay browsable underneath. A place to visit and sit with, not a feed.",
     "book": "The manuscript view. Every book-project Focus becomes a card; each of its question categories becomes a chapter with an answered ratio, a scene-depth score (McAdams' 5-slot probe from the classifier), a readiness verdict, and either the next few gap questions to record or the artifact command to draft it. This is the flagship deliverable made visible.",
-    "focuses": "Everything you're deliberately building toward — people, themes, or books. Each bar shows how full a Focus is against its target (answered / target), its tier, and whether it's early, developing, ready to draft, or saturated.",
-    "coverage": "How much of each question category you've answered. The bar and colour show your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+). Categories are sorted least-covered first, so the top of the list is where the story still needs you.",
+    "foundation": "The raw material behind your stories — every Focus you're building toward, how deep it runs against its target, and where the graph is thin. Expand a Focus to see its categories: the bar is answered/total and the colour your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+) — least-covered first. Expand a category to see every question, answered (✓) and open (○). Artifacts are what you make; this is what you make them from.",
     "graph": "Your life as a graph. Each node is a wiki page (people, places, periods, themes, Focuses); size reflects how many sources mention it and edges connect subjects that share sources. Click any node to open its page.",
-    "question-bank": "The full master list of questions by category — answered (✓) and still open (○). This is the raw pool the daily question and the weekly planner draw from; it only ever grows.",
     "candidates": "Follow-up questions the weekly classifier proposed from your answers and stories, grouped by review status. These are <em>not</em> daily questions yet — they wait here until promoted into the question bank.",
     "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
@@ -2920,6 +2949,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path.startswith("/views/"):
             slug = parsed.path[len("/views/"):].strip("/")
+            legacy_target = LEGACY_VIEW_REDIRECTS.get(slug)
+            if legacy_target:
+                self.send_response(301)
+                self.send_header("Location", f"/views/{legacy_target}")
+                self.end_headers()
+                return
             builder = VIEW_MAP.get(slug)
             if not builder:
                 self.send_html("Not found", "<h1>Not found</h1>", status=404)
