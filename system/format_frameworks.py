@@ -24,6 +24,14 @@ vault is chosen, so this module defers importing ``lifehug_core`` until a
 registry function is actually called, instead of at module import time.
 That keeps ``import format_frameworks`` (and therefore jobs.py's own
 module-level ``import format_frameworks``) free of side effects.
+
+Caveat for direct embedders: the side effect is deferred, not eliminated —
+the FIRST registry call imports lifehug_core and binds the process to the
+resolved vault. A caller using ``jobs.configure(root)`` in-process must keep
+``LIFEHUG_VAULT_ROOT`` consistent with that root (the CLI does this via
+``bootstrap_cli_vault_root``); otherwise the first ``valid_formats()`` call
+raises the already-bound RuntimeError. Tests can instead set TEMPLATES_DIR
+directly to bypass lifehug_core entirely.
 """
 
 from __future__ import annotations
@@ -254,12 +262,27 @@ def valid_formats() -> tuple[str, ...]:
 
 
 def get(format_id: str) -> dict:
-    """Return the validated framework spec for ``format_id``."""
+    """Return the validated framework spec for ``format_id``.
+
+    Degraded mode (no spec files on disk, e.g. mid-update): unlike
+    ``valid_formats()``, which falls back to the canonical id list, there is
+    no spec content to return — callers that can proceed without slots
+    should use ``get_or_none`` instead of catching KeyError.
+    """
     frameworks = load_frameworks()
     try:
         return frameworks[format_id]
     except KeyError:
-        known = ", ".join(sorted(frameworks)) or "(none loaded)"
-        raise KeyError(
-            f"unknown format {format_id!r}; known formats: {known}"
-        ) from None
+        known = ", ".join(sorted(frameworks))
+        detail = (f"known formats: {known}" if known else
+                  "no framework specs found on disk (vault mid-update?)")
+        raise KeyError(f"unknown format {format_id!r}; {detail}") from None
+
+
+def get_or_none(format_id: str) -> dict | None:
+    """Like ``get`` but returns None for unknown ids and in degraded mode.
+
+    The right accessor for optional enrichment (readiness panels, drafting
+    context): the caller renders without slots instead of failing.
+    """
+    return load_frameworks().get(format_id)
