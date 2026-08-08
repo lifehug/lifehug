@@ -68,12 +68,20 @@ class WikiViewsTests(unittest.TestCase):
     def test_menu_order(self):
         # v75 inserts 'book' immediately after the system overview pair so the
         # manuscript surface is one of the first things visible in the menu.
+        # v124 consolidates focuses/coverage/question-bank into foundation.
         order = [slug for slug, _, _ in serve_wiki.VIEWS]
         self.assertEqual(order, [
-            "status", "mirror", "graph", "timeline", "book", "focuses", "recommendations",
-            "question-bank", "candidates", "queue",
-            "coverage", "entities", "sources", "artifacts", "reports", "privacy",
+            "status", "mirror", "graph", "timeline", "book", "foundation",
+            "recommendations", "candidates", "queue",
+            "entities", "sources", "artifacts", "reports", "privacy",
         ])
+
+    def test_legacy_view_slugs_redirect_to_foundation(self):
+        # The absorbed views are gone from the registry but their URLs
+        # permanently redirect, so old bookmarks and hub links keep working.
+        for slug in ("focuses", "coverage", "question-bank"):
+            self.assertNotIn(slug, serve_wiki.VIEW_MAP)
+            self.assertEqual(serve_wiki.LEGACY_VIEW_REDIRECTS[slug], "foundation")
 
     def test_layout_wide_flag_and_menu(self):
         out = serve_wiki.layout("T", "<h1>x</h1>", wide=True).decode()
@@ -168,25 +176,67 @@ class WikiViewsTests(unittest.TestCase):
             '---\ntitle: "Emma"\ntype: person\nsources:\n  - "answers/A1.md"\nsources_count: 1\nrelated:\n  - "[[my-life]]"\n---\n# Emma\n')
         self._write("wiki/index.md", "# Index\n")
 
-    def test_focuses_bars_and_wiki_link(self):
+    def test_foundation_focus_level(self):
+        # Focus rows keep everything the old Focuses view showed: label with
+        # wiki link, tier/phase badges, saturation bar, objective→deliverable.
         self._populate()
-        _, body, _ = self._view("focuses")
+        _, body, _ = self._view("foundation")
         self.assertIn("My Life", body)
         self.assertIn("Etherfuse", body)
         self.assertIn("bar-fill", body)
         self.assertIn("finishing", body)
         self.assertIn('href="/page/wiki/life/my-life.md"', body)
+        self.assertIn('<details class="fnd-focus">', body)
 
-    def test_coverage_sorted_lowest_first(self):
+    def test_foundation_categories_nested_with_live_status(self):
+        # Category rows are computed live from the question bank (never the
+        # cached coverage.json): A is 1/2 → yellow, F is 2/2 → green. Names
+        # come from the bank's category headings.
         self._populate()
-        _, body, _ = self._view("coverage")
-        self.assertLess(body.index('cov-cat">A'), body.index('cov-cat">F'))
+        # Poison the cache to prove the view doesn't read it.
+        serve_wiki.COVERAGE_FILE = self._write("coverage.json", {"categories": {
+            "A": {"total": 9, "answered": 0, "status": "red"}}})
+        _, body, _ = self._view("foundation")
+        self.assertIn("A: Origins", body)
+        self.assertIn("F: The Problem", body)
+        self.assertIn("1/2", body)
+        self.assertIn("2/2", body)
+        self.assertIn("yellow", body)
+        self.assertIn("green", body)
+        self.assertNotIn("0/9", body)
 
-    def test_coverage_shows_category_names(self):
+    def test_foundation_questions_nested(self):
         self._populate()
-        _, body, _ = self._view("coverage")
-        # Each letter is annotated with its category title in parentheses.
-        self.assertIn('cov-name">(Origins)', body)
+        _, body, _ = self._view("foundation")
+        self.assertIn("✓", body)
+        self.assertIn("○", body)
+        self.assertIn("A1", body)
+        self.assertIn("Earliest?", body)
+
+    def test_foundation_starts_collapsed(self):
+        self._populate()
+        _, body, _ = self._view("foundation")
+        self.assertNotIn("<details open", body)
+        self.assertNotIn('<details class="fnd-focus" open', body)
+        self.assertNotIn('<details class="qb-cat" open', body)
+
+    def test_foundation_orphan_categories_listed(self):
+        # A bank category no focus claims still shows, under its own heading.
+        self._populate()
+        qbank = self._write("question-bank.md",
+            "## A: Origins (Childhood)\n- [x] A1: Earliest? *(2026-01-01)*\n- [ ] A2: Where?\n"
+            "## F: The Problem (Etherfuse Story)\n- [x] F1: What?\n- [x] F2: Why you?\n"
+            "## Z: Loose Ends\n- [ ] Z1: What else?\n")
+        serve_wiki.QUESTIONS_FILE = qbank
+        _, body, _ = self._view("foundation")
+        self.assertIn("Not part of any focus", body)
+        self.assertIn("Z: Loose Ends", body)
+
+    def test_foundation_overall_footer(self):
+        self._populate()
+        _, body, _ = self._view("foundation")
+        # my-life target 4 + etherfuse target 2 = 6; answered 1 + 2 = 3.
+        self.assertIn("Overall: 3/6 answered", body)
 
     def test_candidates_menu_label(self):
         label = dict((slug, lbl) for slug, lbl, _ in serve_wiki.VIEWS)["candidates"]
@@ -200,23 +250,6 @@ class WikiViewsTests(unittest.TestCase):
     def test_description_injected_after_h1(self):
         body = serve_wiki._with_description("<h1>Coverage</h1><p>x</p>", "hello desc")
         self.assertEqual(body, '<h1>Coverage</h1><p class="view-desc">hello desc</p><p>x</p>')
-
-    def test_question_bank_markers(self):
-        self._populate()
-        _, body, _ = self._view("question-bank")
-        self.assertIn("A: Origins", body)
-        self.assertIn("✓", body)
-        self.assertIn("○", body)
-
-    def test_question_bank_categories_collapsible_and_collapsed(self):
-        self._populate()
-        _, body, _ = self._view("question-bank")
-        # Each category is a native <details> with a <summary> (overview) …
-        self.assertIn('<details class="qb-cat">', body)
-        self.assertIn("<summary>", body)
-        # … and starts collapsed (no open attribute on any category).
-        self.assertNotIn("<details class=\"qb-cat\" open", body)
-        self.assertNotIn("<details open", body)
 
     def test_candidates_grouped_by_status(self):
         self._populate()

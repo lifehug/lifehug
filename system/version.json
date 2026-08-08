@@ -1,7 +1,7 @@
 {
-  "version": 123,
-  "released": "2026-08-06",
-  "changelog": "v123: correction and retraction filenames are now short, portable identifiers instead of embedding full question text. New files use a bounded target-id label plus a collision-safe digest, and `source-filenames-repair` safely previews or migrates legacy names along with their manifest, classification, and generated-reference indexes before a hosted-vault import.",
+  "version": 124,
+  "released": "2026-08-08",
+  "changelog": "v124: the Foundation view — Focuses, Coverage, and the Question Bank were three pages telling one story from the same source, so they are now one screen. Foundation shows the raw material behind your stories as a drill-down: each Focus with its tier, phase, and saturation bar against its target; expand it for its categories (answered/total, RED/YELLOW/GREEN, least-covered first); expand a category for every question, answered and open. All numbers are computed live from the question bank, so the levels can never disagree the way the cached coverage.json could let the old pages drift apart. Categories no focus claims appear under 'Not part of any focus' instead of silently hiding. The three old URLs (/views/focuses, /views/coverage, /views/question-bank) permanently redirect to /views/foundation, so bookmarks and hub links keep working.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
