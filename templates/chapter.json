@@ -1,0 +1,69 @@
+{
+  "id": "chapter",
+  "label": "Chapter",
+  "kind": "single",
+  "summary": "A period of your life turned into a memoir chapter — a bounded stretch of time with its own shape, key scenes, and a turning point.",
+  "template": "templates/chapter.md",
+  "subject_kind": "categories",
+  "composable": true,
+  "length": {"min_words": 800, "max_words": 2500},
+  "slots": [
+    {
+      "id": "opening_foundation",
+      "label": "Foundation",
+      "description": "Name and bound the chapter — what you'd title it, how it began, how it ended.",
+      "story_functions": ["foundation"],
+      "min_answers": 1
+    },
+    {
+      "id": "the_dream",
+      "label": "Life Structure",
+      "description": "The pillars of those years — work, relationships, home, a guiding Dream — which was the keystone and what was neglected.",
+      "story_functions": ["meaning"],
+      "min_answers": 1
+    },
+    {
+      "id": "central_scene",
+      "label": "Central Scene",
+      "description": "A typical day, waking to sleeping, and the sensory texture of the period — where you lived, what things cost, the music, the rooms.",
+      "story_functions": ["scene"],
+      "min_answers": 2
+    },
+    {
+      "id": "turning_point",
+      "label": "Turning Point",
+      "description": "The key scenes — a high point, a low point, a turning point — each with what happened, who was there, what you felt, what it says about you.",
+      "story_functions": ["turning_point"],
+      "min_answers": 1
+    },
+    {
+      "id": "transition_tension",
+      "label": "Transition Out",
+      "description": "The change itself and the inner transition — when it ended inside you, what you let go of, and the neutral zone between the old life and the new.",
+      "story_functions": ["tension"],
+      "min_answers": 1
+    },
+    {
+      "id": "look_back",
+      "label": "Look Back",
+      "description": "The later evaluative pass — how you make peace with this chapter now and what it gave you that you only see from here.",
+      "story_functions": ["meaning"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "Slots implement the synthesized six-step period arc (research.md §4): McAdams's table-of-contents naming, Levinson's life-structure/Dream construct, oral-history typical-day reconstruction, McAdams's five-slot key-scene probe, Bridges's two-layer transition (ending + neutral zone), and Butler's evaluative life-review pass — the step with the strongest well-being evidence.",
+    "citations": [
+      "McAdams & McLean 2013 — narrative identity chapters and eight key scenes (high point, low point, turning point) organize autobiographical recall",
+      "Levinson 1978 — 'life structure' and 'the Dream' as an organizing developmental construct that is pursued, modified, or abandoned across a period",
+      "Bridges 1980 — transitions have three phases: an ending, a neutral zone, and a new beginning; the neutral zone is the most under-captured memoir material",
+      "Butler 1963 — the evaluative 'life review' integration pass carries the strongest meta-analytic support for well-being gain, more than recall alone"
+    ]
+  },
+  "ai_context": [
+    "When the key scenes carry a redemption arc (hardship into growth), let it surface in the look-back reflection — never impose the frame if the source material doesn't offer it.",
+    "Anchor time relative to life landmarks (a move, a birth, a job change) rather than calendar years when the source itself doesn't give a date.",
+    "Track 'the Dream' (a guiding ambition for the period) if present in the material — whether it was pursued, modified, or let go — without editorializing on which was the right outcome."
+  ]
+}

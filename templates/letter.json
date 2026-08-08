@@ -1,0 +1,59 @@
+{
+  "id": "letter",
+  "label": "Letter",
+  "kind": "single",
+  "summary": "A heartfelt letter to someone in your life, built from real moments you've already told.",
+  "template": "templates/letter.md",
+  "subject_kind": "person",
+  "composable": true,
+  "length": {"min_words": 200, "max_words": 600},
+  "slots": [
+    {
+      "id": "opening_moment",
+      "label": "Opening Moment",
+      "description": "A specific moment or image to open on — a callback to a shared memory, not an abstract feeling. What the letter opens with sets whether it reads as earned or generic.",
+      "story_functions": ["scene"],
+      "min_answers": 2
+    },
+    {
+      "id": "who_they_are",
+      "label": "Who They Are",
+      "description": "Who this person is beyond their role in the author's life — the thing the author actually sees in them.",
+      "story_functions": ["who_they_are"],
+      "min_answers": 1
+    },
+    {
+      "id": "shared_history",
+      "label": "Shared History",
+      "description": "The 2-4 specific anecdotes the letter is built from — real scenes, not summarized habits.",
+      "story_functions": ["shared_history"],
+      "min_answers": 2
+    },
+    {
+      "id": "what_i_see_in_them",
+      "label": "What I See in Them",
+      "description": "What the author admires or notices that this person may not fully see in themselves.",
+      "story_functions": ["what_i_see_in_them"],
+      "min_answers": 1
+    },
+    {
+      "id": "what_i_want_them_to_know",
+      "label": "What I Want Them to Know",
+      "description": "The honest, earned thing the letter lands on — not a tidy bow, the thing that's actually true.",
+      "story_functions": ["what_i_want_them_to_know"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "The gratitude-letter literature (Seligman 2005) found its largest acute effects came from concrete, specific detail — what the person did and how it affected the author's life — not general sentiment, which is why this format opens on a scene rather than a feeling. McAdams' five-slot scene probe is the mechanism for the 2-4 anecdotes the template calls for. Slot order follows the escalating self-disclosure structure Aron et al. (1997) found does the actual work of closeness: who they are, then shared history, then admiration, before naming what needs to be said.",
+    "citations": [
+      "Seligman, Steen, Park & Peterson 2005 — gratitude letter/visit produced the largest acute happiness gains of five tested positive-psychology exercises, driven by concrete specificity; gains attenuate by 6 months.",
+      "McAdams, Life Story Interview II — five-slot scene probe (what happened/where/who/felt/what it says about you) is the depth mechanism for anecdotes.",
+      "Aron et al. 1997 (PSPB) — escalating, reciprocal self-disclosure structure produces closeness; the structure itself does the work, not any single question's content."
+    ]
+  },
+  "ai_context": [
+    "When source material supports it, name the concrete effect this person's action or presence had on the author's life — what they did, how it changed things — rather than general praise; this specific-effect naming is what the gratitude-letter research found carries the emotional charge."
+  ]
+}

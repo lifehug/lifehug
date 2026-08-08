@@ -436,6 +436,7 @@ class DurableJobsTests(unittest.TestCase):
             "vault_contract.json",
             "vault_paths.py",
             "file_answer_bg.sh",
+            "format_frameworks.py",
         ):
             shutil.copy2(SYSTEM / name, self.framework / name)
         controlled_tmp = self.tmp / "controlled-tmp"

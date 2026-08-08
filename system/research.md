@@ -240,3 +240,104 @@ provider imports must never terminate the process.
 **Relationships**: Aron et al. 1997 (36 Questions, PSPB); Gottman (love maps); StoryCorps Great Questions; Neimeyer (continuing bonds); Baines (ethical wills).
 **Oral history practice**: Smithsonian Interviewing Guide; Moyer, Step-by-Step Guide; Morrissey (two-sentence rule); Oral History Association best practices.
 **Structure reference memoirs** (unchanged from v1): *Educated*, *Open*, *Kitchen Confidential*, *Born a Crime*, *The Glass Castle*, *Shoe Dog*, *The Hard Thing About Hard Things*.
+
+## 10. Format Frameworks (v125)
+
+Every artifact format carries a machine-readable **framework spec** at
+`templates/<format>.json`, sitting beside its prose template
+(`templates/<format>.md`). The `.md` remains the model-facing drafting
+instructions, injected verbatim; the `.json` encodes what the research says
+the format *is*: ordered slots (each mapped to story functions from
+`lifehug_core.STORY_FUNCTIONS`), length targets, readiness thresholds
+(defaults mirror book.py's READY=0.70 / DEVELOPING=0.40), the researched
+basis with citations, and optional extra AI drafting context. The single
+loader is `system/format_frameworks.py`; `compose.VALID_FORMATS` and the
+job-queue validation both derive from it, so a new format is exactly two
+files — `<format>.md` (how to write it) + `<format>.json` (what it's made
+of) — and every surface picks it up. Research each new format before
+encoding it; the subsections below are the pattern.
+
+### letter
+The gratitude-letter paradigm (Seligman et al. 2005) found its largest acute
+happiness gains among five tested positive-psychology exercises came from
+concrete specificity — naming what the person did and how it changed the
+author's life — not general sentiment; the effect measurably fades by six
+months, so the format asks for presence now, not permanence. McAdams'
+five-slot scene probe supplies the depth mechanism for the template's 2-4
+anecdotes. Slot ordering (who they are → shared history → what's admired →
+what I want them to know) follows Aron et al.'s (1997) finding that
+escalating, reciprocal self-disclosure — not any single question's content —
+is what produces closeness.
+
+### unsent_letter
+Continuing bonds theory (Klass, Silverman & Nickman 1996) overturned the
+older "detachment" model of grief: maintaining an ongoing bond with someone
+who died is normal, often adaptive — the reason this format is framed as a
+resumed conversation, never a goodbye. For the living-but-estranged case,
+expressive-writing research shows unsent letters help process unfinished
+business (Frattaroli 2006: d≈.15 across 146 RCTs) — with a boundary
+condition now encoded in the spec's ai_context: forcing a positive reframe
+underperforms open framing, and deep-processing writing under roughly two
+months after a fresh rupture shows null or harmful effects.
+
+### legacy_letter
+The ethical-will (tzava'ah) tradition is roughly 3,500 years old; Barry
+Baines' modern lay-practice revival insists what the template already
+enforces: a value without an episode is a poster, not a legacy — values and
+lessons must be anchored to real decisions and their cost. Baines separates
+forgiveness from forward-looking blessing as distinct movements; the spec
+resolves the template's ordering rule ("end with the blessing, not the
+forgiveness") by drafting forgiveness fourth and hopes_and_blessings last.
+
+### chapter
+Slots follow the six-step period arc (§4): name & bound (McAdams TOC),
+life-structure snapshot with "the Dream" (Levinson), a typical-day scene
+(oral history), key scenes via the five-slot probe (McAdams), the two-layer
+transition out (Bridges — ending plus neutral zone), and a later
+evaluative-integration look-back (Butler) — the pass carrying the strongest
+well-being evidence. central_scene requires 2 answers because a single
+typical-day pass rarely yields both texture and a distinct key scene.
+Redemption arcs (McAdams) are offered in the look-back, never imposed.
+
+### essay
+Slots operationalize Gornick's situation-vs-story split: the_position is
+"the thing one has come to say"; evidence_scenes supplies the lived material
+a position piece still needs; counter_tension steelmans the strongest
+opposing view, which persuasion research shows increases credibility more
+than an undefended assertion; earned_resolution is where the argument lands,
+grown out of the evidence rather than stacked on top of it. Unlike chapter,
+argument and generalization are licensed here.
+
+### book
+The book has no static slots — it composes from the live chapter map
+(book.py BOOK_DELIVERABLES), applying §2a's hybrid thematic-chronological
+structure: chronological backbone, thematic chapters, each independently
+scored against the same 0.70/0.40 thresholds. Chapter boundaries track
+McAdams's life-chapters exercise (2-7 chapters, re-run yearly), so the
+book's table of contents is expected to evolve rather than being fixed at
+creation. Drafting the book is the assemble step: chapters stitched into a
+concrete versioned manuscript piece.
+
+### post
+The hook/development/takeaway split matches the classic personal-essay arc
+and §2d's situation-vs-story distinction: development is where situation
+turns into story mid-piece, takeaway is where it's finally stated. The
+concreteness effect (Sadoski, Goetz & Rodriguez 2000) is why the hook must
+be a scene, not a topic sentence — abstract openings measurably lose readers
+before the story starts. One story, one point (Graham's essay test).
+
+### instagram
+A concrete moment, then one line of reflection. The moment slot exists so
+the caption doesn't open on a generality (concreteness effect, Sadoski et
+al. 2000); the meaning slot stays small on purpose — Orwell's
+concrete-over-abstract discipline argues against inflating the reflection
+into a lesson the material hasn't earned. Narrative transportation (Green &
+Brock 2000) predicts the moment carries the emotional weight.
+
+### tweet
+One image, one point — the 280-character ceiling makes it load-bearing.
+Specific, imageable language is recalled and rated more interesting than
+abstract language (Sadoski et al. 2000); Graham's heuristic (surprise
+without generality is gossip, generality without surprise is a textbook)
+scales down: the point slot makes the moment read as a claim, not just an
+anecdote. A two-slot micro-framework, not a theory of the tweet.

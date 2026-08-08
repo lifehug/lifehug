@@ -1,0 +1,59 @@
+{
+  "id": "legacy_letter",
+  "label": "Legacy Letter",
+  "kind": "single",
+  "summary": "A letter passing on your values, lessons, and blessing to someone who matters, while you can still say it yourself.",
+  "template": "templates/legacy_letter.md",
+  "subject_kind": "person",
+  "composable": true,
+  "length": {"min_words": 400, "max_words": 1400},
+  "slots": [
+    {
+      "id": "values",
+      "label": "Values",
+      "description": "What the author actually organized their life around, pulled from real decisions in the context pack — a value without an episode is a poster, not a legacy.",
+      "story_functions": ["value"],
+      "min_answers": 2
+    },
+    {
+      "id": "lessons",
+      "label": "Lessons",
+      "description": "What life taught them, told through where it was learned; the hard-won lessons matter most, including what the lesson cost.",
+      "story_functions": ["meaning"],
+      "min_answers": 2
+    },
+    {
+      "id": "gratitude",
+      "label": "Gratitude",
+      "description": "What this specific recipient gave the author, named through real moments — the movement recipients reread most.",
+      "story_functions": ["shared_history"],
+      "min_answers": 2
+    },
+    {
+      "id": "forgiveness",
+      "label": "Forgiveness",
+      "description": "The rarest movement, in both directions where true: what the author asks forgiveness for, and what they extend it for. Only what the material supports — never fabricated contrition.",
+      "story_functions": ["tension"],
+      "min_answers": 1
+    },
+    {
+      "id": "hopes_and_blessings",
+      "label": "Hopes and Blessings",
+      "description": "What the author wishes for this person, said plainly as blessing, not instruction — the closing movement that leaves the recipient held.",
+      "story_functions": ["what_i_want_them_to_know"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "The ethical-will/tzava'ah tradition (roughly 3,500 years old) and Barry Baines' modern revival of it rest on the same claim Lifehug's context pack already satisfies: legacy lands when it's tied to real decisions and named moments, not abstract advice. Baines' framework treats forgiveness and forward-looking blessing as distinct movements, which is why they're sequenced rather than merged. The template's own closing rule — end on the blessing, not the forgiveness — is honored by placing hopes_and_blessings last among the five slots.",
+    "citations": [
+      "Baines, Ethical Wills: Putting Your Values on Paper — the modern authority reviving the tzava'ah tradition for lay use; values and lessons must be anchored to real decisions and cost, not stated as maxims.",
+      "Tzava'ah tradition (~3,500 years, Jewish ethical wills) — passing values, wisdom, and blessing to descendants while the elder can still say it themselves, distinct from a legal or financial will.",
+      "Seligman et al. 2005; Klass, Silverman & Nickman 1996 (adjacent) — naming specific recipient-given moments (gratitude movement) over general praise carries more weight, consistent with the specificity effect found in gratitude-letter and continuing-bonds writing."
+    ]
+  },
+  "ai_context": [
+    "Draft in this slot order — values, lessons, gratitude, forgiveness, hopes_and_blessings — so the letter ends on the blessing regardless of how the five movements are numbered elsewhere; the template's closing instruction (end on the blessing, not the forgiveness) takes precedence over the movement list's own numbering."
+  ]
+}

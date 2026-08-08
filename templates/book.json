@@ -1,0 +1,22 @@
+{
+  "id": "book",
+  "label": "Book",
+  "kind": "composite",
+  "summary": "The full life-story book, compiled from Focus chapters — no fixed slots; readiness is computed live from the chapter map.",
+  "template": "templates/chapter.md",
+  "subject_kind": "categories",
+  "composable": false,
+  "deliverables": ["book", "chapter", "memoir", "manuscript"],
+  "length": {"min_words": 0, "max_words": 0},
+  "slots": [],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "Chapters-as-slots rather than a fixed slot list because the hybrid thematic-chronological structure (research.md §2a) generates chapters dynamically from the question bank's category map; book.py composes these live using the same READY/DEVELOPING thresholds and scene-slot readiness math as individual chapters, so the book's table of contents evolves as material accumulates instead of being fixed at creation.",
+    "citations": [
+      "research.md §2a — hybrid thematic-chronological structure: chronological backbone, thematic chapters, each needing a central scene, tension, turning point, and reflection",
+      "McAdams life-chapters exercise — 2-7 chapters, each titled, each transition articulated, re-run yearly as the book's table of contents evolves",
+      "book.py BOOK_DELIVERABLES / READY=0.70 / DEVELOPING=0.40 / WORDS_PER_QUESTION_TARGET=350 — chapter readiness and length are anchored to question-bank density rather than a static slot list"
+    ]
+  },
+  "ai_context": []
+}

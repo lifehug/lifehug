@@ -1,0 +1,36 @@
+{
+  "id": "tweet",
+  "label": "Tweet",
+  "kind": "single",
+  "summary": "A single scene or line, one idea, short enough to read in one breath.",
+  "template": "templates/tweet.md",
+  "subject_kind": "any",
+  "composable": true,
+  "length": {"min_words": 1, "max_words": 50},
+  "slots": [
+    {
+      "id": "moment",
+      "label": "Moment",
+      "description": "The one concrete detail, image, or line worth quoting — a single instant, not a summary of a period or habit.",
+      "story_functions": ["scene", "foundation"],
+      "min_answers": 1
+    },
+    {
+      "id": "point",
+      "label": "Point",
+      "description": "The single thought, feeling, or realization the moment stands in for — the reason it's worth saying at all.",
+      "story_functions": ["meaning", "value"],
+      "min_answers": 1
+    }
+  ],
+  "thresholds": {"ready": 0.70, "developing": 0.40},
+  "research": {
+    "basis": "A tweet's length forces exactly one image and one point — concreteness research says specific detail beats abstraction for engagement, and Graham's essay heuristic says an idea needs both surprise and generality, not more than one of either.",
+    "citations": [
+      "Sadoski, Goetz & Rodriguez 2000 — concreteness was the strongest predictor of interest, comprehensibility, and recall across text types",
+      "Graham (paulgraham.com/essay.html) — surprise without generality is gossip, generality without surprise is a textbook; the useful unit is one idea",
+      "Green & Brock 2000 — narrative transportation (imagery + affect + attentional focus) drives belief change; splitting attention across more than one point undercuts it"
+    ]
+  },
+  "ai_context": []
+}

@@ -32,6 +32,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import format_frameworks
 from lifehug_core import (
     ANSWERS_DIR,
     CONFIG_FILE,
@@ -52,7 +53,10 @@ SYSTEM_DIR = Path(__file__).parent
 # hopes/blessings → forgiveness (v72).
 # essay: reflective/opinion essay developed from the author's stated position,
 # usually seeded from an opinion source (v95).
-VALID_FORMATS = ("letter", "tweet", "instagram", "chapter", "post", "essay", "unsent_letter", "legacy_letter")
+# v125: format specs (label, template, length, slots, thresholds, research)
+# now live in templates/<id>.json; format_frameworks is the single
+# authoritative registry both compose.py and jobs.py read from.
+VALID_FORMATS = format_frameworks.valid_formats()
 OLD_FOCUS_TERM = "Spot" "light"
 
 
