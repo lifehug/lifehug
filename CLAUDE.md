@@ -12,7 +12,7 @@ You are an interviewer, editor, and writing partner. You:
 - Generate follow-up questions that deepen the story
 - Track coverage across all categories
 - Watch for people and events worth turning into Focuses
-- Create artifacts (letters, tweets, IG posts, posts, chapter drafts) via `system/lifehug.py artifact ...`
+- Create Studio pieces (letters, tweets, IG posts, posts, chapter drafts) via `system/lifehug.py artifact ...` — the code/CLI term is unchanged: artifact
 - Maintain the private Lifehug wiki via `python3 system/lifehug.py compile`
 - Keep the system running: commit, push, update state
 
@@ -510,11 +510,11 @@ printf '%s\n' "$ESSAY" | python3 system/lifehug.py artifact save outputs/<slug> 
   `artifact final` + `artifact promote-source --kind all` + `compile` — the
   promoted essay becomes source material that influences the wiki (theme pages,
   the author hub); it never directly creates a page.
-- Every revision is browsable in the viewer (v98): each piece in
-  `/views/artifacts` ends with a revision footer — numbered links to every
-  saved version (★ = final; hover shows the `--feedback` note) and Δ links
-  rendering a word-level diff of what changed between versions. Essays without
-  a Focus group under **Thoughts**.
+- Every revision is browsable in the Studio (v98; the dedicated Artifacts
+  view redirects there from v127): each piece ends with a revision footer —
+  numbered links to every saved version (★ = final; hover shows the
+  `--feedback` note) and Δ links rendering a word-level diff of what changed
+  between versions. Essays without a Focus group under **Thoughts**.
 - The opinion source itself is a primary source under the normal contract;
   corrections/changed positions are additive (`correct-source`,
   `reflect-source`), never rewrites.
@@ -736,7 +736,7 @@ Offer to draft these when a Focus has enough material (5+ answers).
 
 ---
 
-## Artifacts (artifact.py)
+## Pieces (artifact.py)
 
 `system/artifact.py` produces occasion-driven artifacts (letters, tweets, IG posts, posts, chapter drafts) from accumulated Lifehug material. The script does NOT call AI itself — it creates a context pack and prompt, you or the OpenClaw agent write the artifact, then the script saves the result with version tracking and can promote the final work into `sources/artifacts/`.
 
@@ -847,13 +847,14 @@ python3 system/compose.py --info outputs/title    # one output's history
 
 ---
 
-## Book Assembly (v75/v76)
+## Projects: the Book (v75/v76 → Studio v127)
 
 The manuscript surface: every Focus with a book-class deliverable becomes a
-**book**; each of its question categories becomes a **chapter** with an
-answered ratio, scene-slot depth (the classifier's five-slot data), a
-readiness verdict (EARLY / DEVELOPING / READY / SATURATED), and its top
-gap questions.
+**project** (today the author's life story is the only book-class project);
+each of its question categories becomes a **chapter** with an answered
+ratio, scene-slot depth (the classifier's five-slot data), a readiness
+verdict (EARLY / DEVELOPING / READY / SATURATED), and its top gap
+questions.
 
 ```bash
 python3 system/lifehug.py book-status                  # the manuscript map
@@ -861,7 +862,9 @@ python3 system/lifehug.py book-chapter <book> <cat>    # one chapter, deep view
 python3 system/lifehug.py book-offers [--send]         # pending READY nudges
 ```
 
-- The local viewer has a matching **Book** view (`/views/book`).
+- The local viewer's project surface lives in the **Studio** (`/views/studio`,
+  v127) — grouped by Focus, a project card expands into this chapter table.
+  The old dedicated **Book** view (`/views/book`) redirects there.
 - **Milestone offers**: when an answer tips a chapter into READY,
   `process-answer` sends a one-time Telegram nudge with the exact
   `artifact new --format chapter` command (tracked in `state/book_offers.json`
@@ -869,10 +872,19 @@ python3 system/lifehug.py book-offers [--send]         # pending READY nudges
 - **Chapter-gap boost**: the weekly planner reserves ~1 slot/week
   (`lane_policy.chapter_boost_fraction`) for the top unanswered question in a
   near-READY chapter, so the queue actively pushes chapters over the line.
-- Drafts are matched from `outputs/` (chapter-format artifacts) into a
+- Drafts are matched from `outputs/` (chapter-format pieces) into a
   manuscript rollup: drafted/ready/total per book plus word count.
 - The owner's **Life Chapters** source (the annual `chapters-exercise`) is the
   book's narrative spine; chapter categories map onto it during drafting.
+- **Assemble** (v127) turns a project with at least one drafted
+  chapter into a concrete piece (undrafted chapters get placeholders): it
+  stitches the latest drafted chapters into one `outputs/` piece with
+  `format: book`, so the book gets its own version history like any other
+  piece.
+
+Command names (`book-status`, `book-chapter`, `book-offers`) and
+`state/book_offers.json` are unchanged code-level terms — only the viewer
+surface and user-facing vocabulary moved to Studio/Project.
 
 ## The Viewer (serve_wiki.py, v99)
 
@@ -901,10 +913,11 @@ artifacts, schedules, compiles, and manual canonical mutators:
   defer / dismiss on Candidates; approve / dismiss on Focus Recommendations
   (approve runs as a job — it scaffolds the Focus and seeds questions); a
   "Got it" acknowledge on the home second-voice card (`second-voice-ack`).
-- **Artifact lifecycle** (on each `/artifact-version/` page): direct edit →
-  saved as vN+1 (`artifact save --model manual-edit`), **Revise with AI**
-  (new `artifact revise --feedback` subcommand; runs as a durable job),
-  mark final, promote-to-source (auto-recompiles), record delivery + the
+- **Piece lifecycle** (on each `/artifact-version/` page — the code-level
+  route name is unchanged): direct edit → saved as vN+1
+  (`artifact save --model manual-edit`), **Revise with AI** (new
+  `artifact revise --feedback` subcommand; runs as a durable job), mark
+  final, promote-to-source (auto-recompiles), record delivery + the
   recipient's reaction.
 - **Reflections & corrections:** every source row (and every Mirror raw
   signal) links to `/source-actions?ref=…` — file a reflection, a
@@ -986,6 +999,12 @@ The private wiki is a **graph of the author's life**. Standard terms:
 - **Edge** — a meaningful connection between nodes/entities. An edge can carry evidence, tension, change over time, and artifact relevance.
 - **Relationship Edge** — a human bond edge, usually between the author and another person. The page in `wiki/relationships/` is an edge page: it answers what the bond is, not merely who the other person is.
 - **Focus** — a *deliberately built-out* entity with an objective, a tier, and a deliverable (book/letter/…). The author themselves is the **primary Focus** (their life story; biggest share of questions). Not every entity is a Focus.
+- **Project** — a Focus whose deliverable is a composite piece built up over time. Today that's the book: the Focus's categories become chapters. A project is virtual while it's being planned — readiness is computed live from the roadmap and answered material — and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts together.
+- **Piece** — a single versioned work in the Studio: a letter, tweet, essay, post, or chapter draft. Lives under `outputs/<slug>/` as `v1.md`, `v2.md`, ... revisions, with AI-assisted revise, mark-final, and promote-back-to-source. The code/CLI term is unchanged: **artifact** (`system/lifehug.py artifact ...`, `sources/artifacts/`).
+- **Format Framework** — the researched slot structure for a piece format (letter, chapter, essay, ...), stored in `templates/<format>.json` (v125). Both pieces and projects (book chapters) are built against a format framework.
+- **Readiness** — the live-computed measure of how well a piece or project's slots are covered by answered material (e.g. "3 of 4 letter slots covered for Mom", v126). Distinct from candidate/neighborhood readiness (see *Neighborhood* above); this readiness is about draft-worthiness of a Studio piece or project.
+- **Assemble** — the step that turns a virtual project into a concrete, versioned piece by stitching the latest drafted chapters into one `outputs/` piece with `format: book`.
+- **Studio** — the single workspace (`/views/studio`, v127) for making pieces and projects: grouped by Focus, project cards expand into a chapter table, piece cards keep their version/revision history, and a create form starts new pieces. Replaces the separate Book Assembly (`/views/book`) and Artifacts (`/views/artifacts`) views, which redirect here.
 - **Entity graduation / node graduation** — the automatic mechanism: the system detects entities mentioned across answers, an **AI-curated roster** (`lifehug.py entity-roster --type <t>`, written to `state/entity_rosters/<t>.json`) cleans and merges them, and `wiki_compile.plan_entities` graduates each page-eligible one into a node page built from its mentions. Per-type rules: **places/periods** graduate on a low bar (a few mentions); **objects** graduate on **AI-judged symbolic meaning** (the cleats, the orange shorts), not frequency; **people** on score + answers; **themes** (v97) graduate via the theme roster — each entry carries AI-curated `keywords` (the surface phrases the compiler matches sources with), overlaying the 8 legacy static themes, so new themes like Parenting emerge from opinions, essays, and classifier extractions. Relationship edges use `plan_relationships` because they are dyadic: a Focus relationship can graduate from dedicated answers or enough cross-story mentions about the person, using a prompt lens of bond, tension, gratitude, grief, repair, and what went unsaid. Rosters refresh monthly; compile graduates the current roster entries into pages so the graph grows with no human action. Refreshes treat the previous roster as settled identity decisions (v67) with one exception (v90): a bare role-word canonical (Brother, Friend, Son) always yields to the person's proper name once the material supplies it — the role word demotes to an alias and the page slug follows the real name.
 - **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source.
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows without a human manually stitching it together, and whose output can affect future questions, wiki pages, relationship understanding, or artifacts.

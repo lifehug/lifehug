@@ -1,12 +1,12 @@
 # Dave — Lifehug
 
-A private, compounding life story system. Daily questions build raw material; Focuses shape it toward deliverables; Artifacts turn that material into letters, posts, chapters, and other things Dave can actually send, publish, or keep.
+A private, compounding life story system. Daily questions build raw material; Focuses shape it toward deliverables; the Studio turns that material into pieces (letters, posts, chapters) and projects like the book that Dave can actually send, publish, or keep.
 
 ## What this is
 
-Lifehug is organized around **the Loop**: the self-improving flow where Dave answers one question by voice or text, the answer is saved as raw source material, the wiki compiles it into memory, classification and quality signals learn from it, and future questions get better. The artifact path takes that accumulated memory and turns it into finished pieces: letters to family, anniversary notes, posts, chapters, speeches, and future book material. Final artifacts can feed back into the same Loop as source material.
+Lifehug is organized around **the Loop**: the self-improving flow where Dave answers one question by voice or text, the answer is saved as raw source material, the wiki compiles it into memory, classification and quality signals learn from it, and future questions get better. The Studio takes that accumulated memory and turns it into finished pieces — letters to family, anniversary notes, posts, chapters, speeches — and, over time, into projects like the book. Finished pieces can feed back into the same Loop as source material.
 
-The wiki is the core memory layer — an AI-maintained knowledge graph connecting childhood, family, work, faith, Etherfuse, and the people who shaped the story. It is centered on **Dave himself** (the page **David James Taylor** — the self-portrait hub — leads the wiki, with his life-story arcs nested beneath). Everything stays owner-only. Sharing happens through reviewed artifacts: letters, essays, posts, chapters, and future published pages. When an artifact is final, its context and final text can be promoted back into `sources/artifacts/` so Lifehug learns from what Dave actually produced.
+The wiki is the core memory layer — an AI-maintained knowledge graph connecting childhood, family, work, faith, Etherfuse, and the people who shaped the story. It is centered on **Dave himself** (the page **David James Taylor** — the self-portrait hub — leads the wiki, with his life-story arcs nested beneath). Everything stays owner-only. Sharing happens through reviewed pieces: letters, essays, posts, chapters, and future published pages. When a piece is final, its context and final text can be promoted back into `sources/artifacts/` (still the code-level term) so Lifehug learns from what Dave actually produced.
 
 ## Nomenclature
 
@@ -19,6 +19,9 @@ The wiki is a **graph of Dave's life**. The standard terms:
 - **Edge** — a meaningful connection between nodes/entities. An edge can carry evidence, tension, change over time, and artifact relevance.
 - **Relationship Edge** — a human bond edge, usually between Dave and another person. The page in `wiki/relationships/` is an edge page: it answers what the bond is, not merely who the other person is.
 - **Focus** — an entity deliberately built toward a deliverable (book, letter, …) with a tier and target. **Dave is the primary Focus** — his life story is the biggest one and gets the largest share of questions. Self-knowledge (values, fears, contradictions, growth) is a built-in dimension of it, not a separate track.
+- **Project** — a Focus whose deliverable is a composite piece built up over time. Today that's the book: the Focus's categories become chapters. A project is virtual while it's being planned — readiness is computed live from answered material — and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts together.
+- **Piece** — a single versioned work in the Studio: a letter, tweet, essay, or chapter draft. Lives under `outputs/<slug>/` as `v1.md`, `v2.md`, ... revisions, with AI revise, mark-final, and promote-back-to-source. The code/CLI term is unchanged: **artifact** (`system/lifehug.py artifact ...`).
+- **Studio** — the one workspace for making pieces and projects: grouped by Focus, project cards expand into their chapter table, piece cards keep their version history, and a create form starts new pieces.
 - **Entity graduation / node graduation** — entities mentioned across answers are detected, AI-curated into a roster (`state/entity_rosters/<type>.json`), and graduated into node pages from their mentions. Places/periods graduate on a low bar (a few mentions); **objects** graduate on symbolic meaning (the cleats, the orange shorts), not frequency; people on score. Relationship edges use a dyadic path: Focus relationship pages can graduate from dedicated answers or enough cross-story mentions about the person. Rosters refresh monthly; compile graduates the current roster entries into pages, so the graph grows on its own.
 - **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source.
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows, and whose output can affect Dave's future questions, wiki pages, relationship understanding, or artifacts.
@@ -64,16 +67,19 @@ Focuses drive the weekly question allocation. **David James Taylor** is the prim
 6. **Profile updates weekly** — aggregates scores by story function and category
 7. **Profile feeds back** — planner weights and AI prompts shift toward what works
 8. **Better questions** — high-quality candidates promote under caps, and next week's queue plus next month's research reflect the signal
-9. **Artifacts get made** — when there is an occasion or deliverable, Lifehug gathers the right context and helps produce the piece
-10. **Finished artifacts feed back** — approved final pieces and context packs become source material under `sources/artifacts/`
+9. **Pieces get made** — when there is an occasion or deliverable, the Studio gathers the right context and helps produce the piece
+10. **Finished pieces feed back** — approved final pieces and context packs become source material under `sources/artifacts/`
 
 No ratings, no friction. The answer itself is the feedback.
 
-## Artifacts
+## Studio: Projects & Pieces
 
-Artifacts are the product payoff. They are the reason the daily answers and wiki matter outside the system: a Mother's Day letter, an anniversary note, an Instagram caption, a post, a chapter, or a speech.
+The Studio is the product payoff — the reason the daily answers and wiki matter outside the system. Two kinds of work happen there:
 
-The workflow creates a context pack from Dave's answers, wiki pages, prior artifacts, and Focus material; drafts the piece; saves versioned drafts under `outputs/`; and can promote approved context/final versions back into immutable sources. A final artifact is authoritative as Dave's authored expression at that moment. It is not treated as independent proof of every underlying event.
+- **Pieces** — single versioned works: a Mother's Day letter, an anniversary note, an Instagram caption, a post, a chapter, a speech.
+- **Projects** — composite pieces built over time. Today that's the book: a Focus with a book-class deliverable whose chapters are its categories. A project is virtual while planning — its chapter verdicts are computed live — and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts into one. (Per-format slot readiness like "4 of 5 letter slots covered for Mom" is the same idea applied to single pieces.)
+
+The workflow creates a context pack from Dave's answers, wiki pages, prior pieces, and Focus material; drafts the piece; saves versioned drafts under `outputs/`; and can promote approved context/final versions back into immutable sources. A final piece is authoritative as Dave's authored expression at that moment. It is not treated as independent proof of every underlying event.
 
 ```bash
 python3 system/lifehug.py artifact new --subject Mom --occasion "Mother's Day" --format letter
@@ -82,7 +88,7 @@ printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<arti
 python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all
 ```
 
-Telegram/OpenClaw messages beginning with `/artifact` or `artifact:` should use this same flow.
+Telegram/OpenClaw messages beginning with `/artifact` or `artifact:` should use this same flow. (`artifact` is the CLI/code-level name for a piece; the Studio is where you see and work them.)
 
 ## Source integrity
 
@@ -128,7 +134,7 @@ printf '%s\n' "$ANSWER" | python3 system/lifehug.py process-answer A14a --source
 python3 system/lifehug.py focus-add "Name" --type person --tier standard --deliverable letter
 python3 system/lifehug.py focus-new    # guided scaffolding for a new Focus + category
 
-# Create artifacts
+# Create pieces (Studio)
 python3 system/lifehug.py artifact new --subject Mom --occasion "Mother's Day" --format letter
 python3 system/lifehug.py artifact prompt outputs/<artifact>
 python3 system/lifehug.py artifact promote-source outputs/<artifact> --kind all

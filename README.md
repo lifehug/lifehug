@@ -2,9 +2,9 @@
 
 **Capture your life, deepen it with AI, and turn it into artifacts that matter.**
 
-Lifehug is a lifelong AI oral-history system organized around **the Loop**: the self-improving flow where daily answers become durable sources, sources become a private wiki and structured signals, signals become better questions, and better questions deepen the life story. The artifact path turns that accumulated memory into things you can actually use: letters, posts, chapters, speeches, a memoir, a founder story — and finished artifacts can feed back into the same Loop as source material.
+Lifehug is a lifelong AI oral-history system organized around **the Loop**: the self-improving flow where daily answers become durable sources, sources become a private wiki and structured signals, signals become better questions, and better questions deepen the life story. The Studio turns that accumulated memory into things you can actually use: letters, posts, chapters, speeches, and — assembled over time — a memoir or founder story; finished pieces can feed back into the same Loop as source material.
 
-You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make an artifact.** Both become part of the same compounding memory system.
+You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make a piece in the Studio.** Both become part of the same compounding memory system.
 
 ## Nomenclature
 
@@ -17,6 +17,9 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 - **Edge** — a meaningful connection between nodes/entities. An edge can carry evidence, tension, change over time, and artifact relevance.
 - **Relationship Edge** — a human bond edge, usually between you and another person. The page in `wiki/relationships/` is an edge page: it answers what the bond is, not merely who the other person is.
 - **Focus** — an entity you're deliberately building toward a deliverable (book, letter, …), with a tier and target. **You are the primary Focus** — your own life story is the biggest one and gets the largest share of questions; self-knowledge (values, fears, contradictions, growth) is a built-in dimension of it, not a separate track.
+- **Project** — a Focus whose deliverable is a composite piece built up over time. Today that's the book: your categories become chapters. A project is virtual while you're planning it — readiness is computed live from the roadmap and answered material — and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts together.
+- **Piece** — a single versioned work in the Studio: a letter, tweet, essay, or chapter draft. Lives under `outputs/<slug>/` as `v1.md`, `v2.md`, ... revisions, with AI-assisted revise, mark-final, and promote-back-to-source. The code/CLI term is unchanged: **artifact** (`system/lifehug.py artifact ...`, `sources/artifacts/`).
+- **Studio** — the single workspace for making pieces and projects: grouped by Focus, project cards expand into a chapter table, piece cards keep their version/revision history, and a create form starts new pieces.
 - **Entity graduation / node graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into node pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score; **themes** via an AI-curated keyword roster (v97) — new themes like *Parenting* emerge from opinions, essays, and classifier extractions. Relationship edges use a dyadic path: Focus relationships can graduate from dedicated answers or enough cross-story mentions about the person. Rosters refresh monthly; compile graduates the current roster entries into pages — no manual work.
 - **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source. When we ask whether a feature "works in the Loop," we mean this path.
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows without a human manually stitching it together, and whose output can affect future questions, wiki pages, relationship understanding, or artifacts.
@@ -29,11 +32,11 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 
 - [The big picture](#the-big-picture) — how the whole thing fits together
 - [The daily loop](#the-daily-loop) — what happens every morning
-- [Core concepts](#core-concepts) — Focus, Roadmap, Wiki, Neighborhood, Candidate, Artifact, Pass
+- [Core concepts](#core-concepts) — Focus, Roadmap, Wiki, Neighborhood, Candidate, Piece, Project, Pass
 - [How the planner decides what to ask](#how-the-planner-decides-what-to-ask)
 - [Research & neighborhoods: finding new questions](#research--neighborhoods-finding-new-questions)
 - [The private wiki](#the-private-wiki)
-- [Artifacts](#artifacts)
+- [Studio: Projects & Pieces](#studio-projects--pieces)
 - [The three clocks](#the-three-clocks-scheduling)
 - [Every script, holistically](#every-script-holistically)
 - [Getting started](#getting-started)
@@ -74,9 +77,9 @@ flowchart TB
         CA["Candidates<br/>review buffer before<br/>they become real questions"]
     end
 
-    subgraph make["📜 the artifact layer"]
-        OUT["ARTIFACTS<br/>letters · posts · captions<br/>chapters · speeches"]
-        SRC["Artifact sources<br/>final piece + context pack"]
+    subgraph make["🎨 the studio layer"]
+        OUT["STUDIO<br/>pieces · projects<br/>letters · posts · chapters"]
+        SRC["Piece sources<br/>final piece + context pack"]
     end
 
     P -->|writes answer| W
@@ -107,7 +110,7 @@ flowchart TB
 2. **Knowledge** — every answer becomes wiki input, a completed question, and, during the weekly capped classifier pass, a structured classification record: people, places, periods, themes, contradictions, possible outputs, and follow-up candidates.
 3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly delivery queue. It applies quality multipliers so question types that have historically pulled richer answers score higher.
 4. **Growth** — classification runs in small weekly batches; broader research runs rarely. Together they inspect the wiki and source layer for thin areas, extract structured meaning, and *generate new questions* about people, themes, periods, and contradictions you haven't covered. The best candidates are automatically promoted into the bank each week under a dynamic cap; once promoted, bank questions stay available until answered or manually edited.
-5. **Artifacts** — when there is an occasion or deliverable, Lifehug gathers the right context, helps write the piece, versions it, and can store the final artifact back as source material.
+5. **Studio** — when there is an occasion or deliverable, Lifehug gathers the right context, helps write the piece, versions it, and can store the final piece back as source material.
 
 ---
 
@@ -150,7 +153,8 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Neighborhood** | A cluster of 6–12 questions around one topic, arranged on a narrative **arc**, aimed at a deliverable. It tracks generated, promoted, and answered readiness separately; only answered material makes it draft-ready. | `state/neighborhoods.json` |
 | **Candidate** | A proposed question waiting in a review buffer. Becomes a real question only when *promoted* into the bank. | `state/question_candidates.json` |
 | **Wiki** | The cross-linked, owner-only encyclopedia of your life, synthesized from your answers. | `wiki/` |
-| **Artifact** | The product payoff: a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. | `outputs/`, `sources/artifacts/` |
+| **Piece** | The product payoff: a single versioned work — a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. Code/CLI term: **artifact**. | `outputs/`, `sources/artifacts/` |
+| **Project** | A composite piece built over time — today, the book: a Focus with a book-class deliverable whose categories are chapters. Virtual while planning; becomes a concrete piece once assembled. | `state/roadmap.json`, `outputs/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` embedded; `state/rotation.json` external |
 
 The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
@@ -356,16 +360,19 @@ Everything else comes free: six-axis scoring, threshold promotion with cap/`--dr
 
 ---
 
-## Artifacts
+## Studio: Projects & Pieces
 
-Artifacts are the reason the system is more than a private archive. They are the moments where Lifehug turns memory into something useful outside the system: a letter to your mom, an anniversary note, a birthday Instagram caption, a chapter draft, a speech, a post about your company, a piece your kids might read years later.
+The Studio is the reason the system is more than a private archive — the place where memory turns into something useful outside it: a letter to your mom, an anniversary note, a birthday Instagram caption, a chapter draft, a speech, a post about your company, a piece your kids might read years later. It holds two kinds of work:
 
-The artifact workflow does four things:
+- **Pieces** — single versioned works: a letter, tweet, essay, post, or chapter draft.
+- **Projects** — composite pieces built up over time. Today that's the book: a Focus with a book-class deliverable whose chapters are its categories. A project is virtual while you're planning it — readiness (chapter verdicts, computed live from the roadmap and answered material) tells you when it's worth drafting — and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts into one. (Per-format slot readiness like "4 of 5 letter slots covered for Mom" is the same idea applied to single pieces.)
 
-1. **Gathers context** — pulls relevant answers, wiki pages, prior artifacts, and Focus material into a context pack.
-2. **Creates the piece** — gives the AI/agent the right prompt and template for the format.
+The Studio workflow does four things:
+
+1. **Gathers context** — pulls relevant answers, wiki pages, prior pieces, and Focus material into a context pack.
+2. **Creates the piece** — gives the AI/agent the right prompt and template for the format (its **format framework**, researched in `templates/<format>.json`).
 3. **Versions the work** — saves drafts under `outputs/<artifact>/` so revision is part of the record.
-4. **Learns from the result** — when you approve the final, Lifehug can promote both the final artifact and its context pack into `sources/artifacts/`.
+4. **Learns from the result** — when you approve the final, Lifehug can promote both the final piece and its context pack into `sources/artifacts/`.
 
 That last step matters. A Mother's Day letter is not just an export; it is evidence of what you chose to say, how you understood the relationship, and which memories mattered at that moment.
 
@@ -382,11 +389,11 @@ python3 system/lifehug.py artifact promote-source \
   outputs/2026-07-12-katie-anniversary-letter --kind all
 ```
 
-Formats: `letter`, `tweet`, `instagram`, `chapter`, `post`, `essay`, `unsent_letter`, `legacy_letter`. Each artifact lives in `outputs/<title>/` with a `context.md`, `artifact.json`, `meta.yaml`, and versioned drafts (`v1.md`, `v2.md`, ...).
+The CLI/code-level name for a piece is still **artifact** — the `artifact` command, `outputs/`, and `sources/artifacts/` are unchanged. Formats: `letter`, `tweet`, `instagram`, `chapter`, `post`, `essay`, `unsent_letter`, `legacy_letter`. Each piece lives in `outputs/<title>/` with a `context.md`, `artifact.json`, `meta.yaml`, and versioned drafts (`v1.md`, `v2.md`, ...).
 
-**Opinions → essays (v95).** A stated position — a philosophical take, a lens on life — is its own lane: capture it with `ingest-story --kind opinion` (it gets Socratic follow-up candidates: origin, counterexample, evolution, dissent, stakes), then develop it with `artifact new --format essay --seed <opinion-source>`. The seed is the thesis, injected verbatim into the context pack; revise with `artifact save --feedback` until it's done, then promote. Every revision stays browsable: the viewer's Artifacts page gives each piece a revision footer (numbered versions, ★ final, Δ word-level diffs), and subjectless essays group under **Thoughts**. The promoted essay becomes source material that influences the wiki — it never directly creates a page. From the phone, start the message with `opinion:`.
+**Opinions → essays (v95).** A stated position — a philosophical take, a lens on life — is its own lane: capture it with `ingest-story --kind opinion` (it gets Socratic follow-up candidates: origin, counterexample, evolution, dissent, stakes), then develop it with `artifact new --format essay --seed <opinion-source>`. The seed is the thesis, injected verbatim into the context pack; revise with `artifact save --feedback` until it's done, then promote. Every revision stays browsable: the Studio gives each piece a revision footer (numbered versions, ★ final, Δ word-level diffs), and subjectless essays group under **Thoughts**. The promoted essay becomes source material that influences the wiki — it never directly creates a page. From the phone, start the message with `opinion:`.
 
-Promotion is opt-in. A final artifact is authoritative as **your authored expression at that moment**. It is not treated as independent proof of every underlying event. The compiler reads artifact/context sources as supporting, attributed material so Lifehug can learn from what you produce without circularly turning generated text into primary evidence.
+Promotion is opt-in. A final piece is authoritative as **your authored expression at that moment**. It is not treated as independent proof of every underlying event. The compiler reads piece/context sources as supporting, attributed material so Lifehug can learn from what you produce without circularly turning generated text into primary evidence.
 
 The same workflow works from a desktop skill or from your phone. In Telegram/OpenClaw, start with `/artifact` or `artifact:` and the agent should gather missing details, run the same script path, draft the piece, and ask before promoting it as source material.
 
@@ -478,13 +485,13 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`classify_story.py`** | The source analyzer. OpenClaw-first, Anthropic fallback. AI-extracts people, places, periods, themes, contradictions, possible outputs, self-understanding insights, Focus opportunities, and targeted follow-up questions from any answer/source file. Weekly maintenance runs it over a capped batch of unclassified files. |
 | **`recommend_focuses.py`** | The pattern-watcher. Scores recurring people/places/periods/themes by how often and how emotionally they show up, and recommends which deserve their own Focus. |
 
-### Wiki, artifacts & maintenance
+### Wiki, Studio & maintenance
 
 | Script | What it does |
 |---|---|
 | **`wiki_compile.py`** | The graph builder. Plan → synthesize → cross-link → write. Turns answers into cross-linked wiki pages with cached, idempotent synthesis and a keyless desktop path (`--emit-tasks`). See [the wiki](#the-private-wiki). |
 | **`source_integrity.py`** | The source contract enforcer. Scans raw sources, maintains `state/source_manifest.json`, writes source lint findings, and creates additive correction/reflection source files instead of rewriting old memories. |
-| **`serve_wiki.py`** | The local viewer and studio. An HTTP server (`python3 system/serve_wiki.py`, http://127.0.0.1:8765) that renders the wiki as HTML and resolves `[[wikilinks]]` into real page navigation. The home page is an **action hub** (v99): up to five calm invitation cards — a chapter ready to draft, one classifier-noticed tension or insight to sit with, the week's next question, review counts, a perennial due, a second-voice offer, and one resurfaced old answer — over a small stats strip. Invitations, never guilt metrics. The header's hamburger menu groups the dashboard views into **Do** (Queue, Candidates, Recommendations, Book), **Reflect** (Timeline, Graph), **Library** (Artifacts, Question Bank, Sources, Privacy), and **System** (The Loop, Focuses, Coverage, Entities, Reports); the compiled wiki stays in the left sidebar with the index one click away. Write actions require a session token plus exact loopback Host/Origin checks and return immediately after durable enqueue; the status pill converges through queued/running/succeeded/failed metadata without exposing private payloads. |
+| **`serve_wiki.py`** | The local viewer and studio. An HTTP server (`python3 system/serve_wiki.py`, http://127.0.0.1:8765) that renders the wiki as HTML and resolves `[[wikilinks]]` into real page navigation. The home page is an **action hub** (v99): up to five calm invitation cards — a chapter ready to draft, one classifier-noticed tension or insight to sit with, the week's next question, review counts, a perennial due, a second-voice offer, and one resurfaced old answer — over a small stats strip. Invitations, never guilt metrics. The header's hamburger menu groups the dashboard views into **Do** (Queue, Candidates, Recommendations, Studio), **Reflect** (Mirror, Timeline, Graph), **Library** (Foundation, Sources, Privacy), and **System** (The Loop, Entities, Reports); the compiled wiki stays in the left sidebar with the index one click away. Write actions require a session token plus exact loopback Host/Origin checks and return immediately after durable enqueue; the status pill converges through queued/running/succeeded/failed metadata without exposing private payloads. |
 | **`artifact.py`** | The artifact workflow. Creates occasion tasks, writes context packs, saves versioned outputs, marks finals, and promotes context/final versions into `sources/artifacts/` with provenance. |
 | **`compose.py`** | The low-level output composer. Assembles a prompt (template + the right answers), then versions the AI's result under `outputs/`. `artifact.py` is the preferred milestone workflow. |
 | **`update_readme.py`** | Keeps the README's coverage section and progress bullets in sync with current state. |
@@ -612,7 +619,7 @@ python3 system/research_expand.py --topic "Dad" --type relationship --output let
 python3 system/lifehug.py candidates-review
 python3 system/lifehug.py candidates-promote <id> --category A
 
-# Artifacts
+# Studio (pieces & projects)
 python3 system/lifehug.py artifact new --subject Mom --occasion "Mother's Day" --format letter
 python3 system/lifehug.py artifact prompt outputs/<artifact>
 printf '%s\n' "$CONTENT" | python3 system/lifehug.py artifact save outputs/<artifact> --final

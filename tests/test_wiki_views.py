@@ -14,6 +14,9 @@ import serve_wiki  # noqa: E402
 import roadmap  # noqa: E402
 import entity_roster  # noqa: E402
 import lifehug_core  # noqa: E402
+import artifact  # noqa: E402
+import book  # noqa: E402
+import studio  # noqa: E402
 
 
 class WikiViewsTests(unittest.TestCase):
@@ -41,6 +44,17 @@ class WikiViewsTests(unittest.TestCase):
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (entity_roster, "ENTITY_DIR"): entity_roster.ENTITY_DIR,
             (lifehug_core, "REPO_DIR"): lifehug_core.REPO_DIR,
+            # v127: the Studio view reads through studio/book/artifact, which
+            # bind their vault paths at import (the retired Artifacts view
+            # re-derived outputs/ from REPO_DIR on every call).
+            (studio, "OUTPUTS_DIR"): studio.OUTPUTS_DIR,
+            (studio, "QUESTIONS_FILE"): studio.QUESTIONS_FILE,
+            (book, "OUTPUTS_DIR"): book.OUTPUTS_DIR,
+            (book, "QUESTIONS_FILE"): book.QUESTIONS_FILE,
+            (book, "CLASSIFICATIONS_DIR"): book.CLASSIFICATIONS_DIR,
+            (book, "WIKI_DIR"): book.WIKI_DIR,
+            (artifact, "OUTPUTS_DIR"): artifact.OUTPUTS_DIR,
+            (artifact, "REPO_DIR"): artifact.REPO_DIR,
         }
 
     def tearDown(self):
@@ -52,6 +66,25 @@ class WikiViewsTests(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(data if isinstance(data, str) else json.dumps(data))
         return p
+
+    def _bind_studio(self, questions_file=None, create_outputs=True):
+        """Point studio/book/artifact at this fixture's vault.
+
+        Day-one state is `create_outputs=False`: no outputs/ directory at all,
+        which the Studio must still render (create form + any book project).
+        """
+        outputs = self.tmp / "outputs"
+        if create_outputs:
+            outputs.mkdir(parents=True, exist_ok=True)
+        qbank = questions_file if questions_file is not None else self.tmp / "missing-bank.md"
+        for mod in (studio, book):
+            mod.OUTPUTS_DIR = outputs
+            mod.QUESTIONS_FILE = qbank
+        artifact.OUTPUTS_DIR = outputs
+        artifact.REPO_DIR = self.tmp
+        book.CLASSIFICATIONS_DIR = self.tmp / "no-classifications"
+        book.WIKI_DIR = self.tmp / "no-wiki"
+        return outputs
 
     def _view(self, slug):
         return serve_wiki.VIEW_MAP[slug]()
@@ -66,22 +99,33 @@ class WikiViewsTests(unittest.TestCase):
             self.assertIn(label, menu)
 
     def test_menu_order(self):
-        # v75 inserts 'book' immediately after the system overview pair so the
-        # manuscript surface is one of the first things visible in the menu.
-        # v124 consolidates focuses/coverage/question-bank into foundation.
+        # v75 put 'book' immediately after the system overview pair so the
+        # making surface is one of the first things visible in the menu; v127
+        # replaces it in that slot with 'studio' (which absorbed both Book
+        # Assembly and Artifacts). v124 consolidated focuses/coverage/
+        # question-bank into foundation.
         order = [slug for slug, _, _ in serve_wiki.VIEWS]
         self.assertEqual(order, [
-            "status", "mirror", "graph", "timeline", "book", "foundation",
+            "status", "mirror", "graph", "timeline", "studio", "foundation",
             "recommendations", "candidates", "queue",
-            "entities", "sources", "artifacts", "reports", "privacy",
+            "entities", "sources", "reports", "privacy",
         ])
 
-    def test_legacy_view_slugs_redirect_to_foundation(self):
+    def test_legacy_view_slugs_redirect_to_their_consolidated_view(self):
         # The absorbed views are gone from the registry but their URLs
-        # permanently redirect, so old bookmarks and hub links keep working.
-        for slug in ("focuses", "coverage", "question-bank"):
+        # permanently redirect, so old bookmarks and hub links keep working:
+        # three into Foundation (v124), two into Studio (v127).
+        expected = {
+            "focuses": "foundation",
+            "coverage": "foundation",
+            "question-bank": "foundation",
+            "book": "studio",
+            "artifacts": "studio",
+        }
+        self.assertEqual(serve_wiki.LEGACY_VIEW_REDIRECTS, expected)
+        for slug, target in expected.items():
             self.assertNotIn(slug, serve_wiki.VIEW_MAP)
-            self.assertEqual(serve_wiki.LEGACY_VIEW_REDIRECTS[slug], "foundation")
+            self.assertIn(target, serve_wiki.VIEW_MAP)
 
     def test_layout_wide_flag_and_menu(self):
         out = serve_wiki.layout("T", "<h1>x</h1>", wide=True).decode()
@@ -112,6 +156,7 @@ class WikiViewsTests(unittest.TestCase):
         serve_wiki.WIKI_DIR = self.tmp / "no-wiki"
         entity_roster.ENTITY_DIR = self.tmp / "no-rosters"
         lifehug_core.REPO_DIR = self.tmp / "no-repo"  # no outputs/ either
+        self._bind_studio(create_outputs=False)
         for slug, _, fn in serve_wiki.VIEWS:
             title, body, wide = fn()
             self.assertTrue(body, slug)
@@ -320,7 +365,7 @@ class WikiViewsTests(unittest.TestCase):
         self.assertNotIn("Candidate pipeline", body)
         self.assertNotIn("Detail views", body)
 
-    # --- artifacts view (v90: grouped by Focus) ---
+    # --- studio view (v127: pieces + projects grouped by Focus) ---
 
     def _populate_artifacts(self):
         roadmap.ROADMAP_FILE = self._write("roadmap.json", {"version": 1, "focuses": [
@@ -330,7 +375,7 @@ class WikiViewsTests(unittest.TestCase):
             {"id": "katie", "label": "Katie", "type": "person", "tier": "standard",
              "objective": "story of Katie", "deliverable": "letter", "categories": ["L"],
              "target_depth": 21, "phase": "active", "wiki_node": None}]})
-        out = self.tmp / "outputs"
+        out = self._bind_studio()
         self._write("outputs/mothers-day-letter-desi/meta.yaml",
                     "title: mothers-day-letter-desi\nformat: letter\nsubject: desi\n"
                     "occasion: Mother's Day\ncategories: [K]\ncreated: 2026-05-08\n")
@@ -347,35 +392,67 @@ class WikiViewsTests(unittest.TestCase):
         lifehug_core.REPO_DIR = self.tmp
         return out
 
-    def test_artifacts_grouped_by_focus(self):
+    def _populate_studio_book(self):
+        """A book-project Focus with one drafted chapter — the project card."""
+        qbank = self._write("question-bank.md",
+            "## A: Origins (Childhood)\n- [x] A1: Earliest? *(2026-01-01)*\n- [ ] A2: Where?\n"
+            "## B: Becoming\n- [ ] B1: What changed?\n")
+        roadmap.QUESTIONS_FILE = qbank
+        roadmap.ROADMAP_FILE = self._write("roadmap.json", {"version": 1, "focuses": [
+            {"id": "life", "label": "My Life", "type": "life_story", "primary": True,
+             "tier": "standard", "objective": "story", "deliverable": "book",
+             "categories": ["A", "B"], "target_depth": 4, "phase": "active",
+             "wiki_node": None}]})
+        self._bind_studio(questions_file=qbank)
+        self._write("outputs/chapter-a/meta.yaml",
+                    "title: chapter-a\nformat: chapter\nsubject: Origins\n"
+                    "categories: [A]\ncreated: 2026-02-01\n")
+        self._write("outputs/chapter-a/v1.md", "Chapter A body one.\n")
+        lifehug_core.REPO_DIR = self.tmp
+
+    def _drop_chapter_draft(self):
+        chapter = self.tmp / "outputs" / "chapter-a"
+        for path in sorted(chapter.iterdir()):
+            path.unlink()
+        chapter.rmdir()
+
+    def test_studio_groups_pieces_by_focus(self):
         self._populate_artifacts()
-        _, body, _ = self._view("artifacts")
+        _, body, _ = self._view("studio")
         # Person groups: subject name appended when it differs from the label.
         self.assertIn("Mom (Desi)", body)
-        self.assertIn('art-group-title">Katie</span>', body)
+        self.assertIn('focus-label">Katie</span>', body)
         # Focus with a wiki node links to it.
         self.assertIn('href="/page/wiki/people/mom.md"', body)
-        # Katie's piece is newer (2026-06-25) -> her group comes first.
-        self.assertLess(body.index('art-group-title">Katie'), body.index("Mom (Desi)"))
-        # Humanized titles, not slugs, in the headings.
+        # Groups follow roadmap order (studio.compute_works), not recency:
+        # Mom is declared first in the fixture roadmap.
+        self.assertLess(body.index("Mom (Desi)"), body.index('focus-label">Katie'))
+        # Humanized titles, not slugs, in the piece headings.
         self.assertIn("Mother&#x27;s Day letter", body)
         self.assertIn("<h3>My Katie", body)
 
-    def test_artifacts_groups_collapsed_by_default(self):
+    def test_studio_groups_collapsed_by_default(self):
         self._populate_artifacts()
-        _, body, _ = self._view("artifacts")
-        # Every group is a collapsible bar (Question Bank / Timeline idiom) …
-        self.assertIn('<details class="art-group">', body)
-        # … starting collapsed, with the piece count visible on the bar.
-        self.assertNotIn('<details class="art-group" open', body)
-        self.assertIn("1 piece(s) · person · → letter · categories K", body)  # Mom bar counts
+        _, body, _ = self._view("studio")
+        # Every group is a collapsible bar (the Foundation idiom) …
+        self.assertIn('<details class="fnd-focus">', body)
+        # … starting collapsed, with the project/piece counts on the bar.
+        self.assertNotIn('<details class="fnd-focus" open', body)
+        self.assertIn("0 project(s) · 1 piece(s) · person → letter", body)  # Mom bar
 
-    def test_artifacts_badges_and_assets(self):
+    def test_studio_readiness_chips_on_non_book_focuses(self):
         self._populate_artifacts()
-        _, body, _ = self._view("artifacts")
+        _, body, _ = self._view("studio")
+        # "<Label> · filled/total · VERDICT" — no answers in this fixture, so
+        # every letter slot is empty and the verdict is EARLY.
+        self.assertRegex(body, r"Letter · 0/\d+ · EARLY")
+
+    def test_studio_badges_and_assets(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("studio")
         # Occasion is a badge, never a group.
         self.assertIn(">Mother&#x27;s Day</span>", body)
-        self.assertNotIn('art-group-title">Mother', body)
+        self.assertNotIn('focus-label">Mother', body)
         # delivered + promoted badges read the fields artifact.py actually
         # writes (promoted_sources — the old view read a never-written key).
         self.assertIn("delivered", body)
@@ -383,24 +460,89 @@ class WikiViewsTests(unittest.TestCase):
         # The PDF sidecar is linked through the /artifact-file/ route.
         self.assertIn('href="/artifact-file/my-katie/v1.pdf"', body)
 
-    def test_artifacts_unfiled_group_last_with_hint(self):
+    def test_studio_piece_cards_carry_the_write_actions(self):
         self._populate_artifacts()
-        _, body, _ = self._view("artifacts")
-        unfiled = 'art-group-title">Unfiled</span>'
+        _, body, _ = self._view("studio")
+        self.assertIn("Act on this piece", body)
+        for action in ("save", "revise", "final", "promote", "delivered"):
+            self.assertIn(f'action="/actions/artifact/{action}"', body)
+
+    def test_studio_unfiled_group_last_with_hint(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("studio")
+        unfiled = 'focus-label">Unfiled</span>'
         self.assertIn(unfiled, body)
         self.assertIn("meta.yaml", body)  # repair hint
-        self.assertLess(body.index('art-group-title">Katie'), body.index(unfiled))
+        self.assertLess(body.index('focus-label">Katie'), body.index(unfiled))
         self.assertLess(body.index("Mom (Desi)"), body.index(unfiled))
 
-    def test_artifacts_safe_without_roadmap(self):
-        # Artifacts exist but roadmap.json is missing and the question bank is
+    def test_studio_safe_without_roadmap(self):
+        # Pieces exist but roadmap.json is missing and the question bank is
         # empty -> everything lands in Unfiled, nothing raises.
         self._populate_artifacts()
         roadmap.ROADMAP_FILE = self.tmp / "missing-roadmap.json"
         roadmap.QUESTIONS_FILE = self.tmp / "missing-bank.md"
-        _, body, _ = self._view("artifacts")
-        self.assertIn('art-group-title">Unfiled</span>', body)
+        _, body, _ = self._view("studio")
+        self.assertIn('focus-label">Unfiled</span>', body)
         self.assertIn("My Katie", body)
+
+    def test_studio_create_form_lists_composable_formats(self):
+        self._populate_artifacts()
+        _, body, _ = self._view("studio")
+        self.assertIn("Start something new", body)
+        self.assertIn('action="/actions/artifact/new"', body)
+        self.assertIn('<select name="format">', body)
+        self.assertIn('<option value="letter">', body)
+        # Option text is "Label — summary" from the format framework spec.
+        self.assertIn("Letter — ", body)
+        # The advanced hint on the categories field.
+        self.assertIn("advanced: category letters", body)
+
+    def test_studio_project_card_nests_the_chapter_table(self):
+        self._populate_studio_book()
+        _, body, _ = self._view("studio")
+        self.assertIn("studio-project", body)
+        self.assertIn("📖 My Life", body)
+        # The v75 chapter table survives intact, one expand deeper.
+        self.assertIn('art-group-title">Chapters</span>', body)
+        self.assertIn("<th>Scene depth</th>", body)
+        self.assertIn("<th>Next questions / draft</th>", body)
+        self.assertIn("Origins", body)
+        self.assertIn("Becoming", body)
+        # Chapter A has a draft, so the assemble form is offered.
+        self.assertIn('action="/actions/artifact/assemble"', body)
+        self.assertIn("Assemble manuscript draft", body)
+        self.assertIn('name="focus" value="life"', body)
+
+    def test_studio_hides_assemble_until_something_is_drafted(self):
+        self._populate_studio_book()
+        self._drop_chapter_draft()  # nothing drafted -> nothing to assemble
+        _, body, _ = self._view("studio")
+        self.assertIn('art-group-title">Chapters</span>', body)
+        self.assertNotIn('action="/actions/artifact/assemble"', body)
+
+    def test_studio_day_one_renders_create_form_and_book_project(self):
+        # No outputs/ directory at all — the day-one vault. The Studio still
+        # renders, still offers the create form, and still shows the book.
+        self._populate_studio_book()
+        self._drop_chapter_draft()
+        (self.tmp / "outputs").rmdir()
+        title, body, wide = self._view("studio")
+        self.assertEqual(title, "Studio")
+        self.assertTrue(wide)
+        self.assertIn("Start something new", body)
+        self.assertIn("📖 My Life", body)
+
+    def test_studio_empty_state_still_offers_the_create_form(self):
+        # No pieces and no book-project Focus -> no groups at all.
+        roadmap.ROADMAP_FILE = self._write("roadmap-empty.json",
+                                           {"version": 1, "focuses": []})
+        roadmap.QUESTIONS_FILE = self.tmp / "missing-bank.md"
+        self._bind_studio(create_outputs=False)
+        _, body, _ = self._view("studio")
+        self.assertIn("Nothing in the studio yet", body)
+        self.assertIn("Start something new", body)
+        self.assertIn('action="/actions/artifact/new"', body)
 
     def test_graph_nodes_edges_and_weight(self):
         self._populate()
@@ -421,12 +563,32 @@ class RevisionFooterTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
         self._saved = {
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
+            (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
             (lifehug_core, "REPO_DIR"): lifehug_core.REPO_DIR,
+            (studio, "OUTPUTS_DIR"): studio.OUTPUTS_DIR,
+            (studio, "QUESTIONS_FILE"): studio.QUESTIONS_FILE,
+            (book, "OUTPUTS_DIR"): book.OUTPUTS_DIR,
+            (book, "QUESTIONS_FILE"): book.QUESTIONS_FILE,
+            (book, "CLASSIFICATIONS_DIR"): book.CLASSIFICATIONS_DIR,
+            (book, "WIKI_DIR"): book.WIKI_DIR,
+            (artifact, "OUTPUTS_DIR"): artifact.OUTPUTS_DIR,
+            (artifact, "REPO_DIR"): artifact.REPO_DIR,
         }
         roadmap.ROADMAP_FILE = self._write("roadmap.json", {"version": 1, "focuses": [
             {"id": "mom", "label": "Mom", "type": "person", "tier": "standard",
              "objective": "story of Mom", "deliverable": "letter", "categories": ["K"],
              "target_depth": 22, "phase": "active", "wiki_node": None}]})
+        # v127: the Studio reads through studio/book/artifact, which bind
+        # their vault paths at import time.
+        missing_bank = self.tmp / "missing-bank.md"
+        roadmap.QUESTIONS_FILE = missing_bank
+        for mod in (studio, book):
+            mod.OUTPUTS_DIR = self.tmp / "outputs"
+            mod.QUESTIONS_FILE = missing_bank
+        artifact.OUTPUTS_DIR = self.tmp / "outputs"
+        artifact.REPO_DIR = self.tmp
+        book.CLASSIFICATIONS_DIR = self.tmp / "no-classifications"
+        book.WIKI_DIR = self.tmp / "no-wiki"
         # A subjectless essay with two saved revisions (the opinion lane shape).
         self._write("outputs/mantle-essay/meta.yaml",
                     "title: mantle-essay\nformat: essay\nsubject: ''\ncreated: 2026-07-06\n")
@@ -461,7 +623,7 @@ class RevisionFooterTests(unittest.TestCase):
         return p
 
     def _body(self):
-        return serve_wiki.VIEW_MAP["artifacts"]()[1]
+        return serve_wiki.VIEW_MAP["studio"]()[1]
 
     def test_footer_links_every_version_with_final_star(self):
         body = self._body()
@@ -480,11 +642,11 @@ class RevisionFooterTests(unittest.TestCase):
 
     def test_subjectless_essay_groups_under_thoughts(self):
         body = self._body()
-        self.assertIn('art-group-title">Thoughts</span>', body)
-        self.assertNotIn('art-group-title">Unfiled</span>', body)
+        self.assertIn('focus-label">Thoughts</span>', body)
+        self.assertNotIn('focus-label">Unfiled</span>', body)
         # Thoughts renders after Focus groups.
-        self.assertLess(body.index('art-group-title">Mom'),
-                        body.index('art-group-title">Thoughts'))
+        self.assertLess(body.index('focus-label">Mom'),
+                        body.index('focus-label">Thoughts'))
 
     def test_version_page_renders_content_and_nav(self):
         result = serve_wiki.artifact_version_html("mantle-essay", "1")
@@ -492,7 +654,7 @@ class RevisionFooterTests(unittest.TestCase):
         title, body = result
         self.assertIn("v1", title)
         self.assertIn("mantle of duty", body)
-        self.assertIn('href="/views/artifacts"', body)
+        self.assertIn('href="/views/studio"', body)
         self.assertIn('href="/artifact-version/mantle-essay/2"', body)
 
     def test_final_version_page_marked(self):
@@ -521,6 +683,87 @@ class RevisionFooterTests(unittest.TestCase):
         for slug, a, b in (("../x", "1", "2"), ("mantle-essay", "1", "x"),
                            ("mantle-essay", "1", "9"), ("nope", "1", "2")):
             self.assertIsNone(serve_wiki.artifact_diff_html(slug, a, b), (slug, a, b))
+
+
+class StudioActionTests(unittest.TestCase):
+    """v127 write actions: the Studio's create form and the assemble button.
+
+    Both queue through _start_job (the durable jobs.py path every browser
+    mutation uses), so the tests assert the queued command + payload rather
+    than shelling anything out.
+    """
+
+    def setUp(self):
+        self._saved_start_job = serve_wiki._start_job
+        self.queued = []
+
+        def fake_start_job(kind, payload=None):
+            self.queued.append((kind, payload or {}))
+            return {"id": "job-1"}
+
+        serve_wiki._start_job = fake_start_job
+
+    def tearDown(self):
+        serve_wiki._start_job = self._saved_start_job
+
+    @staticmethod
+    def _form(**kwargs):
+        return {k: [v] for k, v in kwargs.items()}
+
+    def test_artifact_new_queues_the_cli_job(self):
+        back, flash, job_id = serve_wiki.act_artifact_new(self._form(
+            format="letter", subject="Mom", occasion="Mother's Day",
+            date="2026-05-10", title="For Mom", categories="K"))
+        self.assertEqual(back, "/views/studio")
+        self.assertEqual(job_id, "job-1")
+        self.assertIn("queued: creating letter for Mom", flash)
+        self.assertEqual(self.queued, [("artifact-new", {
+            "format": "letter", "subject": "Mom", "occasion": "Mother's Day",
+            "date": "2026-05-10", "title": "For Mom", "categories": "K"})])
+
+    def test_artifact_new_omits_blank_optional_fields(self):
+        serve_wiki.act_artifact_new(self._form(
+            format="essay", subject="", occasion="", date="", title="",
+            categories="A,B"))
+        self.assertEqual(self.queued[0][1], {"format": "essay", "categories": "A,B"})
+
+    def test_artifact_new_rejects_unknown_format(self):
+        for bad in ("", "not-a-format", "book"):  # book is composite, not composable
+            with self.subTest(bad=bad):
+                back, flash, job_id = serve_wiki.act_artifact_new(
+                    self._form(format=bad, subject="Mom"))
+                self.assertEqual(back, "/views/studio")
+                self.assertEqual(flash, "✗ unknown format")
+                self.assertIsNone(job_id)
+        self.assertEqual(self.queued, [])
+
+    def test_artifact_new_requires_a_subject_or_categories(self):
+        back, flash, job_id = serve_wiki.act_artifact_new(
+            self._form(format="letter", subject="  ", categories=""))
+        self.assertEqual(back, "/views/studio")
+        self.assertIn("✗", flash)
+        self.assertIsNone(job_id)
+        self.assertEqual(self.queued, [])
+
+    def test_artifact_assemble_queues_the_focus(self):
+        back, flash, job_id = serve_wiki.act_artifact_assemble(self._form(focus="life"))
+        self.assertEqual(back, "/views/studio")
+        self.assertEqual(job_id, "job-1")
+        self.assertEqual(flash, "queued manuscript assembly")
+        self.assertEqual(self.queued, [("artifact-assemble", {"focus": "life"})])
+
+    def test_artifact_assemble_requires_a_focus(self):
+        back, flash, job_id = serve_wiki.act_artifact_assemble(self._form(focus=""))
+        self.assertEqual(back, "/views/studio")
+        self.assertIn("✗", flash)
+        self.assertIsNone(job_id)
+        self.assertEqual(self.queued, [])
+
+    def test_both_actions_are_registered(self):
+        self.assertIs(serve_wiki.ACTIONS["/actions/artifact/new"],
+                      serve_wiki.act_artifact_new)
+        self.assertIs(serve_wiki.ACTIONS["/actions/artifact/assemble"],
+                      serve_wiki.act_artifact_assemble)
 
 
 class HomeHubTests(WikiViewsTests):
