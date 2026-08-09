@@ -482,6 +482,18 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 13px; }}
     .statstrip b {{ color: var(--ink-mid); font-weight: 650; }}
     .home-foot {{ margin-top: 26px; font-size: 14px; color: var(--muted); }}
+    /* Update observability (lifehug#84): The Loop's install-state card + last-update line */
+    .update-status {{ margin: 4px 0 22px; padding: 12px 16px; border-radius: 10px;
+      background: var(--card-warm); border: 1px solid var(--line-soft); }}
+    .update-status.update-behind {{ border-left: 4px solid #987b55; }}
+    .update-headline {{ font-size: 14px; font-weight: 650; color: var(--ink-strong); }}
+    .update-cmd {{ margin-top: 4px; font-size: 13px; }}
+    .update-cmd code {{ background: var(--panel-hover); padding: 2px 6px; border-radius: 4px; }}
+    .update-diagnostic {{ margin-top: 6px; font-size: 13px; color: #8c2f28; }}
+    .update-checked {{ margin-top: 4px; }}
+    .update-last {{ margin: 0 0 22px; padding: 12px 16px; border-radius: 10px;
+      background: var(--card-warm); border: 1px solid var(--line-soft); border-left: 4px solid #3f8f4f; }}
+    .update-changelog {{ margin-top: 6px; font-size: 13px; color: var(--ink-soft); white-space: pre-wrap; }}
     /* Write actions (v101) */
     .flash {{ background: #f0ead9; border: 1px solid #ddd0b2; border-radius: 8px; padding: 10px 14px;
       margin: 0 0 18px; font-size: 14px; color: var(--ink-soft); }}
@@ -901,6 +913,83 @@ def loop_stats() -> dict:
     }
 
 
+def _read_state_json(filename: str) -> dict:
+    """A state/<filename> cache written by update.py, tolerant of it being
+    missing OR corrupt (an interrupted write is not this viewer's problem
+    to raise on) — either reads as "nothing cached yet"."""
+    try:
+        data = read_json(STATE_DIR / filename, default=None)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_update_check() -> dict:
+    """The most recent `update.py --check` result, cached to
+    state/update_check.json by --check itself (lifehug#84 item 2) so the
+    viewer never runs git on page load."""
+    return _read_state_json("update_check.json")
+
+
+def _load_last_update() -> dict:
+    """The changelogs crossed by the most recent `--apply`, written by
+    update.py (lifehug#84 item 4)."""
+    return _read_state_json("last_update.json")
+
+
+def _update_status_html() -> str:
+    """The Loop view's update card: installed version, latest available,
+    releases behind, the one command to run, and the tag-lapse diagnostic
+    when present — all from the cached check, never a live git call."""
+    data = _load_update_check()
+    current, latest = data.get("current"), data.get("latest")
+    if not isinstance(current, int) or not isinstance(latest, int):
+        return ('<div class="update-status update-unknown">'
+                'Update status unknown — run <code>python3 system/update.py --check</code>.'
+                '</div>')
+    behind = max(0, latest - current)
+    parts = [f'<div class="update-status {"update-behind" if behind else "update-current"}">']
+    if behind:
+        parts.append(
+            f'<div class="update-headline">Lifehug v{html.escape(str(latest))} is available — '
+            f'{behind} release{"s" if behind != 1 else ""} behind (installed v{html.escape(str(current))}).</div>'
+        )
+        parts.append('<div class="update-cmd"><code>python3 system/update.py --apply</code></div>')
+    else:
+        parts.append(f'<div class="update-headline">Lifehug is current (v{html.escape(str(current))}).</div>')
+    diagnostic = data.get("diagnostic")
+    if diagnostic:
+        parts.append(f'<div class="update-diagnostic">⚠️ {html.escape(str(diagnostic))}</div>')
+    checked_at = data.get("checked_at")
+    if checked_at:
+        parts.append(f'<div class="update-checked sub">Checked {html.escape(str(checked_at))}</div>')
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _last_update_html() -> str:
+    """A 'what changed' line for the most recent applied update, so an
+    update is an event the owner sees rather than a silent file swap."""
+    data = _load_last_update()
+    to_version = data.get("to_version")
+    if not isinstance(to_version, int):
+        return ""
+    from_version = data.get("from_version")
+    applied_at = data.get("applied_at")
+    headline = f"Updated v{from_version} → v{to_version}" if isinstance(from_version, int) else f"Updated to v{to_version}"
+    if applied_at:
+        headline += f" · {applied_at}"
+    parts = [f'<div class="update-last"><div class="update-headline">{html.escape(headline)}</div>']
+    for entry in data.get("crossed") or []:
+        changelog = entry.get("changelog") if isinstance(entry, dict) else None
+        if changelog:
+            version = entry.get("version")
+            label = f"v{version}: " if version is not None else ""
+            parts.append(f'<div class="update-changelog">{html.escape(label + str(changelog))}</div>')
+    parts.append("</div>")
+    return "".join(parts)
+
+
 def view_status():
     s = loop_stats()
     answered, total = s["answered"], s["total"]
@@ -923,7 +1012,8 @@ def view_status():
         card("Queue answered", f"{s['queue_answered']}/{s['queue_total']}", "expires " + str(s["queue_expires"] or "—")),
     ]
     grid = '<div class="cards">' + "".join(cards) + "</div>"
-    return ("The Loop", "<h1>The Loop — System Status</h1>" + grid, False)
+    return ("The Loop", "<h1>The Loop — System Status</h1>" + grid
+             + _update_status_html() + _last_update_html(), False)
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +1035,7 @@ _HUB_ACCENTS = {
     "perennial": "#7c4f1d",
     "second_voice": "#8a7a63",
     "memory": "#9a8c75",
+    "update": "#6f7f8c",
     "quiet": "#c8c2b8",
 }
 
@@ -959,6 +1050,29 @@ def _daily_pick(n: int) -> int:
 def _invitation(kind, kicker, title, body, why="", href="", cta="", extra=""):
     return {"kind": kind, "kicker": kicker, "title": title, "body": body,
             "why": why, "href": href, "cta": cta, "extra": extra}
+
+
+def _hub_card_update():
+    """A calm card when the vault is ≥1 version behind on framework updates
+    (lifehug#84 item 2) — reads the cached result written by
+    `update.py --check`; never runs git itself. Not a backlog nag: it names
+    the exact command and gets out of the way."""
+    data = _load_update_check()
+    if not data:
+        return None
+    current, latest = data.get("current"), data.get("latest")
+    if not isinstance(current, int) or not isinstance(latest, int):
+        return None
+    behind = latest - current
+    if behind < 1:
+        return None
+    body = (f"{behind} release{'s' if behind != 1 else ''} behind. "
+            "`python3 system/update.py --apply`")
+    why = data.get("diagnostic") or ""
+    return _invitation(
+        "update", "System",
+        f"Lifehug v{latest} is available",
+        body, why=why, href="/views/status", cta="See update details")
 
 
 def _hub_card_chapter():
@@ -1170,7 +1284,7 @@ def home_data() -> dict:
     """Assemble the home hub: up to 4 priority invitations + the standing
     memory slot. Every builder is failure-wrapped — one broken card must never
     take down the front page."""
-    builders = [_hub_card_chapter, _hub_card_sit_with, _hub_card_next_question,
+    builders = [_hub_card_update, _hub_card_chapter, _hub_card_sit_with, _hub_card_next_question,
                 _hub_card_review, _hub_card_perennial, _hub_card_second_voice]
     cards = []
     for fn in builders:

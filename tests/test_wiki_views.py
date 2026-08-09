@@ -41,6 +41,7 @@ class WikiViewsTests(unittest.TestCase):
             (serve_wiki, "CLASSIFICATIONS_DIR"): serve_wiki.CLASSIFICATIONS_DIR,
             (serve_wiki, "ANSWERS_DIR"): serve_wiki.ANSWERS_DIR,
             (serve_wiki, "SECOND_VOICE_OFFERS_FILE"): serve_wiki.SECOND_VOICE_OFFERS_FILE,
+            (serve_wiki, "STATE_DIR"): serve_wiki.STATE_DIR,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             # focus_start_gate() (issue #79) lives in recommend_focuses.py and
@@ -162,7 +163,7 @@ class WikiViewsTests(unittest.TestCase):
             (serve_wiki, "QUESTION_CANDIDATES_FILE"), (serve_wiki, "QUESTION_QUEUE_FILE"),
             (serve_wiki, "SOURCE_MANIFEST_FILE"), (serve_wiki, "SOURCE_LINT_FINDINGS_FILE"),
             (serve_wiki, "FOCUS_RECS_FILE"), (serve_wiki, "ROTATION_FILE"),
-            (serve_wiki, "NEIGHBORHOODS_FILE"),
+            (serve_wiki, "NEIGHBORHOODS_FILE"), (serve_wiki, "STATE_DIR"),
             (roadmap, "QUESTIONS_FILE"), (roadmap, "ROADMAP_FILE"),
         ]:
             setattr(mod, name, self.tmp / "missing.json")
@@ -992,6 +993,7 @@ class HomeHubTests(WikiViewsTests):
         serve_wiki.CLASSIFICATIONS_DIR = self.tmp / "no-classifications"
         serve_wiki.ANSWERS_DIR = self.tmp / "no-answers"
         serve_wiki.WIKI_DIR = self.tmp / "no-wiki"
+        serve_wiki.STATE_DIR = self.tmp / "missing.json"
         roadmap.QUESTIONS_FILE = self.tmp / "missing.json"
         roadmap.ROADMAP_FILE = self.tmp / "missing.json"
         lifehug_core.REPO_DIR = self.tmp / "no-repo"
@@ -1029,6 +1031,7 @@ class HomeHubTests(WikiViewsTests):
                     "---\nanswered_date: \"2020-01-01\"\n---\n# Question A1: Earliest?\n\nThe old porch, the dog, the summer.\n")
         serve_wiki.ANSWERS_DIR = self.tmp / "answers"
         serve_wiki.SECOND_VOICE_OFFERS_FILE = self.tmp / "missing.json"
+        serve_wiki.STATE_DIR = self.tmp / "missing.json"  # no update-check cache in this fixture
         data = serve_wiki.home_data()
         kinds = [c["kind"] for c in data["invitations"]]
         self.assertIn("sit_with", kinds)      # classification-backed pick
@@ -1072,6 +1075,114 @@ class HomeHubTests(WikiViewsTests):
     def test_daily_pick_is_stable_within_a_day(self):
         self.assertEqual(serve_wiki._daily_pick(7), serve_wiki._daily_pick(7))
         self.assertEqual(serve_wiki._daily_pick(1), 0)
+
+
+class UpdateObservabilityTests(WikiViewsTests):
+    """The Loop view's update card/row + the home hub card (lifehug#84 items
+    1/2/4) — all read the cache `update.py --check`/`--apply` write, never
+    running git themselves."""
+
+    def _set_state(self, name, data):
+        return self._write(f"state/{name}", data)
+
+    def setUp(self):
+        super().setUp()
+        self._populate()
+        serve_wiki.STATE_DIR = self.tmp / "state"
+
+    # --- The Loop view's update-check card ---
+
+    def test_status_view_unknown_when_no_cached_check(self):
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("Update status unknown", body)
+        self.assertIn("update.py --check", body)
+
+    def test_status_view_current_when_no_versions_behind(self):
+        self._set_state("update_check.json", {
+            "current": 131, "latest": 131, "update_available": False,
+            "changelog": None, "main_version": 131, "tag_lapse": False,
+            "diagnostic": None, "checked_at": "2026-08-09T00:00:00Z"})
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("update-current", body)
+        self.assertIn("is current (v131)", body)
+        self.assertNotIn("update-diagnostic", body)
+
+    def test_status_view_behind_shows_count_and_command(self):
+        self._set_state("update_check.json", {
+            "current": 128, "latest": 131, "update_available": True,
+            "changelog": "v131 notes", "main_version": 131, "tag_lapse": False,
+            "diagnostic": None, "checked_at": "2026-08-09T00:00:00Z"})
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("update-behind", body)
+        self.assertIn("Lifehug v131 is available", body)
+        self.assertIn("3 releases behind", body)
+        self.assertIn("installed v128", body)
+        self.assertIn("python3 system/update.py --apply", body)
+
+    def test_status_view_shows_tag_lapse_diagnostic(self):
+        self._set_state("update_check.json", {
+            "current": 117, "latest": 128, "update_available": True,
+            "changelog": None, "main_version": 128, "tag_lapse": True,
+            "diagnostic": "v128 released but not tagged — releases are not "
+                          "reaching vaults. Tag it to resume delivery.",
+            "checked_at": "2026-08-08T00:00:00Z"})
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("update-diagnostic", body)
+        self.assertIn("not tagged", body)
+
+    def test_status_view_shows_last_update_changelog(self):
+        self._set_state("last_update.json", {
+            "applied_at": "2026-08-09T00:00:00Z", "from_version": 117, "to_version": 119,
+            "crossed": [{"version": 118, "changelog": "v118: fixed X"},
+                        {"version": 119, "changelog": "v119: fixed Y"}]})
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("Updated v117 → v119", body)
+        self.assertIn("v118: fixed X", body)
+        self.assertIn("v119: fixed Y", body)
+
+    def test_status_view_safe_when_state_files_are_corrupt(self):
+        self._write("state/update_check.json", "not json")
+        self._write("state/last_update.json", "not json")
+        _title, body, _wide = serve_wiki.view_status()  # must not raise
+        self.assertIn("Update status unknown", body)
+
+    # --- The home hub card ---
+
+    def test_hub_card_update_absent_with_no_cached_check(self):
+        self.assertIsNone(serve_wiki._hub_card_update())
+
+    def test_hub_card_update_absent_when_current(self):
+        self._set_state("update_check.json", {"current": 131, "latest": 131})
+        self.assertIsNone(serve_wiki._hub_card_update())
+
+    def test_hub_card_update_present_when_behind(self):
+        self._set_state("update_check.json", {
+            "current": 128, "latest": 131, "diagnostic": None})
+        card = serve_wiki._hub_card_update()
+        self.assertIsNotNone(card)
+        self.assertEqual(card["kind"], "update")
+        self.assertIn("v131", card["title"])
+        self.assertIn("3 releases behind", card["body"])
+        self.assertIn("system/update.py --apply", card["body"])
+
+    def test_hub_card_update_surfaces_tag_lapse_diagnostic_as_why(self):
+        self._set_state("update_check.json", {
+            "current": 117, "latest": 128,
+            "diagnostic": "v128 released but not tagged — releases are not reaching vaults."})
+        card = serve_wiki._hub_card_update()
+        self.assertIsNotNone(card)
+        self.assertIn("not tagged", card["why"])
+
+    def test_home_view_includes_update_card_when_behind(self):
+        self._set_state("update_check.json", {"current": 128, "latest": 131})
+        serve_wiki.SECOND_VOICE_OFFERS_FILE = self.tmp / "missing.json"
+        data = serve_wiki.home_data()
+        kinds = [c["kind"] for c in data["invitations"]]
+        self.assertIn("update", kinds)
+        self.assertLessEqual(len(kinds), 5)
+        _title, body, _wide = serve_wiki.view_home()
+        self.assertIn("hub-card", body)
+        self.assertIn("v131", body)
 
 
 if __name__ == "__main__":

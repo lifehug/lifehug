@@ -1254,6 +1254,19 @@ At the start of each session, run `python3 system/update.py --check --quiet`. If
 
 If the exit code is 0 (current), say nothing about updates.
 
+Every `--check` (quiet or not) also compares against **origin/main's**
+`system/version.json`, not just tags — a lapsed tag flow (v118-v128 shipped
+on main while tagging silently stopped, hiding four days of releases from
+every vault) is caught rather than hidden. If main is ahead of the latest
+tag, `update_available` reports true off main's version and the JSON
+carries a `diagnostic` field ("vN released but not tagged…") printed loudly
+to stderr too — surface that verbatim if you see it; it means the
+*maintainer* needs to tag a release, not something the vault owner can fix.
+The check's result is cached to `state/update_check.json` so the wiki
+viewer's Loop view and home hub can show update status without running
+git; `--apply` likewise caches the changelogs it crossed to
+`state/last_update.json` for the Loop view's "what changed" line.
+
 ---
 
 ## Update Command

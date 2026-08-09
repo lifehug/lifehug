@@ -5,12 +5,23 @@ Checks for, applies, and rolls back framework updates from the upstream repo.
 User data (answers/, outputs/, sources/, question-bank.md, planner/source state) is never touched.
 
 Usage:
-    python3 system/update.py --check              # JSON: current, latest, update_available, changelog
+    python3 system/update.py --check              # JSON: current, latest, update_available,
+                                                    # changelog, main_version, tag_lapse, diagnostic
     python3 system/update.py --check --quiet       # Exit code only (0=current, 1=update available)
     python3 system/update.py --apply               # Apply latest version
     python3 system/update.py --apply --version N   # Apply specific version
     python3 system/update.py --rollback            # Revert to previous version
     python3 system/update.py --migrate-vault       # Repair a pre-v120 vault in place
+
+--check compares BOTH the latest vN tag and origin/main's system/version.json
+(lifehug#84): if main is ahead of the latest tag, that IS a tag-lapse — the
+exact failure mode that let v118-v128 ship invisibly for four days — and
+update_available/diagnostic report it instead of being blind to it. A
+network failure or missing remote degrades to the tags-only behavior,
+silently. --check (quiet or not) caches its result to
+state/update_check.json, and --apply caches the changelogs it crossed to
+state/last_update.json, so the wiki viewer can show update status and
+"what changed" without running git.
 """
 
 import argparse
@@ -19,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 SYSTEM_DIR = Path(__file__).parent
@@ -460,6 +472,81 @@ def fetch_tags(remote):
     run_git("fetch", remote, "--tags", "--quiet", check=False)
 
 
+def get_remote_main_info(remote):
+    """Read {"version", "changelog"} from the remote's main branch version.json.
+
+    This is the tag-lapse detector (lifehug#84): v118-v128 shipped on main
+    while tagging silently stopped, so a tags-only check kept reporting
+    "current: 117, latest: 117" for four days of real releases. Comparing
+    against main directly notices that failure mode instead of being blind
+    to it.
+
+    Network-failure tolerant by design: a missing remote, an offline fetch,
+    a main branch without the expected ref, or an unparsable version.json
+    all fall through to None so callers degrade to tags-only, silently —
+    this must never turn a network hiccup into a false diagnostic or a
+    crash.
+    """
+    if not remote:
+        return None
+    run_git("fetch", remote, "main", "--quiet", check=False)
+    try:
+        content = read_repo_file_at(f"{remote}/main", "system/version.json")
+        data = json.loads(content)
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return None
+    version = data.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None
+    return {"version": version, "changelog": data.get("changelog")}
+
+
+def _update_state_dir():
+    state_dir = REPO_DIR / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir
+
+
+def write_update_check_state(result):
+    """Persist the most recent --check result to state/update_check.json so
+    the viewer (serve_wiki.py's Loop view + home hub card) can show update
+    status without running git on every page load. Best-effort: a write
+    failure must never break --check itself."""
+    try:
+        payload = dict(result)
+        payload["checked_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        save_json(_update_state_dir() / "update_check.json", payload)
+    except OSError:
+        pass
+
+
+def write_last_update_state(from_version, to_version, crossed):
+    """Persist the changelogs crossed by an --apply so the viewer can render
+    a 'what changed' line for the most recent update (lifehug#84 item 4).
+    Best-effort: a write failure must never fail the update itself."""
+    try:
+        save_json(_update_state_dir() / "last_update.json", {
+            "applied_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "from_version": from_version,
+            "to_version": to_version,
+            "crossed": crossed,
+        })
+    except OSError:
+        pass
+
+
+def collect_crossed_changelogs(previous_version, target_version):
+    """Changelog entries for every TAGGED version crossed by an apply, in
+    ascending order — an apply can jump many releases in one hop (e.g.
+    v117 -> v128), and the owner should see every changelog it crossed, not
+    just the target's."""
+    crossed = []
+    for v in get_available_versions():
+        if previous_version < v <= target_version:
+            crossed.append({"version": v, "changelog": get_tag_changelog(v)})
+    return crossed
+
+
 def get_available_versions():
     """Get all version tags (vN format) sorted by version number."""
     try:
@@ -712,7 +799,16 @@ def apply_version(version):
 
 
 def cmd_check(args):
-    """Check for available updates."""
+    """Check for available updates.
+
+    Tag-lapse-proof (lifehug#84): compares against BOTH the latest vN tag
+    and origin/main's system/version.json. If main is ahead of the latest
+    tag, that IS the failure that let v118-v128 ship invisibly for four
+    days — update_available reports true off main's version, and a loud
+    diagnostic says so, instead of being blinded by the same lapse it's
+    meant to catch. A network failure (or no upstream remote) degrades to
+    the pre-existing tags-only behavior, silently.
+    """
     remote = find_upstream_remote()
     if remote:
         fetch_tags(remote)
@@ -726,22 +822,41 @@ def cmd_check(args):
             )
 
     current = get_local_version()
-    latest = get_latest_version()
-    update_available = latest > current
+    tag_latest = get_latest_version()
+    main_info = get_remote_main_info(remote)
+    main_version = main_info["version"] if main_info else None
+    tag_lapse = main_version is not None and main_version > tag_latest
 
-    if args.quiet:
-        sys.exit(1 if update_available else 0)
+    diagnostic = None
+    if tag_lapse:
+        diagnostic = (
+            f"v{main_version} released but not tagged — releases are not "
+            "reaching vaults. Tag it to resume delivery."
+        )
+        print(f"Warning: {diagnostic}", file=sys.stderr)
+
+    latest = main_version if tag_lapse else tag_latest
+    update_available = latest > current
 
     changelog = None
     if update_available:
-        changelog = get_tag_changelog(latest)
+        changelog = main_info["changelog"] if tag_lapse else get_tag_changelog(tag_latest)
 
     result = {
         "current": current,
         "latest": latest,
         "update_available": update_available,
         "changelog": changelog,
+        # New fields (lifehug#84) — additive only, existing keys unchanged.
+        "main_version": main_version,
+        "tag_lapse": tag_lapse,
+        "diagnostic": diagnostic,
     }
+    write_update_check_state(result)
+
+    if args.quiet:
+        sys.exit(1 if update_available else 0)
+
     print(json.dumps(result, indent=2))
 
 
@@ -783,6 +898,11 @@ def cmd_apply(args):
         changelog = get_tag_changelog(target)
         if changelog:
             print(f"\nChangelog:\n{changelog}")
+        # Post-update visibility (lifehug#84 item 4): record every tagged
+        # changelog this apply crossed (an apply can jump many releases in
+        # one hop) so the viewer can show "what changed" for the update
+        # instead of it being a silent file swap.
+        write_last_update_state(current, target, collect_crossed_changelogs(current, target))
     else:
         print("\nUpdate failed.", file=sys.stderr)
         sys.exit(1)
