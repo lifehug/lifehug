@@ -617,9 +617,11 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 try:
-                    with urllib.request.urlopen(f"http://localhost:{port}/", timeout=1) as response:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
                         body = response.read().decode("utf-8")
-                    break
+                    if "Lifehug" in body and "Origins" in body:
+                        break
+                    time.sleep(0.05)
                 except (OSError, urllib.error.URLError):
                     if viewer.poll() is not None:
                         break

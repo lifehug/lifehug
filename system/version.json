@@ -1,7 +1,7 @@
 {
-  "version": 141,
+  "version": 142,
   "released": "2026-08-09",
-  "changelog": "v141: process-answer now treats identical repeats as idempotent success and appends different later answers as dated, source-provenanced addenda instead of refusing them.",
+  "changelog": "v142: local wiki viewer startup now avoids reverse-DNS lookup stalls on loopback binds, keeping the data-only vault viewer flow deterministic.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

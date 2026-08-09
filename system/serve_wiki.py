@@ -14,6 +14,7 @@ import secrets
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from lifehug_core import (
@@ -3377,13 +3378,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_html("Not found", "<h1>Not found</h1>", status=404)
 
 
+class LifehugHTTPServer(ThreadingHTTPServer):
+    """Loopback-only viewer server that avoids startup-time reverse DNS.
+
+    Python's HTTPServer.server_bind calls socket.getfqdn(host), which can block
+    on macOS reverse lookups even for 127.0.0.1. The viewer does not use that
+    display name, so bind directly and keep the host literal.
+    """
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Serve the owner-only Lifehug wiki")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host; keep 127.0.0.1 for owner-only local use")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server = LifehugHTTPServer((args.host, args.port), Handler)
     print(f"Lifehug wiki serving at http://{args.host}:{args.port}")
     server.serve_forever()
 
