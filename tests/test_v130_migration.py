@@ -153,19 +153,26 @@ class AskedAtFrontmatterTests(TmpVaultCase):
     """End-to-end through the real process_answer.py CLI against a synthetic
     external vault — the exact path that produced the bad frontmatter."""
 
+    def _run_file_answer(self, vault: Path, answer: str, *args: str):
+        return subprocess.run(
+            [sys.executable, str(SYSTEM / "process_answer.py"), "A1",
+             "--no-compile-wiki", *args],
+            input=answer,
+            capture_output=True, text=True, cwd=str(vault),
+            env={"PATH": "/usr/bin:/bin", "HOME": str(vault),
+                 "LIFEHUG_VAULT_ROOT": str(vault)},
+        )
+
     def _file_answer(self, rotation, *, answered_date="2026-03-09"):
         vault = make_external_vault(
             self.tmp / f"vault-{len(list(self.tmp.iterdir()))}",
             rotation=rotation,
             coverage=V116_TEMPLATE_COVERAGE,
         )
-        result = subprocess.run(
-            [sys.executable, str(SYSTEM / "process_answer.py"), "A1",
-             "--no-compile-wiki", "--answered-date", answered_date],
-            input="A synthetic answer written by the test suite.\n",
-            capture_output=True, text=True, cwd=str(vault),
-            env={"PATH": "/usr/bin:/bin", "HOME": str(vault),
-                 "LIFEHUG_VAULT_ROOT": str(vault)},
+        result = self._run_file_answer(
+            vault,
+            "A synthetic answer written by the test suite.\n",
+            "--answered-date", answered_date,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         answer = vault / "answers" / "A1.md"
@@ -194,6 +201,51 @@ class AskedAtFrontmatterTests(TmpVaultCase):
         rotation = dict(V116_TEMPLATE_ROTATION, last_asked_at="2026-03-01T08:30:00")
         content = self._file_answer(rotation)
         self.assertEqual(self._frontmatter(content)["asked_at"], "2026-03-01")
+
+    def test_second_different_answer_appends_and_identical_retry_noops(self):
+        vault = make_external_vault(
+            self.tmp / "second-answer",
+            rotation=dict(V116_TEMPLATE_ROTATION, last_asked_at="2026-03-01T08:30:00"),
+            coverage=V116_TEMPLATE_COVERAGE,
+        )
+        first = self._run_file_answer(
+            vault,
+            "The first telling of this memory.\n",
+            "--answered-date", "2026-03-09",
+            "--source", "telegram",
+        )
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+
+        second = self._run_file_answer(
+            vault,
+            "The later telling adds a new detail.\n",
+            "--answered-date", "2026-08-08",
+            "--source", "voice (transcribed)",
+        )
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertIn("Appended answer A1", second.stdout)
+
+        answer = vault / "answers" / "A1.md"
+        content = answer.read_text(encoding="utf-8")
+        fields = self._frontmatter(content)
+        self.assertEqual(fields.get("answer_count"), "2")
+        self.assertEqual(fields.get("latest_answered_date"), "2026-08-08")
+        self.assertEqual(fields.get("latest_source_medium"), "voice (transcribed)")
+        self.assertIn("## Additional Answer 2", content)
+        self.assertIn("**Answered:** 2026-08-08", content)
+        self.assertIn("**Source:** voice (transcribed)", content)
+        self.assertIn("The first telling of this memory.", content)
+        self.assertIn("The later telling adds a new detail.", content)
+
+        retry = self._run_file_answer(
+            vault,
+            "The later telling adds a new detail.\n",
+            "--answered-date", "2026-08-08",
+            "--source", "voice (transcribed)",
+        )
+        self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+        self.assertIn("already captured", retry.stdout)
+        self.assertEqual(answer.read_text(encoding="utf-8"), content)
 
     def test_asked_at_is_always_a_plain_iso_date(self):
         # Only values the contract admits (string|null) — anything else fails

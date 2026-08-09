@@ -26,15 +26,33 @@ from lifehug_core import (
     rebuild_coverage,
     resolve_telegram_target,
     send_telegram,
+    split_frontmatter,
     write_json,
     write_text,
 )
-from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256, register_source
+from source_integrity import (
+    SCHEMA_VERSION,
+    format_frontmatter,
+    normalize_payload,
+    payload_sha256,
+    register_source,
+)
 from update_readme import update_readme
 from vault_paths import vault_relative_path
 
 FOLLOWUP_HEADER = "📖 Lifehug — since you're on a roll"
 FOLLOWUP_FOOTER = "(Totally optional — tomorrow's question comes either way)"
+FOLLOWUP_SECTION_TITLE = "## Follow-up Questions Generated"
+FOLLOWUP_SECTION_MARKER = f"\n---\n\n{FOLLOWUP_SECTION_TITLE}\n"
+ADDITIONAL_ANSWER_RE = re.compile(
+    r"^## Additional Answer (?P<number>\d+)\n\n"
+    r"(?:\*\*Asked:\*\* .+\n)?"
+    r"(?:\*\*Answered:\*\* .+\n)?"
+    r"(?:\*\*Source:\*\* .+\n)?"
+    r"(?:\*\*Captured:\*\* .+\n)?"
+    r"\n(?P<body>.*?)(?=\n## Additional Answer \d+\n\n|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
 
 
 def _asked_date_from(rotation: dict) -> str:
@@ -116,6 +134,93 @@ def append_followups(question_id: str, followups: list[str]) -> list[tuple[str, 
         fresh = fresh.rstrip() + f"\n\n## {question_id[0]}: Generated\n" + "\n".join(lines) + "\n"
     write_text(QUESTIONS_FILE, fresh)
     return additions
+
+
+def format_followup_section(followups_added: list[tuple[str, str]]) -> str:
+    if not followups_added:
+        return ""
+    lines = [FOLLOWUP_SECTION_MARKER.rstrip("\n")]
+    lines.extend(f"- {qid}: \"{text}\"" for qid, text in followups_added)
+    return "\n".join(lines) + "\n"
+
+
+def _split_followup_section(body: str) -> tuple[str, str]:
+    index = body.find(FOLLOWUP_SECTION_MARKER)
+    if index == -1:
+        return body.rstrip(), ""
+    return body[:index].rstrip(), body[index:]
+
+
+def _without_question_heading(answer_part: str) -> str:
+    return re.sub(r"^# Question [^\n]+\n\n", "", answer_part, count=1).strip()
+
+
+def answer_text_segments(answer_part: str) -> list[str]:
+    text = _without_question_heading(answer_part)
+    matches = list(ADDITIONAL_ANSWER_RE.finditer(text))
+    if not matches:
+        return [text] if text else []
+
+    segments = []
+    primary = text[:matches[0].start()].strip()
+    if primary:
+        segments.append(primary)
+    segments.extend(match.group("body").strip() for match in matches if match.group("body").strip())
+    return segments
+
+
+def answer_already_captured(existing_content: str, answer_text: str) -> bool:
+    _metadata, body = split_frontmatter(existing_content)
+    answer_part, _followups = _split_followup_section(body)
+    candidate = normalize_payload(answer_text)
+    return any(normalize_payload(segment) == candidate for segment in answer_text_segments(answer_part))
+
+
+def _one_line(value: str | None) -> str:
+    return " ".join(str(value or "").split())
+
+
+def append_answer_addendum(
+    existing_content: str,
+    answer_text: str,
+    *,
+    source: str,
+    asked_date: str,
+    answered_date: str,
+    captured_at: str,
+    followups_added: list[tuple[str, str]],
+) -> str:
+    metadata, body = split_frontmatter(existing_content)
+    answer_part, followup_suffix = _split_followup_section(body)
+    existing_segments = answer_text_segments(answer_part)
+    next_number = len(existing_segments) + 1
+    addendum = (
+        f"\n\n## Additional Answer {next_number}\n\n"
+        f"**Asked:** {_one_line(asked_date)}\n"
+        f"**Answered:** {_one_line(answered_date)}\n"
+        f"**Source:** {_one_line(source)}\n"
+        f"**Captured:** {_one_line(captured_at)}\n"
+        "\n"
+        f"{answer_text.strip()}\n"
+    )
+    merged_followups = followup_suffix
+    if followups_added:
+        lines = [f"- {qid}: \"{text}\"" for qid, text in followups_added]
+        if merged_followups:
+            merged_followups = merged_followups.rstrip() + "\n" + "\n".join(lines) + "\n"
+        else:
+            merged_followups = format_followup_section(followups_added)
+
+    payload = answer_part.rstrip() + addendum + merged_followups
+    if not payload.endswith("\n"):
+        payload += "\n"
+    metadata = dict(metadata)
+    metadata["answer_count"] = next_number
+    metadata["latest_answered_date"] = answered_date
+    metadata["latest_source_medium"] = source
+    metadata["latest_captured_at"] = captured_at
+    metadata["content_sha256"] = payload_sha256(payload)
+    return f"{format_frontmatter(metadata)}\n\n{payload}"
 
 
 PUSH_ATTEMPTS = 2
@@ -395,53 +500,63 @@ def main():
         print("Error: answer text must be provided on stdin", file=sys.stderr)
         raise SystemExit(1)
 
-    out_file = ANSWERS_DIR / f"{question_id}.md"
-    if out_file.exists() and not args.force:
-        print(f"Error: {out_file} already exists; pass --force to overwrite", file=sys.stderr)
-        raise SystemExit(1)
-
     cat = str(question["category"])
     cat_name = categories.get(cat, {}).get("name", cat)
     asked = args.asked_date or _asked_date_from(rotation) or args.answered_date
     pass_number = rotation.get("current_pass", 1)
-    followups_added = append_followups(question_id, args.followup)
+    captured_at = datetime.now().isoformat(timespec="seconds")
 
-    followup_section = ""
-    if followups_added:
-        followup_section = "\n---\n\n## Follow-up Questions Generated\n"
-        for qid, text in followups_added:
-            followup_section += f"- {qid}: \"{text}\"\n"
-
-    body = (
-        f"# Question {question_id}: {question['text']}\n"
-        "\n"
-        f"{answer_text}\n"
-        f"{followup_section}"
-    )
-    metadata = {
-        "title": f"Question {question_id}: {question['text']}",
-        "type": "prompted_answer",
-        "source_id": f"answer:{question_id}",
-        "question_id": question_id,
-        "question_text": str(question["text"]),
-        "category": cat,
-        "category_name": cat_name,
-        "pass_number": pass_number,
-        "source_medium": args.source,
-        "asked_at": asked,
-        "answered_date": args.answered_date,
-        "captured_at": datetime.now().isoformat(timespec="seconds"),
-        "visibility": "owner_only",
-        "sensitivity": args.sensitivity,
-        "status": "raw",
-        "immutable": True,
-        "schema_version": SCHEMA_VERSION,
-        "source_path": out_file.relative_to(REPO_DIR).as_posix(),
-        "content_sha256": payload_sha256(body),
-    }
-    content = f"{format_frontmatter(metadata)}\n\n{body}"
-    if not content.endswith("\n"):
-        content += "\n"
+    out_file = ANSWERS_DIR / f"{question_id}.md"
+    answer_action = "Saved"
+    if out_file.exists() and not args.force:
+        existing = out_file.read_text(encoding="utf-8", errors="replace")
+        if answer_already_captured(existing, answer_text):
+            print(f"✓ Answer {question_id} already captured; no changes needed")
+            return
+        followups_added = append_followups(question_id, args.followup)
+        content = append_answer_addendum(
+            existing,
+            answer_text,
+            source=args.source,
+            asked_date=asked,
+            answered_date=args.answered_date,
+            captured_at=captured_at,
+            followups_added=followups_added,
+        )
+        answer_action = "Appended"
+    else:
+        followups_added = append_followups(question_id, args.followup)
+        body = (
+            f"# Question {question_id}: {question['text']}\n"
+            "\n"
+            f"{answer_text}\n"
+            f"{format_followup_section(followups_added)}"
+        )
+        metadata = {
+            "title": f"Question {question_id}: {question['text']}",
+            "type": "prompted_answer",
+            "source_id": f"answer:{question_id}",
+            "question_id": question_id,
+            "question_text": str(question["text"]),
+            "category": cat,
+            "category_name": cat_name,
+            "pass_number": pass_number,
+            "source_medium": args.source,
+            "asked_at": asked,
+            "answered_date": args.answered_date,
+            "captured_at": captured_at,
+            "answer_count": 1,
+            "visibility": "owner_only",
+            "sensitivity": args.sensitivity,
+            "status": "raw",
+            "immutable": True,
+            "schema_version": SCHEMA_VERSION,
+            "source_path": out_file.relative_to(REPO_DIR).as_posix(),
+            "content_sha256": payload_sha256(body),
+        }
+        content = f"{format_frontmatter(metadata)}\n\n{body}"
+        if not content.endswith("\n"):
+            content += "\n"
     write_text(out_file, content)
     register_source(out_file)
 
@@ -530,7 +645,7 @@ def main():
         summary = args.summary or str(question["text"])[:64]
         git_commit(f"Answer {question_id}: {summary}", args.push)
 
-    print(f"✓ Saved answer {question_id} to {out_file.relative_to(REPO_DIR)}")
+    print(f"✓ {answer_action} answer {question_id} to {out_file.relative_to(REPO_DIR)}")
     print(f"✓ Coverage: {answered_count}/{sum(c['total'] for c in coverage['categories'].values())}")
     if not args.no_compile_wiki:
         print("✓ Compiled wiki")

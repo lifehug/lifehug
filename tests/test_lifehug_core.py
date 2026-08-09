@@ -64,6 +64,34 @@ Legacy answer body.
 """
         self.assertEqual(lifehug_core.answer_body(content), "Legacy answer body.")
 
+    def test_answer_body_keeps_addenda_before_generated_followups(self):
+        content = """---
+title: "Question A1"
+source_id: "answer:A1"
+---
+
+# Question A1: First
+
+The first telling.
+
+## Additional Answer 2
+
+**Answered:** 2026-08-08
+**Source:** voice
+**Captured:** 2026-08-08T12:00:00
+
+The second telling.
+
+---
+
+## Follow-up Questions Generated
+- A1a: "What changed?"
+"""
+        body = lifehug_core.answer_body(content)
+        self.assertIn("The first telling.", body)
+        self.assertIn("The second telling.", body)
+        self.assertNotIn("Follow-up Questions Generated", body)
+
     def test_learning_failure_log_round_trip(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "learning_failures.jsonl"
