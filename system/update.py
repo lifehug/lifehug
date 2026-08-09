@@ -10,10 +10,12 @@ Usage:
     python3 system/update.py --apply               # Apply latest version
     python3 system/update.py --apply --version N   # Apply specific version
     python3 system/update.py --rollback            # Revert to previous version
+    python3 system/update.py --migrate-vault       # Repair a pre-v120 vault in place
 """
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -116,6 +118,300 @@ def is_protected(filepath):
         elif filepath == p:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# v120 durable-data contract migration
+#
+# v120 introduced system/vault_contract.json and made rotation, coverage and
+# question_bank BLOCKING-required at vault bind time: every entry point that
+# imports lifehug_core calls resolve_vault_root(), which calls
+# validate_minimum_vault_shape(), which rejects the whole vault if a required
+# JSON file is absent, carries an unsupported `version`, or is missing any of
+# the contract's `required_keys`.
+#
+# Nothing repaired vaults written by <= v119. An external user applying
+# v116 -> v128 in one hop therefore ended up with new code that refuses to
+# read their own vault ("vault rotation has an unsupported schema version").
+# The founder's vault dodged it only because its state files grew a key at a
+# time through every intermediate release.
+#
+# This migration reads the target version's own contract and brings the vault
+# up to it: additive, idempotent, and never destructive.
+# ---------------------------------------------------------------------------
+
+# Honest defaults for contract-required keys a pre-v120 vault may lack. The
+# KEY SET is always derived from vault_contract.json — this table only supplies
+# the framework's own meaning for keys it already knows, so a repaired vault
+# behaves exactly like a fresh one rather than like an arbitrary zero value.
+V120_KEY_DEFAULTS = {
+    "rotation": {
+        # Passes are 1-indexed everywhere (`pass_names[current_pass - 1]`).
+        "current_pass": 1,
+        # The framework's own inline fallback in ask.py / gen_followups.py.
+        "pass_names": ["skeleton", "depth", "connections", "polish"],
+        # "not recorded" — the contract types these string|null for this reason.
+        "last_question_id": None,
+        "last_asked_at": None,
+        "next_question_id": None,
+        # Counters restart from a truthful zero; `rebuild_state.py` recomputes
+        # them from the question bank on the next run.
+        "questions_asked": 0,
+        "questions_answered": 0,
+        # ask.py's own default when the key is absent.
+        "focus_frequency": 4,
+    },
+    "coverage": {
+        "last_updated": None,
+        # Empty until rebuild_coverage() derives it from the question bank —
+        # the same state a freshly initialised vault is in.
+        "categories": {},
+    },
+}
+
+# Pre-v21 spellings the contract key replaced. Adopting the legacy VALUE here
+# (and dropping the stale key) keeps the user's setting and stops the v21
+# Focus-terminology migration from later renaming the old key on top of the
+# default we just wrote.
+V120_LEGACY_KEY_ALIASES = {
+    "focus_frequency": ("spot" "light_frequency",),
+}
+
+# Mirrors vault_paths._schema_value_matches — kept local so the migration can
+# run against a vault the framework's own loader still refuses to bind.
+_V120_TYPE_CHECKS = {
+    "null": lambda v: v is None,
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
+}
+
+_V120_TYPE_FALLBACKS = {
+    "null": None,
+    "string": "",
+    "integer": 0,
+    "number": 0,
+    "boolean": False,
+    "array": [],
+    "object": {},
+}
+
+
+def _v120_matches_type(value, expected):
+    """True if value satisfies a contract type spec such as 'string|null'."""
+    if not isinstance(expected, str):
+        return True
+    return any(_V120_TYPE_CHECKS.get(option, lambda _v: False)(value)
+               for option in expected.split("|"))
+
+
+def _v120_type_fallback(expected):
+    """A safe value for a contract key this migration has no opinion about.
+
+    Prefers null when the contract allows it (the honest "unset"), otherwise
+    the empty value of the first accepted type.
+    """
+    options = expected.split("|") if isinstance(expected, str) else []
+    if "null" in options:
+        return None
+    for option in options:
+        if option in _V120_TYPE_FALLBACKS:
+            return _V120_TYPE_FALLBACKS[option]
+    return None
+
+
+def load_vault_contract(repo_dir=None):
+    """Load the vault contract that governs the vault being migrated.
+
+    Prefers the copy inside the vault (apply_version has just written the
+    TARGET version's contract there) and falls back to the running framework's
+    own copy. Returns None when neither is readable — a pre-v120 target has no
+    contract and needs no migration.
+    """
+    repo = Path(repo_dir) if repo_dir else REPO_DIR
+    for candidate in (repo / "system" / "vault_contract.json",
+                      SYSTEM_DIR / "vault_contract.json"):
+        try:
+            value = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(value, dict) and isinstance(value.get("data_paths"), dict):
+            return value
+    return None
+
+
+def _v120_vault_layout(repo_dir):
+    """'embedded' when the framework ships inside the vault, else 'external'.
+
+    The contract forbids `system/` in an external vault, so its presence is the
+    layout discriminator — and it decides whether rotation lives at
+    system/rotation.json (embedded) or state/rotation.json (external).
+    """
+    return "embedded" if (repo_dir / "system").is_dir() else "external"
+
+
+def _v120_contract_path(repo_dir, entry, layout):
+    relative = entry.get("embedded_path") if layout == "embedded" else entry.get("path")
+    relative = relative or entry.get("path")
+    if not isinstance(relative, str) or not relative:
+        return None
+    candidate = Path(relative)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return None
+    return repo_dir / candidate
+
+
+def _v120_required_json_shape(name, entry):
+    """Return (required_keys, supported_versions, version_field) or None.
+
+    Only blocking-validated JSON entries need migrating; everything else the
+    binder treats as opaque or deferred.
+    """
+    schema = entry.get("schema")
+    if not isinstance(schema, dict) or schema.get("format") != "json":
+        return None
+    if schema.get("validation_policy") != "blocking":
+        return None
+    required = schema.get("required_keys")
+    if not isinstance(required, dict):
+        required = {}
+    supported = schema.get("supported")
+    if not isinstance(supported, list):
+        supported = schema.get("supported_versions")
+    if not isinstance(supported, list):
+        supported = []
+    version_field = schema.get("version_field")
+    return required, supported, version_field
+
+
+def _v120_migrate_json_file(name, path, required, supported, version_field):
+    """Bring one required JSON file up to the contract. Returns True if changed.
+
+    Additive by construction: existing keys keep their position and value. A
+    value that would fail validation is REPLACED but never lost — the original
+    is preserved alongside under `legacy_<key>`, which the contract permits
+    (`unknown_fields: allow`).
+    """
+    defaults = V120_KEY_DEFAULTS.get(name, {})
+    data = None
+    if path.exists():
+        salvageable = False
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # Unreadable or corrupt (e.g. an interrupted write) — the most
+            # common real-world reason a vault won't bind. Never repairable
+            # in place, ALWAYS salvaged before rebuild.
+            loaded = None
+            salvageable = True
+        if isinstance(loaded, dict):
+            data = loaded
+        elif loaded is not None:
+            # A non-object payload cannot be repaired in place either.
+            salvageable = True
+        if salvageable:
+            # Keep the user's original bytes beside the rebuilt file rather
+            # than discarding them — corrupt or not, they're not ours to lose.
+            salvage = path.with_name(path.name + ".pre-v120")
+            if not salvage.exists():
+                try:
+                    salvage.write_bytes(path.read_bytes())
+                except OSError:
+                    raise RuntimeError(
+                        f"cannot salvage {path.name} before rebuilding it — "
+                        "refusing to overwrite the original"
+                    ) from None
+    if data is None:
+        data = {}
+
+    before = json.dumps(data, sort_keys=True)
+
+    # 1. Schema version: the blocker behind "unsupported schema version".
+    if version_field and supported:
+        if data.get(version_field) not in supported:
+            if version_field in data:
+                data.setdefault(f"legacy_{version_field}", data[version_field])
+            data[version_field] = supported[-1]
+
+    # 2. Every other contract-required key.
+    for key, expected in required.items():
+        if key == version_field:
+            continue
+        if key in data and _v120_matches_type(data[key], expected):
+            continue
+        if key in data:
+            # Present but the wrong type — park the original, then replace.
+            original = data.pop(key)
+            if f"legacy_{key}" not in data:
+                data[f"legacy_{key}"] = original
+        replacement = None
+        for alias in V120_LEGACY_KEY_ALIASES.get(key, ()):
+            if alias in data and _v120_matches_type(data[alias], expected):
+                replacement = data.pop(alias)
+                break
+        if replacement is None:
+            replacement = defaults[key] if key in defaults else _v120_type_fallback(expected)
+            if not _v120_matches_type(replacement, expected):
+                replacement = _v120_type_fallback(expected)
+        data[key] = json.loads(json.dumps(replacement))  # never share mutables
+
+    if path.exists() and json.dumps(data, sort_keys=True) == before:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_json(path, data)
+    return True
+
+
+def migrate_vault_to_v120(repo_dir=None):
+    """Upgrade a pre-v120 vault in place to the v120 durable-data contract.
+
+    Idempotent: running it on a vault that already satisfies the contract
+    changes nothing and returns an empty list. Returns the vault-relative paths
+    it rewrote or created.
+    """
+    repo = Path(repo_dir) if repo_dir else REPO_DIR
+    contract = load_vault_contract(repo)
+    if contract is None:
+        return []
+    data_paths = contract.get("data_paths") or {}
+    required_names = contract.get("required_data_paths") or []
+    layout = _v120_vault_layout(repo)
+    changed = []
+
+    for name in required_names:
+        entry = data_paths.get(name)
+        if not isinstance(entry, dict):
+            continue
+        path = _v120_contract_path(repo, entry, layout)
+        if path is None:
+            continue
+        if entry.get("kind") == "directory":
+            if not path.is_dir():
+                path.mkdir(parents=True, exist_ok=True)
+                changed.append(path.relative_to(repo).as_posix())
+            continue
+        # The state/ (external) or system/ (embedded) parent must exist before
+        # the binder can even open the file.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shape = _v120_required_json_shape(name, entry)
+        if shape is None:
+            # Opaque required file (question_bank). Never synthesised from
+            # nothing — a vault without its question bank is not a Lifehug
+            # vault — but a stale upstream copy is a legitimate seed.
+            if not path.exists():
+                seed = repo / "system" / "question-bank-upstream.md"
+                if name == "question_bank" and seed.exists():
+                    path.write_bytes(seed.read_bytes())
+                    changed.append(path.relative_to(repo).as_posix())
+            continue
+        required, supported, version_field = shape
+        if _v120_migrate_json_file(name, path, required, supported, version_field):
+            changed.append(path.relative_to(repo).as_posix())
+
+    return changed
 
 
 def find_upstream_remote():
@@ -276,6 +572,30 @@ def run_migrations(target_version, current_version):
         gitkeep = directory / ".gitkeep"
         if not gitkeep.exists():
             gitkeep.write_text("")
+
+    if target_version >= 120 and current_version < 120:
+        # v120: the durable-data contract became blocking at vault bind time.
+        # Deliberately ordered BEFORE the v15/v21 blocks below: those import
+        # framework modules (roadmap, focus_migration) that pull in
+        # lifehug_core, which binds the vault at import time and would refuse
+        # an unrepaired pre-v120 vault. Repair first, then those can run.
+        try:
+            changed = migrate_vault_to_v120()
+        except Exception as exc:  # never let a migration break the update
+            print(
+                f"  Warning: v120 vault-contract migration failed: {exc}\n"
+                f"  Your vault may not open until it is repaired. Re-run with:\n"
+                f"    python3 system/update.py --migrate-vault",
+                file=sys.stderr,
+            )
+        else:
+            if changed:
+                print(
+                    f"  Migrated {len(changed)} durable-data file(s) to the v120 vault "
+                    f"contract: {', '.join(changed)}.\n"
+                    f"  Existing keys and values were preserved; only missing or "
+                    f"unreadable contract keys were filled in."
+                )
 
     if target_version >= 15 and current_version < 15:
         # v15: introduce the Focus/roadmap layer. This is a pure backfill —
@@ -485,6 +805,38 @@ def cmd_rollback(args):
         sys.exit(1)
 
 
+def cmd_migrate_vault(args):
+    """Run the v120 vault-contract migration on its own.
+
+    `--apply` already runs it, but a vault that was updated before this
+    migration existed is stuck: its framework files are current and every
+    entry point refuses to bind it. This is the way out.
+
+    Target resolution honors the same escape hatches as the rest of the CLI:
+    --vault-root, then LIFEHUG_VAULT_ROOT, then this checkout (REPO_DIR) —
+    the whole point of this command is repairing a vault the loader refuses,
+    so it must not silently migrate the wrong tree and report success.
+    """
+    root = getattr(args, "vault_root", None) or os.environ.get("LIFEHUG_VAULT_ROOT")
+    repo = Path(root).expanduser() if root else REPO_DIR
+    if not repo.is_dir():
+        print(f"Error: vault root {repo} is not a directory", file=sys.stderr)
+        return 1
+    try:
+        changed = migrate_vault_to_v120(repo)
+    except Exception as exc:  # a broken vault is exactly who runs this
+        print(f"Error: migration failed: {exc}", file=sys.stderr)
+        print("No files were rebuilt without a .pre-v120 salvage copy.", file=sys.stderr)
+        return 1
+    if changed:
+        print(f"Migrated {len(changed)} durable-data file(s) in {repo} to the v120 vault contract:")
+        for path in changed:
+            print(f"  {path}")
+    else:
+        print(f"Vault at {repo} already satisfies the v120 durable-data contract. Nothing to do.")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Lifehug update manager")
     parser.add_argument("--check", action="store_true", help="Check for updates")
@@ -492,6 +844,16 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Apply latest update")
     parser.add_argument("--version", type=int, metavar="N", help="Target version (with --apply)")
     parser.add_argument("--rollback", action="store_true", help="Rollback to previous version")
+    parser.add_argument(
+        "--vault-root", metavar="PATH", default=None,
+        help="Vault to operate on with --migrate-vault (default: "
+             "LIFEHUG_VAULT_ROOT, then this checkout)",
+    )
+    parser.add_argument(
+        "--migrate-vault", action="store_true",
+        help="Repair a pre-v120 vault against the v120 durable-data contract "
+             "(idempotent; safe to run on an already-current vault)",
+    )
     args = parser.parse_args()
 
     if args.check:
@@ -500,6 +862,8 @@ def main():
         cmd_apply(args)
     elif args.rollback:
         cmd_rollback(args)
+    elif args.migrate_vault:
+        sys.exit(cmd_migrate_vault(args) or 0)
     else:
         parser.print_help()
 
