@@ -203,6 +203,36 @@ class DurableJobsTests(unittest.TestCase):
         self.assertEqual(duplicate["id"], record["id"])
         kick.assert_called_once_with()
 
+    def test_no_kick_mode_drains_supervised_without_detached_worker(self):
+        with mock.patch.dict(os.environ, {"LIFEHUG_JOBS_NO_KICK": "1"}):
+            with mock.patch.object(jobs, "_kick_worker") as kick:
+                record = jobs.enqueue(
+                    "compile",
+                    {"no_ai": True},
+                    identity="supervised-no-kick",
+                    kick=True,
+                )
+                finished = jobs.wait_for_job_embedded_safe(record["id"], timeout=5)
+
+        kick.assert_not_called()
+        self.assertEqual(finished["state"], "succeeded")
+        self.assertIn(
+            "start",
+            (self.vault / "state" / "probe-events.log").read_text(encoding="utf-8"),
+        )
+
+    def test_lifehug_queue_wait_uses_embedded_safe_wait(self):
+        record = {"id": "a" * 20}
+        finished = {"id": record["id"], "state": "succeeded"}
+        with mock.patch.object(jobs, "configure"), \
+                mock.patch.object(jobs, "enqueue", return_value=record), \
+                mock.patch.object(
+                    jobs, "wait_for_job_embedded_safe", return_value=finished
+                ) as wait:
+            self.assertEqual(lifehug._queue_and_wait("compile", {"no_ai": True}), 0)
+
+        wait.assert_called_once_with(record["id"])
+
     def test_cold_start_identity_key_is_atomic_across_processes(self):
         cold_vault = self.tmp / "cold-vault"
         make_minimum_vault(cold_vault)

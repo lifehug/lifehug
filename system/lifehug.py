@@ -127,7 +127,7 @@ def _queue_and_wait(command: str, payload: dict) -> int:
     try:
         record = jobs.enqueue(command, payload)
         print(f"Queued {command} job {record['id']}")
-        record = jobs.wait_for_job(record["id"])
+        record = jobs.wait_for_job_embedded_safe(record["id"])
     except (TimeoutError, ValueError) as exc:
         print(f"Error: local job could not complete ({exc})", file=sys.stderr)
         return 1
