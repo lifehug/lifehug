@@ -34,6 +34,23 @@ FOLLOWUP_HEADER = "📖 Lifehug — since you're on a roll"
 FOLLOWUP_FOOTER = "(Totally optional — tomorrow's question comes either way)"
 
 
+def _asked_date_from(rotation: dict) -> str:
+    """Return rotation's asked date as ``YYYY-MM-DD``, or "" when unrecorded.
+
+    ``last_asked_at`` is ``string|null`` in the vault contract — v120 made the
+    key REQUIRED-but-nullable, so ``rotation.get("last_asked_at", "")`` started
+    returning ``None`` instead of the pre-v120 missing-key ``""``. Stringifying
+    that produced the literal ``"None"``, which sailed through the ``or``
+    fallback (a non-empty string) and landed in ``asked_at`` frontmatter, where
+    downstream date validation rejects it. Only a real date string survives
+    here; everything else falls back exactly as a pre-v120 absent key did.
+    """
+    raw = rotation.get("last_asked_at")
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()[:10]
+
+
 def refresh_neighborhood_readiness_safely() -> None:
     """Refresh derived neighborhood lifecycle fields without blocking answer save."""
     try:
@@ -306,7 +323,7 @@ def main():
 
     cat = str(question["category"])
     cat_name = categories.get(cat, {}).get("name", cat)
-    asked = args.asked_date or (str(rotation.get("last_asked_at", ""))[:10] or args.answered_date)
+    asked = args.asked_date or _asked_date_from(rotation) or args.answered_date
     pass_number = rotation.get("current_pass", 1)
     followups_added = append_followups(question_id, args.followup)
 
