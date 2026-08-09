@@ -12,6 +12,7 @@ sys.path.insert(0, str(SYSTEM))
 
 import serve_wiki  # noqa: E402
 import roadmap  # noqa: E402
+import recommend_focuses  # noqa: E402
 import entity_roster  # noqa: E402
 import lifehug_core  # noqa: E402
 import artifact  # noqa: E402
@@ -42,6 +43,13 @@ class WikiViewsTests(unittest.TestCase):
             (serve_wiki, "SECOND_VOICE_OFFERS_FILE"): serve_wiki.SECOND_VOICE_OFFERS_FILE,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
+            # focus_start_gate() (issue #79) lives in recommend_focuses.py and
+            # reads its own module-level QUESTIONS_FILE binding — distinct
+            # from roadmap's and serve_wiki's copies, so it needs its own
+            # save/patch/restore too. (Its roadmap reads go through
+            # roadmap.load_roadmap(), which already resolves against
+            # roadmap.ROADMAP_FILE above — no separate binding for that one.)
+            (recommend_focuses, "QUESTIONS_FILE"): recommend_focuses.QUESTIONS_FILE,
             (entity_roster, "ENTITY_DIR"): entity_roster.ENTITY_DIR,
             (lifehug_core, "REPO_DIR"): lifehug_core.REPO_DIR,
             # v127: the Studio view reads through studio/book/artifact, which
@@ -174,6 +182,7 @@ class WikiViewsTests(unittest.TestCase):
             "## F: The Problem (Etherfuse Story)\n- [x] F1: What?\n- [x] F2: Why you?\n")
         serve_wiki.QUESTIONS_FILE = qbank
         roadmap.QUESTIONS_FILE = qbank
+        recommend_focuses.QUESTIONS_FILE = qbank
         serve_wiki.COVERAGE_FILE = self._write("coverage.json", {"categories": {
             "A": {"total": 2, "answered": 1, "status": "yellow"},
             "F": {"total": 2, "answered": 2, "status": "green"}}})
@@ -373,6 +382,100 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("lifehug/lifehug#79", body)
         self.assertIn("fully automatic", body)
         self.assertIn("no action needed", body)
+
+    def test_review_focus_ideas_policy_cites_79_as_resolved(self):
+        # Issue #79 shipped the threshold — the old "planned threshold"
+        # parenthetical is gone, replaced by the gate's actual state.
+        self._populate()
+        _, body, _ = self._view("review")
+        self.assertNotIn("planned threshold", body)
+        self.assertIn("lifehug/lifehug#79, resolved", body)
+
+    def test_review_focus_ideas_policy_open_when_gate_open(self):
+        # Fixture: primary "My Life" (exempt) + non-primary "Etherfuse" at
+        # 2/2 against a target of 2 -> saturation 1.0 -> SATURATED. No
+        # other non-primary focus with pending questions, so the gate is
+        # open. (Not asserting the substring "ready to start" here — it also
+        # appears in the open-gate policy prose, which would make this
+        # tautological; see the dedicated badge-markup tests below.)
+        self._populate()
+        _, body, _ = self._view("review")
+        self.assertIn("the completion gate is open", body)
+
+    def test_review_focus_ideas_policy_closed_names_the_blocking_focus(self):
+        # Add a second, under-saturated non-primary focus (0/2 answered in
+        # a category with no questions answered yet -> EARLY) so the gate
+        # closes and the policy line must name it.
+        self._populate()
+        roadmap_data = json.loads(Path(roadmap.ROADMAP_FILE).read_text())
+        roadmap_data["focuses"].append({
+            "id": "unfinished-thing", "label": "Unfinished Thing", "type": "theme",
+            "tier": "standard", "objective": "x", "deliverable": "essay",
+            "categories": ["A"], "target_depth": 100, "phase": "active", "wiki_node": None,
+        })
+        Path(roadmap.ROADMAP_FILE).write_text(json.dumps(roadmap_data))
+        _, body, _ = self._view("review")
+        self.assertIn("gated while", body)
+        self.assertIn("Unfinished Thing", body)
+        self.assertNotIn("the completion gate is open", body)
+
+    def test_review_focus_ideas_policy_escapes_hostile_focus_label(self):
+        # Focus labels can originate from LLM/imported-source entities (an
+        # approved recommendation's `entity` name becomes the Focus label
+        # via approve_recommendation) — the blocking-focus label interpolated
+        # into the policy line must be escaped, never raw HTML.
+        self._populate()
+        roadmap_data = json.loads(Path(roadmap.ROADMAP_FILE).read_text())
+        roadmap_data["focuses"].append({
+            "id": "hostile", "label": "<script>alert(1)</script>", "type": "theme",
+            "tier": "standard", "objective": "x", "deliverable": "essay",
+            "categories": ["A"], "target_depth": 100, "phase": "active", "wiki_node": None,
+        })
+        Path(roadmap.ROADMAP_FILE).write_text(json.dumps(roadmap_data))
+        _, body, _ = self._view("review")
+        self.assertNotIn("<script>alert(1)</script>", body)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body)
+
+    def test_review_focus_ideas_ready_badge_renders_for_high_score_when_gate_open(self):
+        # Gate is open in the default fixture. Bump the pending rec's score
+        # to (at least) the floor and assert the EXACT badge markup _badge()
+        # produces — a bare substring check for "ready to start" would also
+        # match the open-gate policy prose even with the badge disabled.
+        self._populate()
+        data = json.loads(Path(serve_wiki.FOCUS_RECS_FILE).read_text())
+        data["recommendations"][0]["score"] = recommend_focuses.FOCUS_READY_SCORE_FLOOR
+        Path(serve_wiki.FOCUS_RECS_FILE).write_text(json.dumps(data))
+        _, body, _ = self._view("review")
+        self.assertIn(serve_wiki._badge("ready to start", "green"), body)
+
+    def test_review_focus_ideas_ready_badge_absent_below_floor_when_gate_open(self):
+        # Fixture rec (Emma, score 7.5) is below FOCUS_READY_SCORE_FLOOR
+        # (8.0) even though the gate is open — no badge for her.
+        self._populate()
+        _, body, _ = self._view("review")
+        self.assertNotIn(serve_wiki._badge("ready to start", "green"), body)
+
+    def test_review_focus_ideas_no_badge_when_gate_closed_even_if_stored_flag_true(self):
+        # Authority check (issue #79): the lane recomputes ready-to-start
+        # LIVE from focus_start_gate() + the rec's stored score — it must
+        # never contradict its own (closed) policy line by trusting a stale
+        # stored ready_to_start flag, even when the score itself clears the
+        # floor.
+        self._populate()
+        roadmap_data = json.loads(Path(roadmap.ROADMAP_FILE).read_text())
+        roadmap_data["focuses"].append({
+            "id": "unfinished-thing", "label": "Unfinished Thing", "type": "theme",
+            "tier": "standard", "objective": "x", "deliverable": "essay",
+            "categories": ["A"], "target_depth": 100, "phase": "active", "wiki_node": None,
+        })
+        Path(roadmap.ROADMAP_FILE).write_text(json.dumps(roadmap_data))  # gate closed
+        data = json.loads(Path(serve_wiki.FOCUS_RECS_FILE).read_text())
+        data["recommendations"][0]["score"] = recommend_focuses.FOCUS_READY_SCORE_FLOOR
+        data["recommendations"][0]["ready_to_start"] = True  # stale/stored flag says yes
+        Path(serve_wiki.FOCUS_RECS_FILE).write_text(json.dumps(data))
+        _, body, _ = self._view("review")
+        self.assertIn("gated while", body)
+        self.assertNotIn(serve_wiki._badge("ready to start", "green"), body)
 
     def test_review_actionable_statuses_render_before_the_rest(self):
         self._populate()
