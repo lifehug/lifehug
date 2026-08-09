@@ -40,7 +40,7 @@ from lifehug_core import (
     slugify,
 )
 from entity_roster import ENTITY_TYPES, load_roster
-from question_candidates import check_quality, _infer_category
+from question_candidates import AUTO_PROMOTE_THRESHOLD, check_quality, _infer_category
 from progress import verdict
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 
@@ -300,10 +300,10 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
 # claimed by any group falls into System automatically, so adding a view is
 # still one registry entry.
 VIEW_GROUPS = [
-    ("Do", ["queue", "candidates", "recommendations", "studio"]),
+    ("Do", ["queue", "review", "studio"]),
     ("Reflect", ["mirror", "timeline", "graph"]),
     ("Library", ["foundation", "sources", "privacy"]),
-    ("System", ["status", "entities", "reports"]),
+    ("System", ["status", "reports"]),
 ]
 
 
@@ -745,10 +745,14 @@ def view_foundation():
     return ("Foundation", "".join(parts), False)
 
 
-def view_candidates():
+def _candidates_section_html() -> str:
+    """Question candidates lane of Review (v128) — the old view_candidates'
+    body, unindented from its own page. Status groups render actionable-first
+    (candidate, needs_review — the ones with a decision waiting) then the
+    rest alphabetically, so the lane opens on what needs your eye."""
     cands = (read_json(QUESTION_CANDIDATES_FILE, default={}) or {}).get("candidates", [])
     if not cands:
-        return ("Candidates", "<h1>Question Candidates</h1>" + _empty("No candidates yet."), False)
+        return _empty("No candidates yet.")
     # Quality is not stored on candidates — it's computed on demand by
     # check_quality (same scorer the classifier/promotion gate use). Category
     # is only stamped at review time; until then infer it from the candidate's
@@ -758,8 +762,10 @@ def view_candidates():
     by_status: dict[str, list[dict]] = {}
     for c in cands:
         by_status.setdefault(c.get("status", "candidate"), []).append(c)
-    parts = ["<h1>Question Candidates</h1>"]
-    for status in sorted(by_status):
+    actionable_order = [s for s in ("candidate", "needs_review") if s in by_status]
+    rest_order = sorted(s for s in by_status if s not in ("candidate", "needs_review"))
+    parts = []
+    for status in actionable_order + rest_order:
         group = by_status[status]
         parts.append(_h2(f"{status} ({len(group)})"))
         rows = []
@@ -790,7 +796,7 @@ def view_candidates():
                 row.append('<span class="muted">—</span>')
             rows.append(row)
         parts.append(_table(["Question", "Priority", "Quality", "Category", "Story fn", "Source", "Actions"], rows))
-    return ("Candidates", "".join(parts), False)
+    return "".join(parts)
 
 
 def _candidate_actions(c: dict, inferred: str | None, cat_names: dict) -> str:
@@ -817,8 +823,10 @@ def _candidate_actions(c: dict, inferred: str | None, cat_names: dict) -> str:
         f'<button class="btn quiet" type="submit">Dismiss</button></form>')
 
 
-def view_entities():
-    parts = ["<h1>Entity Candidates</h1>"]
+def _entities_section_html() -> str:
+    """Entity candidates lane of Review (v128) — the old view_entities' body,
+    unchanged, minus its own page title."""
+    parts = []
     for etype in ENTITY_TYPES:
         # Only show entities still in the candidate stage — anything that has
         # graduated (page-eligible) or already maps to a Focus has a wiki page,
@@ -841,7 +849,7 @@ def view_entities():
                 ("yes" if e.get("qualifies") else "no"),
             ])
         parts.append(_table(["Name", "Aliases", "Score", "Answers", "Qualifies"], rows))
-    return ("Entity Candidates", "".join(parts), False)
+    return "".join(parts)
 
 
 def loop_stats() -> dict:
@@ -1066,7 +1074,7 @@ def _hub_card_review():
                     "proposed from your answers")
     if pending_recs:
         bits.append(f"{pending_recs} focus idea{'s' if pending_recs != 1 else ''}")
-    href = "/views/candidates" if open_cands else "/views/recommendations"
+    href = "/views/review"
     cta = "Review candidates" if open_cands else "Review focus ideas"
     return _invitation(
         "review", "For your eye",
@@ -1368,14 +1376,15 @@ def view_sources():
     return ("Source Integrity", "".join(parts), False)
 
 
-def view_recommendations():
+def _recommendations_section_html() -> str:
+    """Focus ideas lane of Review (v128) — the old view_recommendations' body,
+    unchanged, minus its own page title."""
     data = read_json(FOCUS_RECS_FILE, default={}) or {}
     recs = data.get("recommendations", [])
     dismissed = data.get("dismissed", [])
     pending = [r for r in recs if r.get("status") == "pending"]
     others = [r for r in recs if r.get("status") != "pending"]
-    parts = ["<h1>Focus Recommendations</h1>"]
-    parts.append(_h2(f"Pending ({len(pending)})"))
+    parts = [_h2(f"Pending ({len(pending)})")]
     if pending:
         def rec_actions(r: dict) -> str:
             rid = html.escape(str(r.get("id", "")))
@@ -1410,7 +1419,67 @@ def view_recommendations():
         parts.append(_h2(f"Dismissed ({len(dismissed)})"))
         parts.append(_table(["Entity", "Reason"],
                             [[html.escape(str(r.get("entity", "?"))), html.escape(str(r.get("dismiss_reason", "")))] for r in dismissed]))
-    return ("Focus Recommendations", "".join(parts), False)
+    return "".join(parts)
+
+
+def view_review():
+    """Review (v128) — the system's three self-grown proposal lanes on one
+    page: question candidates the classifier proposed, focus ideas grown
+    from entity evidence, and entity candidates auto-detected across
+    answers. Consolidates the old Question Candidates / Focus
+    Recommendations / Entity Candidates views into three collapsible
+    lanes — the fnd-focus idiom Foundation (v124) and Studio (v127)
+    established — each carrying its own autonomy-level policy line so it's
+    obvious at a glance which lane needs your judgment (question candidates,
+    focus ideas) and which is pure FYI (entity candidates)."""
+    stats = loop_stats()
+    open_cands, pending_recs = stats["open_cands"], stats["pending_recs"]
+    entity_total = sum(
+        len([e for e in load_roster(t).get("entities", [])
+             if not e.get("page_eligible") and not e.get("maps_to_focus")])
+        for t in ENTITY_TYPES)
+
+    parts = [
+        "<h1>Review</h1>",
+        f"<p>{open_cands} question candidates waiting · "
+        f"{pending_recs} focus ideas pending · "
+        f"{entity_total} entities pending graduation</p>",
+    ]
+
+    parts.append(
+        '<details class="fnd-focus"><summary>'
+        '<div class="focus-head"><span class="focus-label">Question candidates</span> '
+        f'{_badge(open_cands)}</div>'
+        '<div class="focus-sub">auto-promote at quality ≥ '
+        f'{AUTO_PROMOTE_THRESHOLD} under weekly caps — these are below the '
+        'line or awaiting review</div>'
+        '</summary><div class="fnd-cats">'
+        + _candidates_section_html()
+        + '</div></details>')
+
+    parts.append(
+        '<details class="fnd-focus"><summary>'
+        '<div class="focus-head"><span class="focus-label">Focus ideas</span> '
+        f'{_badge(pending_recs)}</div>'
+        '<div class="focus-sub">focuses are never created without you — '
+        'approving one redirects the weekly question budget (see '
+        'lifehug/lifehug#79 for the planned threshold)</div>'
+        '</summary><div class="fnd-cats">'
+        + _recommendations_section_html()
+        + '</div></details>')
+
+    parts.append(
+        '<details class="fnd-focus"><summary>'
+        '<div class="focus-head"><span class="focus-label">Entity candidates</span> '
+        f'{_badge(entity_total)}</div>'
+        '<div class="focus-sub">fully automatic — qualifying entities '
+        'graduate into wiki pages at the next compile; this is a preview, '
+        'no action needed</div>'
+        '</summary><div class="fnd-cats">'
+        + _entities_section_html()
+        + '</div></details>')
+
+    return ("Review", "".join(parts), False)
 
 
 # --- Graph view -------------------------------------------------------------
@@ -2509,20 +2578,20 @@ def act_candidate(form):
     if op == "promote":
         cat = _f(form, "category")
         if not cat:
-            return ("/views/candidates", "✗ pick a category before promoting", None)
+            return ("/views/review", "✗ pick a category before promoting", None)
         job = _start_job("candidate-promote", {"candidate_id": cid, "category": cat})
-        return ("/views/candidates", f"queued promotion {cid} → {cat}", job["id"])
+        return ("/views/review", f"queued promotion {cid} → {cat}", job["id"])
     if op == "dismiss":
         job = _start_job("candidate-update", {
             "candidate_id": cid, "status": "rejected", "reason": "dismissed from viewer",
         })
-        return ("/views/candidates", f"queued dismissal of {cid}", job["id"])
+        return ("/views/review", f"queued dismissal of {cid}", job["id"])
     if op == "defer":
         job = _start_job("candidate-update", {
             "candidate_id": cid, "status": "deferred", "reason": "deferred from viewer",
         })
-        return ("/views/candidates", f"queued deferral of {cid}", job["id"])
-    return ("/views/candidates", "✗ unknown candidate action", None)
+        return ("/views/review", f"queued deferral of {cid}", job["id"])
+    return ("/views/review", "✗ unknown candidate action", None)
 
 
 def act_focus_rec(form):
@@ -2531,7 +2600,7 @@ def act_focus_rec(form):
         # focus-approve scaffolds a category and generates starter questions
         # (AI when available) — minutes, not milliseconds: run as a job.
         job = _start_job("focus-approve", {"recommendation_id": rid})
-        return ("/views/recommendations",
+        return ("/views/review",
                 f"approving {rid} — scaffolding the Focus (starter questions may take a minute)",
                 job["id"])
     if op == "dismiss":
@@ -2539,8 +2608,8 @@ def act_focus_rec(form):
             "recommendation_id": rid,
             "reason": _f(form, "reason") or "dismissed from viewer",
         })
-        return ("/views/recommendations", f"queued dismissal of {rid}", job["id"])
-    return ("/views/recommendations", "✗ unknown recommendation action", None)
+        return ("/views/review", f"queued dismissal of {rid}", job["id"])
+    return ("/views/review", "✗ unknown recommendation action", None)
 
 
 def act_second_voice(form):
@@ -2803,12 +2872,11 @@ VIEWS = [
     # Foundation: the consolidated supply-side review (v124) — absorbed the
     # separate Focuses / Coverage / Question Bank views.
     ("foundation", "Foundation", view_foundation),
-    ("recommendations", "Focus Recommendations", view_recommendations),
-    # The question surfaces.
-    ("candidates", "Question Candidates", view_candidates),
+    # Review: the consolidated self-grown proposal lanes (v128) — absorbed
+    # Question Candidates / Focus Recommendations / Entity Candidates.
+    ("review", "Review", view_review),
     ("queue", "Question Queue", view_queue),
     # The rest.
-    ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
     ("reports", "Reports", view_reports),
     ("privacy", "Privacy Preview", view_privacy_preview),
@@ -2816,14 +2884,17 @@ VIEWS = [
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 
 # Old bookmarks and links keep working: the three views Foundation absorbed
-# (v124) and the two Studio absorbed (v127) redirect permanently to their
-# consolidated surface.
+# (v124), the two Studio absorbed (v127), and the three Review absorbed
+# (v128) redirect permanently to their consolidated surface.
 LEGACY_VIEW_REDIRECTS = {
     "focuses": "foundation",
     "coverage": "foundation",
     "question-bank": "foundation",
     "book": "studio",
     "artifacts": "studio",
+    "candidates": "review",
+    "recommendations": "review",
+    "entities": "review",
 }
 
 # One-line explainer shown under each view's title: what the page is and what the
@@ -2835,14 +2906,12 @@ VIEW_DESCRIPTIONS = {
     "studio": "Where material becomes things — your projects and pieces, grouped by Focus. A project (the book) shows its chapter map and readiness; expand it for the full chapter table, and assemble the drafted chapters into a manuscript when you're ready. Every piece keeps its full version history — revisions, diffs, finals, deliveries — and everything starts here: pick a format, name a subject, and the Studio gathers the material. Foundation is the material; Studio is where you work it.",
     "foundation": "The raw material behind your stories — every Focus you're building toward, how deep it runs against its target, and where the graph is thin. Expand a Focus to see its categories: the bar is answered/total and the colour your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+) — least-covered first. Expand a category to see every question, answered (✓) and open (○). Artifacts are what you make; this is what you make them from.",
     "graph": "Your life as a graph. Each node is a wiki page (people, places, periods, themes, Focuses); size reflects how many sources mention it and edges connect subjects that share sources. Click any node to open its page.",
-    "candidates": "Follow-up questions the weekly classifier proposed from your answers and stories, grouped by review status. These are <em>not</em> daily questions yet — they wait here until promoted into the question bank.",
-    "entities": "People, places, periods, objects, and themes auto-detected across your answers that have <em>not</em> yet graduated into wiki pages. Once one graduates it drops off this list and appears in the wiki itself. Qualifies = it meets the bar to become a page.",
+    "review": "What the system grew on its own, waiting for your eye. Three lanes with three autonomy levels: question candidates auto-promote past a quality bar and the rest wait here; focus ideas never become Focuses without you; entities graduate into wiki pages automatically, previewed here. Promote, approve, dismiss, or defer — or just see what the Loop noticed. Decided items keep their history below each lane.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
-    "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
 }
 
 
