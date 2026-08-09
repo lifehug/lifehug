@@ -898,7 +898,9 @@ due, this month's second-voice offer, and a standing last slot resurfacing one
 old answer (≥90 days) — over a small stats strip. Tone contract: invitations,
 never guilt metrics — no streaks, no overdue red, absence reads as stillness;
 each card grounds itself in real material and says why it's here now. The
-hamburger menu groups views into **Do / Reflect / Library / System**; the
+hamburger menu groups views into **Do / Plan / Reflect / System** (v136 —
+act on proposals and pieces; see what's being asked and why; see the life
+itself; check the machinery); the
 compiled wiki stays in the left sidebar (index at the sidebar's Index link).
 Card sources are failure-wrapped — a broken loader drops its card, never the
 page. When nothing waits, home shows a single quiet "the loop is fed" card.
