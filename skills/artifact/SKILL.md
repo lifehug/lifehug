@@ -5,10 +5,11 @@ description: "Create Lifehug artifacts — letters, posts, captions, chapters, e
 
 # Lifehug Artifact Creator
 
-Artifacts are the pieces Lifehug is ultimately trying to help the author make:
-letters, posts, captions, chapters, speeches, and other authored outputs. This
-skill is script-first. Use `system/lifehug.py artifact ...`; do not hand-create
-metadata or source files.
+Artifacts (the Studio calls them **pieces**) are what Lifehug is
+ultimately trying to help the author make: letters, posts, captions, chapters,
+speeches, and other authored outputs. This skill is script-first. Use
+`system/lifehug.py artifact ...`; do not hand-create metadata or source
+files.
 
 Artifact mutations are typed durable jobs and share the vault-wide writer
 with answers, schedules, compiles, and viewer actions. Private drafts,
@@ -74,7 +75,7 @@ essays. Iterate with `artifact save --feedback` until the author says done;
 "done" means `artifact final` + `promote-source --kind all` + `compile`, which
 turns the essay into source material that influences the wiki (theme pages, the
 author hub). Always pass `--feedback` on revisions — it becomes the revision
-note shown in the viewer's revision footer (v98), where every version is
+note shown in the Studio's revision footer (v98), where every version is
 linked (★ = final) and Δ shows a word-level diff of what changed.
 
 Print the generation prompt:

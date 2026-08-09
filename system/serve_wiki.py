@@ -300,9 +300,9 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
 # claimed by any group falls into System automatically, so adding a view is
 # still one registry entry.
 VIEW_GROUPS = [
-    ("Do", ["queue", "candidates", "recommendations", "book"]),
+    ("Do", ["queue", "candidates", "recommendations", "studio"]),
     ("Reflect", ["mirror", "timeline", "graph"]),
-    ("Library", ["foundation", "artifacts", "sources", "privacy"]),
+    ("Library", ["foundation", "sources", "privacy"]),
     ("System", ["status", "entities", "reports"]),
 ]
 
@@ -448,6 +448,12 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     details.fnd-focus[open] > summary .focus-head::before {{ transform: rotate(90deg); }}
     .fnd-cats {{ padding: 10px 14px 12px; }}
     .fnd-cats details.qb-cat {{ background: #fff; }}
+    /* Studio (v127): projects and pieces nested inside a Focus group */
+    .studio-project {{ margin: 0 0 16px; }}
+    .studio-project > .focus-row {{ border-bottom: none; padding-bottom: 4px; }}
+    .fnd-cats details.art-group {{ background: #fff; }}
+    .fnd-cats > h3 {{ margin-top: 18px; }}
+    details.studio-new > summary {{ background: #f6f1e8; }}
     h2.fnd-orphans {{ margin-top: 28px; }}
     .qb-list {{ list-style: none; padding: 8px 16px 12px; margin: 0; }}
     .qb-list li {{ padding: 3px 0; }}
@@ -960,7 +966,7 @@ def _hub_card_chapter():
                     f'{ch["answered"]} of {ch["total"]} questions answered in '
                     f'{b.get("label", "the book")} — enough material to write from.',
                     why=f'it crossed {ch["verdict"]}{depth}',
-                    href="/views/book", cta="Open the book map")
+                    href="/views/studio", cta="Open the Studio")
     return None
 
 
@@ -1929,7 +1935,7 @@ def artifact_version_html(slug: str, n: str):
     title = _artifact_title(slug, "", "")
     star = " ★ final" if final == number else ""
 
-    nav = ['<a href="/views/artifacts">← Artifacts</a>']
+    nav = ['<a href="/views/studio">← Studio</a>']
     if number - 1 in numbers:
         nav.append(f'<a href="/artifact-version/{quote(slug)}/{number - 1}">← v{number - 1}</a>')
         nav.append(f'<a href="/artifact-diff/{quote(slug)}/{number - 1}/{number}">Δ what changed in v{number}</a>')
@@ -2036,7 +2042,7 @@ def artifact_diff_html(slug: str, a: str, b: str):
     title = _artifact_title(slug, "", "")
     diff, added, removed = _word_diff_html(path_a.read_text(errors="replace"),
                                            path_b.read_text(errors="replace"))
-    nav = ['<a href="/views/artifacts">← Artifacts</a>',
+    nav = ['<a href="/views/studio">← Studio</a>',
            f'<a href="/artifact-version/{quote(slug)}/{va}">v{va}</a>',
            f'<a href="/artifact-version/{quote(slug)}/{vb}">v{vb}</a>',
            f"{added} word(s) added", f"{removed} removed"]
@@ -2049,191 +2055,327 @@ def artifact_diff_html(slug: str, a: str, b: str):
     return f"{title} — v{va} → v{vb}", "".join(body)
 
 
-def view_artifacts():
-    """Artifacts view (v91) — outputs/ grouped by Focus, the same primitive the
-    roadmap plans by: each group is the person/project the pieces belong to
-    (resolved from the artifact's categories, subject as fallback). Groups
-    render as collapsed full-width bars (v92, same idiom as Question Bank /
-    Timeline) so the full suite of Focuses is scannable at a glance. Occasions
-    (Mother's Day, birthdays) are badges, not groups. Essays without a Focus
-    are the author's Thoughts (v98); other metadata orphans land in an Unfiled
-    group with a repair hint. PDF/image sidecars are linked; every piece gets
-    a revision footer (v98) with numbered version links and Δ diffs."""
-    import re as _re
+def _format_spec(format_id: str) -> dict | None:
+    """One format framework spec, or None (unknown id, or specs not on disk).
 
-    from lifehug_core import REPO_DIR as _REPO  # noqa: PLC0415
+    format_frameworks binds the process to a vault on its first registry call,
+    so every viewer entry point routes through here and never lets a registry
+    problem take a page down.
+    """
+    try:
+        import format_frameworks  # noqa: PLC0415
+        return format_frameworks.get_or_none(str(format_id))
+    except Exception as exc:  # noqa: BLE001
+        _record_view_failure("format-spec", exc)
+        return None
 
-    outputs = _REPO / "outputs"
-    if not outputs.exists():
-        return ("Artifacts", "<h1>Artifacts</h1>" + _empty(
-            "No artifacts yet. Create one: <code>lifehug.py artifact new "
-            "--format letter --subject Mom</code>"), False)
 
-    roadmap_data = load_roadmap()
-    if not roadmap_data.get("focuses"):
-        try:
-            roadmap_data = rebuild_roadmap(write=False)
-        except Exception:
-            roadmap_data = {"focuses": []}
-    focuses = roadmap_data.get("focuses", [])
-    cat_to_focus = {c: f for f in focuses for c in f.get("categories", [])}
-    label_to_focus = {str(f.get("label", "")).lower(): f for f in focuses}
+def _format_label(format_id: str) -> str:
+    spec = _format_spec(format_id)
+    if isinstance(spec, dict) and spec.get("label"):
+        return str(spec["label"])
+    return str(format_id).replace("_", " ").title()
 
-    arts = []
-    for art_dir in sorted(outputs.iterdir()):
-        if not art_dir.is_dir():
-            continue
-        meta_path = art_dir / "meta.yaml"
-        fmt = subject = created = occasion = ""
-        categories: list[str] = []
-        if meta_path.exists():
-            head = meta_path.read_text(errors="replace")
 
-            def _field(key, _head=head):
-                m = _re.search(rf"^{key}:\s*(.+)$", _head, _re.MULTILINE)
-                return m.group(1).strip().strip("'\"") if m else ""
-
-            fmt, subject, created, occasion = (
-                _field(k) for k in ("format", "subject", "created", "occasion"))
-            m = _re.search(r"^categories:\s*\[(.*?)\]", head, _re.MULTILINE)
-            if m:
-                categories = [c.strip().strip("'\"") for c in m.group(1).split(",") if c.strip()]
-        versions = sorted(art_dir.glob("v*.md"),
-                          key=lambda q: int(_re.match(r"v(\d+)", q.stem).group(1))
-                          if _re.match(r"v(\d+)", q.stem) else 0)
-        if not versions and not meta_path.exists():
-            continue
-        latest = versions[-1] if versions else None
-        body = latest.read_text(errors="replace") if latest else ""
-        art_json = read_json(art_dir / "artifact.json", default={}) or {}
-        occasion = occasion or str(art_json.get("occasion") or "")
-        focus = next((cat_to_focus[c] for c in categories if c in cat_to_focus), None)
-        if focus is None and subject:
-            focus = label_to_focus.get(subject.lower())
-        version_meta, final_version = _artifact_version_meta(art_dir)
-        arts.append({
-            "slug": art_dir.name, "fmt": fmt, "subject": subject,
-            "created": created, "occasion": occasion, "focus": focus,
-            "n_versions": len(versions),
-            "version_numbers": _artifact_version_numbers(art_dir),
-            "version_meta": version_meta, "final_version": final_version,
-            "words": len(_re.findall(r"[\w'’-]+", body)),
-            "delivered": bool(art_json.get("delivered_at")),
-            "promoted": bool(art_json.get("promoted_sources")),
-            "latest_name": latest.name if latest else "", "body": body,
-            "assets": sorted(p.name for p in art_dir.iterdir()
-                             if p.is_file() and p.suffix.lower() in ARTIFACT_ASSET_TYPES),
-        })
-
-    if not arts:
-        return ("Artifacts", "<h1>Artifacts</h1>" + _empty("No artifacts yet."), False)
-
-    groups: dict[str, list[dict]] = {}
-    for art in arts:
-        if art["focus"]:
-            key = art["focus"]["id"]
-        elif art["fmt"] == "essay":
-            # Opinion essays are the author's thoughts, not metadata orphans (v98).
-            key = "__thoughts__"
+def _format_choices() -> list[tuple[str, str]]:
+    """(id, "Label — summary") for every composable format, canonical order."""
+    try:
+        import format_frameworks  # noqa: PLC0415
+        ids = list(format_frameworks.valid_formats())
+    except Exception as exc:  # noqa: BLE001
+        _record_view_failure("format-choices", exc)
+        return []
+    choices = []
+    for fid in ids:
+        spec = _format_spec(fid)
+        if isinstance(spec, dict):
+            label = str(spec.get("label") or fid)
+            summary = str(spec.get("summary") or "")
+            text = f"{label} — {summary}" if summary else label
         else:
-            key = "__unfiled__"
-        groups.setdefault(key, []).append(art)
-    # Focus groups by most-recent artifact first; Thoughts then Unfiled last.
-    special = ("__thoughts__", "__unfiled__")
-    ordered = sorted((kv for kv in groups.items() if kv[0] not in special),
-                     key=lambda kv: max(a["created"] for a in kv[1]), reverse=True)
-    for key in special:
-        if key in groups:
-            ordered.append((key, groups[key]))
+            text = str(fid).replace("_", " ").title()
+        choices.append((str(fid), text))
+    return choices
 
-    sections = ["<h1>Artifacts</h1>",
-                f"<p>{len(arts)} piece(s) in <code>outputs/</code>, grouped by Focus — "
-                "the product payoff: letters, posts, captions, chapter drafts.</p>"]
-    for _key, items in ordered:
-        items.sort(key=lambda a: (a["created"], a["slug"]), reverse=True)
-        focus = items[0]["focus"]
+
+def _studio_create_form() -> str:
+    """"Start something new" (v127): the one door into a new piece.
+
+    Collapsed by default — the Studio's first job is showing what exists — and
+    posting to /actions/artifact/new, which queues the same `artifact new` CLI
+    the terminal runs. The redirect can't know the slug the CLI will mint, so
+    the flash names the format and subject instead of linking the piece.
+    """
+    options = "".join(
+        f'<option value="{html.escape(fid)}">{html.escape(text)}</option>'
+        for fid, text in _format_choices())
+    if not options:
+        options = '<option value="letter">Letter</option>'
+    return (
+        '<details class="fnd-focus studio-new"><summary>'
+        '<div class="focus-head"><span class="focus-label">Start something new</span> '
+        + _badge("create", "saturated")
+        + '</div><div class="focus-sub">Pick a format and name a subject — the '
+        'Studio gathers the material and opens a new piece.</div></summary>'
+        '<div class="fnd-cats">'
+        f'<form class="actform" method="post" action="/actions/artifact/new">{_token_input()}'
+        '<label>Format</label>'
+        f'<select name="format">{options}</select>'
+        '<label>Subject</label>'
+        '<input name="subject" placeholder="Mom">'
+        '<label>Occasion (optional)</label>'
+        "<input name=\"occasion\" placeholder=\"Mother's Day\">"
+        '<label>Date (optional)</label>'
+        '<input type="date" name="date">'
+        '<label>Title (optional)</label>'
+        '<input name="title" placeholder="A letter for Mom">'
+        '<label>Categories (optional)</label>'
+        '<input name="categories" placeholder="K,L">'
+        '<p class="muted"><small>advanced: category letters from the question '
+        'bank — narrows the material this piece is built from.</small></p>'
+        '<div class="act-row"><button class="btn" type="submit">Start it</button></div>'
+        '</form></div></details>')
+
+
+def _readiness_chips(readiness: list[dict] | None) -> str:
+    """"Letter · 4/5 · READY" chips for a Focus's non-book formats (v126)."""
+    chips = []
+    for card in readiness or []:
+        tag = str(card.get("verdict", "") or "")
+        chips.append(_badge(
+            f'{_format_label(card.get("format", ""))} · '
+            f'{card.get("filled_slots", 0)}/{card.get("total_slots", 0)} · {tag}',
+            tag.lower()))
+    return " ".join(chips)
+
+
+def _piece_html(a: dict) -> str:
+    """One piece card — the Artifacts view's per-piece rendering, unchanged.
+
+    Input is a piece dict from studio._scan_pieces (byte-identical fields to
+    the scan this was extracted from). Badges (format, occasion, delivered,
+    promoted), the meta line with linked PDF/image sidecars, the latest text
+    readable inline, the v98 revision footer (numbered version links, ★ final,
+    Δ diffs), and the v101 write-action panel for the latest version.
+    """
+    parts = []
+    badges = _badge(a["fmt"] or "?", "default")
+    if a["occasion"]:
+        badges += " " + _badge(a["occasion"], "yellow")
+    if a["delivered"]:
+        badges += " " + _badge("delivered", "saturated")
+    if a["promoted"]:
+        badges += " " + _badge("promoted to source", "saturated")
+    title = _artifact_title(a["slug"], a["fmt"], a["occasion"])
+    meta_bits = [b for b in (
+        a["created"] and f"created: {html.escape(a['created'])}",
+        f"{a['n_versions']} version(s)",
+        f"{a['words']:,} words",
+        f"<code>{html.escape(a['slug'])}</code>") if b]
+    meta_bits += [
+        f'<a href="/artifact-file/{quote(a["slug"])}/{quote(n)}">{html.escape(n)}</a>'
+        for n in a["assets"]]
+    parts.append(f"<h3>{html.escape(title)} {badges}</h3>")
+    parts.append(f"<p><small>{' · '.join(meta_bits)}</small></p>")
+    if a["body"]:
+        rendered = render_markdown(a["body"])
+        parts.append(
+            f"<details><summary>Read {html.escape(a['latest_name'])}</summary>"
+            f"<blockquote>{rendered}</blockquote></details>")
+    if a["version_numbers"]:
+        # Revision footer (v98): one numbered link per saved version,
+        # ★ marks the final, Δ compares a revision with its predecessor.
+        links = []
+        for vn in a["version_numbers"]:
+            entry = a["version_meta"].get(vn, {})
+            tip = " · ".join(str(bit) for bit in (
+                str(entry.get("created_at", ""))[:10],
+                entry.get("model", ""), entry.get("feedback", "")) if bit)
+            star = "★" if a["final_version"] == vn else ""
+            links.append(
+                f'<a href="/artifact-version/{quote(a["slug"])}/{vn}" '
+                f'title="{html.escape(tip)}">{vn}{star}</a>')
+            if vn - 1 in a["version_numbers"]:
+                links.append(
+                    f'<a href="/artifact-diff/{quote(a["slug"])}/{vn - 1}/{vn}" '
+                    f'title="what changed in v{vn}">Δ</a>')
+        parts.append(
+            f'<p class="rev-footer"><small>Revisions: {" ".join(links)}</small></p>')
+        # The same write-action panel the version page carries (v101), pointed
+        # at the latest version so save/revise/final/promote/delivered are one
+        # click away from the piece itself.
+        latest_n = a["version_numbers"][-1]
+        parts.append(_artifact_actions_html(
+            a["slug"], latest_n, a["body"],
+            is_final=(a["final_version"] == latest_n)))
+    return "".join(parts)
+
+
+def _book_chapter_table(b: dict) -> str:
+    """The Book Assembly chapter table (v75), intact — moved here from the
+    retired view_book so the Studio's book project card can nest it."""
+    rows = []
+    for ch in b["chapters"]:
+        cid = html.escape(ch["category_id"])
+        name = html.escape(ch["category_name"])
+        hook = ch.get("manuscript_hook")
+        if hook:
+            name = f'<a href="/page/{quote(hook)}">{name}</a>'
+        if ch["scene_slots_total"]:
+            depth_cell = (f"{ch['scene_slots_filled']}/{ch['scene_slots_total']} "
+                          f"({_pct(ch['scene_slot_ratio'])})")
+        else:
+            depth_cell = '<span class="muted">—</span>'
+        gap_cell = "<span class='muted'>—</span>"
+        if ch["gap_questions"]:
+            bits = []
+            for gap in ch["gap_questions"][:3]:
+                text = str(gap.get("text", ""))
+                if len(text) > 90:
+                    text = text[:87] + "…"
+                bits.append(f"<code>{html.escape(gap['id'])}</code> {html.escape(text)}")
+            gap_cell = "<br>".join(bits)
+        elif ch["ready_to_draft"]:
+            gap_cell = (f'<em>ready to draft — '
+                        f'<code>lifehug.py artifact new --format chapter '
+                        f'--subject "{html.escape(ch["category_name"])}" '
+                        f'--categories {cid}</code></em>')
+        # Phase 2: per-chapter draft column — word count of the latest
+        # chapter-format artifact whose meta.yaml lists this category.
+        if ch.get("has_draft"):
+            draft_cell = (f"📄 {int(ch.get('drafted_words') or 0):,} words "
+                          f"({_pct(ch.get('manuscript_ratio') or 0)})")
+        else:
+            draft_cell = '<span class="muted">—</span>'
+        rows.append([
+            cid,
+            name,
+            _bar(ch["saturation"], f"{ch['answered']}/{ch['total']} · {_pct(ch['saturation'])}"),
+            depth_cell,
+            draft_cell,
+            _badge(ch["verdict"], ch["verdict"].lower()),
+            gap_cell,
+        ])
+    return _table(["Cat", "Chapter", "Answered", "Scene depth", "Draft", "Verdict",
+                   "Next questions / draft"], rows)
+
+
+def _book_project_card(b: dict) -> str:
+    """A book project inside its Focus group: the v75 header row (verdict,
+    saturation bar, manuscript rollup) with the chapter table one expand
+    deeper, and the assemble button once anything is actually drafted."""
+    sat = float(b.get("saturation") or 0)
+    head_bar = _bar(sat,
+                    f"{b['answered_questions']}/{b['total_questions']} "
+                    f"answered · {_pct(sat)} · {b['chapters_ready']} of "
+                    f"{b['chapter_count']} chapters ready")
+    badges = _badge(b["verdict"], b["verdict"].lower())
+    if b.get("primary"):
+        badges = _badge("primary", "saturated") + " " + badges
+    # Phase 2: manuscript rollup on the header — words drafted vs. target.
+    drafted = int(b.get("drafted_words") or 0)
+    target = int(b.get("manuscript_target") or 0)
+    if drafted:
+        ms = (f"📄 {drafted:,}/{target:,} words drafted "
+              f"({_pct(b.get('manuscript_ratio') or 0)})")
+    else:
+        ms = '<span class="muted">no drafts yet</span>'
+    parts = [
+        '<div class="studio-project">',
+        '<div class="focus-row"><div class="focus-head">'
+        f'<span class="focus-label">📖 {html.escape(str(b.get("label", "")))}</span> {badges}</div>'
+        + head_bar
+        + f'<div class="focus-sub">{html.escape(str(b.get("objective", "")))} '
+        f'→ {html.escape(str(b.get("deliverable", "book")))} · {ms}</div></div>',
+        '<details class="art-group"><summary>'
+        '<span class="art-group-title">Chapters</span>'
+        f'<span class="art-group-counts">{b["chapter_count"]} chapter(s) · '
+        f'{b["chapters_ready"]} ready</span></summary>'
+        '<div class="art-group-body">',
+        _book_chapter_table(b),
+    ]
+    if any(ch.get("has_draft") for ch in b["chapters"]):
+        parts.append(
+            '<form class="actform" method="post" action="/actions/artifact/assemble">'
+            + _token_input()
+            + f'<input type="hidden" name="focus" value="{html.escape(str(b.get("id", "")))}">'
+            '<div class="act-row"><button class="btn" type="submit">'
+            'Assemble manuscript draft</button></div></form>')
+    parts.append("</div></details></div>")
+    return "".join(parts)
+
+
+def view_studio():
+    """Studio (v127) — where material becomes things, on one page.
+
+    Consolidates the old Book Assembly and Artifacts views into a single
+    Focus-grouped surface backed by studio.compute_works(): each Focus is a
+    collapsed bar (the Foundation idiom) carrying its readiness chips; expand
+    it for its projects (the book, with the v75 chapter table one level
+    deeper and an assemble button) and its pieces (the full Artifacts card —
+    badges, inline text, revision footer, write actions). "Start something
+    new" sits at the top because the answer to an empty Studio is always the
+    same one verb.
+    """
+    try:
+        import studio as studio_mod  # noqa: PLC0415
+        groups = studio_mod.compute_works()
+    except Exception as exc:  # noqa: BLE001
+        _record_view_failure("studio", exc)
+        return ("Studio", "<h1>Studio</h1>" + _studio_create_form()
+                + _empty("studio view temporarily unavailable"), True)
+
+    parts = ["<h1>Studio</h1>", _studio_create_form()]
+    if not groups:
+        parts.append(_empty(
+            "Nothing in the studio yet — pick a format above and name a "
+            "subject, and your first piece starts here."))
+        return ("Studio", "".join(parts), True)
+
+    for group in groups:
+        focus = group.get("focus")
+        projects = group.get("projects") or []
+        pieces = group.get("pieces") or []
+        hint = ""
+        chips = ""
         if focus:
             label = str(focus.get("label", "?"))
             head = label
             if focus.get("type") == "person":
-                # Distinct given names from the artifacts themselves ("Mom (Desi)").
-                names = sorted({a["subject"].strip().title() for a in items
-                                if a["subject"].strip()
-                                and a["subject"].strip().lower() != label.lower()})
+                # Distinct given names from the pieces themselves ("Mom (Desi)").
+                names = sorted({p["subject"].strip().title() for p in pieces
+                                if p["subject"].strip()
+                                and p["subject"].strip().lower() != label.lower()})
                 if names:
                     head = f"{label} ({', '.join(names)})"
             head = html.escape(head)
             node = focus.get("wiki_node")
             if node:
                 head = f'<a href="/page/{quote(str(node))}">{head}</a>'
-            counts = (f"{len(items)} piece(s) · {focus.get('type', '?')} "
-                      f"· → {focus.get('deliverable', '-')} "
-                      f"· categories {','.join(focus.get('categories', []))}")
-            sections.append(
-                '<details class="art-group"><summary>'
-                f'<span class="art-group-title">{head}</span>'
-                f'<span class="art-group-counts">{html.escape(counts)}</span>'
-                '</summary><div class="art-group-body">')
-        elif _key == "__thoughts__":
-            sections.append(
-                '<details class="art-group"><summary>'
-                '<span class="art-group-title">Thoughts</span>'
-                f'<span class="art-group-counts">{len(items)} piece(s) · essays — '
-                "the author's stated positions</span>"
-                '</summary><div class="art-group-body">')
+            counts = (f"{len(projects)} project(s) · {len(pieces)} piece(s) · "
+                      f"{focus.get('type', '?')} → {focus.get('deliverable', '-')}")
+            chips = _readiness_chips(group.get("readiness"))
+        elif group.get("key") == "__thoughts__":
+            head = "Thoughts"
+            counts = f"{len(pieces)} piece(s) · essays — the author's stated positions"
         else:
-            sections.append(
-                '<details class="art-group"><summary>'
-                '<span class="art-group-title">Unfiled</span>'
-                f'<span class="art-group-counts">{len(items)} piece(s) · no matching Focus</span>'
-                '</summary><div class="art-group-body">'
-                "<p><small>Add <code>subject:</code> / <code>categories:</code> to each "
-                "folder's <code>meta.yaml</code> to file these under a Focus.</small></p>")
-        for a in items:
-            badges = _badge(a["fmt"] or "?", "default")
-            if a["occasion"]:
-                badges += " " + _badge(a["occasion"], "yellow")
-            if a["delivered"]:
-                badges += " " + _badge("delivered", "saturated")
-            if a["promoted"]:
-                badges += " " + _badge("promoted to source", "saturated")
-            title = _artifact_title(a["slug"], a["fmt"], a["occasion"])
-            meta_bits = [b for b in (
-                a["created"] and f"created: {html.escape(a['created'])}",
-                f"{a['n_versions']} version(s)",
-                f"{a['words']:,} words",
-                f"<code>{html.escape(a['slug'])}</code>") if b]
-            meta_bits += [
-                f'<a href="/artifact-file/{quote(a["slug"])}/{quote(n)}">{html.escape(n)}</a>'
-                for n in a["assets"]]
-            sections.append(f"<h3>{html.escape(title)} {badges}</h3>")
-            sections.append(f"<p><small>{' · '.join(meta_bits)}</small></p>")
-            if a["body"]:
-                rendered = render_markdown(a["body"])
-                sections.append(
-                    f"<details><summary>Read {html.escape(a['latest_name'])}</summary>"
-                    f"<blockquote>{rendered}</blockquote></details>")
-            if a["version_numbers"]:
-                # Revision footer (v98): one numbered link per saved version,
-                # ★ marks the final, Δ compares a revision with its predecessor.
-                links = []
-                for vn in a["version_numbers"]:
-                    entry = a["version_meta"].get(vn, {})
-                    tip = " · ".join(str(bit) for bit in (
-                        str(entry.get("created_at", ""))[:10],
-                        entry.get("model", ""), entry.get("feedback", "")) if bit)
-                    star = "★" if a["final_version"] == vn else ""
-                    links.append(
-                        f'<a href="/artifact-version/{quote(a["slug"])}/{vn}" '
-                        f'title="{html.escape(tip)}">{vn}{star}</a>')
-                    if vn - 1 in a["version_numbers"]:
-                        links.append(
-                            f'<a href="/artifact-diff/{quote(a["slug"])}/{vn - 1}/{vn}" '
-                            f'title="what changed in v{vn}">Δ</a>')
-                sections.append(
-                    f'<p class="rev-footer"><small>Revisions: {" ".join(links)}</small></p>')
-        sections.append("</div></details>")
-    return "Artifacts", "".join(sections), False
+            head = "Unfiled"
+            counts = f"{len(pieces)} piece(s) · no matching Focus"
+            hint = ("<p><small>Add <code>subject:</code> / <code>categories:</code> to "
+                    "each folder's <code>meta.yaml</code> to file these under a "
+                    "Focus.</small></p>")
+        parts.append(
+            '<details class="fnd-focus"><summary>'
+            f'<div class="focus-head"><span class="focus-label">{head}</span> {chips}</div>'
+            f'<div class="focus-sub">{html.escape(counts)}</div>'
+            '</summary><div class="fnd-cats">')
+        parts.append(hint)
+        parts.extend(_book_project_card(p["book"]) for p in projects if p.get("book"))
+        parts.extend(_piece_html(a) for a in pieces)
+        if not projects and not pieces:
+            parts.append(_empty("Nothing made for this Focus yet."))
+        parts.append("</div></details>")
+    return ("Studio", "".join(parts), True)
 
 
 def view_privacy_preview():
@@ -2276,103 +2418,6 @@ def view_privacy_preview():
             sections.append("<p><em>Nothing eligible yet — label sources with --sensitivity, "
                             "or confirm the classifier's suggestions, and floors will open up.</em></p>")
     return "Privacy Preview", "".join(sections), False
-
-
-def view_book():
-    """Book Assembly view (v75) — a chapter map for every book-project Focus.
-
-    Each book gets a card: overall progress bar + a table of chapters with
-    answered ratio, scene-slot depth (McAdams 5-slot from classifications), a
-    verdict badge, and — for chapters not yet ready — the top few gap questions
-    to record next. When a chapter is READY, offers the artifact command that
-    would draft it. The point is a manuscript-shaped view of the archive, so
-    the flagship deliverable stops being an abstract goal.
-    """
-    try:
-        import book as book_mod  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        _record_view_failure("book-import", exc)
-        return ("Book Assembly",
-                f"<h1>Book Assembly</h1>{_empty('book view temporarily unavailable')}",
-                False)
-    books = book_mod.compute_books()
-    if not books:
-        return ("Book Assembly",
-                "<h1>Book Assembly</h1>" + _empty(
-                    "No book-project Focuses yet. A Focus with "
-                    "<code>deliverable=book</code> produces a chapter list."),
-                False)
-
-    sections = ["<h1>Book Assembly</h1>"]
-    for b in books:
-        sat = float(b.get("saturation") or 0)
-        head_bar = _bar(sat,
-                        f"{b['answered_questions']}/{b['total_questions']} "
-                        f"answered · {_pct(sat)} · {b['chapters_ready']} of "
-                        f"{b['chapter_count']} chapters ready")
-        badges = _badge(b["verdict"], b["verdict"].lower())
-        if b.get("primary"):
-            badges = _badge("primary", "saturated") + " " + badges
-        # Phase 2: manuscript rollup on the header — words drafted vs. target.
-        drafted = int(b.get("drafted_words") or 0)
-        target = int(b.get("manuscript_target") or 0)
-        if drafted:
-            ms = (f"📄 {drafted:,}/{target:,} words drafted "
-                  f"({_pct(b.get('manuscript_ratio') or 0)})")
-        else:
-            ms = '<span class="muted">no drafts yet</span>'
-        sections.append(
-            '<div class="focus-row"><div class="focus-head">'
-            f'<span class="focus-label">📖 {html.escape(str(b.get("label", "")))}</span> {badges}</div>'
-            + head_bar
-            + f'<div class="focus-sub">{html.escape(str(b.get("objective", "")))} '
-            f'→ {html.escape(str(b.get("deliverable", "book")))} · {ms}</div></div>'
-        )
-        rows = []
-        for ch in b["chapters"]:
-            cid = html.escape(ch["category_id"])
-            name = html.escape(ch["category_name"])
-            hook = ch.get("manuscript_hook")
-            if hook:
-                name = f'<a href="/page/{quote(hook)}">{name}</a>'
-            if ch["scene_slots_total"]:
-                depth_cell = (f"{ch['scene_slots_filled']}/{ch['scene_slots_total']} "
-                              f"({_pct(ch['scene_slot_ratio'])})")
-            else:
-                depth_cell = '<span class="muted">—</span>'
-            gap_cell = "<span class='muted'>—</span>"
-            if ch["gap_questions"]:
-                bits = []
-                for gap in ch["gap_questions"][:3]:
-                    text = str(gap.get("text", ""))
-                    if len(text) > 90:
-                        text = text[:87] + "…"
-                    bits.append(f"<code>{html.escape(gap['id'])}</code> {html.escape(text)}")
-                gap_cell = "<br>".join(bits)
-            elif ch["ready_to_draft"]:
-                gap_cell = (f'<em>ready to draft — '
-                            f'<code>lifehug.py artifact new --format chapter '
-                            f'--subject "{html.escape(ch["category_name"])}" '
-                            f'--categories {cid}</code></em>')
-            # Phase 2: per-chapter draft column — word count of the latest
-            # chapter-format artifact whose meta.yaml lists this category.
-            if ch.get("has_draft"):
-                draft_cell = (f"📄 {int(ch.get('drafted_words') or 0):,} words "
-                              f"({_pct(ch.get('manuscript_ratio') or 0)})")
-            else:
-                draft_cell = '<span class="muted">—</span>'
-            rows.append([
-                cid,
-                name,
-                _bar(ch["saturation"], f"{ch['answered']}/{ch['total']} · {_pct(ch['saturation'])}"),
-                depth_cell,
-                draft_cell,
-                _badge(ch["verdict"], ch["verdict"].lower()),
-                gap_cell,
-            ])
-        sections.append(_table(["Cat", "Chapter", "Answered", "Scene depth", "Draft", "Verdict", "Next questions / draft"], rows))
-
-    return ("Book Assembly", "".join(sections), True)
 
 
 def view_reports():
@@ -2493,50 +2538,90 @@ def act_artifact_save(form):
     ref = _outputs_ref(form)
     content = (form.get("content") or [""])[0]
     if not ref or not content.strip():
-        return ("/views/artifacts", "✗ missing artifact or empty content", None)
+        return ("/views/studio", "✗ missing artifact or empty content", None)
     note = _f(form, "note")
     job = _start_job("artifact-save", {"ref": ref, "content": content, "note": note})
-    return ("/views/artifacts", f"queued a new version of {ref}", job["id"])
+    return ("/views/studio", f"queued a new version of {ref}", job["id"])
 
 
 def act_artifact_revise(form):
     ref = _outputs_ref(form)
     feedback = _f(form, "feedback")
     if not ref or not feedback:
-        return ("/views/artifacts", "✗ missing artifact or empty feedback", None)
+        return ("/views/studio", "✗ missing artifact or empty feedback", None)
     job = _start_job("artifact-revise", {"ref": ref, "feedback": feedback})
-    return ("/views/artifacts", f"queued revision of {ref} — this can take a few minutes", job["id"])
+    return ("/views/studio", f"queued revision of {ref} — this can take a few minutes", job["id"])
 
 
 def act_artifact_final(form):
     ref = _outputs_ref(form)
     if not ref:
-        return ("/views/artifacts", "✗ bad artifact reference", None)
+        return ("/views/studio", "✗ bad artifact reference", None)
     job = _start_job("artifact-final", {
         "ref": ref, "version": _f(form, "version") or "latest",
     })
-    return ("/views/artifacts", f"queued final marking for {ref}", job["id"])
+    return ("/views/studio", f"queued final marking for {ref}", job["id"])
 
 
 def act_artifact_promote(form):
     ref = _outputs_ref(form)
     if not ref:
-        return ("/views/artifacts", "✗ bad artifact reference", None)
+        return ("/views/studio", "✗ bad artifact reference", None)
     job = _start_job("artifact-promote", {"ref": ref})
-    return ("/views/artifacts", f"queued promotion of {ref} and wiki compile", job["id"])
+    return ("/views/studio", f"queued promotion of {ref} and wiki compile", job["id"])
 
 
 def act_artifact_delivered(form):
     ref = _outputs_ref(form)
     if not ref:
-        return ("/views/artifacts", "✗ bad artifact reference", None)
+        return ("/views/studio", "✗ bad artifact reference", None)
     payload = {"ref": ref}
     for key in ("to", "note", "reaction"):
         val = _f(form, key)
         if val:
             payload[key] = val
     job = _start_job("artifact-delivered", payload)
-    return ("/views/artifacts", f"queued delivery record for {ref}", job["id"])
+    return ("/views/studio", f"queued delivery record for {ref}", job["id"])
+
+
+def act_artifact_new(form):
+    """"Start something new" (v127) — queue the `artifact new` CLI.
+
+    The CLI mints the slug, so the redirect can only name what was asked for;
+    the new piece appears in its Focus group once the job lands.
+    """
+    fmt = _f(form, "format")
+    try:
+        import format_frameworks  # noqa: PLC0415
+        known = set(format_frameworks.valid_formats())
+    except Exception as exc:  # noqa: BLE001
+        # Degraded registry: let jobs.py's own valid_formats() check be the
+        # authority rather than refusing every format from the viewer.
+        _record_view_failure("artifact-new-formats", exc)
+        known = set()
+    if not fmt or (known and fmt not in known):
+        return ("/views/studio", "✗ unknown format", None)
+    subject = _f(form, "subject")
+    categories = _f(form, "categories")
+    if not subject and not categories:
+        return ("/views/studio",
+                "✗ name a subject (or categories) for the new piece", None)
+    payload = {"format": fmt}
+    for key in ("subject", "occasion", "date", "title", "categories"):
+        value = _f(form, key)
+        if value:
+            payload[key] = value
+    job = _start_job("artifact-new", payload)
+    return ("/views/studio",
+            f"queued: creating {fmt} for {subject or categories}", job["id"])
+
+
+def act_artifact_assemble(form):
+    fid = _f(form, "focus")
+    if not fid:
+        return ("/views/studio", "✗ missing focus", None)
+    job = _start_job("artifact-assemble", {"focus": fid})
+    return ("/views/studio", "queued manuscript assembly", job["id"])
 
 
 def act_reflect(form):
@@ -2611,6 +2696,8 @@ ACTIONS = {
     "/actions/candidate": act_candidate,
     "/actions/focus-rec": act_focus_rec,
     "/actions/second-voice-ack": act_second_voice,
+    "/actions/artifact/new": act_artifact_new,
+    "/actions/artifact/assemble": act_artifact_assemble,
     "/actions/artifact/save": act_artifact_save,
     "/actions/artifact/revise": act_artifact_revise,
     "/actions/artifact/final": act_artifact_final,
@@ -2696,8 +2783,9 @@ VIEWS = [
     ("mirror", "Mirror", view_mirror),
     ("graph", "Graph", view_graph),
     ("timeline", "Timeline", view_timeline),
-    # Book assembly — the flagship-deliverable surface.
-    ("book", "Book Assembly", view_book),
+    # Studio — where material becomes things (v127: absorbed Book Assembly
+    # and Artifacts into one Focus-grouped making surface).
+    ("studio", "Studio", view_studio),
     # Foundation: the consolidated supply-side review (v124) — absorbed the
     # separate Focuses / Coverage / Question Bank views.
     ("foundation", "Foundation", view_foundation),
@@ -2708,18 +2796,20 @@ VIEWS = [
     # The rest.
     ("entities", "Entity Candidates", view_entities),
     ("sources", "Source Integrity", view_sources),
-    ("artifacts", "Artifacts", view_artifacts),
     ("reports", "Reports", view_reports),
     ("privacy", "Privacy Preview", view_privacy_preview),
 ]
 VIEW_MAP = {slug: fn for slug, _, fn in VIEWS}
 
 # Old bookmarks and links keep working: the three views Foundation absorbed
-# (v124) redirect permanently to it.
+# (v124) and the two Studio absorbed (v127) redirect permanently to their
+# consolidated surface.
 LEGACY_VIEW_REDIRECTS = {
     "focuses": "foundation",
     "coverage": "foundation",
     "question-bank": "foundation",
+    "book": "studio",
+    "artifacts": "studio",
 }
 
 # One-line explainer shown under each view's title: what the page is and what the
@@ -2728,7 +2818,7 @@ LEGACY_VIEW_REDIRECTS = {
 VIEW_DESCRIPTIONS = {
     "status": "A live snapshot of the whole system — one card per moving part of the Loop: what pass you're on, how much you've answered, how many candidates and sources are waiting, and whether the weekly queue is being delivered.",
     "mirror": "What the archive has noticed about you. The weekly synthesis distills the classifier's contradictions, self-understanding insights, and stated positions into a short edition — tensions presented as coexisting truths in your own words, every claim cited. The raw signals stay browsable underneath. A place to visit and sit with, not a feed.",
-    "book": "The manuscript view. Every book-project Focus becomes a card; each of its question categories becomes a chapter with an answered ratio, a scene-depth score (McAdams' 5-slot probe from the classifier), a readiness verdict, and either the next few gap questions to record or the artifact command to draft it. This is the flagship deliverable made visible.",
+    "studio": "Where material becomes things — your projects and pieces, grouped by Focus. A project (the book) shows its chapter map and readiness; expand it for the full chapter table, and assemble the drafted chapters into a manuscript when you're ready. Every piece keeps its full version history — revisions, diffs, finals, deliveries — and everything starts here: pick a format, name a subject, and the Studio gathers the material. Foundation is the material; Studio is where you work it.",
     "foundation": "The raw material behind your stories — every Focus you're building toward, how deep it runs against its target, and where the graph is thin. Expand a Focus to see its categories: the bar is answered/total and the colour your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+) — least-covered first. Expand a category to see every question, answered (✓) and open (○). Artifacts are what you make; this is what you make them from.",
     "graph": "Your life as a graph. Each node is a wiki page (people, places, periods, themes, Focuses); size reflects how many sources mention it and edges connect subjects that share sources. Click any node to open its page.",
     "candidates": "Follow-up questions the weekly classifier proposed from your answers and stories, grouped by review status. These are <em>not</em> daily questions yet — they wait here until promoted into the question bank.",
@@ -2736,7 +2826,6 @@ VIEW_DESCRIPTIONS = {
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
-    "artifacts": "Every piece in outputs/ — letters, posts, captions, essays, chapter drafts — grouped by the Focus it belongs to (the person or project, resolved from the artifact's categories). Each group is a collapsed bar showing its piece count; click to expand into the pieces, with occasions like Mother's Day as badges, versions, word count, delivered/promoted state, linked PDFs, and the latest text readable inline. Each piece ends with a revision footer — numbered links to every saved version (★ = final, hover for the revision note) and Δ links showing exactly what changed between versions. Essays without a Focus group under Thoughts; other pieces missing metadata land in Unfiled with a repair hint. This is where the archive becomes things you can actually give, post, or publish.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
     "recommendations": "Entities the system thinks are strong enough to become their own Focus, ranked by evidence. Pending ones await your approval; acted-on and dismissed ones are kept for the record. Nothing here changes questions until you promote it.",
