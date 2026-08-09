@@ -368,6 +368,52 @@ class V120MigrationTests(TmpVaultCase):
         salvage = vault / "system" / "rotation.json.pre-v120"
         self.assertEqual(salvage.read_text(encoding="utf-8"), "[1, 2, 3]\n")
 
+    def test_corrupt_json_is_salvaged_not_destroyed(self):
+        # Merge-gate blocker (PR #82): a parse error — the interrupted-write
+        # case, the most common real reason a vault won't bind — used to fall
+        # through the salvage branch and rebuild over the user's bytes.
+        vault = make_embedded_vault(
+            self.tmp / "corrupt",
+            rotation=V116_TEMPLATE_ROTATION, coverage=V116_TEMPLATE_COVERAGE,
+        )
+        truncated = '{"version": 1, "current_pass": 1, "pass_names": ["skel'
+        (vault / "system" / "rotation.json").write_text(truncated, encoding="utf-8")
+        update.migrate_vault_to_v120(vault)
+        binds(vault, layout="embedded")
+        salvage = vault / "system" / "rotation.json.pre-v120"
+        self.assertTrue(salvage.exists())
+        self.assertEqual(salvage.read_text(encoding="utf-8"), truncated)
+        rebuilt = json.loads((vault / "system" / "rotation.json").read_text(encoding="utf-8"))
+        self.assertIsInstance(rebuilt, dict)
+
+    def test_migrate_vault_cli_honors_vault_root_env(self):
+        # Merge-gate blocker (PR #82): --migrate-vault resolved to REPO_DIR
+        # regardless of LIFEHUG_VAULT_ROOT and reported false success while
+        # the target vault stayed broken.
+        vault = make_external_vault(self.tmp / "external-env")
+        _write_json(vault / "state" / "rotation.json", {})
+        args = update.argparse.Namespace(vault_root=None)
+        with mock.patch.dict(update.os.environ, {"LIFEHUG_VAULT_ROOT": str(vault)}):
+            rc = update.cmd_migrate_vault(args)
+        self.assertFalse(rc)
+        binds(vault, layout="external")
+
+    def test_migrate_vault_cli_vault_root_arg_beats_env(self):
+        vault = make_external_vault(self.tmp / "external-arg")
+        _write_json(vault / "state" / "rotation.json", {})
+        decoy = self.tmp / "decoy"
+        decoy.mkdir()
+        args = update.argparse.Namespace(vault_root=str(vault))
+        with mock.patch.dict(update.os.environ, {"LIFEHUG_VAULT_ROOT": str(decoy)}):
+            rc = update.cmd_migrate_vault(args)
+        self.assertFalse(rc)
+        binds(vault, layout="external")
+
+    def test_migrate_vault_cli_fails_loudly_not_falsely(self):
+        args = update.argparse.Namespace(vault_root=str(self.tmp / "does-not-exist"))
+        rc = update.cmd_migrate_vault(args)
+        self.assertEqual(rc, 1)
+
 
 class RunMigrationsWiringTests(TmpVaultCase):
     """update.py applies the TARGET version directly, so the v120 block has to
