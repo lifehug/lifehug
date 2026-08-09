@@ -490,10 +490,13 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .update-cmd {{ margin-top: 4px; font-size: 13px; }}
     .update-cmd code {{ background: var(--panel-hover); padding: 2px 6px; border-radius: 4px; }}
     .update-diagnostic {{ margin-top: 6px; font-size: 13px; color: #8c2f28; }}
-    .update-checked {{ margin-top: 4px; }}
+    .update-checked {{ margin-top: 4px; font-size: 12px; color: var(--muted); }}
     .update-last {{ margin: 0 0 22px; padding: 12px 16px; border-radius: 10px;
       background: var(--card-warm); border: 1px solid var(--line-soft); border-left: 4px solid #3f8f4f; }}
     .update-changelog {{ margin-top: 6px; font-size: 13px; color: var(--ink-soft); white-space: pre-wrap; }}
+    .update-more {{ margin-top: 6px; font-size: 12px; color: var(--muted); }}
+    .update-more summary {{ cursor: pointer; }}
+    .update-more .update-changelog {{ margin-left: 4px; }}
     /* Write actions (v101) */
     .flash {{ background: #f0ead9; border: 1px solid #ddd0b2; border-radius: 8px; padding: 10px 14px;
       margin: 0 0 18px; font-size: 14px; color: var(--ink-soft); }}
@@ -937,39 +940,89 @@ def _load_last_update() -> dict:
     return _read_state_json("last_update.json")
 
 
-def _update_status_html() -> str:
-    """The Loop view's update card: installed version, latest available,
-    releases behind, the one command to run, and the tag-lapse diagnostic
-    when present — all from the cached check, never a live git call."""
-    data = _load_update_check()
+def _update_summary(data: dict) -> dict | None:
+    """Shared interpretation of a cached --check result for BOTH the Loop
+    view's card and the home hub card (lifehug#84) — one place decides what
+    the numbers mean so the two render sites can't drift apart.
+
+    `available_version` (max of the tags-only `latest` and `main_version`,
+    written by update.py) is the true "how far behind" number; `latest`
+    keeps its own tags-only meaning for anyone still reading the raw JSON.
+    `apply_reaches` is whether `--apply` (which only ever reaches the
+    highest TAG) would actually do anything right now — under a tag lapse
+    where the tag ceiling already equals `current`, it would be a no-op, and
+    callers must not show it as a live command."""
     current, latest = data.get("current"), data.get("latest")
     if not isinstance(current, int) or not isinstance(latest, int):
+        return None
+    available_version = data.get("available_version")
+    if not isinstance(available_version, int):
+        available_version = latest
+    return {
+        "current": current,
+        "available_version": available_version,
+        "behind": max(0, available_version - current),
+        "apply_reaches": latest > current,
+        "tag_lapse": bool(data.get("tag_lapse")),
+        "diagnostic": data.get("diagnostic"),
+    }
+
+
+def _update_status_html() -> str:
+    """The Loop view's update card: installed version, latest available,
+    releases behind, the one command to run (only when it would do
+    something), and the tag-lapse diagnostic — all from the cached check,
+    never a live git call."""
+    data = _load_update_check()
+    summary = _update_summary(data)
+    if summary is None:
         return ('<div class="update-status update-unknown">'
                 'Update status unknown — run <code>python3 system/update.py --check</code>.'
                 '</div>')
-    behind = max(0, latest - current)
-    parts = [f'<div class="update-status {"update-behind" if behind else "update-current"}">']
-    if behind:
+    dead_apply = summary["tag_lapse"] and not summary["apply_reaches"]
+    parts = [f'<div class="update-status {"update-behind" if summary["behind"] else "update-current"}">']
+    if dead_apply:
+        # The tag ceiling already equals `current` — --apply is a no-op.
+        # The diagnostic IS the headline; no command to show.
+        parts.append(f'<div class="update-headline">⚠️ {html.escape(str(summary["diagnostic"]))}</div>')
+    elif summary["behind"]:
         parts.append(
-            f'<div class="update-headline">Lifehug v{html.escape(str(latest))} is available — '
-            f'{behind} release{"s" if behind != 1 else ""} behind (installed v{html.escape(str(current))}).</div>'
+            f'<div class="update-headline">Lifehug v{summary["available_version"]} is available — '
+            f'{summary["behind"]} release{"s" if summary["behind"] != 1 else ""} behind '
+            f'(installed v{summary["current"]}).</div>'
         )
         parts.append('<div class="update-cmd"><code>python3 system/update.py --apply</code></div>')
     else:
-        parts.append(f'<div class="update-headline">Lifehug is current (v{html.escape(str(current))}).</div>')
-    diagnostic = data.get("diagnostic")
-    if diagnostic:
-        parts.append(f'<div class="update-diagnostic">⚠️ {html.escape(str(diagnostic))}</div>')
+        parts.append(f'<div class="update-headline">Lifehug is current (v{summary["current"]}).</div>')
+    if summary["diagnostic"] and not dead_apply:
+        parts.append(f'<div class="update-diagnostic">⚠️ {html.escape(str(summary["diagnostic"]))}</div>')
     checked_at = data.get("checked_at")
     if checked_at:
-        parts.append(f'<div class="update-checked sub">Checked {html.escape(str(checked_at))}</div>')
+        parts.append(f'<div class="update-checked">Checked {html.escape(str(checked_at))}</div>')
     parts.append("</div>")
     return "".join(parts)
 
 
+def _changelog_entry_html(entry: dict) -> str:
+    """One crossed-version changelog line. Tag annotations already follow
+    the "vN: ..." convention (see tag_on_merge), so a naive `f"v{v}: " +
+    text` prepend doubles the prefix — strip any existing leading "vN: "
+    before adding our own label."""
+    version = entry.get("version")
+    text = str(entry.get("changelog") or "")
+    if version is not None:
+        text = re.sub(rf"^v{re.escape(str(version))}:\s*", "", text, count=1)
+        label = f"v{version}: "
+    else:
+        label = ""
+    return f'<div class="update-changelog">{html.escape(label + text)}</div>'
+
+
 def _last_update_html() -> str:
     """A 'what changed' line for the most recent applied update, so an
-    update is an event the owner sees rather than a silent file swap."""
+    update is an event the owner sees rather than a silent file swap. Only
+    the first crossed changelog renders inline; the rest collapse into a
+    <details> so a many-version jump doesn't flood the Loop view."""
     data = _load_last_update()
     to_version = data.get("to_version")
     if not isinstance(to_version, int):
@@ -979,13 +1032,16 @@ def _last_update_html() -> str:
     headline = f"Updated v{from_version} → v{to_version}" if isinstance(from_version, int) else f"Updated to v{to_version}"
     if applied_at:
         headline += f" · {applied_at}"
+    entries = [e for e in (data.get("crossed") or []) if isinstance(e, dict) and e.get("changelog")]
     parts = [f'<div class="update-last"><div class="update-headline">{html.escape(headline)}</div>']
-    for entry in data.get("crossed") or []:
-        changelog = entry.get("changelog") if isinstance(entry, dict) else None
-        if changelog:
-            version = entry.get("version")
-            label = f"v{version}: " if version is not None else ""
-            parts.append(f'<div class="update-changelog">{html.escape(label + str(changelog))}</div>')
+    if entries:
+        parts.append(_changelog_entry_html(entries[0]))
+        rest = entries[1:]
+        if rest:
+            parts.append(f'<details class="update-more"><summary>{len(rest)} more change'
+                          f'{"s" if len(rest) != 1 else ""}</summary>')
+            parts.extend(_changelog_entry_html(e) for e in rest)
+            parts.append("</details>")
     parts.append("</div>")
     return "".join(parts)
 
@@ -1053,25 +1109,29 @@ def _invitation(kind, kicker, title, body, why="", href="", cta="", extra=""):
 
 
 def _hub_card_update():
-    """A calm card when the vault is ≥1 version behind on framework updates
+    """A calm card when the vault is >=1 version behind on framework updates
     (lifehug#84 item 2) — reads the cached result written by
     `update.py --check`; never runs git itself. Not a backlog nag: it names
-    the exact command and gets out of the way."""
+    the exact command and gets out of the way. Lowest-priority builder (see
+    home_data): maintenance never displaces a content invitation or the
+    standing memory slot."""
     data = _load_update_check()
-    if not data:
+    summary = _update_summary(data)
+    if summary is None or summary["behind"] < 1:
         return None
-    current, latest = data.get("current"), data.get("latest")
-    if not isinstance(current, int) or not isinstance(latest, int):
-        return None
-    behind = latest - current
-    if behind < 1:
-        return None
-    body = (f"{behind} release{'s' if behind != 1 else ''} behind. "
-            "`python3 system/update.py --apply`")
-    why = data.get("diagnostic") or ""
+    dead_apply = summary["tag_lapse"] and not summary["apply_reaches"]
+    if dead_apply:
+        # --apply would be a no-op right now (the tag ceiling already equals
+        # `current`) — the diagnostic IS the message, no dead command shown.
+        body = str(summary["diagnostic"])
+        why = ""
+    else:
+        body = (f"{summary['behind']} release{'s' if summary['behind'] != 1 else ''} behind. "
+                "python3 system/update.py --apply")
+        why = summary["diagnostic"] or ""
     return _invitation(
         "update", "System",
-        f"Lifehug v{latest} is available",
+        f"Lifehug v{summary['available_version']} is available",
         body, why=why, href="/views/status", cta="See update details")
 
 
@@ -1283,9 +1343,13 @@ def _hub_card_memory():
 def home_data() -> dict:
     """Assemble the home hub: up to 4 priority invitations + the standing
     memory slot. Every builder is failure-wrapped — one broken card must never
-    take down the front page."""
-    builders = [_hub_card_update, _hub_card_chapter, _hub_card_sit_with, _hub_card_next_question,
-                _hub_card_review, _hub_card_perennial, _hub_card_second_voice]
+    take down the front page. `_hub_card_update` is last (owner ruling,
+    lifehug#84): "invitations, never guilt metrics" — maintenance never
+    displaces a content invitation, so it only appears when the first four
+    builders leave a slot free."""
+    builders = [_hub_card_chapter, _hub_card_sit_with, _hub_card_next_question,
+                _hub_card_review, _hub_card_perennial, _hub_card_second_voice,
+                _hub_card_update]
     cards = []
     for fn in builders:
         if len(cards) >= 4:

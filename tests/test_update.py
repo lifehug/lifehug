@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -23,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "system"))
 import update  # noqa: E402
+import vault_paths  # noqa: E402
 
 
 class IsProtectedTests(unittest.TestCase):
@@ -228,8 +230,12 @@ class TagLapseCheckTests(unittest.TestCase):
         self.assertIsNone(exit_code)
         result = json.loads(out)
         self.assertEqual(result["current"], 1)
-        # latest reflects the true latest version (main), not the stale tag.
-        self.assertEqual(result["latest"], 2)
+        # `latest` keeps its v131, TAGS-ONLY meaning exactly (merge-gate
+        # finding 4/9) — existing callers (CLAUDE.md's session-start check,
+        # any script parsing this JSON) must not see it silently change
+        # meaning. `available_version` is the new, additive "true latest".
+        self.assertEqual(result["latest"], 1)
+        self.assertEqual(result["available_version"], 2)
         self.assertTrue(result["update_available"])
         self.assertEqual(result["main_version"], 2)
         self.assertTrue(result["tag_lapse"])
@@ -239,6 +245,8 @@ class TagLapseCheckTests(unittest.TestCase):
 
         # Persisted for the viewer (item 2) — daily --check writes this.
         state = json.loads((local / "state" / "update_check.json").read_text())
+        self.assertEqual(state["latest"], 1)
+        self.assertEqual(state["available_version"], 2)
         self.assertEqual(state["main_version"], 2)
         self.assertTrue(state["tag_lapse"])
         self.assertIn("checked_at", state)
@@ -256,7 +264,8 @@ class TagLapseCheckTests(unittest.TestCase):
         self.assertEqual(out, "")
         state = json.loads((local / "state" / "update_check.json").read_text())
         self.assertTrue(state["tag_lapse"])
-        self.assertEqual(state["latest"], 2)
+        self.assertEqual(state["latest"], 1)
+        self.assertEqual(state["available_version"], 2)
 
     def test_no_tag_lapse_when_main_matches_latest_tag(self):
         remote = self.tmp / "gh" / "lifehug" / "lifehug"
@@ -274,6 +283,8 @@ class TagLapseCheckTests(unittest.TestCase):
         self.assertIsNone(result["diagnostic"])
         self.assertFalse(result["update_available"])
         self.assertEqual(result["main_version"], 1)
+        self.assertEqual(result["latest"], 1)
+        self.assertEqual(result["available_version"], 1)
 
     def test_network_failure_falls_back_to_tags_only_silently(self):
         # A remote whose URL matches but whose path is unreachable (network
@@ -291,6 +302,7 @@ class TagLapseCheckTests(unittest.TestCase):
         self.assertFalse(result["tag_lapse"])
         self.assertIsNone(result["diagnostic"])
         self.assertEqual(result["latest"], 0)  # no tags reachable either
+        self.assertEqual(result["available_version"], 0)
         self.assertNotIn("not tagged", err)
 
     def test_no_upstream_remote_is_tags_only(self):
@@ -301,6 +313,151 @@ class TagLapseCheckTests(unittest.TestCase):
         self.assertIsNone(result["main_version"])
         self.assertFalse(result["tag_lapse"])
         self.assertIsNone(result["diagnostic"])
+
+    def test_latest_field_is_a_backward_compatible_tags_only_pin(self):
+        # Explicit v131-compat pin (merge-gate finding 4/9): a plain,
+        # unremarkable tag bump with no lapse and no remote at all must
+        # report EXACTLY what v131 reported — `latest` == the tag ceiling,
+        # nothing more — so any existing script parsing this JSON never
+        # observes a behavior change.
+        local = self._make_local(current_version=1)
+        self._git(local, "tag", "-a", "v1", "-m", "v1")
+        self._write_version(local, 2)
+        self._git(local, "add", "-A")
+        self._git(local, "commit", "-q", "-m", "v2")
+        self._git(local, "tag", "-a", "v2", "-m", "v2 changelog")
+        update.VERSION_FILE.write_text(json.dumps({"version": 1}) + "\n")  # local stays at v1
+
+        out, _err, _exit = self._run_check(quiet=False)
+        result = json.loads(out)
+        self.assertEqual(result["current"], 1)
+        self.assertEqual(result["latest"], 2)
+        self.assertEqual(result["available_version"], 2)
+        self.assertTrue(result["update_available"])
+        self.assertIn("v2 changelog", result["changelog"])
+        self.assertIsNone(result["main_version"])
+        self.assertFalse(result["tag_lapse"])
+        self.assertIsNone(result["diagnostic"])
+
+
+class StateDirResolutionTests(unittest.TestCase):
+    """Where update.py's cache lives MUST match where serve_wiki.py's
+    vault-rooted STATE_DIR reads (merge-gate finding 1). update.py's own
+    REPO_DIR is the FRAMEWORK checkout (correct for git tags/commits) — but
+    the documented external layout installs the framework separately from
+    the vault, so caching under REPO_DIR there writes somewhere the viewer
+    never reads, silently inerting the whole feature forever."""
+
+    def setUp(self):
+        import tempfile
+        # vault_paths' no-follow authority rejects the default /var/folders
+        # tmp prefix on macOS (it traverses a /var symlink) — root the
+        # fixture under the real worktree parent instead, same fix
+        # test_wiki_views.py already needed for the same reason.
+        self.tmp = Path(tempfile.mkdtemp(dir=Path(__file__).resolve().parents[2]))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self._orig = (update.REPO_DIR, update.VERSION_FILE)
+        self.addCleanup(self._restore)
+        self._orig_env = os.environ.get("LIFEHUG_VAULT_ROOT")
+        self.addCleanup(self._restore_env)
+
+    def _restore(self):
+        update.REPO_DIR, update.VERSION_FILE = self._orig
+
+    def _restore_env(self):
+        if self._orig_env is None:
+            os.environ.pop("LIFEHUG_VAULT_ROOT", None)
+        else:
+            os.environ["LIFEHUG_VAULT_ROOT"] = self._orig_env
+
+    def _git(self, repo, *args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+
+    def _init_repo(self, repo, version=1):
+        repo.mkdir(parents=True, exist_ok=True)
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.email", "t@test")
+        self._git(repo, "config", "user.name", "t")
+        self._git(repo, "config", "commit.gpgsign", "false")
+        vf = repo / "system" / "version.json"
+        vf.parent.mkdir(parents=True, exist_ok=True)
+        vf.write_text(json.dumps({"version": version, "framework_files": ["system/version.json"]}) + "\n")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", f"v{version}")
+
+    def test_vault_root_arg_beats_env_beats_repo_dir(self):
+        # Same precedence as cmd_migrate_vault, exactly.
+        framework_checkout = self.tmp / "framework"
+        self._init_repo(framework_checkout)
+        update.REPO_DIR = framework_checkout
+        update.VERSION_FILE = framework_checkout / "system" / "version.json"
+
+        # No override -> the framework checkout itself (embedded layout).
+        self.assertEqual(update.resolve_state_vault_root(None), framework_checkout)
+
+        # LIFEHUG_VAULT_ROOT -> a vault installed SEPARATELY from the
+        # framework checkout (the documented external layout).
+        external_vault = self.tmp / "external-vault"
+        external_vault.mkdir()
+        os.environ["LIFEHUG_VAULT_ROOT"] = str(external_vault)
+        self.assertEqual(update.resolve_state_vault_root(None), external_vault)
+
+        # --vault-root beats the env var.
+        explicit_vault = self.tmp / "explicit-vault"
+        explicit_vault.mkdir()
+        args = argparse.Namespace(vault_root=str(explicit_vault))
+        self.assertEqual(update.resolve_state_vault_root(args), explicit_vault)
+
+    def test_external_layout_check_writes_land_where_serve_wiki_reads(self):
+        """The actual proof, not just an assertion of intent: --check's
+        cache directory must equal vault_paths.vault_data_path("state", ...)
+        computed for the SAME vault root — the exact authority
+        lifehug_core's STATE_DIR (which serve_wiki.py reads) is built from."""
+        framework_checkout = self.tmp / "framework"
+        self._init_repo(framework_checkout)
+        self._git(framework_checkout, "tag", "-a", "v1", "-m", "v1")
+        update.REPO_DIR = framework_checkout
+        update.VERSION_FILE = framework_checkout / "system" / "version.json"
+
+        external_vault = self.tmp / "external-vault"
+        external_vault.mkdir()
+
+        args = argparse.Namespace(check=True, quiet=False, apply=False, version=None,
+                                   rollback=False, migrate_vault=False,
+                                   vault_root=str(external_vault))
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            update.cmd_check(args)
+
+        written = external_vault / "state" / "update_check.json"
+        self.assertTrue(written.exists())
+        # Nothing leaked into the framework checkout's own state/ directory
+        # (the pre-fix bug: the feature would have been silently inert here,
+        # not merely misplaced).
+        self.assertFalse((framework_checkout / "state" / "update_check.json").exists())
+
+        expected_dir = vault_paths.vault_data_path(
+            "state", vault_root=external_vault, framework_system_dir=update.SYSTEM_DIR,
+        )
+        self.assertEqual(written.parent.resolve(), expected_dir.resolve())
+
+    def test_lifehug_vault_root_env_also_lands_where_serve_wiki_reads(self):
+        framework_checkout = self.tmp / "framework"
+        self._init_repo(framework_checkout)
+        self._git(framework_checkout, "tag", "-a", "v1", "-m", "v1")
+        update.REPO_DIR = framework_checkout
+        update.VERSION_FILE = framework_checkout / "system" / "version.json"
+
+        external_vault = self.tmp / "external-vault"
+        external_vault.mkdir()
+        os.environ["LIFEHUG_VAULT_ROOT"] = str(external_vault)
+
+        args = argparse.Namespace(check=True, quiet=False, apply=False, version=None,
+                                   rollback=False, migrate_vault=False, vault_root=None)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            update.cmd_check(args)
+
+        self.assertTrue((external_vault / "state" / "update_check.json").exists())
+        self.assertFalse((framework_checkout / "state" / "update_check.json").exists())
 
 
 class LastUpdateStateTests(unittest.TestCase):
@@ -371,6 +528,62 @@ class LastUpdateStateTests(unittest.TestCase):
         self.assertEqual(state["to_version"], 3)
         self.assertEqual([c["version"] for c in state["crossed"]], [2, 3])
         self.assertIn("applied_at", state)
+
+    def test_apply_refreshes_the_stale_update_check_cache(self):
+        # merge-gate finding 3: without this, the viewer's update card keeps
+        # announcing an update that was JUST installed until someone happens
+        # to run --check again.
+        for v in (1, 2, 3):
+            self._tag_version(v)
+        self._write("system/version.json", json.dumps({
+            "version": 1, "framework_files": ["system/version.json"],
+        }) + "\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "stale")
+
+        state_dir = self.tmp / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = state_dir / "update_check.json"
+        cache_path.write_text(json.dumps({
+            "current": 1, "latest": 3, "available_version": 3,
+            "update_available": True, "changelog": "v3: change 3",
+            "main_version": None, "tag_lapse": False, "diagnostic": None,
+            "checked_at": "2026-08-01T00:00:00Z",
+        }))
+
+        args = argparse.Namespace(version=None, vault_root=None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            update.cmd_apply(args)
+
+        state = json.loads(cache_path.read_text())
+        self.assertEqual(state["current"], 3)
+        self.assertFalse(state["update_available"])  # no longer stale
+        self.assertNotEqual(state["checked_at"], "2026-08-01T00:00:00Z")
+
+    def test_rollback_refreshes_the_stale_update_check_cache(self):
+        # merge-gate finding 11: cmd_rollback moves `current` too.
+        for v in (1, 2):
+            self._tag_version(v)
+
+        state_dir = self.tmp / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = state_dir / "update_check.json"
+        cache_path.write_text(json.dumps({
+            "current": 2, "latest": 2, "available_version": 2,
+            "update_available": False, "changelog": None,
+            "main_version": None, "tag_lapse": False, "diagnostic": None,
+            "checked_at": "2026-08-01T00:00:00Z",
+        }))
+
+        args = argparse.Namespace(vault_root=None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            update.cmd_rollback(args)
+
+        state = json.loads(cache_path.read_text())
+        self.assertEqual(state["current"], 1)
+        # available_version (2) is now ahead of the rolled-back current (1)
+        # again — correctly re-flagged, not left stuck at False.
+        self.assertTrue(state["update_available"])
 
 
 if __name__ == "__main__":

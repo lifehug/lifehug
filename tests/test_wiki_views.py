@@ -223,6 +223,10 @@ class WikiViewsTests(unittest.TestCase):
             "dismissed": [{"id": "r3", "entity": "Thing", "dismiss_reason": "too generic"}]})
         serve_wiki.ROTATION_FILE = self._write("rot.json",
             {"current_pass": 2, "pass_names": ["skeleton", "depth"], "questions_asked": 3})
+        # Isolate the update-observability cache too (lifehug#84) — without
+        # this, any view that reads STATE_DIR (e.g. view_status) falls back
+        # to the real checkout's real state/ directory instead of the fixture.
+        serve_wiki.STATE_DIR = self.tmp / "state"
         entity_roster.ENTITY_DIR = self.tmp / "rosters"
         self._write("rosters/person.json", {"type": "person", "entities": [
             {"name": "Emma", "aliases": ["Em"], "score": 7.5, "unique_answers": 4, "qualifies": True, "page_eligible": True},
@@ -1099,9 +1103,9 @@ class UpdateObservabilityTests(WikiViewsTests):
 
     def test_status_view_current_when_no_versions_behind(self):
         self._set_state("update_check.json", {
-            "current": 131, "latest": 131, "update_available": False,
-            "changelog": None, "main_version": 131, "tag_lapse": False,
-            "diagnostic": None, "checked_at": "2026-08-09T00:00:00Z"})
+            "current": 131, "latest": 131, "available_version": 131,
+            "update_available": False, "changelog": None, "main_version": 131,
+            "tag_lapse": False, "diagnostic": None, "checked_at": "2026-08-09T00:00:00Z"})
         _title, body, _wide = serve_wiki.view_status()
         self.assertIn("update-current", body)
         self.assertIn("is current (v131)", body)
@@ -1109,9 +1113,9 @@ class UpdateObservabilityTests(WikiViewsTests):
 
     def test_status_view_behind_shows_count_and_command(self):
         self._set_state("update_check.json", {
-            "current": 128, "latest": 131, "update_available": True,
-            "changelog": "v131 notes", "main_version": 131, "tag_lapse": False,
-            "diagnostic": None, "checked_at": "2026-08-09T00:00:00Z"})
+            "current": 128, "latest": 131, "available_version": 131,
+            "update_available": True, "changelog": "v131 notes", "main_version": 131,
+            "tag_lapse": False, "diagnostic": None, "checked_at": "2026-08-09T00:00:00Z"})
         _title, body, _wide = serve_wiki.view_status()
         self.assertIn("update-behind", body)
         self.assertIn("Lifehug v131 is available", body)
@@ -1119,26 +1123,72 @@ class UpdateObservabilityTests(WikiViewsTests):
         self.assertIn("installed v128", body)
         self.assertIn("python3 system/update.py --apply", body)
 
-    def test_status_view_shows_tag_lapse_diagnostic(self):
+    def test_status_view_shows_tag_lapse_diagnostic_when_apply_still_reaches_something(self):
+        # Tags advanced PAST current (115 -> 120), so --apply is live, but
+        # main is further ahead still (128) — the diagnostic is secondary
+        # info alongside a real, non-dead command.
         self._set_state("update_check.json", {
-            "current": 117, "latest": 128, "update_available": True,
-            "changelog": None, "main_version": 128, "tag_lapse": True,
+            "current": 115, "latest": 120, "available_version": 128,
+            "update_available": True, "changelog": None, "main_version": 128,
+            "tag_lapse": True,
             "diagnostic": "v128 released but not tagged — releases are not "
                           "reaching vaults. Tag it to resume delivery.",
             "checked_at": "2026-08-08T00:00:00Z"})
         _title, body, _wide = serve_wiki.view_status()
         self.assertIn("update-diagnostic", body)
         self.assertIn("not tagged", body)
+        self.assertIn("Lifehug v128 is available", body)
+        self.assertIn("13 releases behind", body)
+        self.assertIn("python3 system/update.py --apply", body)  # NOT dead: still moves 115->120
+
+    def test_status_view_dead_apply_shows_diagnostic_as_headline_with_no_command(self):
+        # merge-gate finding 2: tags themselves stopped at v117 (== current)
+        # while main advanced to v128 — the exact real-world bug. --apply
+        # would be a pure no-op here; the diagnostic IS the headline and no
+        # command may be shown.
+        self._set_state("update_check.json", {
+            "current": 117, "latest": 117, "available_version": 128,
+            "update_available": True, "changelog": None, "main_version": 128,
+            "tag_lapse": True,
+            "diagnostic": "v128 released but not tagged — releases are not "
+                          "reaching vaults. Tag it to resume delivery.",
+            "checked_at": "2026-08-08T00:00:00Z"})
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("not tagged", body)
+        self.assertNotIn("update-cmd", body)
+        self.assertNotIn("system/update.py --apply", body)
+        # The diagnostic is not ALSO duplicated as a separate banner.
+        self.assertEqual(body.count("not tagged"), 1)
 
     def test_status_view_shows_last_update_changelog(self):
+        # Tag annotations follow the real "vN: ..." convention (tag_on_merge)
+        # — this is exactly the shape that doubled a version prefix before
+        # the fix (merge-gate finding 7).
         self._set_state("last_update.json", {
             "applied_at": "2026-08-09T00:00:00Z", "from_version": 117, "to_version": 119,
             "crossed": [{"version": 118, "changelog": "v118: fixed X"},
                         {"version": 119, "changelog": "v119: fixed Y"}]})
         _title, body, _wide = serve_wiki.view_status()
         self.assertIn("Updated v117 → v119", body)
+        # First (oldest) crossed entry renders inline, visible.
         self.assertIn("v118: fixed X", body)
+        # No doubled prefix, for either entry.
+        self.assertNotIn("v118: v118:", body)
+        self.assertNotIn("v119: v119:", body)
+        # The rest collapse into a <details> — still present in the markup,
+        # not dropped, but not flooding the visible line.
+        self.assertIn("<details", body)
+        self.assertIn("1 more change", body)
         self.assertIn("v119: fixed Y", body)
+
+    def test_status_view_last_update_single_entry_has_no_details(self):
+        self._set_state("last_update.json", {
+            "applied_at": "2026-08-09T00:00:00Z", "from_version": 118, "to_version": 119,
+            "crossed": [{"version": 119, "changelog": "v119: fixed Y"}]})
+        _title, body, _wide = serve_wiki.view_status()
+        self.assertIn("v119: fixed Y", body)
+        self.assertNotIn("v119: v119:", body)
+        self.assertNotIn("<details", body)
 
     def test_status_view_safe_when_state_files_are_corrupt(self):
         self._write("state/update_check.json", "not json")
@@ -1152,29 +1202,55 @@ class UpdateObservabilityTests(WikiViewsTests):
         self.assertIsNone(serve_wiki._hub_card_update())
 
     def test_hub_card_update_absent_when_current(self):
-        self._set_state("update_check.json", {"current": 131, "latest": 131})
+        self._set_state("update_check.json", {"current": 131, "latest": 131, "available_version": 131})
         self.assertIsNone(serve_wiki._hub_card_update())
 
     def test_hub_card_update_present_when_behind(self):
         self._set_state("update_check.json", {
-            "current": 128, "latest": 131, "diagnostic": None})
+            "current": 128, "latest": 131, "available_version": 131, "diagnostic": None})
         card = serve_wiki._hub_card_update()
         self.assertIsNotNone(card)
         self.assertEqual(card["kind"], "update")
         self.assertIn("v131", card["title"])
         self.assertIn("3 releases behind", card["body"])
         self.assertIn("system/update.py --apply", card["body"])
+        # No literal backticks in card body text (finding 6) — it's plain
+        # text rendered through html.escape, not markdown.
+        self.assertNotIn("`", card["body"])
 
     def test_hub_card_update_surfaces_tag_lapse_diagnostic_as_why(self):
         self._set_state("update_check.json", {
-            "current": 117, "latest": 128,
+            "current": 115, "latest": 120, "available_version": 128, "tag_lapse": True,
             "diagnostic": "v128 released but not tagged — releases are not reaching vaults."})
         card = serve_wiki._hub_card_update()
         self.assertIsNotNone(card)
         self.assertIn("not tagged", card["why"])
+        self.assertIn("system/update.py --apply", card["body"])  # apply still reaches v120
+
+    def test_hub_card_update_dead_apply_shows_diagnostic_as_body_with_no_command(self):
+        # Same real-world scenario as the Loop-view dead-apply test: tags
+        # stuck at current, main ahead. No dead command in the card body.
+        self._set_state("update_check.json", {
+            "current": 117, "latest": 117, "available_version": 128, "tag_lapse": True,
+            "diagnostic": "v128 released but not tagged — releases are not reaching vaults."})
+        card = serve_wiki._hub_card_update()
+        self.assertIsNotNone(card)
+        self.assertIn("not tagged", card["body"])
+        self.assertNotIn("--apply", card["body"])
+        self.assertEqual(card["why"], "")  # not duplicated into `why` too
+
+    def test_hub_card_update_gone_after_apply_refreshes_current(self):
+        # merge-gate finding 3/11, viewer-side proof: once update.py's
+        # cmd_apply/cmd_rollback refresh the cache's `current` (tested in
+        # test_update.py), the hub card must actually disappear — it must
+        # not keep announcing an update that was just installed.
+        self._set_state("update_check.json", {
+            "current": 131, "latest": 131, "available_version": 131,
+            "update_available": False, "tag_lapse": False, "diagnostic": None})
+        self.assertIsNone(serve_wiki._hub_card_update())
 
     def test_home_view_includes_update_card_when_behind(self):
-        self._set_state("update_check.json", {"current": 128, "latest": 131})
+        self._set_state("update_check.json", {"current": 128, "latest": 131, "available_version": 131})
         serve_wiki.SECOND_VOICE_OFFERS_FILE = self.tmp / "missing.json"
         data = serve_wiki.home_data()
         kinds = [c["kind"] for c in data["invitations"]]
@@ -1183,6 +1259,28 @@ class UpdateObservabilityTests(WikiViewsTests):
         _title, body, _wide = serve_wiki.view_home()
         self.assertIn("hub-card", body)
         self.assertIn("v131", body)
+
+    def test_home_view_update_card_never_displaces_content_cards(self):
+        # Owner ruling (finding 12): the update card is LAST among builders
+        # and must not push out a real content invitation when both are
+        # available in the same render.
+        self._set_state("update_check.json", {"current": 128, "latest": 131, "available_version": 131})
+        # _populate()'s queue fixture already makes _hub_card_next_question
+        # fire; classifier/answers fixtures make _hub_card_sit_with fire too.
+        self._write("classifications/answers-a1.json", {
+            "source_path": "answers/A1.md",
+            "self_understanding_insights": ["Core value: people over things."]})
+        serve_wiki.CLASSIFICATIONS_DIR = self.tmp / "classifications"
+        serve_wiki.SECOND_VOICE_OFFERS_FILE = self.tmp / "missing.json"
+        data = serve_wiki.home_data()
+        kinds = [c["kind"] for c in data["invitations"]]
+        self.assertIn("update", kinds)
+        self.assertIn("sit_with", kinds)
+        self.assertIn("question", kinds)
+        # update is never ahead of a content card.
+        content_kinds = [k for k in kinds if k != "update"]
+        self.assertLess(max(kinds.index(k) for k in content_kinds),
+                         kinds.index("update"))
 
 
 if __name__ == "__main__":
