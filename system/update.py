@@ -5,12 +5,31 @@ Checks for, applies, and rolls back framework updates from the upstream repo.
 User data (answers/, outputs/, sources/, question-bank.md, planner/source state) is never touched.
 
 Usage:
-    python3 system/update.py --check              # JSON: current, latest, update_available, changelog
+    python3 system/update.py --check              # JSON: current, latest, update_available,
+                                                    # changelog, main_version, available_version,
+                                                    # tag_lapse, diagnostic
     python3 system/update.py --check --quiet       # Exit code only (0=current, 1=update available)
     python3 system/update.py --apply               # Apply latest version
     python3 system/update.py --apply --version N   # Apply specific version
     python3 system/update.py --rollback            # Revert to previous version
     python3 system/update.py --migrate-vault       # Repair a pre-v120 vault in place
+
+--check compares BOTH the latest vN tag and origin/main's system/version.json
+(lifehug#84): `latest` keeps its pre-existing, tags-only meaning (backward
+compatible); the additive `available_version` is max(latest, main_version)
+— the true latest, tags OR main. If main is ahead of the latest tag, that
+IS a tag-lapse — the exact failure mode that let v118-v128 ship invisibly
+for four days — and update_available/diagnostic report it off
+available_version instead of being blind to it. A network failure or
+missing remote degrades to the tags-only behavior, silently. --check
+(quiet or not) caches its result to state/update_check.json; --apply/
+--rollback refresh that cache's `current` so the update card never
+announces an update that was just installed, and --apply additionally
+caches the changelogs it crossed to state/last_update.json. All of this is
+cached under the VAULT root (--vault-root / LIFEHUG_VAULT_ROOT / this
+checkout, same precedence as --migrate-vault) so the wiki viewer's
+vault-rooted STATE_DIR reads what --check/--apply just wrote, in the
+external layout too.
 """
 
 import argparse
@@ -19,6 +38,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 SYSTEM_DIR = Path(__file__).parent
@@ -460,6 +480,134 @@ def fetch_tags(remote):
     run_git("fetch", remote, "--tags", "--quiet", check=False)
 
 
+def get_remote_main_info(remote):
+    """Read {"version", "changelog"} from the remote's main branch version.json.
+
+    This is the tag-lapse detector (lifehug#84): v118-v128 shipped on main
+    while tagging silently stopped, so a tags-only check kept reporting
+    "current: 117, latest: 117" for four days of real releases. Comparing
+    against main directly notices that failure mode instead of being blind
+    to it.
+
+    Network-failure tolerant by design: a missing remote, an offline fetch,
+    a main branch without the expected ref, or an unparsable version.json
+    all fall through to None so callers degrade to tags-only, silently —
+    this must never turn a network hiccup into a false diagnostic or a
+    crash.
+    """
+    if not remote:
+        return None
+    run_git("fetch", remote, "main", "--quiet", check=False)
+    try:
+        content = read_repo_file_at(f"{remote}/main", "system/version.json")
+        data = json.loads(content)
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return None
+    version = data.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None
+    return {"version": version, "changelog": data.get("changelog")}
+
+
+def resolve_state_vault_root(args=None):
+    """Where the per-vault update-check cache lives: the SAME precedence
+    cmd_migrate_vault already uses — --vault-root (when the invoked
+    subcommand accepts it) -> LIFEHUG_VAULT_ROOT -> this framework checkout
+    (REPO_DIR).
+
+    update.py's own REPO_DIR is the FRAMEWORK checkout (SYSTEM_DIR.parent) —
+    correct for git operations (tags, commits) but wrong for state/*.json in
+    the documented external layout, where the framework is installed
+    separately from the vault. Writing the cache to REPO_DIR there would
+    leave it somewhere serve_wiki.py's vault-rooted STATE_DIR never reads,
+    silently inerting the whole feature. This must match lifehug_core's
+    resolve_vault_root precedence for embedded installs (where the two
+    roots are the same directory anyway) as well as external ones.
+    """
+    root = getattr(args, "vault_root", None) if args is not None else None
+    root = root or os.environ.get("LIFEHUG_VAULT_ROOT")
+    return Path(root).expanduser() if root else REPO_DIR
+
+
+def _update_state_dir(args=None):
+    # parents=False: the vault root itself must already exist — a typo'd
+    # --vault-root/LIFEHUG_VAULT_ROOT must not silently grow a directory
+    # tree and cache into it. Missing root -> FileNotFoundError, which every
+    # caller's try/except treats as "skip caching", keeping writes best-effort.
+    state_dir = resolve_state_vault_root(args) / "state"
+    state_dir.mkdir(parents=False, exist_ok=True)
+    return state_dir
+
+
+def write_update_check_state(result, args=None):
+    """Persist the most recent --check result to state/update_check.json so
+    the viewer (serve_wiki.py's Loop view + home hub card) can show update
+    status without running git on every page load. Best-effort: a write
+    failure must never break --check itself."""
+    try:
+        payload = dict(result)
+        payload["checked_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        save_json(_update_state_dir(args) / "update_check.json", payload)
+    except OSError:
+        pass
+
+
+def write_last_update_state(from_version, to_version, crossed, args=None):
+    """Persist the changelogs crossed by an --apply so the viewer can render
+    a 'what changed' line for the most recent update (lifehug#84 item 4).
+    Best-effort: a write failure must never fail the update itself."""
+    try:
+        save_json(_update_state_dir(args) / "last_update.json", {
+            "applied_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "from_version": from_version,
+            "to_version": to_version,
+            "crossed": crossed,
+        })
+    except OSError:
+        pass
+
+
+def refresh_update_check_current(new_current, args=None):
+    """After --apply/--rollback change the local version, the cached
+    --check result's `current` (and derived `update_available`) must be
+    refreshed too — otherwise the viewer's update card keeps announcing an
+    update that was JUST installed until the next --check happens to run.
+    Best-effort and a deliberate no-op when nothing is cached yet: an
+    absent cache already renders as "unknown" in the viewer, never as
+    stale-wrong, so there is nothing to correct."""
+    try:
+        path = _update_state_dir(args) / "update_check.json"
+        data = load_json(path)
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    available_version = data.get("available_version")
+    if not isinstance(available_version, int):
+        latest = data.get("latest")
+        available_version = latest if isinstance(latest, int) else None
+    data["current"] = new_current
+    if isinstance(available_version, int):
+        data["update_available"] = available_version > new_current
+    data["checked_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        save_json(path, data)
+    except OSError:
+        pass
+
+
+def collect_crossed_changelogs(previous_version, target_version):
+    """Changelog entries for every TAGGED version crossed by an apply, in
+    ascending order — an apply can jump many releases in one hop (e.g.
+    v117 -> v128), and the owner should see every changelog it crossed, not
+    just the target's."""
+    crossed = []
+    for v in get_available_versions():
+        if previous_version < v <= target_version:
+            crossed.append({"version": v, "changelog": get_tag_changelog(v)})
+    return crossed
+
+
 def get_available_versions():
     """Get all version tags (vN format) sorted by version number."""
     try:
@@ -712,7 +860,16 @@ def apply_version(version):
 
 
 def cmd_check(args):
-    """Check for available updates."""
+    """Check for available updates.
+
+    Tag-lapse-proof (lifehug#84): compares against BOTH the latest vN tag
+    and origin/main's system/version.json. If main is ahead of the latest
+    tag, that IS the failure that let v118-v128 ship invisibly for four
+    days — update_available reports true off main's version, and a loud
+    diagnostic says so, instead of being blinded by the same lapse it's
+    meant to catch. A network failure (or no upstream remote) degrades to
+    the pre-existing tags-only behavior, silently.
+    """
     remote = find_upstream_remote()
     if remote:
         fetch_tags(remote)
@@ -726,22 +883,47 @@ def cmd_check(args):
             )
 
     current = get_local_version()
+    # `latest` keeps its v131 meaning EXACTLY (tags-only) — existing callers
+    # (CLAUDE.md's session-start check, any script parsing this JSON) must
+    # not silently change behavior. `available_version` is the new,
+    # additive "true latest" (tags OR main, whichever is ahead); cards and
+    # update_available consume that instead.
     latest = get_latest_version()
-    update_available = latest > current
+    main_info = get_remote_main_info(remote)
+    main_version = main_info["version"] if main_info else None
+    tag_lapse = main_version is not None and main_version > latest
+    available_version = max(latest, main_version) if main_version is not None else latest
 
-    if args.quiet:
-        sys.exit(1 if update_available else 0)
+    diagnostic = None
+    if tag_lapse:
+        diagnostic = (
+            f"v{main_version} released but not tagged — releases are not "
+            "reaching vaults. Tag it to resume delivery."
+        )
+        print(f"Warning: {diagnostic}", file=sys.stderr)
+
+    update_available = available_version > current
 
     changelog = None
     if update_available:
-        changelog = get_tag_changelog(latest)
+        changelog = main_info["changelog"] if tag_lapse else get_tag_changelog(latest)
 
     result = {
         "current": current,
         "latest": latest,
         "update_available": update_available,
         "changelog": changelog,
+        # New fields (lifehug#84) — additive only, existing keys unchanged.
+        "main_version": main_version,
+        "available_version": available_version,
+        "tag_lapse": tag_lapse,
+        "diagnostic": diagnostic,
     }
+    write_update_check_state(result, args)
+
+    if args.quiet:
+        sys.exit(1 if update_available else 0)
+
     print(json.dumps(result, indent=2))
 
 
@@ -783,6 +965,15 @@ def cmd_apply(args):
         changelog = get_tag_changelog(target)
         if changelog:
             print(f"\nChangelog:\n{changelog}")
+        # Post-update visibility (lifehug#84 item 4): record every tagged
+        # changelog this apply crossed (an apply can jump many releases in
+        # one hop) so the viewer can show "what changed" for the update
+        # instead of it being a silent file swap.
+        write_last_update_state(current, target, collect_crossed_changelogs(current, target), args)
+        # The cached --check result's `current` is now stale — without this,
+        # the viewer's update card keeps announcing an update that was just
+        # installed until someone happens to run --check again.
+        refresh_update_check_current(target, args)
     else:
         print("\nUpdate failed.", file=sys.stderr)
         sys.exit(1)
@@ -800,6 +991,7 @@ def cmd_rollback(args):
 
     if apply_version(target):
         print(f"\nRolled back to v{target}.")
+        refresh_update_check_current(target, args)
     else:
         print("\nRollback failed.", file=sys.stderr)
         sys.exit(1)
@@ -846,7 +1038,8 @@ def main():
     parser.add_argument("--rollback", action="store_true", help="Rollback to previous version")
     parser.add_argument(
         "--vault-root", metavar="PATH", default=None,
-        help="Vault to operate on with --migrate-vault (default: "
+        help="Vault to operate on with --migrate-vault, and where --check/"
+             "--apply/--rollback cache their state (default: "
              "LIFEHUG_VAULT_ROOT, then this checkout)",
     )
     parser.add_argument(
