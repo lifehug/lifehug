@@ -530,8 +530,12 @@ def resolve_state_vault_root(args=None):
 
 
 def _update_state_dir(args=None):
+    # parents=False: the vault root itself must already exist — a typo'd
+    # --vault-root/LIFEHUG_VAULT_ROOT must not silently grow a directory
+    # tree and cache into it. Missing root -> FileNotFoundError, which every
+    # caller's try/except treats as "skip caching", keeping writes best-effort.
     state_dir = resolve_state_vault_root(args) / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=False, exist_ok=True)
     return state_dir
 
 
@@ -571,8 +575,8 @@ def refresh_update_check_current(new_current, args=None):
     Best-effort and a deliberate no-op when nothing is cached yet: an
     absent cache already renders as "unknown" in the viewer, never as
     stale-wrong, so there is nothing to correct."""
-    path = _update_state_dir(args) / "update_check.json"
     try:
+        path = _update_state_dir(args) / "update_check.json"
         data = load_json(path)
     except (OSError, ValueError):
         return

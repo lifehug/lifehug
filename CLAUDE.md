@@ -1248,7 +1248,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ## Update Check
 
-At the start of each session, run `python3 system/update.py --check --quiet`. If the exit code is 1 (update available), mention it briefly:
+At the start of each session, run `python3 system/update.py --check --quiet`. If the exit code is 1 (update available), mention it briefly (the JSON's `available_version` is the number to name — it covers releases that are on main but not yet tagged; `latest` remains the tag-reachable ceiling):
 
 > "Lifehug v{N} is available. Say **update lifehug** when you're ready."
 
