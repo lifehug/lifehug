@@ -2,14 +2,15 @@
 
 import json
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import root_parent_tmp  # noqa: E402
 import serve_wiki  # noqa: E402
 import roadmap  # noqa: E402
 import recommend_focuses  # noqa: E402
@@ -25,7 +26,7 @@ class WikiViewsTests(unittest.TestCase):
         # Keep the fixture under the real-path worktree parent. On macOS the
         # default /var/folders prefix traverses the /var symlink, which the
         # production no-follow vault I/O authority correctly rejects.
-        self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
+        self.tmp = root_parent_tmp(self, ROOT)
         # Save originals so each test runs against an isolated fixture set.
         self._saved = {
             (serve_wiki, "QUESTIONS_FILE"): serve_wiki.QUESTIONS_FILE,
@@ -779,7 +780,7 @@ class RevisionFooterTests(unittest.TestCase):
     Thoughts group for subjectless essays."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
+        self.tmp = root_parent_tmp(self, ROOT)
         self._saved = {
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,

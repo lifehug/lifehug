@@ -11,7 +11,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import unittest
 import urllib.error
@@ -22,7 +21,9 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import root_parent_tmp  # noqa: E402
 import vault_paths  # noqa: E402
 
 
@@ -124,7 +125,7 @@ def tree_digest(root: Path) -> dict[str, str]:
 class VaultContractTests(unittest.TestCase):
     def setUp(self):
         vault_paths._reset_process_binding_for_tests()
-        self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-v120-contract-", dir=ROOT.parent))
+        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v120-contract-")
 
     def tearDown(self):
         vault_paths._reset_process_binding_for_tests()
@@ -500,7 +501,7 @@ class VaultContractTests(unittest.TestCase):
 
 class ExternalVaultSubprocessTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-v120-smoke-", dir=ROOT.parent))
+        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v120-smoke-")
         self.framework = self.tmp / "framework"
         shutil.copytree(SYSTEM, self.framework / "system", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(ROOT / "templates", self.framework / "templates")

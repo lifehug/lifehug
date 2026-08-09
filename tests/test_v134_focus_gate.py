@@ -11,9 +11,7 @@ throwaway vault per test, never the founder vault.
 from __future__ import annotations
 
 import json
-import shutil
 import sys
-import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,7 +19,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import root_parent_tmp  # noqa: E402
 import entity_roster  # noqa: E402
 import recommend_focuses  # noqa: E402
 import roadmap  # noqa: E402
@@ -52,8 +52,7 @@ class GateTestBase(unittest.TestCase):
     real-path-tmp-dir + monkeypatched-module-attribute convention."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.tmp = root_parent_tmp(self, ROOT)
         self._saved = {
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,
