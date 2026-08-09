@@ -291,11 +291,16 @@ def _chapter_draft_bodies(category_id: str, drafts_by_cat: dict) -> list[str]:
     return bodies
 
 
-def _slug_for_focus_book(focus_label: str) -> str:
+def _slug_for_focus_book(focus_id: str) -> str:
     """Stable slug for a focus's assembled manuscript — same focus, same
     outputs/ artifact, every time (re-assembly is a new version, not a new
-    piece)."""
-    return slugify(f"{focus_label} book")
+    piece).
+
+    Keyed on the focus ID, not its label: labels can be renamed (which would
+    orphan the manuscript and reset its version chain) and two focuses'
+    labels can slugify identically (which would collide into one artifact).
+    """
+    return slugify(f"{focus_id} book")
 
 
 def assemble_book(focus_id: str, force: bool = False) -> dict:
@@ -335,11 +340,25 @@ def assemble_book(focus_id: str, force: bool = False) -> dict:
             chapters_placeholder += 1
     manuscript = "\n".join(lines).rstrip() + "\n"
 
-    slug = _slug_for_focus_book(target["label"])
+    slug = _slug_for_focus_book(focus_id)
     out_dir = artifact.OUTPUTS_DIR / slug
 
     if artifact.artifact_path(out_dir).exists():
         meta = artifact.load_artifact(out_dir)
+        # Adopt ONLY this focus's own manuscript. An unrelated user artifact
+        # that happens to sit at the derived slug must never be written into:
+        # appending the manuscript to it corrupts the user's piece, and if
+        # that piece carries categories + a chapter-class format, the
+        # manuscript body gets re-counted as chapter-draft material — the
+        # exact runaway self-inclusion the empty-categories rule prevents.
+        if (meta.get("artifact_id") != slug
+                or meta.get("format") != "book"
+                or meta.get("categories")):
+            raise ValueError(
+                f"outputs/{slug} exists but is not this focus's assembled "
+                "manuscript (different artifact_id/format/categories) — "
+                "refusing to write into it; move or rename that artifact"
+            )
     else:
         out_dir.mkdir(parents=True, exist_ok=True)
         created = now_utc()

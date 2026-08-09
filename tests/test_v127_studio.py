@@ -196,10 +196,10 @@ class AssembleBookTests(StudioTestBase):
         self.assertEqual(result["version"], 1)
         self.assertEqual(result["chapters_included"], 1)
         self.assertEqual(result["chapters_placeholder"], 1)
-        self.assertEqual(result["slug"], "my-life-book")
-        self.assertEqual(result["path"], "outputs/my-life-book/v1.md")
+        self.assertEqual(result["slug"], "life-book")
+        self.assertEqual(result["path"], "outputs/life-book/v1.md")
 
-        out_path = self.tmp / "outputs" / "my-life-book" / "v1.md"
+        out_path = self.tmp / "outputs" / "life-book" / "v1.md"
         self.assertTrue(out_path.exists())
         content = out_path.read_text()
         self.assertIn("# My Life", content)
@@ -210,13 +210,57 @@ class AssembleBookTests(StudioTestBase):
         # Chapter order follows the focus's own category order (A then B).
         self.assertLess(content.index("## Origins"), content.index("## Becoming"))
 
-        meta = json.loads((self.tmp / "outputs" / "my-life-book" / "artifact.json").read_text())
+        meta = json.loads((self.tmp / "outputs" / "life-book" / "artifact.json").read_text())
         self.assertEqual(meta["format"], "book")
         # Deliberately empty (see studio.assemble_book) -- otherwise the
         # manuscript would recount itself as chapter-draft material on the
         # next assemble. Focus filing works via the subject-label match.
         self.assertEqual(meta["categories"], [])
         self.assertEqual(meta["subject"], "My Life")
+
+    def test_assemble_refuses_unrelated_artifact_at_derived_slug(self):
+        # Review-gate regression (PR #76): assemble must never write into a
+        # pre-existing artifact that isn't this focus's own manuscript --
+        # appending to it corrupts the user's piece, and if that piece
+        # carries categories + a chapter-class format the manuscript body
+        # gets re-counted as chapter-draft material (runaway self-inclusion).
+        self._write_chapter_a("Chapter A body one.\n")
+        squatter = self.tmp / "outputs" / "life-book"
+        squatter.mkdir(parents=True)
+        (squatter / "artifact.json").write_text(json.dumps({
+            "version": 1, "artifact_id": "life-book",
+            "title": "A letter I wrote", "format": "chapter",
+            "subject": "someone", "categories": ["A", "B"],
+            "versions": [{"version": 1, "path": "outputs/life-book/v1.md",
+                          "created_at": "2026-01-01T00:00:00Z", "model": "x"}],
+            "promoted_sources": [],
+        }))
+        (squatter / "v1.md").write_text("the user's own letter\n")
+        with self.assertRaises(ValueError):
+            studio.assemble_book("life")
+        # Untouched: still v1, still the user's content, meta unchanged.
+        self.assertEqual((squatter / "v1.md").read_text(), "the user's own letter\n")
+        self.assertFalse((squatter / "v2.md").exists())
+        meta = json.loads((squatter / "artifact.json").read_text())
+        self.assertEqual(meta["format"], "chapter")
+
+    def test_slug_keyed_on_focus_id_survives_label_rename(self):
+        # Review-gate regression (PR #76): keying the slug on the label meant
+        # a focus rename orphaned the manuscript and reset its version chain.
+        self._write_chapter_a("Chapter A body one.\n")
+        first = studio.assemble_book("life")
+        self.assertEqual(first["slug"], "life-book")
+        # Rename the focus label; same focus id.
+        data = json.loads(Path(roadmap.ROADMAP_FILE).read_text())
+        for f in data["focuses"]:
+            if f["id"] == "life":
+                f["label"] = "My Story"
+        Path(roadmap.ROADMAP_FILE).write_text(json.dumps(data))
+        self._write_chapter_a("Chapter A body two.\n")
+        second = studio.assemble_book("life")
+        self.assertEqual(second["slug"], "life-book")
+        self.assertEqual(second["version"], 2)
+        self.assertFalse((self.tmp / "outputs" / "my-story-book").exists())
 
     def test_composed_manuscript_is_never_recounted_as_a_chapter_draft(self):
         # Regression: an earlier version tagged the manuscript with the
@@ -227,7 +271,7 @@ class AssembleBookTests(StudioTestBase):
         studio.assemble_book("life")
         drafts_by_cat = book._load_drafts_by_category()
         drafted_slugs = {slug for entries in drafts_by_cat.values() for slug, _w in entries}
-        self.assertNotIn("my-life-book", drafted_slugs)
+        self.assertNotIn("life-book", drafted_slugs)
 
     def test_assembled_manuscript_files_under_its_focus_via_subject_fallback(self):
         # Its own `categories` is deliberately empty (see assemble_book), so
@@ -238,7 +282,7 @@ class AssembleBookTests(StudioTestBase):
         groups = studio.compute_works()
         life_group = next(g for g in groups if g["focus"] and g["focus"]["id"] == "life")
         slugs = {p["slug"] for p in life_group["pieces"]}
-        self.assertIn("my-life-book", slugs)
+        self.assertIn("life-book", slugs)
         self.assertIn("chapter-a", slugs)
 
     def test_reassemble_is_a_noop_until_a_draft_changes_then_bumps_version(self):
@@ -250,13 +294,13 @@ class AssembleBookTests(StudioTestBase):
         again = studio.assemble_book("life")
         self.assertEqual(again["version"], 1)
         self.assertEqual(again["path"], first["path"])
-        self.assertFalse((self.tmp / "outputs" / "my-life-book" / "v2.md").exists())
+        self.assertFalse((self.tmp / "outputs" / "life-book" / "v2.md").exists())
 
         # Chapter A gets a new draft version: content changes -> new manuscript version.
         self._write_chapter_a("Chapter A body TWO, changed.\n", version=2)
         second = studio.assemble_book("life")
         self.assertEqual(second["version"], 2)
-        v2_text = (self.tmp / "outputs" / "my-life-book" / "v2.md").read_text()
+        v2_text = (self.tmp / "outputs" / "life-book" / "v2.md").read_text()
         self.assertIn("Chapter A body TWO, changed.", v2_text)
 
         # Unchanged again: still a no-op at v2.

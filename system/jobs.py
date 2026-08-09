@@ -88,7 +88,7 @@ _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$")
 _QUESTION_ID_RE = re.compile(r"^[A-Z][0-9]+[a-z]*$")
 _ARTIFACT_REF_RE = re.compile(r"^outputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PLACEMENT_KEY_RE = re.compile(r"^[0-9a-f]{12}$")
-_FOCUS_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_FOCUS_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _now() -> str:

@@ -429,7 +429,8 @@ def cmd_book_assemble(args: argparse.Namespace) -> int:
     """Compose a book-project Focus's drafted chapters into one manuscript
     artifact under outputs/. A mutation (writes/versions an artifact), so it
     goes through the durable job queue like other mutations (see
-    cmd_artifact); the in-process worker call (LIFEHUG_JOB_IN_PROCESS) calls
+    cmd_artifact); when the worker re-invokes the CLI under its writer token
+    (_job_runner_active / LIFEHUG_JOB_RUNNER_TOKEN) it calls
     studio.assemble_book directly instead of re-queueing."""
     if not _job_runner_active():
         payload: dict[str, object] = {"focus": args.focus}

@@ -155,13 +155,17 @@ def _relational_story_function(text: str) -> str | None:
     return None
 
 
-def story_functions_for(questions: list[dict]) -> dict[str, str]:
+def story_functions_for(questions: list[dict], relational: bool = True) -> dict[str, str]:
     """{question_id: story_function} for bank questions.
 
     Bank questions (``lifehug_core.parse_questions``) carry no ``kind``, so the
     classifier runs on text alone — the same call the planner makes at
     question_planner.py:592. Computed once per question and shared across every
     slot so a five-slot framework doesn't classify the bank five times.
+
+    ``relational=False`` skips the RELATIONAL_KEYWORDS overlay — used for
+    frameworks with no relational slots, where the overlay could only steal
+    questions from the functions their slots actually want.
     """
     out: dict[str, str] = {}
     for question in questions:
@@ -169,7 +173,8 @@ def story_functions_for(questions: list[dict]) -> dict[str, str]:
         if not qid:
             continue
         text = str(question.get("text", ""))
-        out[qid] = _relational_story_function(text) or infer_story_function(text)
+        function = _relational_story_function(text) if relational else None
+        out[qid] = function or infer_story_function(text)
     return out
 
 
@@ -184,6 +189,14 @@ def compute_readiness(framework: dict | None,
 
     Never raises on a missing/slotless framework — returns the benign empty
     result so an optional readiness panel degrades to "nothing to show".
+
+    Counting note: one answered question fills EVERY slot whose
+    story_functions it matches (shipped chapter/essay specs list ``meaning``
+    in two slots, so a single meaning answer advances both). That is the
+    stated rule — a slot needs material of its kind, not exclusive ownership
+    of a question — but it means multi-slot overlap mildly flatters the
+    ratio; specs that want stricter counting should use distinct functions
+    per slot.
     """
     if not isinstance(framework, dict):
         return _empty_result()
@@ -197,7 +210,15 @@ def compute_readiness(framework: dict | None,
     in_scope = [q for q in questions
                 if str(q.get("category", "")).strip().upper() in wanted]
 
-    functions = story_functions_for(in_scope)
+    # The relational overlay only helps frameworks that actually declare
+    # relational slots; for every other framework it can only reclassify
+    # questions AWAY from functions their slots want (e.g. "describe a moment
+    # with your mother" turning_point → shared_history would hide it from a
+    # chapter slot). Enable it per-framework.
+    framework_functions = {str(f) for slot in slots if isinstance(slot, dict)
+                           for f in (slot.get("story_functions") or [])}
+    relational = bool(framework_functions & {fn for fn, _ in RELATIONAL_KEYWORDS})
+    functions = story_functions_for(in_scope, relational=relational)
     # book.py's dominant sort in practice: bank questions carry no priority, so
     # its (-priority, id) key collapses to ascending id. Same order here.
     answered = sorted((q for q in in_scope if q.get("answered")), key=_qid)
