@@ -4,6 +4,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
@@ -12,6 +13,13 @@ sys.path.insert(0, str(SYSTEM))
 
 def load_answer_ack():
     spec = importlib.util.spec_from_file_location("answer_ack", SYSTEM / "answer_ack.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def load_process_answer():
+    spec = importlib.util.spec_from_file_location("process_answer", SYSTEM / "process_answer.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -118,6 +126,60 @@ class FollowupFramingConstantsTests(unittest.TestCase):
         self.assertNotIn('"📖 Lifehug — since you\'re on a roll\\n\\n"', script)
         self.assertIn("FOLLOWUP_HEADER", script)
         self.assertIn("FOLLOWUP_FOOTER", script)
+
+
+class LocalAckSendTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = load_process_answer()
+
+    def test_ack_skips_model_call_without_telegram_target(self):
+        question = {"id": "A3", "text": PAYLOAD["question_text"], "category": "A"}
+        with (
+            mock.patch.object(self.mod, "resolve_telegram_target", return_value=("", "")),
+            mock.patch.object(self.mod, "generate_answer_ack_text") as generate,
+        ):
+            sent = self.mod.maybe_send_answer_ack(
+                question,
+                {"A": {"name": "Origins"}},
+                PAYLOAD["answer_text"],
+                followup_pending=False,
+            )
+
+        self.assertFalse(sent)
+        generate.assert_not_called()
+
+    def test_ack_generates_and_sends_before_followup_surface(self):
+        question = {"id": "A3", "text": PAYLOAD["question_text"], "category": "A"}
+        with (
+            mock.patch.object(self.mod, "resolve_telegram_target", return_value=("token", "chat")),
+            mock.patch.object(self.mod, "load_config", return_value={"answer_ack_model": "ack-model"}),
+            mock.patch.object(
+                self.mod,
+                "generate_answer_ack_text",
+                return_value="Warm acknowledgment.",
+            ) as generate,
+            mock.patch.object(self.mod, "send_telegram", return_value=True) as send,
+        ):
+            sent = self.mod.maybe_send_answer_ack(
+                question,
+                {"A": {"name": "Origins"}},
+                PAYLOAD["answer_text"],
+                followup_pending=True,
+            )
+
+        self.assertTrue(sent)
+        payload, model = generate.call_args.args
+        self.assertEqual(model, "ack-model")
+        self.assertEqual(payload["question_id"], "A3")
+        self.assertEqual(payload["answer_text"], PAYLOAD["answer_text"])
+        self.assertTrue(payload["followup_pending"])
+        send.assert_called_once_with("Warm acknowledgment.")
+
+    def test_process_answer_calls_ack_before_adaptive_followup(self):
+        script = (SYSTEM / "process_answer.py").read_text(encoding="utf-8")
+        ack = script.index("maybe_send_answer_ack(\n            question")
+        followup = script.index("maybe_send_followup_question(question_id, followup_plan=followup_plan)")
+        self.assertLess(ack, followup)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from lifehug_core import (
     REPO_DIR,
     ROTATION_FILE,
     SYSTEM_DIR,
+    load_config,
     mark_answered_in_bank,
     parse_categories,
     parse_questions,
@@ -23,6 +24,8 @@ from lifehug_core import (
     read_json,
     record_learning_failure,
     rebuild_coverage,
+    resolve_telegram_target,
+    send_telegram,
     write_json,
     write_text,
 )
@@ -235,7 +238,67 @@ def maybe_send_chapter_ready_offer(answered_question_id: str) -> None:
                   f"[{row['chapter_id']}] {row['chapter_name']}")
 
 
-def maybe_send_followup_question(answered_question_id: str) -> None:
+def build_answer_ack_payload(
+    question: dict,
+    categories: dict,
+    answer_text: str,
+    *,
+    followup_pending: bool,
+) -> dict:
+    cat = str(question["category"])
+    return {
+        "question_id": str(question["id"]),
+        "question_text": str(question["text"]),
+        "question_category": cat,
+        "answer_text": answer_text,
+        "followup_pending": followup_pending,
+    }
+
+
+def generate_answer_ack_text(payload: dict, model: str) -> str:
+    """Generate the warm acknowledgment text from the shared prompt contract."""
+    from answer_ack import build_prompt  # noqa: PLC0415
+    from research_expand import call_ai  # noqa: PLC0415
+
+    return call_ai(build_prompt(payload), model).strip()
+
+
+def maybe_send_answer_ack(
+    question: dict,
+    categories: dict,
+    answer_text: str,
+    *,
+    followup_pending: bool,
+) -> bool:
+    """Send a best-effort warm Telegram acknowledgment before follow-ups."""
+    token, chat_id = resolve_telegram_target()
+    if not token or not chat_id:
+        print("  (answer acknowledgment skipped: no telegram credentials on this machine)")
+        return False
+
+    config = load_config()
+    model = config.get("answer_ack_model") or config.get("followup_model")
+    if not model:
+        from research_expand import DEFAULT_MODEL  # noqa: PLC0415
+        model = DEFAULT_MODEL
+
+    payload = build_answer_ack_payload(
+        question,
+        categories,
+        answer_text,
+        followup_pending=followup_pending,
+    )
+    message = generate_answer_ack_text(payload, str(model)).strip()
+    if not message:
+        return False
+    if send_telegram(message):
+        print("✓ Warm answer acknowledgment sent")
+        return True
+    print("  (answer acknowledgment skipped: telegram send failed)")
+    return False
+
+
+def adaptive_followup_plan(answered_question_id: str) -> tuple[dict, dict, dict] | None:
     """Adaptive cadence: after an answer lands, offer the next question the
     same day (up to max_questions_per_day, default 3). Conversation, not
     cadence — an immediate 'here's the next one while you're warm' is the
@@ -244,28 +307,44 @@ def maybe_send_followup_question(answered_question_id: str) -> None:
     or no Telegram credentials on this machine."""
     from datetime import datetime as _dt
 
-    from lifehug_core import load_config, read_json as _read_json, send_telegram  # noqa: PLC0415
-
     config = load_config()
     if str(config.get("adaptive_cadence", "true")).strip().lower() in ("false", "0", "no", "off"):
-        return
+        return None
     if _dt.now().hour >= 20:
-        return  # don't start a new thread late at night
+        return None  # don't start a new thread late at night
 
     import ask  # noqa: PLC0415
 
-    rotation = _read_json(ROTATION_FILE, default={}) or {}
+    rotation = read_json(ROTATION_FILE, default={}) or {}
     if rotation.get("awaiting_pass_transition"):
-        return
+        return None
     if ask.sends_today(rotation) >= ask.max_sends_per_day():
-        return
+        return None
 
     md_text = QUESTIONS_FILE.read_text()
     questions = parse_questions(md_text)
     categories = parse_categories(md_text)
     question = ask.pick_next_question(questions, categories, rotation)
     if not question or question["id"] == answered_question_id:
+        return None
+    return question, categories, rotation
+
+
+_FOLLOWUP_PLAN_UNSET = object()
+
+
+def maybe_send_followup_question(
+    answered_question_id: str,
+    *,
+    followup_plan: tuple[dict, dict, dict] | None | object = _FOLLOWUP_PLAN_UNSET,
+) -> None:
+    if followup_plan is _FOLLOWUP_PLAN_UNSET:
+        followup_plan = adaptive_followup_plan(answered_question_id)
+    if followup_plan is None:
         return
+    question, categories, rotation = followup_plan
+
+    import ask  # noqa: PLC0415
 
     text = (f"{FOLLOWUP_HEADER}\n\n"
             f"{ask.format_question(question, categories)}\n\n"
@@ -398,9 +477,42 @@ def main():
             context={"question_id": question_id},
         )
 
+    followup_plan = None
+    followup_plan_ready = False
+    try:
+        followup_plan = adaptive_followup_plan(question_id)
+        followup_plan_ready = True
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "adaptive_followup_plan",
+            exc,
+            context={"question_id": question_id},
+        )
+
+    # Warm local acknowledgment: hosted sends this after capture; local
+    # Telegram does the same before any adaptive follow-up. Best-effort only.
+    try:
+        maybe_send_answer_ack(
+            question,
+            categories,
+            answer_text,
+            followup_pending=followup_plan is not None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure(
+            "process_answer",
+            "answer_ack",
+            exc,
+            context={"question_id": question_id},
+        )
+
     # Adaptive cadence: offer the next question while the author is warm.
     try:
-        maybe_send_followup_question(question_id)
+        if followup_plan_ready:
+            maybe_send_followup_question(question_id, followup_plan=followup_plan)
+        else:
+            maybe_send_followup_question(question_id)
     except Exception as exc:  # noqa: BLE001
         record_learning_failure(
             "process_answer",
