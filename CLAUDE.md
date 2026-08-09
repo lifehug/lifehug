@@ -909,9 +909,13 @@ token and exact loopback Host/Origin checks. Browser POSTs return after durable
 enqueue, and the same kernel writer lease serializes them with answers,
 artifacts, schedules, compiles, and manual canonical mutators:
 
-- **Review queue:** promote (category picker, defaults to the inferred one) /
-  defer / dismiss on Candidates; approve / dismiss on Focus Recommendations
-  (approve runs as a job — it scaffolds the Focus and seeds questions); a
+- **Review** (`/views/review`, v128 — one page for all three proposal lanes;
+  the old Candidates / Focus Recommendations / Entity Candidates views
+  redirect here): promote (category picker, defaults to the inferred one) /
+  defer / dismiss on question candidates; approve / dismiss on focus ideas
+  (approve runs as a job — it scaffolds the Focus and seeds questions);
+  entity candidates are preview-only (they graduate automatically at
+  compile). Each lane states its autonomy policy on its section bar. Also a
   "Got it" acknowledge on the home second-voice card (`second-voice-ack`).
 - **Piece lifecycle** (on each `/artifact-version/` page — the code-level
   route name is unchanged): direct edit → saved as vN+1

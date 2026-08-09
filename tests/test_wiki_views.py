@@ -103,24 +103,29 @@ class WikiViewsTests(unittest.TestCase):
         # making surface is one of the first things visible in the menu; v127
         # replaces it in that slot with 'studio' (which absorbed both Book
         # Assembly and Artifacts). v124 consolidated focuses/coverage/
-        # question-bank into foundation.
+        # question-bank into foundation. v128 consolidated candidates/
+        # recommendations/entities into review, in recommendations' old slot.
         order = [slug for slug, _, _ in serve_wiki.VIEWS]
         self.assertEqual(order, [
             "status", "mirror", "graph", "timeline", "studio", "foundation",
-            "recommendations", "candidates", "queue",
-            "entities", "sources", "reports", "privacy",
+            "review", "queue",
+            "sources", "reports", "privacy",
         ])
 
     def test_legacy_view_slugs_redirect_to_their_consolidated_view(self):
         # The absorbed views are gone from the registry but their URLs
         # permanently redirect, so old bookmarks and hub links keep working:
-        # three into Foundation (v124), two into Studio (v127).
+        # three into Foundation (v124), two into Studio (v127), three into
+        # Review (v128).
         expected = {
             "focuses": "foundation",
             "coverage": "foundation",
             "question-bank": "foundation",
             "book": "studio",
             "artifacts": "studio",
+            "candidates": "review",
+            "recommendations": "review",
+            "entities": "review",
         }
         self.assertEqual(serve_wiki.LEGACY_VIEW_REDIRECTS, expected)
         for slug, target in expected.items():
@@ -283,9 +288,9 @@ class WikiViewsTests(unittest.TestCase):
         # my-life target 4 + etherfuse target 2 = 6; answered 1 + 2 = 3.
         self.assertIn("Overall: 3/6 answered", body)
 
-    def test_candidates_menu_label(self):
-        label = dict((slug, lbl) for slug, lbl, _ in serve_wiki.VIEWS)["candidates"]
-        self.assertEqual(label, "Question Candidates")
+    def test_review_menu_label(self):
+        label = dict((slug, lbl) for slug, lbl, _ in serve_wiki.VIEWS)["review"]
+        self.assertEqual(label, "Review")
 
     def test_every_view_has_a_description(self):
         for slug, _, _ in serve_wiki.VIEWS:
@@ -296,16 +301,18 @@ class WikiViewsTests(unittest.TestCase):
         body = serve_wiki._with_description("<h1>Coverage</h1><p>x</p>", "hello desc")
         self.assertEqual(body, '<h1>Coverage</h1><p class="view-desc">hello desc</p><p>x</p>')
 
-    def test_candidates_grouped_by_status(self):
+    def test_review_candidates_grouped_by_status(self):
+        # v128: Question Candidates merged into Review's first lane, body
+        # otherwise byte-identical to the old standalone view_candidates.
         self._populate()
-        _, body, _ = self._view("candidates")
+        _, body, _ = self._view("review")
         self.assertIn("candidate (2)", body)
         self.assertIn("needs_review (1)", body)
         self.assertIn("turning_point", body)
 
-    def test_candidates_show_quality_and_category(self):
+    def test_review_candidates_show_quality_and_category(self):
         self._populate()
-        _, body, _ = self._view("candidates")
+        _, body, _ = self._view("review")
         # c1: explicit target category (with name) and stored quality score.
         self.assertIn("F (The Problem)", body)
         self.assertIn("0.88", body)
@@ -315,9 +322,15 @@ class WikiViewsTests(unittest.TestCase):
         # so it is NOT unassigned.
         self.assertIn(">E<", body)
 
-    def test_entities_shows_only_ungraduated_candidates(self):
+    def test_review_entities_shows_only_ungraduated_candidates(self):
+        # v128: Entity Candidates merged into Review's third lane via
+        # _entities_section_html(), tables unchanged from the old standalone
+        # view_entities. Checked against the helper directly (rather than
+        # the full page) because the fixture's recommendation entity is
+        # also coincidentally named "Emma" — that's a Focus-ideas-lane
+        # inclusion, not an entities-lane one.
         self._populate()
-        _, body, _ = self._view("entities")
+        body = serve_wiki._entities_section_html()
         # Sarah is still a candidate — she should appear.
         self.assertIn("Sarah", body)
         # Emma (page_eligible) and Dad (maps_to_focus) already have wiki pages,
@@ -326,6 +339,104 @@ class WikiViewsTests(unittest.TestCase):
         self.assertNotIn("Dad", body)
         # The graduation column is gone now that only candidates are shown.
         self.assertNotIn("Graduates", body)
+        # And the lane renders unchanged inside the full Review page too.
+        _, full_body, _ = self._view("review")
+        self.assertIn(body, full_body)
+
+    def test_review_three_section_bars_render_with_counts(self):
+        self._populate()
+        _, body, _ = self._view("review")
+        self.assertEqual(body.count('class="fnd-focus"'), 3)
+        self.assertIn('<span class="focus-label">Question candidates</span>', body)
+        self.assertIn('<span class="focus-label">Focus ideas</span>', body)
+        self.assertIn('<span class="focus-label">Entity candidates</span>', body)
+        # Fixture: c1/c3 candidate + c2 needs_review = 3 actionable; one
+        # pending recommendation (Emma); one ungraduated entity (Sarah).
+        self.assertIn("<h1>Review</h1>", body)
+        self.assertIn("3 question candidates waiting", body)
+        self.assertIn("1 focus idea pending", body)
+        self.assertIn("1 entity candidate", body)
+
+    def test_review_shows_the_imported_auto_promote_threshold(self):
+        # The policy line must cite question_candidates.AUTO_PROMOTE_THRESHOLD
+        # itself, never a hardcoded restatement of its current value.
+        self._populate()
+        _, body, _ = self._view("review")
+        self.assertIn(str(serve_wiki.AUTO_PROMOTE_THRESHOLD), body)
+        self.assertIn("auto-promote at quality", body)
+
+    def test_review_policy_lines_present_per_lane(self):
+        self._populate()
+        _, body, _ = self._view("review")
+        self.assertIn("these are below the line or awaiting review", body)
+        self.assertIn("focuses are never created without you", body)
+        self.assertIn("lifehug/lifehug#79", body)
+        self.assertIn("fully automatic", body)
+        self.assertIn("no action needed", body)
+
+    def test_review_actionable_statuses_render_before_the_rest(self):
+        self._populate()
+        serve_wiki.QUESTION_CANDIDATES_FILE = self._write("cand-ordering.json", {"candidates": [
+            {"id": "x1", "text": "Old rejected one", "status": "rejected", "priority": 0.1},
+            {"id": "x2", "text": "Still open", "status": "candidate", "priority": 0.5},
+            {"id": "x3", "text": "Needs a look", "status": "needs_review", "priority": 0.6},
+            {"id": "x4", "text": "Long promoted", "status": "auto_promoted", "priority": 0.9},
+        ]})
+        _, body, _ = self._view("review")
+        self.assertLess(body.index("candidate (1)"), body.index("needs_review (1)"))
+        self.assertLess(body.index("needs_review (1)"), body.index("auto_promoted (1)"))
+        self.assertLess(body.index("auto_promoted (1)"), body.index("rejected (1)"))
+
+    def test_review_all_empty_state_still_renders_three_bars(self):
+        # The empty-state teaches the system's three growth channels rather
+        # than disappearing when nothing is waiting.
+        for name in ("QUESTION_CANDIDATES_FILE", "FOCUS_RECS_FILE",
+                     "NEIGHBORHOODS_FILE", "QUESTIONS_FILE", "ROTATION_FILE",
+                     "COVERAGE_FILE", "SOURCE_MANIFEST_FILE",
+                     "SOURCE_LINT_FINDINGS_FILE", "QUESTION_QUEUE_FILE"):
+            setattr(serve_wiki, name, self.tmp / "missing.json")
+        entity_roster.ENTITY_DIR = self.tmp / "no-rosters"
+        _, body, _ = self._view("review")
+        self.assertEqual(body.count('class="fnd-focus"'), 3)
+        self.assertIn("0 question candidates waiting", body)
+        self.assertIn("0 focus ideas pending", body)
+        self.assertIn("0 entity candidates", body)
+        self.assertIn("No candidates yet.", body)
+        self.assertIn("No pending recommendations.", body)
+
+    def test_review_actions_redirect_to_review(self):
+        redirect, flash, job = serve_wiki.act_candidate({"id": ["c1"], "op": ["bogus"]})
+        self.assertEqual(redirect, "/views/review")
+        self.assertIsNone(job)
+        redirect, flash, job = serve_wiki.act_focus_rec({"id": ["r1"], "op": ["bogus"]})
+        self.assertEqual(redirect, "/views/review")
+        self.assertIsNone(job)
+
+    def test_every_real_action_op_redirects_to_review(self):
+        # Review-gate follow-up (PR #80): pin the five real redirect tuples,
+        # not just the unknown-op branch — a future retarget must not
+        # silently strand post-action flashes on a dead page.
+        self._populate()
+        queued = []
+        original = serve_wiki._start_job
+        serve_wiki._start_job = lambda kind, payload: (queued.append((kind, payload)) or {"id": "j1"})
+        try:
+            for form in (
+                {"id": ["c1"], "op": ["promote"]},                      # missing-category branch
+                {"id": ["c1"], "op": ["promote"], "category": ["F"]},
+                {"id": ["c1"], "op": ["dismiss"]},
+                {"id": ["c1"], "op": ["defer"]},
+            ):
+                redirect, _flash, _job = serve_wiki.act_candidate(form)
+                self.assertEqual(redirect, "/views/review", form)
+            for form in (
+                {"id": ["r1"], "op": ["approve"]},
+                {"id": ["r1"], "op": ["dismiss"]},
+            ):
+                redirect, _flash, _job = serve_wiki.act_focus_rec(form)
+                self.assertEqual(redirect, "/views/review", form)
+        finally:
+            serve_wiki._start_job = original
 
     def test_queue_resolves_text_and_category_name(self):
         self._populate()
