@@ -1,6 +1,6 @@
 # Lifehug
 
-**Capture your life, deepen it with AI, and turn it into artifacts that matter.**
+**Capture your life, deepen it with AI, and turn it into pieces that matter.**
 
 Lifehug is a lifelong AI oral-history system organized around **the Loop**: the self-improving flow where daily answers become durable sources, sources become a private wiki and structured signals, signals become better questions, and better questions deepen the life story. The Studio turns that accumulated memory into things you can actually use: letters, posts, chapters, speeches, and — assembled over time — a memoir or founder story; finished pieces can feed back into the same Loop as source material.
 
