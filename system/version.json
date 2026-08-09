@@ -1,7 +1,7 @@
 {
-  "version": 142,
+  "version": 143,
   "released": "2026-08-09",
-  "changelog": "v142: local wiki viewer startup now avoids reverse-DNS lookup stalls on loopback binds, keeping the data-only vault viewer flow deterministic.",
+  "changelog": "v143: local wiki viewer now enforces a loopback-only owner boundary for bind targets and read routes, with no-store private response headers.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

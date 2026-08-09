@@ -7,10 +7,12 @@ import argparse
 import datetime
 import hashlib
 import html
+import ipaddress
 import json
 import logging
 import re
 import secrets
+import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -3020,6 +3022,47 @@ ACTIONS = {
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_BIND_LOOPBACK_LITERALS = frozenset({"127.0.0.1", "::1"})
+
+
+def _ip_address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(value)
+    except ValueError:
+        return None
+
+
+def _localhost_resolves_only_loopback() -> bool:
+    try:
+        infos = socket.getaddrinfo("localhost", None, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    addresses = {info[4][0].split("%", 1)[0] for info in infos if info[4]}
+    if not addresses:
+        return False
+    return all((ip := _ip_address(address)) is not None and ip.is_loopback
+               for address in addresses)
+
+
+def _validated_bind_host(host: str) -> str:
+    """Return a safe bind host or raise before the viewer socket is built."""
+    value = (host or "").strip()
+    if value in _BIND_LOOPBACK_LITERALS:
+        return value
+    if _ip_address(value) is not None:
+        raise ValueError("Lifehug viewer refuses non-owner bind hosts; use 127.0.0.1 or ::1")
+    if value.lower() == "localhost" and _localhost_resolves_only_loopback():
+        return "localhost"
+    raise ValueError("Lifehug viewer refuses non-owner bind hosts; use 127.0.0.1")
+
+
+def _loopback_peer(client_address) -> bool:
+    try:
+        host = str(client_address[0]).split("%", 1)[0]
+    except (IndexError, TypeError):
+        return False
+    ip = _ip_address(host)
+    return bool(ip and ip.is_loopback)
 
 
 def _loopback_authority(value: str, expected_port: int, *, origin: bool = False) -> bool:
@@ -3151,6 +3194,35 @@ def _with_description(body: str, desc: str) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def send_owner_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+
+    def send_simple_html(self, title: str, body: str, status: int = 200):
+        payload = (
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            f"<title>{html.escape(title)} · Lifehug</title></head>"
+            f"<body>{body}</body></html>"
+        ).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_owner_headers()
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def peer_allowed(self) -> bool:
+        return _loopback_peer(getattr(self, "client_address", ()))
+
+    def host_allowed(self) -> bool:
+        host = self.headers.get("Host", "")
+        port = int(self.server.server_address[1])
+        return _loopback_authority(host, port)
+
+    def reject_owner_boundary(self):
+        self.send_simple_html("Forbidden", "<h1>Forbidden</h1>", status=403)
+
     def send_html(self, title, body, status=200, active_rel=None, wide=False):
         flash = getattr(self, "_flash", None)
         if flash:
@@ -3162,6 +3234,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
+        self.send_owner_headers()
         self.end_headers()
         self.wfile.write(payload)
 
@@ -3170,6 +3243,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
+        self.send_owner_headers()
         self.end_headers()
         self.wfile.write(payload)
 
@@ -3185,6 +3259,9 @@ class Handler(BaseHTTPRequestHandler):
         return secrets.compare_digest(token or "", SESSION_TOKEN)
 
     def do_POST(self):
+        if not self.peer_allowed() or not self.host_allowed():
+            self.reject_owner_boundary()
+            return
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
@@ -3223,6 +3300,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if not self.peer_allowed() or not self.host_allowed():
+            self.reject_owner_boundary()
+            return
         parsed = urlparse(self.path)
         q = parse_qs(parsed.query)
         self._flash = (q.get("flash") or [None])[0]
@@ -3311,6 +3391,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(payload)))
+            self.send_owner_headers()
             self.end_headers()
             self.wfile.write(payload)
             return
@@ -3340,6 +3421,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
+            self.send_owner_headers()
             self.end_headers()
             self.wfile.write(payload)
             return
@@ -3393,16 +3475,28 @@ class LifehugHTTPServer(ThreadingHTTPServer):
         self.server_port = int(port)
 
 
+class LifehugIPv6HTTPServer(LifehugHTTPServer):
+    address_family = socket.AF_INET6
+
+
 def main():
     parser = argparse.ArgumentParser(description="Serve the owner-only Lifehug wiki")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host; keep 127.0.0.1 for owner-only local use")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    server = LifehugHTTPServer((args.host, args.port), Handler)
-    print(f"Lifehug wiki serving at http://{args.host}:{args.port}")
+    try:
+        host = _validated_bind_host(args.host)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    server_cls = LifehugIPv6HTTPServer if host == "::1" else LifehugHTTPServer
+    server = server_cls((host, args.port), Handler)
+    display_host = f"[{host}]" if ":" in host else host
+    print(f"Lifehug wiki serving at http://{display_host}:{args.port}")
     server.serve_forever()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
