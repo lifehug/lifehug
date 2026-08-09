@@ -2150,7 +2150,11 @@ def _readiness_chips(readiness: list[dict] | None) -> str:
 
 
 def _piece_html(a: dict) -> str:
-    """One piece card — the Artifacts view's per-piece rendering, unchanged.
+    """One piece card — the Artifacts view's per-piece rendering, plus actions.
+
+    The card body is carried over verbatim; NEW on this surface is the v101
+    write-action panel for the latest version (previously reachable only from
+    the /artifact-version/ page).
 
     Input is a piece dict from studio._scan_pieces (byte-identical fields to
     the scan this was extracted from). Badges (format, occasion, delivered,
@@ -2332,6 +2336,15 @@ def view_studio():
             "subject, and your first piece starts here."))
         return ("Studio", "".join(parts), True)
 
+    total_projects = sum(len(g.get("projects") or []) for g in groups)
+    total_pieces = sum(len(g.get("pieces") or []) for g in groups)
+    summary_bits = [f"{total_projects} project(s)", f"{total_pieces} piece(s) in <code>outputs/</code>"]
+    parts.append(f"<p>{' · '.join(summary_bits)}, grouped by Focus.</p>")
+    if not total_projects:
+        parts.append('<p class="muted">No projects yet — a Focus with a '
+                     'book-class deliverable becomes a project card with a '
+                     'chapter map.</p>')
+
     for group in groups:
         focus = group.get("focus")
         projects = group.get("projects") or []
@@ -2353,7 +2366,8 @@ def view_studio():
             if node:
                 head = f'<a href="/page/{quote(str(node))}">{head}</a>'
             counts = (f"{len(projects)} project(s) · {len(pieces)} piece(s) · "
-                      f"{focus.get('type', '?')} → {focus.get('deliverable', '-')}")
+                      f"{focus.get('type', '?')} → {focus.get('deliverable', '-')} "
+                      f"· categories {','.join(focus.get('categories', []))}")
             chips = _readiness_chips(group.get("readiness"))
         elif group.get("key") == "__thoughts__":
             head = "Thoughts"

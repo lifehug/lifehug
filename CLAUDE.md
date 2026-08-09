@@ -876,7 +876,8 @@ python3 system/lifehug.py book-offers [--send]         # pending READY nudges
   manuscript rollup: drafted/ready/total per book plus word count.
 - The owner's **Life Chapters** source (the annual `chapters-exercise`) is the
   book's narrative spine; chapter categories map onto it during drafting.
-- **Assemble** (v127) turns a READY project into a concrete piece: it
+- **Assemble** (v127) turns a project with at least one drafted
+  chapter into a concrete piece (undrafted chapters get placeholders): it
   stitches the latest drafted chapters into one `outputs/` piece with
   `format: book`, so the book gets its own version history like any other
   piece.

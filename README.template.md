@@ -77,7 +77,7 @@ No ratings, no friction. The answer itself is the feedback.
 The Studio is the product payoff — the reason the daily answers and wiki matter outside the system. Two kinds of work happen there:
 
 - **Pieces** — single versioned works: a Mother's Day letter, an anniversary note, an Instagram caption, a post, a chapter, a speech.
-- **Projects** — composite pieces built over time. Today that's the book: a Focus with a book-class deliverable whose chapters are its categories. A project is virtual while planning (readiness computed live — "3 of 4 letter slots covered for Mom") and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts into one.
+- **Projects** — composite pieces built over time. Today that's the book: a Focus with a book-class deliverable whose chapters are its categories. A project is virtual while planning — its chapter verdicts are computed live — and becomes a concrete, versioned piece once `book-assemble` stitches the latest chapter drafts into one. (Per-format slot readiness like "4 of 5 letter slots covered for Mom" is the same idea applied to single pieces.)
 
 The workflow creates a context pack from Dave's answers, wiki pages, prior pieces, and Focus material; drafts the piece; saves versioned drafts under `outputs/`; and can promote approved context/final versions back into immutable sources. A final piece is authoritative as Dave's authored expression at that moment. It is not treated as independent proof of every underlying event.
 
