@@ -25,6 +25,7 @@ Zero AI calls; read-only over live state.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sys
 from pathlib import Path
@@ -46,6 +47,54 @@ from lifehug_core import (  # noqa: E402
     read_json,
     slugify,
 )
+
+# ---------------------------------------------------------------------------
+# The vault roots this module reads — one authoritative list (issue #129).
+#
+# `timeline_data()` is also run *on behalf of another vault root* by callers
+# that own their own roots: wiki_compile's timeline export and a connector's
+# excavation. Each used to rebind this module's globals by hand, and v120's
+# vault-only refactor moved entity_rosters/ and connectors/ off hand-derived
+# STATE_DIR subpaths onto their own contract names — so every hand-written
+# rebind site silently kept HALF the call reading the process vault and half
+# reading the caller's. `vault_roots()` is the single definition; it REQUIRES
+# the complete set, so the next root added here fails loudly at every rebind
+# site instead of quietly splitting a run across two vaults.
+#
+# (PLACEMENTS_FILE is defined further down, next to the placement store; the
+# names are resolved out of module globals at rebind time.)
+VAULT_ROOT_NAMES = (
+    "CLASSIFICATIONS_DIR",
+    "CONNECTORS_STATE_DIR",
+    "ENTITY_ROSTERS_DIR",
+    "MANUAL_SOURCES_DIR",
+    "PLACEMENTS_FILE",
+    "STATE_DIR",
+    "WIKI_DIR",
+)
+
+
+@contextlib.contextmanager
+def vault_roots(**roots: Path):
+    """Run the enclosed timeline call against `roots` instead of this process's
+    vault, restoring the originals afterwards. Every name in
+    :data:`VAULT_ROOT_NAMES` must be supplied."""
+    unknown = sorted(set(roots) - set(VAULT_ROOT_NAMES))
+    if unknown:
+        raise ValueError(f"not a timeline vault root: {', '.join(unknown)}")
+    missing = sorted(set(VAULT_ROOT_NAMES) - set(roots))
+    if missing:
+        raise ValueError(
+            "timeline vault rebind must supply every root; missing: "
+            f"{', '.join(missing)}"
+        )
+    saved = {name: globals()[name] for name in VAULT_ROOT_NAMES}
+    globals().update(roots)
+    try:
+        yield
+    finally:
+        globals().update(saved)
+
 
 # Entity dirs that line up against the period spine (dir name -> type label).
 LINEUP_DIRS = {

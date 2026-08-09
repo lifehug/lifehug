@@ -1,7 +1,7 @@
 {
-  "version": 128,
+  "version": 129,
   "released": "2026-08-08",
-  "changelog": "v128: the Review view — Question Candidates, Focus Recommendations, and Entity Candidates were three faces of one thing: the system growing itself from your material, with a threshold gate and a chance for your eye. They are now one page (/views/review) with three collapsible lanes, each stating its autonomy policy on its bar: question candidates auto-promote past the quality bar (the rest wait for you, actionable statuses first), focus ideas are never created without you (a completion-gated threshold is designed in issue #79), and entity candidates graduate into wiki pages automatically — previewed, no action needed. All promote/approve/dismiss/defer actions unchanged; post-action flashes land back on Review. The three old URLs redirect permanently. The viewer is now 11 pages where this morning it was 16: Foundation is the material, Studio is where you work it, Review is what the system proposes, The Loop is how it's running.",
+  "changelog": "v129: the test suite is fully green again (810 passed, 0 failures) — 16 failures that crept in at v120/v123 are fixed at the root. One shared cause behind 14 of them: v120 gave entity_rosters/ and connectors/ their own vault-contract roots, and two call sites (wiki_compile's timeline export, connector excavation) kept rebinding only the old partial set — a run could silently read half of one vault and half of another. timeline.py now owns a single VAULT_ROOT_NAMES authority with a vault_roots() context manager that rejects partial rebinds, both call sites use it, and guard tests pin it (recurring-defect doctrine). Also: source-filenames-repair (v123) now takes the writer lease like the rest of the source-repair family — it renames sources and rewrites state indexes and was never classified as the mutator it is.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

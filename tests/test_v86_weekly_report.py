@@ -41,6 +41,7 @@ def load(name):
 
 
 wr = load("weekly_report")
+vault_paths = load("vault_paths")
 
 NOW = datetime.now(timezone.utc)
 SINCE = NOW - timedelta(hours=2)
@@ -182,8 +183,17 @@ class OrchestratorContractTests(unittest.TestCase):
         self.assertIn("${SUMMARY}", tail)
 
     def test_weekly_persists_report_and_calls_summary(self):
-        self.assertIn("state/reports", self.weekly)
+        # v120 (vault-only): the script no longer hardcodes `state/reports` —
+        # it asks the vault contract where the reports directory lives, so the
+        # contract is what pins the location and the script is checked against
+        # it rather than against a literal that can silently drift.
+        self.assertEqual(
+            vault_paths.VAULT_DATA_PATHS["reports"]["external_path"], "state/reports")
+        self.assertIn('vault_paths.py" data-path reports', self.weekly)
+        self.assertIn('REPORT_FILE="$REPORT_DIR/weekly-$(date +%F).md"', self.weekly)
+        self.assertIn('} > "$REPORT_FILE"', self.weekly)  # the full report is written
         self.assertIn("weekly-summary", self.weekly)
+        self.assertIn('--report-path "$REPORT_FILE"', self.weekly)
         self.assertIn("--doctor-file -", self.weekly)
 
     def test_monthly_no_raw_dump_in_notify(self):

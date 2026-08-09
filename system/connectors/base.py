@@ -263,18 +263,22 @@ class BaseConnector:
             import timeline as tl_mod  # noqa: PLC0415
         except Exception:  # noqa: BLE001
             return []
-        saved = (tl_mod.CLASSIFICATIONS_DIR, tl_mod.MANUAL_SOURCES_DIR,
-                 tl_mod.STATE_DIR, tl_mod.WIKI_DIR, tl_mod.PLACEMENTS_FILE)
-        tl_mod.CLASSIFICATIONS_DIR = self.repo_dir / "state" / "classifications"
-        tl_mod.MANUAL_SOURCES_DIR = self.repo_dir / "sources" / "manual"
-        tl_mod.STATE_DIR = self.repo_dir / "state"
-        tl_mod.WIKI_DIR = self.repo_dir / "wiki"
-        tl_mod.PLACEMENTS_FILE = self.repo_dir / "state" / "timeline_placements.json"
-        try:
+        # The excavation reads THIS connector's repo, not the process vault —
+        # every timeline root at once, through the timeline's own authority so
+        # a newly added root can never be missed here (v120 moved
+        # entity_rosters/ and connectors/ off STATE_DIR and this site kept
+        # reading the process vault for both).
+        state = self.repo_dir / "state"
+        with tl_mod.vault_roots(
+            CLASSIFICATIONS_DIR=state / "classifications",
+            CONNECTORS_STATE_DIR=state / "connectors",
+            ENTITY_ROSTERS_DIR=state / "entity_rosters",
+            MANUAL_SOURCES_DIR=self.repo_dir / "sources" / "manual",
+            PLACEMENTS_FILE=state / "timeline_placements.json",
+            STATE_DIR=state,
+            WIKI_DIR=self.repo_dir / "wiki",
+        ):
             data = tl_mod.timeline_data(evidence=evidence)
-        finally:
-            (tl_mod.CLASSIFICATIONS_DIR, tl_mod.MANUAL_SOURCES_DIR,
-             tl_mod.STATE_DIR, tl_mod.WIKI_DIR, tl_mod.PLACEMENTS_FILE) = saved
         corroboration = data.get("corroboration") or {}
         if not corroboration.get("available"):
             return []
