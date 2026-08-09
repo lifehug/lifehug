@@ -50,11 +50,19 @@ A code change is not done until its paper trail ships **in the same pass**:
    a push to `main` is not tagged within a few minutes, that is a
    CI-visible failure (the drift check in `framework-manifest`), not a
    silent one — see issue #84, where the manual equivalent of this step
-   lapsed for ten releases before anyone noticed. Full method:
+   lapsed for eleven releases before anyone noticed. Full method:
    `docs/BUILDING.md`.
 
 "Done" = code + tests + docs + issue state — never code alone. The owner should
 never have to ask whether the docs match the code.
+
+
+
+Then decide:
+
+1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
+2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
+3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `python3 system/lifehug.py process-answer` for answer saves.
 
 ### Machine-authorship attribution
 
@@ -82,12 +90,6 @@ path-guessing that used to be hand-rolled per call site) and
 question/id shapes, instead of every module guessing the alphabet).
 Per-instance regression tests stop regressions; only a centralized
 definition stops the next module from guessing wrong.
-
-Then decide:
-
-1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
-2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
-3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `python3 system/lifehug.py process-answer` for answer saves.
 
 ## Cross-Medium Parity (owner-set, 2026-08-05)
 

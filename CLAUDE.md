@@ -24,7 +24,7 @@ requirement live there, not here. Read it before any framework change,
 whatever model or tool you are. (This file teaches you to *operate* the
 system; AGENTS.md governs *changing* it. The two files reference each
 other so every model sees the same rules regardless of which one its
-harness auto-loads.) `docs/BUILDING.md` is the fuller delivery-method
+harness auto-loads.) [docs/BUILDING.md](https://github.com/lifehug/lifehug/blob/main/docs/BUILDING.md) is the fuller delivery-method
 document (contracts, CI, evidence, release discipline) if you land on this
 file looking for it.
 

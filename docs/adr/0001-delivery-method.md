@@ -7,12 +7,12 @@ Status: ratified (owner, 2026-08-09)
 
 This repo had no CI, no written delivery method, and no index of past
 architectural decisions before issue #85. Two concrete failures made the
-gap costly rather than theoretical: v120's regressions sat red for 8 days
+gap costly rather than theoretical: v120's regressions sat red for two days — and would have sat indefinitely
 because no machine ever ran the test suite on push — local stash-comparison
 kept misdiagnosing them, and nothing else was watching (fixed and pinned in
 v130/v131) — and `system/version.json`'s versions v118 through v128
 shipped without a matching git tag, silently breaking `update.py`'s
-tag-based delivery to every existing vault for ten releases before anyone
+tag-based delivery to every existing vault for eleven releases before anyone
 noticed (issue #84). Both were the same underlying shape: a manual step
 that only works if a human remembers to run it, and nothing watching for
 the case where they don't.
