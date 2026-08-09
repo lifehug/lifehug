@@ -42,6 +42,7 @@ from lifehug_core import (
 from entity_roster import ENTITY_TYPES, load_roster
 from question_candidates import AUTO_PROMOTE_THRESHOLD, check_quality, _infer_category
 from progress import verdict
+from recommend_focuses import focus_start_gate
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 
 VIEWER_LOG = logging.getLogger("lifehug.viewer")
@@ -1405,10 +1406,14 @@ def _recommendations_section_html() -> str:
             html.escape(str(r.get("evidence_strength", "—"))),
             str(r.get("mention_count", 0)),
             html.escape(",".join(r.get("cross_categories", []))),
+            # Issue #79: ready_to_start is computed once, at recommendation
+            # refresh time (recommend_focuses.recommend()) — this lane only
+            # renders the stored flag, never recomputes it.
+            (_badge("ready to start", "green") if r.get("ready_to_start") else "—"),
             html.escape(str(r.get("reason", ""))[:240]),
             rec_actions(r),
         ] for r in sorted(pending, key=lambda r: r.get("score", 0) or 0, reverse=True)]
-        parts.append(_table(["Entity", "Type", "Score", "Evidence", "Mentions", "Cats", "Reason", "Actions"], rows))
+        parts.append(_table(["Entity", "Type", "Score", "Evidence", "Mentions", "Cats", "Ready", "Reason", "Actions"], rows))
     else:
         parts.append(_empty("No pending recommendations."))
     if others:
@@ -1420,6 +1425,27 @@ def _recommendations_section_html() -> str:
         parts.append(_table(["Entity", "Reason"],
                             [[html.escape(str(r.get("entity", "?"))), html.escape(str(r.get("dismiss_reason", "")))] for r in dismissed]))
     return "".join(parts)
+
+
+def _focus_ideas_policy_line() -> str:
+    """Focus ideas lane policy line (issue #79, resolved) — reflects the
+    completion gate's actual state instead of a static 'planned threshold'
+    note. Owner approval is unchanged either way; the gate only decides
+    whether a strong pending idea may show as ready to start."""
+    gate = focus_start_gate()
+    if gate["open"]:
+        return (
+            "focuses are never created without you — approving one "
+            "redirects the weekly question budget; the completion gate is "
+            "open, so strong pending ideas can show as ready to start "
+            "(lifehug/lifehug#79, resolved)")
+    n = len(gate["blocking"])
+    labels = ", ".join(b["label"] for b in gate["blocking"])
+    return (
+        "focuses are never created without you — and starting new ones is "
+        f"gated while {n} open focus{'es' if n != 1 else ''} "
+        f"{'are' if n != 1 else 'is'} unfinished ({labels}) "
+        "(lifehug/lifehug#79, resolved)")
 
 
 def view_review():
@@ -1467,9 +1493,7 @@ def view_review():
         f'<details class="fnd-focus"{rec_open}><summary>'
         '<div class="focus-head"><span class="focus-label">Focus ideas</span> '
         f'{_badge(pending_recs)}</div>'
-        '<div class="focus-sub">focuses are never created without you — '
-        'approving one redirects the weekly question budget (see '
-        'lifehug/lifehug#79 for the planned threshold)</div>'
+        f'<div class="focus-sub">{_focus_ideas_policy_line()}</div>'
         '</summary><div class="fnd-cats">'
         + _recommendations_section_html()
         + '</div></details>')

@@ -1,7 +1,7 @@
 {
-  "version": 133,
+  "version": 134,
   "released": "2026-08-09",
-  "changelog": "v133: the tag-on-merge workflow can actually tag — annotated tags require a git identity and CI runners have none, so the release tagger now carries its own scoped ident. Found by the workflow's own first production run failing loudly (the drift check's whole job); v132 was hand-tagged with the exact message the workflow would have written.",
+  "changelog": "v134 (issue #79): focus recommendations gain a completion gate — starting a new Focus (auto-creation, or an elevated 'ready to start' flag) is gated closed while any ACTIVE, NON-PRIMARY focus hasn't reached READY or SATURATED (roadmap.focus_fill + progress.verdict, the existing authorities; the primary focus is exempt). recommend_focuses.focus_start_gate() is the one authority, called from both recommend() (to compute each pending rec's ready_to_start flag, floored at FOCUS_READY_SCORE_FLOOR=8.0, matching _evidence_strength's own 'moderate' cutoff) and serve_wiki's Review 'Focus ideas' lane (policy line now reflects the gate's real state and names the blocking focus(es); issue #79 cited as resolved, not 'planned'). Rot control: a pending recommendation stuck below the score floor for FOCUS_RECOMMENDATION_EXPIRY_WEEKS=6 auto-dismisses with dismiss_reason 'expired: below threshold for 6 weeks' at every recommendation refresh (save_recommendations, the monthly entry point) — expiry-dismissals are exempted from recommend()'s normal permanent-dismissal blocklist, so re-detection with fresh evidence can re-propose the same entity later. Owner approval for actual Focus creation is unchanged either way — nothing auto-creates.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -122,6 +122,7 @@
     "tests/test_v126_readiness.py",
     "tests/test_v127_studio.py",
     "tests/test_v130_migration.py",
+    "tests/test_v134_focus_gate.py",
     "tests/test_v14_features.py",
     "tests/test_v15_features.py",
     "tests/test_v16_focus_skill.py",

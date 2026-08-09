@@ -17,6 +17,7 @@ import argparse
 import re
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Allow running from repo root or system/
@@ -35,10 +36,13 @@ from lifehug_core import (
     answer_id_from_filename,
     now_utc,
     parse_categories,
+    parse_questions,
     read_json,
     slugify,
     write_json,
 )
+from progress import verdict  # noqa: E402
+from roadmap import focus_fill, load_roadmap, rebuild_roadmap  # noqa: E402
 
 FOCUS_RECOMMENDATION_TYPES = ("person", "place", "period", "theme")
 
@@ -47,6 +51,21 @@ OLD_FOCUS_TERM = "Spot" "light"
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+# Issue #79: the score floor that separates "wait and see" from "genuinely
+# strong candidate" — reused from _evidence_strength()'s own "moderate"
+# cutoff below, so this isn't a second, competing threshold. A recommendation
+# scoring at or above this is eligible for the ready_to_start flag (once the
+# completion gate is open) and is exempt from rot-control expiry; below it,
+# a recommendation is pending-but-quiet and eventually self-cleans.
+FOCUS_READY_SCORE_FLOOR = 8.0
+
+# Issue #79 rot control: a pending recommendation that has sat below
+# FOCUS_READY_SCORE_FLOOR for this many weeks auto-dismisses instead of
+# accumulating forever. Re-detection (fresh evidence bumping the score, or
+# just re-appearing) is not permanently blocked — see the dismissed_ids
+# filter in recommend(), which exempts expiry-dismissals from the blocklist.
+FOCUS_RECOMMENDATION_EXPIRY_WEEKS = 6
 
 RELATIONSHIP_WORDS = re.compile(
     r"\b(mom|dad|mother|father|brother|sister|friend|mentor|boss|wife|husband|"
@@ -140,6 +159,64 @@ STOPWORDS = {
     "US", "USA", "UK", "TV", "OK", "AM", "PM", "CEO", "CTO", "CFO", "ID", "DUI",
     "PhD", "USC", "UCLA", "NYC", "LA", "SF",
 }
+
+
+# ---------------------------------------------------------------------------
+# Completion gate (issue #79)
+# ---------------------------------------------------------------------------
+
+def focus_start_gate() -> dict:
+    """Starting a new Focus — auto-creation, or an elevated 'ready to start'
+    recommendation flag — spends the same weekly question budget the
+    author's *unfinished* focuses need. The owner's rule: no diverting to
+    something new while open focuses have meaningful unanswered material.
+
+    Open iff every ACTIVE (phase != "maintenance"), NON-PRIMARY focus has
+    reached READY or SATURATED. Uses roadmap.focus_fill for the saturation
+    math and progress.verdict for the readiness label — the existing
+    authorities; this function never re-derives a threshold of its own. The
+    primary focus (the author's own life story) is exempt — per the issue,
+    it is never "done".
+
+    Returns {open: bool, reason: str, blocking: [{focus_id, label,
+    saturation, verdict}]} — blocking lists exactly the focuses keeping the
+    gate closed, in roadmap order.
+    """
+    roadmap = load_roadmap()
+    if not roadmap.get("focuses"):
+        try:
+            roadmap = rebuild_roadmap(write=False)
+        except OSError:
+            roadmap = {"focuses": []}
+    questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
+
+    blocking: list[dict] = []
+    for focus in roadmap.get("focuses", []):
+        if focus.get("primary"):
+            continue
+        if focus.get("phase") == "maintenance":
+            continue
+        fill = focus_fill(focus, questions)
+        tag, _label = verdict(fill["saturation"])
+        if fill["saturated"]:
+            tag = "SATURATED"
+        if tag not in ("READY", "SATURATED"):
+            blocking.append({
+                "focus_id": focus.get("id"),
+                "label": focus.get("label", focus.get("id")),
+                "saturation": fill["saturation"],
+                "verdict": tag,
+            })
+
+    if blocking:
+        labels = ", ".join(b["label"] for b in blocking)
+        reason = f"{len(blocking)} open focus(es) unfinished: {labels}"
+        return {"open": False, "reason": reason, "blocking": blocking}
+
+    reason = ("all active non-primary focuses are READY or SATURATED"
+              if any(not f.get("primary") for f in roadmap.get("focuses", []))
+              else "no focuses besides the primary")
+    return {"open": True, "reason": reason, "blocking": []}
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +595,19 @@ def recommend(
     # Load existing state
     existing = load_recommendation_state()
     existing_recs = {r["id"]: r for r in existing.get("recommendations", [])}
-    dismissed_ids = {r["id"] for r in existing.get("dismissed", [])}
+    # Issue #79: entries dismissed by expiry (rot control) are NOT a
+    # permanent blocklist — re-detection with the same or fresh evidence may
+    # re-propose them. Only owner-issued dismissals (any other reason) stick.
+    dismissed_ids = {
+        r["id"] for r in existing.get("dismissed", [])
+        if not str(r.get("dismiss_reason", "")).startswith("expired:")
+    }
+
+    # Issue #79: computed once per refresh (the one authority) — a pending
+    # recommendation is ready_to_start only once the completion gate is open
+    # AND its score clears FOCUS_READY_SCORE_FLOOR. Never auto-creates a
+    # Focus; owner approval is unaffected.
+    gate = focus_start_gate()
 
     now = now_utc()
     new_recs: list[dict] = []
@@ -563,6 +652,9 @@ def recommend(
             "reason": _make_reason(entity, entity_type, s, score),
             "status": status,
             "created_at": existing_rec.get("created_at", now) if existing_rec else now,
+            "ready_to_start": bool(
+                status == "pending" and gate["open"] and score >= FOCUS_READY_SCORE_FLOOR
+            ),
         }
         new_recs.append(rec)
 
@@ -571,13 +663,55 @@ def recommend(
     return new_recs
 
 
+def _parse_recorded_at(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def apply_recommendation_expiry(recs: list[dict], now: str | None = None) -> tuple[list[dict], list[dict]]:
+    """Rot control (issue #79): a *pending* recommendation that has sat below
+    FOCUS_READY_SCORE_FLOOR for FOCUS_RECOMMENDATION_EXPIRY_WEEKS auto-
+    dismisses with a reason recommend()'s dismissed_ids filter recognizes
+    and exempts from the blocklist — re-detection can re-propose it later.
+    Recent low-score pending recs, and recs already at/above the floor, are
+    left untouched regardless of age. Returns (kept, newly_expired)."""
+    now_dt = _parse_recorded_at(now or now_utc()) or datetime.now(timezone.utc)
+    kept: list[dict] = []
+    expired: list[dict] = []
+    for r in recs:
+        if r.get("status") != "pending" or (r.get("score", 0) or 0) >= FOCUS_READY_SCORE_FLOOR:
+            kept.append(r)
+            continue
+        created = _parse_recorded_at(str(r.get("created_at", "")))
+        if created is None:
+            kept.append(r)
+            continue
+        age_weeks = (now_dt - created).days / 7
+        if age_weeks >= FOCUS_RECOMMENDATION_EXPIRY_WEEKS:
+            expired_rec = dict(r)
+            expired_rec["status"] = "expired"
+            expired_rec["dismissed_at"] = now_utc()
+            expired_rec["dismiss_reason"] = (
+                f"expired: below threshold for {FOCUS_RECOMMENDATION_EXPIRY_WEEKS} weeks"
+            )
+            expired.append(expired_rec)
+        else:
+            kept.append(r)
+    return kept, expired
+
+
 def save_recommendations(recs: list[dict]) -> None:
     existing = load_recommendation_state()
     dismissed = existing.get("dismissed", [])
+    kept, newly_expired = apply_recommendation_expiry(recs)
+    if newly_expired:
+        dismissed = dismissed + newly_expired
     write_json(FOCUS_RECS_FILE, {
         "version": 1,
         "generated_at": now_utc(),
-        "recommendations": recs,
+        "recommendations": kept,
         "dismissed": dismissed,
     })
 
@@ -687,7 +821,8 @@ def display_recommendations(recs: list[dict], filter_type: str | None = None) ->
             if len(r["evidence"]) > 3:
                 ev_short += f" (+{len(r['evidence'])-3} more)"
             status_tag = f" [{r['status'].upper()}]" if r["status"] != "pending" else ""
-            print(f"  {emoji} {r['entity']} ({r['type']}) — score: {r['score']}{status_tag}")
+            ready_tag = " ★ ready to start" if r.get("ready_to_start") else ""
+            print(f"  {emoji} {r['entity']} ({r['type']}) — score: {r['score']}{status_tag}{ready_tag}")
             print(f"     {r['unique_answers']} answers, {len(r['cross_categories'])} categories ({cats}), emotional weight: {r['emotional_weight']}")
             if ev_short:
                 print(f"     Evidence: {ev_short}")
