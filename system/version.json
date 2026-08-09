@@ -1,7 +1,7 @@
 {
-  "version": 136,
+  "version": 137,
   "released": "2026-08-09",
-  "changelog": "v136: viewer menu regrouped by owner intent — Do / Plan / Reflect / System (replaces Do / Reflect / Library / System). Do now holds only the true action surfaces (Review, Studio); the new Plan group pairs the Question Queue with Foundation so the asking supply and its weekly schedule sit side by side; Reflect is unchanged (Mirror, Timeline, Graph); Source Integrity and Privacy Preview move into System with The Loop and Reports, since they inspect the machinery rather than hold reading material. The Library group is retired — the actual library (the compiled wiki) already lives in the left sidebar. No routes change; every /views/<slug> URL is untouched.",
+  "changelog": "v137: the tagline speaks the product's own language — 'pieces that matter' (owner rename, 2026-08-09), completing the Projects & Pieces vocabulary from v127. Docs-only release.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
