@@ -24,7 +24,9 @@ requirement live there, not here. Read it before any framework change,
 whatever model or tool you are. (This file teaches you to *operate* the
 system; AGENTS.md governs *changing* it. The two files reference each
 other so every model sees the same rules regardless of which one its
-harness auto-loads.)
+harness auto-loads.) `docs/BUILDING.md` is the fuller delivery-method
+document (contracts, CI, evidence, release discipline) if you land on this
+file looking for it.
 
 The central product concept is **the Loop**: the continuous-learning path where source capture, wiki compile, source integrity, classification, quality scoring, candidate promotion, planning, daily questioning, and artifact feedback compound over time. When auditing or designing, say whether a feature is **In the Loop**, **Loop-adjacent**, or **Out of the Loop**. A mission-critical feature is not done if it only exists in a script but is not reached by the daily, weekly, monthly, or artifact flows.
 
