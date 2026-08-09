@@ -1002,6 +1002,18 @@ class HomeHubTests(WikiViewsTests):
         roadmap.ROADMAP_FILE = self.tmp / "missing.json"
         lifehug_core.REPO_DIR = self.tmp / "no-repo"
 
+    def test_view_groups_are_do_plan_reflect_system(self):
+        # v136 owner decision: group by what the owner is doing — Do (act),
+        # Plan (the asking supply + schedule), Reflect (the life itself),
+        # System (machinery health/inspection). The queue is a plan, not a
+        # Do; sources/privacy inspect the machine, not the material.
+        self.assertEqual(serve_wiki.VIEW_GROUPS, [
+            ("Do", ["review", "studio"]),
+            ("Plan", ["queue", "foundation"]),
+            ("Reflect", ["mirror", "timeline", "graph"]),
+            ("System", ["status", "reports", "sources", "privacy"]),
+        ])
+
     def test_view_groups_cover_every_view(self):
         grouped = {s for _, slugs in serve_wiki.VIEW_GROUPS for s in slugs}
         registered = {slug for slug, _, _ in serve_wiki.VIEWS}

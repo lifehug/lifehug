@@ -296,21 +296,25 @@ def linkify(text: str, index: dict[str, str] | None = None) -> str:
     return text
 
 
-# Hamburger menu groups: what you can DO, what helps you REFLECT, the LIBRARY
-# of material, and the SYSTEM's internals. A view registered in VIEWS but not
-# claimed by any group falls into System automatically, so adding a view is
-# still one registry entry.
+# Hamburger menu groups, split by what the owner is doing when they open the
+# menu (v136): DO — surfaces that wait on their action (decide on proposals,
+# make pieces); PLAN — the asking supply and its weekly schedule; REFLECT —
+# the compiled life itself; SYSTEM — machinery health and inspection. The
+# queue is a plan you read (the daily cron consumes it), not a Do; source
+# integrity and the privacy preview inspect the machine, not the material.
+# A view registered in VIEWS but not claimed by any group falls into System
+# automatically, so adding a view is still one registry entry.
 VIEW_GROUPS = [
-    ("Do", ["queue", "review", "studio"]),
+    ("Do", ["review", "studio"]),
+    ("Plan", ["queue", "foundation"]),
     ("Reflect", ["mirror", "timeline", "graph"]),
-    ("Library", ["foundation", "sources", "privacy"]),
-    ("System", ["status", "reports"]),
+    ("System", ["status", "reports", "sources", "privacy"]),
 ]
 
 
 def menu_html() -> str:
     """The hamburger dropdown: registered views grouped by VIEW_GROUPS
-    (Do / Reflect / Library / System). Adding a view to VIEWS automatically
+    (Do / Plan / Reflect / System). Adding a view to VIEWS automatically
     adds it here (under its group, or System if unclaimed) and at
     /views/<slug>."""
     labels = {slug: label for slug, label, _ in VIEWS}
