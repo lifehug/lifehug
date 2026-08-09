@@ -10,6 +10,7 @@ question candidates. No evidence file → the timeline renders exactly as
 before.
 """
 
+import contextlib
 import importlib.util
 import json
 import sys
@@ -43,6 +44,46 @@ def load(name):
 core = load("lifehug_core")
 tl = load("timeline")
 tcorr = load("timeline_corroboration")
+
+
+def timeline_roots(root: Path) -> dict[str, Path]:
+    """Every vault root timeline.py reads, pointed at a fixture `root`. Keyed
+    by timeline.VAULT_ROOT_NAMES so a root added there fails here loudly
+    instead of silently reading the real vault."""
+    state = root / "state"
+    roots = {
+        "CLASSIFICATIONS_DIR": state / "classifications",
+        "CONNECTORS_STATE_DIR": state / "connectors",
+        "ENTITY_ROSTERS_DIR": state / "entity_rosters",
+        "MANUAL_SOURCES_DIR": root / "sources" / "manual",
+        "PLACEMENTS_FILE": state / "timeline_placements.json",
+        "STATE_DIR": state,
+        "WIKI_DIR": root / "wiki",
+    }
+    assert set(roots) == set(tl.VAULT_ROOT_NAMES), sorted(
+        set(roots).symmetric_difference(tl.VAULT_ROOT_NAMES))
+    return roots
+
+
+# wiki_compile forwards its OWN roots into the timeline for the export, under
+# lifehug_core's names (the placements file is TIMELINE_PLACEMENTS_FILE there).
+_WIKI_COMPILE_NAMES = {"PLACEMENTS_FILE": "TIMELINE_PLACEMENTS_FILE"}
+
+
+@contextlib.contextmanager
+def wiki_compile_vault(wc, root: Path):
+    """Point a loaded wiki_compile at `root` — all of it, so compile_timeline's
+    export reads the fixture rather than half of the real vault."""
+    bindings = {_WIKI_COMPILE_NAMES.get(name, name): value
+                for name, value in timeline_roots(root).items()}
+    saved = {name: getattr(wc, name) for name in bindings}
+    for name, value in bindings.items():
+        setattr(wc, name, value)
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            setattr(wc, name, value)
 
 PERIOD_PAGE = """---
 title: "{title}"
@@ -105,17 +146,18 @@ class CorroborationFixture(unittest.TestCase):
         }), encoding="utf-8")
         self.write_evidence(ASU_RECORDS + [CHASE_RECORD])
 
-        self._orig = (tl.WIKI_DIR, tl.MANUAL_SOURCES_DIR, tl.CLASSIFICATIONS_DIR,
-                      tl.STATE_DIR, tl.PLACEMENTS_FILE)
-        tl.WIKI_DIR = root / "wiki"
-        tl.MANUAL_SOURCES_DIR = root / "sources" / "manual"
-        tl.CLASSIFICATIONS_DIR = root / "state" / "classifications"
-        tl.STATE_DIR = root / "state"
-        tl.PLACEMENTS_FILE = root / "state" / "timeline_placements.json"
+        # v120 gave the roster and connector-evidence directories their own
+        # contract names — timeline.py no longer derives them from STATE_DIR,
+        # so the fixture binds every root the module actually reads
+        # (timeline.VAULT_ROOT_NAMES is the authority).
+        self._orig = {name: getattr(tl, name) for name in tl.VAULT_ROOT_NAMES}
+        self.timeline_roots = timeline_roots(root)
+        for name, value in self.timeline_roots.items():
+            setattr(tl, name, value)
 
     def tearDown(self):
-        (tl.WIKI_DIR, tl.MANUAL_SOURCES_DIR, tl.CLASSIFICATIONS_DIR,
-         tl.STATE_DIR, tl.PLACEMENTS_FILE) = self._orig
+        for name, value in self._orig.items():
+            setattr(tl, name, value)
         self.tmp.cleanup()
 
     def write_roster(self, approximate_dates="2010–2013", aliases=None):
@@ -272,14 +314,9 @@ class RenderTests(CorroborationFixture):
 
     def test_export_carries_the_same_badges(self):
         wc = load("wiki_compile")
-        orig = (wc.STATE_DIR, wc.WIKI_DIR)
-        wc.STATE_DIR = self.root / "state"
-        wc.WIKI_DIR = self.root / "wiki"
         sys.modules["timeline"] = tl
-        try:
+        with wiki_compile_vault(wc, self.root):
             self.assertTrue(wc.compile_timeline())
-        finally:
-            wc.STATE_DIR, wc.WIKI_DIR = orig
         text = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
         self.assertIn("## College — ✉ asu ×4 · 2010–2013", text)
         self.assertIn("Moved into the ASU dorms", text)
@@ -313,17 +350,12 @@ class NoEvidenceNoopTests(CorroborationFixture):
         self.assertEqual(body_without, body_unmatched)
 
         wc = load("wiki_compile")
-        orig = (wc.STATE_DIR, wc.WIKI_DIR)
-        wc.STATE_DIR = self.root / "state"
-        wc.WIKI_DIR = self.root / "wiki"
-        try:
+        with wiki_compile_vault(wc, self.root):
             wc.compile_timeline()
             export_unmatched = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
             self.remove_evidence()
             wc.compile_timeline()
             export_without = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
-        finally:
-            wc.STATE_DIR, wc.WIKI_DIR = orig
         self.assertEqual(export_without, export_unmatched)
         self.assertNotIn("✉", export_without)
 
@@ -366,6 +398,38 @@ class AggregationCapTests(CorroborationFixture):
         self.assertEqual([e["entity"] for e in badge["entities"]],
                          ["asu", "mit", "chase", "delta"])  # count desc, name asc
         self.assertIn("+ 1 more", tcorr.badge_text(badge))
+
+
+class VaultRootRebindTests(unittest.TestCase):
+    """The rebind seam every off-process-vault caller goes through
+    (wiki_compile's export, a connector's excavation). A PARTIAL rebind is the
+    v120 regression that split one timeline run across two vaults — the
+    contract is all-or-nothing, enforced here so a newly added root can't be
+    quietly forgotten at a call site."""
+
+    def test_partial_rebind_is_rejected(self):
+        with self.assertRaises(ValueError) as caught:
+            with tl.vault_roots(WIKI_DIR=Path("/nowhere/wiki")):
+                pass
+        message = str(caught.exception)
+        self.assertIn("missing", message)
+        self.assertIn("CONNECTORS_STATE_DIR", message)
+        self.assertIn("ENTITY_ROSTERS_DIR", message)
+
+    def test_unknown_root_is_rejected(self):
+        roots = dict(timeline_roots(Path("/nowhere")), OUTPUTS_DIR=Path("/nowhere/outputs"))
+        with self.assertRaises(ValueError) as caught:
+            with tl.vault_roots(**roots):
+                pass
+        self.assertIn("OUTPUTS_DIR", str(caught.exception))
+
+    def test_complete_rebind_restores_every_root(self):
+        before = {name: getattr(tl, name) for name in tl.VAULT_ROOT_NAMES}
+        swapped = timeline_roots(Path("/nowhere"))
+        with tl.vault_roots(**swapped):
+            for name, value in swapped.items():
+                self.assertEqual(getattr(tl, name), value)
+        self.assertEqual({name: getattr(tl, name) for name in tl.VAULT_ROOT_NAMES}, before)
 
 
 class PureFunctionTests(unittest.TestCase):

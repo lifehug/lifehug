@@ -27,6 +27,9 @@ from pathlib import Path
 from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
+    CONNECTORS_STATE_DIR,
+    ENTITY_ROSTERS_DIR,
+    MANUAL_SOURCES_DIR,
     QUESTIONS_FILE,
     REPO_DIR,
     SOURCES_DIR,
@@ -1221,18 +1224,19 @@ def compile_timeline(dry_run: bool = False) -> bool:
     import timeline as tl_mod  # noqa: PLC0415
     import timeline_corroboration as tcorr  # noqa: PLC0415
 
-    # Honor this module's (possibly monkeypatched) roots for the call.
-    saved = (tl_mod.CLASSIFICATIONS_DIR, tl_mod.STATE_DIR, tl_mod.WIKI_DIR,
-             tl_mod.PLACEMENTS_FILE)
-    tl_mod.CLASSIFICATIONS_DIR = CLASSIFICATIONS_DIR
-    tl_mod.STATE_DIR = STATE_DIR
-    tl_mod.WIKI_DIR = WIKI_DIR
-    tl_mod.PLACEMENTS_FILE = TIMELINE_PLACEMENTS_FILE
-    try:
+    # The export reads THIS module's vault roots — all of them, through the
+    # timeline's own authority, so a root added there can never be forgotten
+    # here (see timeline.VAULT_ROOT_NAMES).
+    with tl_mod.vault_roots(
+        CLASSIFICATIONS_DIR=CLASSIFICATIONS_DIR,
+        CONNECTORS_STATE_DIR=CONNECTORS_STATE_DIR,
+        ENTITY_ROSTERS_DIR=ENTITY_ROSTERS_DIR,
+        MANUAL_SOURCES_DIR=MANUAL_SOURCES_DIR,
+        PLACEMENTS_FILE=TIMELINE_PLACEMENTS_FILE,
+        STATE_DIR=STATE_DIR,
+        WIKI_DIR=WIKI_DIR,
+    ):
         data = tl_mod.timeline_data()
-    finally:
-        (tl_mod.CLASSIFICATIONS_DIR, tl_mod.STATE_DIR, tl_mod.WIKI_DIR,
-         tl_mod.PLACEMENTS_FILE) = saved
 
     total = data["counts"]["events_placed"] + data["counts"]["events_unplaced"]
     if not total:

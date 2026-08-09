@@ -1,6 +1,7 @@
 """v70 (question craft) + v71 (time & self): why→what lint, deferral,
 rumination detector, period arc, perennials, wiki harvest, timeline."""
 
+import contextlib
 import importlib.util
 import json
 import sys
@@ -222,16 +223,49 @@ class WikiHarvestTests(unittest.TestCase):
             (root / "wiki" / "people" / "dad.md").write_text(self.PAGE, encoding="utf-8")
             bank = root / "bank.md"
             bank.write_text("## A: Origins\n- [ ] A1: What's your earliest memory?\n", encoding="utf-8")
-            live_core = sys.modules["lifehug_core"]  # call-time import target
-            orig = (live_core.REPO_DIR, qc.QUESTIONS_FILE)
-            live_core.REPO_DIR = root
+            # v120: the harvester binds wiki/ and the candidate store at import
+            # from the vault contract instead of re-deriving them from
+            # lifehug_core.REPO_DIR inside the call, so the fixture binds the
+            # module's own names (REPO_DIR still relativizes the page ref).
+            names = ("REPO_DIR", "WIKI_DIR", "QUESTIONS_FILE", "QUESTION_CANDIDATES_FILE")
+            orig = {name: getattr(qc, name) for name in names}
+            qc.REPO_DIR = root
+            qc.WIKI_DIR = root / "wiki"
             qc.QUESTIONS_FILE = bank
+            qc.QUESTION_CANDIDATES_FILE = root / "state" / "question_candidates.json"
             try:
                 harvested = qc.harvest_wiki_questions(dry_run=True)
             finally:
-                live_core.REPO_DIR, qc.QUESTIONS_FILE = orig
+                for name, value in orig.items():
+                    setattr(qc, name, value)
             self.assertEqual(len(harvested), 1)
             self.assertTrue(harvested[0].startswith("cand-wiki-dad-"))
+
+
+@contextlib.contextmanager
+def wiki_compile_vault(wc, root: Path):
+    """Point a loaded wiki_compile at a fixture vault. compile_timeline forwards
+    THIS module's roots into the timeline, and v120 gave the roster and
+    connector-evidence directories their own contract names — binding only
+    STATE_DIR leaves the export reading half the real vault."""
+    state = root / "state"
+    bindings = {
+        "CLASSIFICATIONS_DIR": state / "classifications",
+        "CONNECTORS_STATE_DIR": state / "connectors",
+        "ENTITY_ROSTERS_DIR": state / "entity_rosters",
+        "MANUAL_SOURCES_DIR": root / "sources" / "manual",
+        "TIMELINE_PLACEMENTS_FILE": state / "timeline_placements.json",
+        "STATE_DIR": state,
+        "WIKI_DIR": root / "wiki",
+    }
+    saved = {name: getattr(wc, name) for name in bindings}
+    for name, value in bindings.items():
+        setattr(wc, name, value)
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            setattr(wc, name, value)
 
 
 class TimelineTests(unittest.TestCase):
@@ -249,13 +283,8 @@ class TimelineTests(unittest.TestCase):
             }), encoding="utf-8")
             wiki = root / "wiki"
             wiki.mkdir()
-            orig = (wc.STATE_DIR, wc.WIKI_DIR)
-            wc.STATE_DIR = root / "state"
-            wc.WIKI_DIR = wiki
-            try:
+            with wiki_compile_vault(wc, root):
                 self.assertTrue(wc.compile_timeline())
-            finally:
-                wc.STATE_DIR, wc.WIKI_DIR = orig
             text = (wiki / "timeline.md").read_text(encoding="utf-8")
             self.assertIn("Moved the young family to Seattle", text)
             self.assertIn("when James had just been born", text)
@@ -266,12 +295,8 @@ class TimelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "state").mkdir()
-            orig = wc.STATE_DIR
-            wc.STATE_DIR = root / "state"
-            try:
+            with wiki_compile_vault(wc, root):
                 self.assertFalse(wc.compile_timeline())
-            finally:
-                wc.STATE_DIR = orig
 
 
 class ClassifierSchemaTests(unittest.TestCase):

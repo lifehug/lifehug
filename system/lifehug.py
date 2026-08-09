@@ -78,6 +78,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     "planner-clear", "planner-objective-add", "planner-objective-clear", "planner-queue",
     "planner-state", "quality-update", "rebuild", "recommend-focuses", "reflect-source",
     "research-expand", "retract-source", "roadmap-rebuild", "second-voice-ack",
+    # v123: renames correction/retraction sources on disk AND rewrites every
+    # state index that points at them — a vault mutator, so it takes the
+    # writer lock like the rest of the source-repair family.
+    "source-filenames-repair",
     "source-lint", "source-manifest", "timeline-place", "timeline-retire",
     "timeline-unplace", "unretract",
 })
