@@ -9,7 +9,6 @@ import socket
 import stat
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -20,7 +19,9 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import root_parent_tmp  # noqa: E402
 import jobs  # noqa: E402
 import lifehug  # noqa: E402
 import vault_paths  # noqa: E402
@@ -115,7 +116,7 @@ def make_minimum_vault(root: Path, *, embedded: bool = False) -> None:
 class DurableJobsTests(unittest.TestCase):
     def setUp(self):
         vault_paths._reset_process_binding_for_tests()
-        self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-jobs-test-", dir=ROOT.parent))
+        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-jobs-test-")
         self.vault = self.tmp / "vault-only"
         make_minimum_vault(self.vault)
         self.framework = self.tmp / "framework" / "system"

@@ -1,7 +1,7 @@
 {
-  "version": 137,
+  "version": 138,
   "released": "2026-08-09",
-  "changelog": "v137: the tagline speaks the product's own language — 'pieces that matter' (owner rename, 2026-08-09), completing the Projects & Pieces vocabulary from v127. Docs-only release.",
+  "changelog": "v138: test fixtures that need macOS-safe workspace-parent temp dirs now use one cleanup-registering helper, with a guard test that blocks future direct ROOT.parent mkdtemp leaks.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -108,6 +108,7 @@
     "tests/test_pass_transition.py",
     "tests/test_people_roster.py",
     "tests/test_source_integrity.py",
+    "tests/test_tempdir_cleanup.py",
     "tests/test_update.py",
     "tests/test_v101_actions.py",
     "tests/test_v102_timeline_curation.py",
@@ -143,6 +144,7 @@
     "tests/test_v97_theme_roster.py",
     "tests/test_wiki_compile.py",
     "tests/test_wiki_views.py",
+    "tests/tempdirs.py",
     "tests/v119_job_pill_evidence.py",
     "tests/walkthrough_lib.py",
     "wiki/SCHEMA.md"

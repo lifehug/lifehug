@@ -14,14 +14,15 @@ from __future__ import annotations
 
 import json
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import root_parent_tmp  # noqa: E402
 import book  # noqa: E402
 import compose  # noqa: E402
 import format_frameworks  # noqa: E402
@@ -139,7 +140,7 @@ class FrameworkLoaderUnitTests(unittest.TestCase):
     """Against a synthetic templates/ directory."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(dir=ROOT.parent))
+        self.tmp = root_parent_tmp(self, ROOT)
         self.templates_dir = self.tmp / "templates"
         self.templates_dir.mkdir(parents=True)
         self._saved = {
