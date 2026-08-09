@@ -208,7 +208,7 @@ def main() -> int:
             env=env,
         )
         try:
-            _wait_for_server(f"{base_url}/views/candidates", server)
+            _wait_for_server(f"{base_url}/views/review", server)
             deadline = time.monotonic() + 5
             while not (vault / "state" / "jobs" / ".writer-owner.json").exists():
                 if time.monotonic() >= deadline:
@@ -222,9 +222,13 @@ def main() -> int:
                     record_video_size={"width": 1440, "height": 900},
                 )
                 page = context.new_page()
-                page.goto(f"{base_url}/views/candidates", wait_until="networkidle")
+                page.goto(f"{base_url}/views/review", wait_until="networkidle")
+                # v128: the candidates lane is a <details>; it opens
+                # automatically when actionable, but force it so the
+                # Defer button is visible regardless of fixture state.
+                page.evaluate("document.querySelectorAll('details.fnd-focus').forEach(d => d.open = true)")
                 page.get_by_role("button", name="Defer").click()
-                page.wait_for_url("**/views/candidates?**")
+                page.wait_for_url("**/views/review?**")
                 query = parse_qs(urlparse(page.url).query)
                 job_id = (query.get("job") or [""])[0]
                 record = jobs.load_job(job_id)

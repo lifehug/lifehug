@@ -767,7 +767,7 @@ def _candidates_section_html() -> str:
     parts = []
     for status in actionable_order + rest_order:
         group = by_status[status]
-        parts.append(_h2(f"{status} ({len(group)})"))
+        parts.append(f"<h3>{html.escape(status)} ({len(group)})</h3>")
         rows = []
         for c in group:
             stored = (c.get("quality") or {}).get("score")
@@ -835,7 +835,7 @@ def _entities_section_html() -> str:
             e for e in load_roster(etype).get("entities", [])
             if not e.get("page_eligible") and not e.get("maps_to_focus")
         ]
-        parts.append(_h2(f"{etype.title()} ({len(ents)})"))
+        parts.append(f"<h3>{html.escape(etype.title())} ({len(ents)})</h3>")
         if not ents:
             parts.append(_empty("No candidates — none pending graduation."))
             continue
@@ -1384,7 +1384,7 @@ def _recommendations_section_html() -> str:
     dismissed = data.get("dismissed", [])
     pending = [r for r in recs if r.get("status") == "pending"]
     others = [r for r in recs if r.get("status") != "pending"]
-    parts = [_h2(f"Pending ({len(pending)})")]
+    parts = [f"<h3>Pending ({len(pending)})</h3>"]
     if pending:
         def rec_actions(r: dict) -> str:
             rid = html.escape(str(r.get("id", "")))
@@ -1412,11 +1412,11 @@ def _recommendations_section_html() -> str:
     else:
         parts.append(_empty("No pending recommendations."))
     if others:
-        parts.append(_h2(f"Acted on ({len(others)})"))
+        parts.append(f"<h3>Acted on ({len(others)})</h3>")
         parts.append(_table(["Entity", "Status"],
                             [[html.escape(str(r.get("entity", "?"))), html.escape(str(r.get("status", "?")))] for r in others]))
     if dismissed:
-        parts.append(_h2(f"Dismissed ({len(dismissed)})"))
+        parts.append(f"<h3>Dismissed ({len(dismissed)})</h3>")
         parts.append(_table(["Entity", "Reason"],
                             [[html.escape(str(r.get("entity", "?"))), html.escape(str(r.get("dismiss_reason", "")))] for r in dismissed]))
     return "".join(parts)
@@ -1441,13 +1441,19 @@ def view_review():
 
     parts = [
         "<h1>Review</h1>",
-        f"<p>{open_cands} question candidates waiting · "
-        f"{pending_recs} focus ideas pending · "
-        f"{entity_total} entities pending graduation</p>",
+        f"<p>{open_cands} question candidate{'s' if open_cands != 1 else ''} waiting · "
+        f"{pending_recs} focus idea{'s' if pending_recs != 1 else ''} pending · "
+        f"{entity_total} entity candidate{'s' if entity_total != 1 else ''}</p>",
     ]
 
+    # Lanes with something actionable start open: Review exists to be acted
+    # on, and the hub card's CTA should land on the work, not on three
+    # closed bars. The FYI entity lane always starts collapsed.
+    cand_open = " open" if open_cands else ""
+    rec_open = " open" if pending_recs else ""
+
     parts.append(
-        '<details class="fnd-focus"><summary>'
+        f'<details class="fnd-focus"{cand_open}><summary>'
         '<div class="focus-head"><span class="focus-label">Question candidates</span> '
         f'{_badge(open_cands)}</div>'
         '<div class="focus-sub">auto-promote at quality ≥ '
@@ -1458,7 +1464,7 @@ def view_review():
         + '</div></details>')
 
     parts.append(
-        '<details class="fnd-focus"><summary>'
+        f'<details class="fnd-focus"{rec_open}><summary>'
         '<div class="focus-head"><span class="focus-label">Focus ideas</span> '
         f'{_badge(pending_recs)}</div>'
         '<div class="focus-sub">focuses are never created without you — '

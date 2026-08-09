@@ -354,8 +354,8 @@ class WikiViewsTests(unittest.TestCase):
         # pending recommendation (Emma); one ungraduated entity (Sarah).
         self.assertIn("<h1>Review</h1>", body)
         self.assertIn("3 question candidates waiting", body)
-        self.assertIn("1 focus ideas pending", body)
-        self.assertIn("1 entities pending graduation", body)
+        self.assertIn("1 focus idea pending", body)
+        self.assertIn("1 entity candidate", body)
 
     def test_review_shows_the_imported_auto_promote_threshold(self):
         # The policy line must cite question_candidates.AUTO_PROMOTE_THRESHOLD
@@ -400,7 +400,7 @@ class WikiViewsTests(unittest.TestCase):
         self.assertEqual(body.count('class="fnd-focus"'), 3)
         self.assertIn("0 question candidates waiting", body)
         self.assertIn("0 focus ideas pending", body)
-        self.assertIn("0 entities pending graduation", body)
+        self.assertIn("0 entity candidates", body)
         self.assertIn("No candidates yet.", body)
         self.assertIn("No pending recommendations.", body)
 
@@ -411,6 +411,32 @@ class WikiViewsTests(unittest.TestCase):
         redirect, flash, job = serve_wiki.act_focus_rec({"id": ["r1"], "op": ["bogus"]})
         self.assertEqual(redirect, "/views/review")
         self.assertIsNone(job)
+
+    def test_every_real_action_op_redirects_to_review(self):
+        # Review-gate follow-up (PR #80): pin the five real redirect tuples,
+        # not just the unknown-op branch — a future retarget must not
+        # silently strand post-action flashes on a dead page.
+        self._populate()
+        queued = []
+        original = serve_wiki._start_job
+        serve_wiki._start_job = lambda kind, payload: (queued.append((kind, payload)) or {"id": "j1"})
+        try:
+            for form in (
+                {"id": ["c1"], "op": ["promote"]},                      # missing-category branch
+                {"id": ["c1"], "op": ["promote"], "category": ["F"]},
+                {"id": ["c1"], "op": ["dismiss"]},
+                {"id": ["c1"], "op": ["defer"]},
+            ):
+                redirect, _flash, _job = serve_wiki.act_candidate(form)
+                self.assertEqual(redirect, "/views/review", form)
+            for form in (
+                {"id": ["r1"], "op": ["approve"]},
+                {"id": ["r1"], "op": ["dismiss"]},
+            ):
+                redirect, _flash, _job = serve_wiki.act_focus_rec(form)
+                self.assertEqual(redirect, "/views/review", form)
+        finally:
+            serve_wiki._start_job = original
 
     def test_queue_resolves_text_and_category_name(self):
         self._populate()
