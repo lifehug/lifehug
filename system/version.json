@@ -1,7 +1,7 @@
 {
-  "version": 139,
+  "version": 140,
   "released": "2026-08-09",
-  "changelog": "v139: embedded hosts can set LIFEHUG_JOBS_NO_KICK=1 so queued-and-waited mutations drain under the foreground process instead of spawning a detached fallback worker.",
+  "changelog": "v140: local Telegram answer filing now best-effort sends the shared warm acknowledgment before any adaptive follow-up, matching hosted delivery order.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
