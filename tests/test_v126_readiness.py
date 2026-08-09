@@ -352,6 +352,28 @@ class RealLetterFrameworkTests(unittest.TestCase):
         self.assertEqual(result["filled_slots"], 5)
         self.assertEqual(result["verdict"], "READY")
 
+    def test_overlay_disabled_for_non_relational_frameworks(self):
+        """The overlay must not steal questions from chapter/essay slots.
+
+        "Describe a moment with your mom that was a turning point" matches
+        both the overlay's shared_history phrases AND the planner's
+        turning_point keywords. Chapter declares no relational slot
+        functions, so the overlay must stay off: the planner classifies it
+        turning_point and the chapter slot sees it. The same text under the
+        letter framework (relational slots declared) goes to shared_history.
+        Guards the per-framework overlay gate in compute_readiness.
+        """
+        chapter = format_frameworks.get("chapter")
+        text = "Describe a moment with your mom that was a turning point for you."
+        questions = [q("A1", text, True)]
+        result = format_readiness.compute_readiness(chapter, ["A"], questions)
+        rows = {row["id"]: row for row in result["slots"]}
+        self.assertEqual(rows["turning_point"]["matched"], ["A1"])
+        # Same question under the letter framework goes relational instead.
+        letter_result = format_readiness.compute_readiness(self.letter, ["A"], questions)
+        letter_rows = {row["id"]: row for row in letter_result["slots"]}
+        self.assertEqual(letter_rows["shared_history"]["matched"], ["A1"])
+
     def test_chapter_framework_reaches_ready(self):
         """A reachable-function framework proves the engine can actually say READY."""
         chapter = format_frameworks.get("chapter")
