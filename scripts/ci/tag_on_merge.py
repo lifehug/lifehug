@@ -83,7 +83,7 @@ def tag_on_merge(remote: str = "origin") -> int:
         print(f"tag_on_merge: {tag} already exists locally, nothing to do.")
         return 0
 
-    create = _run(["git", "tag", "-a", tag, "-m", changelog])
+    create = _run(["git", "-c", "user.name=lifehug tag-on-merge", "-c", "user.email=tag-on-merge@users.noreply.github.com", "tag", "-a", tag, "-m", changelog])
     if create.returncode != 0:
         # Another concurrent run created it between our check and our create.
         if _tag_exists_locally(tag):
