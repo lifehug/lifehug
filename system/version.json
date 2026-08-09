@@ -1,11 +1,12 @@
 {
-  "version": 131,
-  "released": "2026-08-08",
-  "changelog": "v131: regression tests for v130's merge-gate blockers — corrupt-JSON salvage (interrupted-write rotation.json is preserved as .pre-v120, never destroyed) and --migrate-vault target resolution (LIFEHUG_VAULT_ROOT honored, --vault-root beats it, missing target exits nonzero instead of false success). Test-only release; v130 shipped the fixes, this pins them.",
+  "version": 132,
+  "released": "2026-08-09",
+  "changelog": "v132: the delivery method (issue #85) — a right-sized OSS adoption of the hosted platform's build process. CI is now the keystone: .github/workflows/ci.yml runs the full unit suite on a Python 3.11/3.14 matrix on every PR and push to main, verifies every system/version.json framework_files entry actually exists on disk (nothing checked this before — the dry run for this PR found the manifest already clean), and gates every PR on a version bump with no exemption (this PR proves the rule against its own introduction). .github/workflows/tag-on-merge.yml auto-tags main's version on every merge, closing the exact gap that let v118-v128 go untagged for eleven releases (issue #84) — plus a drift-check safety net so a failed tagging run goes red instead of silently lapsing again. docs/BUILDING.md documents the method; docs/pr-specs/TEMPLATE.md is the contract template. This repo also adopts a lightweight ADR practice (docs/adr/TEMPLATE.md), reversing the design's original default — docs/adr/0001-delivery-method.md ratifies this delivery method itself as the first entry, so future PRs that bind a decision have one findable index instead of only a changelog trail. The walkthrough evidence harness is generalized: tests/walkthrough_lib.py extracts the reusable disposable-vault/live-viewer/Playwright scaffolding out of tests/v119_job_pill_evidence.py (which now consumes it), and the new root Makefile's `make walkthrough-<slug>` pattern rule is the going-forward convention for evidence scripts. AGENTS.md's Definition of Done gains a CI & release discipline item plus written-down machine-authorship-attribution and recurring-defect-doctrine sections; CLAUDE.md gains a one-line pointer to docs/BUILDING.md. No user-facing product behavior changed.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
     "CLAUDE.md",
+    "Makefile",
     "README.md",
     "README.template.md",
     "config.yaml.example",
@@ -142,6 +143,7 @@
     "tests/test_wiki_compile.py",
     "tests/test_wiki_views.py",
     "tests/v119_job_pill_evidence.py",
+    "tests/walkthrough_lib.py",
     "wiki/SCHEMA.md"
   ]
 }

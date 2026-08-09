@@ -7,6 +7,13 @@ clicks its real Candidate action, then advances that durable synthetic job
 record through every user-visible state.  No private vault or live credential
 is read or written.
 
+Since v132 (lifehug#85), the disposable-vault / live-viewer / Playwright
+scaffolding lives in `tests/walkthrough_lib.py` — this script keeps only what
+is actually specific to the job-pill evidence: the STATE_SPECS sequence, the
+writer-lease holder subprocess, and the pill-text/overflow assertions. Its
+own assertions (screenshot count, exact PNG dimensions) are the regression
+test that the extraction didn't change behavior.
+
 Usage:
     python3 tests/v119_job_pill_evidence.py \
       --artifacts artifacts/walkthroughs/pr-71-jobs
@@ -16,27 +23,23 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import json
-import os
 import shutil
-import socket
-import struct
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from playwright.sync_api import sync_playwright
-
-
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
+TESTS = ROOT / "tests"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(TESTS))
 
 import jobs  # noqa: E402
+
+import walkthrough_lib  # noqa: E402
 
 
 STATE_SPECS = (
@@ -58,55 +61,18 @@ STATE_SPECS = (
     }),
 )
 
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def _write(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-
-def _synthetic_vault(root: Path) -> Path:
-    vault = root / "synthetic-vault"
-    (vault / "state").mkdir(parents=True)
-    shutil.copy2(SYSTEM / "question-bank.md", vault / "question-bank.md")
-    shutil.copy2(SYSTEM / "rotation.json", vault / "state" / "rotation.json")
-    shutil.copy2(SYSTEM / "coverage.json", vault / "state" / "coverage.json")
-    for directory in ("answers", "outputs", "sources/manual", "sources/corrections", "wiki"):
-        (vault / directory).mkdir(parents=True, exist_ok=True)
-    _write(vault / "state" / "question_candidates.json", {
-        "version": 1,
-        "candidates": [{
-            "id": "synthetic-v119-candidate",
-            "text": "What ordinary moment from a recent week deserves to be remembered?",
-            "status": "candidate",
-            "priority": 0.87,
-            "story_function": "scene",
-            "source_path": "sources/manual/synthetic-v119.md",
-            "target_category": "A",
-        }],
-    })
-    return vault
-
-
-def _wait_for_server(url: str, process: subprocess.Popen[str]) -> None:
-    from urllib.request import urlopen
-
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError("viewer exited before it became ready")
-        try:
-            with urlopen(url, timeout=1) as response:  # noqa: S310 -- fixed loopback URL
-                if response.status == 200:
-                    return
-        except OSError:
-            time.sleep(0.1)
-    raise RuntimeError("viewer did not become ready")
+QUESTION_CANDIDATES = {
+    "version": 1,
+    "candidates": [{
+        "id": "synthetic-v119-candidate",
+        "text": "What ordinary moment from a recent week deserves to be remembered?",
+        "status": "candidate",
+        "priority": 0.87,
+        "story_function": "scene",
+        "source_path": "sources/manual/synthetic-v119.md",
+        "target_category": "A",
+    }],
+}
 
 
 def _set_state(record: dict, values: dict) -> dict:
@@ -143,31 +109,6 @@ def _capture_state(page, url: str, label: str, artifacts: Path, width: int, heig
     page.screenshot(path=str(artifacts / f"job-pill-{label}-{width}x{height}.png"), full_page=False)
 
 
-def _png_dimensions(path: Path) -> tuple[int, int]:
-    header = path.read_bytes()[:24]
-    if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
-        raise RuntimeError(f"still is not a valid PNG: {path}")
-    return struct.unpack(">II", header[16:24])
-
-
-def _make_compact_gif(webm: Path, gif: Path) -> None:
-    if shutil.which("ffmpeg") is None:
-        raise RuntimeError("ffmpeg is required to create the compact evidence GIF")
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-loglevel", "error", "-i", str(webm),
-            "-vf",
-            (
-                "fps=10,scale=640:-1:flags=lanczos,split[s0][s1];"
-                "[s0]palettegen=max_colors=128[p];"
-                "[s1][p]paletteuse=dither=bayer:bayer_scale=3"
-            ),
-            "-loop", "0", str(gif),
-        ],
-        check=True,
-    )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", type=Path, required=True)
@@ -175,25 +116,12 @@ def main() -> int:
     artifacts = args.artifacts.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="lifehug-v119-evidence-") as tmp_text:
-        tmp = Path(tmp_text)
-        vault = _synthetic_vault(tmp)
-        jobs.configure(vault)
-        port = _free_port()
-        env = os.environ | {
-            "LIFEHUG_VAULT_ROOT": str(vault),
-            "LIFEHUG_FRAMEWORK_SYSTEM_DIR": str(SYSTEM),
-            "PYTHONPATH": str(SYSTEM),
-        }
-        server = subprocess.Popen(
-            [sys.executable, str(SYSTEM / "serve_wiki.py"), "--port", str(port)],
-            cwd=ROOT,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        base_url = f"http://127.0.0.1:{port}"
+    with walkthrough_lib.WalkthroughHarness(
+        question_candidates=QUESTION_CANDIDATES,
+        viewport={"width": 1440, "height": 900},
+        record_video=True,
+    ) as harness:
+        jobs.configure(harness.vault)
         holder = subprocess.Popen(
             [
                 sys.executable,
@@ -201,74 +129,64 @@ def main() -> int:
                 (
                     "import sys,time; from pathlib import Path; "
                     f"sys.path.insert(0,{str(SYSTEM)!r}); import jobs; "
-                    f"jobs.configure(Path({str(vault)!r})); "
+                    f"jobs.configure(Path({str(harness.vault)!r})); "
                     "\nwith jobs._WriterLease(wait_seconds=1): time.sleep(90)"
                 ),
             ],
-            env=env,
+            env=harness.env,
         )
         try:
-            _wait_for_server(f"{base_url}/views/review", server)
+            writer_owner = harness.vault / "state" / "jobs" / ".writer-owner.json"
             deadline = time.monotonic() + 5
-            while not (vault / "state" / "jobs" / ".writer-owner.json").exists():
+            while not writer_owner.exists():
                 if time.monotonic() >= deadline:
                     raise RuntimeError("evidence writer lease did not start")
                 time.sleep(0.05)
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch()
-                context = browser.new_context(
-                    viewport={"width": 1440, "height": 900},
-                    record_video_dir=str(tmp / "video"),
-                    record_video_size={"width": 1440, "height": 900},
-                )
-                page = context.new_page()
-                page.goto(f"{base_url}/views/review", wait_until="networkidle")
-                # v128: the candidates lane is a <details>; it opens
-                # automatically when actionable, but force it so the
-                # Defer button is visible regardless of fixture state.
-                page.evaluate("document.querySelectorAll('details.fnd-focus').forEach(d => d.open = true)")
-                page.get_by_role("button", name="Defer").click()
-                page.wait_for_url("**/views/review?**")
-                query = parse_qs(urlparse(page.url).query)
-                job_id = (query.get("job") or [""])[0]
-                record = jobs.load_job(job_id)
-                if record is None:
-                    raise RuntimeError("real viewer action did not create a durable job")
-                action_url = page.url
-                # The lease holds the actual worker behind the clicked action,
-                # keeping its initial queued state visible. The remaining
-                # durable states are then deterministic synthetic recoveries.
-                current = record
-                for label, values in STATE_SPECS:
-                    current = _set_state(current, values)
-                    _capture_state(page, action_url, label, artifacts, 1440, 900)
-                    _capture_state(page, action_url, label, artifacts, 390, 844)
-                page.set_viewport_size({"width": 1440, "height": 900})
-                page.goto(action_url, wait_until="networkidle")
-                for label, values in STATE_SPECS:
-                    current = _set_state(current, values)
-                    page.reload(wait_until="networkidle")
-                    page.wait_for_timeout(3200)
-                video = page.video
-                context.close()
-                if video is None:
-                    raise RuntimeError("Playwright did not create walkthrough video")
-                source_video = Path(video.path())
-                if not source_video.is_file():
-                    raise RuntimeError("Playwright did not finalize walkthrough video")
-                shutil.copy2(source_video, artifacts / "job-pill-action-sequence.webm")
-                browser.close()
+
+            page = harness.page
+            page.goto(f"{harness.base_url}/views/review", wait_until="networkidle")
+            # v128: the candidates lane is a <details>; it opens
+            # automatically when actionable, but force it so the
+            # Defer button is visible regardless of fixture state.
+            page.evaluate("document.querySelectorAll('details.fnd-focus').forEach(d => d.open = true)")
+            page.get_by_role("button", name="Defer").click()
+            page.wait_for_url("**/views/review?**")
+            query = parse_qs(urlparse(page.url).query)
+            job_id = (query.get("job") or [""])[0]
+            record = jobs.load_job(job_id)
+            if record is None:
+                raise RuntimeError("real viewer action did not create a durable job")
+            action_url = page.url
+            # The lease holds the actual worker behind the clicked action,
+            # keeping its initial queued state visible. The remaining
+            # durable states are then deterministic synthetic recoveries.
+            current = record
+            for label, values in STATE_SPECS:
+                current = _set_state(current, values)
+                _capture_state(page, action_url, label, artifacts, 1440, 900)
+                _capture_state(page, action_url, label, artifacts, 390, 844)
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.goto(action_url, wait_until="networkidle")
+            for label, values in STATE_SPECS:
+                current = _set_state(current, values)
+                page.reload(wait_until="networkidle")
+                page.wait_for_timeout(3200)
+            video = page.video
+            harness.context.close()
+            harness.context = None
+            if video is None:
+                raise RuntimeError("Playwright did not create walkthrough video")
+            source_video = Path(video.path())
+            if not source_video.is_file():
+                raise RuntimeError("Playwright did not finalize walkthrough video")
+            shutil.copy2(source_video, artifacts / "job-pill-action-sequence.webm")
         finally:
             holder.terminate()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 holder.wait(timeout=5)
             if holder.poll() is None:
                 holder.kill()
-            server.terminate()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                server.wait(timeout=5)
-            if server.poll() is None:
-                server.kill()
+
     expected_count = len(STATE_SPECS) * 2
     screenshots = list(artifacts.glob("job-pill-*.png"))
     if len(screenshots) != expected_count:
@@ -282,12 +200,12 @@ def main() -> int:
         expected = expected_dimensions.get(screenshot)
         if expected is None:
             raise RuntimeError(f"unexpected still filename: {screenshot.name}")
-        actual = _png_dimensions(screenshot)
+        actual = walkthrough_lib.png_dimensions(screenshot)
         if actual != expected:
             raise RuntimeError(
                 f"{screenshot.name} is {actual[0]}x{actual[1]}, expected {expected[0]}x{expected[1]}"
             )
-    _make_compact_gif(
+    walkthrough_lib.make_compact_gif(
         artifacts / "job-pill-action-sequence.webm",
         artifacts / "job-pill-action-sequence.gif",
     )

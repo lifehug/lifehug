@@ -39,15 +39,57 @@ A code change is not done until its paper trail ships **in the same pass**:
    `framework_files` in the same bump (that manifest is what
    `system/update.py` ships to existing installs — a file missing from it
    never reaches upgraders). No PR ships without a bump.
+4. **CI & release discipline** — every PR runs CI
+   (`.github/workflows/ci.yml`) green before merge; branch protection
+   requires it. The `test` job is the unit suite on the Python matrix, the
+   `framework-manifest` job proves every `framework_files` entry exists on
+   disk, and the `version-bump` job proves rule 3's bump actually happened
+   — no exemption, including doc/CI-only PRs. On merge to `main`, the
+   version in `system/version.json` is tagged automatically
+   (`.github/workflows/tag-on-merge.yml`, `scripts/ci/tag_on_merge.py`); if
+   a push to `main` is not tagged within a few minutes, that is a
+   CI-visible failure (the drift check in `framework-manifest`), not a
+   silent one — see issue #84, where the manual equivalent of this step
+   lapsed for eleven releases before anyone noticed. Full method:
+   `docs/BUILDING.md`.
 
 "Done" = code + tests + docs + issue state — never code alone. The owner should
 never have to ask whether the docs match the code.
+
+
 
 Then decide:
 
 1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.
 2. **Setup done but no cron?** → If `config.yaml` exists but no daily question delivery is configured, help the user set up their cron job.
 3. **Normal session?** → Check if there's a pending question or incoming answer to process. Prefer `python3 system/lifehug.py process-answer` for answer saves.
+
+### Machine-authorship attribution
+
+Every newly machine-authored commit message, PR/issue body, and substantive
+comment identifies the model that authored its final text and the surface
+when both are verified: `🤖 Generated with MODEL via SURFACE`. The
+implementing agent identifies its own artifact. If the exact model is
+unavailable, name only the verified surface (for example, `🤖 Generated with
+Codex`) and never guess. For mixed artifacts, identify the model
+responsible for the final authored text. Never add a false `Co-Authored-By`
+identity. Keep honest historical Claude, Kimi, Codex, and other attribution
+unchanged.
+
+### Recurring-defect doctrine
+
+Same defect class twice = stop patching instances. Extract one authoritative
+definition (a single importable module), rewire every call site to it, add a
+guard test that fails on inline re-introductions of the known-bad form, and
+— when the fact is really a contract with an external source — add a parity
+test derived from that source so upstream drift fails the build instead of
+production. Exemplars already in this repo: `system/vault_paths.py` (single
+authoritative vault-root/contract resolution, replacing scattered
+path-guessing that used to be hand-rolled per call site) and
+`system/format_frameworks.py` (single source of truth for framework
+question/id shapes, instead of every module guessing the alphabet).
+Per-instance regression tests stop regressions; only a centralized
+definition stops the next module from guessing wrong.
 
 ## Cross-Medium Parity (owner-set, 2026-08-05)
 
