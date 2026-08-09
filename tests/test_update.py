@@ -50,7 +50,7 @@ class ApplyVersionTests(unittest.TestCase):
         import tempfile
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
-        self._git("init", "-q")
+        self._git("init", "-q", "-b", "main")
         self._git("config", "user.email", "t@test")
         self._git("config", "user.name", "t")
         self._git("config", "commit.gpgsign", "false")
@@ -166,7 +166,7 @@ class TagLapseCheckTests(unittest.TestCase):
 
     def _init_repo(self, repo):
         repo.mkdir(parents=True, exist_ok=True)
-        self._git(repo, "init", "-q")
+        self._git(repo, "init", "-q", "-b", "main")
         self._git(repo, "config", "user.email", "t@test")
         self._git(repo, "config", "user.name", "t")
         self._git(repo, "config", "commit.gpgsign", "false")
@@ -375,7 +375,7 @@ class StateDirResolutionTests(unittest.TestCase):
 
     def _init_repo(self, repo, version=1):
         repo.mkdir(parents=True, exist_ok=True)
-        self._git(repo, "init", "-q")
+        self._git(repo, "init", "-q", "-b", "main")
         self._git(repo, "config", "user.email", "t@test")
         self._git(repo, "config", "user.name", "t")
         self._git(repo, "config", "commit.gpgsign", "false")
@@ -471,7 +471,7 @@ class LastUpdateStateTests(unittest.TestCase):
         update.REPO_DIR = self.tmp
         update.VERSION_FILE = self.tmp / "system" / "version.json"
         self.addCleanup(self._restore)
-        self._git("init", "-q")
+        self._git("init", "-q", "-b", "main")
         self._git("config", "user.email", "t@test")
         self._git("config", "user.name", "t")
         self._git("config", "commit.gpgsign", "false")
