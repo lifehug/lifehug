@@ -42,7 +42,7 @@ from lifehug_core import (
 from entity_roster import ENTITY_TYPES, load_roster
 from question_candidates import AUTO_PROMOTE_THRESHOLD, check_quality, _infer_category
 from progress import verdict
-from recommend_focuses import focus_start_gate
+from recommend_focuses import FOCUS_READY_SCORE_FLOOR, focus_start_gate
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 
 VIEWER_LOG = logging.getLogger("lifehug.viewer")
@@ -1378,8 +1378,13 @@ def view_sources():
 
 
 def _recommendations_section_html() -> str:
-    """Focus ideas lane of Review (v128) — the old view_recommendations' body,
-    unchanged, minus its own page title."""
+    """Focus ideas lane of Review (v128/v134) — the old view_recommendations'
+    body, plus a live-computed "Ready" column (issue #79). Ready-to-start is
+    recomputed HERE from focus_start_gate() (live) and each rec's stored
+    score against FOCUS_READY_SCORE_FLOOR — never trusted from a stored
+    ready_to_start flag, which can go stale between recommendation refreshes
+    and the gate's current state; this lane must never contradict its own
+    policy line above it."""
     data = read_json(FOCUS_RECS_FILE, default={}) or {}
     recs = data.get("recommendations", [])
     dismissed = data.get("dismissed", [])
@@ -1387,6 +1392,8 @@ def _recommendations_section_html() -> str:
     others = [r for r in recs if r.get("status") != "pending"]
     parts = [f"<h3>Pending ({len(pending)})</h3>"]
     if pending:
+        gate = focus_start_gate()
+
         def rec_actions(r: dict) -> str:
             rid = html.escape(str(r.get("id", "")))
             return (
@@ -1399,6 +1406,9 @@ def _recommendations_section_html() -> str:
                 f'<input type="hidden" name="op" value="dismiss">'
                 f'<button class="btn quiet" type="submit">Dismiss</button></form>')
 
+        def _is_ready(r: dict) -> bool:
+            return gate["open"] and (r.get("score", 0) or 0) >= FOCUS_READY_SCORE_FLOOR
+
         rows = [[
             html.escape(str(r.get("entity", "?"))),
             html.escape(str(r.get("type", "?"))),
@@ -1406,10 +1416,7 @@ def _recommendations_section_html() -> str:
             html.escape(str(r.get("evidence_strength", "—"))),
             str(r.get("mention_count", 0)),
             html.escape(",".join(r.get("cross_categories", []))),
-            # Issue #79: ready_to_start is computed once, at recommendation
-            # refresh time (recommend_focuses.recommend()) — this lane only
-            # renders the stored flag, never recomputes it.
-            (_badge("ready to start", "green") if r.get("ready_to_start") else "—"),
+            (_badge("ready to start", "green") if _is_ready(r) else "—"),
             html.escape(str(r.get("reason", ""))[:240]),
             rec_actions(r),
         ] for r in sorted(pending, key=lambda r: r.get("score", 0) or 0, reverse=True)]
@@ -1431,7 +1438,12 @@ def _focus_ideas_policy_line() -> str:
     """Focus ideas lane policy line (issue #79, resolved) — reflects the
     completion gate's actual state instead of a static 'planned threshold'
     note. Owner approval is unchanged either way; the gate only decides
-    whether a strong pending idea may show as ready to start."""
+    whether a strong pending idea may show as ready to start.
+
+    Focus labels and the gate's reason text can originate from
+    LLM/imported-source entities (approve_recommendation creates Focuses
+    from recommendation entity names) — every interpolated value is
+    html.escape()'d before being embedded."""
     gate = focus_start_gate()
     if gate["open"]:
         return (
@@ -1440,7 +1452,7 @@ def _focus_ideas_policy_line() -> str:
             "open, so strong pending ideas can show as ready to start "
             "(lifehug/lifehug#79, resolved)")
     n = len(gate["blocking"])
-    labels = ", ".join(b["label"] for b in gate["blocking"])
+    labels = ", ".join(html.escape(str(b.get("label", ""))) for b in gate["blocking"])
     return (
         "focuses are never created without you — and starting new ones is "
         f"gated while {n} open focus{'es' if n != 1 else ''} "
