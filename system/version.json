@@ -1,7 +1,7 @@
 {
-  "version": 130,
+  "version": 131,
   "released": "2026-08-08",
-  "changelog": "v130: two fixes for the update path every external vault takes. (1) process-answer no longer writes asked_at: \"None\" when rotation's last_asked_at is null (the v120 contract made the key present-but-nullable); it falls back to the answer's own date, exactly as pre-v120 behavior did when the key was absent. (2) updating a pre-v120 vault now migrates it to the v120 durable-data contract instead of leaving new code that refuses to read the vault it just updated: required keys are derived from vault_contract.json itself at run time, defaults are the framework's own (never arbitrary zeros), wrong-typed values are parked under legacy_* rather than deleted, corrupt or non-object files are salvaged to <name>.pre-v120 before any rebuild (and the rebuild refuses to proceed if the salvage copy cannot be written), and the whole pass is idempotent. Vaults already updated past this release can repair themselves with `python3 system/update.py --migrate-vault [--vault-root PATH]`, which honors LIFEHUG_VAULT_ROOT and exits nonzero with the reason instead of reporting false success.",
+  "changelog": "v131: regression tests for v130's merge-gate blockers — corrupt-JSON salvage (interrupted-write rotation.json is preserved as .pre-v120, never destroyed) and --migrate-vault target resolution (LIFEHUG_VAULT_ROOT honored, --vault-root beats it, missing target exits nonzero instead of false success). Test-only release; v130 shipped the fixes, this pins them.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
