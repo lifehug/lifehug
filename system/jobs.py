@@ -78,6 +78,7 @@ DRAIN_IDLE_SECONDS = max(0.05, float(os.environ.get("LIFEHUG_JOB_DRAIN_IDLE", "0
 DRAIN_LOCK_WAIT_SECONDS = max(0.05, float(os.environ.get("LIFEHUG_JOB_DRAIN_LOCK_WAIT", "1")))
 WAIT_TIMEOUT_SECONDS = max(1, int(os.environ.get("LIFEHUG_JOB_WAIT_TIMEOUT", "86400")))
 ORPHAN_GRACE_SECONDS = max(60, int(os.environ.get("LIFEHUG_JOB_ORPHAN_GRACE", "86400")))
+NO_KICK_ENV = "LIFEHUG_JOBS_NO_KICK"
 PAYLOAD_VERSION = 1
 RECORD_VERSION = 2
 
@@ -93,6 +94,11 @@ _FOCUS_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def supervised_no_kick_enabled() -> bool:
+    """Return true when an embedded host forbids detached fallback workers."""
+    return os.environ.get(NO_KICK_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -713,7 +719,11 @@ def enqueue(
             }
             _write_json(_record_path(job_id), record)
             created = True
-    if kick and (created or record["state"] in {"queued", "safely-retryable"}):
+    if (
+        kick
+        and not supervised_no_kick_enabled()
+        and (created or record["state"] in {"queued", "safely-retryable"})
+    ):
         _kick_worker()
     return record
 
@@ -1338,6 +1348,26 @@ def wait_for_job(job_id: str, *, timeout: float = WAIT_TIMEOUT_SECONDS) -> dict:
     raise TimeoutError("timed out waiting for job")
 
 
+def wait_for_job_supervised(job_id: str, *, timeout: float = WAIT_TIMEOUT_SECONDS) -> dict:
+    """Wait for one job while draining runnable work in this process."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        record = load_job(job_id)
+        if record is None:
+            raise ValueError("unknown job")
+        if record["state"] in TERMINAL_STATES:
+            return record
+        worker_once(wait_seconds=DRAIN_LOCK_WAIT_SECONDS)
+        time.sleep(min(POLL_SECONDS, 0.2))
+    raise TimeoutError("timed out waiting for job")
+
+
+def wait_for_job_embedded_safe(job_id: str, *, timeout: float = WAIT_TIMEOUT_SECONDS) -> dict:
+    if supervised_no_kick_enabled():
+        return wait_for_job_supervised(job_id, timeout=timeout)
+    return wait_for_job(job_id, timeout=timeout)
+
+
 def _cmd_enqueue(args: argparse.Namespace) -> int:
     if args.command not in {"daily", "weekly", "monthly", "compile-pending", "compile"}:
         print("error: use the typed application API for commands with inputs", file=sys.stderr)
@@ -1348,7 +1378,7 @@ def _cmd_enqueue(args: argparse.Namespace) -> int:
     if not args.wait:
         return 0
     try:
-        record = wait_for_job(record["id"])
+        record = wait_for_job_embedded_safe(record["id"])
     except TimeoutError:
         return 124
     return int(record.get("exit_code", 1)) if record["state"] == "failed" else 0
@@ -1366,7 +1396,7 @@ def _cmd_file_answer(args: argparse.Namespace) -> int:
     if not args.wait:
         return 0
     try:
-        record = wait_for_job(record["id"])
+        record = wait_for_job_embedded_safe(record["id"])
     except TimeoutError:
         return 124
     return int(record.get("exit_code", 1)) if record["state"] == "failed" else 0

@@ -1,7 +1,7 @@
 {
-  "version": 138,
+  "version": 139,
   "released": "2026-08-09",
-  "changelog": "v138: test fixtures that need macOS-safe workspace-parent temp dirs now use one cleanup-registering helper, with a guard test that blocks future direct ROOT.parent mkdtemp leaks.",
+  "changelog": "v139: embedded hosts can set LIFEHUG_JOBS_NO_KICK=1 so queued-and-waited mutations drain under the foreground process instead of spawning a detached fallback worker.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

@@ -417,6 +417,12 @@ same canonical scripts. Queue administration is intentionally exposed through
 `system/jobs.py` (`worker`, `show`, `retry`, `purge`, and `cleanup`); canonical
 vault mutations remain commands of `system/lifehug.py`.
 
+Embedded hosts that create disposable vault workspaces can set
+`LIFEHUG_JOBS_NO_KICK=1`. In that mode, queued-and-waited mutations drain in
+the foreground instead of spawning the detached fallback worker, so the command
+returns only after Lifehug has stopped touching the checkout. Local companion
+behavior stays unchanged when the variable is unset.
+
 ```mermaid
 flowchart TB
     subgraph d["🌅 DAILY · free"]
