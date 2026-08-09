@@ -2,6 +2,7 @@
 acknowledge, and the action UI surfaces."""
 
 import http.client
+import io
 import json
 import sys
 import tempfile
@@ -9,6 +10,8 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,9 +19,102 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 
 import jobs  # noqa: E402
+import lifehug_core  # noqa: E402
 import question_planner as qp  # noqa: E402
 import serve_wiki  # noqa: E402
 import vault_paths  # noqa: E402
+
+
+class ViewerBoundaryTests(unittest.TestCase):
+    """Loopback-only owner boundary for the local viewer."""
+
+    def test_bind_host_rejects_wildcards_lan_and_non_localhost_names(self):
+        for host in (
+            "",
+            "0.0.0.0",
+            "::",
+            "192.168.1.5",
+            "10.0.0.5",
+            "127.0.0.2",
+            "localhost.evil",
+            "example.com",
+        ):
+            with self.subTest(host=host):
+                with self.assertRaises(ValueError):
+                    serve_wiki._validated_bind_host(host)
+
+    def test_bind_host_allows_exact_loopback_targets(self):
+        self.assertEqual(serve_wiki._validated_bind_host("127.0.0.1"), "127.0.0.1")
+        self.assertEqual(serve_wiki._validated_bind_host("::1"), "::1")
+
+    def test_main_rejects_unsafe_bind_before_constructing_server(self):
+        with mock.patch.object(sys, "argv", ["serve_wiki.py", "--host", "0.0.0.0"]), \
+             mock.patch.object(serve_wiki, "LifehugHTTPServer") as server_cls, \
+             mock.patch("sys.stderr", new=io.StringIO()) as stderr:
+            self.assertEqual(serve_wiki.main(), 2)
+        server_cls.assert_not_called()
+        self.assertIn("refuses non-owner bind hosts", stderr.getvalue())
+
+    def test_localhost_bind_requires_only_loopback_resolution(self):
+        original = serve_wiki.socket.getaddrinfo
+        try:
+            serve_wiki.socket.getaddrinfo = lambda *_args, **_kwargs: [
+                (None, None, None, None, ("127.0.0.1", 0)),
+                (None, None, None, None, ("::1", 0, 0, 0)),
+            ]
+            self.assertEqual(serve_wiki._validated_bind_host("localhost"), "localhost")
+            serve_wiki.socket.getaddrinfo = lambda *_args, **_kwargs: [
+                (None, None, None, None, ("127.0.0.1", 0)),
+                (None, None, None, None, ("192.168.1.9", 0)),
+            ]
+            with self.assertRaises(ValueError):
+                serve_wiki._validated_bind_host("localhost")
+        finally:
+            serve_wiki.socket.getaddrinfo = original
+
+    def test_non_loopback_peer_cannot_dispatch_read_route(self):
+        called = []
+        original_builder = serve_wiki.VIEW_MAP.get("peer-guard-test")
+
+        def builder():
+            called.append(True)
+            return ("Peer guard", "<h1>should not render</h1>", False)
+
+        class FakeHandler(serve_wiki.Handler):
+            def __init__(self):
+                self.client_address = ("192.168.1.23", 4444)
+                self.server = SimpleNamespace(server_address=("127.0.0.1", 8765))
+                self.headers = {}
+                self.path = "/views/peer-guard-test"
+                self.wfile = io.BytesIO()
+                self._headers = []
+                self.status = None
+
+            def send_response(self, code, message=None):  # noqa: ARG002
+                self.status = code
+
+            def send_header(self, key, value):
+                self._headers.append((key, value))
+
+            def end_headers(self):
+                pass
+
+            def log_message(self, *_args):
+                pass
+
+        serve_wiki.VIEW_MAP["peer-guard-test"] = builder
+        try:
+            handler = FakeHandler()
+            handler.do_GET()
+        finally:
+            if original_builder is None:
+                serve_wiki.VIEW_MAP.pop("peer-guard-test", None)
+            else:
+                serve_wiki.VIEW_MAP["peer-guard-test"] = original_builder
+
+        self.assertEqual(handler.status, 403)
+        self.assertFalse(called)
+        self.assertIn(("Cache-Control", "no-store"), handler._headers)
 
 
 class PostAuthTests(unittest.TestCase):
@@ -54,6 +150,19 @@ class PostAuthTests(unittest.TestCase):
         payload = resp.read()
         conn.close()
         return resp, payload
+
+    def _get(self, path, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", path, headers=headers or {})
+        resp = conn.getresponse()
+        payload = resp.read()
+        conn.close()
+        return resp, payload
+
+    def assertPrivateHeaders(self, resp):  # noqa: N802 - unittest assertion style
+        self.assertEqual(resp.getheader("Cache-Control"), "no-store")
+        self.assertEqual(resp.getheader("Referrer-Policy"), "no-referrer")
+        self.assertEqual(resp.getheader("X-Content-Type-Options"), "nosniff")
 
     def test_post_without_token_403(self):
         resp, _ = self._post("/actions/candidate", {"id": "c1"})
@@ -165,22 +274,43 @@ class PostAuthTests(unittest.TestCase):
         self.assertEqual(resp.status, 404)
 
     def test_jobs_route_unknown_404(self):
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        conn.request("GET", "/jobs/ffffffffffff.json")
-        resp = conn.getresponse()
-        resp.read()
-        conn.close()
+        resp, _ = self._get("/jobs/ffffffffffff.json")
         self.assertEqual(resp.status, 404)
 
+    def test_get_with_bad_host_403(self):
+        resp, payload = self._get("/views/status", headers={"Host": "evil.example.com"})
+        self.assertEqual(resp.status, 403)
+        self.assertNotIn(b"The Loop", payload)
+        self.assertPrivateHeaders(resp)
+
     def test_flash_banner_renders_on_get(self):
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        conn.request("GET", "/views/status?flash=hello+there")
-        resp = conn.getresponse()
-        body = resp.read().decode()
-        conn.close()
+        resp, payload = self._get("/views/status?flash=hello+there")
+        body = payload.decode()
         self.assertEqual(resp.status, 200)
         self.assertIn('class="flash"', body)
         self.assertIn("hello there", body)
+        self.assertPrivateHeaders(resp)
+
+    def test_json_gets_private_headers(self):
+        resp, _ = self._get("/views/graph.json")
+        self.assertEqual(resp.status, 200)
+        self.assertPrivateHeaders(resp)
+
+    def test_artifact_file_gets_private_headers(self):
+        original_repo = lifehug_core.REPO_DIR
+        with tempfile.TemporaryDirectory(dir=ROOT.parent) as tmp:
+            try:
+                lifehug_core.REPO_DIR = Path(tmp)
+                artifact = lifehug_core.REPO_DIR / "outputs" / "piece" / "v1.pdf"
+                artifact.parent.mkdir(parents=True)
+                artifact.write_bytes(b"%PDF-1.4\n")
+                resp, payload = self._get("/artifact-file/piece/v1.pdf")
+            finally:
+                lifehug_core.REPO_DIR = original_repo
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(payload, b"%PDF-1.4\n")
+        self.assertEqual(resp.getheader("Content-Type"), "application/pdf")
+        self.assertPrivateHeaders(resp)
 
     def test_get_exception_has_fixed_private_failure_surface(self):
         secret = "GET-SECRET-private-path"
