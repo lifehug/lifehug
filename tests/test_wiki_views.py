@@ -119,7 +119,7 @@ class WikiViewsTests(unittest.TestCase):
         self.assertEqual(order, [
             "status", "mirror", "graph", "timeline", "studio", "foundation",
             "review", "queue",
-            "sources", "reports", "privacy",
+            "sources", "answers", "reports", "privacy",
         ])
 
     def test_legacy_view_slugs_redirect_to_their_consolidated_view(self):
@@ -1012,7 +1012,7 @@ class HomeHubTests(WikiViewsTests):
             ("Do", ["review", "studio"]),
             ("Plan", ["queue", "foundation"]),
             ("Reflect", ["mirror", "timeline", "graph"]),
-            ("System", ["status", "reports", "sources", "privacy"]),
+            ("System", ["status", "reports", "sources", "answers", "privacy"]),
         ])
 
     def test_view_groups_cover_every_view(self):
@@ -1294,6 +1294,100 @@ class UpdateObservabilityTests(WikiViewsTests):
         content_kinds = [k for k in kinds if k != "update"]
         self.assertLess(max(kinds.index(k) for k in content_kinds),
                          kinds.index("update"))
+
+
+class AnswersViewTests(WikiViewsTests):
+    """The Answers view (issue #110) — the ledger of everything answered."""
+
+    def _write_answer(self, filename, metadata, body):
+        lines = ["---"]
+        for key, value in metadata.items():
+            lines.append(f"{key}: {json.dumps(value)}")
+        lines.append("---")
+        content = "\n".join(lines) + "\n\n" + body + "\n"
+        return self._write(f"answers/{filename}", content)
+
+    def _bind_answers(self):
+        answers_dir = self.tmp / "answers"
+        answers_dir.mkdir(parents=True, exist_ok=True)
+        serve_wiki.ANSWERS_DIR = answers_dir
+        return answers_dir
+
+    def test_answers_registered_in_system_group_next_to_sources(self):
+        self.assertIn("answers", serve_wiki.VIEW_MAP)
+        labels = dict((slug, lbl) for slug, lbl, _ in serve_wiki.VIEWS)
+        self.assertEqual(labels["answers"], "Answers")
+        system_slugs = dict(serve_wiki.VIEW_GROUPS)["System"]
+        self.assertIn("answers", system_slugs)
+        self.assertEqual(
+            system_slugs.index("answers"), system_slugs.index("sources") + 1)
+
+    def test_answers_empty_state_is_calm(self):
+        self._bind_answers()
+        _title, body, _wide = serve_wiki.view_answers()
+        self.assertIn("<h1>Answers</h1>", body)
+        self.assertIn("No answers yet", body)
+        self.assertNotIn("<table", body)
+
+    def test_answers_lists_newest_first_with_text_category_date_and_words(self):
+        self._bind_answers()
+        self._write_answer(
+            "A1.md",
+            {"title": "Question A1: Earliest?", "question_id": "A1",
+             "question_text": "What is your earliest memory?",
+             "category": "A", "category_name": "Origins",
+             "answered_date": "2026-01-01"},
+            "# Question A1: Earliest?\n\nOne two three four five.")
+        self._write_answer(
+            "F1.md",
+            {"title": "Question F1: Why?", "question_id": "F1",
+             "question_text": "Why did you start it?",
+             "category": "F", "category_name": "The Problem",
+             "answered_date": "2026-03-15"},
+            "# Question F1: Why?\n\nOne two three.")
+        _title, body, _wide = serve_wiki.view_answers()
+        self.assertIn("2 answers · 2026-01-01 → 2026-03-15", body)
+        # Newest first: F1 (03-15) renders before A1 (01-01).
+        self.assertLess(body.index("Why did you start it?"), body.index("What is your earliest memory?"))
+        self.assertIn("Origins", body)
+        self.assertIn("The Problem", body)
+        self.assertIn("2026-01-01", body)
+        self.assertIn("2026-03-15", body)
+        # Word counts are computed from the body, frontmatter excluded.
+        # A1's body is "# Question A1: Earliest?" (4 words) + the answer
+        # (5 words) = 9; F1's is "# Question F1: Why?" (4 words) + 3 = 7.
+        self.assertIn(">9<", body)
+        self.assertIn(">7<", body)
+        self.assertIn('href="/source-actions?ref=answers/A1.md"', body)
+        self.assertIn('href="/source-actions?ref=answers/F1.md"', body)
+
+    def test_answers_missing_date_sorts_last_as_unknown(self):
+        self._bind_answers()
+        self._write_answer(
+            "A1.md",
+            {"question_text": "Dated one", "category_name": "Origins",
+             "answered_date": "2026-01-01"},
+            "Body one.")
+        self._write_answer(
+            "A2.md",
+            {"question_text": "Undated one", "category_name": "Origins"},
+            "Body two.")
+        _title, body, _wide = serve_wiki.view_answers()
+        self.assertLess(body.index("Dated one"), body.index("Undated one"))
+        self.assertIn("unknown", body)
+        # The summary line's range ignores undated entries.
+        self.assertIn("2 answers · 2026-01-01 → 2026-01-01", body)
+
+    def test_answers_falls_back_to_title_and_category_code(self):
+        self._bind_answers()
+        self._write_answer(
+            "B1.md",
+            {"title": "Question B1: Fallback title", "category": "B",
+             "answered_date": "2026-02-02"},
+            "Some body text here.")
+        _title, body, _wide = serve_wiki.view_answers()
+        self.assertIn("Question B1: Fallback title", body)
+        self.assertIn(">B<", body)
 
 
 if __name__ == "__main__":
