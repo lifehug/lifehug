@@ -1,7 +1,7 @@
 {
-  "version": 143,
-  "released": "2026-08-09",
-  "changelog": "v143: local wiki viewer now enforces a loopback-only owner boundary for bind targets and read routes, with no-store private response headers.",
+  "version": 144,
+  "released": "2026-08-10",
+  "changelog": "v144: new Answers view (System menu, next to Source Integrity) lists every answer newest-first with question, category, date, and word count, each linking to reflect/correct/retract — filing here is synchronous, so there's no in-flight status column like the hosted twin's.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -146,6 +146,7 @@
     "tests/test_wiki_views.py",
     "tests/tempdirs.py",
     "tests/v119_job_pill_evidence.py",
+    "tests/walkthrough_answers.py",
     "tests/walkthrough_lib.py",
     "wiki/SCHEMA.md"
   ]

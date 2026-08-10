@@ -35,12 +35,14 @@ from lifehug_core import (
     SOURCE_MANIFEST_FILE,
     STATE_DIR,
     WIKI_DIR,
+    answer_body,
     load_config,
     parse_categories,
     parse_questions,
     read_json,
     read_text,
     slugify,
+    split_frontmatter,
 )
 from entity_roster import ENTITY_TYPES, load_roster
 from question_candidates import AUTO_PROMOTE_THRESHOLD, check_quality, _infer_category
@@ -311,7 +313,7 @@ VIEW_GROUPS = [
     ("Do", ["review", "studio"]),
     ("Plan", ["queue", "foundation"]),
     ("Reflect", ["mirror", "timeline", "graph"]),
-    ("System", ["status", "reports", "sources", "privacy"]),
+    ("System", ["status", "reports", "sources", "answers", "privacy"]),
 ]
 
 
@@ -1560,6 +1562,63 @@ def view_sources():
         ] for key, s in by_type[t]]
         parts.append(_table(["Title", "Captured", "Medium", "Integrity", ""], rows))
     return ("Source Integrity", "".join(parts), False)
+
+
+def view_answers():
+    """Answers (issue #110) — the ledger of everything answered, parity twin
+    of lifehug-platform#368. Lists every answers/*.md newest-first by
+    answered_date (missing dates sort last, shown as "unknown"): question
+    text, category, date, and an approximate body word count. Filing here is
+    synchronous (the CLI writes the file directly), so there is no
+    in-flight/parked status column the way the hosted twin has — that
+    explanation lives in VIEW_DESCRIPTIONS below, the view's own header
+    line."""
+    files = sorted(ANSWERS_DIR.glob("*.md")) if ANSWERS_DIR.exists() else []
+    entries = []
+    for path in files:
+        try:
+            content = read_text(path, errors="replace")
+        except OSError as exc:
+            _record_view_failure("view-answers-read", exc)
+            continue
+        metadata, _body = split_frontmatter(content)
+        date = str(metadata.get("answered_date") or "").strip()
+        question_text = str(metadata.get("question_text") or metadata.get("title") or path.stem).strip()
+        category = str(metadata.get("category_name") or metadata.get("category") or "—").strip()
+        word_count = len(answer_body(content).split())
+        entries.append({
+            "filename": path.name,
+            "date": date,
+            "question_text": question_text or path.stem,
+            "category": category or "—",
+            "word_count": word_count,
+        })
+
+    parts = ["<h1>Answers</h1>"]
+    if not entries:
+        parts.append(_empty(
+            "No answers yet — answer a daily question and it will show up here."))
+        return ("Answers", "".join(parts), False)
+
+    dated = [e for e in entries if e["date"]]
+    undated = [e for e in entries if not e["date"]]
+    dated.sort(key=lambda e: e["date"], reverse=True)
+    first_date = min((e["date"] for e in dated), default="unknown")
+    last_date = max((e["date"] for e in dated), default="unknown")
+    plural = "" if len(entries) == 1 else "s"
+    parts.append(
+        f'<p class="view-summary">{len(entries)} answer{plural} · '
+        f"{html.escape(first_date)} → {html.escape(last_date)}</p>")
+
+    rows = [[
+        html.escape(e["question_text"]),
+        html.escape(e["category"]),
+        html.escape(e["date"] or "unknown"),
+        str(e["word_count"]),
+        f'<a href="/source-actions?ref={quote("answers/" + e["filename"])}">act</a>',
+    ] for e in dated + undated]
+    parts.append(_table(["Question", "Category", "Date", "Words", ""], rows))
+    return ("Answers", "".join(parts), False)
 
 
 def _recommendations_section_html() -> str:
@@ -3146,6 +3205,7 @@ VIEWS = [
     ("queue", "Question Queue", view_queue),
     # The rest.
     ("sources", "Source Integrity", view_sources),
+    ("answers", "Answers", view_answers),
     ("reports", "Reports", view_reports),
     ("privacy", "Privacy Preview", view_privacy_preview),
 ]
@@ -3177,6 +3237,7 @@ VIEW_DESCRIPTIONS = {
     "review": "What the system grew on its own, waiting for your eye. Three lanes with three autonomy levels: question candidates auto-promote past a quality bar and the rest wait here; focus ideas never become Focuses without you; entities graduate into wiki pages automatically, previewed here. Promote, approve, dismiss, or defer — or just see what the Loop noticed. Decided items keep their history below each lane.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
+    "answers": "The ledger of everything you've answered — question, category, date, and an approximate word count, newest first, each row linking to reflect / correct / retract. Filing here is synchronous, so there's no in-flight or parked status column the way the hosted twin has — every row below already landed.",
     "timeline": "The life graph projected onto time: chrono-ordered periods as the spine, with people, places, objects, and projects lined up by shared sources (the evidence is shown), dated moments from classified answers, your own Life Chapters as a parallel band, and gaps made explicit. A validation surface — wrong placements are feedback.",
     "privacy": "Which pages' material would be eligible for each future audience build (public / friends / family), from per-page sensitivity floors. Preview only — the wiki itself is permanently owner-only, and audience surfaces will be separate, owner-reviewed builds.",
     "reports": "The full weekly and monthly maintenance reports — every step's complete output, persisted under state/reports/. The Telegram message is just the counts summary; when it flags a failure or warning, this is where the detail lives.",
