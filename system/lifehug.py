@@ -172,6 +172,34 @@ def git_dirty() -> bool | None:
     return bool(result.stdout.strip())
 
 
+def _safe_autocommit(label: str = "Lifehug") -> None:
+    """Commit and push vault-tracked paths. Non-fatal on failure."""
+    try:
+        from vault_paths import git_paths
+        paths = git_paths()
+    except Exception:
+        return
+    existing = [p for p in paths if Path(p).exists()]
+    if not existing:
+        return
+    try:
+        subprocess.run(["git", "add", "--"] + existing, cwd=REPO_DIR, check=True,
+                       capture_output=True, text=True)
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_DIR,
+                              capture_output=True)
+        if diff.returncode == 0:
+            return  # nothing staged
+        from datetime import date
+        subprocess.run(["git", "commit", "-m", f"{label} {date.today().isoformat()}"],
+                       cwd=REPO_DIR, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "pull", "--rebase", "--autostash"],
+                       cwd=REPO_DIR, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "push"], cwd=REPO_DIR, check=True,
+                       capture_output=True, text=True)
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        print(f"warn: autocommit failed: {exc}", file=sys.stderr)
+
+
 def check(label: str, ok: bool, detail: str = "") -> bool:
     status = "ok" if ok else "fail"
     suffix = f" - {detail}" if detail else ""
@@ -308,7 +336,10 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
         flags.append("--no-candidates")
     if args.dry_run:
         flags.append("--dry-run")
-    return run_python("ingest_story.py", flags)
+    rc = run_python("ingest_story.py", flags)
+    if rc == 0 and not args.dry_run and getattr(args, "commit", False):
+        _safe_autocommit("Ingest story")
+    return rc
 
 
 def cmd_candidates_list(args: argparse.Namespace) -> int:
@@ -1424,6 +1455,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sensitivity", default=None, choices=["private", "family", "friends", "public"])
     p.add_argument("--kind", default="story", choices=["story", "opinion"],
                    help="Content kind: opinion = the author's stated position/lens; gets Socratic follow-ups and can seed an essay artifact")
+    p.add_argument("--commit", action="store_true", help="Git commit and push after ingesting")
     p.set_defaults(func=cmd_ingest_story)
 
     def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:

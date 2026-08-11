@@ -51,6 +51,35 @@ send_msg() {
   printf '%s' "$1" | python3 "$SCRIPT_DIR/lifehug.py" notify || true
 }
 
+safe_autocommit() {
+  local label="${1:-File answer}"
+  local paths=()
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && paths+=("$path")
+  done < <(python3 "$SCRIPT_DIR/vault_paths.py" git-paths --vault-root "$WORKSPACE")
+  local existing=()
+  for path in "${paths[@]}"; do
+    [[ -e "$path" ]] && existing+=("$path")
+  done
+  [[ ${#existing[@]} -eq 0 ]] && return 0
+  set +e
+  local git_out
+  git_out=$(
+    git add -- "${existing[@]}" &&
+    { git diff --cached --quiet ||
+      { git commit -m "${label} $(date +%Y-%m-%d)" &&
+        git pull --rebase --autostash &&
+        git push; }; } 2>&1
+  )
+  local git_status=$?
+  set -e
+  if [[ "$git_status" -ne 0 ]]; then
+    echo "warn: git autocommit failed" >&2
+    echo "$git_out" >&2
+  fi
+  return 0
+}
+
 # The outer invocation streams stdin directly into the queue; it never writes a
 # plaintext answer to /tmp. Only the lease-bound worker re-entry needs a local
 # file because the canonical filing and notification steps both consume it.
@@ -120,6 +149,7 @@ if [[ $RC -eq 0 ]]; then
   MSG="✅ Filed ${QID}"
   [[ -n "$COVERAGE" ]] && MSG="${MSG} · ${COVERAGE}"
   [[ -n "$FOLLOWUPS" ]] && MSG="${MSG}"$'\n'"↳ ${FOLLOWUPS}"
+  safe_autocommit "File ${QID}"
   if [[ -z "$ACK_CONFIRMED" ]]; then
     send_msg "$MSG"
   fi
