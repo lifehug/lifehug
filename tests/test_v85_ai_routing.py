@@ -41,6 +41,7 @@ def load(name):
 
 
 rex = load("research_expand")
+aip = sys.modules["ai_provider"]
 
 SENTINEL = "⚠️ Agent couldn't generate a response."
 
@@ -49,9 +50,10 @@ class _FakeResponse:
     def __init__(self, content: str):
         self._body = json.dumps(
             {"choices": [{"message": {"content": content}}]}).encode()
+        self.headers = {"Content-Length": str(len(self._body))}
 
-    def read(self):
-        return self._body
+    def read(self, size=-1):
+        return self._body if size < 0 else self._body[:size]
 
     def __enter__(self):
         return self
@@ -75,59 +77,80 @@ class _FakeSDKClient:
 class CallAIRoutingTests(unittest.TestCase):
     def setUp(self):
         patches = [
-            mock.patch.object(rex, "_openclaw_gateway",
-                              return_value=("http://fake:1/v1", "tok")),
+            mock.patch.object(aip, "_openclaw_gateway",
+                              return_value=("http://localhost:1/v1", "tok")),
             mock.patch("time.sleep"),
-            mock.patch.dict("os.environ", {"LIFEHUG_AI_TIMEOUT": "5"}),
+            mock.patch.dict("os.environ", {
+                "LIFEHUG_AI_TIMEOUT": "5",
+                "ANTHROPIC_API_KEY": "test-key",
+            }),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
 
     def test_sentinel_is_not_retried_and_falls_through_to_sdk(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse(SENTINEL)) as urlopen, \
-                mock.patch.object(rex, "get_client",
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
+                mock.patch.object(aip, "get_anthropic_client",
                                   return_value=_FakeSDKClient()), \
                 mock.patch("sys.stdout", new_callable=io.StringIO):
-            result = rex.call_ai("prompt", "claude-sonnet-5")
+            result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "sdk says hi")
-        self.assertEqual(urlopen.call_count, 1)  # deterministic → no retries
+        self.assertEqual(opener.open.call_count, 1)  # deterministic → no retries
 
     def test_transient_failure_retries_then_falls_through(self):
         err = urllib.error.URLError("boom")
-        with mock.patch("urllib.request.urlopen", side_effect=err) as urlopen, \
-                mock.patch.object(rex, "get_client",
+        opener = mock.Mock()
+        opener.open.side_effect = err
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
+                mock.patch.object(aip, "get_anthropic_client",
                                   return_value=_FakeSDKClient()), \
                 mock.patch("sys.stdout", new_callable=io.StringIO):
-            result = rex.call_ai("prompt", "claude-sonnet-5")
+            result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "sdk says hi")
-        self.assertEqual(urlopen.call_count, 3)  # transient → retried
+        self.assertEqual(opener.open.call_count, 3)  # transient → retried
 
     def test_no_key_surfaces_gateway_error_not_missing_key(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse(SENTINEL)), \
-                mock.patch.object(rex, "get_client",
-                                  side_effect=RuntimeError("no key")), \
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
+                mock.patch.dict("os.environ", {"LIFEHUG_AI_TIMEOUT": "5"}, clear=True), \
                 mock.patch("sys.stdout", new_callable=io.StringIO), \
                 self.assertRaises(RuntimeError) as ctx:
-            rex.call_ai("prompt", "claude-sonnet-5")
-        self.assertIn("generate", str(ctx.exception))  # the gateway error
+            aip.call_ai("prompt", "claude-sonnet-5")
+        self.assertIn("openclaw", str(ctx.exception))  # metadata-only gateway error
 
     def test_gateway_success_never_touches_sdk(self):
-        with mock.patch("urllib.request.urlopen",
-                        return_value=_FakeResponse("gateway says hi")), \
-                mock.patch.object(rex, "get_client") as get_client:
-            result = rex.call_ai("prompt", "claude-sonnet-5")
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse("gateway says hi")
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
+                mock.patch.object(aip, "get_anthropic_client") as get_client:
+            result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "gateway says hi")
         get_client.assert_not_called()
 
     def test_no_gateway_uses_sdk_directly(self):
-        with mock.patch.object(rex, "_openclaw_gateway", return_value=None), \
-                mock.patch.object(rex, "get_client",
+        with mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+                mock.patch.object(aip, "get_anthropic_client",
                                   return_value=_FakeSDKClient()):
-            result = rex.call_ai("prompt", "claude-sonnet-5")
+            result = aip.call_ai("prompt", "claude-sonnet-5")
         self.assertEqual(result, "sdk says hi")
+
+    def test_gateway_error_survives_missing_optional_anthropic_sdk(self):
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
+        with mock.patch.object(aip, "_local_opener", return_value=opener), \
+                mock.patch.object(
+                    aip,
+                    "get_anthropic_client",
+                    side_effect=aip.AIUnavailableError("optional SDK not installed"),
+                ), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                self.assertRaises(aip.AIResponseError) as ctx:
+            aip.call_ai("prompt", "claude-sonnet-5")
+        self.assertIn("openclaw", str(ctx.exception))
 
 
 class OptionalAnthropicSdkTests(unittest.TestCase):
@@ -144,27 +167,31 @@ class OptionalAnthropicSdkTests(unittest.TestCase):
     def test_missing_sdk_is_catchable_and_ai_status_is_keyless(self):
         """Simulate absence directly so this test does not depend on the host."""
         with mock.patch("builtins.__import__", side_effect=self._missing_anthropic_import), \
-                mock.patch.object(rex, "_openclaw_gateway", return_value=None), \
-                mock.patch.dict(rex.os.environ, {"ANTHROPIC_API_KEY": "synthetic-key"}, clear=True), \
-                mock.patch.object(rex, "load_config", return_value={}):
-            self.assertIsNone(rex.ai_available())
-            with self.assertRaises(rex.AIProviderUnavailableError):
-                rex.get_client()
+                mock.patch.object(aip, "_openclaw_gateway", return_value=None), \
+                mock.patch.object(aip, "_anthropic_sdk_available", return_value=False), \
+                mock.patch.dict(aip.os.environ,
+                                {"ANTHROPIC_API_KEY": "synthetic-key"}, clear=True), \
+                mock.patch.object(aip, "load_config", return_value={}):
+            self.assertIsNone(aip.ai_available())
+            with self.assertRaises(aip.AIUnavailableError):
+                aip.get_anthropic_client()
 
     def test_gateway_failure_remains_catchable_when_sdk_is_absent(self):
+        opener = mock.Mock()
+        opener.open.return_value = _FakeResponse(SENTINEL)
         with mock.patch("builtins.__import__", side_effect=self._missing_anthropic_import), \
-                mock.patch.object(rex, "_openclaw_gateway",
-                                  return_value=("http://fake:1/v1", "tok")), \
-                mock.patch.dict(rex.os.environ,
+                mock.patch.object(aip, "_openclaw_gateway",
+                                  return_value=("http://localhost:1/v1", "tok")), \
+                mock.patch.dict(aip.os.environ,
                                 {"LIFEHUG_AI_TIMEOUT": "5", "ANTHROPIC_API_KEY": "synthetic-key"},
                                 clear=True), \
-                mock.patch.object(rex, "load_config", return_value={}), \
+                mock.patch.object(aip, "load_config", return_value={}), \
                 mock.patch("time.sleep"), \
-                mock.patch("urllib.request.urlopen", return_value=_FakeResponse(SENTINEL)), \
+                mock.patch.object(aip, "_local_opener", return_value=opener), \
                 mock.patch("sys.stdout", new_callable=io.StringIO), \
                 self.assertRaises(RuntimeError) as ctx:
-            rex.call_ai("prompt", "claude-sonnet-5")
-        self.assertIn("generate", str(ctx.exception))
+            aip.call_ai("prompt", "claude-sonnet-5")
+        self.assertIn("openclaw", str(ctx.exception))
 
 
 class KimiRoutingTests(unittest.TestCase):
@@ -180,12 +207,12 @@ class KimiRoutingTests(unittest.TestCase):
             captured["auth"] = req.headers.get("Authorization")
             return _FakeResponse("kimi says hi")
 
-        with mock.patch.object(rex, "_openclaw_gateway",
-                               return_value=("http://fake:1/v1", "tok")), \
-                mock.patch.object(rex, "get_client") as get_client, \
+        with mock.patch.object(aip, "_openclaw_gateway",
+                               return_value=("http://localhost:1/v1", "tok")), \
+                mock.patch.object(aip, "get_anthropic_client") as get_client, \
                 mock.patch.dict("os.environ", {"KIMI_API_KEY": "kimi-key-123"}), \
                 mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            result = rex.call_ai("prompt", "kimi-for-coding")
+            result = aip.call_ai("prompt", "kimi-for-coding")
         self.assertEqual(result, "kimi says hi")
         self.assertEqual(captured["url"],
                          "https://api.kimi.com/coding/v1/chat/completions")
@@ -194,25 +221,25 @@ class KimiRoutingTests(unittest.TestCase):
 
     def test_kimi_key_falls_back_to_config(self):
         with mock.patch.dict("os.environ", {}, clear=True), \
-                mock.patch.object(rex, "load_config",
+                mock.patch.object(aip, "load_config",
                                   return_value={"kimi_api_key": "cfg-key"}):
-            self.assertEqual(rex._kimi_key(), "cfg-key")
+            self.assertEqual(aip._kimi_key(), "cfg-key")
 
     def test_kimi_no_key_raises_clear_error(self):
         with mock.patch.dict("os.environ", {}, clear=True), \
-                mock.patch.object(rex, "load_config", return_value={}), \
+                mock.patch.object(aip, "load_config", return_value={}), \
                 self.assertRaises(RuntimeError) as ctx:
-            rex.call_ai("prompt", "kimi-for-coding")
-        self.assertIn("KIMI_API_KEY", str(ctx.exception))
+            aip.call_ai("prompt", "kimi-for-coding")
+        self.assertIn("Kimi", str(ctx.exception))
 
     def test_model_prefixes(self):
         for kimi_model in ("kimi-for-coding", "kimi-for-coding-highspeed",
                            "k3", "moonshot-v1-8k", "Kimi-K2"):
             with self.subTest(model=kimi_model):
-                self.assertTrue(rex.model_is_kimi(kimi_model))
+                self.assertTrue(aip.model_is_kimi(kimi_model))
         for other in ("claude-sonnet-5", "gpt-4o", ""):
             with self.subTest(model=other):
-                self.assertFalse(rex.model_is_kimi(other))
+                self.assertFalse(aip.model_is_kimi(other))
 
     def test_kimi_base_url_override(self):
         captured = {}
@@ -222,11 +249,11 @@ class KimiRoutingTests(unittest.TestCase):
             return _FakeResponse("ok")
 
         with mock.patch.dict("os.environ", {"KIMI_API_KEY": "k"}), \
-                mock.patch.object(rex, "load_config",
+                mock.patch.object(aip, "load_config",
                                   return_value={"kimi_api_key": "k",
                                                 "kimi_base_url": "https://api.moonshot.cn/v1"}), \
                 mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            rex.call_ai("prompt", "moonshot-v1-8k")
+            aip.call_ai("prompt", "moonshot-v1-8k")
         self.assertEqual(captured["url"],
                          "https://api.moonshot.cn/v1/chat/completions")
 
@@ -241,10 +268,10 @@ class KimiRoutingTests(unittest.TestCase):
             return _FakeResponse("" if len(calls) == 1 else "real answer")
 
         with mock.patch.dict("os.environ", {"KIMI_API_KEY": "k"}), \
-                mock.patch.object(rex, "load_config", return_value={}), \
+                mock.patch.object(aip, "load_config", return_value={}), \
                 mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), \
                 mock.patch("sys.stdout", new_callable=io.StringIO):
-            result = rex.call_ai("prompt", "kimi-k3")
+            result = aip.call_ai("prompt", "kimi-k3")
         self.assertEqual(result, "real answer")
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0], 16384)  # reasoning headroom default
@@ -257,10 +284,10 @@ class KimiRoutingTests(unittest.TestCase):
             return _FakeResponse("ok")
 
         with mock.patch.dict("os.environ", {"KIMI_API_KEY": "k"}), \
-                mock.patch.object(rex, "load_config",
+                mock.patch.object(aip, "load_config",
                                   return_value={"kimi_max_tokens": "8192"}), \
                 mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            rex.call_ai("prompt", "kimi-k3")
+            aip.call_ai("prompt", "kimi-k3")
         self.assertEqual(calls, [8192])
 
 

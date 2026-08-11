@@ -291,7 +291,8 @@ def compile_mirror(model: str | None = None, dry_run: bool = False) -> int:
         print("No mirror material yet — the classifier hasn't extracted "
               "contradictions or insights. Nothing to synthesize.")
         return 0
-    from research_expand import DEFAULT_MODEL, call_ai  # noqa: PLC0415
+    from ai_provider import call_ai  # noqa: PLC0415
+    from research_expand import DEFAULT_MODEL  # noqa: PLC0415
     cfg = load_config()
     model = model or cfg.get("mirror_model") or cfg.get("research_model") or DEFAULT_MODEL
     print(f"Synthesizing the Mirror from {len(entries)} signal(s) with {model}…")

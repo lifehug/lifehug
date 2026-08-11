@@ -736,6 +736,28 @@ class DossierTests(ConnectorTestCase):
         self.assertEqual(len(ai.calls), 3)
         self.assertEqual(len(client.thread_requests), 3)  # all cached by now
 
+    def test_dossier_error_summary_never_captures_model_output(self):
+        from connectors import dossier as cdossier
+
+        secret = "PRIVATE_DOSSIER_MODEL_OUTPUT"
+        self.write_ledger(kristine_ledger())
+        client = FakeGmailClient(thread_bodies=kristine_bodies())
+
+        def leaking_error(_prompt, _model):
+            raise ValueError(secret)
+
+        summary = cdossier.run_dossier_pass(
+            self.connector,
+            client=client,
+            model="fake-model",
+            ai_caller=leaking_error,
+        )
+        captured_report = json.dumps(summary, sort_keys=True)
+        self.assertEqual(len(summary["errors"]), 1)
+        self.assertNotIn(secret, captured_report)
+        self.assertNotIn(KRIS, summary["errors"][0])
+        self.assertIn("failure=ValueError", summary["errors"][0])
+
     def test_body_cache_hit_avoids_refetch(self):
         entries = kristine_ledger()
         self.write_ledger(entries)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -120,6 +121,50 @@ def tree_digest(root: Path) -> dict[str, str]:
         if path.is_file() and "__pycache__" not in path.parts:
             result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
+
+
+# AST-precise companion to the runtime guard below. A bare text/regex search
+# for ".open(" cannot tell a genuine Path-like filesystem open from an
+# unrelated method that happens to share the name (e.g. urllib's
+# OpenerDirector.open(request) for an HTTP call) — same-named-method
+# collision, not a vault-authority bypass. This mirrors the AST idiom
+# test_v120_source_view.py already uses to find its own authoritative
+# os.open() call: walk real Call nodes instead of matching text, and only
+# trust a receiver as path-like when it's a plain reference (a Name,
+# Attribute, or Subscript — how genuine vault path variables/constants are
+# always used: ``some_path.open()``, ``ANSWERS_DIR.write_text(...)``) or a
+# call to a recognized Path constructor. A call to anything else (a plain
+# function/helper call, e.g. ``_local_opener()``) is treated as an opaque,
+# non-filesystem receiver and is not flagged. Enforcement scope is
+# unchanged — still only .open(/.write_text(/.write_bytes( method calls,
+# still every system/*.py file outside the same three exempt modules.
+_PATH_CONSTRUCTOR_NAMES = {"Path", "PurePath", "PosixPath", "WindowsPath", "VaultPath"}
+
+
+def _is_path_like_receiver(node: ast.AST) -> bool:
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id in _PATH_CONSTRUCTOR_NAMES
+        if isinstance(func, ast.Attribute):
+            return func.attr in _PATH_CONSTRUCTOR_NAMES
+        return False
+    return True
+
+
+def has_direct_filesystem_call(text: str) -> bool:
+    """True if ``text`` contains a genuine Path-like .open/.write_text/.write_bytes call."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"write_text", "write_bytes", "open"}
+        and _is_path_like_receiver(node.func.value)
+        for node in ast.walk(tree)
+    )
 
 
 class VaultContractTests(unittest.TestCase):
@@ -402,8 +447,15 @@ class VaultContractTests(unittest.TestCase):
             # don't care which way the fd points), so runtime modules must
             # route reads through vault_paths.py's open_vault_fd /
             # read_vault_bytes / read_vault_text too, not just writes.
-            if path.name not in {"lifehug_core.py", "update.py", "vault_paths.py"} and re.search(
-                r"\.(?:write_text|write_bytes|open)\(", text
+            # AST-precise (not a blunt text/regex match, see
+            # has_direct_filesystem_call above): a same-named, non-Path
+            # ``.open(`` — e.g. urllib's OpenerDirector.open(request) for
+            # an HTTP call in ai_provider.py — is a checker-precision false
+            # positive, not a vault-authority bypass, and must not trip
+            # this guard; enforcement scope (which files, which method
+            # names) is unchanged.
+            if path.name not in {"lifehug_core.py", "update.py", "vault_paths.py"} and (
+                has_direct_filesystem_call(text)
             ):
                 direct_writers.append(relative)
             if path.name != "update.py" and re.search(
@@ -418,6 +470,35 @@ class VaultContractTests(unittest.TestCase):
             "vault reads and writes must use the no-follow I/O authority (vault_paths.py)",
         )
         self.assertEqual(authority_escapes, [], "runtime paths must preserve VaultPath authority")
+
+    def test_direct_filesystem_call_detector_stays_sensitive_after_the_precision_fix(self):
+        """Negative proof for has_direct_filesystem_call's AST precision fix.
+
+        The runtime guard above must not get quieter without proof it still
+        bites: a genuine inline re-introduction of a hand-rolled Path open —
+        the exact class of defect this guard exists to catch — must still
+        trip the detector, on synthetic source text so this never touches a
+        real file under system/.
+        """
+        genuine_reintroductions = (
+            'x = Path("state/answers/A1.md").open("w")\n',
+            'x = pathlib.Path(vault_root).write_text("data")\n',
+            "some_vault_path.write_bytes(payload)\n",
+            "ANSWERS_DIR.open('r')\n",
+        )
+        for source in genuine_reintroductions:
+            with self.subTest(source=source):
+                self.assertTrue(
+                    has_direct_filesystem_call(source),
+                    "a genuine Path-like open/write must still trip the guard",
+                )
+        # The false positive this precision fix was made for: a same-named
+        # method on a plainly non-Path receiver (an HTTP opener call, not a
+        # filesystem path) must NOT trip the guard.
+        self.assertFalse(
+            has_direct_filesystem_call("x = _local_opener().open(request, timeout=timeout)\n"),
+            "a urllib OpenerDirector.open(...) call is not a filesystem bypass",
+        )
 
     def test_shell_entrypoints_validate_the_selected_root_before_cd_or_write(self):
         target = make_vault(self.tmp / "shell-target")

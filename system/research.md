@@ -3,6 +3,19 @@
 **Original research:** 2026-02-25 (StoryCorps, ghostwriting frameworks, memoir structure)
 **Deep-research revision:** 2026-07-04 — verified against primary sources (McAdams, Pennebaker, Frattaroli meta-analysis, Aron, Bridges, Birren, Belli, Tversky & Marsh, Cochrane reviews) plus competitor post-mortems (StoryWorth, Remento, HereAfter AI). Implementation status is tagged per section: **[shipped]**, or the wave that lands it (v70–v73, issues lifehug/lifehug#27–#30).
 
+**AI privacy boundary (v123):** every model-backed research, learning, compile,
+Mirror, and artifact step uses `system/ai_provider.py`. A configured local
+OpenAI-compatible route is loopback-only and fail-closed by default: when it
+is invalid or absent, work remains durable and moves to the existing agent-task
+path rather than sending source material to a cloud fallback. Provider logs are
+metadata-only; prompts, source bodies, responses, and secrets are never logged.
+Local and OpenClaw loopback transports bypass proxy environment variables and
+reject redirects, so the validated boundary also holds at request time. Chat
+and readiness responses are size-bounded, configuration decode failures fail
+closed, malformed/unknown routing syntax cannot collapse into auto routing,
+structured model fields are normalized before persistence, and operational
+errors retain bounded metadata only.
+
 ---
 
 ## 1. Question Design — the essentials (read first; this section feeds AI prompts)

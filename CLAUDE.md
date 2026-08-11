@@ -216,7 +216,7 @@ python3 system/lifehug.py focus-new "<label>" --type <type> --tier <tier> \
     --objective "<objective>" --deliverable <book|chapter|essay|letter|post>
 ```
 
-`focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates + promotes ~8–12 starter questions (uses the OpenClaw gateway when running — no key needed — or `ANTHROPIC_API_KEY` as fallback; without either, the Focus is still created and it prints how to seed later). It never touches existing answers. Then show `python3 system/lifehug.py progress`.
+`focus-new` scaffolds a new question-bank category, registers the Focus, and auto-generates + promotes ~8–12 starter questions (using the shared AI provider: direct local model, OpenClaw, explicit Kimi/Anthropic, or keyless agent-task mode). Without an unattended provider, the Focus is still created and it prints how to seed later. It never touches existing answers. Then show `python3 system/lifehug.py progress`.
 
 **Healing a zombie Focus.** A Focus registered on the roadmap with NO question
 category can never be asked about — `doctor`, `planner-report`, and `progress`
@@ -740,7 +740,7 @@ Offer to draft these when a Focus has enough material (5+ answers).
 
 ## Pieces (artifact.py)
 
-`system/artifact.py` produces occasion-driven artifacts (letters, tweets, IG posts, posts, chapter drafts) from accumulated Lifehug material. The script does NOT call AI itself — it creates a context pack and prompt, you or the OpenClaw agent write the artifact, then the script saves the result with version tracking and can promote the final work into `sources/artifacts/`.
+`system/artifact.py` produces occasion-driven artifacts (letters, tweets, IG posts, posts, chapter drafts) from accumulated Lifehug material. Initial drafting creates a context pack and prompt for you or an agent; `artifact revise --feedback` uses the shared AI provider when unattended revision is requested. The script saves results with version tracking and can promote final work into `sources/artifacts/`.
 
 Use this for milestones and deliverables: Mother's Day letters, anniversary notes, birthday posts, chapter drafts, speeches, and publishable reflections.
 
@@ -1135,12 +1135,32 @@ channel: "telegram"
 
 Optional AI-call tuning (v85): `ai_timeout_seconds` (default 600; env override
 `LIFEHUG_AI_TIMEOUT`) bounds each gateway/SDK call, and `classify_model` /
-`research_model` override the classifier/expander model defaults. `call_ai`
-routes OpenClaw gateway → retries transient failures 3x → falls through to the
-Anthropic SDK when a key is available (the gateway's deterministic
-"couldn't generate" rejection, issue #34, skips retries and falls through
-immediately). The Anthropic SDK is optional: when it is not importable,
-`ai-status` reports keyless and the agent-task paths remain available.
+`research_model` override the classifier/expander model defaults.
+
+Direct on-machine AI (v123): put `ai_provider: local`,
+`local_ai_base_url`, `local_ai_model`, and `local_ai_timeout_seconds` in
+gitignored `config.yaml`. The shared `system/ai_provider.py` route powers
+compile, classification, research, rosters, the Mirror, artifact revision,
+connector dossiers, and future web acknowledgments. Ollama, LM Studio,
+llama.cpp, and equivalent OpenAI-compatible servers work through
+`/v1/chat/completions`; `ai-status` probes `/v1/models` without generating
+content. Loopback is mandatory unless `local_ai_allow_non_loopback: true` is
+deliberately set. Local and OpenClaw loopback transports ignore HTTP(S) proxy
+environment variables and refuse redirects, so a validated loopback destination
+cannot change after the check. The local route is exclusive and fail-closed: an invalid or offline
+server returns the Loop to agent-task mode and never sends the prompt to
+OpenClaw, Kimi, or Anthropic. Without local configuration, backward-
+compatible auto routing remains OpenClaw → Anthropic; a Kimi model name is
+still an explicit Kimi choice. `ai_provider: openclaw|kimi|anthropic` makes
+any of those alternatives deliberate and exclusive. The Anthropic SDK remains
+optional: if it is not installed, `ai-status` reports not ready and the
+agent-task paths remain available without terminating the process. Configuration
+load failures are invalid rather than silently resetting provider choice; chat
+and readiness responses are size-bounded, and errors expose bounded provider /
+operation / failure-class metadata only. AI-routing entries are validated using
+the documented flat `key: value` syntax, so malformed or unknown routing keys
+cannot disappear into automatic cloud selection. Structured question fields
+are schema-normalized before maintenance writes anything.
 
 ---
 
@@ -1248,7 +1268,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 
 ## Weekly and Monthly Rhythms
 
-**Any machine can run these (v92).** Check `python3 system/lifehug.py ai-status` first: exit 0 means an AI route exists (OpenClaw gateway or API key) and the scripts run fully unattended; exit 1 means keyless — follow the **maintenance** skill (`skills/maintenance/SKILL.md`): you act as the model, pre-completing the AI work through the `--emit-prompts` / `--emit-task` / `--from-response` agent paths BEFORE the run (classify first so the planner queue sees the week's classifications). A keyless scheduled run doesn't fail its AI steps — it emits them as tasks to `state/agent_tasks/` (gitignored, transient) for the agent to complete afterwards.
+**Any machine can run these (v92/v123).** Check `python3 system/lifehug.py ai-status` first: it reports provider, model, and non-mutating readiness. Exit 0 means the selected direct local model, OpenClaw gateway, or keyed provider is ready and scripts run fully unattended; exit 1 means keyless/agent-task mode — follow the **maintenance** skill (`skills/maintenance/SKILL.md`): you act as the model, pre-completing the AI work through the `--emit-prompts` / `--emit-task` / `--from-response` agent paths BEFORE the run (classify first so the planner queue sees the week's classifications). A keyless scheduled run doesn't fail its AI steps — it emits them as tasks to `state/agent_tasks/` (gitignored, transient) for the agent to complete afterwards.
 
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
@@ -1313,7 +1333,7 @@ If the user wants to rollback: `python3 system/update.py --rollback`
 Lifehug tracks its version in `system/version.json`. Framework files (listed there) are maintained by the Lifehug project and can be updated automatically. User data files are never touched by updates:
 
 **Framework files** (updated automatically):
-- `CLAUDE.md`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+- `CLAUDE.md`, `system/ai_provider.py`, `system/ask.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 

@@ -35,6 +35,7 @@ from pathlib import Path
 SYSTEM_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SYSTEM_DIR))
 
+from ai_provider import failure_metadata
 from lifehug_core import (
     ANSWERS_DIR,
     ENTITY_ROSTERS_DIR,
@@ -718,7 +719,8 @@ def main() -> int:
         print(f"✓ {t} roster written: {len(ents)} entities, {elig} page-eligible{extra} → {roster_file(t).name}")
         return 0
 
-    from research_expand import DEFAULT_MODEL, call_ai, parse_ai_json
+    from ai_provider import call_ai
+    from research_expand import DEFAULT_MODEL, parse_ai_json
     preserved = 0
     failure_reason = None
     try:
@@ -732,10 +734,11 @@ def main() -> int:
             ents, preserved = carry_forward_objects(ents, previous_roster)
         source = "AI"
     except Exception as exc:  # noqa: BLE001
-        print(f"  ⚠ AI resolution unavailable ({exc}); using deterministic fallback")
+        safe_failure = failure_metadata("entity-roster", exc, provider="ai")
+        print(f"  ⚠ AI resolution unavailable ({safe_failure}); using deterministic fallback")
         ents = deterministic(t, candidates, focus_map, min_score, min_answers, previous_roster)
         source = "deterministic"
-        failure_reason = str(exc)
+        failure_reason = safe_failure
 
     ents, was_preserved = preserve_existing_object_roster(t, ents, previous_roster, args.force_empty)
     if was_preserved:
