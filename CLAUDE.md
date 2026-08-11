@@ -1002,6 +1002,24 @@ the edition plus the raw signals browsable underneath; the home page's
 "worth sitting with" card draws from the edition's Sit-with picks (falling
 back to a deterministic daily pick over the raw signals).
 
+### Reading source bodies (v120)
+
+The owner can open an immutable raw answer or source directly from **Source
+Integrity**, then move between the rendered body and its reflection /
+correction / retraction actions. Source GETs are display-only: they never lint,
+repair, compile, or write state. The route remains owner-private even if the
+viewer is bound broadly — both the peer and Host must be loopback — and sends
+`Cache-Control: no-store`.
+
+The security boundary is `state/source_manifest.json`: only an exact manifested
+Markdown path under `answers/` or `sources/` is eligible. The canonical reader
+rejects absolute and normalized paths, traversal (including encoded forms),
+NULs, directories, untracked files, and every symlink component. It walks and
+reads through no-follow file descriptors so validation is not followed by an
+unsafe reopen. Connector source families need no parallel route allowlist: once
+the source-integrity pipeline manifests their file under `sources/`, the same
+reader covers them.
+
 ## Nomenclature: the Life Graph
 
 The private wiki is a **graph of the author's life**. Standard terms:
