@@ -215,7 +215,13 @@ class SourceViewTests(unittest.TestCase):
         source = Path(serve_wiki.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
         manifest_callers = set()
-        fd_openers = set()
+        # The behavior this guards is a single authoritative opener for raw
+        # source bodies. The no-follow fd walk itself now lives in
+        # vault_paths.py (lifehug#recurring-defect-doctrine: one importable
+        # no-follow I/O module, not a second hand-rolled implementation
+        # here) — so the guard tracks calls to its open_vault_fd /
+        # read_vault_bytes entry points instead of a raw os.open call.
+        vault_io_callers = set()
         body_read_callers = set()
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -224,10 +230,9 @@ class SourceViewTests(unittest.TestCase):
                 if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
                         and child.func.id == "_manifest_source_record"):
                     manifest_callers.add(node.name)
-                if (isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
-                        and isinstance(child.func.value, ast.Name)
-                        and child.func.value.id == "os" and child.func.attr == "open"):
-                    fd_openers.add(node.name)
+                if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                        and child.func.id in {"open_vault_fd", "read_vault_bytes"}):
+                    vault_io_callers.add(node.name)
                 if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
                         and child.func.id == "read_source_ref"
                         and any(keyword.arg == "include_body"
@@ -236,7 +241,7 @@ class SourceViewTests(unittest.TestCase):
                                 for keyword in child.keywords)):
                     body_read_callers.add(node.name)
         self.assertEqual(manifest_callers, {"read_source_ref"})
-        self.assertEqual(fd_openers, {"read_source_ref"})
+        self.assertEqual(vault_io_callers, {"read_source_ref"})
         self.assertEqual(body_read_callers, {"source_document_html"})
         self.assertNotIn("def resolve_source_ref", source,
                          "do not reintroduce validate-then-reopen source resolvers")

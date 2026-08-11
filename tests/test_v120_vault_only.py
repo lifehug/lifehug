@@ -396,6 +396,12 @@ class VaultContractTests(unittest.TestCase):
                     text,
                 ):
                     offenders.append(relative)
+            # Despite the name, this also catches direct *reads*: a bare
+            # `.open(` bypasses the no-follow authority exactly as much when
+            # opening for read as it does for write (symlink/TOCTOU attacks
+            # don't care which way the fd points), so runtime modules must
+            # route reads through vault_paths.py's open_vault_fd /
+            # read_vault_bytes / read_vault_text too, not just writes.
             if path.name not in {"lifehug_core.py", "update.py", "vault_paths.py"} and re.search(
                 r"\.(?:write_text|write_bytes|open)\(", text
             ):
@@ -407,7 +413,10 @@ class VaultContractTests(unittest.TestCase):
                 authority_escapes.append(relative)
         self.assertEqual(hosted_readers, [], "hosted marker must not affect OSS runtime")
         self.assertEqual(offenders, [], "runtime modules must import the vault authority")
-        self.assertEqual(direct_writers, [], "vault writes must use the no-follow I/O authority")
+        self.assertEqual(
+            direct_writers, [],
+            "vault reads and writes must use the no-follow I/O authority (vault_paths.py)",
+        )
         self.assertEqual(authority_escapes, [], "runtime paths must preserve VaultPath authority")
 
     def test_shell_entrypoints_validate_the_selected_root_before_cd_or_write(self):

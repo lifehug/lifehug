@@ -15,7 +15,6 @@ import os
 import re
 import secrets
 import socket
-import stat
 import subprocess
 import sys
 import time
@@ -56,6 +55,7 @@ from question_candidates import AUTO_PROMOTE_THRESHOLD, check_quality, _infer_ca
 from progress import verdict
 from recommend_focuses import FOCUS_READY_SCORE_FLOOR, focus_start_gate
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
+from vault_paths import open_vault_fd, read_vault_bytes
 
 VIEWER_LOG = logging.getLogger("lifehug.viewer")
 
@@ -1616,15 +1616,17 @@ def _manifest_source_record(ref: str) -> dict | None:
 
 
 def read_source_ref(ref: str, *, include_body: bool = False) -> SourceBodyRead | None:
-    """Validate and read one exact manifested source through no-follow fds.
+    """Validate and read one exact manifested source through the vault's
+    no-follow I/O authority (vault_paths.open_vault_fd / read_vault_bytes).
 
     Deliberately reject normalization instead of repairing a request: absolute
     paths, dot segments, duplicate separators, encoded leftovers, backslashes,
     NULs, non-Markdown targets, directories, untracked files, and symlinks at
-    any level fail closed. Directory descriptors pin the walked tree and the
-    final regular-file descriptor supplies the bytes, closing the validate /
-    reopen race. This is the only raw source-body reader; route and link code
-    must not resolve or open a source path itself.
+    any level fail closed. vault_paths pins a no-follow directory-descriptor
+    walk from the answers/sources root to the final regular-file descriptor
+    and re-verifies the parent binding before the final open, closing the
+    validate / reopen race. This is the only raw source-body reader; route
+    and link code must not resolve or open a source path itself.
     """
     if not isinstance(ref, str):
         return None
@@ -1653,42 +1655,18 @@ def read_source_ref(ref: str, *, include_body: bool = False) -> SourceBodyRead |
     if record is None:
         return None
 
-    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    directory_fds: list[int] = []
-    file_fd: int | None = None
+    tail_path = Path(*tail)
     try:
-        current_fd = os.open(root, directory_flags)
-        directory_fds.append(current_fd)
-        if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
-            return None
-        for part in tail[:-1]:
-            current_fd = os.open(part, directory_flags, dir_fd=current_fd)
-            directory_fds.append(current_fd)
-            if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
-                return None
-        file_fd = os.open(tail[-1], file_flags, dir_fd=current_fd)
-        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
-            return None
-        text: str | None = None
         if include_body:
-            chunks: list[bytes] = []
-            while True:
-                chunk = os.read(file_fd, 1024 * 1024)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            text = b"".join(chunks).decode("utf-8", "replace")
-        return SourceBodyRead(raw, text, dict(record))
-    except (OSError, TypeError, ValueError):
+            content = read_vault_bytes(tail_path, vault_root=root)
+        else:
+            fd = open_vault_fd(tail_path, os.O_RDONLY, vault_root=root)
+            os.close(fd)
+            content = None
+    except (FileNotFoundError, ValueError, OSError, TypeError):
         return None
-    finally:
-        if file_fd is not None:
-            with contextlib.suppress(OSError):
-                os.close(file_fd)
-        for fd in reversed(directory_fds):
-            with contextlib.suppress(OSError):
-                os.close(fd)
+    text = content.decode("utf-8", "replace") if content is not None else None
+    return SourceBodyRead(raw, text, dict(record))
 
 
 def source_href(ref: str) -> str | None:
