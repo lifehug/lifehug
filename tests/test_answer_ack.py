@@ -2,6 +2,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -128,58 +129,151 @@ class FollowupFramingConstantsTests(unittest.TestCase):
         self.assertIn("FOLLOWUP_FOOTER", script)
 
 
-class LocalAckSendTests(unittest.TestCase):
+class AnswerAcknowledgmentDeliveryTests(unittest.TestCase):
+    """Ported guarantees from the retired inline #107 LocalAckSendTests.
+
+    #107's ``maybe_send_answer_ack``/``generate_answer_ack_text``/
+    ``build_answer_ack_payload`` (in ``process_answer.py``) are superseded by
+    #67's ``answer_ack_delivery.acknowledge_answer`` — an independently
+    converged, more complete implementation (durable idempotent state,
+    confirmed/ambiguous retry, dual-commit delivery boundary). See the
+    superseding commit message for the full rationale and exactly which
+    #107 assertions were purely implementation-specific and dropped versus
+    ported here. This class exercises the surviving implementation directly
+    through plain imports (matching how ``process_answer.py``'s
+    ``from answer_ack_delivery import acknowledge_answer`` resolves), not the
+    ``load_process_answer()``/``load_answer_ack()`` fresh-module helpers used
+    above — those helpers create module instances outside ``sys.modules``,
+    which would make ``mock.patch.object`` here invisible to the real
+    call sites under test.
+    """
+
     def setUp(self):
-        self.mod = load_process_answer()
+        import answer_ack_delivery
+        import process_answer
 
-    def test_ack_skips_model_call_without_telegram_target(self):
-        question = {"id": "A3", "text": PAYLOAD["question_text"], "category": "A"}
-        with (
-            mock.patch.object(self.mod, "resolve_telegram_target", return_value=("", "")),
-            mock.patch.object(self.mod, "generate_answer_ack_text") as generate,
+        self.delivery = answer_ack_delivery
+        self.process_answer = process_answer
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.state_path = Path(tmp.name) / "answer_acknowledgments.json"
+
+    def test_ack_is_best_effort_and_never_confirmed_without_a_telegram_target(self):
+        """Ported from test_ack_skips_model_call_without_telegram_target.
+
+        #107 checked ``resolve_telegram_target()`` before generating, so a
+        missing telegram target skipped the model call entirely. #67 checks
+        AI-provider readiness first instead (the more central real-world
+        gate — keyless/agent-task mode — and, since #61, generation may
+        route through a free local provider, so the cost concern behind
+        #107's ordering is much smaller). The model CAN now be called before
+        the missing-telegram-target is discovered; that is an intentional,
+        disclosed change, not a silent regression (see the superseding
+        commit message). The guarantee that matters and does survive: the
+        answer is never blocked and the outcome is honestly reported as not
+        delivered — exercised here through the same ``telegram_send`` hook
+        ``lifehug_core.send_telegram_result`` itself uses to report a
+        missing target, so the assertion reflects the real "no telegram
+        configured" outcome rather than a synthetic stand-in.
+        """
+        missing_target = self.delivery.TelegramSendResult(
+            "not_attempted", "telegram_credentials_missing", 0, 1
+        )
+        outcome = self.delivery.acknowledge_answer(
+            source_id="answer:A3",
+            question_id="A3",
+            question_text=PAYLOAD["question_text"],
+            question_category="A",
+            answer_text=PAYLOAD["answer_text"],
+            followup_pending=False,
+            state_path=self.state_path,
+            status_resolver=lambda *_a, **_k: mock.Mock(ready=True, provider="local-openai"),
+            ai_call=lambda _prompt, _model: "Warm acknowledgment.",
+            telegram_send=lambda _message: missing_target,
+        )
+
+        self.assertNotEqual(outcome.status, self.delivery.STATUS_CONFIRMED)
+        self.assertEqual(outcome.reason, "telegram_credentials_missing")
+
+    def test_ack_generates_and_sends_using_the_canonical_payload(self):
+        """Ported from test_ack_generates_and_sends_before_followup_surface.
+
+        Same guarantee (correct payload fields reach generation; a
+        successful send is reported as delivered), rewritten against
+        ``acknowledge_answer``'s dependency-injected hooks instead of
+        ``process_answer``'s now-retired module-level mocks.
+        """
+        seen: dict = {}
+
+        def ai_call(prompt, model):
+            seen["prompt"] = prompt
+            seen["model"] = model
+            return "Warm acknowledgment."
+
+        with mock.patch.object(
+            self.delivery, "load_config", return_value={"answer_ack_model": "ack-model"}
         ):
-            sent = self.mod.maybe_send_answer_ack(
-                question,
-                {"A": {"name": "Origins"}},
-                PAYLOAD["answer_text"],
-                followup_pending=False,
-            )
-
-        self.assertFalse(sent)
-        generate.assert_not_called()
-
-    def test_ack_generates_and_sends_before_followup_surface(self):
-        question = {"id": "A3", "text": PAYLOAD["question_text"], "category": "A"}
-        with (
-            mock.patch.object(self.mod, "resolve_telegram_target", return_value=("token", "chat")),
-            mock.patch.object(self.mod, "load_config", return_value={"answer_ack_model": "ack-model"}),
-            mock.patch.object(
-                self.mod,
-                "generate_answer_ack_text",
-                return_value="Warm acknowledgment.",
-            ) as generate,
-            mock.patch.object(self.mod, "send_telegram", return_value=True) as send,
-        ):
-            sent = self.mod.maybe_send_answer_ack(
-                question,
-                {"A": {"name": "Origins"}},
-                PAYLOAD["answer_text"],
+            outcome = self.delivery.acknowledge_answer(
+                source_id="answer:A3",
+                question_id="A3",
+                question_text=PAYLOAD["question_text"],
+                question_category="A",
+                answer_text=PAYLOAD["answer_text"],
                 followup_pending=True,
+                state_path=self.state_path,
+                status_resolver=lambda *_a, **_k: mock.Mock(ready=True, provider="local-openai"),
+                ai_call=ai_call,
+                telegram_send=lambda _message: self.delivery.TelegramSendResult(
+                    "confirmed", "telegram_confirmed", 1, 1
+                ),
             )
 
-        self.assertTrue(sent)
-        payload, model = generate.call_args.args
-        self.assertEqual(model, "ack-model")
-        self.assertEqual(payload["question_id"], "A3")
-        self.assertEqual(payload["answer_text"], PAYLOAD["answer_text"])
-        self.assertTrue(payload["followup_pending"])
-        send.assert_called_once_with("Warm acknowledgment.")
+        self.assertEqual(outcome.status, self.delivery.STATUS_CONFIRMED)
+        self.assertEqual(seen["model"], "ack-model")
+        expected_prompt = self.delivery.build_prompt({
+            "question_id": "A3",
+            "question_text": PAYLOAD["question_text"],
+            "question_category": "A",
+            "answer_text": PAYLOAD["answer_text"],
+            "followup_pending": True,
+        })
+        self.assertEqual(seen["prompt"], expected_prompt)
 
     def test_process_answer_calls_ack_before_adaptive_followup(self):
-        script = (SYSTEM / "process_answer.py").read_text(encoding="utf-8")
-        ack = script.index("maybe_send_answer_ack(\n            question")
-        followup = script.index("maybe_send_followup_question(question_id, followup_plan=followup_plan)")
-        self.assertLess(ack, followup)
+        """Ported from the same-named #107 test.
+
+        #107 asserted call order via a literal source-text index
+        (``script.index("maybe_send_answer_ack(...")``) — purely
+        implementation-specific and dropped, since neither that function
+        name nor that literal call-site text exists after the swap. The
+        ORDERING GUARANTEE itself (ack attempted, then follow-up sent) is
+        ported here as a real behavioral assertion against
+        ``run_post_answer_delivery``, and is also covered end-to-end by
+        tests/test_v121_answer_ack_delivery.py's OrderingTests.
+        """
+        events = []
+        with (
+            mock.patch.object(self.process_answer, "plan_adaptive_followup",
+                               return_value={"id": "B1", "category": "B", "text": "next?"}),
+            mock.patch.object(self.delivery, "acknowledge_answer",
+                               side_effect=lambda **_k: (
+                                   events.append("ack"),
+                                   self.delivery.AcknowledgmentOutcome(
+                                       "answer:A3", "confirmed", "telegram_confirmed", True
+                                   ),
+                               )[1]),
+            mock.patch.object(self.process_answer, "maybe_send_followup_question",
+                               side_effect=lambda *_a: events.append("followup")),
+        ):
+            self.process_answer.run_post_answer_delivery(
+                source_id="answer:A3",
+                question_id="A3",
+                question_text=PAYLOAD["question_text"],
+                question_category="A",
+                answer_text=PAYLOAD["answer_text"],
+            )
+
+        self.assertEqual(events, ["ack", "followup"])
 
 
 if __name__ == "__main__":
