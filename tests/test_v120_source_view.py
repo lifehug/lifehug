@@ -292,11 +292,17 @@ class SourceViewHttpTests(SourceViewTests):
                 self.assertIn("Source unavailable", body)
 
     def test_raw_source_get_requires_loopback_host(self):
+        # A spoofed Host authority is now rejected by do_GET's own
+        # peer/Host boundary check (lifehug#109) before the request ever
+        # reaches the /source/ route's narrower _source_get_allowed()
+        # check, so the response is the general owner-boundary rejection
+        # rather than the route-specific "only on this device" message —
+        # the 403 + no-store guarantee this test cares about still holds.
         status, headers, body = self._get(
             "/source/answers/A1.md", host="127.0.0.1.evil.example")
         self.assertEqual(status, 403)
         self.assertEqual(headers.get("Cache-Control"), "no-store")
-        self.assertIn("only on this device", body)
+        self.assertIn("Forbidden", body)
 
 
 if __name__ == "__main__":
