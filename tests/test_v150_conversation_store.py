@@ -545,15 +545,25 @@ class LintTests(unittest.TestCase):
 
 
 class NoBehaviorChangeGuardTests(unittest.TestCase):
-    """Subtest 6: no module under system/ other than lifehug.py and the two
-    new modules references a `conversation` import — proves this PR is
-    reachable only through the new conversation-* subcommands and direct
-    imports of the new modules themselves.
+    """Subtest 6: the conversation store/lints have exactly ONE live consumer.
+
+    v150 (issue #115) shipped this module pair as infrastructure with no
+    consumer at all. v153 (issue #116) gave it exactly one:
+    ``conversation_delivery`` — the turn engine — which ``process_answer``
+    reaches lazily. The guard's purpose is unchanged: keep the store and the
+    lint engine from acquiring ad-hoc callers that would fork the assembly
+    order or the lint list. Any NEW name appearing here is a review question,
+    not a test to relax.
     """
 
     def test_no_other_module_imports_conversation_or_conversation_lints(self):
         pattern = re.compile(r'^\s*(?:from|import)\s+conversation(?:_lints)?\b', re.MULTILINE)
-        exempt = {"lifehug.py", "conversation.py", "conversation_lints.py"}
+        exempt = {
+            "lifehug.py",
+            "conversation.py",
+            "conversation_lints.py",
+            "conversation_delivery.py",  # v153: the one sanctioned consumer
+        }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):
             if path.name in exempt:

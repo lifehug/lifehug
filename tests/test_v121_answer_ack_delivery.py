@@ -14,8 +14,11 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import root_parent_tmp  # noqa: E402
 import answer_ack  # noqa: E402
+import conversation_delivery as turn_engine  # noqa: E402
 import answer_ack_delivery as delivery  # noqa: E402
 import lifehug_core as core  # noqa: E402
 import process_answer  # noqa: E402
@@ -170,6 +173,34 @@ class DeliveryContractTests(unittest.TestCase):
 
 
 class OrderingTests(unittest.TestCase):
+    """The post-answer ordering contract, now via the v153 turn engine.
+
+    Issue #116 replaced the ack + separate-follow-up pair with ONE
+    conversation turn that degrades to exactly this pair when no provider is
+    seated — which is the case in these tests. The assertions below are
+    therefore unchanged; only the isolation is new: the engine writes a
+    session document and a delivery ledger, so both are pointed at a
+    synthetic vault (never the developer's real one, never ~/Workspace/dave).
+    """
+
+    def setUp(self):
+        # ROOT.parent, never tempfile's default: on macOS /var is a symlink
+        # and vault_paths refuses to traverse symlinks (tests/tempdirs.py).
+        vault = root_parent_tmp(self, ROOT, prefix="lifehug-v153-ordering-") / "vault"
+        vault.mkdir()
+        for patch in (
+            mock.patch.object(turn_engine, "VAULT_ROOT", vault),
+            mock.patch.object(
+                turn_engine, "DELIVERY_STATE_FILE", vault / "state" / "conversation_deliveries.json"
+            ),
+            # The engine keeps its own diagnostic channel; without this the
+            # synthetic failures below would append to the real vault's
+            # learning-failures log.
+            mock.patch.object(turn_engine, "record_learning_failure"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_commit_then_ack_then_followup_exact_order(self):
         events = []
         followup = {"id": "B1", "category": "B", "text": "What came next?"}
@@ -261,6 +292,21 @@ class OrderingTests(unittest.TestCase):
 
 
 class ProcessAnswerIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        vault = root_parent_tmp(self, ROOT, prefix="lifehug-v153-integration-") / "vault"
+        vault.mkdir()
+        for patch in (
+            mock.patch.object(turn_engine, "VAULT_ROOT", vault),
+            mock.patch.object(
+                turn_engine,
+                "DELIVERY_STATE_FILE",
+                vault / "state" / "conversation_deliveries.json",
+            ),
+            mock.patch.object(turn_engine, "record_learning_failure"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_main_has_durable_file_and_first_commit_before_acknowledgment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

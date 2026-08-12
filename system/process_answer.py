@@ -414,10 +414,21 @@ def run_post_answer_delivery(
     question_category: str,
     answer_text: str,
 ):
-    """After durability: acknowledgment attempt, then adaptive follow-up.
+    """After durability: ONE conversation turn, or today's ack + follow-up.
 
-    Every acknowledgment failure is swallowed before the follow-up step.  No
-    diagnostic receives answer, prompt, or generated message text.
+    v153 (issue #116): the acknowledgment-then-separate-follow-up pair became
+    a single conversation turn — receipt, payout, and a cued follow-up in one
+    message, per ``interactions/conversation/prompt/behavior.md``. The
+    planning step is unchanged and still runs FIRST, because the turn engine
+    needs the cadence gates' verdict (curfew, 3/day cap, pass transition):
+    when planning returns None our question initiative is spent, and the turn
+    is question-free rather than skipped.
+
+    The engine degrades to today's exact behavior — ``acknowledge_answer``
+    then ``maybe_send_followup_question`` — on any definitive failure, so
+    this path is never silent and never worse than before. Every failure is
+    swallowed relative to answer durability, and no diagnostic receives
+    answer, prompt, or generated message text.
     """
     planned_question = None
     try:
@@ -430,6 +441,59 @@ def run_post_answer_delivery(
             context={"source_id": source_id},
         )
 
+    outcome = None
+    try:
+        from conversation_delivery import run_post_answer_turn  # noqa: PLC0415
+
+        outcome = run_post_answer_turn(
+            source_id=source_id,
+            question_id=question_id,
+            question_text=question_text,
+            question_category=question_category,
+            answer_text=answer_text,
+            planned_question=planned_question,
+        )
+        print(
+            f"✓ Conversation turn: {outcome.status} "
+            f"({outcome.reason}; {source_id})"
+        )
+    except Exception as exc:  # noqa: BLE001 — the turn is never capture
+        record_learning_failure(
+            "process_answer",
+            "conversation_turn",
+            type(exc).__name__,
+            context={"source_id": source_id},
+        )
+        print(f"  (conversation turn skipped: internal_error; {source_id})")
+        # The engine owns its own fallback; an exception BEFORE it could run
+        # leaves the user with nothing, so run today's behavior here.
+        _run_legacy_post_answer_delivery(
+            source_id=source_id,
+            question_id=question_id,
+            question_text=question_text,
+            question_category=question_category,
+            answer_text=answer_text,
+            planned_question=planned_question,
+        )
+    return outcome
+
+
+def _run_legacy_post_answer_delivery(
+    *,
+    source_id: str,
+    question_id: str,
+    question_text: str,
+    question_category: str,
+    answer_text: str,
+    planned_question,
+):
+    """Pre-v153 behavior: warm acknowledgment, then the separate follow-up.
+
+    Kept as a named function (not dead code): it is the last-resort path when
+    the turn engine cannot even be imported or raises before its own fallback
+    fires. ``answer_ack``'s "No questions back" rule is correct HERE — this
+    message is an acknowledgment, and the follow-up is a separate message.
+    """
     outcome = None
     try:
         from answer_ack_delivery import acknowledge_answer  # noqa: PLC0415

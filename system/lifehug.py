@@ -81,6 +81,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # store's own three mutators. No jobs.py command kind yet (Wave 2) — they
     # take the writer lock directly like the rest of this family.
     "conversation-close", "conversation-open", "conversation-record-turn",
+    # New in issue #116 (Wave 2 PR 3): the operator retry door for a turn
+    # whose send definitively failed. conversation-close is unchanged here —
+    # it was already classified; #116 only upgraded what it does.
+    "conversation-turn-retry",
     "correct-source", "entity-roster", "fix", "focus-add",
     "focus-approve", "focus-dismiss", "focus-finish", "focus-new", "focus-set",
     "ingest", "ingest-story", "mirror-compile", "perennial-add", "perennials",
@@ -831,12 +835,16 @@ def cmd_conversation_open(args: argparse.Namespace) -> int:
 
 
 def cmd_conversation_status(args: argparse.Namespace) -> int:
+    # v153 (issue #116): upgraded IN PLACE to the turn engine's status, which
+    # prints the same session summary PLUS the delivery ledger (mirrors
+    # answer-ack-status). conversation.py's own `status` stays available for
+    # store-only inspection.
     flags = ["status"]
     if args.session_id:
         flags.append(args.session_id)
     if args.full:
         flags.append("--full")
-    return run_python("conversation.py", flags)
+    return run_python("conversation_delivery.py", flags)
 
 
 def cmd_conversation_record_turn(args: argparse.Namespace) -> int:
@@ -851,7 +859,23 @@ def cmd_conversation_record_turn(args: argparse.Namespace) -> int:
 
 
 def cmd_conversation_close(args: argparse.Namespace) -> int:
-    return run_python("conversation.py", ["close", args.session_id, "--reason", args.reason])
+    # v153 (issue #116): the same subcommand now closes for real — closing
+    # takeaway when the session earned one, silence when it did not — and
+    # owns the --expired idle sweep that #119's jobs builder enqueues.
+    flags = ["close"]
+    if args.expired:
+        flags.append("--expired")
+    else:
+        flags.append(args.session_id)
+    flags += ["--reason", args.reason]
+    return run_python("conversation_delivery.py", flags)
+
+
+def cmd_conversation_turn_retry(args: argparse.Namespace) -> int:
+    flags = ["turn-retry", args.session_id, str(args.turn_index)]
+    if args.confirm_not_sent:
+        flags.append("--confirm-not-sent")
+    return run_python("conversation_delivery.py", flags)
 
 
 def cmd_conversation_turn_prompt(_args: argparse.Namespace) -> int:
@@ -1880,10 +1904,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--expected-turns", required=True, type=int)
     p.set_defaults(func=cmd_conversation_record_turn)
 
-    p = sub.add_parser("conversation-close", help="Store a conversation close only; takeaway on stdin optional")
-    p.add_argument("session_id")
-    p.add_argument("--reason", required=True, choices=["done", "idle_timeout", "exit_taken"])
+    p = sub.add_parser("conversation-close",
+                       help="Close one conversation session now, or sweep every idle-expired one")
+    p.add_argument("session_id", nargs="?")
+    p.add_argument("--expired", action="store_true",
+                   help="Close every session past its idle timeout (the sweep)")
+    p.add_argument("--reason", default="done", choices=["done", "idle_timeout", "exit_taken"])
     p.set_defaults(func=cmd_conversation_close)
+
+    p = sub.add_parser("conversation-turn-retry", help="Retry a definitively unsent conversation turn")
+    p.add_argument("session_id")
+    p.add_argument("turn_index", type=int)
+    p.add_argument("--confirm-not-sent", action="store_true",
+                   help="Retry an ambiguous send only after checking that Telegram did not receive it")
+    p.set_defaults(func=cmd_conversation_turn_retry)
 
     p = sub.add_parser("conversation-turn-prompt", help="stdin JSON -> the conversation turn prompt")
     p.set_defaults(func=cmd_conversation_turn_prompt)

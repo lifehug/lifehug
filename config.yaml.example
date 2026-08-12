@@ -15,8 +15,15 @@
 # --- AI models ---
 # Pass-transition question generation:
 followup_model: "anthropic/claude-opus-4-6"
-# Warm 2–4 sentence answer acknowledgment (shared provider; default Sonnet):
+# Warm 2–4 sentence answer acknowledgment — the FALLBACK path since v153
+# (shared provider; default Sonnet):
 # answer_ack_model: "claude-sonnet-5"
+# Conversation turns + closing takeaways (the seated voice; sonnet-class):
+# conversation_model: "claude-sonnet-5"
+# Conversation intent router (cheap, haiku-class):
+# router_model: "claude-haiku-4-5"
+# Weekly conversation arc planning (falls back to classify_model):
+# arc_plan_model: "claude-sonnet-5"
 # Research neighborhood expansion (self-knowledge, gaps, topics):
 # research_model: "claude-opus-4-20250514"
 # Story/source classification:
