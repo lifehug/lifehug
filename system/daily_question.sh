@@ -85,6 +85,10 @@ arc_card_text() {
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY RUN: would use configured Telegram delivery target"
+  # Day-rollover preview (design §D): one deterministic line, no mutation —
+  # mirrors the real pre-question step below (same --day-rollover flag),
+  # added with --dry-run so this preview stays a pure read.
+  python3 "$SCRIPT_DIR/lifehug.py" conversation-close --day-rollover --dry-run
   DRY_OUTPUT=$(python3 "$SCRIPT_DIR/ask.py" --dry-run)
   printf '%s\n' "$DRY_OUTPUT"
   DRY_QID=$(printf '%s\n' "$DRY_OUTPUT" | parse_question_id)
@@ -219,6 +223,26 @@ COMPILE_STATUS=$?
 set -e
 if [[ "$COMPILE_STATUS" -ne 0 ]]; then
   record_learning_failure "daily_question" "wiki_compile" "$COMPILE_STATUS" "$COMPILE_OUT"
+fi
+
+# Day-rollover pre-step (design §D, Chats-per-Focus, 2026-08-12): close
+# EVERY open conversation session — no idle filter, the day owns the
+# surface, not a timer — before minting today's question. Runs BEFORE the
+# pass-transition check and ask.py's pick so no session survives into a new
+# day's context. THE PLATFORM'S TRANSPORT SPEC: mirror this invocation
+# verbatim (same flag, same placement — after compile, before pick) in
+# workflow.py's delivery flow. Non-fatal, same idiom as the compile step
+# above: a rollover failure must never cost the author their daily question.
+set +e
+ROLLOVER_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" conversation-close --day-rollover 2>&1)
+ROLLOVER_STATUS=$?
+set -e
+if [[ "$ROLLOVER_STATUS" -ne 0 ]]; then
+  echo "warn: day-rollover close failed (continuing)" >&2
+  echo "$ROLLOVER_OUT" >&2
+  record_learning_failure "daily_question" "day_rollover_close" "$ROLLOVER_STATUS" "$ROLLOVER_OUT"
+else
+  echo "$ROLLOVER_OUT"
 fi
 
 AWAITING=$(python3 - <<'PY'

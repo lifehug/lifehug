@@ -1,7 +1,7 @@
 {
-  "version": 160,
+  "version": 161,
   "released": "2026-08-12",
-  "changelog": "v160: fix duplicate '\u2705 Filed' notice after conversation turns (issue #133) \u2014 file_answer_bg.sh's duplicate-notice suppression now recognizes the v153 turn-confirmed marker alongside the legacy acknowledgment marker.",
+  "changelog": "v161: day-rollover session close (issue #136, Chats-per-Focus design \u00a7D) \u2014 daily_question.sh gains a pre-question step closing every open conversation session (reason day_rollover, no idle filter) via the generalized conversation-close --day-rollover; the idle sweep (--expired) demotes to a mode-independent 36h janitor (knob.janitor_idle_hours); interaction.yaml's chat/conversation idle knobs raised to day-scale (1440 minutes).",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

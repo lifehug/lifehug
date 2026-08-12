@@ -442,7 +442,25 @@ class CloseTests(EngineTestCase):
         telegram = mock.Mock(side_effect=AssertionError("no-nag: nothing may be sent"))
         ai = mock.Mock(side_effect=AssertionError("no closing generation"))
 
-        later = datetime.now(timezone.utc) + timedelta(hours=5)
+        # Design §D (2026-08-12): the sweep is a 36h-class janitor now, not
+        # the old 120-minute chat knob — 5 hours idle must NOT trip it.
+        soon = datetime.now(timezone.utc) + timedelta(hours=5)
+        untouched = engine.close_expired_sessions(
+            now=soon,
+            vault_root=self.vault,
+            state_path=self.state_path,
+            scores_path=self.scores_path,
+            candidates_path=self.candidates_path,
+            ai_call=ai,
+            telegram_send=telegram,
+            status_resolver=ready_status,
+        )
+        self.assertEqual(untouched, [])
+        self.assertEqual(
+            conversation.load_session(session_id, vault_root=self.vault)["status"], "open",
+        )
+
+        later = datetime.now(timezone.utc) + timedelta(hours=37)
         outcomes = engine.close_expired_sessions(
             now=later,
             vault_root=self.vault,
@@ -594,16 +612,135 @@ class CloseTests(EngineTestCase):
         telegram.assert_not_called()
 
     def test_idle_timeout_knobs_come_from_interaction_yaml(self):
+        # Design §D (2026-08-12): raised to day-scale (1440 min-class) —
+        # day rollover + user transitions are the real lifecycle now, these
+        # are only a generous "still counts as current" continuation
+        # ceiling, not a UX trigger.
         manifest = engine._manifest()
         chat = {"mode": "chat", "session_id": "conv-20260811-120000-abcdef", "turns": []}
         talk = {"mode": "conversation", "session_id": "conv-20260811-120000-abcdef", "turns": []}
-        self.assertEqual(engine.idle_timeout_minutes(chat, manifest), 120)
-        self.assertEqual(engine.idle_timeout_minutes(talk, manifest), 30)
+        self.assertEqual(engine.idle_timeout_minutes(chat, manifest), 1440)
+        self.assertEqual(engine.idle_timeout_minutes(talk, manifest), 1440)
         opened = datetime(2026, 8, 11, 12, 0, 0, tzinfo=timezone.utc)
         self.assertFalse(engine.is_idle_expired(chat, manifest=manifest,
-                                                now=opened + timedelta(minutes=119)))
+                                                now=opened + timedelta(minutes=1439)))
         self.assertTrue(engine.is_idle_expired(chat, manifest=manifest,
-                                               now=opened + timedelta(minutes=121)))
+                                               now=opened + timedelta(minutes=1441)))
+
+    def test_janitor_knob_comes_from_interaction_yaml(self):
+        manifest = engine._manifest()
+        self.assertEqual(manifest.get("knob.janitor_idle_hours"), 36)
+        stale = {"mode": "chat", "session_id": "conv-20260811-120000-abcdef", "turns": []}
+        opened = datetime(2026, 8, 11, 12, 0, 0, tzinfo=timezone.utc)
+        self.assertFalse(engine.is_janitor_expired(stale, manifest=manifest,
+                                                    now=opened + timedelta(hours=35)))
+        self.assertTrue(engine.is_janitor_expired(stale, manifest=manifest,
+                                                   now=opened + timedelta(hours=37)))
+
+
+class DayRolloverTests(EngineTestCase):
+    """Design §D (Chats-per-Focus, 2026-08-12): day rollover closes EVERY
+    open session — no idle filter, the day owns the surface, not a timer."""
+
+    def test_closes_every_open_session_regardless_of_idle_age(self):
+        fresh_chat = conversation.open_session("chat", "telegram", vault_root=self.vault)
+        fresh_talk = conversation.open_session("conversation", "telegram", vault_root=self.vault)
+        already_closed = conversation.open_session(
+            "chat", "telegram", session_id="conv-20200101-000000-bbbbbb",
+            vault_root=self.vault,
+        )
+        conversation.close_session(already_closed["session_id"], {"reason": "done"},
+                                    vault_root=self.vault)
+
+        ids = engine.find_open_sessions(vault_root=self.vault)
+        self.assertEqual(set(ids), {fresh_chat["session_id"], fresh_talk["session_id"]})
+
+        telegram = mock.Mock(side_effect=AssertionError("no-nag: nothing may be sent"))
+        outcomes = engine.close_all_open_sessions(
+            vault_root=self.vault,
+            state_path=self.state_path,
+            scores_path=self.scores_path,
+            candidates_path=self.candidates_path,
+            ai_call=mock.Mock(side_effect=AssertionError("no closing generation")),
+            telegram_send=telegram,
+            status_resolver=ready_status,
+        )
+
+        self.assertEqual({o.session_id for o in outcomes},
+                         {fresh_chat["session_id"], fresh_talk["session_id"]})
+        for outcome in outcomes:
+            self.assertEqual(outcome.reason, "day_rollover")
+            self.assertTrue(outcome.silent)  # zero user turns -> silent, no nag
+        for session_id in (fresh_chat["session_id"], fresh_talk["session_id"]):
+            self.assertEqual(
+                conversation.load_session(session_id, vault_root=self.vault)["status"],
+                "closed",
+            )
+        telegram.assert_not_called()
+        # The already-closed session is untouched (still closed with its
+        # original reason).
+        self.assertEqual(
+            conversation.load_session(already_closed["session_id"],
+                                      vault_root=self.vault)["close"]["reason"],
+            "done",
+        )
+
+        # Idempotent: nothing left open, a second pass closes nothing.
+        self.assertEqual(engine.find_open_sessions(vault_root=self.vault), [])
+        self.assertEqual(
+            engine.close_all_open_sessions(
+                vault_root=self.vault, state_path=self.state_path,
+                scores_path=self.scores_path, candidates_path=self.candidates_path,
+            ),
+            [],
+        )
+
+    def test_takeaway_rule_honored_two_plus_user_turns_earns_a_close_message(self):
+        self.run_turn(answer_text=ANSWER)
+        self.run_turn(answer_text=SECOND_ANSWER)
+        session_id = self.only_session()["session_id"]
+
+        outcomes = engine.close_all_open_sessions(
+            vault_root=self.vault,
+            state_path=self.state_path,
+            scores_path=self.scores_path,
+            candidates_path=self.candidates_path,
+            status_resolver=ready_status,
+            ai_call=lambda _p, _m: json.dumps({"message": CLOSING_MESSAGE}),
+            telegram_send=self._send(),
+            prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
+        )
+
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].reason, "day_rollover")
+        self.assertTrue(outcomes[0].takeaway_delivered)
+        self.assertEqual(self.sent[-1], CLOSING_MESSAGE)
+        session = conversation.load_session(session_id, vault_root=self.vault)
+        self.assertEqual(session["close"]["reason"], "day_rollover")
+        self.assertEqual(session["close"]["takeaway"], CLOSING_MESSAGE)
+        self.assertTrue(session["close"]["takeaway_delivered"])
+
+    def test_below_the_takeaway_threshold_closes_silently(self):
+        self.run_turn()  # one answer only
+        session_id = self.only_session()["session_id"]
+        telegram = mock.Mock(side_effect=AssertionError("no-nag"))
+
+        outcomes = engine.close_all_open_sessions(
+            vault_root=self.vault,
+            state_path=self.state_path,
+            scores_path=self.scores_path,
+            candidates_path=self.candidates_path,
+            status_resolver=ready_status,
+            telegram_send=telegram,
+        )
+
+        self.assertEqual(len(outcomes), 1)
+        self.assertTrue(outcomes[0].silent)
+        self.assertFalse(outcomes[0].takeaway_delivered)
+        telegram.assert_not_called()
+        session = conversation.load_session(session_id, vault_root=self.vault)
+        self.assertEqual(session["close"]["reason"], "day_rollover")
+        self.assertEqual(session["close"]["takeaway"], "")
 
 
 class PrivacyTests(EngineTestCase):
