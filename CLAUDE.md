@@ -114,6 +114,8 @@ Help the user configure a daily cron job or scheduled task that:
 3. Runs `system/daily_question.sh`, which picks the question, sends it, and marks it delivered only after success
 4. If an update is available, mentions it briefly after the question
 
+**Daily message composition (v154, issue #118).** After the question id is parsed, the script asks for the day's pre-planned arc card (`lifehug.py arc-card <QID> --daily-text`). This is a PURE FILE READ — the daily path stays AI-free. When a live card with an opening exists, the message body becomes the card's framing (one sentence quoted from the author's own record) followed by the question; the `[QID]` marker keeps `ask.format_question`'s exact shape, so the id parse and the answer-filing flow are unchanged. When there is no live card — a reengagement pick, an expired queue, a question the weekly run never carded — the command prints nothing and today's message format stands. `LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh` shows the would-be attach (or its absence).
+
 The cron commits and pushes any pending changes first (ensuring nothing is lost), then checks for updates and delivers the question. The question should be delivered warmly, not robotically.
 
 **Delivery options:**
@@ -1288,6 +1290,7 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 ### Weekly
 - Run `python3 system/lifehug.py weekly-maintenance` (or `LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh` to inspect first)
 - This compiles, source-lints/fixes safe metadata, classifies a capped batch of unclassified sources, updates the quality profile, **synthesizes the Mirror** (`mirror-compile`, v100 — keyless runs emit the task to `state/agent_tasks/mirror/`), auto-promotes the best candidates under caps (backlog-aware, quality-gated, semantically deduped — v68/v69), writes the next queue, scans gaps, reports progress, surfaces pending Focus recommendations, **runs `doctor`** (queue expiry, backlog age, cadence stalls, zombie Focuses, roster continuity), and commits real changes. Every learning step is failure-wrapped. **The Telegram message is a short counts-first summary (v86, issue #35)** — classification ✅/❌ with one-line errors, candidates new/promoted/backlog, queue, coverage, doctor verdict — built by `lifehug.py weekly-summary` from state files; the full step-by-step output is persisted to `state/reports/weekly-YYYY-MM-DD.md` (committed, phone-readable via GitHub, browsable at the wiki viewer's `/views/reports`). Dry-run previews the candidate promotion gate and the summary too.
+- **Arc cards (v154, issue #118)**: directly after the queue is written, the weekly run plans one arc card per queued question (`lifehug.py arc-plan`) — an opening framing quoted from the author's own record plus 2–4 typed follow-up intents drawn from unfilled five-slot scene probes, neighborhood siblings, timeline gaps (landmark anchors, never "what year"; ≤1 per card, ≤`LIFEHUG_WEEKLY_ARC_GAP_MAX`=3 per week), studio format slots, a Mirror "sit with" line on self-arc questions, and demonstrated-knowledge summaries. Deterministic cards are ALWAYS computed first; the one model call per run enriches them, and any failure or invalid output keeps the deterministic plan. Keyless runs write the deterministic cards immediately and emit the prompt to `state/agent_tasks/arcs/` (`arc-plan --from-response` upgrades cards in place). Cards land in `state/arc_cards.json` and expire with the queue.
 - Review any manual source findings that `source-lint --fix` could not safely repair
 - Review classifier/candidate output in the weekly Telegram summary, then check queue balance, progress, and whether any Focus is ready for a deliverable
 
@@ -1297,7 +1300,8 @@ The daily question cron job handles outbound delivery. For inbound (receiving an
 - Review new research-neighborhood candidates before promotion. New gap neighborhoods only open when the planner's expansion urgency ≥ 0.25 (the archive deepens before it widens — v69)
 - Review Focus recommendations and approve only the ones that should become Focuses — **approval creates the Focus for real** (category scaffolded + starter questions seeded via `roadmap.focus_new`; never a zombie — v69)
 - Check if any categories are ready for drafting (GREEN)
-- Perennial re-asks generate automatically (`perennials --generate-due`) and one old answer is resurfaced with a reflection question
+- Perennial re-asks generate automatically (`perennials --generate-due`) and one old answer is resurfaced with a reflection question — both now close as an invitation to talk ("Reply and we'll talk it through"), the mechanism otherwise unchanged (v154)
+- **Conversation-thread offers (v154, issue #118)**: `arc-thread-offers` adds at most `LIFEHUG_MONTHLY_THREAD_OFFERS` (default 1) ignorable line to the monthly summary, offering a research neighborhood that has record to open from AND somewhere left to go. Offers are recorded in `state/arc_cards.json` and never repeat within a quarter
 
 ### At Milestones
 - **Skeleton complete** (all categories have at least one answer): Celebrate, preview what depth pass will look like

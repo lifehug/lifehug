@@ -162,6 +162,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "==> (real run) lifehug.py mirror-compile — synthesizes wiki/self/mirror.md (skipped in dry run: costs an AI call)"
   run_step python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
+  run_step python3 "$SCRIPT_DIR/lifehug.py" arc-plan --dry-run --limit "$QUEUE_LIMIT" --gap-max "${LIFEHUG_WEEKLY_ARC_GAP_MAX:-3}"
   run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" progress
   SINCE_7D=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc)-timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
@@ -275,6 +276,38 @@ run_learning_step "planner_queue" python3 "$SCRIPT_DIR/lifehug.py" planner-queue
 # shellcheck disable=SC2034
 QUEUE_OUT="$LAST_STEP_OUT"
 
+# Arc cards (issue #118): one card per question the queue just planned — an
+# opening framing plus 2–4 typed follow-up intents — so the daily loop can
+# ATTACH a plan instead of asking three unrelated questions. Runs DIRECTLY
+# after planner_queue so the cards are planned against the queue just written,
+# and they expire with it.
+#
+# PARITY SPEC (binding): the platform transports this step verbatim as
+# StepSpec("arcs", "arc_plan", llm=True) + LlmPurpose "arc_plan". Every cap,
+# gate, and fallback the platform needs must appear HERE first — a
+# platform-side gate absent from this step is a parity merge-blocker.
+ARC_GAP_MAX="${LIFEHUG_WEEKLY_ARC_GAP_MAX:-3}"
+# ARCS_OUT is read indirectly by the report section table below.
+# shellcheck disable=SC2034
+if [[ "$KEYLESS" == "1" ]]; then
+  echo
+  echo "==> keyless — writing deterministic arc cards and emitting the arc-plan task"
+  set +e
+  ARCS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" arc-plan --limit "$QUEUE_LIMIT" --gap-max "$ARC_GAP_MAX" --emit-tasks "$AGENT_TASKS_DIR/arcs" 2>&1)
+  ARCS_STATUS=$?
+  set -e
+  if [[ "$ARCS_STATUS" -ne 0 ]]; then
+    record_learning_failure "weekly_maintenance" "arc_plan_emit" "$ARCS_STATUS" "$ARCS_OUT"
+  elif ! grep -q "^No queued questions" <<< "$ARCS_OUT"; then
+    ARCS_OUT="⏸ keyless — arc-plan task emitted, not a failure. Deterministic cards are already written; complete the model pass via the maintenance skill (--from-response).
+$ARCS_OUT"
+  fi
+  echo "$ARCS_OUT"
+else
+  run_learning_step "arc_plan" python3 "$SCRIPT_DIR/lifehug.py" arc-plan --limit "$QUEUE_LIMIT" --gap-max "$ARC_GAP_MAX"
+  ARCS_OUT="$LAST_STEP_OUT"
+fi
+
 run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
 PROGRESS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
@@ -320,6 +353,7 @@ mkdir -p "$REPORT_DIR"
     "Mirror:MIRROR_OUT" \
     "Candidate promotion:PROMOTE_OUT" \
     "Planner queue:QUEUE_OUT" \
+    "Arc cards:ARCS_OUT" \
     "Progress:PROGRESS_OUT" \
     "Learning failures:LEARNING_OUT" \
     "Focus recommendations:RECS_OUT" \

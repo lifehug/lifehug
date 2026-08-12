@@ -558,11 +558,17 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
 
     def test_no_other_module_imports_conversation_or_conversation_lints(self):
         pattern = re.compile(r'^\s*(?:from|import)\s+conversation(?:_lints)?\b', re.MULTILINE)
+        # conversation_delivery.py (v153) is the sanctioned runtime consumer;
+        # arc_planner.py (issue #118, Wave 2) is the planning consumer: it reads
+        # the arc-card container and the interaction definition through this
+        # module's helpers rather than re-deriving either. The guard's point
+        # stands — no OTHER module may reach into the store.
         exempt = {
             "lifehug.py",
             "conversation.py",
             "conversation_lints.py",
-            "conversation_delivery.py",  # v153: the one sanctioned consumer
+            "conversation_delivery.py",
+            "arc_planner.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):

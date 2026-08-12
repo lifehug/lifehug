@@ -61,7 +61,12 @@ QUEUED_MUTATION_COMMANDS = frozenset({
     "weekly-maintenance",
 })
 READ_ONLY_COMMANDS = frozenset({
-    "ai-status", "answer-ack-prompt", "answer-ack-status", "book-chapter", "book-status",
+    "ai-status", "answer-ack-prompt", "answer-ack-status",
+    # Issue #118: the daily attach is a PURE READ of state/arc_cards.json —
+    # it must never take the writer lock, because daily_question.sh calls it
+    # between picking and sending.
+    "arc-card",
+    "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
     "conversation-arc-prompt", "conversation-closing-prompt", "conversation-lint",
@@ -73,6 +78,10 @@ READ_ONLY_COMMANDS = frozenset({
 })
 DIRECT_MUTATION_COMMANDS = frozenset({
     "answer-ack-retry",
+    # Issue #118 (Conversation Interaction, Wave 2): both write
+    # state/arc_cards.json, so they take the writer lock like the rest of the
+    # weekly/monthly learning-loop family.
+    "arc-plan", "arc-thread-offers",
     "book-offers", "candidates-auto-promote", "candidates-promote",
     "candidates-promote-neighborhood", "candidates-update", "classify-story",
     "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
@@ -825,6 +834,41 @@ def cmd_answer_ack_retry(args: argparse.Namespace) -> int:
     if args.confirm_not_sent:
         flags.append("--confirm-not-sent")
     return run_python("answer_ack_delivery.py", flags)
+
+
+def cmd_arc_plan(args: argparse.Namespace) -> int:
+    flags = ["plan"]
+    if args.limit is not None:
+        flags += ["--limit", str(args.limit)]
+    if args.gap_max is not None:
+        flags += ["--gap-max", str(args.gap_max)]
+    if getattr(args, "model", None):
+        flags += ["--model", args.model]
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    if getattr(args, "emit_tasks", None):
+        flags += ["--emit-tasks", args.emit_tasks]
+    if getattr(args, "from_response", None):
+        flags += ["--from-response", args.from_response]
+    if getattr(args, "force", False):
+        flags.append("--force")
+    return run_python("arc_planner.py", flags)
+
+
+def cmd_arc_card(args: argparse.Namespace) -> int:
+    flags = ["card", args.question_id]
+    if getattr(args, "daily_text", False):
+        flags.append("--daily-text")
+    return run_python("arc_planner.py", flags)
+
+
+def cmd_arc_thread_offers(args: argparse.Namespace) -> int:
+    flags = ["thread-offers"]
+    if args.limit is not None:
+        flags += ["--limit", str(args.limit)]
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    return run_python("arc_planner.py", flags)
 
 
 def cmd_conversation_open(args: argparse.Namespace) -> int:
@@ -1885,6 +1929,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Retry an ambiguous send only after checking that Telegram did not receive it",
     )
     p.set_defaults(func=cmd_answer_ack_retry)
+
+    # Issue #118 (Wave 2): the weekly arc planner, the daily attach, and the
+    # monthly conversation-thread offers.
+    p = sub.add_parser("arc-plan", help="Plan one arc card per queued question (weekly)")
+    p.add_argument("--limit", type=int, default=None, help="Plan at most N queued questions")
+    p.add_argument("--gap-max", type=int, default=None,
+                   help="Max timeline_gap intents across the week (default 3)")
+    p.add_argument("--model", help="AI model override (config arc_plan_model → classify_model)")
+    p.add_argument("--dry-run", action="store_true", help="Print the plan; write nothing")
+    p.add_argument("--emit-tasks", metavar="DIR",
+                   help="Keyless: write deterministic cards and emit the prompt for agent completion")
+    p.add_argument("--from-response", metavar="PATH",
+                   help="Ingest an agent-written response; upgrades cards in place")
+    p.add_argument("--force", action="store_true",
+                   help="Replan model-planned cards for the same queue")
+    p.set_defaults(func=cmd_arc_plan)
+
+    p = sub.add_parser("arc-card", help="Read one live arc card (pure read; --daily-text for the daily attach)")
+    p.add_argument("question_id")
+    p.add_argument("--daily-text", action="store_true",
+                   help="Print the assembled daily message for a live card, else nothing")
+    p.set_defaults(func=cmd_arc_card)
+
+    p = sub.add_parser("arc-thread-offers", help="Monthly conversation-thread offers for ready neighborhoods")
+    p.add_argument("--limit", type=int, default=None, help="Max offers this month (default 1)")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_arc_thread_offers)
 
     p = sub.add_parser("conversation-open", help="Open a new conversation session; prints its id and document path")
     p.add_argument("--mode", required=True, choices=["chat", "conversation"])

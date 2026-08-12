@@ -28,6 +28,10 @@ followup_model: "anthropic/claude-opus-4-6"
 # research_model: "claude-opus-4-20250514"
 # Story/source classification:
 # classify_model: "claude-sonnet-4-20250514"
+# Weekly arc planning (one arc card per queued question — the opening framing
+# and 2-4 follow-up intents the daily chat runs inside). One call per weekly
+# run; falls back to classify_model, then to the classifier's default:
+# arc_plan_model: "claude-sonnet-5"
 # Wiki page synthesis (system/lifehug.py compile); falls back to deterministic
 # excerpts when the selected shared provider is unavailable:
 # wiki_model: "claude-opus-4-20250514"
