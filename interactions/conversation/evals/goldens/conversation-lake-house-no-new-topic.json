@@ -1,0 +1,51 @@
+{
+  "golden_id": "conversation-lake-house-no-new-topic-01",
+  "mode": "conversation",
+  "register": "neutral",
+  "arc": {
+    "question_id": "B07",
+    "opening": "You mentioned the old boat at the lake house last time.",
+    "intents": [{"kind": "scene_slot"}, {"kind": "neighborhood_sibling"}],
+    "topics": ["boat", "lake_house"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You mentioned the old boat at the lake house last time. What was it like getting it out on the water for the first time each summer?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "boat",
+        "seam_ok": false,
+        "properties": ["no_new_topic_mid_arc"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "It always smelled like gasoline and lake water once we got the motor going."
+    },
+    {
+      "role": "lifehug",
+      "text": "Gasoline and lake water — I can practically picture that first pull of the cord. Who usually ended up yanking the motor to life?",
+      "annotations": {
+        "kind": "receipt",
+        "topic": "lake_house",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "Yeah usually my brother, he loved being the one in charge of the engine."
+    },
+    {
+      "role": "lifehug",
+      "text": "Sounds like your brother wore that job like a badge of honor every summer.",
+      "annotations": {
+        "kind": "receipt",
+        "topic": "lake_house",
+        "seam_ok": false,
+        "properties": []
+      }
+    }
+  ]
+}

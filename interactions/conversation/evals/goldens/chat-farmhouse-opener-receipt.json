@@ -1,0 +1,38 @@
+{
+  "golden_id": "chat-farmhouse-opener-receipt-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "A14",
+    "opening": "You've told me about the old farmhouse kitchen before.",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["farmhouse"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You've told me about the old farmhouse kitchen before. What do you remember about the smell of it in the mornings?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "farmhouse",
+        "seam_ok": false,
+        "properties": ["demonstrated_knowledge_opener_shape"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "Diesel and cut hay, mostly, from my dad coming in from the fields before breakfast."
+    },
+    {
+      "role": "lifehug",
+      "text": "Diesel and cut hay — that's such a specific, physical memory. What else comes to mind about those mornings?",
+      "annotations": {
+        "kind": "receipt",
+        "quoted_span": "Diesel and cut hay",
+        "topic": "farmhouse",
+        "seam_ok": false,
+        "properties": ["receipt_quotes_user"]
+      }
+    }
+  ]
+}

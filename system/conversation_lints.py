@@ -28,7 +28,7 @@ bias against that). Two heuristics worth documenting explicitly:
 Public surface:
 
     load_lints_config(*, framework_root=None) -> dict
-    lint_turn(text, *, is_reply_to_substantive=False, config=None) -> list[dict]
+    lint_turn(text, *, is_reply_to_substantive=False, seam_ok=False, config=None) -> list[dict]
     lint_transcript(turns, *, config=None) -> list[dict]
 
 Findings are ``{"lint": "<id>", "detail": "...", "span": [start, end]}``.
@@ -37,6 +37,21 @@ numbers): ``one_question_per_turn`` (rule 1), ``banned_phrases`` (rules
 4/5/12 + the do-not-use list), ``question_grammar_audit`` (rule 3),
 ``length_caps``, ``receipt_before_question`` (rule 2, structural),
 ``year_question_detector`` (rule 3).
+
+**Eval-harness amendment (issue #120, consistency-audit)**: the grammar
+classifier's baseline tags (``ted``/``cued``/``closed``/``option_posing``/
+``other``) are wave-1 (#115) reality and stay as landed — the eval
+contract's own vocabulary sketch (``cued``/``cued_invitation``/``closed``/
+``option_posing``/``presupposing``) is not renamed onto them (merged
+reality wins per the contract's own binding fact). This module ADDS
+``presupposing`` to the set additively: a question sentence that assumes an
+unconfirmed narrative fact or motive ("what made you decide", "why did you
+choose", "when did you realize", or a "So you ..." lead-in before the
+question) rather than inviting the user to supply one. ``closed``,
+``option_posing``, and ``presupposing`` findings are suppressed when the
+caller marks the turn ``seam_ok=True`` (a golden-annotated exception to
+rule 3, e.g. a deliberate closed confirmation at a narrative seam) — every
+other lint stays enforced regardless of ``seam_ok``.
 """
 
 from __future__ import annotations
@@ -53,9 +68,17 @@ DEFAULT_CAP_TURN_CHARS = 1200
 SUBSTANTIVE_MIN_CHARS = 20  # heuristic floor for a "substantive" preceding user turn
 
 #: The closed grammar-classification vocabulary (question_grammar_audit).
-#: Only "closed" and "option_posing" produce findings; "ted"/"cued"/"other"
-#: are informational tags a question sentence may also carry.
-QUESTION_GRAMMAR_TAGS = frozenset({"ted", "cued", "closed", "option_posing", "other"})
+#: "closed", "option_posing", and "presupposing" produce findings (subject
+#: to the seam_ok exemption below); "ted"/"cued"/"other" are informational
+#: tags a question sentence may also carry.
+QUESTION_GRAMMAR_TAGS = frozenset(
+    {"ted", "cued", "closed", "option_posing", "presupposing", "other"}
+)
+#: The subset of QUESTION_GRAMMAR_TAGS that produce findings unless the
+#: turn is annotated seam_ok (behavior.md rule 3; issue #120 amendment) —
+#: documentation only; lint_turn gates the whole audit block on seam_ok
+#: since "ted"/"cued"/"other" never produce findings in the first place.
+GATED_GRAMMAR_TAGS = frozenset({"closed", "option_posing", "presupposing"})
 
 _QUOTED_SPAN_RE = re.compile(r'"[^"]*"')
 _QUOTED_QUESTION_RE = re.compile(r'"[^"]*\?[^"]*"')
@@ -66,6 +89,13 @@ _CLOSED_RE = re.compile(
     re.IGNORECASE,
 )
 _OR_RE = re.compile(r'\bor\b', re.IGNORECASE)
+#: Presupposing lead-ins (issue #120): the question assumes a decision,
+#: realization, or narrative frame the user has not actually confirmed yet,
+#: rather than inviting them to supply one.
+_PRESUPPOSING_RE = re.compile(
+    r'^\s*(what made you|why did you (?:decide|choose)|when did you realize|so you\b.*,)',
+    re.IGNORECASE,
+)
 _YEAR_PATTERNS = ("what year", "which year", "in what year")
 
 
@@ -119,6 +149,8 @@ def _classify_question(sentence: str) -> set[str]:
         tags.add("closed")
     if _OR_RE.search(sentence):
         tags.add("option_posing")
+    if _PRESUPPOSING_RE.match(sentence.strip()):
+        tags.add("presupposing")
     if not tags:
         tags.add("other")
     return tags
@@ -136,9 +168,17 @@ def lint_turn(
     text: str,
     *,
     is_reply_to_substantive: bool = False,
+    seam_ok: bool = False,
     config: dict | None = None,
 ) -> list[dict]:
-    """Deterministic findings for one lifehug-role turn's text."""
+    """Deterministic findings for one lifehug-role turn's text.
+
+    ``seam_ok`` (issue #120) suppresses only the gated grammar findings
+    (closed/option_posing/presupposing) — every other lint, including
+    ``one_question_per_turn`` and ``banned_phrases``, is unaffected. Runtime
+    callers (``conversation_delivery``) never annotate seams and so always
+    pass the default ``False``; only golden-transcript evaluation does.
+    """
     config = config if config is not None else load_lints_config()
     findings: list[dict] = []
 
@@ -164,7 +204,7 @@ def lint_turn(
                     "span": [idx, idx + len(phrase)],
                 })
 
-    if config.get("lint.question_grammar_audit", True):
+    if config.get("lint.question_grammar_audit", True) and not seam_ok:
         for sentence in question_sentences:
             tags = _classify_question(sentence)
             if "closed" in tags:
@@ -177,6 +217,12 @@ def lint_turn(
                 findings.append({
                     "lint": "question_grammar_audit",
                     "detail": f"option-posing question: {sentence.strip()!r}",
+                    "span": _span_of(text, sentence),
+                })
+            if "presupposing" in tags:
+                findings.append({
+                    "lint": "question_grammar_audit",
+                    "detail": f"presupposing question: {sentence.strip()!r}",
                     "span": _span_of(text, sentence),
                 })
 
@@ -214,7 +260,13 @@ def lint_turn(
 
 
 def lint_transcript(turns: list[dict], *, config: dict | None = None) -> list[dict]:
-    """Map lint_turn over lifehug-role turns; substantive-reply flag from the prior user turn."""
+    """Map lint_turn over lifehug-role turns.
+
+    substantive-reply flag from the prior user turn; ``seam_ok`` (issue
+    #120) is read per-turn from ``turn["annotations"]["seam_ok"]`` when
+    present — golden transcripts annotate it, runtime turns never carry
+    annotations and so default to False (unchanged runtime behavior).
+    """
     config = config if config is not None else load_lints_config()
     findings: list[dict] = []
     previous_user_text = ""
@@ -227,7 +279,11 @@ def lint_transcript(turns: list[dict], *, config: dict | None = None) -> list[di
         if role != "lifehug":
             continue
         is_reply = len(previous_user_text.strip()) >= SUBSTANTIVE_MIN_CHARS
-        for finding in lint_turn(text, is_reply_to_substantive=is_reply, config=config):
+        annotations = turn.get("annotations")
+        seam_ok = bool(annotations.get("seam_ok")) if isinstance(annotations, dict) else False
+        for finding in lint_turn(
+            text, is_reply_to_substantive=is_reply, seam_ok=seam_ok, config=config
+        ):
             findings.append({**finding, "turn_index": index})
     return findings
 

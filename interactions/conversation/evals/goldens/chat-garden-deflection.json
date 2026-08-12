@@ -1,0 +1,52 @@
+{
+  "golden_id": "chat-garden-deflection-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "D03",
+    "opening": "Last time you mentioned starting a vegetable garden this spring.",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["garden"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "Last time you mentioned starting a vegetable garden this spring. How has it been going since the first planting?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "garden",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "Actually, can you help me write an email to my boss instead?",
+      "off_scope": true
+    },
+    {
+      "role": "lifehug",
+      "text": "That one's outside what I do — I'm here for your story. Speaking of which — is there anything on your mind about the garden today?",
+      "annotations": {
+        "kind": "deflection",
+        "topic": "garden",
+        "seam_ok": true,
+        "properties": ["deflects_off_scope"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "Haha ok. It's actually growing better than I expected, especially the tomatoes."
+    },
+    {
+      "role": "lifehug",
+      "text": "Tomatoes doing well is always satisfying — there's nothing like the first one that finally turns red. What other bed have you got dialed in this year?",
+      "annotations": {
+        "kind": "receipt",
+        "topic": "garden",
+        "seam_ok": false,
+        "properties": []
+      }
+    }
+  ]
+}

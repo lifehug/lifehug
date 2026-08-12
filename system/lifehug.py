@@ -96,6 +96,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # store's own three mutators. No jobs.py command kind yet (Wave 2) — they
     # take the writer lock directly like the rest of this family.
     "conversation-close", "conversation-open", "conversation-record-turn",
+    # Issue #120 (eval harness): the default run is read-only, but
+    # --emit-tasks writes state/agent_tasks/evals/ — classified with the
+    # rest of the --emit-tasks family (arc-plan) rather than per-invocation.
+    "conversation-evals",
     # New in issue #116 (Wave 2 PR 3): the operator retry door for a turn
     # whose send definitively failed. conversation-close is unchanged here —
     # it was already classified; #116 only upgraded what it does.
@@ -1165,6 +1169,11 @@ def cmd_route(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_conversation_evals(args: argparse.Namespace) -> int:
+    flags = ["--emit-tasks"] if getattr(args, "emit_tasks", False) else []
+    return run_python("interaction_evals.py", flags)
+
+
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["LIFEHUG_DAILY_DRY_RUN"] = "1"
@@ -2227,6 +2236,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("conversation-lint", help="Print deterministic lint findings for stdin turn text")
     p.add_argument("--reply-to-substantive", action="store_true")
     p.set_defaults(func=cmd_conversation_lint)
+
+    p = sub.add_parser(
+        "conversation-evals",
+        help="Run the Conversation Interaction eval harness (issue #120): "
+             "lints + router fixtures + golden properties + judge/persona (keyless-skippable)",
+    )
+    p.add_argument("--emit-tasks", action="store_true",
+                   help="Also write judge/persona agent-task prompts to state/agent_tasks/evals/")
+    p.set_defaults(func=cmd_conversation_evals)
 
     p = sub.add_parser(
         "route",

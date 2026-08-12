@@ -1,0 +1,26 @@
+[
+  {"text": "Yeah, that was back in 2003, right after we moved to the coast.", "session_open": true, "intent": "answer"},
+  {"text": "Honestly I don't really remember much about that summer.", "session_open": true, "intent": "answer"},
+  {"text": "It was my grandmother, she always made the biscuits herself.", "session_open": false, "intent": "answer"},
+  {"text": "About three years, give or take.", "session_open": true, "intent": "answer"},
+
+  {"text": "Something happened today that I want to tell you about.", "session_open": false, "intent": "new_story"},
+  {"text": "Random memory just hit me — my grandmother's kitchen smell.", "session_open": false, "intent": "new_story"},
+  {"text": "I've been thinking about my twenties a lot lately, can I just talk?", "session_open": false, "intent": "new_story"},
+  {"text": "So this is completely unrelated to anything you've asked, but I have to tell someone.", "session_open": false, "intent": "new_story"},
+
+  {"text": "Skip this question.", "session_open": true, "intent": "command"},
+  {"text": "Can we talk about something else instead?", "session_open": true, "intent": "command"},
+  {"text": "Stop asking me about my divorce for a while.", "session_open": true, "intent": "command"},
+  {"text": "Actually, pause — I don't want to do this today.", "session_open": false, "intent": "command"},
+
+  {"text": "Oh also, I forgot to mention —", "session_open": true, "intent": "continue_session"},
+  {"text": "Wait, that's not quite right, let me redo that part.", "session_open": true, "intent": "continue_session"},
+  {"text": "One more thing about that.", "session_open": true, "intent": "continue_session"},
+  {"text": "Actually hold on, going back to what I just said.", "session_open": true, "intent": "continue_session"},
+
+  {"text": "What's the capital of Peru?", "session_open": false, "intent": "out_of_scope"},
+  {"text": "Can you help me write an email to my boss?", "session_open": true, "intent": "out_of_scope"},
+  {"text": "lol ok what's 47 times 12", "session_open": false, "intent": "out_of_scope"},
+  {"text": "Can you recommend a good recipe for lasagna?", "session_open": false, "intent": "out_of_scope"}
+]
