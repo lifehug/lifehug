@@ -1207,15 +1207,28 @@ Life Hug is delivery-method agnostic. This skill handles the content logic — q
 
 ### Recognizing Answers
 
-When you receive a message in the Lifehug workspace context, determine what it is:
+When you receive a message in the Lifehug workspace context, classify it into exactly one of five intents — the shared definition in `interactions/conversation/router/router.md` (issue #117); this prose and `system/lifehug.py route` must never diverge on it:
 
-1. **An answer to the pending question** — If the user's message is personal, reflective, or detailed, and there's a pending question in `rotation.json` (`last_question_id`), treat it as an answer. Process it using the "Processing an Answer" flow above.
+1. **`answer`** — a direct reply to the pending question in `rotation.json` (`last_question_id`). Process it using the "Processing an Answer" flow above.
+2. **`new_story`** — the user is volunteering something unprompted, not replying to a pending question. Ingest it (see "Unprompted Story Ingest" below) — a story now opens or continues a Conversation and gets an immediate turn.
+3. **`command`** — an explicit instruction about the system itself, not story content: "show coverage", "draft a chapter", "skip this question", "ask me something else".
+4. **`continue_session`** — a message that only makes sense as more of an already-open Conversation (a follow-up thought, a correction, "wait, also—"). When a Conversation session is open, this is the DEFAULT reading of free text.
+5. **`out_of_scope`** — anything that isn't about this person's life story or the system itself: general assistant requests, factual lookups, unrelated chit-chat. Send `interactions/conversation/router/deflection.md`'s template — warmly, once per exchange, then stay silent on repeated off-scope messages rather than deflect a third time.
 
-2. **A pass transition reply** — If `rotation.json` has `awaiting_pass_transition: true` and the user replies with a model name (e.g. "opus", "gpt-5", "anthropic/claude-opus-4-6") or just **go** / **yes** / **do it**, treat it as a pass transition trigger. See **Pass Transition** below.
+Two things happen BEFORE this classification, exactly as documented, never routed as one of the five intents:
 
-3. **A command** — "show coverage", "draft a chapter", "skip this question", "ask me something else"
+- **A pass transition reply** — If `rotation.json` has `awaiting_pass_transition: true` and the user replies with a model name (e.g. "opus", "gpt-5", "anthropic/claude-opus-4-6") or just **go** / **yes** / **do it**, treat it as a pass transition trigger. See **Pass Transition** below.
+- **Prefix hatches** — `/artifact`, `artifact:`, `opinion:` are handled exactly as documented today.
 
-4. **Setup conversation** — If config.yaml doesn't exist or question-bank.md only has A-E categories, this is still setup.
+**Setup conversation** — if config.yaml doesn't exist or question-bank.md only has A-E categories, this is still setup, not one of the five intents above.
+
+The host agent MAY delegate classification to the cheap router model instead of judging by eye:
+
+```bash
+printf '%s' "$MSG" | python3 system/lifehug.py route
+```
+
+...and act on its `action` field (`file_answer` / `ingest_story` / `handle_command` / `continue_session` / `deflect`, or `ask_user` when the router is unsure and there is neither a pending question nor an open session — ask one clarifying line rather than guessing).
 
 ---
 

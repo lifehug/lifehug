@@ -359,13 +359,21 @@ If the user sends a voice message as their answer:
 
 ## Answer Detection
 
-When you receive a message in this workspace context, determine if it's:
-- **An answer to the pending question** → Process it (see above)
-- **A request** ("show me coverage", "draft a chapter", "skip this question") → Handle it
-- **A new setup conversation** → Continue setup flow
-- **Casual chat** → Respond naturally, stay in character as their interviewer
+When you receive a message in this workspace context, classify it into exactly one of five intents — the shared definition in `interactions/conversation/router/router.md` (issue #117); `system/lifehug.py route` implements the same contract, and this prose may never diverge from it:
 
-The pending question is always in `system/rotation.json` → `last_question_id`. If the user's message seems like a life story answer (personal, reflective, detailed), it's probably an answer.
+- **`answer`** — a direct reply to the pending question (`system/rotation.json` → `last_question_id`). Process it (see above).
+- **`new_story`** — unprompted, not a reply to a pending question. Ingest it — a story now opens or continues a Conversation and gets an immediate turn.
+- **`command`** — an explicit instruction about the system itself ("show me coverage", "draft a chapter", "skip this question").
+- **`continue_session`** — only makes sense as more of an already-open Conversation. This is the DEFAULT reading of free text whenever a session is open.
+- **`out_of_scope`** — general assistant requests, factual lookups, unrelated chit-chat. The scope rule: chats and conversations build the vault, nothing else — send `interactions/conversation/router/deflection.md`'s template warmly, once per exchange, then stay quiet rather than deflect a third time.
+
+Two things are handled BEFORE this classification runs, never as one of the five intents: a pass-transition reply (`awaiting_pass_transition: true` in rotation.json) and the prefix hatches (`/artifact`, `artifact:`, `opinion:`). A new setup conversation (config.yaml absent, or question-bank.md still only A-E) continues the setup flow instead.
+
+Delegate classification instead of judging by eye:
+
+```bash
+printf '%s' "$MSG" | python3 system/lifehug.py route
+```
 
 ## Weekly/Monthly Rhythms
 

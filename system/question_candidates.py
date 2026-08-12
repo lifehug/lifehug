@@ -28,7 +28,12 @@ from lifehug_core import (
 
 from lifehug_core import STORY_FUNCTIONS
 
-VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted", "needs_review", "expired"}
+VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted",
+                   "needs_review", "expired", "superseded"}
+# "superseded" (issue #117): a template candidate whose story source later
+# earned a classifier-grade Conversation extraction — a strictly stronger
+# candidate for the same source. Superseded, never deleted (history stays
+# auditable); deliberately absent from PROMOTABLE_STATUSES below.
 PROMOTABLE_STATUSES = {"candidate", "accepted", "deferred"}
 # needs_review candidates are re-scored every auto-promote run (the quality
 # profile shifts weekly), so a near-miss can graduate later instead of dying

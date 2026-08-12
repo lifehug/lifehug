@@ -503,6 +503,42 @@ def find_open_session_for_question(
     return newest
 
 
+def find_open_session_for_channel(
+    channel: str,
+    *,
+    mode: str | None = None,
+    vault_root: str | Path | None = None,
+    manifest: dict | None = None,
+    now: datetime | None = None,
+) -> dict | None:
+    """The newest open, non-idle-expired session for this channel.
+
+    Shared by the router (any mode — "any open non-expired session from the
+    store", contract #117 Part B) and the story-turn entry point (mode
+    "conversation" only — a story continues a conversation, never a chat).
+    """
+    manifest = manifest if manifest is not None else _manifest()
+    reference = now or _now()
+    newest = None
+    for summary in conversation.list_sessions(status="open", vault_root=vault_root):
+        if summary.get("channel") != channel:
+            continue
+        if mode is not None and summary.get("mode") != mode:
+            continue
+        session_id = summary.get("session_id")
+        if not session_id:
+            continue
+        try:
+            doc = conversation.load_session(session_id, vault_root=vault_root)
+        except (OSError, ValueError):
+            continue
+        if is_idle_expired(doc, manifest=manifest, now=reference):
+            continue
+        if newest is None or str(session_id) > str(newest["session_id"]):
+            newest = doc
+    return newest
+
+
 def _append_turn_resilient(
     session_id: str,
     turn: dict,
@@ -586,6 +622,155 @@ def router_model(config: dict | None = None) -> str:
 def conversation_model(config: dict | None = None) -> str:
     cfg = config if isinstance(config, dict) else _safe_config()
     return _resolve_model(cfg, "conversation_model", DEFAULT_CONVERSATION_MODEL)
+
+
+# --------------------------------------------------------------------------
+# Part B — the router (issue #117): classify one inbound message.
+#
+# `interactions/conversation/router/router.md` is the single definition both
+# runtimes execute; this function is the OSS side of it. Read-only: it never
+# writes rotation, session, or candidate state (contract, "route mutates
+# nothing durable" — READ_ONLY_COMMANDS in lifehug.py).
+# --------------------------------------------------------------------------
+
+VALID_ROUTER_INTENTS = frozenset(
+    {"answer", "new_story", "command", "continue_session", "out_of_scope"}
+)
+
+#: Fixed intent -> action mapping (contract, Part B mechanics #4).
+#: "ask_user" is never in this table — it only ever comes from the
+#: safe-default rule below, not from a classified intent.
+_ROUTER_ACTION_BY_INTENT = {
+    "answer": "file_answer",
+    "new_story": "ingest_story",
+    "command": "handle_command",
+    "continue_session": "continue_session",
+    "out_of_scope": "deflect",
+}
+
+
+def _parse_router_output(raw: object) -> tuple[str, float] | None:
+    """Parse router.md's ``{"intent": ..., "confidence": ...}`` schema.
+
+    None on anything unusable — malformed output is the "treat as
+    unavailable" path (contract, Part B mechanics #2), never a guess.
+    """
+    if not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(_strip_fences(raw))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    intent = data.get("intent")
+    if intent not in VALID_ROUTER_INTENTS:
+        return None
+    confidence = data.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        return None
+    confidence = float(confidence)
+    if not (0.0 <= confidence <= 1.0):
+        return None
+    return intent, confidence
+
+
+def route_message(
+    text: str,
+    *,
+    channel: str = "cli",
+    vault_root: str | Path | None = None,
+    ai_call: Callable[[str, str], str] | None = None,
+    status_resolver: Callable[..., object] | None = None,
+    prompt_builder: Callable[[dict], str] | None = None,
+    rotation: dict | None = None,
+    open_session: dict | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Classify one inbound message per router.md; never mutates anything.
+
+    Returns ``{"intent", "confidence", "source", "action",
+    "pending_question_id", "open_session_id"}`` — always, and always with
+    exit-0 semantics for the CLI wrapper (``cmd_route`` in ``lifehug.py``):
+    a provider that is not ready, a malformed model reply, or a
+    below-threshold classification all resolve through the deterministic
+    default rule below rather than raising.
+
+    Injectable collaborators (``ai_call`` / ``status_resolver`` /
+    ``prompt_builder`` / ``rotation`` / ``open_session``) mirror the turn
+    engine's own testing seam.
+    """
+    vault_root = vault_root if vault_root is not None else VAULT_ROOT
+    manifest = _manifest()
+    threshold = manifest.get("knob.router_confidence_threshold")
+    threshold = float(threshold) if isinstance(threshold, (int, float)) else 0.7
+
+    if rotation is None:
+        from lifehug_core import ROTATION_FILE  # noqa: PLC0415
+
+        rotation = read_json(ROTATION_FILE, default={}) or {}
+    pending_question_id = rotation.get("last_question_id") or None
+
+    if open_session is None:
+        open_session = find_open_session_for_channel(
+            channel, vault_root=vault_root, manifest=manifest, now=now
+        )
+    open_session_id = str(open_session["session_id"]) if open_session else None
+
+    config = _safe_config()
+    model = router_model(config)
+    resolve_status = status_resolver or provider_status
+    selected = resolve_status(model, probe=False)
+
+    model_intent: str | None = None
+    model_confidence: float | None = None
+    if getattr(selected, "ready", False):
+        builder = prompt_builder or conversation.build_router_prompt
+        payload = {
+            "message": text,
+            "session_open": open_session_id is not None,
+            "pending_question_id": pending_question_id,
+        }
+        try:
+            prompt = builder(payload)
+            generated = (ai_call or call_ai)(prompt, model)
+            parsed = _parse_router_output(generated)
+        except Exception:  # noqa: BLE001 — a classify call is never capture
+            parsed = None
+        if parsed is None:
+            _diagnostic("route_classify", "malformed_generation", open_session_id or "-")
+        else:
+            model_intent, model_confidence = parsed
+
+    if model_intent is not None and model_confidence is not None and model_confidence >= threshold:
+        intent = model_intent
+        confidence = model_confidence
+        source = "model"
+        action = _ROUTER_ACTION_BY_INTENT[intent]
+    else:
+        source = "default"
+        confidence = model_confidence if model_confidence is not None else 0.0
+        if pending_question_id:
+            intent = "answer"
+            action = _ROUTER_ACTION_BY_INTENT[intent]
+        elif open_session_id:
+            intent = "continue_session"
+            action = _ROUTER_ACTION_BY_INTENT[intent]
+        else:
+            # Terminal, per-runtime unsure-fallback (router.md step 3, OSS
+            # side): report the model's best guess when there was one, else
+            # new_story — either way, ask rather than guess.
+            intent = model_intent if model_intent is not None else "new_story"
+            action = "ask_user"
+
+    return {
+        "intent": intent,
+        "confidence": round(float(confidence), 4),
+        "source": source,
+        "action": action,
+        "pending_question_id": pending_question_id,
+        "open_session_id": open_session_id,
+    }
 
 
 def _default_fallback(
@@ -886,6 +1071,282 @@ def run_post_answer_turn(
     )
 
 
+# --------------------------------------------------------------------------
+# Part A — story -> Conversation (issue #117).
+#
+# An unprompted story opens or continues a "conversation"-mode session and
+# gets ONE immediate turn through the SAME machinery as the answer-path
+# engine above — never a copy. Story follow-ups are conversational only
+# (they live in the message + session document); they are never bank-minted,
+# so unlike ``run_post_answer_turn`` there is no ``followup_minter`` /
+# ``rotation_updater`` seam here (contract, "Turn identity for story
+# follow-ups").
+# --------------------------------------------------------------------------
+
+
+def _story_turn_shape(session: dict, *, manifest: dict) -> TurnShape:
+    """Conversation-mode turn shape: the 25-exchange cap governs OUR
+    initiative (``knob.conversation_turn_cap_exchanges``), not the 3-exchange
+    chat cadence ``decide_turn_shape`` uses — mirrors ``conversation.py``'s
+    own ``_turn_position`` cap logic for this mode. A cued follow-up
+    invitation is allowed on every turn up to the cap; past it the engine
+    keeps receiving without spending further initiative."""
+    user_turns = _count_user_turns(session)
+    cap = _knob(manifest, "knob.conversation_turn_cap_exchanges", 25)
+    if user_turns <= 1:
+        position = "opening"
+    elif user_turns >= cap:
+        position = "past_target"
+    else:
+        position = "mid_arc"
+    return TurnShape(position, user_turns < cap, user_turns, cap)
+
+
+def _story_context_block(source_type: str) -> str:
+    """Mechanical source-type signal, appended like ``_output_contract_block``.
+
+    Orchestration-owned: this only makes the fact of the source type
+    (``unprompted_story`` / ``witness_account`` / ``opinion``) available at
+    runtime so the register can match it (a witness account is another
+    person's words; an opinion gets Socratic energy). Any actual per-type
+    guidance lives in ``interactions/conversation/`` — if a definition file
+    has no branch for it yet, the engine still runs (contract, Part A #6).
+    """
+    return f"\n\n## SOURCE TYPE\n\n{source_type}\n"
+
+
+def _virtual_story_session(channel: str, story_text: str, source_path: str) -> dict:
+    """An in-memory session shape (never persisted) for the prompt builder.
+
+    Used only while deciding whether a BRAND NEW conversation session is
+    worth opening at all: the contract's no-session fallback ("no session
+    created" on a definitive generation/lint/send failure while opening) is
+    honored by generating against this virtual document first and only
+    calling ``conversation.open_session`` once generation + lint have
+    cleared — an already-open session simply appends the real turn instead
+    (below). The virtual document's ``session_id`` is a placeholder; nothing
+    the prompt builders read depends on it.
+    """
+    return {
+        "session_version": conversation.SESSION_VERSION,
+        "session_id": "(pending)",
+        "mode": "conversation",
+        "channel": channel,
+        "status": "open",
+        "arc": None,
+        "turns": [{
+            "role": "user",
+            "text": story_text,
+            "channel": channel,
+            "ts": now_utc(),
+            "source_path": source_path,
+        }],
+        "rolling_summary": "",
+        "extracted": {"facts": [], "entities": [], "candidate_ideas": [], "mirror_responses": []},
+    }
+
+
+def run_story_conversation_turn(
+    *,
+    source_id: str,
+    source_path: str,
+    title: str,
+    story_text: str,
+    source_type: str,
+    channel: str,
+    state_path: Path | None = None,
+    vault_root: str | Path | None = None,
+    ai_call: Callable[[str, str], str] | None = None,
+    telegram_send: Callable[[str], TelegramSendResult] | None = None,
+    status_resolver: Callable[..., object] | None = None,
+    prompt_builder: Callable[[dict], str] | None = None,
+) -> TurnOutcome:
+    """Open/continue a Conversation for one unprompted story; ONE turn.
+
+    Called from the ingest path AFTER durability (``register_source``),
+    wrapped by the caller in the same try/except + ``record_learning_failure``
+    posture as ``run_post_answer_turn``'s callers. Never raises here either.
+
+    No-session fallback (contract, Part A #3): when the provider is not
+    ready, or generation/lint fails while OPENING a brand new session, no
+    session is created at all — today's checkmark + filed template
+    candidates are already the complete, correct outcome. Continuing an
+    already-open session behaves like the answer-path engine: the user's
+    turn lands regardless, and only a failed generation means the session
+    simply does not gain a lifehug reply.
+    """
+    state_path = state_path if state_path is not None else DELIVERY_STATE_FILE
+    vault_root = vault_root if vault_root is not None else VAULT_ROOT
+    manifest = _manifest()
+
+    config = _safe_config()
+    model = conversation_model(config)
+    resolve_status = status_resolver or provider_status
+    selected = resolve_status(model, probe=False)
+    if not getattr(selected, "ready", False):
+        reason = (
+            "no_unattended_provider"
+            if getattr(selected, "provider", "") == "agent-task"
+            else "provider_unavailable"
+        )
+        # Never touches the session store — no session created (contract).
+        return TurnOutcome("", -1, STATUS_SKIPPED, reason, False)
+
+    existing = find_open_session_for_channel(
+        channel, mode="conversation", vault_root=vault_root, manifest=manifest
+    )
+    opening = existing is None
+    if opening:
+        # Not persisted yet — see the no-session-on-failure guarantee below.
+        session_id = ""
+        session = _virtual_story_session(channel, story_text, source_path)
+    else:
+        session_id = str(existing["session_id"])
+        user_turn = {
+            "role": "user",
+            "text": story_text,
+            "channel": channel,
+            "source_path": source_path,
+        }
+        # No replay-detection here (unlike the answer-path engine's
+        # `_locate_user_turn`): every real story ingest names a fresh,
+        # unique `source_path` (`unique_source_path`), so there is no
+        # "the same answer re-filed" scenario to guard against — each call
+        # appends the next turn in the conversation, by design.
+        try:
+            session = conversation.append_turn(
+                session_id, user_turn, expected_turns=len(existing.get("turns") or []),
+                vault_root=vault_root,
+            )
+        except (conversation.TurnConflictError, conversation.SessionClosedError):
+            return TurnOutcome(session_id, -1, STATUS_SKIPPED, "turn_already_minted", False)
+
+        turn_index = len(session.get("turns") or [])
+        key = turn_key(session_id, turn_index)
+
+    attempts = 1  # no retry seam feeds this a prior attempt count (contract, Scope)
+
+    def _ledger(status: str, reason: str, lint_ids: tuple[str, ...] = ()) -> None:
+        if opening:
+            # Nothing has been persisted yet — a ledger entry keyed to a
+            # session that was never opened would be orphaned metadata.
+            return
+        _write_outcome(
+            state_path, key, session_id=session_id, turn_index=turn_index,
+            question_id="", status=status, reason=reason, attempts=attempts,
+            lint_ids=lint_ids,
+        )
+
+    shape = _story_turn_shape(session, manifest=manifest)
+    builder = prompt_builder or conversation.build_turn_prompt
+    try:
+        prompt = (
+            builder({"session": session})
+            + _story_context_block(source_type)
+            + _output_contract_block(shape)
+        )
+        generated = (ai_call or call_ai)(prompt, model)
+    except AIProviderError as exc:
+        reason = _fixed_provider_reason(exc)
+        _ledger(STATUS_FAILED, reason)
+        _diagnostic("story_turn_generation", reason, session_id or "-")
+        return TurnOutcome("", -1, STATUS_FAILED, reason, True) if opening else \
+            TurnOutcome(session_id, turn_index, STATUS_FAILED, reason, True)
+    except Exception:  # noqa: BLE001 — the ingest itself always wins
+        _ledger(STATUS_FAILED, "generation_failed")
+        _diagnostic("story_turn_generation", "generation_failed", session_id or "-")
+        return TurnOutcome("", -1, STATUS_FAILED, "generation_failed", True) if opening else \
+            TurnOutcome(session_id, turn_index, STATUS_FAILED, "generation_failed", True)
+
+    parsed = parse_turn_output(generated)
+    if parsed is None:
+        _ledger(STATUS_FAILED, "malformed_generation")
+        _diagnostic("story_turn_generation", "malformed_generation", session_id or "-")
+        return TurnOutcome("", -1, STATUS_FAILED, "malformed_generation", True) if opening else \
+            TurnOutcome(session_id, turn_index, STATUS_FAILED, "malformed_generation", True)
+
+    message = parsed["message"]
+    question_allowed = shape.question_allowed and not parsed["question_free"]
+    blocking, advisory = lint_outgoing(
+        message, question_allowed=question_allowed, config=_lints_config()
+    )
+    if blocking:
+        _ledger(STATUS_FAILED, "malformed_generation", tuple(blocking))
+        _diagnostic("story_turn_lint", "malformed_generation", session_id or "-")
+        if opening:
+            return TurnOutcome("", -1, STATUS_FAILED, "malformed_generation", True,
+                                lint_ids=tuple(blocking))
+        return TurnOutcome(session_id, turn_index, STATUS_FAILED, "malformed_generation", True,
+                            lint_ids=tuple(blocking))
+
+    if opening:
+        # Generation + lint cleared — worth persisting now, right before the
+        # external effect (same "conservative position before the send" as
+        # the answer-path engine, just deferred one step further here).
+        session = conversation.open_session("conversation", channel, vault_root=vault_root)
+        session_id = str(session["session_id"])
+        user_turn = {
+            "role": "user",
+            "text": story_text,
+            "channel": channel,
+            "source_path": source_path,
+        }
+        try:
+            session = conversation.append_turn(
+                session_id, user_turn, expected_turns=0, vault_root=vault_root,
+            )
+        except (conversation.TurnConflictError, conversation.SessionClosedError):
+            return TurnOutcome(session_id, -1, STATUS_SKIPPED, "turn_already_minted", False)
+        turn_index = len(session.get("turns") or [])
+        key = turn_key(session_id, turn_index)
+
+    _write_outcome(
+        state_path, key, session_id=session_id, turn_index=turn_index, question_id="",
+        status=STATUS_AMBIGUOUS, reason="send_in_progress", attempts=attempts,
+    )
+    send_result = (telegram_send or send_telegram_result)(message)
+    if send_result.status == "confirmed":
+        status, reason = STATUS_CONFIRMED, "telegram_confirmed"
+    elif send_result.status == "ambiguous":
+        status, reason = STATUS_AMBIGUOUS, send_result.reason
+    elif send_result.status == "not_attempted":
+        status, reason = STATUS_SKIPPED, send_result.reason
+    else:
+        status, reason = STATUS_FAILED, send_result.reason
+
+    if status != STATUS_CONFIRMED:
+        _write_outcome(
+            state_path, key, session_id=session_id, turn_index=turn_index, question_id="",
+            status=status, reason=reason, attempts=attempts, advisory_lints=advisory,
+        )
+        _diagnostic("story_turn_send", reason, session_id)
+        return TurnOutcome(session_id, turn_index, status, reason, True)
+
+    lifehug_turn = {"role": "lifehug", "text": message, "channel": channel, "model": model}
+    try:
+        _append_turn_resilient(
+            session_id, lifehug_turn, expected_turns=turn_index, vault_root=vault_root
+        )
+        conversation.merge_session_extraction(
+            session_id, rolling_summary=parsed["rolling_summary"], extracted=parsed["extracted"],
+            vault_root=vault_root,
+        )
+    except Exception:  # noqa: BLE001 — the message is already delivered
+        _diagnostic("story_turn_session_record", "session_write_failed", session_id)
+
+    _write_outcome(
+        state_path, key, session_id=session_id, turn_index=turn_index, question_id="",
+        status=STATUS_CONFIRMED, reason="telegram_confirmed", attempts=attempts,
+        advisory_lints=advisory,
+    )
+    if parsed["insight_receipts"]:
+        _record_insight_receipts(state_path, key, parsed["insight_receipts"])
+    return TurnOutcome(
+        session_id, turn_index, STATUS_CONFIRMED, "telegram_confirmed", True,
+        question_free=parsed["question_free"],
+    )
+
+
 def _lints_config() -> dict | None:
     try:
         return conversation_lints.load_lints_config()
@@ -1130,6 +1591,56 @@ def file_candidate_ideas(
     return added
 
 
+def _story_source_paths(session: dict) -> tuple[str, ...]:
+    """The distinct story ``source_path`` values behind this session's user
+    turns (issue #117) — only story-mode ("conversation") user turns carry
+    this field; a chat session's answer turns carry ``question_id`` instead
+    and contribute nothing here."""
+    paths: list[str] = []
+    for turn in session.get("turns") or []:
+        if turn.get("role") != "user":
+            continue
+        source_path = turn.get("source_path")
+        if source_path and str(source_path) not in paths:
+            paths.append(str(source_path))
+    return tuple(paths)
+
+
+def supersede_template_candidates_for_session(
+    session: dict,
+    *,
+    candidates_path: Path | None = None,
+) -> list[str]:
+    """Flip this session's story-source template candidates to ``superseded``.
+
+    Called only when the close step actually filed classifier-grade
+    ``extracted.candidate_ideas`` (provenance ``conversation``) for this
+    session — the templates are the documented no-session fallback and the
+    immediate-value floor; a session that closes with nothing extracted
+    leaves them live. Goes through ``question_candidates.update_candidate``
+    so ``updated_at``-style bookkeeping stays consistent with every other
+    status transition in that store (contract, implementation notes).
+    """
+    sources = _story_source_paths(session)
+    if not sources:
+        return []
+    import question_candidates  # noqa: PLC0415
+
+    path = candidates_path or question_candidates.QUESTION_CANDIDATES_FILE
+    data = question_candidates.load_store(path)
+    superseded: list[str] = []
+    for candidate in data.get("candidates", []):
+        if candidate.get("status") != "candidate":
+            continue
+        if str(candidate.get("source_path") or "") not in sources:
+            continue
+        question_candidates.update_candidate(data, candidate["id"], status="superseded")
+        superseded.append(candidate["id"])
+    if superseded:
+        question_candidates.save_store(data, path)
+    return superseded
+
+
 def _entity_hints(session: dict) -> list[str]:
     extracted = session.get("extracted") or {}
     entities = extracted.get("entities") if isinstance(extracted, dict) else None
@@ -1216,10 +1727,22 @@ def close_session_now(
         )
     except Exception:  # noqa: BLE001 — instrumentation never blocks a close
         _diagnostic("engagement_capture", "engagement_write_failed", session_id)
+    added_candidates: list[str] = []
     try:
-        file_candidate_ideas(closed, candidates_path=candidates_path)
+        added_candidates = file_candidate_ideas(closed, candidates_path=candidates_path)
     except Exception:  # noqa: BLE001
         _diagnostic("candidate_filing", "candidate_write_failed", session_id)
+
+    if added_candidates:
+        # Issue #117: classifier-grade extraction landed for this session —
+        # supersede the template candidates it was standing in for. A close
+        # with NO extracted candidate_ideas leaves the templates live
+        # (contract, "the templates stay live" — the no-session fallback IS
+        # the immediate-value floor when nothing better ever arrives).
+        try:
+            supersede_template_candidates_for_session(closed, candidates_path=candidates_path)
+        except Exception:  # noqa: BLE001
+            _diagnostic("candidate_supersede", "candidate_supersede_failed", session_id)
 
     return CloseOutcome(
         session_id,
