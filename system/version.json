@@ -1,7 +1,7 @@
 {
-  "version": 149,
+  "version": 150,
   "released": "2026-08-11",
-  "changelog": "v149: file_answer_bg.sh now auto-commits and pushes after successful filing (safe_autocommit pattern from weekly/monthly scripts). ingest-story gains --commit flag for the same behavior. Answers hit GitHub immediately instead of waiting for the next maintenance run.",
+  "changelog": "Fix file_answer_bg.sh filing invariants: remove set -e toggle (a failed pull could abort filing after the first autocommit), restore pull-position ordering (v117 contract).",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
