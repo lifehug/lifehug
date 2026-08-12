@@ -343,7 +343,7 @@ dry run first, then commit the resulting rename transaction.
 
 6. **Update README** — `process-answer` does this; otherwise run `python3 system/lifehug.py rebuild`.
 
-7. **Refresh wiki** — `process-answer` compiles the wiki by default. Use `--no-compile-wiki` only for tests or emergency repairs.
+7. **Refresh wiki** — `process-answer` compiles the wiki by default. Use `--no-compile-wiki` only for tests or emergency repairs. Inside an OPEN conversation session (v156, issue #119) this default flips: compile skips and the compile-needed sentinel is touched instead — the session's close compiles once for the whole exchange (`--compile-wiki` forces it anyway).
 
 8. **Source lint when repairing** — use `python3 system/lifehug.py source-lint` for review and `source-lint --fix` only for safe metadata/manifest repairs.
 

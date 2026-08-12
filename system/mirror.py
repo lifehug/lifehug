@@ -28,6 +28,7 @@ from pathlib import Path
 
 from lifehug_core import (
     CLASSIFICATIONS_DIR,
+    MIRROR_RESPONSES_FILE,
     WIKI_DIR,
     load_config,
     now_utc,
@@ -54,42 +55,109 @@ def mirror_page_path() -> Path:
 
 
 def load_mirror_entries() -> list[dict]:
-    """Every classifier-extracted contradiction / insight / position, newest
-    classification first: {kind, text, source, source_short, classified_at}.
-    ``position`` = an insight the classifier prefixed ``position:`` (the
-    author's stated stance, v96 opinion lane)."""
+    """Every classifier-extracted contradiction / insight / position, PLUS the
+    author's own conversation responses to a tension (issue #119 — the
+    Mirror's first inbound path), newest first:
+    {kind, text, source, source_short, classified_at}. ``position`` = an
+    insight the classifier prefixed ``position:`` (the author's stated
+    stance, v96 opinion lane). ``response`` = a "Sit with" reply the author
+    gave in conversation (``state/mirror_responses.json``, the ONE writer is
+    ``append_mirror_responses`` below)."""
     entries: list[dict] = []
-    if not CLASSIFICATIONS_DIR.exists():
-        return entries
     seen: set[tuple[str, str]] = set()
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-        data = read_json(path, default={}) or {}
-        source = str(data.get("source_path", path.stem))
-        classified_at = str(data.get("classified_at", ""))
-        source_short = Path(source).stem
 
-        def add(kind: str, text: str) -> None:
-            text = text.strip()
-            if not text or (kind, text.lower()) in seen:
-                return
-            seen.add((kind, text.lower()))
-            entries.append({
-                "kind": kind,
-                "text": text,
-                "source": source,
-                "source_short": source_short,
-                "classified_at": classified_at,
-            })
+    def add(kind: str, text: str, *, source: str, source_short: str, classified_at: str) -> None:
+        text = text.strip()
+        if not text or (kind, text.lower()) in seen:
+            return
+        seen.add((kind, text.lower()))
+        entries.append({
+            "kind": kind,
+            "text": text,
+            "source": source,
+            "source_short": source_short,
+            "classified_at": classified_at,
+        })
 
-        for c in data.get("contradictions") or []:
-            if isinstance(c, str):
-                add("contradiction", c)
-        for i in data.get("self_understanding_insights") or []:
-            if isinstance(i, str):
-                kind = "position" if i.strip().lower().startswith("position:") else "insight"
-                add(kind, i)
+    if CLASSIFICATIONS_DIR.exists():
+        for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
+            data = read_json(path, default={}) or {}
+            source = str(data.get("source_path", path.stem))
+            classified_at = str(data.get("classified_at", ""))
+            source_short = Path(source).stem
+
+            for c in data.get("contradictions") or []:
+                if isinstance(c, str):
+                    add("contradiction", c, source=source, source_short=source_short,
+                        classified_at=classified_at)
+            for i in data.get("self_understanding_insights") or []:
+                if isinstance(i, str):
+                    kind = "position" if i.strip().lower().startswith("position:") else "insight"
+                    add(kind, i, source=source, source_short=source_short,
+                        classified_at=classified_at)
+
+    responses = read_json(MIRROR_RESPONSES_FILE, default={}) or {}
+    for item in responses.get("responses") or []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if not isinstance(text, str):
+            continue
+        session_id = str(item.get("session_id", ""))
+        add(
+            "response",
+            text,
+            source=f"conversation:{session_id}",
+            source_short=session_id,
+            classified_at=str(item.get("responded_at", "")),
+        )
+
     entries.sort(key=lambda e: e["classified_at"], reverse=True)
     return entries
+
+
+def append_mirror_responses(responses: list[dict]) -> int:
+    """Append author responses to ``state/mirror_responses.json``.
+
+    THE ONE writer of this file (issue #119, restated by the contract's
+    consistency-audit amendment — a duplicate write path named elsewhere was
+    dropped). Idempotent on ``(session_id, text)``: a re-run of the same
+    conversation-close never duplicates. Author's words stored verbatim —
+    never rewritten (voice contract).
+    """
+    if not responses:
+        return 0
+    data = read_json(MIRROR_RESPONSES_FILE, default=None)
+    if not isinstance(data, dict) or not isinstance(data.get("responses"), list):
+        data = {"version": 1, "responses": []}
+    existing = {
+        (str(r.get("session_id", "")), str(r.get("text", "")).strip())
+        for r in data["responses"] if isinstance(r, dict)
+    }
+    added = 0
+    for item in responses:
+        if not isinstance(item, dict):
+            continue
+        session_id = str(item.get("session_id") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not session_id or not text:
+            continue
+        key = (session_id, text)
+        if key in existing:
+            continue
+        existing.add(key)
+        data["responses"].append({
+            "session_id": session_id,
+            "responded_at": str(item.get("responded_at") or now_utc()),
+            "tension_ref": str(item.get("tension_ref") or "").strip(),
+            "text": text,
+            "source": "conversation",
+        })
+        added += 1
+    if added:
+        data["version"] = 1
+        write_json(MIRROR_RESPONSES_FILE, data)
+    return added
 
 
 def _capped(entries: list[dict], kind: str) -> list[dict]:
@@ -130,6 +198,9 @@ VOICE CONTRACT (hard rules):
 - Never invent, embellish, or infer beyond the material. Quote the author's
   own phrasings where they're vivid.
 - Calm over complete: pick what matters most, don't inventory everything.
+- Author responses show them ENGAGING a tension in conversation — reflect
+  the development in this week's edition. Never declare the tension
+  resolved: the author resolves tensions, not you.
 
 OUTPUT: markdown BODY only (no frontmatter, no top-level # title), with
 EXACTLY these four sections in this order:
@@ -157,6 +228,7 @@ THE SIGNALS:
 {block("contradiction", "Contradictions")}
 {block("insight", "Self-understanding insights")}
 {block("position", "Stated positions")}
+{block("response", "Author responses to tensions")}
 """
 
 

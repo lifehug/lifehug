@@ -234,6 +234,26 @@ def _question_id(payload: dict) -> str:
     return value
 
 
+#: Mirrors conversation.SESSION_ID_RE byte-for-byte. NOT a plain re-import:
+#: tests/test_v150_conversation_store.py's NoBehaviorChangeGuardTests (Wave-1
+#: PR2) forbids every module except an exempt few (conversation_delivery.py,
+#: arc_planner.py, lifehug.py) from importing conversation.py at all — jobs.py
+#: binds its OWN vault root via jobs.configure(), and conversation.py binds
+#: one at import time via lifehug_core, so importing it here would silently
+#: rebind (and break) every jobs.py caller that configures a non-default
+#: vault. This is the one place the recurring-defect "single authoritative
+#: definition" doctrine loses to that stronger, pre-existing constraint —
+#: keep the two patterns in sync by hand if conversation.py's ever changes.
+_SESSION_ID_RE = re.compile(r"^conv-\d{8}-\d{6}-[0-9a-f]{6}$")
+
+
+def _session_id(payload: dict) -> str:
+    value = _text(payload, "session_id", maximum=64)
+    if not _SESSION_ID_RE.fullmatch(value):
+        raise ValueError("invalid session id")
+    return value
+
+
 @dataclass(frozen=True)
 class Invocation:
     kind: str
@@ -522,7 +542,7 @@ def _build_process_answer(payload: dict) -> tuple[Invocation, ...]:
         required={"question_id", "answer"},
         optional={
             "source", "answered_date", "asked_date", "followups", "force", "commit",
-            "push", "summary", "no_compile_wiki", "sensitivity",
+            "push", "summary", "no_compile_wiki", "compile_wiki", "sensitivity",
         },
     )
     args = ["process-answer", _question_id(payload)]
@@ -547,11 +567,14 @@ def _build_process_answer(payload: dict) -> tuple[Invocation, ...]:
         if not isinstance(followup, str) or not followup.strip() or len(followup) > 20_000:
             raise ValueError("invalid followup")
         args += ["--followup", followup]
+    if payload.get("no_compile_wiki", False) and payload.get("compile_wiki", False):
+        raise ValueError("no_compile_wiki and compile_wiki are mutually exclusive")
     for key, flag in (
         ("force", "--force"),
         ("commit", "--commit"),
         ("push", "--push"),
         ("no_compile_wiki", "--no-compile-wiki"),
+        ("compile_wiki", "--compile-wiki"),
     ):
         value = payload.get(key, False)
         if not isinstance(value, bool):
@@ -564,7 +587,7 @@ def _build_process_answer(payload: dict) -> tuple[Invocation, ...]:
 _FILE_ANSWER_VALUE_FLAGS = {
     "--source", "--answered-date", "--asked-date", "--followup", "--summary", "--sensitivity",
 }
-_FILE_ANSWER_BOOL_FLAGS = {"--force", "--commit", "--push", "--no-compile-wiki"}
+_FILE_ANSWER_BOOL_FLAGS = {"--force", "--commit", "--push", "--no-compile-wiki", "--compile-wiki"}
 
 
 def _validated_file_answer_args(raw: object) -> list[str]:
@@ -592,6 +615,22 @@ def _validated_file_answer_args(raw: object) -> list[str]:
     return out
 
 
+def _build_conversation_close(payload: dict) -> tuple[Invocation, ...]:
+    """One durable close: PR3's close + #119's filing/compile/commit steps,
+    all inside ``lifehug.py conversation-close <session_id>`` (never
+    ``--expired`` here — that flag is the deterministic sweep's own
+    discovery entry point, invoked directly, never enqueued as a job).
+    ``reason`` passes through to the close (contract §2a) — the idle-sweep
+    enqueues "idle_timeout"; default "done" covers any other producer."""
+    _expect_payload(payload, required={"session_id"}, optional={"reason"})
+    reason = _optional_text(payload, "reason", maximum=32) or "done"
+    # Mirrors conversation.VALID_CLOSE_REASONS — see _SESSION_ID_RE's comment
+    # above for why this can't just import conversation.py.
+    if reason not in {"done", "idle_timeout", "exit_taken"}:
+        raise ValueError("invalid close reason")
+    return (_cli("conversation-close", _session_id(payload), "--reason", reason),)
+
+
 def _build_file_answer(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(payload, required={"args", "body"})
     args = _validated_file_answer_args(payload["args"])
@@ -612,6 +651,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "candidate-update": CommandSpec(_build_candidate_update, "never"),
     "compile": CommandSpec(_build_compile, "idempotent"),
     "compile-pending": CommandSpec(_build_schedule("compile_and_commit.sh"), "never"),
+    "conversation-close": CommandSpec(_build_conversation_close, "never", timeout_seconds=1800),
     "daily": CommandSpec(_build_schedule("daily_question.sh"), "never", timeout_seconds=1800),
     "file-answer": CommandSpec(_build_file_answer, "never", timeout_seconds=1800),
     "fix-source": CommandSpec(_build_fix, "never"),

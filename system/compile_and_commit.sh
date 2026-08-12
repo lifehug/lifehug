@@ -21,6 +21,16 @@ SENTINEL="$(python3 "$SCRIPT_DIR/vault_paths.py" data-path compile_needed --vaul
 LEARNING_FAILURES_FILE="$WORKSPACE/$(python3 "$SCRIPT_DIR/vault_paths.py" data-path learning_failures --vault-root "$WORKSPACE")"
 export LEARNING_FAILURES_FILE
 
+# Close-sweep pre-step (issue #119, OSS twin of the platform's scheduled
+# tick): find and enqueue a durable conversation-close job for every open
+# conversation session past its idle timeout. Deterministic/AI-free at this
+# discovery step; the actual close (which may call AI for the takeaway)
+# runs on the job worker. Runs BEFORE the sentinel check so a vault whose
+# only pending work is an expired session still closes it. Never fatal —
+# a sweep failure here must not block the compile below.
+python3 "$SCRIPT_DIR/lifehug.py" conversation-close --expired --vault-root "$WORKSPACE" || \
+  echo "warn: conversation-close --expired sweep failed (continuing)" >&2
+
 # Nothing to do?
 if [[ ! -f "$SENTINEL" ]]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') nothing to compile"

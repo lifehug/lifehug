@@ -11,6 +11,7 @@ from datetime import date, datetime
 
 from lifehug_core import (
     ANSWERS_DIR,
+    COMPILE_NEEDED_FILE,
     QUESTIONS_FILE,
     README_FILE,
     REPO_DIR,
@@ -313,6 +314,73 @@ def compile_wiki() -> None:
     )
 
 
+def in_open_conversation_session(question_id: str) -> bool:
+    """Pure read: is ``question_id`` (or its suffix-chain root) inside an
+    OPEN conversation session (issue #119)? Never blocks answer filing on
+    a lookup failure — an import/read error just means "no session".
+
+    Threads ``conversation_delivery.VAULT_ROOT`` through explicitly — the
+    same testability seam PR3 (#116) built for exactly this: a caller that
+    cannot pass ``vault_root`` as a call-time argument (this module's CLI)
+    can still point the lookup at a synthetic vault in tests.
+    """
+    try:
+        import conversation_delivery  # noqa: PLC0415
+
+        return conversation_delivery.find_open_session_for_question(
+            question_id, vault_root=conversation_delivery.VAULT_ROOT
+        ) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve_compile_default(question_id: str, *, no_compile_wiki: bool, compile_wiki_flag: bool) -> bool:
+    """Whether to SKIP the wiki compile for this filing (issue #119).
+
+    Explicit flags always win. With neither flag, the default flips to
+    "skip" when the answer belongs to an open conversation session — the
+    session's eventual close is the batch boundary — and stays "compile"
+    (today's exact behavior) otherwise.
+    """
+    if compile_wiki_flag:
+        return False
+    if no_compile_wiki:
+        return True
+    return in_open_conversation_session(question_id)
+
+
+def _parse_answer_timestamp(value: str | None) -> datetime | None:
+    """Frontmatter timestamp parser: date-only (``YYYY-MM-DD``, midnight
+    assumed) or a full ISO timestamp. Unparseable/missing input -> None."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    candidates = [text] if len(text) > 10 else [f"{text}T00:00:00"]
+    for candidate in candidates:
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+    return None
+
+
+def time_to_answer_hours(asked_at: str | None, captured_at: str | None) -> float | None:
+    """Hours from ``asked_at`` to ``captured_at`` (answer frontmatter,
+    issue #119 engagement dimension). ``asked_at`` is frequently date-only
+    (see ``_asked_date_from``) so this is an approximation, not a guess —
+    computable retroactively from the same fields for every answer,
+    conversational or not. Absent/unparseable/negative -> None, never
+    fabricated."""
+    started = _parse_answer_timestamp(asked_at)
+    ended = _parse_answer_timestamp(captured_at)
+    if started is None or ended is None:
+        return None
+    hours = (ended - started).total_seconds() / 3600.0
+    return round(hours, 2) if hours >= 0 else None
+
+
 def maybe_send_chapter_ready_offer(answered_question_id: str) -> None:
     """Phase 2: after an answer lands, if it just tipped a chapter into READY
     (and we haven't offered that chapter before, and it isn't already drafted),
@@ -573,7 +641,12 @@ def main():
                         help="Sensitivity tier for future audience builds (default private — "
                              "nothing is ever shared without explicit owner review; the wiki "
                              "itself stays owner-only regardless)")
-    parser.add_argument("--no-compile-wiki", action="store_true", help="Skip automatic wiki compile")
+    compile_group = parser.add_mutually_exclusive_group()
+    compile_group.add_argument("--no-compile-wiki", action="store_true",
+                                help="Skip automatic wiki compile (explicit — always wins)")
+    compile_group.add_argument("--compile-wiki", action="store_true",
+                                help="Force the automatic wiki compile even inside an open "
+                                     "conversation session (explicit — always wins; issue #119)")
     args = parser.parse_args()
 
     rotation = read_json(ROTATION_FILE, default={}) or {}
@@ -673,7 +746,18 @@ def main():
     write_json(ROTATION_FILE, rotation)
     update_readme()
 
-    if not args.no_compile_wiki:
+    # Batching default (issue #119): inside an OPEN conversation session, the
+    # per-answer wiki compile skips by default — the session's close is the
+    # batch boundary — and the compile-needed sentinel is touched so the
+    # hourly compile_and_commit.sh (or the eventual close) picks it up.
+    # Explicit --compile-wiki / --no-compile-wiki always win. No session ⇒
+    # byte-identical to today (compile runs, sentinel untouched).
+    skip_compile = resolve_compile_default(
+        question_id, no_compile_wiki=args.no_compile_wiki, compile_wiki_flag=args.compile_wiki
+    )
+    if skip_compile:
+        COMPILE_NEEDED_FILE.touch()
+    else:
         compile_wiki()
 
     # Score this answer for the quality loop — runs silently, never fails.
@@ -685,7 +769,12 @@ def main():
         richness = score_richness(signals)
         from question_planner import infer_story_function  # noqa: PLC0415
         story_fn = infer_story_function(str(question.get("text", "")))
-        append_score(question_id, cat, story_fn, focus_for_category(cat), signals, richness)
+        engagement = None
+        hours = time_to_answer_hours(asked, captured_at)
+        if hours is not None:
+            engagement = {"time_to_answer_hours": hours}
+        append_score(question_id, cat, story_fn, focus_for_category(cat), signals, richness,
+                     engagement=engagement)
     except Exception as exc:  # noqa: BLE001
         record_learning_failure(
             "process_answer",
@@ -715,7 +804,9 @@ def main():
 
     print(f"✓ {answer_action} answer {question_id} to {out_file.relative_to(REPO_DIR)}")
     print(f"✓ Coverage: {answered_count}/{sum(c['total'] for c in coverage['categories'].values())}")
-    if not args.no_compile_wiki:
+    if skip_compile:
+        print("✓ Compile-needed sentinel touched (batched — the session close compiles once)")
+    else:
         print("✓ Compiled wiki")
     if followups_added:
         print(f"✓ Added follow-ups: {', '.join(qid for qid, _ in followups_added)}")
