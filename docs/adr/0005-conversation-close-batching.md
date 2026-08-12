@@ -1,4 +1,4 @@
-# ADR 0004: One commit, one compile, per conversation close
+# ADR 0005: One commit, one compile, per conversation close
 
 Date: 2026-08-12
 Status: proposed
