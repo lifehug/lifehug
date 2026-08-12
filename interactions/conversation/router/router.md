@@ -4,7 +4,8 @@ Prompt for the cheap router model (`role.router` in `interaction.yaml`,
 default `haiku-class`). This is the definition's own router contract —
 **both runtimes (OSS and hosted platform) must classify identically**;
 they may not diverge on the intent taxonomy, the default-class rule, or
-the unsure-fallback policy documented here.
+the unsure-fallback policy documented here — except the unsure-fallback
+policy's own terminal step, which is explicitly per-runtime (see below).
 
 ## Task
 
@@ -79,10 +80,25 @@ order:
    reply, treat the message as `answer`.
 2. **Continue session** — else, if a session is currently open, treat the
    message as `continue_session`.
-3. **Ask** — else, do not guess: surface the ambiguity rather than forcing
-   a low-confidence classification into one of the five intents (the
-   runtime's job at this point is to clarify, not to silently commit to a
-   class).
+3. **Terminal, per runtime** — else, do not guess: surface the ambiguity
+   rather than forcing a low-confidence classification into one of the
+   five intents. The two runtimes reach for this terminal case by
+   different mechanics (delivery model), so each resolves it the way its
+   own mechanics allow, while both still "do not guess":
+   - **OSS host-agent runtime** — asks one short clarifying line (e.g.
+     "just to make sure I've got this right — is that continuing what you
+     were telling me, or something new?").
+   - **Hosted webhook runtime** — files the message as a story
+     (`new_story`) rather than blocking on a clarifying round-trip;
+     nothing is ever lost, and the record can be reclassified later once
+     more context exists.
 
-The two runtimes may not diverge on this fallback policy — it is the
-definition's own router contract, not a per-runtime implementation detail.
+   [Hosted terminal pending owner ratification — platform PR #422 flags
+   this as a judgment item. Until ratified, treat the hosted behavior
+   above as the working default, not as finally settled.]
+
+This file is the definition both runtimes must match: the taxonomy, the
+default-class rule, and steps 1–2 above admit no runtime divergence at
+all; only the terminal step (3) is explicitly per-runtime, and only
+because the two runtimes' delivery models make a single shared mechanic
+impossible — not because the definition is silent on it.
