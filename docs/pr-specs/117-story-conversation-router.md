@@ -43,7 +43,7 @@ Expected interfaces:
      what I do — I'm here for your story. Speaking of which — is there
      anything on your mind today?").
    - `interactions/conversation/interaction.yaml` — router knobs read (not
-     hardcoded): `router.confidence_threshold` and the safe-default rules
+     hardcoded): `knob.router_confidence_threshold` and the safe-default rules
      (below), plus conversation idle timeout (~30min default).
 2. Wave-1 PR 2 (`system/conversation.py`): session store CRUD
    (`state/conversations/<session_id>.json`), `build_router_prompt(...)`
@@ -207,7 +207,12 @@ nothing durable.
      `action:"ask_user"` (intent still reported as the model's
      best guess when one exists, otherwise `new_story` with
      `action:"ask_user"` — the caller asks one clarifying line rather
-     than guessing).
+     than guessing). NOTE: `router.md`'s unsure-terminal behavior is
+     PER-RUNTIME — OSS asks one clarifying line (`action:"ask_user"`, as
+     specified here); the hosted platform's unsure-terminal (file-as-story)
+     is pending owner ratification on platform issue #422 and is NOT this
+     contract's concern. `action:"ask_user"` remains the OSS behavior
+     regardless of how #422 resolves.
    - `continue_session` is the default CLASS whenever a session is open —
      router.md instructs the model accordingly; the code default above
      mirrors it.
