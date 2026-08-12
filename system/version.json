@@ -1,7 +1,7 @@
 {
-  "version": 152,
+  "version": 153,
   "released": "2026-08-11",
-  "changelog": "v150: the Conversation Interaction's durable session store lands (issue #115, Wave 1 PR 2 of 2) \u2014 vault-contract v2 registers arc_cards, conversations, and mirror_responses data paths plus the interactions framework path; system/conversation.py adds session CRUD (open/load/list/append-turn-CAS/close), deterministic context assembly, and four pure prompt builders (turn/router/arc/closing); system/conversation_lints.py adds the deterministic lint engine (one-question-per-turn, banned phrases, question-grammar audit, length caps, receipt-before-question, year-question detection); eight new conversation-* lifehug.py subcommands expose all of it. Infrastructure only \u2014 no live-flow behavior change; nothing here is reachable except through the new subcommands and imports.",
+  "changelog": "v153: the post-answer moment becomes a CONVERSATION (issue #116, Wave 2 PR 3). Answering a question no longer produces two disconnected messages \u2014 a warm acknowledgment that cannot ask anything, followed by a rotation-picked question about something else. It now produces ONE message that receives what you said, pays it back with something you didn't have, and cues the next question in your own words: a short chat (~3 exchanges) that ends gracefully and, when it earned one, closes with a takeaway. Partial chats file cleanly and close silently \u2014 no nagging, ever. system/conversation_delivery.py orchestrates the turn through the issue #115 builders and the interactions/conversation/ behavior authority, enforcing the deterministic lints (one question, length cap, banned phrases) before anything is sent; state/conversation_deliveries.json makes delivery exactly-once (confirmed replays are no-ops, ambiguous is never auto-retried); and ANY definitive failure degrades to the previous acknowledgment + follow-up pair in the same run, so this is never silent and never worse than before. New config keys conversation_model / router_model / arc_plan_model; conversation-status and conversation-close upgraded in place (--expired runs the idle sweep) plus the new conversation-turn-retry operator door; engagement signal is recorded on each answered question at close.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -185,6 +185,8 @@
     "tests/walkthrough_lib.py",
     "wiki/SCHEMA.md",
     "system/conversation.py",
-    "system/conversation_lints.py"
+    "system/conversation_lints.py",
+    "system/conversation_delivery.py",
+    "tests/test_conversation_delivery.py"
   ]
 }

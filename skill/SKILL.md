@@ -106,10 +106,11 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer <ID> \
   --followup "What did the room look like in that moment?"
 ```
 
-5. After the answer is durable, `process-answer` sends the canonical warm Telegram acknowledgment through the shared AI provider, then any adaptive follow-up. Do not add a second acknowledgment. A provider or send failure never changes answer success and never suppresses the follow-up.
-6. Confirmed acknowledgments dedupe by `answer:{ID}`. Check `answer-ack-status`; retry a definitive failure with `answer-ack-retry`. Never retry an ambiguous send until Telegram has been checked, then pass `--confirm-not-sent`.
-7. `process-answer` compiles the wiki automatically by default. Use `--no-compile-wiki` only for tests or emergency repairs.
-8. Commit only when the user asks, or when operating an explicit daily/cron workflow.
+5. After the answer is durable, `process-answer` sends ONE conversation turn (v153): a single Telegram message that receives the answer, pays it back, and cues the next question in the user's own words. Do not add a second acknowledgment or a second question — one message per answer, whatever the path produced it. Any definitive failure (no provider, generation error, lint rejection, send rejection) degrades in the same run to the previous behavior: the warm acknowledgment followed by a separate adaptive follow-up. Nothing here ever changes answer success.
+6. Turn delivery dedupes by `turn:{session_id}:{turn_index}`. Check `conversation-status`; retry a definitive failure with `conversation-turn-retry <session_id> <turn_index>`. Never retry an ambiguous send until Telegram has been checked, then pass `--confirm-not-sent`. The fallback acknowledgment keeps its own `answer:{ID}` ledger — `answer-ack-status` / `answer-ack-retry` are unchanged.
+7. Chats close themselves: `conversation-close --expired` runs the idle sweep. A chat with at least two of the user's turns gets a closing takeaway; a partial one closes SILENTLY — never nag someone for stopping.
+8. `process-answer` compiles the wiki automatically by default. Use `--no-compile-wiki` only for tests or emergency repairs.
+9. Commit only when the user asks, or when operating an explicit daily/cron workflow.
 
 Never manually edit `coverage.json` or `rotation.json` unless repairing a failed script run with a clear reason.
 

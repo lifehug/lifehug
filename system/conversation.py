@@ -346,6 +346,65 @@ def close_session(
     return doc
 
 
+#: The four extraction buckets a turn may contribute to (schema-pinned).
+EXTRACTED_BUCKETS = ("facts", "entities", "candidate_ideas", "mirror_responses")
+
+
+def merge_session_extraction(
+    session_id: str,
+    *,
+    rolling_summary: str | None = None,
+    extracted: dict | None = None,
+    vault_root: str | Path | None = None,
+) -> dict:
+    """Merge one turn's extraction deltas into an OPEN session document.
+
+    Wave 1 shipped turn-append and close only; issue #116's engine needs the
+    ``extracted``/``rolling_summary`` half of the schema to actually persist,
+    because the close step files ``extracted.candidate_ideas`` into the
+    candidate store and records ``extracted.entities`` on the close block.
+    Keeping that write here (rather than in the engine) preserves the
+    contract rule that ``state/conversations/`` is only ever touched through
+    this module's CRUD.
+
+    Deltas are appended, de-duplicated conservatively (exact repeats of a
+    JSON-serializable item are dropped), and unknown buckets are ignored.
+    """
+    root = _resolve_root(vault_root)
+    doc = load_session(session_id, vault_root=root)
+    if doc.get("status") == "closed":
+        raise SessionClosedError(f"session {session_id} is closed")
+    if rolling_summary is not None:
+        if not isinstance(rolling_summary, str):
+            raise ValueError("rolling_summary must be a string")
+        doc["rolling_summary"] = rolling_summary
+    if extracted:
+        if not isinstance(extracted, dict):
+            raise ValueError("extracted must be an object")
+        current = doc.get("extracted")
+        if not isinstance(current, dict):
+            current = {}
+        for bucket in EXTRACTED_BUCKETS:
+            existing = current.get(bucket)
+            if not isinstance(existing, list):
+                existing = []
+            additions = extracted.get(bucket)
+            if not isinstance(additions, list):
+                current[bucket] = existing
+                continue
+            seen = {json.dumps(item, sort_keys=True) for item in existing}
+            for item in additions:
+                key = json.dumps(item, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                existing.append(item)
+            current[bucket] = existing
+        doc["extracted"] = current
+    _write_json_at(_conversations_dir(root) / f"{session_id}.json", doc, vault_root=root)
+    return doc
+
+
 # --------------------------------------------------------------------------
 # Arc-card helpers (storage only)
 #

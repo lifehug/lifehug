@@ -10,6 +10,9 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
+
+from tempdirs import root_parent_tmp  # noqa: E402
 
 
 def load_answer_ack():
@@ -150,6 +153,7 @@ class AnswerAcknowledgmentDeliveryTests(unittest.TestCase):
 
     def setUp(self):
         import answer_ack_delivery
+        import conversation_delivery
         import process_answer
 
         self.delivery = answer_ack_delivery
@@ -157,6 +161,24 @@ class AnswerAcknowledgmentDeliveryTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.state_path = Path(tmp.name) / "answer_acknowledgments.json"
+        # v153: run_post_answer_delivery now runs a conversation turn first
+        # (which falls back to the ack pair asserted below). Point the engine
+        # at a synthetic vault — ROOT.parent, because vault_paths refuses to
+        # traverse macOS's /var symlink — so these tests never write session
+        # documents or a delivery ledger into the real vault.
+        vault = root_parent_tmp(self, ROOT, prefix="lifehug-v153-ack-") / "vault"
+        vault.mkdir()
+        for patch in (
+            mock.patch.object(conversation_delivery, "VAULT_ROOT", vault),
+            mock.patch.object(
+                conversation_delivery,
+                "DELIVERY_STATE_FILE",
+                vault / "state" / "conversation_deliveries.json",
+            ),
+            mock.patch.object(conversation_delivery, "record_learning_failure"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def test_ack_is_best_effort_and_never_confirmed_without_a_telegram_target(self):
         """Ported from test_ack_skips_model_call_without_telegram_target.
