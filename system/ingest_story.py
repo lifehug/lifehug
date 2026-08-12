@@ -15,6 +15,7 @@ from lifehug_core import (
     REPO_DIR,
     now_utc,
     read_json,
+    record_learning_failure,
     slugify,
     write_json,
     write_text,
@@ -199,20 +200,74 @@ def append_candidates(candidates: list[dict]) -> None:
     write_json(QUESTION_CANDIDATES_FILE, data)
 
 
+def content_source_type(args: argparse.Namespace) -> str:
+    """The raw-source content kind for this ingest — shared by the frontmatter
+    and the Conversation turn prompt (issue #117) so the register can match
+    it (a witness account is another person's words; an opinion gets
+    Socratic energy rather than narrative-scene probing).
+
+    A witness account is ANOTHER PERSON's words about shared events — a
+    second voice. It is never merged with the author's account; when the
+    two disagree, the wiki preserves both ("perspectives differ" is data,
+    not an error to resolve). An opinion is the author's STATED POSITION —
+    a lens on life rather than an event account. Same raw-source contract;
+    different content kind.
+    """
+    if getattr(args, "witness", None):
+        return "witness_account"
+    if getattr(args, "kind", "story") == "opinion":
+        return "opinion"
+    return "unprompted_story"
+
+
+def conversation_channel_for_source(source_label: str) -> str:
+    """Map ``--source`` to a Conversation ``channel`` (issue #117).
+
+    ``conversation.VALID_CHANNELS`` is exactly ``{telegram, web, cli}`` —
+    every other source label (the default ``manual``, ``voice``, ``email``,
+    ...) reads as an operator/CLI-mediated ingest, so it maps to ``cli``.
+    """
+    label = (source_label or "").strip().lower()
+    if label in ("telegram", "web"):
+        return label
+    return "cli"
+
+
+def run_story_conversation_hook(
+    *, args: argparse.Namespace, relative_source: str, story_text: str, source_type: str,
+) -> None:
+    """Best-effort: open/continue a Conversation and send ONE immediate turn.
+
+    Never blocks, delays, or fails the ingest itself — the same
+    swallow-everything posture as ``process_answer.run_post_answer_delivery``.
+    ``run_story_conversation_turn`` already degrades internally on a
+    not-ready provider or a definitive generation/lint/send failure (the
+    no-session fallback, contract #117 Part A #3); this wrapper only guards
+    against a genuinely unexpected internal error reaching the ingest path.
+    """
+    try:
+        from conversation_delivery import run_story_conversation_turn  # noqa: PLC0415
+
+        outcome = run_story_conversation_turn(
+            source_id=f"story:{relative_source}",
+            source_path=relative_source,
+            title=args.title,
+            story_text=story_text,
+            source_type=source_type,
+            channel=conversation_channel_for_source(args.source),
+        )
+        if outcome.status == "confirmed":
+            print(f"✓ Conversation turn: confirmed ({relative_source})")
+    except Exception:  # noqa: BLE001 — the ingest itself must never fail here
+        record_learning_failure(
+            "ingest_story", "conversation_turn", "internal_error",
+            context={"source_id": f"story:{relative_source}"},
+        )
+
+
 def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[str], payload: str) -> str:
+    source_type = content_source_type(args)
     witness = getattr(args, "witness", None)
-    # A witness account is ANOTHER PERSON's words about shared events —
-    # a second voice. It is never merged with the author's account; when
-    # the two disagree, the wiki preserves both ("perspectives differ" is
-    # data, not an error to resolve).
-    # An opinion is the author's STATED POSITION — a lens on life rather than
-    # an event account. Same raw-source contract; different content kind.
-    if witness:
-        source_type = "witness_account"
-    elif getattr(args, "kind", "story") == "opinion":
-        source_type = "opinion"
-    else:
-        source_type = "unprompted_story"
     values = {
         "title": args.title,
         "type": source_type,
@@ -295,6 +350,18 @@ def main() -> int:
     register_source(source_path)
     if candidates:
         append_candidates(candidates)
+
+    # Issue #117: an unprompted story now opens or continues a Conversation
+    # and gets an immediate turn — best-effort, never blocking the ingest.
+    # Filed template candidates above are the immediate-value floor either
+    # way (contract, "Template candidates are generated at ingest time in
+    # BOTH cases").
+    run_story_conversation_hook(
+        args=args,
+        relative_source=relative_source,
+        story_text=story,
+        source_type=content_source_type(args),
+    )
 
     if args.witness:
         print(f"✓ Ingested witness account from {args.witness}: {relative_source}")

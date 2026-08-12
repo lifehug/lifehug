@@ -317,7 +317,12 @@ def append_turn(
         "ts": turn.get("ts") or now or now_utc(),
         "channel": channel,
     }
-    for optional in ("router", "model", "question_id"):
+    # "source_path" (issue #117): tags a story-turn's user turn with the raw
+    # source it came from — the close-time supersede hook reads it back to
+    # find which template candidates a session's classifier-grade extraction
+    # should flip to "superseded". Optional and additive; existing callers
+    # that never pass it are unaffected.
+    for optional in ("router", "model", "question_id", "source_path"):
         if turn.get(optional) is not None:
             new_turn[optional] = turn[optional]
     doc["turns"] = [*turns, new_turn]

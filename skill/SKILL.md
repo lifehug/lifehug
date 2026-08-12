@@ -88,6 +88,24 @@ If the user does not provide an ID, `process-answer` uses `rotation.last_questio
 
 ## Answer Processing
 
+When a user message arrives, it is one of five intents — the shared
+definition in `interactions/conversation/router/router.md` (issue #117):
+`answer`, `new_story`, `command`, `continue_session`, `out_of_scope`. You
+may delegate classification instead of judging by eye:
+
+```bash
+printf '%s' "$MSG" | python3 system/lifehug.py route
+```
+
+Act on its `action` field: `file_answer` → continue below; `ingest_story` →
+see "Unprompted Story Ingest"; `handle_command`; `continue_session`; `deflect`
+→ send `interactions/conversation/router/deflection.md`'s template once,
+warmly, then stay quiet rather than deflect a third time in the same
+exchange. With no unattended provider, `route` returns the deterministic
+default (a pending question → `answer`; else an open session →
+`continue_session`; else `action:"ask_user"`) and you judge edge cases
+yourself using the same five-intent definitions.
+
 When a user message is a Lifehug answer:
 
 1. Identify the question ID from the message or `system/rotation.json`.
@@ -125,13 +143,23 @@ Use `source-lint --fix` only for safe metadata/manifest repairs. See `system/sou
 
 ## Unprompted Story Ingest
 
-When the user shares a story that is not an answer to the current daily question, ingest it as source material:
+When the user shares a story that is not an answer to the current daily question (`new_story` from the router above), ingest it as source material:
 
 ```bash
 printf '%s\n' "$STORY_TEXT" | python3 system/lifehug.py ingest-story --source "telegram" --title "Arizona memory"
 ```
 
 This writes to `sources/manual/` and stores suggested follow-up questions in `state/question_candidates.json`. Candidates are a parking lot; they are not asked automatically until promoted into the question bank or explicitly planned.
+
+A story now also opens or continues a Conversation and gets an immediate
+turn (issue #117) — the same turn engine that pays out answers: a receipt
+quoting the user's words, register matched to the source (a witness account
+reads differently from an opinion), at most one cued follow-up invitation.
+This is best-effort and never blocks the ingest — with no unattended
+provider, or on any definitive generation/lint/send failure, behavior is
+exactly the checkmark + filed candidates above, no session created. When
+the session later closes with a classifier-grade extraction, the matching
+template candidates flip from `candidate` to `superseded` (never deleted).
 
 Review and promote candidates through scripts:
 

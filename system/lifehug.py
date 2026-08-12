@@ -9,6 +9,7 @@ workflow logic.
 from __future__ import annotations
 
 import argparse
+import json
 import runpy
 import os
 import subprocess
@@ -75,6 +76,10 @@ READ_ONLY_COMMANDS = frozenset({
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
     "planner-report", "progress", "quality-stats", "roadmap", "serve",
     "source-findings", "source-scan", "status", "weekly-summary",
+    # Issue #117: routing reads rotation + session state and makes a model
+    # call, but mutates nothing durable (test_route_mutates_nothing pins
+    # this).
+    "route",
 })
 DIRECT_MUTATION_COMMANDS = frozenset({
     "answer-ack-retry",
@@ -941,6 +946,45 @@ def cmd_conversation_closing_prompt(_args: argparse.Namespace) -> int:
 def cmd_conversation_lint(args: argparse.Namespace) -> int:
     flags = ["--reply-to-substantive"] if args.reply_to_substantive else []
     return run_python("conversation_lints.py", flags)
+
+
+def cmd_route(_args: argparse.Namespace) -> int:
+    # Issue #117: a direct in-process call (not run_python), like
+    # cmd_ai_status — the point of route_message's injectable ai_call is
+    # testability, which a subprocess dispatch would throw away. Exit 0 on
+    # any successful classification, including the deterministic default;
+    # a non-zero exit is reserved for invalid (empty) stdin.
+    #
+    # Stdin accepts EITHER shape: the structured JSON object from the
+    # contract ({"text": ..., "channel": ...}) when the caller needs to
+    # pick a channel, or plain free text otherwise (the common case — most
+    # inbound messages are not valid JSON, and the contract's own smoke
+    # test pipes plain text). A JSON payload only takes effect when it
+    # parses to an object with a string "text" field; anything else
+    # (unparseable, a bare string/number, a dict without "text") is read as
+    # the literal message text.
+    raw = sys.stdin.read()
+    if not raw.strip():
+        print("Error: empty stdin — expected message text or a JSON payload", file=sys.stderr)
+        return 1
+    text = raw.strip()
+    channel = "cli"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict) and isinstance(payload.get("text"), str):
+        text = payload["text"]
+        channel = payload.get("channel") or "cli"
+        if channel not in ("telegram", "web", "cli"):
+            print(f"Error: invalid channel: {channel!r}", file=sys.stderr)
+            return 1
+
+    from conversation_delivery import route_message  # noqa: PLC0415
+
+    result = route_message(text, channel=channel)
+    print(json.dumps(result))
+    return 0
 
 
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
@@ -2005,6 +2049,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("conversation-lint", help="Print deterministic lint findings for stdin turn text")
     p.add_argument("--reply-to-substantive", action="store_true")
     p.set_defaults(func=cmd_conversation_lint)
+
+    p = sub.add_parser(
+        "route",
+        help="Classify one inbound message (five-intent router); stdin JSON {text, channel}",
+    )
+    p.set_defaults(func=cmd_route)
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")
     p.set_defaults(func=cmd_daily_dry_run)
