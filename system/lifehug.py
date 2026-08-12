@@ -63,7 +63,10 @@ QUEUED_MUTATION_COMMANDS = frozenset({
 READ_ONLY_COMMANDS = frozenset({
     "ai-status", "answer-ack-prompt", "answer-ack-status", "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
-    "connector-audit", "connector-report", "daily-dry-run", "doctor",
+    "connector-audit", "connector-report",
+    "conversation-arc-prompt", "conversation-closing-prompt", "conversation-lint",
+    "conversation-router-prompt", "conversation-status", "conversation-turn-prompt",
+    "daily-dry-run", "doctor",
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
     "planner-report", "progress", "quality-stats", "roadmap", "serve",
     "source-findings", "source-scan", "status", "weekly-summary",
@@ -73,7 +76,12 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     "book-offers", "candidates-auto-promote", "candidates-promote",
     "candidates-promote-neighborhood", "candidates-update", "classify-story",
     "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
-    "connector-fetch", "correct-source", "entity-roster", "fix", "focus-add",
+    "connector-fetch",
+    # New in issue #115 (Conversation Interaction, Wave 1 PR 2): the session
+    # store's own three mutators. No jobs.py command kind yet (Wave 2) — they
+    # take the writer lock directly like the rest of this family.
+    "conversation-close", "conversation-open", "conversation-record-turn",
+    "correct-source", "entity-roster", "fix", "focus-add",
     "focus-approve", "focus-dismiss", "focus-finish", "focus-new", "focus-set",
     "ingest", "ingest-story", "mirror-compile", "perennial-add", "perennials",
     "planner-clear", "planner-objective-add", "planner-objective-clear", "planner-queue",
@@ -813,6 +821,58 @@ def cmd_answer_ack_retry(args: argparse.Namespace) -> int:
     if args.confirm_not_sent:
         flags.append("--confirm-not-sent")
     return run_python("answer_ack_delivery.py", flags)
+
+
+def cmd_conversation_open(args: argparse.Namespace) -> int:
+    flags = ["open", "--mode", args.mode, "--channel", args.channel]
+    if args.question_id:
+        flags += ["--question-id", args.question_id]
+    return run_python("conversation.py", flags)
+
+
+def cmd_conversation_status(args: argparse.Namespace) -> int:
+    flags = ["status"]
+    if args.session_id:
+        flags.append(args.session_id)
+    if args.full:
+        flags.append("--full")
+    return run_python("conversation.py", flags)
+
+
+def cmd_conversation_record_turn(args: argparse.Namespace) -> int:
+    flags = [
+        "record-turn", args.session_id,
+        "--role", args.role,
+        "--expected-turns", str(args.expected_turns),
+    ]
+    if args.channel:
+        flags += ["--channel", args.channel]
+    return run_python("conversation.py", flags)
+
+
+def cmd_conversation_close(args: argparse.Namespace) -> int:
+    return run_python("conversation.py", ["close", args.session_id, "--reason", args.reason])
+
+
+def cmd_conversation_turn_prompt(_args: argparse.Namespace) -> int:
+    return run_python("conversation.py", ["turn-prompt"])
+
+
+def cmd_conversation_router_prompt(_args: argparse.Namespace) -> int:
+    return run_python("conversation.py", ["router-prompt"])
+
+
+def cmd_conversation_arc_prompt(_args: argparse.Namespace) -> int:
+    return run_python("conversation.py", ["arc-prompt"])
+
+
+def cmd_conversation_closing_prompt(_args: argparse.Namespace) -> int:
+    return run_python("conversation.py", ["closing-prompt"])
+
+
+def cmd_conversation_lint(args: argparse.Namespace) -> int:
+    flags = ["--reply-to-substantive"] if args.reply_to_substantive else []
+    return run_python("conversation_lints.py", flags)
 
 
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
@@ -1801,6 +1861,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Retry an ambiguous send only after checking that Telegram did not receive it",
     )
     p.set_defaults(func=cmd_answer_ack_retry)
+
+    p = sub.add_parser("conversation-open", help="Open a new conversation session; prints its id and document path")
+    p.add_argument("--mode", required=True, choices=["chat", "conversation"])
+    p.add_argument("--channel", required=True, choices=["telegram", "web", "cli"])
+    p.add_argument("--question-id", default=None, help="Attach the arc card for this question, if one exists")
+    p.set_defaults(func=cmd_conversation_open)
+
+    p = sub.add_parser("conversation-status", help="Metadata-only conversation session list/detail")
+    p.add_argument("session_id", nargs="?")
+    p.add_argument("--full", action="store_true", help="Also print turn text (private content)")
+    p.set_defaults(func=cmd_conversation_status)
+
+    p = sub.add_parser("conversation-record-turn", help="CAS-append one conversation turn; text on stdin")
+    p.add_argument("session_id")
+    p.add_argument("--role", required=True, choices=["user", "lifehug"])
+    p.add_argument("--channel", default=None, choices=["telegram", "web", "cli"])
+    p.add_argument("--expected-turns", required=True, type=int)
+    p.set_defaults(func=cmd_conversation_record_turn)
+
+    p = sub.add_parser("conversation-close", help="Store a conversation close only; takeaway on stdin optional")
+    p.add_argument("session_id")
+    p.add_argument("--reason", required=True, choices=["done", "idle_timeout", "exit_taken"])
+    p.set_defaults(func=cmd_conversation_close)
+
+    p = sub.add_parser("conversation-turn-prompt", help="stdin JSON -> the conversation turn prompt")
+    p.set_defaults(func=cmd_conversation_turn_prompt)
+
+    p = sub.add_parser("conversation-router-prompt", help="stdin JSON -> the conversation router prompt")
+    p.set_defaults(func=cmd_conversation_router_prompt)
+
+    p = sub.add_parser("conversation-arc-prompt", help="stdin JSON -> the arc-card planning prompt")
+    p.set_defaults(func=cmd_conversation_arc_prompt)
+
+    p = sub.add_parser("conversation-closing-prompt", help="stdin JSON -> the closing-takeaway prompt")
+    p.set_defaults(func=cmd_conversation_closing_prompt)
+
+    p = sub.add_parser("conversation-lint", help="Print deterministic lint findings for stdin turn text")
+    p.add_argument("--reply-to-substantive", action="store_true")
+    p.set_defaults(func=cmd_conversation_lint)
 
     p = sub.add_parser("daily-dry-run", help="Validate daily delivery config without sending")
     p.set_defaults(func=cmd_daily_dry_run)

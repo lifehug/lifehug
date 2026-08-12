@@ -1,7 +1,7 @@
 {
-  "version": 151,
+  "version": 152,
   "released": "2026-08-11",
-  "changelog": "v150: the conversation surface (chats around the daily question, long inbound conversations) becomes a designed Interaction instead of three disconnected mechanisms. New `interactions/` pattern directory documents the definition/runtime/seat split any AI-driven surface will follow; the full `interactions/conversation/` skeleton ships its behavior contract, context recipe, router/deflection templates, provider overlays, eval fixtures (lints, rubrics, seven personas), and arc-planning spec, plus all four research phases behind it (what makes conversations great, the payout turn, elicitation craft, the interaction architecture) committed in full for anyone who wants the why, not just the what. README gains the Interaction/Chat/Conversation/Arc card/Session nomenclature and a truthfully-labeled daily-loop diagram noting the Chat engine ships in the next waves. ADR 0002 records the pattern. system/mission.md carries a draft refresh (owner ratifies in review) weaving in the direction to honor and increase the value of your life and relationships. No behavior change: nothing here is loaded by any live flow yet \u2014 the loader and builders land in the next PR (issue #115).",
+  "changelog": "v150: the Conversation Interaction's durable session store lands (issue #115, Wave 1 PR 2 of 2) \u2014 vault-contract v2 registers arc_cards, conversations, and mirror_responses data paths plus the interactions framework path; system/conversation.py adds session CRUD (open/load/list/append-turn-CAS/close), deterministic context assembly, and four pure prompt builders (turn/router/arc/closing); system/conversation_lints.py adds the deterministic lint engine (one-question-per-turn, banned phrases, question-grammar audit, length caps, receipt-before-question, year-question detection); eight new conversation-* lifehug.py subcommands expose all of it. Infrastructure only \u2014 no live-flow behavior change; nothing here is reachable except through the new subcommands and imports.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -183,6 +183,8 @@
     "tests/v119_job_pill_evidence.py",
     "tests/walkthrough_answers.py",
     "tests/walkthrough_lib.py",
-    "wiki/SCHEMA.md"
+    "wiki/SCHEMA.md",
+    "system/conversation.py",
+    "system/conversation_lints.py"
   ]
 }

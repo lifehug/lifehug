@@ -94,7 +94,7 @@ def _normalized_contract(value: dict[str, object]) -> dict[str, object]:
     normalized["framework_paths"] = {
         name: {
             "path": path,
-            "kind": "directory" if name in {"system", "templates", "connectors"} else "file",
+            "kind": "directory" if name in {"system", "templates", "connectors", "interactions"} else "file",
             "classification": "framework",
         }
         for name, path in framework_paths.items()
