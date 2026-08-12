@@ -1,6 +1,13 @@
 # Lifehug Mission
 
-Every life is a story worth telling. Lifehug exists to make sure yours gets told well.
+> **DRAFT (2026-08-11)** — this refresh weaves in the owner's mission
+> direction and awaits owner ratification in PR review
+> (lifehug/lifehug#126). Not yet final.
+
+Every life is a story worth telling. Lifehug exists to make sure yours
+gets told well — and, in the telling, to honor and increase the value of
+your life and your relationships: to hold them up, cherish them, and help
+you realize how impactful they are in your life.
 
 ## Three Purposes
 
@@ -8,7 +15,7 @@ Every life is a story worth telling. Lifehug exists to make sure yours gets told
 
 2. **Enable me to tell my story** — Give me the questions, arcs, and outputs so I can produce tangible artifacts: letters, essays, chapters, memoirs, founder stories. Every neighborhood of questions should move toward something I can hold, send, or publish.
 
-3. **Help me understand myself** — Surface patterns, contradictions, philosophy, faith, and self-knowledge I haven't articulated yet. See relationships across people, places, time periods, projects, and themes that aren't obvious from any single answer. The best memoirs aren't chronological — they're organized around turning points and themes. Help me find mine.
+3. **Help me understand myself** — Surface patterns, contradictions, philosophy, faith, and self-knowledge I haven't articulated yet. See relationships across people, places, time periods, projects, and themes that aren't obvious from any single answer, and honor how much the people and moments in it truly mattered. The best memoirs aren't chronological — they're organized around turning points and themes. Help me find mine.
 
 ## How It Works
 

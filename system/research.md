@@ -354,3 +354,11 @@ abstract language (Sadoski et al. 2000); Graham's heuristic (surprise
 without generality is gossip, generality without surprise is a textbook)
 scales down: the point slot makes the moment read as a claim, not just an
 anecdote. A two-slot micro-framework, not a theory of the tweet.
+
+## 11. The Conversation Interaction (v150)
+
+The conversation surface (chats around the daily question, long inbound
+conversations) is a designed Interaction: its research basis, behavior
+contract, and eval harness live in `interactions/conversation/` —
+README.md there is the orientation doc. The four research phases behind
+it are committed in full under `interactions/conversation/research/`.
