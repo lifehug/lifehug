@@ -160,8 +160,9 @@ Documented in `config.yaml.example`, read via `load_config()`:
   (haiku-class). Defined here so the key set ships once; its consumer is
   Wave-2 PR 4 (`lifehug.py route`).
 - `arc_plan_model` — weekly arc planning; resolution order
-  `arc_plan_model` → `classify_model` → provider default. Defined here;
-  consumer is Wave-2 PR 5.
+  `arc_plan_model` → `classify_model` → `classify_story.DEFAULT_MODEL`
+  (`"claude-sonnet-5"`) as the terminal fallback (matching #118). Defined
+  here; consumer is Wave-2 PR 5.
 
 ## The behavior this engine enforces (pasted; the implementer does not
 re-derive this from the design docs)
@@ -202,8 +203,10 @@ every generated message BEFORE send; definitions sourced from
 `interactions/conversation/evals/lints.yaml`, not forked into code):
 
 - ≤ 1 question mark's worth of questions per message (one-question lint).
-- Length ≤ the interaction.yaml message cap (default 1200 chars, matching
-  `ACK_MAX_CHARS`).
+- Length ≤ the turn-length cap sourced from the shared lint config
+  `evals/lints.yaml` key `cap.turn_chars` (value 1200, matching
+  `ACK_MAX_CHARS`) — read from that one file; this module does NOT pin an
+  independent 1200 constant.
 - Banned-phrase list (from lints.yaml; includes at minimum: "that must have
   been", guilt/streak phrasing, "as an AI" / AI self-reference,
   "you haven't told me much").
@@ -321,13 +324,18 @@ as `run_post_answer_delivery` swallows ack failures today.
   router-based explicit exits arrive with PR 4). Closes run in the lazy
   sweep (step 1 above) and via the CLI below. No daemon, no cron change in
   this PR.
-- **Close behavior**: completed chats (the exchange target was reached and
-  the last lifehug turn wasn't left dangling mid-question) get the closing
-  takeaway message — generated via `build_closing_prompt` +
+- **Close behavior**: the closing-takeaway criterion is the deterministic
+  cross-runtime rule (platform #414 confirms the same rule): a template/
+  model close message is sent only when the session has **≥2 user turns**;
+  zero-turn or single-answer chats close SILENTLY (no nag), regardless of
+  whether an exchange target was nominally reached. Sessions meeting the
+  ≥2-user-turns bar get the closing takeaway message — generated via
+  `build_closing_prompt` +
   `conversation_model`, linted, sent and ledgered exactly like a turn
-  (entry key `close:{session_id}`). Zero-turn or abandoned-mid-chat
-  sessions close SILENTLY (no-nag rule). Either way the close block is
-  written: `reason`, `takeaway` (empty if silent), `takeaway_delivered`,
+  (entry key `close:{session_id}`). Sessions below the ≥2-user-turns bar
+  (zero-turn or abandoned-mid-chat) close SILENTLY (no-nag rule). Either
+  way the close block is written: `reason`, `takeaway` (empty if silent),
+  `takeaway_delivered`,
   `insight_receipts_count` (count of receipt-citing insight contributions
   delivered this session, taken from the structured turn outputs),
   `filed` (question ids answered in-session).
@@ -336,13 +344,20 @@ as `run_post_answer_delivery` swallows ack failures today.
   files whatever was answered; next day starts a fresh chat; nothing nags.
 - **Engagement capture at close** (decision-D cause instrumentation): for
   each question id in `close.filed`, append to its existing
-  `state/answer_scores.json` record an `engagement` object:
-  `{"session_id", "session_turns", "continued_past_exit": bool,
-  "turn_length_trend": "expanding|flat|contracting", "close_reason"}`.
-  Never overwrite richness fields. Named consumers (doctrine): the arc
-  planner (Wave-2 PR 5, arc-topic/opener choice) and
-  `compute_profile()`'s engagement dimension (Wave-2 PR 6). Recorded now
-  so the nourishment dashboard can be built any time from recorded data.
+  `state/answer_scores.json` record an `engagement` object using #119's
+  AUTHORITATIVE field names for the shared fields:
+  `{"session_id", "session_turns", "continuation_past_exit": bool,
+  "turn_length_trajectory": "expanding|flat|contracting", "close_reason"}`
+  (NOT `continued_past_exit`/`turn_length_trend` — #119 defines the
+  canonical names for the fields shared across producers; `session_id`,
+  `session_turns`, and `close_reason` are extra fields this PR contributes
+  freely). Leave room for #119's `time_to_answer_hours` and
+  `unprompted_inbound` fields, which are computed elsewhere and are not
+  this PR's responsibility to populate. Never overwrite richness fields.
+  Named consumers (doctrine): the arc planner (Wave-2 PR 5, arc-topic/
+  opener choice) and `compute_profile()`'s engagement dimension (Wave-2
+  PR 6). Recorded now so the nourishment dashboard can be built any time
+  from recorded data.
 - **Extracted-field filing at close** (consumers named per doctrine):
   `extracted.candidate_ideas` → candidate store via the
   `question_candidates` append path with `"provenance": "conversation"`;
@@ -366,7 +381,11 @@ as `run_post_answer_delivery` swallows ack failures today.
   `READ_ONLY_COMMANDS`.
 - `conversation-close --expired | <session_id>` — run the idle sweep, or
   close one session now (operator door; also what a cron line could call).
-  Classify in `DIRECT_MUTATION_COMMANDS`.
+  Classify in `DIRECT_MUTATION_COMMANDS`. This PR's `conversation-close`
+  work UPGRADES #115's minimal subcommand IN PLACE (same name — this is
+  not a new/rival subcommand) and this PR OWNS the `--expired` sweep flag
+  on it. #119's jobs builder calls this exact subcommand/flag to enqueue
+  the sweep — do not introduce a separate `conversation-sweep` command.
 - `conversation-turn-retry <session_id> <turn_index> [--confirm-not-sent]`
   — retry a definitively unsent turn; ambiguous requires the flag, exactly
   like `answer-ack-retry`. Classify in `DIRECT_MUTATION_COMMANDS`.
