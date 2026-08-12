@@ -154,20 +154,31 @@ implementation time.
       failure recorded). This is the OSS one-commit-per-close granularity
       (platform's per-turn capture commits are platform-side and out of
       scope).
-3. **Close sweep (OSS twin of the platform tick)**: `compile_and_commit.sh`
-   gains a pre-step that enqueues `conversation-close` for every OPEN
-   session whose idle timeout has expired (`lifehug.py conversation-sweep`,
-   deterministic, AI-free at sweep level; identity
-   `conversation-close:<session_id>` so retries dedupe). Runs BEFORE the
-   sentinel check so a vault whose only pending work is an expired session
-   still closes it. Partial chats are normal and file cleanly
-   (owner-confirmed): timeout close files whatever was answered, skips the
-   takeaway where it would read as a nag (PR3's rule), never nags.
+3. **Close sweep (OSS twin of the platform tick)**: the sweep entry point is
+   **#116's `conversation-close --expired`** — this contract does NOT add a
+   separate `conversation-sweep` subcommand (dropped by amendment; #116 owns
+   the `--expired` flag on its upgraded `conversation-close` subcommand).
+   This PR's jobs builder enqueues `conversation-close` with identity
+   `conversation-close:<session_id>` exactly as already specified below (§2),
+   and `compile_and_commit.sh` gains a pre-step that INVOKES
+   `lifehug.py conversation-close --expired` (deterministic, AI-free at
+   sweep level) to find and enqueue every OPEN session whose idle timeout
+   has expired. Runs BEFORE the sentinel check so a vault whose only pending
+   work is an expired session still closes it. Partial chats are normal and
+   file cleanly (owner-confirmed): timeout close files whatever was
+   answered, skips the takeaway where it would read as a nag (PR3's rule),
+   never nags.
 4. **Mirror inbound**: new `state/mirror_responses.json` (schema below,
    vault-contract registered, tracked) + writer API
    `mirror.append_mirror_responses(responses: list[dict]) -> int`
    (idempotent on `(session_id, text)`), called from the close command's
-   filing step. `mirror.load_mirror_entries()` reads it alongside
+   filing step. CONFIRMED (already this contract's position, restated by
+   amendment): `mirror.append_mirror_responses` is the ONE writer of
+   `state/mirror_responses.json`. #115's contract originally named a
+   duplicate helper for this same write path — that duplicate has been
+   DROPPED by amendment; this module's `append_mirror_responses` is
+   authoritative and the only writer. `mirror.load_mirror_entries()` reads it
+   alongside
    classifications, mapping each response to kind `"response"`; 
    `build_mirror_prompt` gains a fourth block ("Author responses to
    tensions") plus one prompt instruction: responses show the author
