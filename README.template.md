@@ -24,6 +24,11 @@ The wiki is a **graph of Dave's life**. The standard terms:
 - **Studio** — the one workspace for making pieces and projects: grouped by Focus, project cards expand into their chapter table, piece cards keep their version history, and a create form starts new pieces.
 - **Entity graduation / node graduation** — entities mentioned across answers are detected, AI-curated into a roster (`state/entity_rosters/<type>.json`), and graduated into node pages from their mentions. Places/periods graduate on a low bar (a few mentions); **objects** graduate on symbolic meaning (the cleats, the orange shorts), not frequency; people on score. Relationship edges use a dyadic path: Focus relationship pages can graduate from dedicated answers or enough cross-story mentions about the person. Rosters refresh monthly; compile graduates the current roster entries into pages, so the graph grows on its own.
 - **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source.
+- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. First: the conversation interaction.
+- **Chat** — the short exchange around the daily question: system-initiated, ~3 exchanges, arc-carded, graceful third-turn exit, closing takeaway.
+- **Conversation** — a long user-initiated session (a story, "something on my mind", or a thread the system offered); runs the full interviewer arc; closes with a narrative takeaway.
+- **Arc card** — the pre-planned skeleton for a chat/conversation: opening framing + 2–4 follow-up *intents* (not scripted text), planned by the loops, executed live per turn.
+- **Session** — one bounded run: open → turns → close; the durable record is the session document.
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows, and whose output can affect Dave's future questions, wiki pages, relationship understanding, or artifacts.
 - **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
 - **Out of the Loop** — code or data that exists but is not called by Loop entrypoints and is not read downstream. Mission-critical features should not remain here.
@@ -52,16 +57,16 @@ Focuses drive the weekly question allocation. **David James Taylor** is the prim
 
 | Cadence | What happens | Cost |
 |---|---|---|
-| **Daily** 7:35 AM | Compile wiki → pick question → send + pin to Telegram | free |
-| **Hourly** :00 | Compile wiki + commit if new answers pending (sentinel-gated) | free |
-| **Weekly** Sun 8 PM | Compile → source lint/fix → classify capped batch → quality profile update → candidate auto-promotion → Focus-weighted queue → gap detection → progress | keyless/capped |
-| **Monthly** 1st 9 PM | Compile → capped research neighborhoods → self-knowledge refresh → Focus recommendations → progress | API $ |
+| **Daily** 7:35 AM | Compile wiki → pick question → attach its arc card opening if one is live → send + pin to Telegram | free |
+| **Hourly** :00 | Compile wiki + commit if new answers pending (sentinel-gated); sweep and close any idle-expired conversation session (one coalesced compile + commit per close) | free |
+| **Weekly** Sun 8 PM | Compile → source lint/fix → classify capped batch → quality profile update → candidate auto-promotion → Focus-weighted queue → plan this week's arc cards → gap detection → progress | keyless/capped |
+| **Monthly** 1st 9 PM | Compile → capped research neighborhoods → self-knowledge refresh → offer ≤1 system-initiated Conversation thread → Focus recommendations → progress | API $ |
 
 ## The Loop
 
-1. **Question arrives** — drawn from the weekly queue (Focus-weighted, variety-capped)
+1. **Question arrives** — drawn from the weekly queue (Focus-weighted, variety-capped), with its pre-planned arc card opening when one is live
 2. **Dave answers** — voice or text, whenever he wants
-3. **Answer is processed conversationally** — saved durably as source material and scored silently; then one warm, detail-specific acknowledgment arrives before any optional same-day follow-up. AI or Telegram failure never risks the answer or the follow-up. Wiki compile is decoupled and runs hourly (or at daily question time), so batch answers never conflict
+3. **Answer is processed conversationally** — saved durably as source material and scored silently; then ONE conversation turn arrives that receives what was said, pays it out, and cues the next question in Dave's own words (falls back to a warm acknowledgment + separate follow-up on any definitive failure). AI or Telegram failure never risks the answer itself. Wiki compile is decoupled — it runs hourly, at daily question time, or (inside an open conversation) coalesces to the session's close — so batch answers never conflict
 4. **Weekly source integrity checks run** — metadata, citations, and repair findings stay visible; safe metadata/manifest fixes apply automatically
 5. **New sources are classified** — a capped weekly pass extracts structured meaning and adds reviewable follow-up candidates without rewriting the raw file
 6. **Profile updates weekly** — aggregates scores by story function and category

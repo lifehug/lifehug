@@ -59,22 +59,28 @@ Lifehug is a **compounding system**, not a journal. The Loop is the clutch: each
 ```mermaid
 flowchart TB
     subgraph daily["🌅 every day"]
-        Q["Question delivered<br/>(Telegram / WhatsApp / CLI)"]
+        Q["Question delivered<br/>(Telegram / WhatsApp / CLI)<br/>+ arc card opening, if live"]
         A["You answer<br/>(voice or text)"]
-        P["process-answer<br/>save durably · warm ack · optional follow-up"]
-        Q --> A --> P
+        P["process-answer<br/>save durably"]
+        T["CONVERSATION TURN<br/>receipt + payout + cued follow-up<br/>(the Chat) — degrades to legacy<br/>ack + follow-up on failure"]
+        S["Session doc<br/>state/conversations/"]
+        Q --> A --> P --> T
+        T -->|append turn| S
+        S -->|context| T
     end
 
     subgraph brain["🧠 the knowledge layer"]
         W["Private WIKI<br/>people · places · periods<br/>projects · themes · self"]
         CL["CLASSIFIER<br/>people · places · themes<br/>contradictions · outputs"]
         QB["Question bank<br/>(every question, answered or not)"]
+        MIR["MIRROR<br/>wiki/self/mirror.md<br/>+ Review's Sit-with card"]
     end
 
     subgraph think["📋 the planning layer"]
         PL["PLANNER<br/>builds the weekly queue,<br/>balanced across your Focuses"]
         RM["ROADMAP<br/>your Focuses + targets"]
-        QP["Quality profile<br/>learns what opens you up"]
+        QP["Quality + engagement profile<br/>learns what opens/keeps you engaged"]
+        AP["ARC PLANNER<br/>plans this week's arc cards<br/>(opening + 2–4 intents)"]
     end
 
     subgraph grow["🔬 the growth layer (rare, costs API)"]
@@ -91,13 +97,18 @@ flowchart TB
     P -->|weekly capped pass| CL
     P -->|marks answered| QB
     P -->|silently scores| QP
+    T -->|extracted.candidate_ideas, at close| CA
+    T -->|extracted.mirror_responses, at close| MIR
     CL -->|follow-up candidates| CA
     CL -->|focus/entity signals| RM
+    CL -->|contradictions/insights| MIR
     W --> PL
     QB --> PL
     RM --> PL
     QP --> PL
     PL -->|weekly queue| Q
+    PL --> AP
+    AP -->|arc card opening,<br/>daily pure-file-read attach| Q
     W -->|thin spots| RE
     RE --> CA
     CA -->|auto-promote weekly| QB
@@ -109,9 +120,11 @@ flowchart TB
     QP -->|candidate scoring| CA
 ```
 
+*`extracted.facts` and `extracted.entities` are captured per turn into the session document but have no downstream consumer yet — `entities` surfaces as `close.entity_hints` for a future weekly-classification hint surface that doesn't exist today; `facts` is stored and otherwise inert. Not drawn above so the diagram never implies a consumer that isn't wired.*
+
 **Read it as five layers:**
 
-1. **Daily** — one question out, one answer in, then a warm acknowledgment before any optional follow-up. The only part you touch.
+1. **Daily** — one question out, one answer in, then ONE conversation turn that receives it, pays it out, and cues the next question in your own words (falls back to a warm acknowledgment + separate follow-up on any definitive failure). The only part you touch.
 2. **Knowledge** — every answer becomes wiki input, a completed question, and, during the weekly capped classifier pass, a structured classification record: people, places, periods, themes, contradictions, possible outputs, and follow-up candidates.
 3. **Planning** — the planner reads the wiki + roadmap + a quality profile and writes a balanced weekly delivery queue. It applies quality multipliers so question types that have historically pulled richer answers score higher.
 4. **Growth** — classification runs in small weekly batches; broader research runs rarely. Together they inspect the wiki and source layer for thin areas, extract structured meaning, and *generate new questions* about people, themes, periods, and contradictions you haven't covered. The best candidates are automatically promoted into the bank each week under a dynamic cap; once promoted, bank questions stay available until answered or manually edited.
@@ -129,20 +142,25 @@ sequenceDiagram
     participant Cron
     participant DQ as daily_question.sh
     participant Ask as ask.py
+    participant AC as arc_planner.py<br/>(arc-card --daily-text)
     participant You
     participant PA as process_answer.py
+    participant CD as conversation_delivery.py
 
     Cron->>DQ: fire (e.g. 9:00 local)
     DQ->>DQ: commit pending data + compile wiki
     DQ->>Ask: pick next question (--dry-run)
     Ask-->>DQ: "[A3] What was your family's…"
-    DQ->>You: send + pin in Telegram
+    DQ->>AC: arc-card A3 --daily-text (pure file read, no AI)
+    AC-->>DQ: opening framing, or nothing (no live card)
+    DQ->>You: send question (+ arc opening) + pin in Telegram
     DQ->>Ask: --confirm-sent A3 (mark delivered)
     Note over You: hours later, whenever you feel like it
     You->>PA: reply (voice/text)
-    PA->>You: receipt + payout + cued follow-up (the Chat)
-    PA->>PA: save answer, mark answered,<br/>rebuild coverage, update README,<br/>recompile wiki, score richness, commit
-    Note over PA,You: the Chat engine (receipt/payout/cued follow-up,<br/>interactions/conversation/) ships in the next<br/>waves — v149's warm-ack + optional follow-up<br/>is what's actually live today.
+    PA->>PA: save answer durably, mark answered,<br/>rebuild coverage, update README, score richness
+    PA->>CD: run_post_answer_turn (open/continue the Chat session)
+    CD->>You: receipt + payout + cued follow-up, ONE message
+    Note over PA,CD: any definitive failure degrades in the same run<br/>to the pre-v153 pair — warm ack, then a separate<br/>follow-up. Wiki compile + the answer's own commit<br/>are skipped inside an open session — they coalesce<br/>into ONE compile + ONE commit at the session's close<br/>(idle timeout, swept hourly).
 ```
 
 No ratings, no streaks, no friction. **The answer itself is the only feedback the system needs** — its length, the people and places it names, the new wiki nodes it creates, the follow-ups it spawns. That gets scored silently and shapes next week's questions.
@@ -164,6 +182,10 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Project** | A composite piece built over time — today, the book: a Focus with a book-class deliverable whose categories are chapters. Virtual while planning; becomes a concrete piece once assembled. | `state/roadmap.json`, `outputs/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` embedded; `state/rotation.json` external |
 | **Interaction** | A role definition for the AI in one situation: behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. First: the conversation interaction (chats + conversations). | `interactions/` |
+| **Chat** | The short exchange around the daily question: system-initiated, ~3 exchanges, arc-carded, graceful third-turn exit, closing takeaway. | `state/conversations/<session_id>.json` |
+| **Conversation** | A long user-initiated session (a story, "something on your mind", or a thread the system offered); runs the full interviewer arc; closes with a narrative takeaway. | `state/conversations/<session_id>.json` |
+| **Arc card** | The pre-planned skeleton for a chat/conversation: opening framing + 2–4 follow-up intents (not scripted text), planned weekly, executed live per turn. | `state/arc_cards.json` |
+| **Session** | One bounded run: open → turns → close; the durable record is the session document. | `state/conversations/<session_id>.json` |
 
 The key mental model: a **Focus** is the unit of intent. Everything — a person, a memoir, a recurring theme, a relationship, a place, a company story — is a Focus with a tier and an objective.
 
@@ -180,11 +202,16 @@ flowchart LR
     RM["Roadmap<br/>(Focuses + tiers)"] --> W
     WIKI["Wiki saturation<br/>(how full is each Focus?)"] --> W
     QP["Quality profile<br/>(what scores richest?)"] --> W
-    W["weight =<br/>base(tier) × fill_factor × room"] --> SAMPLE
+    EP["Engagement profile<br/>(what keeps you engaged?)"] --> W
+    W["weight =<br/>base(tier) × fill_factor × room<br/>× quality × engagement"] --> SAMPLE
     OBJ["Active objectives<br/>(e.g. 'Mom letter')"] -->|2.5× boost| SAMPLE
     SAMPLE["Weighted random sample<br/>into an 8-slot delivery queue"] --> CAPS
     CAPS["Apply caps:<br/>• no Focus over 30% (50% if finishing)<br/>• story-function balance<br/>• ≥1 self-knowledge slot<br/>• max 2 in a row per category"] --> QUEUE["state/question_queue.json"]
     QUEUE --> ASK["ask.py serves one/day"]
+    QUEUE --> ARCPLAN["arc_planner.py plans<br/>one arc card per queued question"]
+    ARCPLAN --> ARCCARDS["state/arc_cards.json"]
+    ASK --> ATTACH["daily_question.sh attaches<br/>the arc card opening<br/>(pure file read, no AI)"]
+    ARCCARDS --> ATTACH
 ```
 
 **The weight formula** — `weight = base(tier) × fill_factor × room`:
@@ -203,6 +230,9 @@ flowchart LR
 - **Self-knowledge floor** — ~1 slot per week is reserved for vulnerable self-examination, even during project-heavy stretches.
 - **Objective boost** — if you've set an active objective ("Prepare Mom's letter"), matching questions get a 2.5× weight.
 - **Quality multiplier** — once you've answered ~20 questions, the silent quality profile kicks in: question types that historically pull richer answers out of *you* get nudged up. The system learns what opens you up.
+- **Engagement multiplier** — a second, structurally parallel signal (issue #119) reads how conversationally engaged each story function has kept you (time-to-answer, unprompted follow-through, whether you kept going past a chat's exit-friendly turn). It biases pacing/framing only, alongside the quality multiplier — never the self-knowledge floor, the escalation gate, or the rumination cooldown. Drain is not negative: a hard, heavy thread can score as engaged as a light one; only rumination (going in circles) backs off.
+
+Once a week the arc planner (`arc_planner.py`, issue #118) also plans one **arc card** per queued question — an opening framing plus 2–4 typed follow-up intents drawn from timeline gaps, neighborhood siblings, Studio slots, sit-with material, and demonstrated-knowledge summaries — so the daily loop can ATTACH a plan instead of improvising three unrelated questions. The daily attach (`arc-card --daily-text`) is a pure file read: no AI runs on the daily path, and a stale/expired card just means today's message reverts to the plain queued question.
 
 The planner also tracks **global fullness**. Once your Focuses cross ~60% full, it raises an *expansion urgency* signal — a hint to the monthly research job that it's time to discover new territory.
 
@@ -240,12 +270,14 @@ flowchart LR
     end
 ```
 
+*These three arc templates (`system/research_expand.py`'s `MEMOIR_ARC`/`SELF_ARC`/`RELATIONSHIP_ARC`) shape multi-question **neighborhoods** — an older, still-live, and unrelated mechanism. A neighborhood's `arc` list is one *input* the weekly arc planner can pull a `neighborhood_sibling` intent from; it is not the same object as a Chat/Conversation **Arc card** (`interactions/conversation/plan/arc-templates.md`, `state/arc_cards.json`), which skeletons a single question's opening + follow-up intents rather than a whole multi-question research thread.*
+
 ### How new topics (nodes) get discovered
 
 Three ways a neighborhood gets opened:
 
 1. **Gap detection** — `research_expand.py --gaps` scans your answers for thin spots: life periods barely covered (under 30%), people mentioned 3+ times but with no wiki page, emotionally-charged themes with little material. It hands back a list of suggested neighborhoods to open.
-2. **Story ingest** — when you share something *not* tied to the daily question (`ingest-story`), it's saved as raw source material and auto-seeds candidate questions to deepen it. External corpora (Gmail today; Drive, Instagram, X next) come in through the **connector framework** (`connectors/` — calibrated, threshold-driven ingestion; see *Connectors* below). The weekly classifier then works through unclassified sources in small batches, extracting people, places, themes, contradictions, possible outputs, and targeted follow-up questions.
+2. **Story ingest** — when you share something *not* tied to the daily question (`ingest-story`), it's saved as raw source material and auto-seeds template candidate questions to deepen it — and (issue #117) opens or continues a **Conversation** for one immediate turn: a receipt quoting your words, register matched to the source, at most one cued follow-up invitation. This is best-effort and never blocks the save; with no unattended provider, or on any definitive failure, behavior is exactly the filed templates above with no session created. When the session later closes with a classifier-grade extraction, the matching template candidates flip to `superseded` (never deleted). External corpora (Gmail today; Drive, Instagram, X next) come in through the **connector framework** (`connectors/` — calibrated, threshold-driven ingestion; see *Connectors* below). The weekly classifier then works through unclassified sources in small batches, extracting people, places, themes, contradictions, possible outputs, and targeted follow-up questions.
 3. **You ask for it** — `research_expand.py --topic "Faith" --type theme --output essay` opens a neighborhood directly.
 
 In every case the script: loads your mission + relevant existing answers (so it won't repeat what you've already told it), builds an arc-aware prompt, calls the model, and deposits the generated questions as **candidates** — never directly as daily questions. The neighborhood can be **question-ready** before it is **answer-ready**; `progress` only calls it ready to draft after enough arc slots have captured answers.
@@ -256,7 +288,7 @@ Generated questions don't go live until they pass an automated quality gate — 
 
 ```mermaid
 flowchart LR
-    SRC["source:<br/>gap · story · classification · arc"] --> C["candidate<br/>(scored + ranked)"] 
+    SRC["source:<br/>gap · story · classification · arc · conversation"] --> C["candidate<br/>(scored + ranked)"] 
     C -->|"score ≥ 0.82\n+ weekly cap"| AUTO["auto_promoted ✅"]
     C -->|"0.70–0.82"| REV["needs_review ⚠️"]
     C -->|"< 0.70"| LOW["stays candidate"]
@@ -452,21 +484,25 @@ behavior stays unchanged when the variable is unset.
 ```mermaid
 flowchart TB
     subgraph d["🌅 DAILY · free"]
-        D1["compile wiki → deliver today's question"]
+        D1["compile wiki → deliver today's question<br/>(+ arc card opening, if live)"]
     end
     subgraph w["📅 WEEKLY · keyless/capped"]
-        W1["compile → source lint/fix → classify new sources → quality update →<br/>auto-promote candidates → plan next week's queue → gap scan → progress"]
+        W1["compile → source lint/fix → classify new sources → quality update →<br/>auto-promote candidates → plan next week's queue → plan arc cards →<br/>gap scan → progress"]
     end
     subgraph m["🗓️ MONTHLY · costs API $"]
-        M1["compile → generate research neighborhoods<br/>for top gaps + a self-knowledge batch +<br/>focus recommendations"]
+        M1["compile → generate research neighborhoods<br/>for top gaps + a self-knowledge batch →<br/>offer ≤1 system-initiated Conversation thread →<br/>focus recommendations"]
     end
     subgraph e["⚡ ON ANSWER · tiny"]
-        E1["process-answer: save · recompile · score"]
+        E1["process-answer: save · score ·<br/>open/continue the Chat session, ONE turn"]
+    end
+    subgraph close["🌙 SESSION CLOSE · idle-swept hourly"]
+        C1["takeaway · Mirror inbound · engagement timing ·<br/>ONE coalesced compile · ONE commit"]
     end
     d --> w --> m
+    e -.->|idle timeout| close
 ```
 
-The daily job needs **no model call**. Weekly maintenance is capped and can run unattended through a ready local model, OpenClaw, Kimi, or Anthropic; if none is ready, the rest of the weekly Loop segment still runs and emits agent tasks for its AI work. The optional Anthropic SDK is not required for keyless agent-task workflows. Monthly generation is the bigger model-backed growth pass. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
+The daily job needs **no model call**. Weekly maintenance is capped and can run unattended through a ready local model, OpenClaw, Kimi, or Anthropic; if none is ready, the rest of the weekly Loop segment still runs and emits agent tasks for its AI work. The optional Anthropic SDK is not required for keyless agent-task workflows. Monthly generation is the bigger model-backed growth pass. The per-turn conversation reply fires synchronously inside `process-answer`/`ingest-story`; the session's actual CLOSE — one coalesced wiki compile, one commit — is decoupled and happens later, swept by `compile_and_commit.sh`'s hourly `conversation-close --expired` tick (idle timeout: ~2h for a chat, ~30m for a conversation) rather than on every answer. See [`examples/openclaw-cron.md`](examples/openclaw-cron.md) for copy-paste cron commands (Telegram DM/group, WhatsApp, Signal, Discord) and a local dry-run you can try first:
 
 ```bash
 LIFEHUG_DAILY_DRY_RUN=1 system/daily_question.sh   # see today's question without sending
@@ -486,13 +522,18 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 |---|---|
 | **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
-| **`jobs.py`** + **`job_execute.py`** | Durable metadata-only queue and single-writer worker. Typed payloads stay in private sidecars and cross the child boundary through stdin, never process argv. Explicit schedule/provider identities deduplicate; ordinary repeated actions create fresh jobs. |
+| **`jobs.py`** + **`job_execute.py`** | Durable metadata-only queue and single-writer worker. Typed payloads stay in private sidecars and cross the child boundary through stdin, never process argv. Explicit schedule/provider identities deduplicate (including `conversation-close:<session_id>`, issue #119's idle-sweep dedupe key); ordinary repeated actions create fresh jobs. |
 | **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with process binding, no-follow file operations, deterministic tree preflight, and an exportable versioned contract. |
-| **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
-| **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, classifies a capped batch of unclassified sources, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, scans for gaps, reports progress, then commits and sends a Telegram summary. Dry-run previews the same candidate promotion gate without writing. |
-| **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, recommends new Focuses, refreshes entity rosters, reports progress, then commits real changes. |
-| **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and focus interleaving). Also marks questions sent/answered and flags pass completion. |
-| **`process_answer.py`** | The answer pipeline. Saves the answer to `answers/<id>.md`, marks the question done, rebuilds coverage, updates rotation, refreshes the README, recompiles the wiki, silently scores richness, then best-effort sends a warm Telegram acknowledgment before any adaptive follow-up. A repeated identical answer is an idempotent no-op; a different later answer appends as a dated/provenanced addendum so the source gains depth without overwriting the first telling. The one command that runs after every reply. |
+| **`conversation.py`** | The Conversation Interaction's session store + pure prompt/context builders (issue #115). CRUD for `state/conversations/<id>.json` session documents (open / compare-and-set append_turn / close), the manifest-driven context assembler, the four prompt builders (turn / router / arc / closing), and arc-card storage helpers. Never calls a model or sends a message. |
+| **`conversation_delivery.py`** | The turn engine wired on top of `conversation.py` (issue #116/#117/#119). Runs ONE conversation turn per answer or per unprompted story (receipt + payout + cued follow-up), decides turn shape (opening / mid-arc / graceful third-exchange exit for Chats, a 25-exchange cap for Conversations), classifies inbound messages into the five-intent router (`route_message`), and closes sessions — takeaway-or-silence, Mirror inbound filing, engagement timing, one coalesced wiki compile, one commit. Degrades to the pre-v153 ack-then-follow-up pair on any definitive failure; never silent, never worse than before. |
+| **`conversation_lints.py`** | The deterministic lint engine shared by the turn engine and the eval harness (issue #115, extended #120). Enforces: one question per turn, banned phrases, question-grammar audit (closed / option-posing / presupposing), `cap.turn_chars` length caps, receipt-before-question, and year-question detection — reading `interactions/conversation/evals/lints.yaml`, never a locally pinned copy of its numbers. |
+| **`arc_planner.py`** | The weekly arc planner (issue #118). Plans ONE arc card per queued question — an opening framing plus 2–4 typed follow-up intents (`scene_slot`, `neighborhood_sibling`, `timeline_gap`, `studio_slot`, `sit_with`, `demonstrated_knowledge_summary`) drawn from `timeline.compute_gaps()`, research neighborhoods, Studio readiness, and quality/engagement signals — so the AI-free daily loop only ATTACHES a pre-planned card (`arc-card --daily-text`, a pure file read). Writes `state/arc_cards.json`; the OSS weekly shell step is the platform's parity spec. Also owns the monthly `arc-thread-offers` — at most one "I've been wanting to ask about X — shall we?" line per run for a conversation-ready neighborhood, quieted a quarter once offered: the "a thread the system offered" branch of a **Conversation**. |
+| **`interaction_evals.py`** | The Conversation Interaction eval harness (issue #120) — `conversation-evals` runs four layers over `interactions/conversation/`: deterministic lints, router fixtures + a per-class precision/recall scorer, golden-transcript property checks, and (model-backed, keyless-skippable) judge rubrics + a seven-persona simulated-user suite. Gates which models may be seated in `role.router`/`role.worker`/`role.planner`; `--emit-tasks` writes judge/persona agent-task prompts when no provider is configured. |
+| **`daily_question.sh`** | The cron entrypoint. Commits pending data, compiles the wiki, asks `ask.py` for today's question, attaches its pre-planned arc card opening when one is live (`arc-card --daily-text`, a pure file read — no AI on the daily path), sends + pins it on Telegram, then confirms it as delivered. Handles pass-completion prompts too. |
+| **`weekly_maintenance.sh`** | The weekly self-improvement entrypoint. Compiles offline, lints source integrity, applies safe metadata/manifest fixes only when needed, classifies a capped batch of unclassified sources, updates the quality profile, **auto-promotes the highest-scoring candidates into the bank** (dynamic cap based on bank fullness), builds the next queue, **plans this week's arc cards** (issue #118 — one opening + 2–4 intents per queued question, run directly after the queue so cards expire with it), scans for gaps, reports progress, then commits and sends a Telegram summary. Dry-run previews the same candidate promotion gate without writing. |
+| **`monthly_research.sh`** | The monthly growth entrypoint. Compiles with AI if available, detects thin areas, opens a small capped set of new research neighborhoods, refreshes self-knowledge candidates, offers at most one system-initiated Conversation thread for a ready neighborhood (`arc-thread-offers`, issue #118), recommends new Focuses, refreshes entity rosters, reports progress, then commits real changes. |
+| **`ask.py`** | The question picker. Serves the next question from the weekly queue if one's valid; otherwise falls back to coverage rotation (lowest-coverage category first, with group alternation and focus interleaving). Also marks questions sent/answered and flags pass completion. Carries no arc-card logic itself — `daily_question.sh` wraps its output with the attach step, and `arc_planner.py` reuses its `format_question` for the `[QID]` header. |
+| **`process_answer.py`** | The answer pipeline. Saves the answer to `answers/<id>.md`, marks the question done, rebuilds coverage, updates rotation, refreshes the README, silently scores richness, then runs ONE conversation turn (issue #116) — receipt + payout + cued follow-up in a single message — falling back to the pre-v153 warm-ack-then-follow-up pair on any definitive failure. Inside an open conversation session, the wiki compile and the answer's own commit default to skipped; they coalesce into the session's eventual close instead (issue #119). A repeated identical answer is an idempotent no-op; a different later answer appends as a dated/provenanced addendum so the source gains depth without overwriting the first telling. The one command that runs after every reply. |
 | **`rebuild_state.py`** | Repair tool. Reconstructs derived state (rotation counts, README) from the source-of-truth files. Run it if state ever drifts. |
 
 ### Planning & roadmap
@@ -500,7 +541,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | Script | What it does |
 |---|---|
 | **`roadmap.py`** | Owns Focuses. *Derives* the roadmap from the question bank (categories → Focuses), infers tiers from size, computes live saturation per Focus, and exposes the `focus-*` management commands. The JSON is config, not source-of-truth, so renumbering questions never breaks it. |
-| **`question_planner.py`** | The brain of question selection. Builds the weekly delivery queue by Focus-weighted random sampling under caps (see [the planner section](#how-the-planner-decides-what-to-ask)). Applies quality-profile multipliers so question types that historically pull richer answers score higher. Also computes the expansion-urgency signal that tells the research job when to find new territory. |
+| **`question_planner.py`** | The brain of question selection. Builds the weekly delivery queue by Focus-weighted random sampling under caps (see [the planner section](#how-the-planner-decides-what-to-ask)). Applies quality-profile and engagement-profile multipliers (issue #119) so question types that historically pull richer, more engaged answers score higher. Also computes the expansion-urgency signal that tells the research job when to find new territory. Arc-card planning is a separate step (`arc_planner.py`, below) that reads the queue this script writes. |
 | **`quality_profile.py`** | The feedback loop. Scores each answer's richness (length, entity diversity, wiki nodes added, follow-ups spawned) and, after ~20 answers, aggregates a profile that biases the planner toward question types that pull the deepest answers out of you. Zero friction — no ratings. Also feeds the candidate auto-promotion scorer: candidates matching your richest-answer story functions score higher and promote sooner. |
 | **`progress.py`** | The deliverables dashboard. For each Focus, shows fill-vs-target and a readiness verdict (EARLY → DEVELOPING → READY → SATURATED), and nudges you to create an artifact when something is ready. |
 
@@ -512,7 +553,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 | **`research_expand.py`** | The growth engine. Opens question **neighborhoods** along memoir/self/relationship arcs, detects coverage **gaps**, and generates new questions as **candidates** through the shared provider. The biggest script — see [research & neighborhoods](#research--neighborhoods-finding-new-questions). |
 | **`question_candidates.py`** | The review buffer. Manages the candidate lifecycle (list / review / update / promote), quality-checks each candidate (flags yes/no wording, vagueness, duplicates), and promotes accepted ones into the bank with provenance. |
 | **`gen_followups.py`** | The pass engine. At the end of a rotation pass it builds a prompt over the pass's answers, takes back AI-written follow-ups, appends them to the bank, and advances to the next, deeper pass. |
-| **`ingest_story.py`** | Captures unprompted stories. Saves a story you share (that isn't an answer) as owner-only source material and seeds candidate questions to deepen it. |
+| **`ingest_story.py`** | Captures unprompted stories. Saves a story you share (that isn't an answer) as owner-only source material and seeds template candidate questions to deepen it, then (issue #117) best-effort opens or continues a Conversation session for one immediate turn — never blocking the save. At the session's close, classifier-grade candidates supersede the immediate templates. |
 | **`ingest.py`** | Bulk source import. Pluggable connectors (X/Twitter, Gmail, Instagram, local files) normalize external writing into source records + candidates. |
 | **`connector.py`** + **`connectors/`** | Calibrated external-evidence ingestion (Gmail first). Permanent metadata ledger + six-axis scoring + threshold promotion: `connector-fetch` appends new metadata; `connector-excavate` re-scores the whole ledger against the current wiki and delta-promotes above-threshold threads into immutable `sources/gmail/` records; `connector-calibrate` is the one-time shadow run where the owner picks the threshold; `connector-dossier` classifies top unknown correspondents with AI (family auto-applies as VIPs). Bodies are fetched only for promotions/dossier samples and cached (committed) so nothing re-fetches. |
 | **`classify_story.py`** | The source analyzer. Uses the shared provider to AI-extract people, places, periods, themes, contradictions, possible outputs, self-understanding insights, Focus opportunities, and targeted follow-up questions from any answer/source file. Weekly maintenance runs it over a capped batch of unclassified files. |
@@ -639,6 +680,15 @@ printf '%s\n' "$ANSWER" | python3 system/lifehug.py process-answer A14 --source 
 
 # Capture an unprompted story
 printf '%s\n' "$STORY" | python3 system/lifehug.py ingest-story --source telegram --title "memory"
+
+# Conversations (the Chat around daily answers; longer inbound Conversations)
+printf '%s' "$MSG" | python3 system/lifehug.py route            # classify one inbound message (five-intent router)
+python3 system/lifehug.py conversation-status                   # metadata-only session list/detail
+python3 system/lifehug.py conversation-close <session_id>       # close one session now (takeaway-or-silence)
+python3 system/lifehug.py conversation-close --expired          # sweep + enqueue every idle-expired session's close
+python3 system/lifehug.py arc-plan                               # plan this week's arc cards (usually via weekly-maintenance)
+python3 system/lifehug.py arc-thread-offers                     # offer ≤1 system-initiated Conversation thread (monthly)
+python3 system/lifehug.py conversation-evals                    # run the interaction eval harness (issue #120)
 
 # Plan & grow
 python3 system/lifehug.py weekly-maintenance        # lint/fix, classify, update profile, plan queue
