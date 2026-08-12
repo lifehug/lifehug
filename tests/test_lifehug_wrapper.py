@@ -162,6 +162,49 @@ class LifehugWrapperTests(unittest.TestCase):
         self.assertIn("COMPILE_STATUS=$?", script)
         self.assertIn('if [[ "$COMPILE_STATUS" -ne 0 ]]', script)
 
+    def test_daily_day_rollover_runs_after_compile_and_before_pick(self):
+        """Design §D (Chats-per-Focus, 2026-08-12): THE PLATFORM'S TRANSPORT
+        SPEC — daily_question.sh's day-rollover pre-step, pinned at text
+        level like every other shell "parity SPEC" (see
+        tests/test_arc_planner.py::CommandSurfaceTests)."""
+        script = (SYSTEM / "daily_question.sh").read_text(encoding="utf-8")
+
+        compile_status_at = script.index("COMPILE_STATUS=$?")
+        rollover_at = script.index("conversation-close --day-rollover", compile_status_at)
+        awaiting_at = script.index("awaiting_pass_transition")
+        pick_at = script.index('QUESTION_OUTPUT=$(python3 "$SCRIPT_DIR/ask.py" --dry-run)')
+        self.assertLess(compile_status_at, rollover_at)
+        self.assertLess(rollover_at, awaiting_at)
+        self.assertLess(rollover_at, pick_at)
+        self.assertIn(
+            'record_learning_failure "daily_question" "day_rollover_close"', script,
+        )
+        self.assertIn("ROLLOVER_STATUS=$?", script)
+        self.assertIn('if [[ "$ROLLOVER_STATUS" -ne 0 ]]', script)
+
+    def test_daily_dry_run_previews_day_rollover_as_one_new_line(self):
+        """The dry-run transcript's shape is unchanged except for one new
+        line: a --dry-run (pure read) call of the same --day-rollover flag,
+        placed before the existing ask.py --dry-run preview."""
+        script = (SYSTEM / "daily_question.sh").read_text(encoding="utf-8")
+        preview = script.split('if [[ "$DRY_RUN" == "1" ]]; then')[1].split("exit 0")[0]
+        self.assertIn("conversation-close --day-rollover --dry-run", preview)
+        rollover_at = preview.index("conversation-close --day-rollover --dry-run")
+        ask_dry_run_at = preview.index('ask.py" --dry-run')
+        self.assertLess(rollover_at, ask_dry_run_at)
+
+    def test_conversation_close_cli_has_day_rollover_and_dry_run_flags(self):
+        wrapper = load_wrapper()
+        parser = subparser(wrapper.build_parser(), "conversation-close")
+        flags = {opt for action in parser._actions for opt in action.option_strings}
+        self.assertIn("--day-rollover", flags)
+        self.assertIn("--dry-run", flags)
+        self.assertIn("--expired", flags)
+        self.assertEqual(
+            option_choices(parser, "--reason"),
+            {"done", "idle_timeout", "exit_taken", "day_rollover"},
+        )
+
     def test_weekly_reports_recent_learning_failures(self):
         script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
 

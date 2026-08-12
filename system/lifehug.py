@@ -1085,6 +1085,51 @@ def _enqueue_expired_conversation_closes() -> int:
     return 0 if all(ok for _sid, ok in outcomes) else 1
 
 
+def _enqueue_day_rollover_conversation_closes(*, dry_run: bool = False) -> int:
+    """Day rollover (design §D, Chats-per-Focus, 2026-08-12): close EVERY
+    open session, not just idle-expired ones — the day owns the surface, no
+    timer. Same enqueue-durable-job discovery/wait shape as
+    ``_enqueue_expired_conversation_closes`` above (deliberately mirrored:
+    ``daily_question.sh`` calls this pre-question, exactly as
+    ``compile_and_commit.sh`` calls the idle sweep pre-compile), reason
+    ``day_rollover`` instead of ``idle_timeout``. Shares the SAME job
+    identity (``conversation-close:<session_id>``) as the idle sweep — a
+    session that is both janitor-expired and rolled over only ever gets one
+    close job, deduped.
+
+    ``--dry-run`` (the daily script's ``LIFEHUG_DAILY_DRY_RUN`` preview)
+    lists what WOULD close without enqueuing or mutating anything —
+    deterministic, AI-free, one line regardless of vault state.
+    """
+    import conversation_delivery  # noqa: PLC0415
+
+    session_ids = conversation_delivery.find_open_sessions(vault_root=REPO_DIR)
+    if not session_ids:
+        print(
+            "DRY RUN: no open conversation sessions for day rollover."
+            if dry_run else
+            "No open conversation sessions for day rollover."
+        )
+        return 0
+    if dry_run:
+        print(
+            f"DRY RUN: day rollover would close {len(session_ids)} open "
+            f"session(s): {', '.join(session_ids)}"
+        )
+        return 0
+    outcomes: list[tuple[str, bool]] = []
+    for session_id in session_ids:
+        rc = _queue_and_wait(
+            "conversation-close",
+            {"session_id": session_id, "reason": "day_rollover"},
+            identity=f"conversation-close:{session_id}",
+        )
+        outcomes.append((session_id, rc == 0))
+    for session_id, ok in outcomes:
+        print(f"{session_id}: {'closed' if ok else 'close job failed'}")
+    return 0 if all(ok for _sid, ok in outcomes) else 1
+
+
 def cmd_conversation_close(args: argparse.Namespace) -> int:
     # v153 (issue #116): the same subcommand now closes for real — closing
     # takeaway when the session earned one, silence when it did not.
@@ -1093,6 +1138,10 @@ def cmd_conversation_close(args: argparse.Namespace) -> int:
     # engagement timing), one wiki compile, one commit. --expired stays
     # #116's idle-sweep entry point, upgraded to ENQUEUE a durable job per
     # session (deterministic, AI-free discovery) rather than closing inline.
+    # --day-rollover (design §D, 2026-08-12): the daily flow's pre-question
+    # step, same enqueue shape as --expired, no idle filter.
+    if args.day_rollover:
+        return _enqueue_day_rollover_conversation_closes(dry_run=args.dry_run)
     if args.expired:
         return _enqueue_expired_conversation_closes()
     flags = ["close", args.session_id, "--reason", args.reason]
@@ -2207,11 +2256,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_conversation_record_turn)
 
     p = sub.add_parser("conversation-close",
-                       help="Close one conversation session now, or sweep every idle-expired one")
+                       help="Close one conversation session now, sweep the janitor, or roll over the day")
     p.add_argument("session_id", nargs="?")
     p.add_argument("--expired", action="store_true",
-                   help="Close every session past its idle timeout (the sweep)")
-    p.add_argument("--reason", default="done", choices=["done", "idle_timeout", "exit_taken"])
+                   help="Close every session past the janitor threshold (36h-class safety net)")
+    p.add_argument("--day-rollover", action="store_true",
+                   help="Close every open session regardless of idle age (design §D day rollover)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="With --day-rollover: list sessions that would close, without closing them")
+    p.add_argument("--reason", default="done",
+                   choices=["done", "idle_timeout", "exit_taken", "day_rollover"])
     p.set_defaults(func=cmd_conversation_close)
 
     p = sub.add_parser("conversation-turn-retry", help="Retry a definitively unsent conversation turn")

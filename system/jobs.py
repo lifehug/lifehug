@@ -618,15 +618,20 @@ def _validated_file_answer_args(raw: object) -> list[str]:
 def _build_conversation_close(payload: dict) -> tuple[Invocation, ...]:
     """One durable close: PR3's close + #119's filing/compile/commit steps,
     all inside ``lifehug.py conversation-close <session_id>`` (never
-    ``--expired`` here — that flag is the deterministic sweep's own
-    discovery entry point, invoked directly, never enqueued as a job).
-    ``reason`` passes through to the close (contract §2a) — the idle-sweep
-    enqueues "idle_timeout"; default "done" covers any other producer."""
+    ``--expired``/``--day-rollover`` here — those flags are deterministic
+    sweeps' own discovery entry points, invoked directly, never enqueued as
+    a job themselves). ``reason`` passes through to the close (contract
+    §2a) — the janitor sweep enqueues "idle_timeout", the daily rollover
+    sweep enqueues "day_rollover" (design §D, Chats-per-Focus); default
+    "done" covers any other producer."""
     _expect_payload(payload, required={"session_id"}, optional={"reason"})
     reason = _optional_text(payload, "reason", maximum=32) or "done"
     # Mirrors conversation.VALID_CLOSE_REASONS — see _SESSION_ID_RE's comment
-    # above for why this can't just import conversation.py.
-    if reason not in {"done", "idle_timeout", "exit_taken"}:
+    # above for why this can't just import conversation.py. "day_rollover"
+    # added alongside the day-owns-the-surface close event (design §D,
+    # Chats-per-Focus) — the daily flow's --day-rollover sweep enqueues one
+    # of these per open session, exactly like --expired's "idle_timeout".
+    if reason not in {"done", "idle_timeout", "exit_taken", "day_rollover"}:
         raise ValueError("invalid close reason")
     return (_cli("conversation-close", _session_id(payload), "--reason", reason),)
 

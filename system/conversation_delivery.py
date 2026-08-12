@@ -1452,6 +1452,23 @@ def is_idle_expired(session: dict, *, manifest: dict, now: datetime | None = Non
     return reference - moment >= timedelta(minutes=idle_timeout_minutes(session, manifest))
 
 
+def is_janitor_expired(session: dict, *, manifest: dict, now: datetime | None = None) -> bool:
+    """Mode-independent safety net for abandoned conversation-mode sessions
+    (design §D, Chats-per-Focus, 2026-08-12): day rollover + user
+    transitions are the real close lifecycle now, not a timer — this sweep
+    is a 36h-class janitor, no user-facing role. ``knob.janitor_idle_hours``
+    replaces the old per-mode idle knobs for ``--expired``/the inline
+    per-turn sweep; ``chat_idle_timeout_minutes``/``conversation_idle_timeout_minutes``
+    (``is_idle_expired`` above) stay in force for "is this open session still
+    current" continuation checks, raised to day-scale."""
+    moment = _last_activity(session)
+    if moment is None:
+        return False
+    reference = now or _now()
+    hours = _knob(manifest, "knob.janitor_idle_hours", 36)
+    return reference - moment >= timedelta(hours=hours)
+
+
 def _filed_question_ids(session: dict) -> tuple[str, ...]:
     filed: list[str] = []
     for turn in session.get("turns") or []:
@@ -1892,7 +1909,7 @@ def find_expired_open_sessions(
     manifest: dict | None = None,
     now: datetime | None = None,
 ) -> list[str]:
-    """Session ids for every OPEN session past its idle timeout.
+    """Session ids for every OPEN session past the janitor threshold.
 
     Pure discovery — deterministic, AI-free, no closing, no send: distinct
     from ``close_expired_sessions`` (which actually closes each one,
@@ -1901,6 +1918,12 @@ def find_expired_open_sessions(
     what to enqueue as durable jobs, keeping the discovery step itself free
     of AI calls; ``close_expired_sessions`` stays exactly as PR3 shipped it
     (the inline per-turn sweep's synchronous close, unchanged).
+
+    "Expired" is the janitor's 36h-class ``knob.janitor_idle_hours``
+    threshold as of design §D (Chats-per-Focus, 2026-08-12) — day rollover
+    and user transitions are the real close lifecycle now; this sweep is
+    only the safety net for abandoned conversation-mode sessions, no longer
+    a user-facing timer.
     """
     vault_root = vault_root if vault_root is not None else VAULT_ROOT
     manifest = manifest if manifest is not None else _manifest()
@@ -1914,7 +1937,7 @@ def find_expired_open_sessions(
             session = conversation.load_session(session_id, vault_root=vault_root)
         except (OSError, ValueError):
             continue
-        if is_idle_expired(session, manifest=manifest, now=reference):
+        if is_janitor_expired(session, manifest=manifest, now=reference):
             ids.append(str(session_id))
     return ids
 
@@ -1931,11 +1954,15 @@ def close_expired_sessions(
     status_resolver: Callable[..., object] | None = None,
     prompt_builder: Callable[[dict], str] | None = None,
 ) -> list[CloseOutcome]:
-    """Lazy sweep: close every open session past its idle timeout.
+    """Lazy sweep: close every open session past the janitor threshold.
 
     No daemon and no cron change in this PR — the sweep runs at the top of
     every post-answer turn and on demand via ``conversation-close --expired``
-    (the same subcommand #119's jobs builder enqueues).
+    (the same subcommand #119's jobs builder enqueues). Design §D
+    (2026-08-12) demotes this from a user-facing idle timer to a 36h-class
+    janitor (``is_janitor_expired`` / ``knob.janitor_idle_hours``) — day
+    rollover (``close_all_open_sessions`` below) and user transitions are
+    the real close lifecycle.
     """
     state_path = state_path if state_path is not None else DELIVERY_STATE_FILE
     vault_root = vault_root if vault_root is not None else VAULT_ROOT
@@ -1951,7 +1978,7 @@ def close_expired_sessions(
             session = conversation.load_session(session_id, vault_root=vault_root)
         except (OSError, ValueError):
             continue
-        if not is_idle_expired(session, manifest=manifest, now=reference):
+        if not is_janitor_expired(session, manifest=manifest, now=reference):
             continue
         try:
             outcomes.append(
@@ -1971,6 +1998,75 @@ def close_expired_sessions(
             )
         except Exception:  # noqa: BLE001 — one bad session never stalls the sweep
             _diagnostic("idle_sweep", "close_failed", str(session_id))
+    return outcomes
+
+
+def find_open_sessions(*, vault_root: str | Path | None = None) -> list[str]:
+    """Every OPEN session id, regardless of idle age.
+
+    Day rollover's pure discovery (design §D, Chats-per-Focus, 2026-08-12):
+    the day owns the surface, not a timer — a session opened seconds ago
+    still closes at rollover. Deterministic, AI-free, no closing, no send;
+    distinct from ``find_expired_open_sessions`` (janitor-filtered).
+    ``lifehug.py``'s ``conversation-close --day-rollover`` uses THIS to
+    decide what to enqueue as durable jobs, mirroring how
+    ``find_expired_open_sessions`` feeds ``--expired``.
+    """
+    vault_root = vault_root if vault_root is not None else VAULT_ROOT
+    ids: list[str] = []
+    for summary in conversation.list_sessions(status="open", vault_root=vault_root):
+        session_id = summary.get("session_id")
+        if session_id:
+            ids.append(str(session_id))
+    return ids
+
+
+def close_all_open_sessions(
+    *,
+    vault_root: str | Path | None = None,
+    state_path: Path | None = None,
+    scores_path: Path | None = None,
+    candidates_path: Path | None = None,
+    ai_call: Callable[[str, str], str] | None = None,
+    telegram_send: Callable[[str], TelegramSendResult] | None = None,
+    status_resolver: Callable[..., object] | None = None,
+    prompt_builder: Callable[[dict], str] | None = None,
+) -> list[CloseOutcome]:
+    """Day rollover: close EVERY open session — no idle filter (design §D).
+
+    Mirrors ``close_expired_sessions`` exactly, minus the janitor filter;
+    the closing-takeaway criterion is unchanged (>=2 user turns earns a
+    takeaway, appended in-thread; fewer closes silently — ``close_session_now``'s
+    existing rule, not re-decided here). This is the synchronous engine
+    entry point for ``conversation-close --day-rollover``; ``lifehug.py``'s
+    CLI wrapper enqueues one durable job per session instead of calling this
+    directly, for operational parity with how ``--expired`` is transported
+    (``_enqueue_expired_conversation_closes``).
+    """
+    state_path = state_path if state_path is not None else DELIVERY_STATE_FILE
+    vault_root = vault_root if vault_root is not None else VAULT_ROOT
+    scores_path = scores_path if scores_path is not None else ANSWER_SCORES_FILE
+    manifest = _manifest()
+    outcomes: list[CloseOutcome] = []
+    for session_id in find_open_sessions(vault_root=vault_root):
+        try:
+            outcomes.append(
+                close_session_now(
+                    session_id,
+                    reason="day_rollover",
+                    state_path=state_path,
+                    vault_root=vault_root,
+                    scores_path=scores_path,
+                    candidates_path=candidates_path,
+                    ai_call=ai_call,
+                    telegram_send=telegram_send,
+                    status_resolver=status_resolver,
+                    prompt_builder=prompt_builder,
+                    manifest=manifest,
+                )
+            )
+        except Exception:  # noqa: BLE001 — one bad session never stalls rollover
+            _diagnostic("day_rollover", "close_failed", str(session_id))
     return outcomes
 
 
@@ -2073,6 +2169,17 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_close(args: argparse.Namespace) -> int:
+    if args.day_rollover:
+        outcomes = close_all_open_sessions()
+        if not outcomes:
+            print("No open conversation sessions for day rollover.")
+            return 0
+        for outcome in outcomes:
+            print(
+                f"{outcome.session_id}: closed ({outcome.reason}; "
+                f"{'silent' if outcome.silent else 'takeaway sent'}; {outcome.detail})"
+            )
+        return 0
     if args.expired:
         outcomes = close_expired_sessions()
         if not outcomes:
@@ -2122,9 +2229,18 @@ def main() -> int:
     p.add_argument("--full", action="store_true", help="Also print turn text (private content)")
     p.set_defaults(func=cmd_status)
 
-    p = sub.add_parser("close", help="Close one session now, or sweep every expired one")
+    p = sub.add_parser(
+        "close", help="Close one session now, sweep the janitor, or roll over the day"
+    )
     p.add_argument("session_id", nargs="?")
-    p.add_argument("--expired", action="store_true", help="Close every idle-expired session")
+    p.add_argument(
+        "--expired", action="store_true",
+        help="Close every session past the janitor threshold (knob.janitor_idle_hours)",
+    )
+    p.add_argument(
+        "--day-rollover", action="store_true",
+        help="Close every open session regardless of idle age (design §D day rollover)",
+    )
     p.add_argument("--reason", default="done", choices=sorted(conversation.VALID_CLOSE_REASONS))
     p.set_defaults(func=cmd_close)
 

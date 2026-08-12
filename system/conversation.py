@@ -95,7 +95,7 @@ from vault_paths import atomic_write_vault_text, read_vault_text, vault_data_pat
 SESSION_VERSION = 1
 VALID_MODES = frozenset({"chat", "conversation"})
 VALID_CHANNELS = frozenset({"telegram", "web", "cli"})
-VALID_CLOSE_REASONS = frozenset({"done", "idle_timeout", "exit_taken"})
+VALID_CLOSE_REASONS = frozenset({"done", "idle_timeout", "exit_taken", "day_rollover"})
 VALID_ROLES = frozenset({"user", "lifehug"})
 SESSION_ID_RE = re.compile(r"^conv-\d{8}-\d{6}-[0-9a-f]{6}$")
 

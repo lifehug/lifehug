@@ -371,6 +371,91 @@ class ConversationCloseCommandTests(VaultSubprocessTestCase):
         self.assertNotIn(fresh["session_id"], enqueued_ids)
         self.assertNotIn(closed["session_id"], enqueued_ids)
 
+    def test_day_rollover_enqueues_every_open_session_with_stable_identity(self):
+        """Design §D (2026-08-12): --day-rollover has NO idle filter — a
+        session opened moments ago still gets swept, unlike --expired."""
+        fresh = conversation.open_session(
+            "chat", "telegram", arc={"question_id": "A1"}, vault_root=self.vault,
+        )
+        also_fresh = conversation.open_session(
+            "conversation", "telegram", vault_root=self.vault,
+        )
+        closed = conversation.open_session(
+            "chat", "telegram", arc={"question_id": "A1"},
+            session_id="conv-20200101-000000-bbbbbb", vault_root=self.vault,
+        )
+        conversation.close_session(closed["session_id"], {"reason": "done"}, vault_root=self.vault)
+
+        calls: list[tuple[str, dict, str | None]] = []
+
+        def fake_queue_and_wait(command, payload, *, identity=None):
+            calls.append((command, payload, identity))
+            return 0
+
+        with mock.patch.object(lifehug, "REPO_DIR", self.vault), \
+             mock.patch.object(lifehug, "_queue_and_wait", side_effect=fake_queue_and_wait):
+            rc = lifehug._enqueue_day_rollover_conversation_closes()
+
+        self.assertEqual(rc, 0)
+        enqueued_ids = {p["session_id"] for _c, p, _i in calls}
+        self.assertEqual(enqueued_ids, {fresh["session_id"], also_fresh["session_id"]})
+        self.assertNotIn(closed["session_id"], enqueued_ids)
+        for command, payload, identity in calls:
+            self.assertEqual(command, "conversation-close")
+            self.assertEqual(payload["reason"], "day_rollover")
+            self.assertEqual(identity, f"conversation-close:{payload['session_id']}")
+
+    def test_day_rollover_dry_run_lists_without_enqueuing_or_closing(self):
+        """--dry-run is a pure read: nothing enqueued, nothing closed."""
+        session_id = self.open_session(question_id="A2")
+
+        calls: list[tuple[str, dict, str | None]] = []
+
+        def fake_queue_and_wait(command, payload, *, identity=None):
+            calls.append((command, payload, identity))
+            return 0
+
+        with mock.patch.object(lifehug, "REPO_DIR", self.vault), \
+             mock.patch.object(lifehug, "_queue_and_wait", side_effect=fake_queue_and_wait):
+            rc = lifehug._enqueue_day_rollover_conversation_closes(dry_run=True)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [])
+        self.assertEqual(
+            conversation.load_session(session_id, vault_root=self.vault)["status"], "open",
+        )
+
+    def test_day_rollover_dry_run_cli_is_a_single_deterministic_line(self):
+        """The daily script's LIFEHUG_DAILY_DRY_RUN preview depends on this
+        being ONE line, present regardless of vault state (empty or not)."""
+        empty = self.run_script("lifehug.py", "conversation-close", "--day-rollover", "--dry-run")
+        self.assertEqual(empty.returncode, 0, empty.stderr)
+        empty_lines = [line for line in empty.stdout.splitlines() if line.strip()]
+        self.assertEqual(len(empty_lines), 1, empty.stdout)
+        self.assertIn("DRY RUN", empty_lines[0])
+
+        self.open_session(question_id="A2")
+        nonempty = self.run_script("lifehug.py", "conversation-close", "--day-rollover", "--dry-run")
+        self.assertEqual(nonempty.returncode, 0, nonempty.stderr)
+        nonempty_lines = [line for line in nonempty.stdout.splitlines() if line.strip()]
+        self.assertEqual(len(nonempty_lines), 1, nonempty.stdout)
+        self.assertIn("DRY RUN", nonempty_lines[0])
+
+    # NOTE: an end-to-end subprocess run of --day-rollover (real job worker,
+    # no mocks) is deliberately NOT exercised here. --day-rollover shares
+    # its enqueue/wait shape with --expired verbatim, and `conversation-close`
+    # is a DIRECT_MUTATION_COMMANDS entry (lifehug.py:main takes the writer
+    # lock for the WHOLE call before either sweep runs); the sweep then
+    # enqueues + waits on a NESTED conversation-close job that needs the
+    # same writer lock, which the kicked worker subprocess cannot acquire
+    # until the outer process releases it. This is pre-existing behavior
+    # inherited unchanged from --expired (issue #119) — no test in this
+    # suite exercises --expired end-to-end via subprocess either, for the
+    # same reason. In-process coverage (the mocked-enqueue test above, and
+    # ``close_all_open_sessions``'s own idempotence test in
+    # tests/test_conversation_delivery.py::DayRolloverTests) proves the
+    # discovery/close/idempotence contract without tripping this seam.
+
 
 class JobsConversationCloseCommandTests(unittest.TestCase):
     """Scope §2 — the jobs.py command-registry contract."""

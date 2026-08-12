@@ -10,11 +10,21 @@ load_order: identity|behavior|examples|profile|record|session|turn_instructions
 role.router: haiku-class
 role.worker: sonnet-class
 role.planner: sonnet-class
-# lifecycle knobs (owner-accepted defaults, 2026-08-11)
+# lifecycle knobs (owner-accepted defaults, 2026-08-11; idle knobs raised to
+# day-scale 2026-08-12 per the Chats-per-Focus design §D: day rollover
+# (daily_question.sh's --day-rollover pre-question step) plus user
+# transitions (Rest / starting a new conversation) are the real close
+# lifecycle now — chat_idle_timeout_minutes/conversation_idle_timeout_minutes
+# below are only a generous "still counts as the current open session"
+# ceiling for continuation checks, never a UX trigger. The idle SWEEP
+# ("--expired") no longer reads these: it is a mode-independent 36h-class
+# janitor for abandoned conversation-mode sessions, knob.janitor_idle_hours,
+# with no user-facing role.
 knob.chat_target_exchanges: 3
-knob.chat_idle_timeout_minutes: 120
-knob.conversation_idle_timeout_minutes: 30
+knob.chat_idle_timeout_minutes: 1440
+knob.conversation_idle_timeout_minutes: 1440
 knob.conversation_turn_cap_exchanges: 25
+knob.janitor_idle_hours: 36
 knob.deposit_framing: off
 knob.grief_deferral_days: 60
 knob.router_confidence_threshold: 0.7
