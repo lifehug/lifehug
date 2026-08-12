@@ -26,6 +26,7 @@ bootstrap_cli_vault_root(sys.argv[1:])
 
 from lifehug_core import (
     ANSWERS_DIR,
+    STATE_DIR,
     CLASSIFICATIONS_DIR,
     CONFIG_FILE,
     COVERAGE_FILE,
