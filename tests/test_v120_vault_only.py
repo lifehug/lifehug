@@ -38,12 +38,14 @@ EXPECTED_DATA_PATHS = {
     "agent_tasks",
     "answer_scores",
     "answers",
+    "arc_cards",
     "artifact_sources",
     "book_offers",
     "classifications",
     "compile_needed",
     "config",
     "connectors_state",
+    "conversations",
     "correction_sources",
     "coverage",
     "entity_rosters",
@@ -53,6 +55,7 @@ EXPECTED_DATA_PATHS = {
     "learning_failures",
     "legacy_focus_recommendations",
     "manual_sources",
+    "mirror_responses",
     "neighborhoods",
     "outputs",
     "perennials",
@@ -185,7 +188,7 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(vault_paths.FRAMEWORK_PATHS, exported["framework_paths"])
         self.assertEqual(list(exported["data_paths"]), sorted(exported["data_paths"]))
         self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
-        self.assertEqual(exported["identity"]["framework_version"], 120)
+        self.assertEqual(exported["identity"]["framework_version"], 150)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

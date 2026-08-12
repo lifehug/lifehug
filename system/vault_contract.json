@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 120,
-    "revision": "vault-contract-v1",
-    "content_digest": "sha256:335369282eb9b1c3f205eb784c1f8b17cdbb6681e04baeabdcbc356b3d27a635"
+    "framework_version": 150,
+    "revision": "vault-contract-v2",
+    "content_digest": "sha256:b5c2c3362d4f4f8b71735a2a4e2f48e23b61ea77ee66e7939702142ee4691d76"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -29,7 +29,8 @@
     "mission": "system/mission.md",
     "research": "system/research.md",
     "version": "system/version.json",
-    "connectors": "system/connectors"
+    "connectors": "system/connectors",
+    "interactions": "interactions"
   },
   "data_paths": {
     "question_bank": {
@@ -120,6 +121,27 @@
     "reports": {"path": "state/reports", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": null, "supported": []}},
     "agent_tasks": {"path": "state/agent_tasks", "kind": "directory", "required": false, "tracked": false, "schema": {"format": "task_family", "version_field": null, "supported": []}},
     "jobs": {"path": "state/jobs", "kind": "directory", "required": false, "tracked": false, "schema": {"format": "job_family", "version_field": "record_version", "supported": [2]}},
-    "compile_needed": {"path": "state/.compile-needed", "kind": "file", "required": false, "tracked": false, "schema": {"format": "sentinel", "version_field": null, "supported": []}}
+    "compile_needed": {"path": "state/.compile-needed", "kind": "file", "required": false, "tracked": false, "schema": {"format": "sentinel", "version_field": null, "supported": []}},
+    "arc_cards": {
+      "path": "state/arc_cards.json",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "json", "version_field": "version", "supported": [1]}
+    },
+    "conversations": {
+      "path": "state/conversations",
+      "kind": "directory",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "json_family", "version_field": "session_version", "supported": [1]}
+    },
+    "mirror_responses": {
+      "path": "state/mirror_responses.json",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "json", "version_field": "version", "supported": [1]}
+    }
   }
 }

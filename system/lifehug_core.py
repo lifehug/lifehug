@@ -184,10 +184,14 @@ REPORTS_DIR = _data("reports")
 AGENT_TASKS_DIR = _data("agent_tasks")
 JOBS_DIR = _data("jobs")
 COMPILE_NEEDED_FILE = _data("compile_needed")
+ARC_CARDS_FILE = _data("arc_cards")
+CONVERSATIONS_DIR = _data("conversations")
+MIRROR_RESPONSES_FILE = _data("mirror_responses")
 
 TEMPLATES_DIR = framework_path("templates", framework_system_dir=SYSTEM_DIR)
 MISSION_FILE = framework_path("mission", framework_system_dir=SYSTEM_DIR)
 CONNECTORS_DIR = framework_path("connectors", framework_system_dir=SYSTEM_DIR)
+INTERACTIONS_DIR = framework_path("interactions", framework_system_dir=SYSTEM_DIR)
 
 QUESTION_ID_RE = r"[A-Z]\d+[a-z]*"
 QUESTION_LINE_RE = re.compile(
