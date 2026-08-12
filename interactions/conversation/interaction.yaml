@@ -1,0 +1,29 @@
+# interactions/conversation/interaction.yaml — flat scalar subset only
+# (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
+interaction: conversation
+version: 1.0.0
+modes: chat|conversation
+# file load order (per-turn assembly; also documented in context/manifest.md)
+load_order: identity|behavior|examples|profile|record|session|turn_instructions
+# model roles by capability tier (config keys resolved by the runtime;
+# OSS config keys land in Wave 2 — these name the ROLES, not providers)
+role.router: haiku-class
+role.worker: sonnet-class
+role.planner: sonnet-class
+# lifecycle knobs (owner-accepted defaults, 2026-08-11)
+knob.chat_target_exchanges: 3
+knob.chat_idle_timeout_minutes: 120
+knob.conversation_idle_timeout_minutes: 30
+knob.conversation_turn_cap_exchanges: 25
+knob.deposit_framing: off
+knob.grief_deferral_days: 60
+knob.router_confidence_threshold: 0.7
+# per-block context budgets (tokens, approximate; top-K small,
+# whole-corpus never loaded)
+budget.identity: 600
+budget.behavior: 1200
+budget.examples: 900
+budget.profile: 400
+budget.record: 1800
+budget.session: 1200
+budget.turn_instructions: 400

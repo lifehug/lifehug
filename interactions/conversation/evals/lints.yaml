@@ -1,0 +1,41 @@
+# interactions/conversation/evals/lints.yaml — flat scalar subset only
+# (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
+#
+# DATA for the PR 2 lint engine — key names here are contract, not free
+# text. Each lint.* id maps 1:1 to a hard rule in prompt/behavior.md and a
+# rubric clause in rubrics.md. Fixtures only at this stage — no engine
+# reads this file yet (lands in PR 2 / issue #115).
+
+# one question per turn, maximum (behavior.md rule 1)
+lint.one_question_per_turn: on
+
+# banned phrases: guilt/pressure/advice-lead-ins/"that must have been"/
+# AI-self-reference (behavior.md rules 4, 5, 12 + the Never block)
+lint.banned_phrases: on
+banned.1: you haven't told me much
+banned.2: just one more question
+banned.3: that must have been
+banned.4: as an AI
+banned.5: I'm an AI
+banned.6: I don't actually
+banned.7: you should really
+banned.8: if I were you
+banned.9: I'm so sorry, that must be so painful
+banned.10: I remember when I
+
+# classify each question TED/cued/closed/option-posing (behavior.md rule 3)
+lint.question_grammar_audit: on
+
+# reply length ceiling, Telegram-native (behavior.md defaults)
+# cap.turn_chars is the single source for this value across the
+# interaction's builders/lints (cross-contract consistency note,
+# 2026-08-11 audit) — 1200, not the contract's original 900.
+lint.length_caps: on
+cap.turn_chars: 1200
+
+# structural: substantive user message -> reply must not open with a
+# question (behavior.md rule 2)
+lint.receipt_before_question: on
+
+# flags "what year"-form questions (behavior.md rule 3)
+lint.year_question_detector: on
