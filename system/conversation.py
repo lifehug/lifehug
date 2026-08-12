@@ -626,15 +626,33 @@ def build_turn_prompt(payload: dict) -> str:
     intents = arc.get("intents") or []
     template = _read_framework_text("prompt", "turn-instructions.md")
     length_cap = _lint_cap_turn_chars()
+    position = _turn_position(session, manifest)
     filled = (
         template
         .replace("{mode}", str(session.get("mode", "")))
-        .replace("{arc_intent}", _intent_label(intents[0]) if intents else "")
-        .replace("{turn_position}", _turn_position(session, manifest))
-        .replace("{previous_turn}", turns[-1]["text"] if turns else "")
-        .replace("{length_cap}", str(length_cap))
+        .replace("{arc_card_current_intent}", _intent_label(intents[0]) if intents else "(no arc card)")
+        .replace("{turn_position}", position)
+        .replace("{previous_turn_summary}", (turns[-1]["text"][:200] if turns else "(none — this is the opening)"))
+        .replace("{applicable_rule_hints}", _rule_hints_for_position(position))
     )
-    return f"{context}\n\n## TURN_INSTRUCTIONS\n\n{filled}"
+    return (
+        f"{context}\n\n## TURN_INSTRUCTIONS\n\n{filled}\n\n"
+        f"Hard length cap for this message: {length_cap} characters."
+    )
+
+
+def _rule_hints_for_position(position: str) -> str:
+    """Deterministic behavior.md rule hints per turn position (definition file
+    slot {applicable_rule_hints}; the mapping mirrors behavior.md's own
+    structure — opening leans on framing/grammar rules, middle on
+    respond-before-ask/register, closing on rule 8)."""
+    hints = {
+        "opening": "2 (respond-before-ask), 3 (question grammar), 5 (register), 7 (escalation)",
+        "middle": "1 (one question max), 2 (respond-before-ask), 5 (register), 6 (payout anatomy), 13 (back-off)",
+        "exit_door": "1 (one question max), 8 (closings — offer the door, do not push past it)",
+        "closing": "8 (closings: takeaway, appreciation, continuity, hook, stop)",
+    }
+    return hints.get(position, "1, 2, 5")
 
 
 def _lint_cap_turn_chars() -> int:
@@ -656,11 +674,14 @@ def build_router_prompt(payload: dict) -> str:
     session_open = payload["session_open"]
     pending_question_id = payload.get("pending_question_id")
     template = _read_framework_text("router", "router.md")
+    pending = "(none)" if pending_question_id is None else str(pending_question_id)
     return (
-        template
-        .replace("{message}", message)
-        .replace("{session_open}", str(session_open))
-        .replace("{pending_question_id}", "" if pending_question_id is None else str(pending_question_id))
+        f"{template}\n\n"
+        "## INPUT (assembled at runtime — classify this message)\n\n"
+        f"SESSION OPEN: {session_open}\n"
+        f"PENDING QUESTION: {pending}\n\n"
+        "MESSAGE:\n"
+        f"{message}\n"
     )
 
 
@@ -670,14 +691,14 @@ def build_arc_prompt(payload: dict) -> str:
     record_summary = payload["record_summary"]
     gap_inputs = payload["gap_inputs"]
     template = _read_framework_text("plan", "arc-templates.md")
+    gaps = "; ".join(str(item) for item in gap_inputs) or "(none)"
     return (
-        template
-        .replace("{question_id}", str(question.get("id", "")))
-        .replace("{question_text}", str(question.get("text", "")))
-        .replace("{question_category}", str(question.get("category", "")))
-        .replace("{question_focus}", str(question.get("focus", "")))
-        .replace("{record_summary}", record_summary)
-        .replace("{gap_inputs}", "; ".join(str(item) for item in gap_inputs))
+        f"{template}\n\n"
+        "## INPUT (assembled at runtime — plan one arc card for this question)\n\n"
+        f"QUESTION [{question.get('id', '')}] (category {question.get('category', '')}, "
+        f"focus {question.get('focus', '')}):\n{question.get('text', '')}\n\n"
+        f"RECORD SUMMARY:\n{record_summary}\n\n"
+        f"GAP INPUTS:\n{gaps}\n"
     )
 
 

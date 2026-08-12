@@ -570,5 +570,27 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
         self.assertIn('"conversation_lints.py"', text)
 
 
+
+
+class BuilderSlotRegressionTests(unittest.TestCase):
+    """No builder may emit an unfilled {slot} from a definition file (the
+    fixture-vs-real-file seam defect caught at the #126/#127 rebase)."""
+
+    def test_turn_prompt_has_no_unfilled_slots(self):
+        import re
+        session = BuilderTests()._sample_session()
+        session["turns"] = [{"role": "user", "text": "we drove the blue truck", "ts": "2026-08-11T00:00:00Z", "channel": "telegram"}]
+        prompt = conversation.build_turn_prompt({"session": session})
+        leftovers = re.findall(r"\{[a-z_]+\}", prompt)
+        allowed = {"{placeholder}"}  # the file's own meta-sentence about slots
+        self.assertFalse([m for m in leftovers if m not in allowed], leftovers)
+
+    def test_router_and_arc_prompts_embed_inputs(self):
+        rp = conversation.build_router_prompt({"message": "slot-guard probe", "session_open": True})
+        self.assertIn("slot-guard probe", rp)
+        ap = conversation.build_arc_prompt({"question": {"id": "Z9", "text": "probe?", "category": "A", "focus": "my-life"}, "record_summary": "rs", "gap_inputs": []})
+        self.assertIn("Z9", ap)
+
+
 if __name__ == "__main__":
     unittest.main()
