@@ -144,7 +144,9 @@ if [[ $RC -eq 0 ]]; then
   # Extract coverage line if present
   COVERAGE=$(echo "$OUT" | grep -oE "Coverage: [0-9]+/[0-9]+" | tail -1 || true)
   FOLLOWUPS=$(echo "$OUT" | grep -oE "Adaptive follow-up question sent: [A-Z][0-9]+[a-z]?" | head -1 || true)
-  ACK_CONFIRMED=$(echo "$OUT" | grep -oE "Answer acknowledgment: confirmed" | head -1 || true)
+  # v153+: a confirmed conversation turn replaces the ack — both count as
+  # "the user already saw a message about this answer" (issue #133).
+  ACK_CONFIRMED=$(echo "$OUT" | grep -oE "Answer acknowledgment: confirmed|Conversation turn: confirmed" | head -1 || true)
   MSG="✅ Filed ${QID}"
   [[ -n "$COVERAGE" ]] && MSG="${MSG} · ${COVERAGE}"
   [[ -n "$FOLLOWUPS" ]] && MSG="${MSG}"$'\n'"↳ ${FOLLOWUPS}"
