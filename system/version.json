@@ -1,7 +1,7 @@
 {
-  "version": 153,
+  "version": 154,
   "released": "2026-08-11",
-  "changelog": "v153: the post-answer moment becomes a CONVERSATION (issue #116, Wave 2 PR 3). Answering a question no longer produces two disconnected messages \u2014 a warm acknowledgment that cannot ask anything, followed by a rotation-picked question about something else. It now produces ONE message that receives what you said, pays it back with something you didn't have, and cues the next question in your own words: a short chat (~3 exchanges) that ends gracefully and, when it earned one, closes with a takeaway. Partial chats file cleanly and close silently \u2014 no nagging, ever. system/conversation_delivery.py orchestrates the turn through the issue #115 builders and the interactions/conversation/ behavior authority, enforcing the deterministic lints (one question, length cap, banned phrases) before anything is sent; state/conversation_deliveries.json makes delivery exactly-once (confirmed replays are no-ops, ambiguous is never auto-retried); and ANY definitive failure degrades to the previous acknowledgment + follow-up pair in the same run, so this is never silent and never worse than before. New config keys conversation_model / router_model / arc_plan_model; conversation-status and conversation-close upgraded in place (--expired runs the idle sweep) plus the new conversation-turn-retry operator door; engagement signal is recorded on each answered question at close.",
+  "changelog": "v154: the daily question stops being three unrelated prompts (issue #118, Conversation Interaction Wave 2). The WEEKLY loop now plans one arc card per queued question \u2014 an opening framing quoted from your own record plus 2-4 typed follow-up intents \u2014 and the daily loop simply attaches it, so the day's message opens where you actually left off while the daily path stays AI-free. The card's intents claim three gap seams that were previously display-only: unfilled five-slot scene probes, sibling questions in the same research neighborhood, and timeline gaps (the first non-display consumer of compute_gaps \u2014 always phrased as landmark anchors, never \"what year\"), plus studio format slots, a Mirror \"sit with\" tension on self-arc questions, and small demonstrated-knowledge summaries once a category has material. Cards live and die with the question queue, so a missed week degrades to today's message format instead of breaking. Keyless machines get deterministic cards immediately plus an agent task for the model pass. Monthly research now offers one conversation thread from a neighborhood that has record to open from and somewhere left to go (never twice in a quarter), and resurfaced/perennial questions close as an invitation to talk rather than a form to fill.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -187,6 +187,7 @@
     "system/conversation.py",
     "system/conversation_lints.py",
     "system/conversation_delivery.py",
-    "tests/test_conversation_delivery.py"
+    "tests/test_conversation_delivery.py",
+    "system/arc_planner.py"
   ]
 }

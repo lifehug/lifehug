@@ -63,6 +63,9 @@ GAP_LIMIT="${LIFEHUG_MONTHLY_GAP_LIMIT:-2}"
 SELF_TOPIC="${LIFEHUG_MONTHLY_SELF_TOPIC:-Who I am becoming}"
 SELF_OUTPUT="${LIFEHUG_MONTHLY_SELF_OUTPUT:-essay}"
 FOCUS_MIN_SCORE="${LIFEHUG_MONTHLY_FOCUS_MIN_SCORE:-15}"
+# Conversation-thread offers (issue #118): at most this many ignorable lines a
+# month, and an offered neighborhood stays quiet for a quarter afterwards.
+THREAD_OFFERS="${LIFEHUG_MONTHLY_THREAD_OFFERS:-1}"
 TARGETS_FILE="$(mktemp "${TMPDIR:-/tmp}/lifehug-monthly-targets.XXXXXX")"
 ROSTER_PREVIEW_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lifehug-roster-preview.XXXXXX")"
 trap 'rm -f "$TARGETS_FILE"; rm -rf "$ROSTER_PREVIEW_DIR"' EXIT
@@ -254,6 +257,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
     run_step python3 "$SCRIPT_DIR/research_expand.py" --topic "$SELF_TOPIC" --type self --output "$SELF_OUTPUT" --dry-run
   fi
   echo
+  echo "==> preview conversation-thread offers"
+  run_step python3 "$SCRIPT_DIR/lifehug.py" arc-thread-offers --limit "$THREAD_OFFERS" --dry-run
+  echo
   echo "==> preview Focus recommendations"
   preview_focuses
   echo
@@ -344,6 +350,21 @@ run_step python3 "$SCRIPT_DIR/lifehug.py" compile
 # ~a year ago get re-inserted WITH last year's answer attached (10Q model).
 run_optional python3 "$SCRIPT_DIR/lifehug.py" perennials --generate-due
 
+# Conversation-thread offers (issue #118): research neighborhoods that already
+# have record to open from AND somewhere left to go become multi-session
+# conversation threads. Deterministic (no AI), capped, and never repeated
+# within a quarter — empty most months by design.
+set +e
+THREAD_OFFERS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" arc-thread-offers --limit "$THREAD_OFFERS" 2>&1)
+THREAD_OFFERS_STATUS=$?
+set -e
+if [[ "$THREAD_OFFERS_STATUS" -ne 0 ]]; then
+  record_learning_failure "monthly_research" "arc_thread_offers" "$THREAD_OFFERS_STATUS" "$THREAD_OFFERS_OUT"
+  THREAD_OFFERS_OUT="⚠ conversation-thread offers FAILED (exit ${THREAD_OFFERS_STATUS})
+${THREAD_OFFERS_OUT}"
+fi
+echo "$THREAD_OFFERS_OUT"
+
 # Echo-style resurfacing (v71): send one old answer back verbatim with a
 # reflection question — reviewing past entries is itself the intervention
 # (CHI 2013). Deterministic per month; replies become reflection sources.
@@ -381,7 +402,7 @@ body = " ".join(body.split())[:900]
 message = (f"🪞 Lifehug — from your own archive\n\n"
            f"On {answered_date} you wrote ({f.stem}):\n\n“{body}”\n\n"
            f"Reading it now — what do you see that you couldn't see then? "
-           f"(Reply and it saves as a reflection on {f.stem})")
+           f"(Reply and we'll talk it through — it saves as a reflection on {f.stem})")
 if send_telegram(message):
     print(f"✓ Resurfaced {f.stem} ({answered_date}) with a reflection question")
 else:
@@ -401,6 +422,7 @@ mkdir -p "$REPORT_DIR"
     "Research neighborhoods:RESEARCH_OUT" \
     "Focus recommendations:FOCUSES_OUT" \
     "Entity rosters:ROSTER_OUT" \
+    "Conversation threads:THREAD_OFFERS_OUT" \
     "Resurfacing:RESURFACE_OUT" \
     "Progress:PROGRESS_OUT"; do
     title="${section%%:*}"; var="${section##*:}"
@@ -418,4 +440,13 @@ SUMMARY=$(python3 "$SCRIPT_DIR/lifehug.py" weekly-summary \
   --kind monthly --since "$START_TS" --report-path "$REPORT_FILE" 2>&1) \
   || SUMMARY="⚠ monthly summary generation failed — see $REPORT_FILE"
 
-telegram_notify "${SUMMARY}"
+# The month's conversation-thread offer (issue #118) rides along with the
+# summary: one ignorable line, in the register of an invitation.
+THREAD_OFFER_LINES=$(printf '%s\n' "$THREAD_OFFERS_OUT" | grep '^💬' || true)
+if [[ -n "$THREAD_OFFER_LINES" ]]; then
+  telegram_notify "${SUMMARY}
+
+${THREAD_OFFER_LINES}"
+else
+  telegram_notify "${SUMMARY}"
+fi

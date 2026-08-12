@@ -193,6 +193,13 @@ After setup, create a cron job for daily question delivery. The cron task should
 2. Let that script pick, send, pin when supported, and mark sent only after delivery succeeds
 3. Avoid custom state mutation outside the script
 
+The delivered message body is the day's pre-planned arc card when one is live
+(v154, issue #118): after the id parse, the script reads `lifehug.py arc-card
+<QID> --daily-text` — a pure file read, no AI on the daily path — and uses the
+card's framing plus the question when it prints something, today's format when
+it prints nothing (reengagement picks, an expired queue, an uncarded question).
+The `[QID]` marker is unchanged in either case.
+
 Real runs of the daily, weekly, and monthly scripts enqueue into the durable
 single-writer worker under `state/jobs/`; dry-runs remain direct and
 non-mutating. On macOS, install the persistent worker plus canonical schedules
@@ -286,7 +293,9 @@ python3 system/lifehug.py weekly-maintenance
 LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
 ```
 
-The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, auto-promotes candidates under caps, writes the next planned queue, scans gaps in dry-run mode, reports progress, and autocommits real changes.
+The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, auto-promotes candidates under caps, writes the next planned queue, **plans one arc card per queued question**, scans gaps in dry-run mode, reports progress, and autocommits real changes.
+
+**Arc cards (v154, issue #118).** Directly after the queue is written, `lifehug.py arc-plan` plans one card per queued question — an opening framing quoted from the author's own record plus 2–4 typed follow-up intents (unfilled five-slot scene probes, neighborhood siblings, timeline gaps phrased as landmark anchors, studio format slots, a Mirror "sit with" line on self-arc questions, demonstrated-knowledge summaries). Deterministic cards are always computed first, so a model failure, invalid output, or a keyless machine never costs the week its plan; keyless runs additionally emit the prompt to `state/agent_tasks/arcs/` for `arc-plan --from-response`. Cards live in `state/arc_cards.json` and expire with the queue. **This shell step is the parity spec for the platform's `arc_plan` step** — a cap or gate the platform needs must appear here first.
 
 Both loops run on any machine (v92/v123). Check `python3 system/lifehug.py ai-status` first: a ready direct local model, gateway, or keyed provider runs fully unattended; unavailable providers use agent-task mode — follow `skills/maintenance/SKILL.md` (pre-complete AI work via `--emit-prompts`/`--emit-task`/`--from-response` before the run; a keyless cron emits its AI work to `state/agent_tasks/` instead of failing). The direct local route is fail-closed: it never sends source material to another provider when its configured endpoint is offline or rejected. Local and OpenClaw loopback transports bypass proxies and refuse redirects; their errors expose metadata only. The Anthropic SDK is optional; if absent, status stays keyless instead of exiting.
 
@@ -297,7 +306,7 @@ python3 system/lifehug.py monthly-research
 LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh
 ```
 
-The monthly Loop segment compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, reports progress, and autocommits real changes.
+The monthly Loop segment compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, **offers at most one conversation thread** from a neighborhood that has record to open from and somewhere left to go (never repeated within a quarter — v154), reports progress, and autocommits real changes.
 
 Review candidate questions before they enter the daily flow:
 

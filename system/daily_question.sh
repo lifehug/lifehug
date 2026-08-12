@@ -62,9 +62,42 @@ if [[ -z "$TOKEN" || -z "$CHAT_ID" ]]; then
   exit 1
 fi
 
+# The [QID] marker is what daily_question.sh keys the delivered message on
+# (and the answer-filing flow after it), so the parse has ONE definition used
+# by both the dry run and the real send.
+parse_question_id() {
+  python3 -c '
+import re
+import sys
+text = sys.stdin.read()
+m = re.search(r"\[([A-Z]\d+[a-z]*)\]", text)
+print(m.group(1) if m else "")
+'
+}
+
+# Arc-card attach (issue #118) — a PURE FILE READ, no AI on the daily path.
+# Prints the assembled message for a live card (unexpired and still in the
+# current queue) or nothing at all; the caller branches on empty-vs-nonempty,
+# which is the whole of the stale-plan fallback.
+arc_card_text() {
+  python3 "$SCRIPT_DIR/lifehug.py" arc-card "$1" --daily-text 2>/dev/null || true
+}
+
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY RUN: would use configured Telegram delivery target"
-  python3 "$SCRIPT_DIR/ask.py" --dry-run
+  DRY_OUTPUT=$(python3 "$SCRIPT_DIR/ask.py" --dry-run)
+  printf '%s\n' "$DRY_OUTPUT"
+  DRY_QID=$(printf '%s\n' "$DRY_OUTPUT" | parse_question_id)
+  if [[ -n "$DRY_QID" ]]; then
+    DRY_ARC=$(arc_card_text "$DRY_QID")
+    echo
+    if [[ -n "$DRY_ARC" ]]; then
+      echo "==> arc card attach for ${DRY_QID} (would send):"
+      printf '%s\n' "$DRY_ARC"
+    else
+      echo "==> no live arc card for ${DRY_QID} — today's message format unchanged"
+    fi
+  fi
   exit 0
 fi
 
@@ -234,14 +267,7 @@ Reply with a model name to use a different one, or just say **go** to use the de
   exit 0
 fi
 
-QUESTION_ID=$(printf '%s\n' "$QUESTION_OUTPUT" | python3 -c '
-import re
-import sys
-text = sys.stdin.read()
-m = re.search(r"\[([A-Z]\d+[a-z]*)\]", text)
-print(m.group(1) if m else "")
-'
-)
+QUESTION_ID=$(printf '%s\n' "$QUESTION_OUTPUT" | parse_question_id)
 
 if [[ -z "$QUESTION_ID" ]]; then
   echo "ERROR: Could not parse question ID from ask.py output" >&2
@@ -249,9 +275,21 @@ if [[ -z "$QUESTION_ID" ]]; then
   exit 1
 fi
 
+# The day's pre-planned arc card, when one is live. The card's own text
+# carries the same [QID] marker format_question produces, so the message the
+# author sees — and every downstream parse of it — is unchanged in shape.
+# Reengagement picks and expired queues simply have no card: empty output,
+# today's format, no branch anywhere else in this script.
+ARC_TEXT=$(arc_card_text "$QUESTION_ID")
+if [[ -n "$ARC_TEXT" ]]; then
+  QUESTION_BODY="$ARC_TEXT"
+else
+  QUESTION_BODY="$QUESTION_OUTPUT"
+fi
+
 TEXT="📖 Lifehug — Daily Question
 
-${QUESTION_OUTPUT}
+${QUESTION_BODY}
 
 (Answer whenever you want — voice or text)"
 

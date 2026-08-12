@@ -87,3 +87,42 @@ the free, no-API-key daily run exactly as free as it is today.
   every future AI-driven surface, not just this one; it would only need
   revisiting if the definition/runtime/seat split itself proved
   unworkable in practice, which nothing in this PR's scope tests.
+
+## Amendment (2026-08-11, issue #118): the arc-card contract
+
+The vault-contract addition above ((c), landed in #115) reserved
+`state/arc_cards.json`; the weekly arc planner (#118) fills it, and this
+amendment ratifies the DATA contract everything downstream inherits, so
+there is one findable answer rather than a second ADR.
+
+- **The intent vocabulary is CLOSED** — exactly six kinds: `scene_slot`,
+  `neighborhood_sibling`, `timeline_gap`, `studio_slot`, `sit_with`,
+  `demonstrated_knowledge_summary`. `conversation.ARC_INTENT_KINDS` is the
+  single definition; the turn engine, the evals, and the platform's
+  transport all read it from there. Adding a kind is a schema bump, not an
+  additive change (per the recurring-defect doctrine: one importable
+  definition, guarded by a test, rather than a vocabulary retyped at four
+  call sites).
+- **Intents are intents, not scripts.** A card carries 2–4 typed objects
+  naming what the exchange should reach for; the turn engine phrases them
+  live. The card never contains scripted follow-up text.
+- **Cards live and die with the question queue.** `queue_generated_at` and
+  `expires_at` are copied verbatim from `state/question_queue.json`, and a
+  card is live only while unexpired AND its question is still queued or
+  sent. Staleness therefore needs no expiry code of its own: nothing
+  attaches, and the day degrades to the pre-arc message format.
+- **Openings are receipted or null.** An opening cites `opening_receipts`
+  that must resolve to real answers/sources; an unresolvable receipt costs
+  the card its opening, never its intents. No card text may contain "what
+  year" (research.md §4's landmark-anchor rule, enforced as a validation
+  lint).
+- **The OSS weekly shell step is the parity SPEC** for the platform's
+  `StepSpec("arcs", "arc_plan", llm=True)`. A cap, gate, or fallback that
+  the platform needs must appear in `system/weekly_maintenance.sh` and the
+  CLI first; a platform-side gate absent from the OSS step is a parity
+  merge-blocker on the platform PR.
+- **Ratified deviation (d) is now load-bearing, not aspirational**: the
+  daily attach is a pure file read (`lifehug.py arc-card <QID>
+  --daily-text`) that prints the assembled message or nothing at all, so
+  the daily loop's AI-free property is enforced by the seam's SHAPE, not
+  by convention.

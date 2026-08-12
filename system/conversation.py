@@ -46,6 +46,14 @@ Arc-card helpers (minimal, typed; storage only — the planner is Wave 2):
 
     load_arc_card(question_id, *, vault_root=None) -> dict | None
     save_arc_card(card, *, vault_root=None) -> None
+    load_arc_cards(*, vault_root=None) -> dict          # the whole container
+    save_arc_cards(container, *, vault_root=None) -> None
+
+(The two container-level helpers and ``read_conversation_definition`` are
+the issue #118 extension: ``system/arc_planner.py`` rewrites the container
+wholesale every week and reads ``plan/arc-templates.md``, and both go
+through this module rather than re-deriving the container defaults or
+hand-building a path into the interaction definition.)
 
 There is deliberately no ``append_mirror_response`` here (mid-flight
 cross-contract audit amendment M14): issue #119 ships the single mirror
@@ -419,13 +427,16 @@ def merge_session_extraction(
 # here.
 # --------------------------------------------------------------------------
 
+ARC_CARDS_VERSION = 1
+
+
 def _arc_cards_default() -> dict:
     # A fresh dict/list on every call — never a shared module-level mutable
     # (a `dict(SHARED_CONSTANT)` shallow copy would alias the "cards" list
     # across every vault this process touches; the bug this factory avoids
     # was caught by this PR's own upsert-without-duplicating test).
     return {
-        "version": 1,
+        "version": ARC_CARDS_VERSION,
         "generated_at": None,
         "queue_generated_at": None,
         "expires_at": None,
@@ -433,6 +444,40 @@ def _arc_cards_default() -> dict:
         "cards": [],
         "thread_offers": [],
     }
+
+
+def load_arc_cards(*, vault_root: str | Path | None = None) -> dict:
+    """The whole arc-card CONTAINER, defaults filled (issue #118 extension).
+
+    ``load_arc_card`` answers "one card for this question"; the arc planner
+    rewrites the container wholesale each week (generation-run bookkeeping
+    included), so both halves resolve the container through this one
+    function rather than each re-deriving the defaults. A cold vault, a
+    corrupt file, or a non-object payload all degrade to the default
+    container — never an exception on a read path the daily loop touches.
+    """
+    root = _resolve_root(vault_root)
+    data = _read_json_at(_arc_cards_path(root), vault_root=root, default=None)
+    if not isinstance(data, dict):
+        return _arc_cards_default()
+    for key, default in _arc_cards_default().items():
+        data.setdefault(key, default)
+    if not isinstance(data.get("cards"), list):
+        data["cards"] = []
+    if not isinstance(data.get("thread_offers"), list):
+        data["thread_offers"] = []
+    return data
+
+
+def save_arc_cards(data: dict, *, vault_root: str | Path | None = None) -> None:
+    """Write the whole container (issue #118 extension; defaults filled)."""
+    if not isinstance(data, dict):
+        raise ValueError("arc-card container must be a JSON object")
+    payload = dict(data)
+    for key, default in _arc_cards_default().items():
+        payload.setdefault(key, default)
+    root = _resolve_root(vault_root)
+    _write_json_at(_arc_cards_path(root), payload, vault_root=root)
 
 
 def load_arc_card(question_id: str, *, vault_root: str | Path | None = None) -> dict | None:
@@ -455,14 +500,7 @@ def save_arc_card(card: dict, *, vault_root: str | Path | None = None) -> None:
     if not question_id:
         raise ValueError("arc card requires a question_id")
     root = _resolve_root(vault_root)
-    path = _arc_cards_path(root)
-    data = _read_json_at(path, vault_root=root, default=None)
-    if not isinstance(data, dict):
-        data = _arc_cards_default()
-    for key, default in _arc_cards_default().items():
-        data.setdefault(key, default)
-    if not isinstance(data.get("cards"), list):
-        data["cards"] = []
+    data = load_arc_cards(vault_root=root)
     cards = data["cards"]
     for index, existing in enumerate(cards):
         if isinstance(existing, dict) and existing.get("question_id") == question_id:
@@ -470,7 +508,7 @@ def save_arc_card(card: dict, *, vault_root: str | Path | None = None) -> None:
             break
     else:
         cards.append(card)
-    _write_json_at(path, data, vault_root=root)
+    save_arc_cards(data, vault_root=root)
 
 
 # --------------------------------------------------------------------------
@@ -520,8 +558,19 @@ def _safe_manifest() -> dict:
         return {}
 
 
+def read_conversation_definition(*parts: str, framework_root: str | Path | None = None) -> str:
+    """Read one ``interactions/conversation/`` definition file verbatim.
+
+    The public accessor (issue #118 extension) so other modules — the arc
+    planner reads ``plan/arc-templates.md`` — never hand-build a path into
+    the interaction definition. Raises OSError when the file is absent; the
+    definition tree is a framework file, not optional vault state.
+    """
+    return _conversation_dir_path(*parts, framework_root=framework_root).read_text(encoding="utf-8")
+
+
 def _read_framework_text(*parts: str) -> str:
-    return _conversation_dir_path(*parts).read_text(encoding="utf-8")
+    return read_conversation_definition(*parts)
 
 
 def _truncate(text: str, budget_tokens: object) -> str:

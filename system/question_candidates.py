@@ -831,8 +831,12 @@ def generate_due_perennials(dry_run: bool = False) -> list[tuple[str, str]]:
             continue
 
         year = answered_date[:4]
+        # Issue #118: the mechanism is unchanged (last year's answer attached);
+        # the closing line becomes a conversation opener rather than a bare
+        # re-ask — the perennial is an invitation to talk, not a form to fill.
         reask_text = (f"In {year} you answered this: \"{excerpt}\" — "
-                      f"a year on, here it is again: {original['text']}")
+                      f"a year on, here it is again: {original['text']} "
+                      f"Reply and we'll talk it through.")
         category = str(original["category"])
         new_id = next_question_id(bank_text, category)
         if not dry_run:
