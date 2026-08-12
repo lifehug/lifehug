@@ -22,7 +22,12 @@ pass the harness in CI, exactly like code. Without it, "model-agnostic" is
 hope; with it, the roster is whatever passes. Issue #120; platform twin
 lifehug/lifehug-platform#417 (CI mirror + cross-model scheduled runs — the
 live cross-model workflow deliberately lives THERE, where vendor keys can
-exist; this repo's CI stays dependency-free and keyless).
+exist; this repo's CI stays dependency-free and keyless). **Pin note**: the
+platform twin (#417) requires the platform's framework pin to include this
+PR's (lifehug#120's) release — #417's contract states explicitly that if the
+Wave-3 step-0 pin bump ships before #120 merges, a SECOND pin bump is
+required before #417 lands; this PR's own merge is the trigger that #417
+gates on.
 
 ## Binding facts
 
@@ -36,12 +41,21 @@ exist; this repo's CI stays dependency-free and keyless).
   `rubrics.md`, `personas/*.md`. Interface pins shared with the wave-1
   contract (if merged wave-1 reality differs, follow the merged reality and
   record the deviation in the evidence comment):
-  - **`lints.yaml` format subset**: top-level keys mapping to scalars, lists
-    of strings, or one-level mappings of scalars/lists. No anchors, no nested
-    blocks beyond one level, no flow style. This repo is dependency-free —
-    there is no PyYAML; the harness ships a minimal loader for exactly this
-    subset (same spirit as `lifehug_core.load_config`'s flat `key: value`
-    config parsing).
+  - **`lints.yaml` format subset**: FLAT SCALAR DOTTED-KEY subset only — keys
+    map to scalars or lists of strings; there is no one-level-mapping form.
+    Anything that would otherwise be a nested mapping (e.g. per-class
+    router gate thresholds) is instead expressed as flat dotted keys, e.g.
+    `router_gates.answer.precision: 0.9`, `router_gates.answer.recall: 0.85`
+    — one scalar per dotted key, never a nested block. No anchors, no
+    nesting, no flow style. This repo is dependency-free — there is no
+    PyYAML; the harness ships a minimal loader for exactly this subset (same
+    spirit as `lifehug_core.load_config`'s flat `key: value` config
+    parsing). `seam_ok` semantics (referenced below in the golden schema) are
+    a GOLDEN-file field, not a `lints.yaml` key, so they are unaffected by
+    this constraint; if a future PR needs seam-related config in
+    `lints.yaml` itself, it must be expressed as a flat dotted key
+    (e.g. `seam.ok_default: false`) under this same subset — it is not
+    otherwise defined here.
   - **Golden transcript schema** (`goldens/*.json`, one session per file):
     `golden_id`, `mode` (`chat|conversation`), `register`
     (`celebration|hard|neutral`), `arc` (`question_id`, `opening`,
@@ -58,12 +72,21 @@ exist; this repo's CI stays dependency-free and keyless).
     `{text, session_open: bool, intent}` with `intent` ∈ `{answer,
     new_story, command, continue_session, out_of_scope}`; per-class
     precision/recall thresholds live in `lints.yaml` under `router_gates`.
-- Wave 1 lands the first lint checks "runnable via pytest/unittest"; the
-  authoritative lint module is `system/interaction_evals.py`. This PR
-  extends that module (or creates it if wave 1 named it differently —
-  recurring-defect doctrine: ONE importable authority; the wave-2/3 runtime
-  turn validator in `conversation_delivery` imports these same functions,
-  never re-implements them).
+- **Vocabulary alignment with #114/#115 (consistency-audit amendment)**: the
+  authoritative lint MODULE is `system/conversation_lints.py` (NOT
+  `interaction_evals.py`) — recurring-defect doctrine: ONE importable
+  authority; the wave-2/3 runtime turn validator in `conversation_delivery`
+  imports the lint functions from `conversation_lints`, never re-implements
+  them. This PR's own harness module for goldens/rubrics/personas MAY remain
+  `system/interaction_evals.py` (the Layer 4 judge/persona runner and
+  everything beyond deterministic lints), but that module IMPORTS the lint
+  layer from `conversation_lints` rather than defining or duplicating lint
+  logic. Lint ids are `one_question_per_turn` (not `max_questions_per_turn`)
+  and `question_grammar_audit` (not `question_grammar`). Grammar
+  classification classes per #115 are anchored on `cued` (the shared
+  classifier's baseline classes); this contract ADDS a `presupposing` class
+  to the SHARED classifier living in `conversation_lints` — it does not
+  define its own separate presupposing check.
 - Provider access for model-backed layers goes through
   `system/ai_provider.py::call_ai` only (fail-closed; keyless →
   agent-task/skip semantics). Judge/persona/live-router runs never bypass
@@ -91,18 +114,23 @@ exist; this repo's CI stays dependency-free and keyless).
 **In:**
 
 1. **Layer 1 — deterministic lints** (always run, CI + runtime), in
-   `system/interaction_evals.py`, each mapping to a behavior.md rule:
-   - `max_questions_per_turn` — ≤1 interrogative per lifehug turn (rule 1).
+   `system/conversation_lints.py` (the shared lint module — see the
+   vocabulary-alignment binding fact above; `interaction_evals.py` imports
+   from here, it does not define these), each mapping to a behavior.md rule:
+   - `one_question_per_turn` — ≤1 interrogative per lifehug turn (rule 1).
    - `banned_phrases` — list-driven from `lints.yaml`: guilt/pressure
      ("you haven't told me much", streak language), unsolicited advice
      markers, "that must have been"-class presupposed-emotion phrasing,
      AI self-reference ("as an AI", "I'm just a language model") (rules 4,
      5, 12). Case-insensitive, curly-quote-normalized substring match.
-   - `question_grammar` — classify every interrogative as
-     `ted | cued_invitation | closed | option_posing | presupposing`
+   - `question_grammar_audit` — classify every interrogative as
+     `cued | cued_invitation | closed | option_posing | presupposing`
      (deterministic pattern rules documented in the module docstring);
-     `closed`/`option_posing`/`presupposing` fail unless the turn is
-     annotated `seam_ok` (rule 3).
+     `presupposing` is ADDED BY THIS CONTRACT to the shared classifier in
+     `conversation_lints` (per #115, the classifier's baseline anchors on
+     `cued`) — this PR extends the shared classifier rather than defining a
+     separate one; `closed`/`option_posing`/`presupposing` fail unless the
+     turn is annotated `seam_ok` (rule 3).
    - `length_caps` — per-turn character caps by mode/channel from
      `lints.yaml` (Telegram-native defaults).
    - `receipt_before_question` — structural: in a turn following a
@@ -115,7 +143,10 @@ exist; this repo's CI stays dependency-free and keyless).
 2. **Layer 2 — router fixtures + scorer**: schema validation of
    `router_fixtures.json` (always run) plus a per-class precision/recall
    scorer that consumes a predictions file (`[{text, predicted}]`) and
-   enforces `router_gates` thresholds. Live prediction generation uses the
+   enforces `router_gates.*` thresholds, expressed as the flat dotted keys
+   defined above (e.g. `router_gates.answer.precision`,
+   `router_gates.answer.recall`) — never a nested `router_gates:` mapping.
+   Live prediction generation uses the
    `lifehug.py route` builder/delivery from the wave-2 router PR when
    present; until then the scorer + a committed sample predictions fixture
    prove the gate math deterministically.
