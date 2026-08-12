@@ -263,7 +263,7 @@ python3 system/lifehug.py compile
 python3 system/lifehug.py planner-report
 ```
 
-This stores the raw story under `sources/manual/` and parks suggested follow-up questions in `state/question_candidates.json`. Candidates should inform planning and future question-bank edits; they should not automatically dominate daily delivery.
+This stores the raw story under `sources/manual/` and parks suggested template follow-up questions in `state/question_candidates.json`. The story also (issue #117) opens or continues a Conversation and gets one immediate turn — the same turn engine that pays out daily answers: a receipt quoting the user's own words, register matched to the source, at most one cued follow-up invitation. Best-effort and never blocking; on any definitive failure or with no unattended provider, behavior is exactly the filed template candidates above, no session created. At the session's close, classifier-grade candidates supersede the templates rather than duplicating them. Candidates should inform planning and future question-bank edits; they should not automatically dominate daily delivery.
 
 If the user states an **opinion** — a philosophical position or lens on life, not an event account (messages starting `opinion:` are explicit) — ingest it with `--kind opinion` and offer to develop it as an essay artifact:
 

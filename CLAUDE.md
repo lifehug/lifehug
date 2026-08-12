@@ -247,15 +247,20 @@ printf '%s\n' "$ANSWER_TEXT" | python3 system/lifehug.py process-answer {questio
 
 If follow-up questions are already known, pass `--followup "question text"` for each.
 
-The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, refreshes `README.md`, and compiles the private wiki. After the answer file (and a requested local commit) is durable, it runs ONE conversation turn (v153, issue #116): `system/conversation_delivery.py` assembles the turn through the `interactions/conversation/` behavior authority and the issue #115 builders, enforces the deterministic lints (one question, `cap.turn_chars`, banned phrases) before anything is sent, and delivers a single Telegram message that receives the answer, pays it back, and cues the next question in the user's own words. The cued follow-up is minted as a suffix-chain bank question and rotation targets it, so the next inbound files against it. Model, provider, malformed-generation, lint, and Telegram failures are best-effort AND never silent: each degrades in the same run to the previous behavior — the canonical `answer-ack-prompt` acknowledgment followed by the separate adaptive follow-up. A transport-ambiguous turn is the one exception: it is ledgered and surfaced rather than followed by an acknowledgment, because the turn may already have arrived.
+The helper writes `answers/{question_id}.md` as a raw source record, registers it in `state/source_manifest.json`, marks the question answered, rebuilds coverage, updates rotation state, and refreshes `README.md`. It compiles the private wiki too — UNLESS the answer belongs to an open conversation session (issue #119), in which case the compile defaults to skipped (the compile-needed sentinel is touched instead) and the session's eventual close is the batch boundary; `--compile-wiki` forces a compile anyway. After the answer file (and a requested local commit) is durable, it runs ONE conversation turn (v153, issue #116): `system/conversation_delivery.py` assembles the turn through the `interactions/conversation/` behavior authority and the issue #115 builders, enforces the deterministic lints (one question, `cap.turn_chars`, banned phrases) before anything is sent, and delivers a single Telegram message that receives the answer, pays it back, and cues the next question in the user's own words. The cued follow-up is minted as a suffix-chain bank question and rotation targets it, so the next inbound files against it. Model, provider, malformed-generation, lint, and Telegram failures are best-effort AND never silent: each degrades in the same run to the previous behavior — the canonical `answer-ack-prompt` acknowledgment followed by the separate adaptive follow-up. A transport-ambiguous turn is the one exception: it is ledgered and surfaced rather than followed by an acknowledgment, because the turn may already have arrived.
 
 **Chat / phone path (durable filing, v82/v83/v121).** From a chat surface that must not block,
 dispatch the canonical wrapper, acknowledge immediately, and end the turn. The
 wrapper streams the answer into a mode-0600 queue sidecar without first leaving
-plaintext in `/tmp`; the single writer files it, then sends the warm
-acknowledgment itself before any optional follow-up, and finally its own factual
-filing confirmation only when that acknowledgment was not already confirmed
-(`lifehug.py notify`, chunked) — avoiding a duplicate success message:
+plaintext in `/tmp`; the single writer files it, running the same ONE
+conversation turn described above (falling back to the warm acknowledgment
+and separate follow-up only on a definitive failure), then sends its own
+factual filing confirmation unless that fallback acknowledgment was already
+confirmed (`lifehug.py notify`, chunked) — the "avoid a duplicate success
+message" guard is written against the pre-v153 acknowledgment path's exact
+output string only; a successful conversation turn is NOT recognized by it,
+so a duplicate confirmation currently follows every successful chat/phone
+turn (known issue, [lifehug#133](https://github.com/lifehug/lifehug/issues/133)):
 
 ```bash
 printf '%s\n' "$ANSWER_TEXT" | nohup bash system/file_answer_bg.sh {question_id} \
@@ -473,7 +478,7 @@ python3 system/lifehug.py compile
 python3 system/lifehug.py planner-report
 ```
 
-This writes an owner-only source file under `sources/manual/` and stores initial suggested follow-up questions in `state/question_candidates.json`. The weekly classifier also works through unclassified stories in capped batches and may add better structured candidates later. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan; automated weekly promotion is allowed only through the quality/cap gate.
+This writes an owner-only source file under `sources/manual/` and stores initial suggested template follow-up questions in `state/question_candidates.json`. The story also (issue #117) opens or continues a Conversation and gets one immediate turn — the same turn engine that pays out daily answers: a receipt quoting the user's own words, register matched to the source, at most one cued follow-up invitation. This is best-effort and never blocks the ingest; with no unattended provider, or on any definitive generation/lint/send failure, behavior is exactly the checkmark + filed template candidates above, no session created. When the session later closes with a classifier-grade extraction, the matching template candidates flip from `candidate` to `superseded` (never deleted) rather than being asked twice. The weekly classifier also works through unclassified stories in capped batches and may add better structured candidates later. Those candidates are intentionally not daily questions yet. Promote them into `system/question-bank.md` only when they fit the broader story plan; automated weekly promotion is allowed only through the quality/cap gate.
 
 Unprompted stories follow the same source contract as answers: they are raw source-of-truth files. Later corrections and changed perspective belong in `sources/corrections/`, not by rewriting the original story.
 
