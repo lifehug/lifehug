@@ -1150,7 +1150,13 @@ Optional AI-call tuning (v85): `ai_timeout_seconds` (default 600; env override
 `conversation_model` selects the seated conversation-turn/closing model (default
 `claude-sonnet-5`); `router_model` (default `claude-haiku-4-5`) and
 `arc_plan_model` (falls back to `classify_model`) are read by the
-conversation interaction's later stages.
+conversation interaction's later stages. `judge_model` (issue #120; falls
+back to `classify_model`, then `classify_story.DEFAULT_MODEL`) selects the
+strong judge model for `system/interaction_evals.py`'s rubric layer. Any PR
+touching `interactions/conversation/**`, a `conversation_model`/
+`router_model`/`judge_model` config default, or `overlays/*` gates through
+`python3 system/lifehug.py conversation-evals` — a harness run belongs in
+that PR's evidence.
 `answer_ack_model` selects the fallback acknowledgment model (default
 `claude-sonnet-5`; a configured local provider still uses its own local model).
 

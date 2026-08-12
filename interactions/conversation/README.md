@@ -148,15 +148,31 @@ phases. These bind this interaction; they are not implementer discretion.
 
 `evals/` is the model contract: `lints.yaml` (deterministic structural
 checks — one question per turn, banned phrases, question-grammar audit,
-length caps, receipt-before-question, year-question detection), `goldens/`
-(transcript fixtures with property assertions, placeholder at this stage —
-filled by the eval-harness PR), `rubrics.md` (a binary yes/no judge
-question per hard rule, 1:1 with `prompt/behavior.md`'s 13 rules), and
-`personas/` (seven simulated users whose runs must demonstrate specific
-properties — e.g. the `grief-fresh` persona's runs must show deferral, the
-`ruminator` persona's runs must show mid-thread back-off).
+length caps, receipt-before-question, year-question detection, plus
+`router_gates.*` per-class precision/recall thresholds), `goldens/`
+(golden transcripts with property assertions, and `router_fixtures.json` /
+`router_sample_predictions.json` for the router scorer), `rubrics.md` (a
+binary yes/no judge question per hard rule, 1:1 with `prompt/behavior.md`'s
+13 rules), and `personas/` (seven simulated users whose runs must
+demonstrate specific properties — e.g. the `grief-fresh` persona's runs
+must show deferral, the `ruminator` persona's runs must show mid-thread
+back-off).
+
+**The eval harness (issue #120)**: `python3 system/lifehug.py
+conversation-evals` runs all four layers — deterministic lints, router
+fixtures + scorer, golden-transcript properties, and (model-backed,
+keyless-skippable) judge rubrics + personas — over this directory.
+`--emit-tasks` writes judge/persona agent-task prompts to
+`state/agent_tasks/evals/` when no provider is configured. See
+`system/interaction_evals.py`'s module docstring for the full layer
+breakdown.
 
 The model roster for `role.router`, `role.worker`, and `role.planner` is
-whatever passes this harness — not a fixed vendor choice. Model and prompt
-changes gate through this evals directory exactly like code changes gate
-through CI.
+whatever passes this harness — not a fixed vendor choice, recorded in
+`evals/roster.md` with run links. **Any PR touching
+`interactions/conversation/**`, a `conversation_model`/`router_model`/
+`judge_model` config default, or `overlays/*` must include a harness run in
+its evidence** (a local live run, or a platform interaction-evals workflow
+link) — model and prompt changes gate through this evals directory exactly
+like code changes gate through CI. Full README trueing is issue #121's job,
+not this harness's.

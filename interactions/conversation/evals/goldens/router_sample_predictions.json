@@ -1,0 +1,82 @@
+[
+  {
+    "text": "Yeah, that was back in 2003, right after we moved to the coast.",
+    "predicted": "answer"
+  },
+  {
+    "text": "Honestly I don't really remember much about that summer.",
+    "predicted": "answer"
+  },
+  {
+    "text": "It was my grandmother, she always made the biscuits herself.",
+    "predicted": "answer"
+  },
+  {
+    "text": "About three years, give or take.",
+    "predicted": "answer"
+  },
+  {
+    "text": "Something happened today that I want to tell you about.",
+    "predicted": "new_story"
+  },
+  {
+    "text": "Random memory just hit me — my grandmother's kitchen smell.",
+    "predicted": "new_story"
+  },
+  {
+    "text": "I've been thinking about my twenties a lot lately, can I just talk?",
+    "predicted": "new_story"
+  },
+  {
+    "text": "So this is completely unrelated to anything you've asked, but I have to tell someone.",
+    "predicted": "new_story"
+  },
+  {
+    "text": "Skip this question.",
+    "predicted": "command"
+  },
+  {
+    "text": "Can we talk about something else instead?",
+    "predicted": "command"
+  },
+  {
+    "text": "Stop asking me about my divorce for a while.",
+    "predicted": "command"
+  },
+  {
+    "text": "Actually, pause — I don't want to do this today.",
+    "predicted": "command"
+  },
+  {
+    "text": "Oh also, I forgot to mention —",
+    "predicted": "continue_session"
+  },
+  {
+    "text": "Wait, that's not quite right, let me redo that part.",
+    "predicted": "continue_session"
+  },
+  {
+    "text": "One more thing about that.",
+    "predicted": "continue_session"
+  },
+  {
+    "text": "Actually hold on, going back to what I just said.",
+    "predicted": "continue_session"
+  },
+  {
+    "text": "What's the capital of Peru?",
+    "predicted": "out_of_scope"
+  },
+  {
+    "text": "Can you help me write an email to my boss?",
+    "predicted": "out_of_scope"
+  },
+  {
+    "text": "lol ok what's 47 times 12",
+    "predicted": "out_of_scope"
+  },
+  {
+    "text": "Can you recommend a good recipe for lasagna?",
+    "predicted": "out_of_scope"
+  }
+]

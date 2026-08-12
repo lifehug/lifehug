@@ -1,0 +1,54 @@
+{
+  "golden_id": "chat-promotion-closing-01",
+  "mode": "chat",
+  "register": "celebration",
+  "arc": {
+    "question_id": "C21",
+    "opening": "You mentioned things were looking good at work.",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["promotion"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You mentioned things were looking good at work. What's been the best part of how it's gone?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "promotion",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "I actually got the promotion I've been hoping for since spring — director of the whole team now."
+    },
+    {
+      "role": "lifehug",
+      "text": "Leading the whole team now — that's huge, congratulations. What felt different the moment you found out?",
+      "annotations": {
+        "kind": "receipt",
+        "quoted_span": "the whole team",
+        "topic": "promotion",
+        "seam_ok": false,
+        "properties": ["receipt_quotes_user"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "Honestly I just sat there for a minute. It didn't feel real until I called my sister."
+    },
+    {
+      "role": "lifehug",
+      "text": "You've been steadily building toward this all year, and it finally landed — congratulations again. I'd love to hear more about that call with your sister next time.",
+      "annotations": {
+        "kind": "closing",
+        "topic": "promotion",
+        "seam_ok": false,
+        "takeaway": "You've been steadily building toward this all year, and it finally landed.",
+        "hook": "hear more about that call with your sister next time",
+        "properties": ["closing_has_takeaway_and_hook"]
+      }
+    }
+  ]
+}

@@ -39,3 +39,24 @@ lint.receipt_before_question: on
 
 # flags "what year"-form questions (behavior.md rule 3)
 lint.year_question_detector: on
+
+# router_gates.* (issue #120, eval harness): per-class precision/recall
+# thresholds for the five-intent router, flat dotted keys only (this
+# file's format subset forbids a nested `router_gates:` mapping — see the
+# contract's binding fact). Consumed by system/interaction_evals.py's
+# scorer against interactions/conversation/evals/goldens/router_fixtures.json.
+# Thresholds target a STRONG live model (Layer 4 / platform #417); the
+# deterministic offline safe-default (Layer 2, always-on, keyless) is
+# recall-safe by construction, not a classifier, and is reported
+# separately rather than gated against these numbers — see
+# interaction_evals.py's module docstring.
+router_gates.answer.precision: 0.85
+router_gates.answer.recall: 0.85
+router_gates.new_story.precision: 0.8
+router_gates.new_story.recall: 0.8
+router_gates.command.precision: 0.85
+router_gates.command.recall: 0.75
+router_gates.continue_session.precision: 0.75
+router_gates.continue_session.recall: 0.85
+router_gates.out_of_scope.precision: 0.85
+router_gates.out_of_scope.recall: 0.8

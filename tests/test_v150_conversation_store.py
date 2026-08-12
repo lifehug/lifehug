@@ -569,6 +569,12 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             "conversation_lints.py",
             "conversation_delivery.py",
             "arc_planner.py",
+            # issue #120 (eval harness): the contract's own sanctioned
+            # consumer — imports conversation_lints (Layer 1 authority) and
+            # conversation (framework text/prompt readers) for the goldens/
+            # router-fixture/judge/persona runner. Never re-derives lint
+            # logic (recurring-defect doctrine).
+            "interaction_evals.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):
