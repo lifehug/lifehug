@@ -606,6 +606,17 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
             if category in (_qprofile.get("rumination_categories") or []):
                 base_weight = base_weight * 0.25
 
+        # Engagement multiplier (issue #119) — pacing/framing bias ONLY,
+        # alongside the quality multiplier above. Guarded on
+        # engagement.active; never touches the self-knowledge floor, the
+        # escalation gate below, or the rumination cooldown above. Drain is
+        # not negative (owner-set) — the only back-off remains rumination.
+        _engagement = _qprofile.get("engagement") or {}
+        if _engagement.get("active"):
+            eng_data = _engagement.get("by_story_function", {}).get(story_function, {})
+            engagement_multiplier = float(eng_data.get("multiplier", 1.0))
+            base_weight = base_weight * engagement_multiplier
+
         # Aron escalation gate: late-arc relational questions wait until the
         # earlier slots have answered material for this person.
         escalation_hold = (

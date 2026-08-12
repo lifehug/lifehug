@@ -1511,6 +1511,13 @@ def append_engagement(
     ``time_to_answer_hours`` and ``unprompted_inbound`` are computed
     elsewhere (#119) and are deliberately left absent rather than guessed.
     Richness fields are never touched.
+
+    MERGES into any existing ``engagement`` dict rather than replacing it
+    (#119): ``process_answer.py`` may already have seeded
+    ``time_to_answer_hours`` at filing time — strictly before a session can
+    close — and #119's own close orchestration adds ``unprompted_inbound``
+    strictly after this call returns. Two writers of one field must compose,
+    not clobber (recurring-defect doctrine).
     """
     filed = _filed_question_ids(session)
     if not filed:
@@ -1533,7 +1540,10 @@ def append_engagement(
         if not isinstance(record, dict):
             continue
         if str(record.get("question_id") or "") in filed:
-            record["engagement"] = dict(engagement)
+            existing = record.get("engagement")
+            merged = dict(existing) if isinstance(existing, dict) else {}
+            merged.update(engagement)
+            record["engagement"] = merged
             touched.append(str(record["question_id"]))
     if touched:
         data["last_updated"] = now_utc()
@@ -1874,6 +1884,39 @@ def _closing_output_contract() -> str:
         '{"message": "the closing message, plain text", "question_free": true}\n'
         "The closing message ends on the peak and STOPS — no trailing question.\n"
     )
+
+
+def find_expired_open_sessions(
+    *,
+    vault_root: str | Path | None = None,
+    manifest: dict | None = None,
+    now: datetime | None = None,
+) -> list[str]:
+    """Session ids for every OPEN session past its idle timeout.
+
+    Pure discovery — deterministic, AI-free, no closing, no send: distinct
+    from ``close_expired_sessions`` (which actually closes each one,
+    generating and sending an AI takeaway where warranted). Issue #119's
+    ``conversation-close --expired`` sweep entry point uses THIS to decide
+    what to enqueue as durable jobs, keeping the discovery step itself free
+    of AI calls; ``close_expired_sessions`` stays exactly as PR3 shipped it
+    (the inline per-turn sweep's synchronous close, unchanged).
+    """
+    vault_root = vault_root if vault_root is not None else VAULT_ROOT
+    manifest = manifest if manifest is not None else _manifest()
+    reference = now or _now()
+    ids: list[str] = []
+    for summary in conversation.list_sessions(status="open", vault_root=vault_root):
+        session_id = summary.get("session_id")
+        if not session_id:
+            continue
+        try:
+            session = conversation.load_session(session_id, vault_root=vault_root)
+        except (OSError, ValueError):
+            continue
+        if is_idle_expired(session, manifest=manifest, now=reference):
+            ids.append(str(session_id))
+    return ids
 
 
 def close_expired_sessions(

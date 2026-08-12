@@ -44,11 +44,13 @@ class MirrorTests(unittest.TestCase):
         self._saved = {
             (mirror, "CLASSIFICATIONS_DIR"): mirror.CLASSIFICATIONS_DIR,
             (mirror, "WIKI_DIR"): mirror.WIKI_DIR,
+            (mirror, "MIRROR_RESPONSES_FILE"): mirror.MIRROR_RESPONSES_FILE,
             (serve_wiki, "CLASSIFICATIONS_DIR"): serve_wiki.CLASSIFICATIONS_DIR,
             (serve_wiki, "WIKI_DIR"): serve_wiki.WIKI_DIR,
         }
         mirror.CLASSIFICATIONS_DIR = self.tmp / "classifications"
         mirror.WIKI_DIR = self.tmp / "wiki"
+        mirror.MIRROR_RESPONSES_FILE = self.tmp / "mirror_responses.json"
         serve_wiki.CLASSIFICATIONS_DIR = mirror.CLASSIFICATIONS_DIR
         serve_wiki.WIKI_DIR = mirror.WIKI_DIR
 
@@ -89,6 +91,36 @@ class MirrorTests(unittest.TestCase):
 
     def test_load_entries_empty_dir(self):
         self.assertEqual(mirror.load_mirror_entries(), [])
+
+    # --- Mirror inbound (issue #119) ---
+
+    def test_load_mirror_entries_includes_responses_alongside_classifications(self):
+        self._classification("answers-a1", contradictions=["Ache and dismissal coexist."])
+        mirror.append_mirror_responses([{
+            "session_id": "conv-20260816-210400-abcdef",
+            "text": "I keep circling back to this and I think it's fine now.",
+            "tension_ref": "Sit with: the mantle you wear",
+            "responded_at": "2026-08-16T21:04:00Z",
+        }])
+        entries = mirror.load_mirror_entries()
+        kinds = sorted(e["kind"] for e in entries)
+        self.assertEqual(kinds, ["contradiction", "response"])
+        response = next(e for e in entries if e["kind"] == "response")
+        self.assertEqual(response["text"], "I keep circling back to this and I think it's fine now.")
+        self.assertEqual(response["source"], "conversation:conv-20260816-210400-abcdef")
+        self.assertEqual(response["source_short"], "conv-20260816-210400-abcdef")
+        self.assertEqual(response["classified_at"], "2026-08-16T21:04:00Z")
+
+    def test_mirror_prompt_gains_response_block_and_never_adjudicates_instruction(self):
+        mirror.append_mirror_responses([{
+            "session_id": "conv-20260816-210400-abcdef",
+            "text": "Still sitting with the mantle line.",
+        }])
+        prompt = mirror.build_mirror_prompt()
+        self.assertIn("Author responses to tensions", prompt)
+        self.assertIn("Still sitting with the mantle line.", prompt)
+        self.assertIn("never declare the tension", prompt.lower())
+        self.assertIn("the author resolves tensions, not you", prompt.lower())
 
     # --- section contract ---
 

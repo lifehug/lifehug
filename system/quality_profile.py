@@ -178,13 +178,23 @@ def append_score(
     focus: str | None,
     signals: dict,
     richness_score: float,
+    *,
+    engagement: dict | None = None,
 ) -> None:
-    """Append a single answer score. Idempotent — skips if question_id exists."""
+    """Append a single answer score. Idempotent — skips if question_id exists.
+
+    ``engagement`` (issue #119) seeds the record's engagement block at
+    filing time — today that is only ``time_to_answer_hours`` (computable
+    for every answer from frontmatter, session or no session). The other
+    three engagement fields are added LATER, at conversation close, by
+    ``conversation_delivery.append_engagement`` (MERGING into this same
+    dict, never overwriting it — see that function's docstring).
+    """
     data = load_scores()
     existing_ids = {s["question_id"] for s in data["scores"]}
     if question_id in existing_ids:
         return
-    data["scores"].append({
+    record = {
         "question_id": question_id,
         "answered_at": now_utc()[:10],
         "category": category,
@@ -192,8 +202,38 @@ def append_score(
         "focus": focus,
         "signals": signals,
         "richness_score": richness_score,
-    })
+    }
+    if engagement:
+        record["engagement"] = dict(engagement)
+    data["scores"].append(record)
     save_scores(data)
+
+
+def merge_engagement(question_id: str, fields: dict, *, scores_path: Path | None = None) -> bool:
+    """Merge ``fields`` into one record's engagement block (issue #119).
+
+    Never overwrites what another writer already stored there — two writers
+    of one field must compose (recurring-defect doctrine). No-ops when the
+    record doesn't exist or ``fields`` is empty. Returns whether a record was
+    found and updated.
+    """
+    if not fields:
+        return False
+    scores_path = scores_path if scores_path is not None else ANSWER_SCORES_FILE
+    data = read_json(scores_path, default=None)
+    if not isinstance(data, dict) or not isinstance(data.get("scores"), list):
+        return False
+    for record in data["scores"]:
+        if not isinstance(record, dict) or str(record.get("question_id") or "") != question_id:
+            continue
+        existing = record.get("engagement")
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        merged.update(fields)
+        record["engagement"] = merged
+        data["last_updated"] = now_utc()
+        write_json(scores_path, data)
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +300,106 @@ def _top_patterns(by_story: dict, by_category: dict, global_avg: float) -> list[
     return patterns[:4]
 
 
+# ---------------------------------------------------------------------------
+# Engagement dimension (issue #119, design §5, "Engagement in the Loop" /
+# "Drain is not negative" — decision log). A PARALLEL dimension to richness:
+# richness scores WHAT was said, engagement scores whether the author kept
+# coming back. Buckets key exclusively through canonical_story_function
+# (lesson 2, below) and only fire from signals #122/#119 actually capture
+# (lesson 1) — never a guessed or invented vocabulary.
+# ---------------------------------------------------------------------------
+
+# Response-latency normalization window for the engagement blend: a reply
+# inside this many hours earns full responsiveness credit, one a week or
+# slower earns none, linear between. Deliberately generous — the daily
+# question is asked once a day, so same-day-ish replies are the norm, not
+# the exception.
+_TIME_TO_ANSWER_FAST_HOURS = 4.0
+_TIME_TO_ANSWER_SLOW_HOURS = 168.0
+
+_TRAJECTORY_SCORE = {"expanding": 1.0, "flat": 0.5, "contracting": 0.0}
+
+
+def _engagement_component_score(engagement: dict) -> float | None:
+    """Normalize one record's fired engagement signals into a single 0-1
+    score — the unweighted average of whichever components fired.
+    Components:
+      - continuation_past_exit: 1.0 (kept going) / 0.0 (stopped at the exit)
+      - turn_length_trajectory: expanding=1.0, flat=0.5, contracting=0.0
+      - unprompted_inbound: 1.0 (the author brought it up) / 0.0
+      - time_to_answer_hours: faster -> higher, normalized against the
+        fast/slow window above, clamped to [0, 1]
+    Absent components are never fabricated: with nothing fired, returns
+    None rather than guessing a score (lesson 1 — a signal that can't
+    demonstrably fire must not silently count as zero).
+    """
+    parts: list[float] = []
+    if isinstance(engagement.get("continuation_past_exit"), bool):
+        parts.append(1.0 if engagement["continuation_past_exit"] else 0.0)
+    trajectory = engagement.get("turn_length_trajectory")
+    if trajectory in _TRAJECTORY_SCORE:
+        parts.append(_TRAJECTORY_SCORE[trajectory])
+    if isinstance(engagement.get("unprompted_inbound"), bool):
+        parts.append(1.0 if engagement["unprompted_inbound"] else 0.0)
+    hours = engagement.get("time_to_answer_hours")
+    if isinstance(hours, (int, float)) and not isinstance(hours, bool):
+        span = _TIME_TO_ANSWER_SLOW_HOURS - _TIME_TO_ANSWER_FAST_HOURS
+        normalized = 1.0 - ((float(hours) - _TIME_TO_ANSWER_FAST_HOURS) / span)
+        parts.append(max(0.0, min(1.0, normalized)))
+    if not parts:
+        return None
+    return round(sum(parts) / len(parts), 3)
+
+
+def _engagement_records(scores: list[dict]) -> list[tuple[dict, float]]:
+    """(score record, component score) for every record with ≥1 fired signal."""
+    out: list[tuple[dict, float]] = []
+    for s in scores:
+        engagement = s.get("engagement")
+        if not isinstance(engagement, dict) or not engagement:
+            continue
+        comp = _engagement_component_score(engagement)
+        if comp is not None:
+            out.append((s, comp))
+    return out
+
+
+def _aggregate_engagement(records: list[tuple[dict, float]], key: str, global_avg: float) -> dict:
+    """Bucket engagement component scores by ``key``, same clamp as richness.
+
+    A bucket only earns a non-1.0 multiplier at count >= 5 (the
+    ``_top_patterns`` precedent) — below that, avg/count still show but the
+    multiplier stays neutral so a thin sample never biases the planner.
+    """
+    buckets: dict[str, list[float]] = {}
+    for s, comp in records:
+        bucket = str(s.get(key) or "unknown")
+        if key == "story_function":
+            bucket = canonical_story_function(bucket)
+        buckets.setdefault(bucket, []).append(comp)
+    result = {}
+    for bucket, values in buckets.items():
+        avg = sum(values) / len(values)
+        count = len(values)
+        multiplier = _multiplier(avg, global_avg) if count >= 5 else 1.0
+        result[bucket] = {"avg": round(avg, 3), "count": count, "multiplier": multiplier}
+    return result
+
+
+def _compute_engagement_block(scores: list[dict]) -> dict:
+    records = _engagement_records(scores)
+    scored = len(records)
+    global_avg = round(sum(c for _, c in records) / scored, 3) if scored else 0.0
+    return {
+        "active": scored >= ACTIVATION_THRESHOLD,
+        "scored": scored,
+        "global_avg": global_avg,
+        "by_story_function": _aggregate_engagement(records, "story_function", global_avg),
+        "by_category": _aggregate_engagement(records, "category", global_avg),
+        "by_focus": _aggregate_engagement(records, "focus", global_avg),
+    }
+
+
 # Rumination detector thresholds: the last N answers in a category all show
 # the brooding signature (high negative + high self-focus + no insight growth).
 RUMINATION_WINDOW = 3
@@ -299,7 +439,13 @@ def compute_profile() -> dict:
     total = len(scores)
 
     if total == 0:
-        profile = {"active": False, "total_scored": 0, "computed_at": now_utc()}
+        profile = {
+            "active": False,
+            "total_scored": 0,
+            "computed_at": now_utc(),
+            "engagement": {"active": False, "scored": 0, "global_avg": 0.0,
+                           "by_story_function": {}, "by_category": {}, "by_focus": {}},
+        }
         save_profile(profile)
         return profile
 
@@ -336,6 +482,7 @@ def compute_profile() -> dict:
         "by_focus": by_focus,
         "rumination_categories": detect_rumination(scores),
         "top_patterns": patterns,
+        "engagement": _compute_engagement_block(scores),
     }
     save_profile(profile)
     return profile
@@ -454,6 +601,18 @@ def cmd_show() -> None:
     print("Top patterns:")
     for p in profile.get("top_patterns", []):
         print(f"  • {p}")
+    print()
+    engagement = profile.get("engagement") or {}
+    if not engagement.get("active"):
+        scored = engagement.get("scored", 0)
+        needed = ACTIVATION_THRESHOLD - scored
+        print(f"Engagement: inactive ({scored} scored, need {needed} more to activate)")
+    else:
+        print(f"Engagement — {engagement['scored']} answers scored, "
+              f"global avg {engagement['global_avg']:.2f}")
+        for fn, d in sorted(engagement.get("by_story_function", {}).items(), key=lambda x: -x[1]["avg"]):
+            bar = "▲" if d["multiplier"] > 1.05 else ("▼" if d["multiplier"] < 0.95 else "·")
+            print(f"  {bar} {fn:22}  avg={d['avg']:.2f}  n={d['count']}  ×{d['multiplier']:.2f}")
 
 
 def main() -> int:

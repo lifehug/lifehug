@@ -351,7 +351,9 @@ class ProcessAnswerIntegrationTests(unittest.TestCase):
             fake_quality.extract_signals = lambda *_args: {}
             fake_quality.score_richness = lambda *_args: 0.0
             fake_quality.focus_for_category = lambda *_args: "life"
-            fake_quality.append_score = lambda *_args: None
+            # engagement=... (issue #119) is an optional kwarg on the real
+            # append_score; this fake accepts and ignores it like the rest.
+            fake_quality.append_score = lambda *_args, **_kwargs: None
             fake_planner = types.ModuleType("question_planner")
             fake_planner.infer_story_function = lambda *_args: "foundation"
 

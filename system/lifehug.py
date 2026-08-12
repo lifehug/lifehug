@@ -146,13 +146,18 @@ def _job_runner_active() -> bool:
     )
 
 
-def _queue_and_wait(command: str, payload: dict) -> int:
-    """Run a mutation through the local durable worker and wait for truth."""
+def _queue_and_wait(command: str, payload: dict, *, identity: str | None = None) -> int:
+    """Run a mutation through the local durable worker and wait for truth.
+
+    ``identity`` opts into stable dedup (issue #119's sweep, e.g.
+    ``conversation-close:<session_id>``) — omitted, every call is a fresh
+    request even when its payload happens to match (unchanged default).
+    """
     import jobs  # noqa: PLC0415
 
     jobs.configure(REPO_DIR)
     try:
-        record = jobs.enqueue(command, payload)
+        record = jobs.enqueue(command, payload, identity=identity)
         print(f"Queued {command} job {record['id']}")
         record = jobs.wait_for_job_embedded_safe(record["id"])
     except (TimeoutError, ValueError) as exc:
@@ -198,16 +203,34 @@ def git_dirty() -> bool | None:
     return bool(result.stdout.strip())
 
 
-def _safe_autocommit(label: str = "Lifehug") -> None:
-    """Commit and push vault-tracked paths. Non-fatal on failure."""
+def _safe_autocommit(label: str = "Lifehug", *, message: str | None = None) -> None:
+    """Commit and push vault-tracked paths. Non-fatal on failure.
+
+    ``message`` overrides the default ``"{label} {date}"`` shape when a
+    caller needs an exact commit message — issue #119's one-commit-per-close
+    granularity uses ``"Conversation close <session_id>"`` verbatim, no date
+    suffix (the session id already carries a timestamp). Any git failure is
+    recorded to the learning-failure log (the compile_and_commit.sh idiom):
+    the commit and the filed content are never lost, only the push.
+    """
     try:
-        from vault_paths import git_paths
-        paths = git_paths()
+        from vault_paths import tracked_vault_paths
+        # Fix (issue #119): this called a name — ``git_paths`` — that has
+        # never existed in vault_paths.py; the ImportError was silently
+        # swallowed by the bare except below, so EVERY caller of
+        # ``_safe_autocommit`` (ingest-story's own autocommit, and now this
+        # PR's one-commit-per-close) no-op'd instead of committing.
+        # ``tracked_vault_paths`` is the real, contract-derived authority
+        # (the same one ``vault_paths.py git-paths`` and
+        # ``compile_and_commit.sh`` already use).
+        paths = tracked_vault_paths(REPO_DIR)
     except Exception:
         return
     existing = [p for p in paths if Path(p).exists()]
     if not existing:
         return
+    from datetime import date
+    commit_message = message or f"{label} {date.today().isoformat()}"
     try:
         subprocess.run(["git", "add", "--"] + existing, cwd=REPO_DIR, check=True,
                        capture_output=True, text=True)
@@ -215,15 +238,19 @@ def _safe_autocommit(label: str = "Lifehug") -> None:
                               capture_output=True)
         if diff.returncode == 0:
             return  # nothing staged
-        from datetime import date
-        subprocess.run(["git", "commit", "-m", f"{label} {date.today().isoformat()}"],
+        subprocess.run(["git", "commit", "-m", commit_message],
                        cwd=REPO_DIR, check=True, capture_output=True, text=True)
         subprocess.run(["git", "pull", "--rebase", "--autostash"],
                        cwd=REPO_DIR, check=True, capture_output=True, text=True)
         subprocess.run(["git", "push"], cwd=REPO_DIR, check=True,
                        capture_output=True, text=True)
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        detail = (f"{exc.stdout or ''}{exc.stderr or ''}".strip()
+                  if isinstance(exc, subprocess.CalledProcessError) else str(exc))
         print(f"warn: autocommit failed: {exc}", file=sys.stderr)
+        from lifehug_core import record_learning_failure
+        record_learning_failure("lifehug_autocommit", "git_commit", detail or str(exc),
+                                 context={"label": label})
 
 
 def check(label: str, ok: bool, detail: str = "") -> bool:
@@ -907,17 +934,167 @@ def cmd_conversation_record_turn(args: argparse.Namespace) -> int:
     return run_python("conversation.py", flags)
 
 
+def _file_mirror_responses(session: dict) -> None:
+    """Session -> ``state/mirror_responses.json`` (issue #119, §4). Best
+    effort — filing never blocks a close that has already delivered."""
+    from lifehug_core import now_utc, record_learning_failure
+
+    session_id = str(session.get("session_id") or "")
+    try:
+        import mirror  # noqa: PLC0415
+
+        extracted = session.get("extracted") or {}
+        raw = extracted.get("mirror_responses") if isinstance(extracted, dict) else None
+        if not isinstance(raw, list) or not raw:
+            return
+        payload = []
+        for item in raw:
+            if isinstance(item, dict):
+                text, tension_ref = item.get("text"), item.get("tension_ref")
+            elif isinstance(item, str):
+                text, tension_ref = item, None
+            else:
+                continue
+            if not isinstance(text, str) or not text.strip():
+                continue
+            payload.append({
+                "session_id": session_id,
+                "text": text,
+                "tension_ref": tension_ref if isinstance(tension_ref, str) else "",
+                "responded_at": now_utc(),
+            })
+        if payload:
+            mirror.append_mirror_responses(payload)
+    except Exception as exc:  # noqa: BLE001 — filing is best-effort
+        record_learning_failure("conversation_close", "mirror_filing", exc,
+                                 context={"session_id": session_id})
+
+
+def _file_engagement_timing(session: dict) -> None:
+    """``unprompted_inbound`` (issue #119, §5) — the one engagement field
+    that needs the session doc's own ``mode`` and so is filed at close, not
+    at answer time (``time_to_answer_hours`` files at answer time in
+    ``process_answer.py``, session or not). MERGES into whatever
+    ``conversation_delivery.append_engagement`` already wrote for these
+    question ids, via ``quality_profile.merge_engagement``."""
+    from lifehug_core import record_learning_failure
+
+    session_id = str(session.get("session_id") or "")
+    filed = (session.get("close") or {}).get("filed") or []
+    if not filed:
+        return
+    unprompted_inbound = session.get("mode") == "conversation"
+    try:
+        import quality_profile  # noqa: PLC0415
+
+        for question_id in filed:
+            quality_profile.merge_engagement(
+                str(question_id), {"unprompted_inbound": unprompted_inbound}
+            )
+    except Exception as exc:  # noqa: BLE001 — instrumentation is best-effort
+        record_learning_failure("conversation_close", "engagement_timing", exc,
+                                 context={"session_id": session_id})
+
+
+def _load_session_document(session_id: str) -> dict | None:
+    """Read one session doc straight off disk (metadata-shaped, this
+    module's own tracked-data-path idiom — the same one every other CLI
+    handler here uses for ITS OWN files). Deliberately NOT
+    ``conversation.load_session``: lifehug.py's command handlers stay
+    dispatch-string callers of the store (tests/test_v150_conversation_store
+    .py's NoBehaviorChangeGuardTests), never direct importers of its CRUD."""
+    from vault_paths import vault_data_path
+
+    path = vault_data_path("conversations", vault_root=REPO_DIR) / f"{session_id}.json"
+    return read_json(path, default=None)
+
+
+def _finish_conversation_close(session_id: str) -> int:
+    """§2 steps b-d, after PR3's own close already ran: file the Mirror
+    inbound + engagement timing this contract owns (candidate_ideas,
+    entity_hints, and the session-turn engagement fields are already PR3's
+    — pass-through, not re-implemented here), compile the wiki ONCE, then
+    ONE git commit — the batch boundary #119 exists for."""
+    from lifehug_core import record_learning_failure
+
+    session = _load_session_document(session_id)
+    if not isinstance(session, dict):
+        # The close itself already succeeded (this runs only after it did);
+        # a reload failure only costs the filing/compile/commit steps.
+        record_learning_failure("conversation_close", "reload_after_close", "session unreadable",
+                                 context={"session_id": session_id})
+        return 0
+
+    _file_mirror_responses(session)
+    _file_engagement_timing(session)
+
+    compile_rc = run_python("wiki_compile.py", [])
+    if compile_rc != 0:
+        record_learning_failure("conversation_close", "wiki_compile", f"exit {compile_rc}",
+                                 context={"session_id": session_id})
+        # Don't remove the sentinel — the next hourly compile retries, same
+        # idiom as compile_and_commit.sh. State writes above still commit.
+    else:
+        from lifehug_core import COMPILE_NEEDED_FILE
+        COMPILE_NEEDED_FILE.unlink(missing_ok=True)
+
+    _safe_autocommit(message=f"Conversation close {session_id}")
+    return 0
+
+
+def _enqueue_expired_conversation_closes() -> int:
+    """#116's deterministic idle-sweep discovery, upgraded (issue #119): find
+    every open session past its idle timeout and ENQUEUE one durable
+    ``conversation-close`` job per session (identity
+    ``conversation-close:<session_id>`` dedupes retries) rather than closing
+    synchronously in the calling — often cron — process. Discovery here is
+    deterministic and AI-free; the actual close (which may call AI for the
+    takeaway) runs on the job worker. Waits for each job so a vault whose
+    only pending work is an expired session still closes it before this
+    returns (the compile_and_commit.sh pre-step's contract).
+
+    ``conversation_delivery`` is a sanctioned exception to the
+    dispatch-string rule above: it is the store's OTHER exempt consumer
+    (tests/test_v150_conversation_store.py), and its
+    ``find_expired_open_sessions`` is the single authoritative idle-timeout
+    calculation (mode-dependent knobs, last-activity math) — duplicating
+    that here would be exactly the recurring-defect doctrine's "same
+    defect twice" pattern this codebase has already paid for once.
+    """
+    import conversation_delivery  # noqa: PLC0415
+
+    expired_ids = conversation_delivery.find_expired_open_sessions(vault_root=REPO_DIR)
+    outcomes: list[tuple[str, bool]] = []
+    for session_id in expired_ids:
+        rc = _queue_and_wait(
+            "conversation-close",
+            {"session_id": session_id, "reason": "idle_timeout"},
+            identity=f"conversation-close:{session_id}",
+        )
+        outcomes.append((session_id, rc == 0))
+    if not outcomes:
+        print("No expired conversation sessions.")
+        return 0
+    for session_id, ok in outcomes:
+        print(f"{session_id}: {'closed' if ok else 'close job failed'}")
+    return 0 if all(ok for _sid, ok in outcomes) else 1
+
+
 def cmd_conversation_close(args: argparse.Namespace) -> int:
     # v153 (issue #116): the same subcommand now closes for real — closing
-    # takeaway when the session earned one, silence when it did not — and
-    # owns the --expired idle sweep that #119's jobs builder enqueues.
-    flags = ["close"]
+    # takeaway when the session earned one, silence when it did not.
+    # v156 (issue #119): the single-session path is now the FULL close
+    # orchestration — PR3's close, then this PR's filing (Mirror inbound,
+    # engagement timing), one wiki compile, one commit. --expired stays
+    # #116's idle-sweep entry point, upgraded to ENQUEUE a durable job per
+    # session (deterministic, AI-free discovery) rather than closing inline.
     if args.expired:
-        flags.append("--expired")
-    else:
-        flags.append(args.session_id)
-    flags += ["--reason", args.reason]
-    return run_python("conversation_delivery.py", flags)
+        return _enqueue_expired_conversation_closes()
+    flags = ["close", args.session_id, "--reason", args.reason]
+    rc = run_python("conversation_delivery.py", flags)
+    if rc != 0:
+        return rc
+    return _finish_conversation_close(args.session_id)
 
 
 def cmd_conversation_turn_retry(args: argparse.Namespace) -> int:
