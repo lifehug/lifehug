@@ -351,16 +351,19 @@ class TurnShapeTests(EngineTestCase):
         self.assertEqual(outcome.status, "confirmed")
         self.assertEqual(self.minted, [])
 
-    def test_third_exchange_exit_shape_and_cap(self):
+    def test_third_exchange_is_question_free_with_no_special_framing(self):
         first = self.run_turn(answer_text=ANSWER)
         second = self.run_turn(answer_text=SECOND_ANSWER)
         self.assertEqual([o.status for o in (first, second)], ["confirmed", "confirmed"])
         self.assertEqual(len(self.minted), 2)  # exchanges 1 and 2 carry initiative
 
-        # Exchange 3 is the exit-friendly door: it receives and pays out, but
-        # asks nothing — stopping there has to feel like a good place to rest.
-        # (The shape is decided with the incoming answer already recorded, so
-        # it is keyed on the user-turn count including this exchange's.)
+        # Pure-chat wave (issue #139): the exchange budget governs OUR
+        # initiative SILENTLY — exchange 3 (the target) and every exchange
+        # after it share the same plain, question-free "past_target" shape;
+        # there is no distinct "exit-friendly" turn or special copy telling
+        # the model to make stopping feel good. (The shape is decided with
+        # the incoming answer already recorded, so it is keyed on the
+        # user-turn count including this exchange's.)
         manifest = engine._manifest()
         def shape_for(user_turns):
             return engine.decide_turn_shape(
@@ -372,10 +375,19 @@ class TurnShapeTests(EngineTestCase):
         self.assertEqual(shape_for(1).position, "opening")
         self.assertEqual(shape_for(2).position, "mid_arc")
         self.assertTrue(shape_for(2).question_allowed)
-        self.assertEqual(shape_for(3).position, "third_exchange_exit_friendly")
+        self.assertEqual(shape_for(3).position, "past_target")
         self.assertFalse(shape_for(3).question_allowed)
         self.assertEqual(shape_for(4).position, "past_target")
         self.assertFalse(shape_for(4).question_allowed)
+        # No special "exit-friendly" output-contract copy exists anymore —
+        # a question-free turn at the target gets the exact same plain
+        # instruction as any later question-free turn.
+        self.assertEqual(
+            engine._output_contract_block(shape_for(3)),
+            engine._output_contract_block(shape_for(4)),
+        )
+        self.assertNotIn("exit-friendly", engine._output_contract_block(shape_for(3)))
+        self.assertNotIn("good place to rest", engine._output_contract_block(shape_for(3)))
 
         third = self.run_turn(
             answer_text=THIRD_ANSWER,
@@ -535,6 +547,33 @@ class CloseTests(EngineTestCase):
         )
         self.assertFalse(outcome.takeaway_delivered)
         self.assertEqual(len(self.sent), before)  # behavior rule 8: no trailing question
+
+    def test_closing_with_a_banned_meta_phrase_is_never_sent(self):
+        # Pure-chat wave (issue #139): a close that narrates the ending
+        # instead of just landing it — even with no trailing question — is
+        # rejected exactly like one that trails a question.
+        self.run_turn(answer_text=ANSWER)
+        self.run_turn(answer_text=SECOND_ANSWER)
+        session_id = self.only_session()["session_id"]
+        before = len(self.sent)
+
+        outcome = engine.close_session_now(
+            session_id,
+            state_path=self.state_path,
+            vault_root=self.vault,
+            scores_path=self.scores_path,
+            candidates_path=self.candidates_path,
+            status_resolver=ready_status,
+            ai_call=lambda _p, _m: json.dumps(
+                {"message": "That's a good one to leave sitting here for now — thank you."}
+            ),
+            telegram_send=self._send(),
+            prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
+        )
+        self.assertFalse(outcome.takeaway_delivered)
+        self.assertEqual(len(self.sent), before)
+        entry = self.entries()[engine.close_key(session_id)]
+        self.assertIn("closing_declarative", entry["lint_ids"])
 
     def test_engagement_appended_to_answer_scores(self):
         self.seed_score(QUESTION_ID)

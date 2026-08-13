@@ -17,11 +17,17 @@ paraphrase), `topic` (slug), `seam_ok` (bool — permits a closed/
 option-posing/presupposing question at a seam per behavior.md rule 3), and
 `properties[]` — the closed assertion vocabulary: `receipt_quotes_user`,
 `no_new_topic_mid_arc`, `closing_has_takeaway_and_hook`,
-`deflects_off_scope`, `demonstrated_knowledge_opener_shape`. A `closing`-
-kind turn asserting `closing_has_takeaway_and_hook` also carries `takeaway`
-and `hook` (non-empty strings — the harness checks their presence
-structurally; content quality is the judge layer's job, not this
-deterministic one).
+`closing_is_declarative`, `deflects_off_scope`,
+`demonstrated_knowledge_opener_shape`. A `closing`-kind turn asserting
+`closing_has_takeaway_and_hook` also carries `takeaway` and `hook`
+(non-empty strings — the harness checks their presence structurally;
+content quality is the judge layer's job, not this deterministic one).
+`closing_is_declarative` (issue #139, pure-chat wave) requires `kind ==
+"closing"`, zero question marks anywhere in the text (stricter than the
+ordinary one-question-per-turn lint — a close permits none), and no
+`closing_banned.*` phrase from `evals/lints.yaml` — see
+`chat-witness-filing-close.json` for the exemplary shape (a concrete
+witness/filing line, behavior.md rule 8's ratified worked example).
 
 **Extension beyond the contract's schema sketch** (documented, additive
 only): `arc.topics: [...]` names the arc's allowed topic set for the

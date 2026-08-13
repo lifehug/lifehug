@@ -58,6 +58,23 @@ rather than forcing a message into `answer` or `new_story` — the worker
 model has the full session context to sort it out; the router's job is
 cheap triage, not perfect disambiguation.
 
+## Reply-after-close rule (owner ruling, 2026-08-12/13 — pure-chat wave)
+
+The runtime INPUT block below may include `RECENTLY CLOSED: true` — no
+session is currently open, but one closed on this channel without a new
+one opening since. A message arriving into that gap is presumed to be
+about the subject that just closed, not a fresh unrelated topic —
+"they're not talking about something else." Classify it
+`continue_session` unless the message is UNMISTAKABLY unrelated (a plain
+out-of-scope request, an explicit new-topic marker like "totally
+different thing —", or content that shares nothing at all with a life
+story reply). When in doubt with `RECENTLY CLOSED: true`, prefer
+`continue_session` over `new_story` — losing a subject's thread by
+misfiling a continuation as a new story costs more than the reverse (a
+genuinely new story told inside a resumed session still gets told). This
+rule only narrows `new_story`; it does not change how `answer`,
+`out_of_scope`, or `command` are classified.
+
 ## Output schema
 
 Return exactly this shape, nothing else:
@@ -80,7 +97,11 @@ order:
    reply, treat the message as `answer`.
 2. **Continue session** — else, if a session is currently open, treat the
    message as `continue_session`.
-3. **Terminal, per runtime** — else, do not guess: surface the ambiguity
+3. **Reopen a recently closed session** — else, if `RECENTLY CLOSED: true`
+   (see the Reply-after-close rule above), still treat the message as
+   `continue_session` — it resumes that subject in a fresh session seeded
+   from it, never guessed as `new_story`.
+4. **Terminal, per runtime** — else, do not guess: surface the ambiguity
    rather than forcing a low-confidence classification into one of the
    five intents. The two runtimes reach for this terminal case by
    different mechanics (delivery model), so each resolves it the way its
@@ -98,7 +119,7 @@ order:
    above as the working default, not as finally settled.]
 
 This file is the definition both runtimes must match: the taxonomy, the
-default-class rule, and steps 1–2 above admit no runtime divergence at
-all; only the terminal step (3) is explicitly per-runtime, and only
+default-class rule, and steps 1–3 above admit no runtime divergence at
+all; only the terminal step (4) is explicitly per-runtime, and only
 because the two runtimes' delivery models make a single shared mechanic
 impossible — not because the definition is silent on it.

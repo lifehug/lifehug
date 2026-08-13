@@ -47,7 +47,7 @@
         "seam_ok": false,
         "takeaway": "You've been steadily building toward this all year, and it finally landed.",
         "hook": "hear more about that call with your sister next time",
-        "properties": ["closing_has_takeaway_and_hook"]
+        "properties": ["closing_has_takeaway_and_hook", "closing_is_declarative"]
       }
     }
   ]

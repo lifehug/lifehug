@@ -282,12 +282,6 @@ def _output_contract_block(shape: TurnShape) -> str:
             "quotes the user's own phrase. Put that same question's text in "
             "\"followup_question\"."
         )
-    elif shape.position == "third_exchange_exit_friendly":
-        question_rule = (
-            "Ask NO question. This is the exit-friendly turn: make stopping "
-            "here feel like a good place to rest. Set \"followup_question\" "
-            "to null and \"question_free\" to true."
-        )
     else:
         question_rule = (
             "Ask NO question — keep receiving. Set \"followup_question\" to "
@@ -384,6 +378,7 @@ def lint_outgoing(
     *,
     question_allowed: bool,
     is_reply_to_substantive: bool = True,
+    is_closing: bool = False,
     config: dict | None = None,
 ) -> tuple[list[str], int]:
     """Return (blocking lint ids, advisory finding count) for one message.
@@ -391,6 +386,15 @@ def lint_outgoing(
     The checks themselves live in ``conversation_lints`` (single authority,
     config from ``evals/lints.yaml`` — including the ``cap.turn_chars``
     length cap, which this module deliberately does NOT pin independently).
+
+    ``is_closing`` (issue #139, pure-chat wave) additionally blocks banned
+    closing meta-phrases ("leave it here", "for now", ...) via
+    ``conversation_lints.lint_closing_phrases`` — the declarative-close
+    doctrine's other half, checked ONLY on closing turns (never folded
+    into the turn-wide ``banned_phrases`` lint, since these same words are
+    often fine mid-conversation). The "no question at all" half is already
+    covered below by the existing ``question_allowed=False`` check that
+    every closing call already makes.
     """
     findings = conversation_lints.lint_turn(
         message, is_reply_to_substantive=is_reply_to_substantive, config=config
@@ -401,6 +405,10 @@ def lint_outgoing(
         # The engine's own deterministic enforcement: a question-free turn
         # that asks anyway would spend initiative the gates already spent.
         blocking.append("question_not_permitted")
+    if is_closing:
+        blocking.extend(
+            f["lint"] for f in conversation_lints.lint_closing_phrases(message, config=config)
+        )
     return blocking, advisory
 
 
@@ -434,11 +442,15 @@ def decide_turn_shape(
     """Deterministic turn shape from session state + the cadence gates.
 
     Exchange 1..target-1 carry our initiative (a cued follow-up). The
-    target-th exchange is the exit-friendly door: it receives and pays out
-    but asks nothing, so stopping there reads as "a good place to rest"
-    rather than a dropped question. Past the target we keep receiving for as
-    long as the user keeps going — the target governs OUR initiative only,
-    never the user's.
+    target-th exchange, and every one after it, simply receives and pays
+    out with no question — the budget governs OUR initiative silently
+    (pure-chat wave, issue #139: there is no dedicated "offer to stop"
+    turn distinct from ordinary question-free receiving; reply-is-consent
+    means the budget needs no announcement). Past the target we keep
+    receiving for as long as the user keeps going — the target governs OUR
+    initiative only, never the user's. The actual close, when it comes, is
+    a separate, later, declarative event (``close_session_now`` /
+    ``_deliver_closing`` — behavior.md rule 8), never signaled here.
 
     When ``plan_adaptive_followup`` returned None (curfew, 3/day cap, pass
     transition, cadence off), the gates transfer to the turn: the turn is
@@ -450,8 +462,6 @@ def decide_turn_shape(
         position = "opening"
     elif user_turns < target:
         position = "mid_arc"
-    elif user_turns == target:
-        position = "third_exchange_exit_friendly"
     else:
         position = "past_target"
     question_allowed = planned_question is not None and user_turns < target
@@ -536,6 +546,46 @@ def find_open_session_for_channel(
             continue
         if newest is None or str(session_id) > str(newest["session_id"]):
             newest = doc
+    return newest
+
+
+def find_last_closed_session_for_channel(
+    channel: str,
+    *,
+    mode: str | None = None,
+    vault_root: str | Path | None = None,
+) -> dict | None:
+    """The most recently active CLOSED session for this channel (pure-chat
+    wave, issue #139 — the reply-after-close routing rung, design K item
+    6): when no session is currently open, a message still resumes the
+    last subject THIS channel closed on rather than guessing ``new_story``.
+
+    "Most recently active" is by last-turn timestamp (``_last_activity``,
+    the same proxy the idle/janitor sweeps already use — ``close_session``
+    itself writes no ``closed_at`` field, and adding one would break its
+    idempotency contract, see the PR spec), not by session-id sort — an
+    age-independent lookup by design ("same day or later").
+    """
+    newest: dict | None = None
+    newest_activity: datetime | None = None
+    for summary in conversation.list_sessions(status="closed", vault_root=vault_root):
+        if summary.get("channel") != channel:
+            continue
+        if mode is not None and summary.get("mode") != mode:
+            continue
+        session_id = summary.get("session_id")
+        if not session_id:
+            continue
+        try:
+            doc = conversation.load_session(session_id, vault_root=vault_root)
+        except (OSError, ValueError):
+            continue
+        activity = _last_activity(doc)
+        if activity is None:
+            continue
+        if newest_activity is None or activity > newest_activity:
+            newest = doc
+            newest_activity = activity
     return newest
 
 
@@ -690,11 +740,20 @@ def route_message(
     """Classify one inbound message per router.md; never mutates anything.
 
     Returns ``{"intent", "confidence", "source", "action",
-    "pending_question_id", "open_session_id"}`` — always, and always with
-    exit-0 semantics for the CLI wrapper (``cmd_route`` in ``lifehug.py``):
-    a provider that is not ready, a malformed model reply, or a
-    below-threshold classification all resolve through the deterministic
-    default rule below rather than raising.
+    "pending_question_id", "open_session_id", "reopen_session_id"}`` —
+    always, and always with exit-0 semantics for the CLI wrapper
+    (``cmd_route`` in ``lifehug.py``): a provider that is not ready, a
+    malformed model reply, or a below-threshold classification all resolve
+    through the deterministic default rule below rather than raising.
+
+    ``reopen_session_id`` (issue #139, pure-chat wave, design K item 6) is
+    the most-recently-CLOSED session on this channel when no session is
+    currently open — never an append target (a closed session's store
+    invariant forbids appending to it by design), but the subject a
+    ``continue_session`` result should seed a FRESH session from, exactly
+    like the platform's thread-composer pattern for a closed thread. A
+    reply landing in that gap is never guessed as an unrelated
+    ``new_story`` — see the Reply-after-close rule in ``router.md``.
 
     Injectable collaborators (``ai_call`` / ``status_resolver`` /
     ``prompt_builder`` / ``rotation`` / ``open_session``) mirror the turn
@@ -704,6 +763,7 @@ def route_message(
     manifest = _manifest()
     threshold = manifest.get("knob.router_confidence_threshold")
     threshold = float(threshold) if isinstance(threshold, (int, float)) else 0.7
+    reference = now or _now()
 
     if rotation is None:
         from lifehug_core import ROTATION_FILE  # noqa: PLC0415
@@ -713,9 +773,19 @@ def route_message(
 
     if open_session is None:
         open_session = find_open_session_for_channel(
-            channel, vault_root=vault_root, manifest=manifest, now=now
+            channel, vault_root=vault_root, manifest=manifest, now=reference
         )
     open_session_id = str(open_session["session_id"]) if open_session else None
+
+    closed_session = None
+    if open_session_id is None:
+        closed_session = find_last_closed_session_for_channel(channel, vault_root=vault_root)
+    reopen_session_id = str(closed_session["session_id"]) if closed_session else None
+    same_day_reopen = False
+    if closed_session is not None:
+        closed_activity = _last_activity(closed_session)
+        if closed_activity is not None:
+            same_day_reopen = closed_activity.astimezone(timezone.utc).date() == reference.astimezone(timezone.utc).date()
 
     config = _safe_config()
     model = router_model(config)
@@ -730,6 +800,7 @@ def route_message(
             "message": text,
             "session_open": open_session_id is not None,
             "pending_question_id": pending_question_id,
+            "recently_closed": reopen_session_id is not None,
         }
         try:
             prompt = builder(payload)
@@ -746,6 +817,13 @@ def route_message(
         intent = model_intent
         confidence = model_confidence
         source = "model"
+        if intent == "new_story" and same_day_reopen:
+            # Reply-after-close rule (design K item 6, owner ruling): a
+            # same-day reply after a close is never an unrelated new
+            # story — "they're not talking about something else." This is
+            # a structural override, not a model judgment call — the
+            # owner's ruling admits no ambiguity for the same-day case.
+            intent = "continue_session"
         action = _ROUTER_ACTION_BY_INTENT[intent]
     else:
         source = "default"
@@ -756,8 +834,17 @@ def route_message(
         elif open_session_id:
             intent = "continue_session"
             action = _ROUTER_ACTION_BY_INTENT[intent]
+        elif reopen_session_id:
+            # Reopen a recently closed session (router.md unsure-fallback
+            # step 3, issue #139): before guessing new_story, resume the
+            # last subject this channel closed on — any age, "same day or
+            # later" (this rung only fires when there is no live
+            # classifier to weigh nuance, so resuming a known subject is
+            # always safer than guessing new_story).
+            intent = "continue_session"
+            action = _ROUTER_ACTION_BY_INTENT[intent]
         else:
-            # Terminal, per-runtime unsure-fallback (router.md step 3, OSS
+            # Terminal, per-runtime unsure-fallback (router.md step 4, OSS
             # side): report the model's best guess when there was one, else
             # new_story — either way, ask rather than guess.
             intent = model_intent if model_intent is not None else "new_story"
@@ -770,6 +857,7 @@ def route_message(
         "action": action,
         "pending_question_id": pending_question_id,
         "open_session_id": open_session_id,
+        "reopen_session_id": reopen_session_id if open_session_id is None else None,
     }
 
 
@@ -1857,9 +1945,11 @@ def _deliver_closing(
         _diagnostic("closing_generation", "malformed_generation", session_id)
         return STATUS_FAILED, "malformed_generation", ""
     # Behavior rule 8: a close ends on the peak and STOPS — no trailing
-    # question. That makes every closing message question-free by contract.
+    # question, no meta-framing that narrates the ending (issue #139).
+    # That makes every closing message question-free AND declarative by
+    # contract — is_closing=True adds the banned-meta-phrase check.
     blocking, _advisory = lint_outgoing(
-        message, question_allowed=False, config=_lints_config()
+        message, question_allowed=False, is_closing=True, config=_lints_config()
     )
     if blocking:
         ledger(STATUS_FAILED, "malformed_generation", tuple(blocking))

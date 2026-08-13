@@ -97,6 +97,30 @@ Follow-ups signal responsiveness; full topic switches are the weakest question t
 ### 2.4 Endings are broken in human conversation — a solvable problem
 Conversations almost never end when both parties want (desires coincided in ~2% of ~930 dyads); people misestimate their partner's desired stopping point by ~half the conversation length; signaling "I want to leave" is face-threatening so nobody does it (Mastroianni, Gilbert, Cooney & Wilson 2021, *PNAS*). Closing rituals: pre-closing → summary → appreciation → farewell (Schegloff & Sacks 1973). **Implication:** the AI has no face to protect, so it can end well every time: watch for satiation, offer a graceful exit, close with micro-summary + appreciation + a hook to next time, and bias toward ending slightly *before* satiation.
 
+> **Addendum, 2026-08-12 (owner decision, pure-chat wave — appended, not a
+> revision of the finding above).** The 2026-08-11 design read "offer a
+> graceful exit" as a distinct, explicit move — and the implementation
+> that followed built one: a dedicated turn, at the exchange-budget
+> boundary, whose text told the user this was a good place to stop. The
+> owner's 2026-08-12 ruling supersedes that reading for a **chat medium**
+> specifically: "If the person wants to stop, they just stop... If they
+> want to keep going they just keep typing so it's unnecessary." In a
+> written back-and-forth, the exit already exists structurally as the
+> absence of a reply — there is no face-threat to protect against
+> (Mastroianni et al.'s finding above is about *spoken* dyads, where
+> silence is awkward and stopping requires an announced move) and no
+> turn-taking cost to not-replying. An EXPLICIT exit offer in this medium
+> doesn't lower a real barrier — it manufactures ceremony where reply-is-
+> consent already does the same job for free, and it risks the double
+> signal the owner's challenge named directly: "why are we trying to
+> signal the chat's over?" The original finding stands (endings ARE
+> broken in human conversation, and the AI should still end well, before
+> satiation, with a real close); what changes is the MECHANISM — a
+> declarative closing statement (behavior.md rule 8) replaces the
+> separate offer-to-stop turn. See `interactions/conversation/prompt/
+> behavior.md` rule 8 and issue #139 for the full ruling and the removed
+> mechanic (`third_exchange_exit_friendly`).
+
 ### 2.5 A good conversation ends with an artifact of being known
 Summaries consolidate what a person said, prove they were heard, and help them organize their own understanding (MI literature); redemption-shaped retellings are associated with well-being (McAdams). **Implication:** close sessions by handing back a compact, faithful, slightly-composed version of what was told — proves listening, seeds the wiki artifact, lets the user correct the record.
 

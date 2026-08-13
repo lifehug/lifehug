@@ -103,8 +103,12 @@ see "Unprompted Story Ingest"; `handle_command`; `continue_session`; `deflect`
 warmly, then stay quiet rather than deflect a third time in the same
 exchange. With no unattended provider, `route` returns the deterministic
 default (a pending question → `answer`; else an open session →
-`continue_session`; else `action:"ask_user"`) and you judge edge cases
-yourself using the same five-intent definitions.
+`continue_session`; else a recently closed session on this channel (same
+day or later, issue #139) → `continue_session` with `reopen_session_id`
+set — never guessed as `new_story`; else `action:"ask_user"`) and you
+judge edge cases yourself using the same five-intent definitions. A
+`reopen_session_id` (open_session_id is null) means: open a FRESH session
+seeded from that closed session's subject, never append to it.
 
 When a user message is a Lifehug answer:
 

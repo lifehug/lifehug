@@ -1,7 +1,7 @@
 {
-  "version": 161,
+  "version": 162,
   "released": "2026-08-12",
-  "changelog": "v161: day-rollover session close (issue #136, Chats-per-Focus design \u00a7D) \u2014 daily_question.sh gains a pre-question step closing every open conversation session (reason day_rollover, no idle filter) via the generalized conversation-close --day-rollover; the idle sweep (--expired) demotes to a mode-independent 36h janitor (knob.janitor_idle_hours); interaction.yaml's chat/conversation idle knobs raised to day-scale (1440 minutes).",
+  "changelog": "v162: pure-chat close (issue #139, Chats-per-Focus design \u00a7K) \u2014 the exit-offer ceremony is gone: chats and conversations now close with ONE declarative statement (the statement IS the user's out; no trailing question, no meta-framing like \"leave it here\"/\"for now\"/\"a good place to rest\") instead of a separate mid-arc turn that announced stopping was okay. The exchange budget still governs how many follow-up questions the AI asks, but it now operates silently \u2014 reply-is-consent replaces the ceremony. Replying to a chat that already closed, same day or months later, resumes that same subject instead of being misread as an unrelated new story. New deterministic checks catch closing messages that slip back into the old announced-ending phrasing.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -31,6 +31,7 @@
     "interactions/conversation/evals/goldens/chat-farmhouse-opener-receipt.json",
     "interactions/conversation/evals/goldens/conversation-lake-house-no-new-topic.json",
     "interactions/conversation/evals/goldens/chat-promotion-closing.json",
+    "interactions/conversation/evals/goldens/chat-witness-filing-close.json",
     "interactions/conversation/evals/goldens/chat-garden-deflection.json",
     "interactions/conversation/evals/goldens/router_fixtures.json",
     "interactions/conversation/evals/goldens/router_sample_predictions.json",

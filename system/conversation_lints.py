@@ -29,6 +29,7 @@ Public surface:
 
     load_lints_config(*, framework_root=None) -> dict
     lint_turn(text, *, is_reply_to_substantive=False, seam_ok=False, config=None) -> list[dict]
+    lint_closing_phrases(text, *, config=None) -> list[dict]
     lint_transcript(turns, *, config=None) -> list[dict]
 
 Findings are ``{"lint": "<id>", "detail": "...", "span": [start, end]}``.
@@ -106,11 +107,14 @@ def _conversation_evals_path(*parts: str, framework_root: str | Path | None = No
 
 
 def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
-    """Read evals/lints.yaml's flat subset: lint.<id>: on/off, cap.*, banned.N."""
+    """Read evals/lints.yaml's flat subset: lint.<id>: on/off, cap.*, banned.N,
+    closing_banned.N (pure-chat wave, issue #139 — the declarative-close
+    doctrine's own banned-phrase list, checked only against closing turns)."""
     path = _conversation_evals_path("lints.yaml", framework_root=framework_root)
     raw = _parse_simple_yaml(path, validate_ai_routing=False)
     config: dict[str, object] = {}
     banned: list[str] = []
+    closing_banned: list[str] = []
     for key, value in raw.items():
         if key.startswith("lint."):
             config[key] = value.strip().lower() == "on"
@@ -119,11 +123,14 @@ def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
                 config[key] = int(value)
             except ValueError:
                 config[key] = value
+        elif key.startswith("closing_banned."):
+            closing_banned.append(value)
         elif key.startswith("banned."):
             banned.append(value)
         else:
             config[key] = value
     config["banned_phrases"] = banned
+    config["closing_banned_phrases"] = closing_banned
     return config
 
 
@@ -256,6 +263,45 @@ def lint_turn(
                 })
                 break
 
+    return findings
+
+
+def lint_closing_phrases(text: str, *, config: dict | None = None) -> list[dict]:
+    """Banned meta-framing phrases for CLOSING turns only (behavior.md rule
+    8's declarative-close doctrine, pure-chat wave, issue #139, 2026-08-12).
+
+    These phrases narrate that a close is happening ("leave it here", "for
+    now", "a good place to rest") instead of simply closing — kept SEPARATE
+    from ``lint_turn``'s turn-wide ``banned_phrases`` because the same
+    words are often fine mid-conversation; only closing-turn narration of
+    the ending is banned. The companion "no question at all" half of the
+    doctrine is enforced elsewhere: the runtime's own
+    ``question_allowed=False`` pass already blocks any question sentence
+    in a closing message (``conversation_delivery.lint_outgoing``'s
+    ``question_not_permitted`` check); the eval harness's
+    ``_check_closing_is_declarative`` re-derives the same "no question
+    mark" rule directly rather than duplicating it here, so this function
+    stays scoped to the banned-phrase half only.
+
+    Single authority for both callers (recurring-defect doctrine): the
+    runtime (``conversation_delivery.lint_outgoing(is_closing=True)``) and
+    the golden-transcript property checker
+    (``interaction_evals._check_closing_is_declarative``) both call this
+    function rather than each keeping its own phrase list.
+    """
+    config = config if config is not None else load_lints_config()
+    findings: list[dict] = []
+    if not config.get("lint.closing_declarative", True):
+        return findings
+    lowered = text.lower()
+    for phrase in config.get("closing_banned_phrases", []):
+        idx = lowered.find(str(phrase).lower())
+        if idx != -1:
+            findings.append({
+                "lint": "closing_declarative",
+                "detail": f"banned closing meta-phrase: {phrase!r}",
+                "span": [idx, idx + len(phrase)],
+            })
     return findings
 
 

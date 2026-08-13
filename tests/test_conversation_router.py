@@ -22,6 +22,7 @@ import json
 import re
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -33,6 +34,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from tempdirs import root_parent_tmp  # noqa: E402
 import conversation  # noqa: E402
 import conversation_delivery as engine  # noqa: E402
+import lifehug_core as core  # noqa: E402
 from ai_provider import ProviderStatus  # noqa: E402
 
 OPEN_SESSION = {
@@ -224,6 +226,206 @@ class MutatesNothingTests(unittest.TestCase):
         reloaded = conversation.load_session(session["session_id"], vault_root=vault)
         self.assertEqual(reloaded["turns"], [])
         self.assertEqual(reloaded["status"], "open")
+
+
+class ReplyAfterCloseTests(unittest.TestCase):
+    """Issue #139, pure-chat wave, design K item 6: a reply arriving with
+    no open session, on a channel whose last session closed, resumes that
+    subject rather than guessing new_story. Synthetic vault, NEVER
+    ~/Workspace/dave."""
+
+    def _closed_session(self, tmp, *, last_activity):
+        vault = tmp / "vault"
+        vault.mkdir(exist_ok=True)
+        session = conversation.open_session("chat", "telegram", vault_root=vault)
+        session_id = session["session_id"]
+        session = conversation.append_turn(
+            session_id,
+            {"role": "user", "text": "It was a whole summer of driving out to the lake.",
+             "channel": "telegram"},
+            expected_turns=0, vault_root=vault,
+        )
+        session = conversation.append_turn(
+            session_id,
+            {"role": "lifehug", "text": "That parking-lot steering wheel moment.",
+             "channel": "telegram"},
+            expected_turns=1, vault_root=vault,
+        )
+        session = conversation.append_turn(
+            session_id,
+            {"role": "user", "text": "Yeah, every Sunday.", "channel": "telegram",
+             "ts": last_activity.strftime("%Y-%m-%dT%H:%M:%SZ")},
+            expected_turns=2, vault_root=vault,
+        )
+        conversation.close_session(
+            session_id,
+            {"reason": "done", "takeaway": "The lake Sundays.", "takeaway_delivered": True,
+             "insight_receipts_count": 1, "filed": []},
+            vault_root=vault,
+        )
+        return vault, session_id
+
+    def test_same_day_reply_overrides_confident_new_story_model_call(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        closed_at = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+        vault, session_id = self._closed_session(tmp, last_activity=closed_at)
+        same_day_later = closed_at + timedelta(hours=6)
+
+        result = engine.route_message(
+            "Actually there's more to that lake story.",
+            channel="telegram",
+            vault_root=vault,
+            now=same_day_later,
+            ai_call=lambda *_a, **_k: router_json("new_story", 0.97),
+            status_resolver=ready_status,
+            rotation={},
+            open_session=None,
+        )
+        self.assertEqual(result["intent"], "continue_session")
+        self.assertEqual(result["action"], "continue_session")
+        self.assertEqual(result["reopen_session_id"], session_id)
+        self.assertIsNone(result["open_session_id"])
+
+    def test_later_reply_with_no_provider_resolves_to_continue_not_new_story(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        closed_at = datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+        vault, session_id = self._closed_session(tmp, last_activity=closed_at)
+        much_later = closed_at + timedelta(days=40)
+        ai = mock.Mock(side_effect=AssertionError("keyless must never call the model"))
+
+        result = engine.route_message(
+            "Actually there's more to that lake story.",
+            channel="telegram",
+            vault_root=vault,
+            now=much_later,
+            ai_call=ai,
+            status_resolver=keyless_status,
+            rotation={},
+            open_session=None,
+        )
+        self.assertEqual((result["source"], result["intent"], result["action"]),
+                         ("default", "continue_session", "continue_session"))
+        self.assertEqual(result["reopen_session_id"], session_id)
+        ai.assert_not_called()
+
+    def test_recently_closed_does_not_override_out_of_scope_or_command(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        closed_at = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+        vault, _session_id = self._closed_session(tmp, last_activity=closed_at)
+        same_day_later = closed_at + timedelta(hours=1)
+
+        for intent in ("out_of_scope", "command"):
+            with self.subTest(intent=intent):
+                result = engine.route_message(
+                    "irrelevant text",
+                    channel="telegram",
+                    vault_root=vault,
+                    now=same_day_later,
+                    ai_call=lambda *_a, **_k: router_json(intent, 0.9),
+                    status_resolver=ready_status,
+                    rotation={},
+                    open_session=None,
+                )
+                self.assertEqual(result["intent"], intent)
+
+    def test_no_closed_session_leaves_terminal_fallback_unchanged(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        vault = tmp / "vault"
+        vault.mkdir()
+        ai = mock.Mock(side_effect=AssertionError("keyless must never call the model"))
+        result = engine.route_message(
+            "hello there", channel="telegram", vault_root=vault,
+            ai_call=ai, status_resolver=keyless_status, rotation={}, open_session=None,
+        )
+        self.assertEqual((result["source"], result["intent"], result["action"]),
+                         ("default", "new_story", "ask_user"))
+        self.assertIsNone(result["reopen_session_id"])
+
+    def test_reopen_then_close_again(self):
+        """Integration scenario (issue #139 evals item): a subject closes,
+        a same-day reply resumes it in a fresh seeded session (never
+        appending to the closed doc — the store forbids that by design),
+        and that new session closes again with its own declarative
+        takeaway. Both closes pass the closing-declarative lint."""
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reopen-close-again-")
+        closed_at = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+        vault, first_session_id = self._closed_session(tmp, last_activity=closed_at)
+        same_day_later = closed_at + timedelta(hours=3)
+
+        routed = engine.route_message(
+            "One more thing about that lake — I forgot the ducks.",
+            channel="telegram",
+            vault_root=vault,
+            now=same_day_later,
+            ai_call=lambda *_a, **_k: router_json("new_story", 0.9),
+            status_resolver=ready_status,
+            rotation={},
+            open_session=None,
+        )
+        self.assertEqual(routed["action"], "continue_session")
+        self.assertEqual(routed["reopen_session_id"], first_session_id)
+
+        # The caller opens a FRESH session seeded from the closed subject
+        # (never appends to first_session_id — SessionClosedError by design).
+        second = conversation.open_session("chat", "telegram", vault_root=vault)
+        second_id = second["session_id"]
+        second = conversation.append_turn(
+            second_id,
+            {"role": "user", "text": "One more thing about that lake — I forgot the ducks.",
+             "channel": "telegram"},
+            expected_turns=0, vault_root=vault,
+        )
+        second = conversation.append_turn(
+            second_id,
+            {"role": "lifehug", "text": "The ducks that used to follow the dock.",
+             "channel": "telegram"},
+            expected_turns=1, vault_root=vault,
+        )
+        conversation.append_turn(
+            second_id,
+            {"role": "user", "text": "Every single Sunday, without fail.", "channel": "telegram"},
+            expected_turns=2, vault_root=vault,
+        )
+
+        state_path = tmp / "conversation_deliveries.json"
+        scores_path = tmp / "answer_scores.json"
+        candidates_path = tmp / "question_candidates.json"
+        sent: list[str] = []
+        second_takeaway = "I'll keep this filed right next to the dock story and the ducks."
+
+        def telegram_send(message):
+            sent.append(message)
+            return core.TelegramSendResult("confirmed", "telegram_confirmed", 1, 1)
+
+        outcome = engine.close_session_now(
+            second_id,
+            state_path=state_path,
+            vault_root=vault,
+            scores_path=scores_path,
+            candidates_path=candidates_path,
+            status_resolver=ready_status,
+            ai_call=lambda _p, _m: json.dumps({"message": second_takeaway}),
+            telegram_send=telegram_send,
+            prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
+        )
+        # Both closes (the original and this reopened-then-closed-again
+        # one) are declarative — no trailing question, no banned meta-phrase.
+        self.assertTrue(outcome.takeaway_delivered)
+        self.assertEqual(sent, [second_takeaway])
+        blocking, _advisory = engine.lint_outgoing(
+            second_takeaway, question_allowed=False, is_closing=True,
+        )
+        self.assertEqual(blocking, [])
+        first_close_blocking, _ = engine.lint_outgoing(
+            "The lake Sundays.", question_allowed=False, is_closing=True,
+        )
+        self.assertEqual(first_close_blocking, [])
+
+        first = conversation.load_session(first_session_id, vault_root=vault)
+        self.assertEqual(first["close"]["reason"], "done")
+        second_doc = conversation.load_session(second_id, vault_root=vault)
+        self.assertEqual(second_doc["status"], "closed")
+        self.assertNotEqual(first_session_id, second_id)
 
 
 class ProseContractGuardTests(unittest.TestCase):

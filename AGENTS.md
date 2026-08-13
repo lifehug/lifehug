@@ -370,6 +370,8 @@ When you receive a message in this workspace context, classify it into exactly o
 
 Two things are handled BEFORE this classification runs, never as one of the five intents: a pass-transition reply (`awaiting_pass_transition: true` in rotation.json) and the prefix hatches (`/artifact`, `artifact:`, `opinion:`). A new setup conversation (config.yaml absent, or question-bank.md still only A-E) continues the setup flow instead.
 
+Reply-after-close (issue #139, pure-chat wave): when no session is open but a session on that channel closed recently — same day or later — `route`'s output carries `reopen_session_id` and `action:"continue_session"`. That reply is about the subject that just closed, never an unrelated `new_story` — act on it by opening a FRESH session seeded from the closed session's subject (never append to a closed session; the store forbids it by design).
+
 Delegate classification instead of judging by eye:
 
 ```bash
