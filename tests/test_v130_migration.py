@@ -34,7 +34,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import update  # noqa: E402
 import vault_paths  # noqa: E402
 
@@ -132,7 +132,7 @@ class TmpVaultCase(unittest.TestCase):
     def setUp(self):
         # dir=ROOT.parent, not the system temp dir: macOS /var is a symlink and
         # vault_paths refuses to traverse one.
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v130-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v130-")
         self._orig = (update.REPO_DIR, update.VERSION_FILE)
         self.addCleanup(self._restore)
 

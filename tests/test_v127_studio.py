@@ -21,7 +21,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import artifact  # noqa: E402
 import book  # noqa: E402
 import jobs  # noqa: E402
@@ -49,7 +49,7 @@ class StudioTestBase(unittest.TestCase):
     """Shared fixture plumbing: a real-path tmp dir + module attribute saves."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT)
+        self.tmp = symlink_free_tmp(self)
         self._saved = {
             (studio, "OUTPUTS_DIR"): studio.OUTPUTS_DIR,
             (studio, "QUESTIONS_FILE"): studio.QUESTIONS_FILE,

@@ -27,7 +27,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 
 import arc_planner  # noqa: E402
 import book  # noqa: E402
@@ -153,7 +153,7 @@ class BaseVaultTest(unittest.TestCase):
     prefix = "lifehug-118-arc-"
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix=self.prefix)
+        self.tmp = symlink_free_tmp(self, prefix=self.prefix)
         self.vault = self.tmp / "vault"
         self.vault.mkdir()
         self.fixture = VaultFixture(self.vault)

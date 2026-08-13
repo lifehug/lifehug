@@ -16,7 +16,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import answer_ack  # noqa: E402
 import conversation_delivery as turn_engine  # noqa: E402
 import answer_ack_delivery as delivery  # noqa: E402
@@ -186,7 +186,7 @@ class OrderingTests(unittest.TestCase):
     def setUp(self):
         # ROOT.parent, never tempfile's default: on macOS /var is a symlink
         # and vault_paths refuses to traverse symlinks (tests/tempdirs.py).
-        vault = root_parent_tmp(self, ROOT, prefix="lifehug-v153-ordering-") / "vault"
+        vault = symlink_free_tmp(self, prefix="lifehug-v153-ordering-") / "vault"
         vault.mkdir()
         for patch in (
             mock.patch.object(turn_engine, "VAULT_ROOT", vault),
@@ -293,7 +293,7 @@ class OrderingTests(unittest.TestCase):
 
 class ProcessAnswerIntegrationTests(unittest.TestCase):
     def setUp(self):
-        vault = root_parent_tmp(self, ROOT, prefix="lifehug-v153-integration-") / "vault"
+        vault = symlink_free_tmp(self, prefix="lifehug-v153-integration-") / "vault"
         vault.mkdir()
         for patch in (
             mock.patch.object(turn_engine, "VAULT_ROOT", vault),

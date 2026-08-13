@@ -1,7 +1,7 @@
 {
-  "version": 162,
-  "released": "2026-08-12",
-  "changelog": "v162: pure-chat close (issue #139, Chats-per-Focus design \u00a7K) \u2014 the exit-offer ceremony is gone: chats and conversations now close with ONE declarative statement (the statement IS the user's out; no trailing question, no meta-framing like \"leave it here\"/\"for now\"/\"a good place to rest\") instead of a separate mid-arc turn that announced stopping was okay. The exchange budget still governs how many follow-up questions the AI asks, but it now operates silently \u2014 reply-is-consent replaces the ceremony. Replying to a chat that already closed, same day or months later, resumes that same subject instead of being misread as an unrelated new story. New deterministic checks catch closing messages that slip back into the old announced-ending phrasing.",
+  "version": 163,
+  "released": "2026-08-13",
+  "changelog": "v163: test fixtures no longer create temp vaults in the workspace parent directory — a killed test run used to leak tmp* directories next to the repo (3,760 of them in one session). Temp vaults now live under the resolved system temp dir (symlink-free, so vault_paths' no-follow guard still accepts them) and are cleaned up unconditionally; a strengthened guard test bans any workspace-parent temp dir from returning. Test-only change; no user-facing behavior differs.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

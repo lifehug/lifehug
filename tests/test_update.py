@@ -23,6 +23,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "system"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from tempdirs import symlink_free_tmp  # noqa: E402
 import update  # noqa: E402
 import vault_paths  # noqa: E402
 
@@ -349,13 +352,7 @@ class StateDirResolutionTests(unittest.TestCase):
     never reads, silently inerting the whole feature forever."""
 
     def setUp(self):
-        import tempfile
-        # vault_paths' no-follow authority rejects the default /var/folders
-        # tmp prefix on macOS (it traverses a /var symlink) — root the
-        # fixture under the real worktree parent instead, same fix
-        # test_wiki_views.py already needed for the same reason.
-        self.tmp = Path(tempfile.mkdtemp(dir=Path(__file__).resolve().parents[2]))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-update-")
         self._orig = (update.REPO_DIR, update.VERSION_FILE)
         self.addCleanup(self._restore)
         self._orig_env = os.environ.get("LIFEHUG_VAULT_ROOT")

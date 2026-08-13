@@ -35,7 +35,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import conversation  # noqa: E402
 import jobs  # noqa: E402
 import lifehug  # noqa: E402
@@ -124,7 +124,7 @@ class VaultSubprocessTestCase(unittest.TestCase):
     matching the codebase's own ExternalVaultSubprocessTests precedent."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v156-close-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v156-close-")
         self.vault = make_vault(self.tmp / "vault")
         import os
         self.env = os.environ.copy()
@@ -490,7 +490,7 @@ class MirrorInboundTests(unittest.TestCase):
     """Scope §4 — surgical, mirrors tests/test_mirror.py's own fixture style."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v156-mirror-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v156-mirror-")
         self._saved = mirror.MIRROR_RESPONSES_FILE
         mirror.MIRROR_RESPONSES_FILE = self.tmp / "mirror_responses.json"
         self.addCleanup(setattr, mirror, "MIRROR_RESPONSES_FILE", self._saved)
@@ -518,7 +518,7 @@ class EngagementFieldsTests(unittest.TestCase):
     real capture path; nothing is ever fabricated for an absent signal."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v156-engagement-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v156-engagement-")
         self.scores_path = self.tmp / "answer_scores.json"
 
     def _seed(self, records: list[dict]) -> None:
@@ -586,7 +586,7 @@ class EngagementProfileTests(unittest.TestCase):
 
     def setUp(self):
         self.qprof = load("quality_profile")
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v156-profile-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v156-profile-")
         self.qprof.ANSWER_SCORES_FILE = self.tmp / "answer_scores.json"
         self.qprof.QUALITY_PROFILE_FILE = self.tmp / "quality_profile.json"
 
@@ -657,7 +657,7 @@ class PlannerEngagementTests(unittest.TestCase):
         import question_planner as qp
 
         self.qp = qp
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v156-planner-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v156-planner-")
         bank = self.tmp / "question-bank.md"
         bank.write_text(self.SELF_BANK, encoding="utf-8")
         self._saved_questions_file = qp.QUESTIONS_FILE
