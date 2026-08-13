@@ -22,9 +22,10 @@ ships the template only — no filling logic exists yet.
 - **Previous turn:** `{previous_turn_summary}` — one line: what the AI
   said or asked last, and what (if anything) the user hasn't yet
   responded to.
-- **Turn position:** `{turn_position}` — one of `opening`,
-  `mid_arc`, `third_exchange_exit_friendly` (chat mode only — the
-  graceful-exit turn per `knob.chat_target_exchanges`), or `closing`.
+- **Turn position:** `{turn_position}` — one of `opening`, `mid_arc`,
+  `past_target` (chat mode only — past `knob.chat_target_exchanges`; our
+  question-initiative is spent, so the turn simply receives, question-free,
+  with no special framing about stopping), or `closing`.
 
 ## Output constraints for this turn
 
@@ -33,10 +34,11 @@ ships the template only — no filling logic exists yet.
 - One question maximum (behavior.md rule 1) — fewer is fine, zero is fine
   on a question-free receiving turn.
 - Apply behavior.md's hard rules in full; this template does not restate
-  them. If `turn_position` is `third_exchange_exit_friendly`, this turn
-  must be exit-friendly per behavior.md rule 8 (closing anatomy) unless
-  the user has clearly signaled they want to keep going (rule: never
-  hard-stop a continuing user).
+  them. The exchange budget (`knob.chat_target_exchanges`) governs OUR
+  initiative silently — past it, ordinary turns just keep receiving; there
+  is no dedicated "offer to stop" turn (removed 2026-08-12, pure-chat wave
+  — reply-is-consent makes it unnecessary: never hard-stop a continuing
+  user, and never narrate that initiative has run out).
 - If `turn_position` is `closing`, follow behavior.md rule 8 exactly:
   takeaway, appreciation, continuity line, optional deposit-frame, hook,
   then stop — no trailing question.

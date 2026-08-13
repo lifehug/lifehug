@@ -708,6 +708,14 @@ CLOSING_PROMPT_REQUIRED_FIELDS = {"session": dict}
 
 
 def _turn_position(session: dict, manifest: dict) -> str:
+    """Descriptive `{turn_position}` label for the prompt only — advisory
+    text, not a gate (the actual question-allowed decision is
+    ``conversation_delivery.decide_turn_shape`` + its output-contract
+    appendix, applied after this template). Pure-chat wave (issue #139):
+    the distinct "exit-friendly" state is removed — the turn just before
+    the exchange budget is reached is an ordinary ``mid-arc`` turn like any
+    other; there is no dedicated "make stopping feel good" label or turn.
+    """
     turns = session.get("turns") or []
     if not turns:
         return "opening"
@@ -718,8 +726,6 @@ def _turn_position(session: dict, manifest: dict) -> str:
         exchanges_done = (len(turns) + 1) // 2  # this turn will start the next exchange
         if exchanges_done >= target:
             return "closing-candidate"
-        if exchanges_done == target - 1:
-            return "exit-friendly"
         return "mid-arc"
     cap = manifest.get("knob.conversation_turn_cap_exchanges")
     cap = cap if isinstance(cap, int) else 25
@@ -762,8 +768,7 @@ def _rule_hints_for_position(position: str) -> str:
     hints = {
         "opening": "2 (respond-before-ask), 3 (question grammar), 5 (register), 7 (escalation)",
         "middle": "1 (one question max), 2 (respond-before-ask), 5 (register), 6 (payout anatomy), 13 (back-off)",
-        "exit_door": "1 (one question max), 8 (closings — offer the door, do not push past it)",
-        "closing": "8 (closings: takeaway, appreciation, continuity, hook, stop)",
+        "closing": "8 (closings: takeaway, appreciation, continuity, hook, stop, declarative — no offer, no meta-framing)",
     }
     return hints.get(position, "1, 2, 5")
 
@@ -786,13 +791,19 @@ def build_router_prompt(payload: dict) -> str:
     message = payload["message"]
     session_open = payload["session_open"]
     pending_question_id = payload.get("pending_question_id")
+    # "recently_closed" (issue #139, pure-chat wave): no session is open,
+    # but one closed on this channel without a new one opening since — the
+    # Reply-after-close rule's own signal (router.md). Optional/additive:
+    # callers that never pass it get "False", the pre-#139 reading.
+    recently_closed = bool(payload.get("recently_closed", False))
     template = _read_framework_text("router", "router.md")
     pending = "(none)" if pending_question_id is None else str(pending_question_id)
     return (
         f"{template}\n\n"
         "## INPUT (assembled at runtime — classify this message)\n\n"
         f"SESSION OPEN: {session_open}\n"
-        f"PENDING QUESTION: {pending}\n\n"
+        f"PENDING QUESTION: {pending}\n"
+        f"RECENTLY CLOSED: {recently_closed}\n\n"
         "MESSAGE:\n"
         f"{message}\n"
     )

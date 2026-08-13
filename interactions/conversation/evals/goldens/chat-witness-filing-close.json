@@ -1,0 +1,54 @@
+{
+  "golden_id": "chat-witness-filing-close-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "G6",
+    "opening": "You mentioned a cabin your family used to visit.",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["cabin"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You mentioned a cabin your family used to visit every summer. What's one morning there that's stuck with you?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "cabin",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "My grandmother always had coffee going before any of us were up. The whole cabin smelled like it, even out on the dock."
+    },
+    {
+      "role": "lifehug",
+      "text": "Coffee already going before any of us were up — that's such a specific kind of quiet to remember. Tell me more about her out there on the dock with that cup.",
+      "annotations": {
+        "kind": "receipt",
+        "quoted_span": "before any of us were up",
+        "topic": "cabin",
+        "seam_ok": false,
+        "properties": ["receipt_quotes_user"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "Every morning, as far as I remember. She'd already be out on the dock with her cup by the time I got up."
+    },
+    {
+      "role": "lifehug",
+      "text": "The cabin smelled like your grandmother's coffee before either of you said a word — that's the whole morning in one detail. Thank you for letting me sit in it with you. I'll keep this filed right next to the dock story and the loons.",
+      "annotations": {
+        "kind": "closing",
+        "topic": "cabin",
+        "seam_ok": false,
+        "takeaway": "The cabin smelled like your grandmother's coffee before either of you said a word.",
+        "hook": "filed right next to the dock story and the loons",
+        "properties": ["closing_has_takeaway_and_hook", "closing_is_declarative"]
+      }
+    }
+  ]
+}

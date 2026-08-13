@@ -103,7 +103,8 @@ appropriate for fresh grief within the 60-day deferral window.)
 pushing forward instead of holding still:**
 > I'm so sorry for your loss. What was she like as a person?
 
-## Closing (takeaway + appreciation + hook, no trailing question)
+## Closing (takeaway + appreciation + hook, declarative — no trailing
+question, no meta-framing)
 
 **GOOD:**
 > What you gave me today wasn't really about the move itself — it was
@@ -115,9 +116,30 @@ pushing forward instead of holding still:**
 (Takeaway, not recap. Specific appreciation. Continuity hook. Ends on the
 peak. No trailing question.)
 
+**GOOD — the exemplary shape (concrete witness/filing line, rule 8's
+ratified worked example — invented content here per this file's
+synthetic-only rule; the real line is quoted verbatim in behavior.md):**
+> The cabin smelled like your grandmother's coffee before either of you
+> said a word — that's the whole morning in one detail. Thank you for
+> letting me sit in it with you. I'll keep this filed right next to the
+> dock story and the loons.
+
+(A specific, settled, declarative landing — closure as a felt quality of
+the prose itself, never announced.)
+
 **BAD — violates rule 8 (trailing question, recap instead of takeaway):**
 > So to recap, you moved because of your sister, it was hard, but you did
 > it anyway. Anything else you want to add?
+
+**BAD — violates rule 8's declarative-close doctrine (meta-framing that
+narrates the ending and grants an exit instead of just landing it):**
+> That's a good one to leave sitting here for now — thank you for
+> sharing it. We'll pick this up again whenever you're ready.
+
+(Every clause here announces that the conversation is ending instead of
+simply ending it: "leave it here," "for now," "we'll pick this up" are
+all banned shapes — the statement should have just been the takeaway,
+settled and done.)
 
 ## Deflection (out-of-scope → warm redirect)
 

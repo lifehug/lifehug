@@ -37,6 +37,25 @@ cap.turn_chars: 1200
 # question (behavior.md rule 2)
 lint.receipt_before_question: on
 
+# closing-declarative doctrine (behavior.md rule 8 amendment, pure-chat
+# wave, issue #139): checked ONLY against closing-turn text, never folded
+# into lint.banned_phrases above — these phrases are often fine
+# mid-conversation; only closing-turn narration of the ending is banned.
+# The "no question at all" half of the doctrine is enforced separately
+# (conversation_delivery.lint_outgoing's existing question_not_permitted
+# check, already active on question_allowed=False closing calls).
+lint.closing_declarative: on
+closing_banned.1: leave it here
+closing_banned.2: leave this here
+closing_banned.3: for now
+closing_banned.4: a good place to rest
+closing_banned.5: a good place to stop
+closing_banned.6: we'll leave
+closing_banned.7: we'll pick this up
+closing_banned.8: we'll stop here
+closing_banned.9: rest here
+closing_banned.10: whenever you're ready to keep going
+
 # flags "what year"-form questions (behavior.md rule 3)
 lint.year_question_detector: on
 

@@ -355,7 +355,7 @@ class CommittedGoldensPassEveryDeclaredPropertyTests(unittest.TestCase):
             with self.subTest(golden_id=golden.get("golden_id")):
                 self.assertEqual(ie.check_golden(golden), [])
 
-    def test_all_five_properties_are_exercised_across_the_corpus(self):
+    def test_all_properties_are_exercised_across_the_corpus(self):
         goldens = ie.load_goldens()
         covered = {
             p for g in goldens for _, t in ie._lifehug_turns(g)

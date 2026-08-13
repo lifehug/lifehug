@@ -42,9 +42,9 @@ Four layers, always in this order:
 3. **Golden-transcript property assertions** — always run, over every
    committed `evals/goldens/*.json` transcript: the closed vocabulary
    (`receipt_quotes_user`, `no_new_topic_mid_arc`,
-   `closing_has_takeaway_and_hook`, `deflects_off_scope`,
-   `demonstrated_knowledge_opener_shape`) plus Layer-1 lints over every
-   lifehug turn (seam_ok-aware).
+   `closing_has_takeaway_and_hook`, `closing_is_declarative`,
+   `deflects_off_scope`, `demonstrated_knowledge_opener_shape`) plus
+   Layer-1 lints over every lifehug turn (seam_ok-aware).
 4. **Judge rubrics + personas** — model-backed, keyless-skippable. Every
    model-backed step is SKIPPED loudly (named step + reason), never
    silently green, never red without keys. `--emit-tasks` writes agent-task
@@ -100,10 +100,14 @@ VALID_REGISTERS = frozenset({"celebration", "hard", "neutral"})
 VALID_TURN_KINDS = frozenset({"opener", "receipt", "receipt_payout", "closing", "deflection"})
 
 #: The closed property-assertion vocabulary (contract, golden schema).
+#: "closing_is_declarative" (issue #139, pure-chat wave) is an additive
+#: extension: a closing turn has no question anywhere and no banned
+#: closing meta-phrase — behavior.md rule 8's declarative-close doctrine.
 PROPERTY_IDS = frozenset({
     "receipt_quotes_user",
     "no_new_topic_mid_arc",
     "closing_has_takeaway_and_hook",
+    "closing_is_declarative",
     "deflects_off_scope",
     "demonstrated_knowledge_opener_shape",
 })
@@ -524,6 +528,31 @@ def _check_closing_has_takeaway_and_hook(golden: dict) -> list[str]:
     return errors
 
 
+def _check_closing_is_declarative(golden: dict) -> list[str]:
+    """behavior.md rule 8's declarative-close doctrine (issue #139,
+    pure-chat wave): a closing turn has NO question anywhere (stricter
+    than the ordinary one-question-per-turn lint — a close permits zero,
+    not one) and no banned closing meta-phrase. Reuses
+    ``conversation_lints.lint_closing_phrases`` — the same authority the
+    runtime's ``lint_outgoing(is_closing=True)`` checks — rather than a
+    forked phrase list (recurring-defect doctrine)."""
+    errors = []
+    for index, turn in _turns_with_property(golden, "closing_is_declarative"):
+        annotations = turn.get("annotations") or {}
+        if annotations.get("kind") != "closing":
+            errors.append(f"turns[{index}]: closing_is_declarative requires kind == 'closing'")
+        text = turn.get("text") or ""
+        stripped = conversation_lints._strip_echoed_questions(text)  # noqa: SLF001 — shared authority
+        if "?" in stripped:
+            errors.append(
+                f"turns[{index}]: closing turn contains a question — closes must be "
+                "purely declarative (rule 8)"
+            )
+        for finding in conversation_lints.lint_closing_phrases(text):
+            errors.append(f"turns[{index}]: {finding['detail']}")
+    return errors
+
+
 def _check_deflects_off_scope(golden: dict) -> list[str]:
     errors = []
     for index, turn in _turns_with_property(golden, "deflects_off_scope"):
@@ -567,6 +596,7 @@ PROPERTY_CHECKERS: dict[str, Callable[[dict], list[str]]] = {
     "receipt_quotes_user": _check_receipt_quotes_user,
     "no_new_topic_mid_arc": _check_no_new_topic_mid_arc,
     "closing_has_takeaway_and_hook": _check_closing_has_takeaway_and_hook,
+    "closing_is_declarative": _check_closing_is_declarative,
     "deflects_off_scope": _check_deflects_off_scope,
     "demonstrated_knowledge_opener_shape": _check_demonstrated_knowledge_opener_shape,
 }

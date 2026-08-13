@@ -1239,7 +1239,7 @@ The host agent MAY delegate classification to the cheap router model instead of 
 printf '%s' "$MSG" | python3 system/lifehug.py route
 ```
 
-...and act on its `action` field (`file_answer` / `ingest_story` / `handle_command` / `continue_session` / `deflect`, or `ask_user` when the router is unsure and there is neither a pending question nor an open session — ask one clarifying line rather than guessing).
+...and act on its `action` field (`file_answer` / `ingest_story` / `handle_command` / `continue_session` / `deflect`, or `ask_user` when the router is unsure and there is neither a pending question nor an open session — ask one clarifying line rather than guessing). Reply-after-close (issue #139): when no session is open but a session on that channel closed recently — same day or later — `route`'s output carries `reopen_session_id` and `action:"continue_session"`; act on it by opening a FRESH session seeded from that closed session's subject (never append to a closed session — the store forbids it), never by filing the message as an unrelated `new_story`.
 
 ---
 
