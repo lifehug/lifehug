@@ -21,7 +21,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import entity_roster  # noqa: E402
 import recommend_focuses  # noqa: E402
 import roadmap  # noqa: E402
@@ -52,7 +52,7 @@ class GateTestBase(unittest.TestCase):
     real-path-tmp-dir + monkeypatched-module-attribute convention."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT)
+        self.tmp = symlink_free_tmp(self)
         self._saved = {
             (roadmap, "ROADMAP_FILE"): roadmap.ROADMAP_FILE,
             (roadmap, "QUESTIONS_FILE"): roadmap.QUESTIONS_FILE,

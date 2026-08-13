@@ -12,7 +12,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 
 
 def load_answer_ack():
@@ -166,7 +166,7 @@ class AnswerAcknowledgmentDeliveryTests(unittest.TestCase):
         # at a synthetic vault — ROOT.parent, because vault_paths refuses to
         # traverse macOS's /var symlink — so these tests never write session
         # documents or a delivery ledger into the real vault.
-        vault = root_parent_tmp(self, ROOT, prefix="lifehug-v153-ack-") / "vault"
+        vault = symlink_free_tmp(self, prefix="lifehug-v153-ack-") / "vault"
         vault.mkdir()
         for patch in (
             mock.patch.object(conversation_delivery, "VAULT_ROOT", vault),

@@ -24,7 +24,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import vault_paths  # noqa: E402
 
 
@@ -174,7 +174,7 @@ def has_direct_filesystem_call(text: str) -> bool:
 class VaultContractTests(unittest.TestCase):
     def setUp(self):
         vault_paths._reset_process_binding_for_tests()
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v120-contract-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v120-contract-")
 
     def tearDown(self):
         vault_paths._reset_process_binding_for_tests()
@@ -595,7 +595,7 @@ class VaultContractTests(unittest.TestCase):
 
 class ExternalVaultSubprocessTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v120-smoke-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v120-smoke-")
         self.framework = self.tmp / "framework"
         shutil.copytree(SYSTEM, self.framework / "system", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(ROOT / "templates", self.framework / "templates")

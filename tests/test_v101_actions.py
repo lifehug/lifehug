@@ -17,7 +17,9 @@ from urllib.parse import urlencode
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
+from tempdirs import SYMLINK_FREE_TMP_BASE  # noqa: E402
 import jobs  # noqa: E402
 import lifehug_core  # noqa: E402
 import question_planner as qp  # noqa: E402
@@ -298,7 +300,7 @@ class PostAuthTests(unittest.TestCase):
 
     def test_artifact_file_gets_private_headers(self):
         original_repo = lifehug_core.REPO_DIR
-        with tempfile.TemporaryDirectory(dir=ROOT.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=SYMLINK_FREE_TMP_BASE) as tmp:
             try:
                 lifehug_core.REPO_DIR = Path(tmp)
                 artifact = lifehug_core.REPO_DIR / "outputs" / "piece" / "v1.pdf"
@@ -343,7 +345,7 @@ class PostAuthTests(unittest.TestCase):
 
     def test_job_endpoint_converges_from_queued_to_succeeded(self):
         original = jobs.VAULT_ROOT
-        with tempfile.TemporaryDirectory(dir=ROOT.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=SYMLINK_FREE_TMP_BASE) as tmp:
             try:
                 vault_paths._reset_process_binding_for_tests()
                 vault = Path(tmp)

@@ -31,7 +31,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import conversation  # noqa: E402
 import conversation_delivery as engine  # noqa: E402
 import lifehug_core as core  # noqa: E402
@@ -188,7 +188,7 @@ class ThresholdAndDefaultTests(unittest.TestCase):
 
 class MutatesNothingTests(unittest.TestCase):
     def test_route_mutates_nothing(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v155-router-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-v155-router-")
         vault = tmp / "vault"
         vault.mkdir()
         state_dir = vault / "state"
@@ -266,7 +266,7 @@ class ReplyAfterCloseTests(unittest.TestCase):
         return vault, session_id
 
     def test_same_day_reply_overrides_confident_new_story_model_call(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-v161-reply-after-close-")
         closed_at = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
         vault, session_id = self._closed_session(tmp, last_activity=closed_at)
         same_day_later = closed_at + timedelta(hours=6)
@@ -287,7 +287,7 @@ class ReplyAfterCloseTests(unittest.TestCase):
         self.assertIsNone(result["open_session_id"])
 
     def test_later_reply_with_no_provider_resolves_to_continue_not_new_story(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-v161-reply-after-close-")
         closed_at = datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
         vault, session_id = self._closed_session(tmp, last_activity=closed_at)
         much_later = closed_at + timedelta(days=40)
@@ -309,7 +309,7 @@ class ReplyAfterCloseTests(unittest.TestCase):
         ai.assert_not_called()
 
     def test_recently_closed_does_not_override_out_of_scope_or_command(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-v161-reply-after-close-")
         closed_at = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
         vault, _session_id = self._closed_session(tmp, last_activity=closed_at)
         same_day_later = closed_at + timedelta(hours=1)
@@ -329,7 +329,7 @@ class ReplyAfterCloseTests(unittest.TestCase):
                 self.assertEqual(result["intent"], intent)
 
     def test_no_closed_session_leaves_terminal_fallback_unchanged(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reply-after-close-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-v161-reply-after-close-")
         vault = tmp / "vault"
         vault.mkdir()
         ai = mock.Mock(side_effect=AssertionError("keyless must never call the model"))
@@ -347,7 +347,7 @@ class ReplyAfterCloseTests(unittest.TestCase):
         appending to the closed doc — the store forbids that by design),
         and that new session closes again with its own declarative
         takeaway. Both closes pass the closing-declarative lint."""
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v161-reopen-close-again-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-v161-reopen-close-again-")
         closed_at = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
         vault, first_session_id = self._closed_session(tmp, last_activity=closed_at)
         same_day_later = closed_at + timedelta(hours=3)

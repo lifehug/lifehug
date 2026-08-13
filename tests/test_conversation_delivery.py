@@ -29,7 +29,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import conversation  # noqa: E402
 import conversation_delivery as engine  # noqa: E402
 import lifehug_core as core  # noqa: E402
@@ -98,7 +98,7 @@ class EngineTestCase(unittest.TestCase):
     """Synthetic vault + injected collaborators shared by every subtest."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v153-turn-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v153-turn-")
         self.vault = self.tmp / "vault"
         self.vault.mkdir()
         self.state_path = self.tmp / "conversation_deliveries.json"

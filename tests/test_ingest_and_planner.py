@@ -12,7 +12,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import conversation  # noqa: E402
 import conversation_delivery as engine  # noqa: E402
 import lifehug_core as core  # noqa: E402
@@ -158,7 +158,7 @@ class StoryConversationTurnCase(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v155-story-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v155-story-")
         self.vault = self.tmp / "vault"
         self.vault.mkdir()
         self.state_path = self.tmp / "conversation_deliveries.json"
@@ -421,7 +421,7 @@ class IngestCliRegressionTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v155-ingest-cli-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v155-ingest-cli-")
 
     def _make_vault(self) -> Path:
         vault = self.tmp / f"vault-{len(list(self.tmp.iterdir()))}"

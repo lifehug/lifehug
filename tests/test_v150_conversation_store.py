@@ -25,7 +25,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import conversation  # noqa: E402
 import conversation_lints  # noqa: E402
 import vault_paths  # noqa: E402
@@ -85,7 +85,7 @@ class ConversationStoreTests(unittest.TestCase):
     """Subtest 2: session lifecycle (open/append CAS/close, cold-vault degradation)."""
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v150-conversation-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v150-conversation-")
         self.vault = self.tmp / "vault"
         self.vault.mkdir()
 
@@ -215,7 +215,7 @@ class ArcCardStoreTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v150-arc-cards-")
+        self.tmp = symlink_free_tmp(self, prefix="lifehug-v150-arc-cards-")
         self.vault = self.tmp / "vault"
         self.vault.mkdir()
 

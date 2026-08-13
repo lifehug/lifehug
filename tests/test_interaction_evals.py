@@ -24,7 +24,7 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tempdirs import root_parent_tmp  # noqa: E402
+from tempdirs import symlink_free_tmp  # noqa: E402
 import conversation_lints  # noqa: E402
 import interaction_evals as ie  # noqa: E402
 from ai_provider import ProviderStatus  # noqa: E402
@@ -661,7 +661,7 @@ class RunOrchestratorTests(unittest.TestCase):
 
 class EmitTasksTests(unittest.TestCase):
     def test_emit_tasks_writes_a_prompt_per_golden_and_per_persona(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-evals-emit-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-evals-emit-")
         out_dir = tmp / "evals"
         manifest_path = ie.emit_tasks(out_dir)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -673,7 +673,7 @@ class EmitTasksTests(unittest.TestCase):
             self.assertTrue((out_dir / item["prompt"]).exists())
 
     def test_run_with_emit_tasks_flag_writes_the_manifest(self):
-        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-evals-run-emit-")
+        tmp = symlink_free_tmp(self, prefix="lifehug-evals-run-emit-")
         import unittest.mock as mock
         with mock.patch.object(ie, "AGENT_TASKS_DIR", tmp):
             code, report = ie.run(emit_tasks_flag=True)
