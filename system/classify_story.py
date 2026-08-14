@@ -57,6 +57,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from question_judgment import load_judgment_rubric
 
 # ── constants ─────────────────────────────────────────────────────────────────
 # Non-dated alias — tracks the current Sonnet tier instead of pinning a
@@ -66,7 +67,6 @@ from lifehug_core import (
 # misdiagnosed — if it recurs on an instance, set `classify_model:
 # claude-sonnet-4-6` in config.yaml and capture the actual error.
 DEFAULT_MODEL = "claude-sonnet-5"
-RESEARCH_FILE = SYSTEM_DIR / "research.md"
 
 # Taxonomy themes for the AI prompt
 THEME_TAXONOMY = [
@@ -282,7 +282,7 @@ def corrections_for(source_path: Path) -> list[str]:
 def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
     """Construct the full AI classification prompt for a source file."""
     mission = load_mission()
-    research = RESEARCH_FILE.read_text(encoding="utf-8") if RESEARCH_FILE.exists() else ""
+    judgment_rubric = load_judgment_rubric()
     categories_block = load_question_categories()
     story_functions_block = "\n".join(f"  - {sf}" for sf in STORY_FUNCTIONS)
     themes_block = ", ".join(THEME_TAXONOMY)
@@ -294,8 +294,8 @@ def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
 ## Lifehug Mission
 {mission}
 
-## Research Background (condensed)
-{research[:3000]}
+## Question-Judgment Rubric
+{judgment_rubric}
 
 ---
 

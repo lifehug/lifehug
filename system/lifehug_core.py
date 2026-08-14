@@ -188,6 +188,7 @@ ARC_CARDS_FILE = _data("arc_cards")
 CONVERSATIONS_DIR = _data("conversations")
 MIRROR_RESPONSES_FILE = _data("mirror_responses")
 CONVERSATION_DELIVERIES_FILE = _data("conversation_deliveries")
+QUESTION_JUDGMENT_LEARNED_FILE = _data("question_judgment_learned")
 
 TEMPLATES_DIR = framework_path("templates", framework_system_dir=SYSTEM_DIR)
 MISSION_FILE = framework_path("mission", framework_system_dir=SYSTEM_DIR)

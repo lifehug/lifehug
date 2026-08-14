@@ -1,0 +1,26 @@
+# interactions/question_judgment/interaction.yaml — flat scalar subset only
+# (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
+interaction: question_judgment
+version: 1.0.0
+modes: judge|rubric_edit
+# file load order (per-turn assembly; also documented in context/manifest.md)
+load_order: identity|behavior|learned|examples|profile|turn_instructions
+# model roles by capability tier (config keys resolved by the runtime; these
+# name capability TIERS, not vendor products — owner-ratified 2026-08-14)
+role.worker: medium
+role.planner: high
+# lifecycle knobs (owner-ratified 2026-08-14 learning architecture: score
+# once at capture; a weekly pass makes ONE bounded, auditable edit to the
+# learned file; a quarterly pass re-examines the full candidate ledger)
+knob.weekly_edit_max_chars: 600
+knob.recalibration_cadence: quarterly
+knob.priority_floor: 0.4
+knob.priority_ceiling: 0.95
+# per-block context budgets (tokens, approximate; top-K small, whole-ledger
+# never loaded)
+budget.identity: 300
+budget.behavior: 1600
+budget.learned: 600
+budget.examples: 700
+budget.profile: 300
+budget.turn_instructions: 300

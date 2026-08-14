@@ -1,0 +1,46 @@
+# interactions/question_judgment/evals/lints.yaml — flat scalar subset only
+# (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
+#
+# DATA for a future lint engine — key names here are contract, not free
+# text. Each lint.* id maps to a structural property of the shipped
+# definition or of a JUDGE/RUBRIC-EDIT verdict. Fixtures only at this
+# stage — no engine reads this file yet (lands with the wiring PR, mirrors
+# interactions/conversation/evals/lints.yaml's own bootstrap PR).
+
+# prompt/behavior.md must carry numbered hard rules 1-11 (research.md §1
+# parity) plus the priority and penalty vocabulary sections — a rubric
+# missing any of these is a shipped-file defect, not a style nit.
+lint.behavior_has_numbered_rules: on
+rule_count.min: 11
+
+# a JUDGE-mode verdict must parse as the exact JSON shape
+# prompt/turn-instructions.md specifies: verdict, priority (accept only),
+# evidence, flags, purposes_served.
+lint.judge_output_parses: on
+
+# a RUBRIC-EDIT amendment's char_count must not exceed the edit budget
+# (interaction.yaml's knob.weekly_edit_max_chars) — an over-budget
+# amendment is a defect, never silently truncated by the runtime.
+lint.amendment_within_edit_budget: on
+
+# flags on any verdict must use the penalty vocabulary's exact names
+# (prompt/behavior.md's penalty table) or the duplicate_of_<id> shape —
+# no ad hoc flag names.
+lint.flags_use_penalty_vocabulary: on
+penalty_vocab.1: yes_no_wording
+penalty_vocab.2: self_directed_why
+penalty_vocab.3: too_broad
+penalty_vocab.4: no_scene_or_stakes_path
+penalty_vocab.5: no_source_citation
+penalty_vocab.6: too_short
+penalty_vocab.7: possibly_vague
+penalty_vocab.8: duplicate_of_
+
+# priority must be in-band on accept, absent/null on reject.
+lint.priority_in_band: on
+band.floor: 0.4
+band.ceiling: 0.95
+
+# an accept verdict with priority but no evidence line is invalid (the
+# priority vocabulary's evidence requirement).
+lint.evidence_required_on_accept: on
