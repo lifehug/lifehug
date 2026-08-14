@@ -21,6 +21,33 @@ you realize how impactful they are in your life.
 
 One thoughtful question at a time. Voice or text, long or short. A compounding, AI-assisted memory system that gets smarter with every answer — discovering connections, deepening thin areas, and turning raw stories into a living, interlinked wiki of my life.
 
+## The Convergence Principle
+
+The loop must work without us. Two tiers, one mechanism (owner-ratified
+2026-08-14):
+
+1. **The floor: answering is sufficient.** A user who only ever answers
+   questions — who never opens a review surface, never clicks anything —
+   must still converge, over time, to the optimal system: the right
+   questions, the right Focuses, an ever-more-accurate telling of their
+   life. Every autonomous stage (candidate promotion, focus creation and
+   retirement, entity graduation, queue planning) must have a no-human
+   path. A stage that silently requires manual input to make progress is
+   a defect against this principle, not a design choice.
+
+2. **The accelerator: manual signals are optional and multiplicative.**
+   An avid user who makes explicit decisions — promoting, dismissing,
+   giving reasons, choosing focuses — does not unlock different behavior;
+   they speed up the same convergence. Every manual affordance is an
+   accelerant, never a dependency, and every explicit decision is signal
+   the loop must actually consume.
+
+Corollaries: "never created without you" postures are override defaults,
+not hard gates — the system may act autonomously within stated policy and
+the owner's explicit decision always wins. Work parked "for a human" must
+either resurface autonomously or be reachable by a real affordance; it
+never strands.
+
 ## For AI Prompts
 
 Every prompt, classification, neighborhood, and planner decision should serve at least one of these three purposes. If a question doesn't help someone understand the author, help the author tell their story, or help the author understand themselves — it's the wrong question.

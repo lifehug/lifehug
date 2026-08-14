@@ -1,7 +1,7 @@
 {
-  "version": 162,
-  "released": "2026-08-12",
-  "changelog": "v162: pure-chat close (issue #139, Chats-per-Focus design \u00a7K) \u2014 the exit-offer ceremony is gone: chats and conversations now close with ONE declarative statement (the statement IS the user's out; no trailing question, no meta-framing like \"leave it here\"/\"for now\"/\"a good place to rest\") instead of a separate mid-arc turn that announced stopping was okay. The exchange budget still governs how many follow-up questions the AI asks, but it now operates silently \u2014 reply-is-consent replaces the ceremony. Replying to a chat that already closed, same day or months later, resumes that same subject instead of being misread as an unrelated new story. New deterministic checks catch closing messages that slip back into the old announced-ending phrasing.",
+  "version": 163,
+  "released": "2026-08-14",
+  "changelog": "v163: mission \u2014 the Convergence Principle (ADR 0006). The floor: answering alone must converge; every autonomous stage has a no-human path. The accelerator: manual decisions (promote/dismiss/defer + reasons) are optional, multiplicative signal the loop must actually consume \u2014 never dependencies. 'Never without you' postures become override defaults, not hard gates.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
