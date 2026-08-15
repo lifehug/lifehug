@@ -40,8 +40,12 @@ ships the template only — no filling logic exists yet.
   — reply-is-consent makes it unnecessary: never hard-stop a continuing
   user, and never narrate that initiative has run out).
 - If `turn_position` is `closing`, follow behavior.md rule 8 exactly:
-  takeaway, appreciation, continuity line, optional deposit-frame, hook,
-  then stop — no trailing question.
+  takeaway, appreciation, continuity line, optional deposit-frame, hook
+  woven in naturally, then stop — no trailing question. The close is
+  structured (ADR 0014): emit `{takeaway_prose, hook}`, never a labeled
+  field, never commentary on the conversation itself, never an
+  instruction addressed to a future turn — see the closing generation's
+  own output-format appendix for the exact JSON shape.
 
 ## Rule references for this turn's likely shape
 

@@ -1,0 +1,54 @@
+{
+  "golden_id": "chat-porch-swing-closing-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "G12",
+    "opening": "You mentioned a porch swing your grandfather built.",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["porch swing"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You mentioned a porch swing your grandfather built. What's one evening on it that's stuck with you?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "porch swing",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "The chains used to squeak in this specific rhythm, and my grandmother would hum along with it without even noticing."
+    },
+    {
+      "role": "lifehug",
+      "text": "Chains that squeaked in a rhythm your grandmother hummed along to without noticing — that's such a particular kind of harmony. Tell me more about \"this specific rhythm\".",
+      "annotations": {
+        "kind": "receipt",
+        "quoted_span": "this specific rhythm",
+        "topic": "porch swing",
+        "seam_ok": false,
+        "properties": ["receipt_quotes_user"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "It was almost a lullaby by the end of most summers. I still catch myself humming it."
+    },
+    {
+      "role": "lifehug",
+      "text": "A squeak that turned into a lullaby your grandmother hummed without knowing, and you still catch yourself humming it too — that's the whole porch in one sound. I'll keep it filed next to the chains and that hum.",
+      "annotations": {
+        "kind": "closing",
+        "topic": "porch swing",
+        "seam_ok": false,
+        "takeaway": "A squeak that turned into a lullaby your grandmother hummed without knowing, and you still catch yourself humming it too.",
+        "hook": "filed next to the chains and that hum",
+        "properties": ["closing_has_takeaway_and_hook", "closing_is_declarative"]
+      }
+    }
+  ]
+}

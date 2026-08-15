@@ -1,0 +1,38 @@
+{
+  "golden_id": "closing-scaffold-leak-bad-01",
+  "note": "INTENTIONALLY BROKEN (ADR 0014, issue #163). Reproduces the leaked-scaffolding close SHAPE — anonymized/synthesized, never the owner's real close or any vault content — as a lint-regression fixture: a labeled hook field, meta-commentary on the conversation's own quality, a self-instruction addressed to a future turn/session, and raw markdown emphasis, all in one closing turn. Deliberately excluded from interaction_evals.load_goldens()'s sweep (see NON_GOLDEN_FILENAMES) because it is NOT a correct reference transcript — tests/test_structured_close.py loads this file directly and asserts every one of the four new lint classes (closing_label_leak, closing_meta_commentary, closing_future_turn, closing_markdown_leak) trips on its closing turn's text.",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "G99",
+    "opening": "You mentioned a fishing trip with your uncle.",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["fishing trip"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You mentioned a fishing trip with your uncle. What's one morning out there that's stuck with you?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "fishing trip",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "He never let me use the good reel until that one morning, and I still don't know why he changed his mind."
+    },
+    {
+      "role": "lifehug",
+      "text": "That morning he finally handed you the good reel. I appreciated that you pushed back on using the old one for years, and that made this actually productive. Next time, pick up wherever things land — no need to re-explain the setup.\n\nHook for next time: **\"the good reel and why he finally handed it over\"**",
+      "annotations": {
+        "kind": "closing",
+        "topic": "fishing trip",
+        "seam_ok": false,
+        "properties": []
+      }
+    }
+  ]
+}

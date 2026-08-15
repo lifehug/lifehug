@@ -76,6 +76,12 @@ def rejected_send(_message):
     return core.TelegramSendResult("rejected", "telegram_api_rejected", 0, 1)
 
 
+def closing_json(takeaway_prose=CLOSING_MESSAGE, hook="the baler he kept alive"):
+    # ADR 0014 (issue #163): the closing model's own output shape —
+    # {takeaway_prose, hook} — distinct from turn_json's {message, ...}.
+    return json.dumps({"takeaway_prose": takeaway_prose, "hook": hook})
+
+
 def turn_json(message=TURN_MESSAGE, followup=FOLLOWUP_TEXT, **extra):
     payload = {
         "message": message,
@@ -512,7 +518,7 @@ class CloseTests(EngineTestCase):
             scores_path=self.scores_path,
             candidates_path=self.candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _prompt, _model: json.dumps({"message": CLOSING_MESSAGE}),
+            ai_call=lambda _prompt, _model: closing_json(),
             telegram_send=self._send(),
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
         )
@@ -539,8 +545,8 @@ class CloseTests(EngineTestCase):
             scores_path=self.scores_path,
             candidates_path=self.candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _p, _m: json.dumps(
-                {"message": "Thank you for that. What should we talk about next time?"}
+            ai_call=lambda _p, _m: closing_json(
+                "Thank you for that. What should we talk about next time?"
             ),
             telegram_send=self._send(),
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
@@ -564,8 +570,8 @@ class CloseTests(EngineTestCase):
             scores_path=self.scores_path,
             candidates_path=self.candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _p, _m: json.dumps(
-                {"message": "That's a good one to leave sitting here for now — thank you."}
+            ai_call=lambda _p, _m: closing_json(
+                "That's a good one to leave sitting here for now — thank you."
             ),
             telegram_send=self._send(),
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
@@ -590,7 +596,7 @@ class CloseTests(EngineTestCase):
             scores_path=self.scores_path,
             candidates_path=self.candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _p, _m: json.dumps({"message": CLOSING_MESSAGE}),
+            ai_call=lambda _p, _m: closing_json(),
             telegram_send=self._send(),
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
         )
@@ -624,7 +630,7 @@ class CloseTests(EngineTestCase):
             scores_path=self.scores_path,
             candidates_path=self.candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _p, _m: json.dumps({"message": CLOSING_MESSAGE}),
+            ai_call=lambda _p, _m: closing_json(),
             telegram_send=self._send(),
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
         )
@@ -745,7 +751,7 @@ class DayRolloverTests(EngineTestCase):
             scores_path=self.scores_path,
             candidates_path=self.candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _p, _m: json.dumps({"message": CLOSING_MESSAGE}),
+            ai_call=lambda _p, _m: closing_json(),
             telegram_send=self._send(),
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
         )

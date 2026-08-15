@@ -56,6 +56,40 @@ closing_banned.8: we'll stop here
 closing_banned.9: rest here
 closing_banned.10: whenever you're ready to keep going
 
+# structured-close doctrine (ADR 0014, issue #163): the DELIVERED
+# takeaway_prose (and closing goldens, via conversation_lints
+# .lint_closing_phrases) must never carry the model's own bookkeeping.
+# Checked ONLY on closing turns, same is_closing=True gate as
+# lint.closing_declarative above. Four independent classes so a golden/test
+# can assert exactly which one tripped.
+
+# literal labeled-field substrings — the exact shape issue #163's incident
+# rendered verbatim ("Hook for next time: **"..."**").
+lint.closing_label_leak: on
+closing_label.1: hook for next time
+closing_label.2: takeaway:
+closing_label.3: for next time:
+
+# case-insensitive regex (the class needs alternation) — commentary judging
+# the CONVERSATION's quality or the author's own conversational behavior,
+# distinct from rule 8's required "specific appreciation" of what they
+# actually shared, which stays allowed and unflagged.
+lint.closing_meta_commentary: on
+closing_meta.1: i appreciated that you
+closing_meta.2: made this (actually )?(useful|productive)
+closing_meta.3: you pushed back
+
+# instructions addressed to a future turn/session. The clause-initial
+# "next time," + imperative shape is grammatical, not a literal phrase, so
+# it is an engine constant (conversation_lints._FUTURE_TURN_CLAUSE_RE) —
+# this data list holds literal phrases only.
+lint.closing_future_turn: on
+closing_future.1: no need to re-explain
+
+# raw "**" markdown emphasis leaking into channel-delivered text — no data,
+# pure structural check (Telegram never renders markdown).
+lint.closing_markdown_leak: on
+
 # flags "what year"-form questions (behavior.md rule 3)
 lint.year_question_detector: on
 

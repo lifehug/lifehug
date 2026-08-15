@@ -404,7 +404,10 @@ class ReplyAfterCloseTests(unittest.TestCase):
             scores_path=scores_path,
             candidates_path=candidates_path,
             status_resolver=ready_status,
-            ai_call=lambda _p, _m: json.dumps({"message": second_takeaway}),
+            # ADR 0014 (issue #163): the closing model's structured shape.
+            ai_call=lambda _p, _m: json.dumps(
+                {"takeaway_prose": second_takeaway, "hook": "the ducks"}
+            ),
             telegram_send=telegram_send,
             prompt_builder=lambda payload: "SYNTHETIC CLOSING PROMPT",
         )
