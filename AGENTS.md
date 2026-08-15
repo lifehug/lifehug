@@ -294,7 +294,7 @@ python3 system/lifehug.py weekly-maintenance
 LIFEHUG_WEEKLY_DRY_RUN=1 system/weekly_maintenance.sh
 ```
 
-The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, auto-promotes candidates under caps, writes the next planned queue, **plans one arc card per queued question**, scans gaps in dry-run mode, reports progress, and autocommits real changes.
+The weekly Loop segment compiles offline, lints sources, applies safe source fixes only when lint finds them, classifies capped new sources, updates the quality profile, **runs the question-judgment RUBRIC-EDIT** (`judgment-update`, ADR 0009 — at most one bounded, evidence-cited amendment to `state/question_judgment/learned.md` from the week's owner decisions, immediately after the quality update and before candidate promotion), auto-promotes candidates under caps, writes the next planned queue, **plans one arc card per queued question**, scans gaps in dry-run mode, reports progress, and autocommits real changes. Focus-autopilot is a monthly step, not weekly (ADR 0011 amendment, v170).
 
 **Arc cards (v154, issue #118).** Directly after the queue is written, `lifehug.py arc-plan` plans one card per queued question — an opening framing quoted from the author's own record plus 2–4 typed follow-up intents (unfilled five-slot scene probes, neighborhood siblings, timeline gaps phrased as landmark anchors, studio format slots, a Mirror "sit with" line on self-arc questions, demonstrated-knowledge summaries). Deterministic cards are always computed first, so a model failure, invalid output, or a keyless machine never costs the week its plan; keyless runs additionally emit the prompt to `state/agent_tasks/arcs/` for `arc-plan --from-response`. Cards live in `state/arc_cards.json` and expire with the queue. **This shell step is the parity spec for the platform's `arc_plan` step** — a cap or gate the platform needs must appear here first.
 
@@ -307,7 +307,7 @@ python3 system/lifehug.py monthly-research
 LIFEHUG_MONTHLY_DRY_RUN=1 system/monthly_research.sh
 ```
 
-The monthly Loop segment compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, **offers at most one conversation thread** from a neighborhood that has record to open from and somewhere left to go (never repeated within a quarter — v154), reports progress, and autocommits real changes.
+The monthly Loop segment compiles, detects gaps, opens a small capped set of new research neighborhoods, refreshes the self-knowledge arc if needed, recommends Focuses, then **runs focus-autopilot** (ADR 0011 as amended 2026-08-15 — the cadence moved weekly → monthly; approves the single highest-scoring pending idea when the "developing" set is thinner than target, directly after the recommendations refresh and before the roster refresh, gentle by default at 1/run), refreshes entity rosters, **offers at most one conversation thread** from a neighborhood that has record to open from and somewhere left to go (never repeated within a quarter — v154), reports progress, and autocommits real changes.
 
 Review candidate questions before they enter the daily flow:
 
