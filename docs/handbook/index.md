@@ -19,10 +19,10 @@ Planned pages, in build order:
 | The Mission & the Convergence Principle | the three purposes; floor and accelerator |
 | The Loop | the canonical cycle, the three clocks, In/adjacent/Out taxonomy |
 | Interactions | the pattern; Conversation, Question-Judgment, Focus-Curation |
-| Quality & Engagement Profile | answer richness, multipliers, rumination |
-| Neighborhoods | the question-supply unit and its arcs |
-| Entities & Graduation | rosters, thresholds, wiki pages |
-| Conversations & the Day Model | chats, sessions, the daily reset |
+| [Quality & Engagement Profile](quality-profile.md) | answer richness, multipliers, rumination |
+| [Neighborhoods](neighborhoods.md) | the question-supply unit and its arcs |
+| [Entities & Graduation](entities.md) | rosters, thresholds, wiki pages |
+| [Conversations & the Day Model](conversations.md) | chats, sessions, the daily reset |
 | Decisions & Learning | the weekly rubric edit; how owner decisions teach the system |
 
 Until a page exists, its territory is covered by the
