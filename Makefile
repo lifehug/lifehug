@@ -16,3 +16,13 @@ export LIFEHUG_WALKTHROUGH_PORT
 
 walkthrough-%:
 	python3 tests/walkthrough_$*.py --artifacts artifacts/walkthroughs/$*
+
+# Explicit entry (issue #146, ADR 0008): the generic pattern rule substitutes
+# `$*` literally, so a hyphenated slug like `unified-quality` would look for
+# `tests/walkthrough_unified-quality.py` (hyphen mid-filename) rather than
+# the standard-Python-module-naming `tests/walkthrough_unified_quality.py`
+# the contract specifies. An explicit target (Make prefers an exact match
+# over a pattern rule) bridges the two without changing the pattern rule
+# itself or renaming every other slug's script.
+walkthrough-unified-quality:
+	python3 tests/walkthrough_unified_quality.py --artifacts artifacts/walkthroughs/unified-quality
