@@ -31,3 +31,8 @@ walkthrough-unified-quality:
 # as walkthrough-unified-quality above, for tests/walkthrough_decision_reason.py.
 walkthrough-decision-reason:
 	python3 tests/walkthrough_decision_reason.py --artifacts artifacts/walkthroughs/decision-reason
+
+# Explicit entry (focus-merge, ADR 0012): same hyphen-vs-underscore bridge
+# as walkthrough-unified-quality above, for tests/walkthrough_focus_merge.py.
+walkthrough-focus-merge:
+	python3 tests/walkthrough_focus_merge.py --artifacts artifacts/walkthroughs/focus-merge

@@ -386,17 +386,20 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn(body, full_body)
 
     def test_review_three_section_bars_render_with_counts(self):
+        # Four lanes since v169 (ADR 0012 added Duplicate focuses).
         self._populate()
         _, body, _ = self._view("review")
-        self.assertEqual(body.count('class="fnd-focus"'), 3)
+        self.assertEqual(body.count('class="fnd-focus"'), 4)
         self.assertIn('<span class="focus-label">Question candidates</span>', body)
         self.assertIn('<span class="focus-label">Focus ideas</span>', body)
+        self.assertIn('<span class="focus-label">Duplicate focuses</span>', body)
         self.assertIn('<span class="focus-label">Entity candidates</span>', body)
         # Fixture: c1/c3 candidate + c2 needs_review = 3 actionable; one
         # pending recommendation (Emma); one ungraduated entity (Sarah).
         self.assertIn("<h1>Review</h1>", body)
         self.assertIn("3 question candidates waiting", body)
         self.assertIn("1 focus idea pending", body)
+        self.assertIn("0 duplicate focuses", body)
         self.assertIn("1 entity candidate", body)
 
     def test_review_shows_the_imported_auto_promote_threshold(self):
@@ -531,8 +534,9 @@ class WikiViewsTests(unittest.TestCase):
         self.assertLess(body.index("auto_promoted (1)"), body.index("rejected (1)"))
 
     def test_review_all_empty_state_still_renders_three_bars(self):
-        # The empty-state teaches the system's three growth channels rather
-        # than disappearing when nothing is waiting.
+        # The empty-state teaches the system's growth/healing channels rather
+        # than disappearing when nothing is waiting. Four lanes since v169
+        # (ADR 0012 added Duplicate focuses).
         for name in ("QUESTION_CANDIDATES_FILE", "FOCUS_RECS_FILE",
                      "NEIGHBORHOODS_FILE", "QUESTIONS_FILE", "ROTATION_FILE",
                      "COVERAGE_FILE", "SOURCE_MANIFEST_FILE",
@@ -540,12 +544,14 @@ class WikiViewsTests(unittest.TestCase):
             setattr(serve_wiki, name, self.tmp / "missing.json")
         entity_roster.ENTITY_DIR = self.tmp / "no-rosters"
         _, body, _ = self._view("review")
-        self.assertEqual(body.count('class="fnd-focus"'), 3)
+        self.assertEqual(body.count('class="fnd-focus"'), 4)
         self.assertIn("0 question candidates waiting", body)
         self.assertIn("0 focus ideas pending", body)
+        self.assertIn("0 duplicate focuses", body)
         self.assertIn("0 entity candidates", body)
         self.assertIn("No candidates yet.", body)
         self.assertIn("No pending recommendations.", body)
+        self.assertIn("No duplicate focuses", body)
 
     def test_review_actions_redirect_to_review(self):
         redirect, flash, job = serve_wiki.act_candidate({"id": ["c1"], "op": ["bogus"]})

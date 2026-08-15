@@ -327,6 +327,30 @@ def _build_focus_dismiss(payload: dict) -> tuple[Invocation, ...]:
     return _build_focus(payload, "dismiss")
 
 
+def _build_focus_merge(payload: dict) -> tuple[Invocation, ...]:
+    """The Combine action's envelope (ADR 0012). Exactly two focus ids, both
+    validated against _FOCUS_ID_RE before they ever reach argv; the verb
+    itself does the semantic refusals (unknown, self, primary). Retry safety
+    is "never": the transaction is not idempotent — a re-run after a
+    successful merge finds no loser and fails, which is the correct, safe
+    outcome, but not one a retry should provoke."""
+    _expect_payload(payload, required={"survivor", "loser"}, optional={"adopt_target"})
+    survivor = _text(payload, "survivor", maximum=64)
+    loser = _text(payload, "loser", maximum=64)
+    for value in (survivor, loser):
+        if not _FOCUS_ID_RE.fullmatch(value):
+            raise ValueError("invalid focus id")
+    if survivor == loser:
+        raise ValueError("a focus cannot absorb itself")
+    args = ["focus-merge", survivor, loser]
+    adopt_target = payload.get("adopt_target", False)
+    if not isinstance(adopt_target, bool):
+        raise ValueError("invalid adopt_target flag")
+    if adopt_target:
+        args.append("--adopt-target")
+    return (_cli(*args),)
+
+
 def _build_second_voice(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(payload, required={"key"})
     return (_cli("second-voice-ack", _token(payload, "key")),)
@@ -662,6 +686,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "fix-source": CommandSpec(_build_fix, "never"),
     "focus-approve": CommandSpec(_build_focus_approve, "never", timeout_seconds=1800),
     "focus-dismiss": CommandSpec(_build_focus_dismiss, "never"),
+    "focus-merge": CommandSpec(_build_focus_merge, "never"),
     "monthly": CommandSpec(_build_schedule("monthly_research.sh"), "never", timeout_seconds=21600),
     "process-answer": CommandSpec(_build_process_answer, "never", timeout_seconds=1800),
     "reflect-source": CommandSpec(_build_reflect, "never"),

@@ -1964,6 +1964,62 @@ def _recommendations_section_html() -> str:
     return "".join(parts)
 
 
+def _duplicate_focuses_section_html() -> str:
+    """Duplicate focuses lane of Review (ADR 0012) — the certain-duplicate
+    pairs `focus_dupes.certain_focus_duplicates()` detects, each with a
+    Combine action that enqueues the `focus-merge` transaction.
+
+    Detection is NOT re-derived here: the lane renders focus_dupes' own
+    report, and the survivor picker is seeded with focus_dupes' own
+    `suggested_merge` survivor — one detector, one suggestion, whether the
+    owner reads it in the terminal or in the viewer.
+    """
+    from focus_dupes import certain_focus_duplicates  # noqa: PLC0415
+
+    groups = certain_focus_duplicates(load_roadmap())
+    if not groups:
+        return _empty("No duplicate focuses — every focus has a distinct name.")
+
+    rows = []
+    for group in groups:
+        focuses = group["focuses"]
+        suggested = group["suggested_merge"]["survivor"]
+        ids = [str(f.get("id")) for f in focuses]
+        options = "".join(
+            f'<option value="{html.escape(fid)}"{" selected" if fid == suggested else ""}>'
+            f'{html.escape(str(f.get("label") or fid))} ({html.escape(fid)})</option>'
+            for f, fid in zip(focuses, ids))
+        # The pair travels as a hidden field; the handler recomputes the
+        # losers as (group - survivor) so the button can never be replayed
+        # into merging something the lane didn't show.
+        action = (
+            f'<form class="actform act-inline" method="post" action="/actions/focus-merge">'
+            f'{_token_input()}'
+            f'<input type="hidden" name="group" value="{html.escape(",".join(ids))}">'
+            f'<label for="survivor-{html.escape(group["key"])}">keep </label>'
+            f'<select id="survivor-{html.escape(group["key"])}" name="survivor">{options}</select>'
+            f'<button class="btn" type="submit">Combine…</button></form>')
+        rows.append([
+            html.escape(str(group["key"])),
+            ", ".join(f'{html.escape(str(f.get("label") or "?"))} '
+                      f'(<code>{html.escape(str(f.get("id")))}</code>)' for f in focuses),
+            action,
+        ])
+    return _table(["Name key", "Focuses", "Actions"], rows)
+
+
+def _duplicate_focuses_policy_line() -> str:
+    """Policy line for the Duplicate focuses lane — states the two rules the
+    owner needs to know before pressing Combine (ADR 0012)."""
+    return (
+        "owner-initiated only — nothing here merges on its own. Combining is a "
+        "single auditable transaction: the survivor absorbs the other's question-bank "
+        "categories (question ids are never renumbered), roster entries re-point, and "
+        "the absorbed focus is recorded in state/focus_merges.json. Hand-authored wiki "
+        "pages are never removed. Run <code>lifehug focus-merge &lt;keep&gt; &lt;absorb&gt; "
+        "--dry-run</code> first to read the full plan")
+
+
 def _focus_ideas_policy_line() -> str:
     """Focus ideas lane policy line — reflects the completion gate's actual
     state (issue #79, resolved) AND the autopilot posture that retired
@@ -2008,17 +2064,21 @@ def view_review():
     established — each carrying its own autonomy-level policy line so it's
     obvious at a glance which lane needs your judgment (question candidates,
     focus ideas) and which is pure FYI (entity candidates)."""
+    from focus_dupes import certain_focus_duplicates  # noqa: PLC0415
+
     stats = loop_stats()
     open_cands, pending_recs = stats["open_cands"], stats["pending_recs"]
     entity_total = sum(
         len([e for e in load_roster(t).get("entities", [])
              if not e.get("page_eligible") and not e.get("maps_to_focus")])
         for t in ENTITY_TYPES)
+    dupe_total = len(certain_focus_duplicates(load_roadmap()))
 
     parts = [
         "<h1>Review</h1>",
         f"<p>{open_cands} question candidate{'s' if open_cands != 1 else ''} waiting · "
         f"{pending_recs} focus idea{'s' if pending_recs != 1 else ''} pending · "
+        f"{dupe_total} duplicate focus{'es' if dupe_total != 1 else ''} · "
         f"{entity_total} entity candidate{'s' if entity_total != 1 else ''}</p>",
     ]
 
@@ -2046,6 +2106,19 @@ def view_review():
         f'<div class="focus-sub">{_focus_ideas_policy_line()}</div>'
         '</summary><div class="fnd-cats">'
         + _recommendations_section_html()
+        + '</div></details>')
+
+    # Duplicate focuses (ADR 0012): a healing lane, not a proposal lane —
+    # it opens only when the vault actually carries a certain-duplicate
+    # pair, and closes to a one-line "none" the moment the last one heals.
+    dupe_open = " open" if dupe_total else ""
+    parts.append(
+        f'<details class="fnd-focus"{dupe_open}><summary>'
+        '<div class="focus-head"><span class="focus-label">Duplicate focuses</span> '
+        f'{_badge(dupe_total)}</div>'
+        f'<div class="focus-sub">{_duplicate_focuses_policy_line()}</div>'
+        '</summary><div class="fnd-cats">'
+        + _duplicate_focuses_section_html()
         + '</div></details>')
 
     parts.append(
@@ -3193,6 +3266,31 @@ def act_focus_rec(form):
     return ("/views/review", "✗ unknown recommendation action", None)
 
 
+def act_focus_merge(form):
+    """Combine two duplicate focuses (ADR 0012).
+
+    The form carries the whole detected group plus the chosen survivor; the
+    losers are recomputed HERE as (group - survivor) rather than trusted
+    from the request, so a replayed or hand-edited POST can only ever merge
+    within a group the lane actually rendered. One `focus-merge` job is
+    enqueued per loser — each job is the same single-pair transaction the
+    CLI runs, under the single-writer lock."""
+    survivor = _f(form, "survivor")
+    group = [g.strip() for g in _f(form, "group").split(",") if g.strip()]
+    if not survivor or survivor not in group:
+        return ("/views/review", "✗ pick which focus to keep", None)
+    losers = [g for g in group if g != survivor]
+    if not losers:
+        return ("/views/review", "✗ nothing to combine — that group has one focus", None)
+    job = None
+    for loser in losers:
+        job = _start_job("focus-merge", {"survivor": survivor, "loser": loser})
+    absorbed = ", ".join(losers)
+    return ("/views/review",
+            f"queued combine: {absorbed} → {survivor} (recorded in state/focus_merges.json)",
+            job["id"] if job else None)
+
+
 def act_second_voice(form):
     job = _start_job("second-voice-ack", {"key": _f(form, "key")})
     return ("/", "queued acknowledgment — the card will step aside", job["id"])
@@ -3359,6 +3457,7 @@ def act_timeline_unplace(form):
 ACTIONS = {
     "/actions/candidate": act_candidate,
     "/actions/focus-rec": act_focus_rec,
+    "/actions/focus-merge": act_focus_merge,
     "/actions/second-voice-ack": act_second_voice,
     "/actions/artifact/new": act_artifact_new,
     "/actions/artifact/assemble": act_artifact_assemble,
@@ -3535,7 +3634,7 @@ VIEW_DESCRIPTIONS = {
     "studio": "Where material becomes things — your projects and pieces, grouped by Focus. A project (the book) shows its chapter map and readiness; expand it for the full chapter table, and assemble the drafted chapters into a manuscript when you're ready. Every piece keeps its full version history — revisions, diffs, finals, deliveries — and everything starts here: pick a format, name a subject, and the Studio gathers the material. Foundation is the material; Studio is where you work it.",
     "foundation": "The raw material behind your stories — every Focus you're building toward, how deep it runs against its target, and where the graph is thin. Expand a Focus to see its categories: the bar is answered/total and the colour your ratio — RED (0–30%), YELLOW (30–70%), GREEN (70%+) — least-covered first. Expand a category to see every question, answered (✓) and open (○). Artifacts are what you make; this is what you make them from.",
     "graph": "Your life as a graph. Each node is a wiki page (people, places, periods, themes, Focuses); size reflects how many sources mention it and edges connect subjects that share sources. Click any node to open its page.",
-    "review": "What the system grew on its own, waiting for your eye. Three lanes with three autonomy levels: question candidates auto-promote past a quality bar and the rest wait here; focus ideas never become Focuses without you; entities graduate into wiki pages automatically, previewed here. Promote, approve, dismiss, or defer — or just see what the Loop noticed. Decided items keep their history below each lane.",
+    "review": "What the system grew on its own, waiting for your eye. Four lanes with four autonomy levels: question candidates auto-promote past a quality bar and the rest wait here; focus ideas never become Focuses without you; duplicate focuses are found for you but only ever combined by you; entities graduate into wiki pages automatically, previewed here. Promote, approve, combine, dismiss, or defer — or just see what the Loop noticed. Decided items keep their history below each lane.",
     "queue": "This week's planned questions — the ordered list the daily question pulls from before falling back to coverage rotation. Each row shows the question, its category, why it was chosen, and its status: answered (you've responded), delivered (sent, awaiting an answer), or queued (still waiting). Answered state is read from the question bank, so it stays accurate. The queue expires and is rebuilt weekly.",
     "sources": "The integrity ledger for every raw source (answers, stories, artifacts). Open lint findings flag metadata or manifest problems to repair; the captured-sources tables show what's tracked and whether any file has changed since it was first recorded.",
     "answers": "The ledger of everything you've answered — question, category, date, and an approximate word count, newest first, each row linking to reflect / correct / retract. Filing here is synchronous, so there's no in-flight or parked status column the way the hosted twin has — every row below already landed.",
@@ -3617,7 +3716,25 @@ class Handler(BaseHTTPRequestHandler):
         if not _loopback_authority(host, port):
             return False
         origin = self.headers.get("Origin")
-        if origin and not _loopback_authority(origin, port, origin=True):
+        # An OPAQUE origin ("null") carries no information to check, so it is
+        # treated exactly as an absent Origin already is — fall through to the
+        # session-token check, which is the actual CSRF defense here.
+        #
+        # This is not a theoretical case: `send_owner_headers` sets
+        # `Referrer-Policy: no-referrer`, and Chromium serializes the Origin of
+        # a form-POST navigation as "null" under that policy. Before this, EVERY
+        # POST action in the viewer (Promote/Defer/Dismiss, Approve/Dismiss,
+        # Reflect, Fix, Compile, Timeline place/unplace, every artifact action)
+        # answered 403 in a Chromium-family browser — found while building the
+        # focus-merge Combine walkthrough, reproduced on clean origin/main with
+        # the untouched candidate-Promote button.
+        #
+        # Nothing is weakened: the loopback-peer check, the exact Host+port
+        # check, and the per-process SESSION_TOKEN (unreadable cross-origin,
+        # since the HTML carrying it is served only to a loopback peer) all
+        # still apply. A sandboxed attacker frame gets an opaque origin too —
+        # and still cannot obtain the token.
+        if origin and origin != "null" and not _loopback_authority(origin, port, origin=True):
             return False
         token = self.headers.get("X-Lifehug-Token") or _f(form, "_token")
         return secrets.compare_digest(token or "", SESSION_TOKEN)
