@@ -35,6 +35,7 @@ from lifehug_core import (
     answer_body,
     answer_id_from_filename,
     load_config,
+    normalized_focus_key,
     now_utc,
     parse_categories,
     parse_questions,
@@ -559,6 +560,65 @@ def _build_entity_stats(
     return stats
 
 
+# ---------------------------------------------------------------------------
+# Roster fold (contract: focus-duplicate-curation, Scope 2) — the roster's
+# settled alias intelligence (monthly AI curation, apply_previous_decisions'
+# merges) is consulted BEFORE scoring, so two pending ideas whose keys the
+# roster already folded into one entity emerge as ONE recommendation instead
+# of two same-named twins.
+# ---------------------------------------------------------------------------
+
+def _roster_alias_fold_map(entity_type: str) -> dict[str, str]:
+    """{normalized_key: canonical_name} from entity_type's settled roster —
+    built via entity_roster._entity_keys, the ONE shared key definition
+    (recurring-defect doctrine), never re-derived here. "" / {} when the
+    roster module or file is unavailable (a vault with no rosters yet)."""
+    try:
+        from entity_roster import _entity_keys, load_roster  # noqa: PLC0415
+    except Exception:
+        return {}
+    try:
+        entities = load_roster(entity_type).get("entities", [])
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for entity in entities:
+        name = str(entity.get("name") or "").strip()
+        if not name:
+            continue
+        for key in _entity_keys(entity):
+            out.setdefault(key, name)
+    return out
+
+
+def _fold_stats_through_roster(stats: dict[tuple[str, str], dict]) -> dict[tuple[str, str], dict]:
+    """Fold _build_entity_stats keys through each type's roster alias map
+    before scoring: stats for a key the roster already settled as an alias
+    of another entity merge into that entity's canonical name — mention
+    counts summed, unique-answer/category sets unioned, evidence unioned
+    (deduped, order-preserving). A type with no roster yet passes through
+    unchanged."""
+    fold_maps: dict[str, dict[str, str]] = {}
+    folded: dict[tuple[str, str], dict] = {}
+    for (entity_type, name), s in stats.items():
+        fold_map = fold_maps.setdefault(entity_type, _roster_alias_fold_map(entity_type))
+        canonical = fold_map.get(normalized_focus_key(name), name) if fold_map else name
+        dest_key = (entity_type, canonical)
+        dest = folded.get(dest_key)
+        if dest is None:
+            dest = {"mention_count": 0, "answers": set(), "categories": set(),
+                    "emotional_weight": 0.0, "evidence": []}
+            folded[dest_key] = dest
+        dest["mention_count"] += s["mention_count"]
+        dest["answers"] |= s["answers"]
+        dest["categories"] |= s["categories"]
+        dest["emotional_weight"] += s["emotional_weight"]
+        for ev in s["evidence"]:
+            if ev not in dest["evidence"]:
+                dest["evidence"].append(ev)
+    return folded
+
+
 def _score(s: dict) -> float:
     mention_count = s["mention_count"]
     unique_answers = len(s["answers"])
@@ -636,6 +696,7 @@ def recommend(
     classifications = _load_classifications()
 
     stats = _build_entity_stats(answers, source_texts, classifications)
+    stats = _fold_stats_through_roster(stats)
 
     # Load existing state
     existing = load_recommendation_state()

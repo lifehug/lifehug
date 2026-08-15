@@ -43,6 +43,7 @@ from lifehug_core import (
     answer_body,
     answer_id_from_filename,
     load_config,
+    normalized_focus_key,
     now_utc,
     parse_categories,
     read_json,
@@ -268,6 +269,13 @@ def answer_excerpts(limit: int = 60, cap: int = 400) -> list[dict]:
 
 
 def _entity_keys(entity: dict) -> set[str]:
+    """Match-key variants for one roster entity (name + slug + aliases).
+
+    Delegates the actual lowercase/slugify/"the "-strip logic to
+    lifehug_core.normalized_focus_key — the ONE authoritative definition
+    (recurring-defect doctrine) also used by every Focus-creation door in
+    roadmap.py and by recommend_focuses.py's roster fold, so this module
+    never re-derives its own copy of that normalization."""
     keys: set[str] = set()
     raw_values = [
         entity.get("name", ""),
@@ -280,9 +288,9 @@ def _entity_keys(entity: dict) -> set[str]:
             continue
         keys.add(value)
         keys.add(slugify(value))
+        keys.add(normalized_focus_key(value))
         if value.startswith("the "):
             keys.add(value[4:])
-            keys.add(slugify(value[4:]))
     return {k for k in keys if k}
 
 

@@ -74,6 +74,10 @@ READ_ONLY_COMMANDS = frozenset({
     "conversation-arc-prompt", "conversation-closing-prompt", "conversation-lint",
     "conversation-router-prompt", "conversation-status", "conversation-turn-prompt",
     "daily-dry-run", "doctor",
+    # focus-duplicate-curation contract, Scope 3: the damage list is
+    # deterministic, zero AI, zero writes — pure reads of roadmap.json and
+    # focus_recommendations.json.
+    "focus-dupes",
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
     "planner-report", "progress", "quality-stats", "roadmap", "serve",
     "source-findings", "source-scan", "status", "weekly-summary",
@@ -111,6 +115,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # it's the same writer-lock family as focus-approve/recommend-focuses.
     # --dry-run writes nothing but the command is still classified by name.
     "focus-autopilot",
+    # focus-duplicate-curation (ADR 0010): applying a CURATE verdict writes
+    # state/focus_recommendations.json directly (--dry-run/--emit-task
+    # never write) — same family as judgment-update.
+    "focus-curate",
     "focus-dismiss", "focus-finish", "focus-new", "focus-set",
     "ingest", "ingest-story",
     # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
@@ -580,6 +588,19 @@ def cmd_judgment_update(args: argparse.Namespace) -> int:
     if getattr(args, "model", None):
         flags.extend(["--model", args.model])
     return run_python("question_judgment.py", flags)
+
+
+def cmd_focus_curate(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    if getattr(args, "emit_task", None):
+        flags.extend(["--emit-task", args.emit_task])
+    if getattr(args, "from_response", None):
+        flags.extend(["--from-response", args.from_response])
+    if getattr(args, "model", None):
+        flags.extend(["--model", args.model])
+    return run_python("focus_curation.py", flags)
 
 
 def cmd_second_voice_ack(args: argparse.Namespace) -> int:
@@ -1363,6 +1384,11 @@ def cmd_focus_autopilot(args: argparse.Namespace) -> int:
     return run_python("recommend_focuses.py", flags)
 
 
+def cmd_focus_dupes(args: argparse.Namespace) -> int:
+    flags = ["--json"] if args.json else ["--report"]
+    return run_python("focus_dupes.py", flags)
+
+
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
     if args.emit_task:
@@ -2007,6 +2033,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_recommend_focuses)
 
+    p = sub.add_parser("focus-dupes",
+                       help="Report duplicate/near-duplicate Focuses and pending ideas "
+                            "(deterministic, zero AI, zero writes)")
+    p.add_argument("--report", action="store_true", help="Print the damage list (default)")
+    p.add_argument("--json", action="store_true", help="Print the damage list as JSON")
+    p.set_defaults(func=cmd_focus_dupes)
+
     p = sub.add_parser("entity-roster",
                        help="Resolve mentioned entities (person/place/period/object/theme) into a canonical roster")
     p.add_argument("--type", choices=["person", "place", "period", "object", "theme"], default="person")
@@ -2145,6 +2178,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Full decision-ledger context instead of the weekly delta (quarterly, manual only)")
     p.add_argument("--model", help="AI model override for the rubric-edit call")
     p.set_defaults(func=cmd_judgment_update)
+
+    p = sub.add_parser("focus-curate",
+                       help="Curate first-encounter Focus/idea duplicate variants "
+                            "(interactions/focus_curation/) — merges/maps pending ideas the "
+                            "door guards and roster fold couldn't resolve deterministically")
+    p.add_argument("--dry-run", action="store_true", help="Preview the pending ideas and prompt without writing")
+    p.add_argument("--emit-task", metavar="PATH",
+                   help="Keyless: emit the curation prompt for agent completion")
+    p.add_argument("--from-response", metavar="PATH",
+                   help="Apply an agent-written CURATE verdict (no model call)")
+    p.add_argument("--model", help="AI model override for the CURATE call")
+    p.set_defaults(func=cmd_focus_curate)
 
     p = sub.add_parser("second-voice-ack", help="Acknowledge a second-voice offer (hides the home card)")
     p.add_argument("key", help="The offer key from state/second_voice_offers.json")

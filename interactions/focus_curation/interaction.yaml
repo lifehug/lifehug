@@ -1,0 +1,16 @@
+# interactions/focus_curation/interaction.yaml — flat scalar subset only
+# (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
+interaction: focus_curation
+version: 1.0.0
+modes: curate
+# file load order (per-turn assembly; also documented in context/manifest.md)
+load_order: identity|behavior|examples|turn_instructions
+# model role by capability tier (config key resolved by the runtime; this
+# names a capability TIER, not a vendor product — owner-ratified 2026-08-14).
+# No role.planner — this interaction has no rubric-edit mode.
+role.worker: medium
+# per-block context budgets (tokens, approximate)
+budget.identity: 250
+budget.behavior: 900
+budget.examples: 500
+budget.turn_instructions: 400
