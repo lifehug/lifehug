@@ -307,6 +307,20 @@ RESEARCH_OUT="${RESEARCH_OUT}${SELF_OUT}
 "
 FOCUSES_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" recommend-focuses --min-score "$FOCUS_MIN_SCORE" 2>&1) || true
 echo "$FOCUSES_OUT"
+# Focus autopilot (ADR 0011, amended 2026-08-15 to MONTHLY, owner-ratified —
+# issue #154): runs directly after the recommendations refresh, so it approves
+# from the freshest pending list, and before the roster refresh + recompile,
+# so a newly-approved Focus's scaffold rides this run's recompile. The
+# approval path is approve_recommendation() itself — scaffolding and starter-
+# question seeding ride along exactly as a manual approval. Gentle by default
+# (at most one approval per run; --catch-up stays a manual CLI-only
+# escalation). Monthly rationale: the ideas supply refreshes monthly (the
+# recommend-focuses line above), so a weekly autopilot mostly re-read a
+# static list; focus creation is a rare, high-weight event and one clock now
+# rules the whole focus lifecycle. Slot recovery between runs is the manual
+# approve button or focus-autopilot --catch-up.
+AUTOPILOT_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" focus-autopilot 2>&1) || true
+echo "$AUTOPILOT_OUT"
 # Refresh the canonical entity rosters (AI-curated) for every entity type, then
 # recompile so newly-eligible entities graduate into pages and Focus pages pick up
 # fresh mentions. The whole life graph — people, places, periods, symbolic objects

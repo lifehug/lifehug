@@ -423,11 +423,12 @@ class ApprovedByProvenanceTests(AutopilotTestBase):
 
 
 class WiringTests(unittest.TestCase):
-    """Scope 3/4/6/7: CLI registration, writer-lock classification, weekly
+    """Scope 3/4/6/7: CLI registration, writer-lock classification, monthly
     wiring order, version bump, ADR presence."""
 
     def setUp(self):
         self.weekly = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
+        self.monthly = (SYSTEM / "monthly_research.sh").read_text(encoding="utf-8")
 
     def test_focus_autopilot_registered_as_a_direct_mutation_command(self):
         import lifehug
@@ -439,19 +440,19 @@ class WiringTests(unittest.TestCase):
         )
         self.assertIn("focus-autopilot", subparsers.choices)
 
-    def test_weekly_maintenance_wires_focus_autopilot_after_promote_and_queue_planning(self):
-        auto_promote_idx = self.weekly.index('"auto_promote" python3')
-        planner_queue_idx = self.weekly.index('"planner_queue" python3')
-        # The real (non-keyless) arc-plan wiring step, not the dry-run
-        # preview line above it.
-        arc_plan_idx = self.weekly.index('run_learning_step "arc_plan" python3')
-        autopilot_idx = self.weekly.index('"focus_autopilot" python3')
-        self.assertLess(auto_promote_idx, planner_queue_idx)
-        self.assertLess(planner_queue_idx, arc_plan_idx)
-        self.assertLess(arc_plan_idx, autopilot_idx)
+    def test_monthly_research_wires_focus_autopilot_after_recommendations(self):
+        # ADR 0011 amended 2026-08-15 (owner-ratified, issue #154): MONTHLY
+        # cadence — approve from the freshest pending list (directly after
+        # recommend-focuses) and before the roster refresh + recompile.
+        recommend_idx = self.monthly.index('recommend-focuses --min-score')
+        autopilot_idx = self.monthly.index('lifehug.py" focus-autopilot')
+        # the REAL roster refresh loop, not the dry-run preview block
+        roster_idx = self.monthly.index('ROSTER_OUT=""')
+        self.assertLess(recommend_idx, autopilot_idx)
+        self.assertLess(autopilot_idx, roster_idx)
 
-    def test_weekly_dry_run_previews_autopilot(self):
-        self.assertIn("focus-autopilot --dry-run", self.weekly)
+    def test_weekly_maintenance_no_longer_runs_the_autopilot(self):
+        self.assertNotIn("focus-autopilot", self.weekly)
 
     def test_version_bumped_with_adr_0011_changelog(self):
         # changelog is a single STRING holding only the most recent bump's
