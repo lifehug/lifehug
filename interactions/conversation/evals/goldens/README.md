@@ -46,6 +46,24 @@ is a *correct* reference transcript; deliberately-broken fixtures proving
 each property checker's failure path live inline in
 `tests/test_interaction_evals.py`, not here.
 
+**ADR 0014 (issue #163) amendment**: `closing_is_declarative` now also
+enforces the structured-close scaffolding-leak checks —
+`closing_label_leak`, `closing_meta_commentary`, `closing_future_turn`,
+`closing_markdown_leak` (all in `conversation_lints.lint_closing_phrases`,
+data in `evals/lints.yaml`) — since it already runs that function over the
+closing turn's text. `chat-porch-swing-closing.json` is the new committed
+PASS example demonstrating the woven, un-scaffolded shape.
+
+One exception to "every committed golden must pass every Layer-1 lint":
+`closing-scaffold-leak-bad-01.json` is a deliberately-broken fixture
+reproducing issue #163's leaked-scaffolding SHAPE (labeled hook field,
+meta-commentary, a future-turn self-instruction, raw `**` markdown) —
+entirely synthetic, never the owner's real close or any vault content. It
+exists to prove the four new lints actually trip, so it is excluded from
+`interaction_evals.load_goldens()`'s sweep via `NON_GOLDEN_FILENAMES`
+(same mechanism as the router fixture files below) rather than required to
+pass `check_golden` — `tests/test_structured_close.py` loads it directly.
+
 ## Router fixtures (`router_fixtures.json`)
 
 A flat JSON list of `{text, session_open, intent}`, `intent` one of

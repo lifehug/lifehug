@@ -827,7 +827,15 @@ def build_arc_prompt(payload: dict) -> str:
 
 
 def build_closing_prompt(payload: dict) -> str:
-    """Assemble the closing-takeaway prompt per behavior rule 8."""
+    """Assemble the closing-takeaway prompt per behavior rule 8.
+
+    ADR 0014 (issue #163): the close is STRUCTURED — this checklist
+    describes what goes into the ONE woven ``takeaway_prose`` statement;
+    the exact ``{takeaway_prose, hook}`` JSON mechanics are appended
+    separately by the caller via ``conversation_delivery
+    ._closing_output_contract()`` (same split as every other builder here —
+    this function states the behavior, the engine appends the wire format).
+    """
     session = payload["session"]
     manifest = _safe_manifest()
     deposit_framing = str(manifest.get("knob.deposit_framing", "off")).strip().lower() == "on"
@@ -839,16 +847,25 @@ def build_closing_prompt(payload: dict) -> str:
         f"Mode: {session.get('mode', '')}",
         f"Rolling summary: {session.get('rolling_summary', '')}",
         "",
-        "Write the closing message for this session (behavior rule 8):",
+        "Write the closing takeaway_prose for this session (behavior rule 8)",
+        "— ONE woven statement, never labeled sections, composed of:",
         "  1. A takeaway — NOT a recap.",
-        "  2. Specific appreciation.",
-        "  3. A continuity line.",
+        "  2. Specific appreciation for what they shared (never commentary",
+        "     on how they conversed).",
+        "  3. A continuity line, woven into the prose.",
     ]
     if deposit_framing:
         lines.append("  4. An optional deposit-frame (knob.deposit_framing is ON).")
     else:
         lines.append("  4. Deposit-framing is OFF — do not use a deposit frame.")
-    lines.append("  5. A named hook for next time, then STOP — no trailing question.")
+    lines.append(
+        "  5. Weave the hook in naturally when one exists, then STOP — no "
+        "trailing question, no labeled \"Hook for next time:\" line."
+    )
+    lines.append(
+        "Then name that same hook again, separately, as a short machine-only "
+        "continuity label — it is never shown to the user."
+    )
     return "\n".join(lines)
 
 

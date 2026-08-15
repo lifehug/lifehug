@@ -32,6 +32,17 @@ Public surface:
     lint_closing_phrases(text, *, config=None) -> list[dict]
     lint_transcript(turns, *, config=None) -> list[dict]
 
+**ADR 0014 (issue #163, structured close)**: ``lint_closing_phrases`` was
+extended beyond the pure-chat wave's declarative-close phrase ban to also
+catch leaked model scaffolding in the DELIVERED ``takeaway_prose`` — labeled
+fields ("Hook for next time:"), meta-commentary judging the conversation's
+quality or the author's own conversational behavior, instructions addressed
+to a future turn/session, and raw ``**`` markdown emphasis (channel delivery
+never renders markdown). Each class keeps its own lint id
+(``closing_label_leak`` / ``closing_meta_commentary`` / ``closing_future_turn``
+/ ``closing_markdown_leak``) so a golden or test can assert exactly which
+class tripped — see that function's docstring for the full contract.
+
 Findings are ``{"lint": "<id>", "detail": "...", "span": [start, end]}``.
 Implemented lint ids (exactly matching lints.yaml and behavior.md rule
 numbers): ``one_question_per_turn`` (rule 1), ``banned_phrases`` (rules
@@ -98,6 +109,16 @@ _PRESUPPOSING_RE = re.compile(
     re.IGNORECASE,
 )
 _YEAR_PATTERNS = ("what year", "which year", "in what year")
+#: Clause-initial "next time," followed by an imperative — a grammatical
+#: shape (ADR 0014, issue #163), not a literal phrase, so it stays an engine
+#: constant rather than lints.yaml data (same precedent as _PRESUPPOSING_RE
+#: above). Matches at the start of the text or right after sentence-ending
+#: punctuation, so it never flags "...with your sister next time." (mid-
+#: sentence, no comma, no instruction) the way the existing goldens use it.
+_FUTURE_TURN_CLAUSE_RE = re.compile(r'(?:^|[.!?]\s+)next time,\s+\S', re.IGNORECASE)
+#: Raw markdown emphasis leaking into channel-delivered text (ADR 0014) —
+#: Telegram never renders "**bold**"; a close that carries it is scaffolding.
+_MARKDOWN_EMPHASIS_RE = re.compile(r'\*\*')
 
 
 def _conversation_evals_path(*parts: str, framework_root: str | Path | None = None) -> Path:
@@ -109,12 +130,19 @@ def _conversation_evals_path(*parts: str, framework_root: str | Path | None = No
 def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
     """Read evals/lints.yaml's flat subset: lint.<id>: on/off, cap.*, banned.N,
     closing_banned.N (pure-chat wave, issue #139 — the declarative-close
-    doctrine's own banned-phrase list, checked only against closing turns)."""
+    doctrine's own banned-phrase list, checked only against closing turns),
+    and — ADR 0014, issue #163 — closing_label.N / closing_meta.N /
+    closing_future.N (the structured-close scaffolding-leak checks, also
+    closing-only; closing_meta.N values are matched as case-insensitive
+    regex, since the meta-commentary class needs alternation)."""
     path = _conversation_evals_path("lints.yaml", framework_root=framework_root)
     raw = _parse_simple_yaml(path, validate_ai_routing=False)
     config: dict[str, object] = {}
     banned: list[str] = []
     closing_banned: list[str] = []
+    closing_label: list[str] = []
+    closing_meta: list[str] = []
+    closing_future: list[str] = []
     for key, value in raw.items():
         if key.startswith("lint."):
             config[key] = value.strip().lower() == "on"
@@ -125,12 +153,21 @@ def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
                 config[key] = value
         elif key.startswith("closing_banned."):
             closing_banned.append(value)
+        elif key.startswith("closing_label."):
+            closing_label.append(value)
+        elif key.startswith("closing_meta."):
+            closing_meta.append(value)
+        elif key.startswith("closing_future."):
+            closing_future.append(value)
         elif key.startswith("banned."):
             banned.append(value)
         else:
             config[key] = value
     config["banned_phrases"] = banned
     config["closing_banned_phrases"] = closing_banned
+    config["closing_label_phrases"] = closing_label
+    config["closing_meta_commentary_patterns"] = closing_meta
+    config["closing_future_turn_phrases"] = closing_future
     return config
 
 
@@ -267,41 +304,116 @@ def lint_turn(
 
 
 def lint_closing_phrases(text: str, *, config: dict | None = None) -> list[dict]:
-    """Banned meta-framing phrases for CLOSING turns only (behavior.md rule
-    8's declarative-close doctrine, pure-chat wave, issue #139, 2026-08-12).
+    """Every closing-only check for CLOSING turns (never applied mid-
+    conversation, where the same words are often fine).
 
-    These phrases narrate that a close is happening ("leave it here", "for
-    now", "a good place to rest") instead of simply closing — kept SEPARATE
-    from ``lint_turn``'s turn-wide ``banned_phrases`` because the same
-    words are often fine mid-conversation; only closing-turn narration of
-    the ending is banned. The companion "no question at all" half of the
-    doctrine is enforced elsewhere: the runtime's own
-    ``question_allowed=False`` pass already blocks any question sentence
-    in a closing message (``conversation_delivery.lint_outgoing``'s
-    ``question_not_permitted`` check); the eval harness's
-    ``_check_closing_is_declarative`` re-derives the same "no question
-    mark" rule directly rather than duplicating it here, so this function
-    stays scoped to the banned-phrase half only.
+    Two doctrines, both checked here (single authority — recurring-defect
+    doctrine):
 
-    Single authority for both callers (recurring-defect doctrine): the
-    runtime (``conversation_delivery.lint_outgoing(is_closing=True)``) and
-    the golden-transcript property checker
-    (``interaction_evals._check_closing_is_declarative``) both call this
-    function rather than each keeping its own phrase list.
+    1. **Declarative-close phrase ban** (behavior.md rule 8, pure-chat wave,
+       issue #139, 2026-08-12): phrases that narrate the close is
+       happening ("leave it here", "for now", "a good place to rest")
+       instead of simply closing. ``lint.closing_declarative`` /
+       ``closing_banned.N``. The companion "no question at all" half of
+       this doctrine is enforced elsewhere (``conversation_delivery
+       .lint_outgoing``'s ``question_allowed=False`` pass;
+       ``interaction_evals._check_closing_is_declarative`` re-derives the
+       same "no question mark" rule directly), so this function stays
+       scoped to banned-phrase-shaped checks only.
+
+    2. **Structured-close scaffolding-leak ban** (ADR 0014, issue #163,
+       2026-08-15): the DELIVERED ``takeaway_prose`` must be the model's
+       one woven statement, never its own bookkeeping. Four independently-
+       flagged classes:
+
+       - ``lint.closing_label_leak`` (``closing_label.N``): literal
+         labeled-field substrings ("Hook for next time:", "Takeaway:") —
+         the exact shape issue #163's incident rendered verbatim.
+       - ``lint.closing_meta_commentary`` (``closing_meta.N``, matched as
+         case-insensitive regex — the class needs alternation, e.g. "made
+         this (actually )?(useful|productive)"): commentary evaluating the
+         CONVERSATION's quality or the author's own conversational
+         behavior ("I appreciated that you pushed back"). Distinct from
+         the rule-8-required "specific appreciation" of what the person
+         actually shared, which stays allowed and unflagged.
+       - ``lint.closing_future_turn`` (``closing_future.N`` literal phrases
+         plus the engine-side ``_FUTURE_TURN_CLAUSE_RE`` grammatical
+         shape): instructions addressed to a future turn or session
+         ("Next time, pick up wherever...", "no need to re-explain").
+         Continuity is the machine's job via the structured ``hook`` field
+         now — never a sentence talking to the next session's model.
+       - ``lint.closing_markdown_leak`` (no data — pure structural): a raw
+         ``**`` emphasis marker. Channel delivery never renders markdown,
+         so its presence is scaffolding, not formatting.
+
+    Single authority for both callers of this whole function (recurring-
+    defect doctrine): the runtime (``conversation_delivery
+    .lint_outgoing(is_closing=True)``) and the golden-transcript property
+    checker (``interaction_evals._check_closing_is_declarative``) both call
+    it rather than each keeping its own phrase/pattern lists.
     """
     config = config if config is not None else load_lints_config()
     findings: list[dict] = []
-    if not config.get("lint.closing_declarative", True):
-        return findings
-    lowered = text.lower()
-    for phrase in config.get("closing_banned_phrases", []):
-        idx = lowered.find(str(phrase).lower())
-        if idx != -1:
+
+    if config.get("lint.closing_declarative", True):
+        lowered = text.lower()
+        for phrase in config.get("closing_banned_phrases", []):
+            idx = lowered.find(str(phrase).lower())
+            if idx != -1:
+                findings.append({
+                    "lint": "closing_declarative",
+                    "detail": f"banned closing meta-phrase: {phrase!r}",
+                    "span": [idx, idx + len(phrase)],
+                })
+
+    if config.get("lint.closing_label_leak", True):
+        lowered = text.lower()
+        for phrase in config.get("closing_label_phrases", []):
+            idx = lowered.find(str(phrase).lower())
+            if idx != -1:
+                findings.append({
+                    "lint": "closing_label_leak",
+                    "detail": f"labeled scaffolding field leaked into the close: {phrase!r}",
+                    "span": [idx, idx + len(phrase)],
+                })
+
+    if config.get("lint.closing_meta_commentary", True):
+        for pattern in config.get("closing_meta_commentary_patterns", []):
+            match = re.search(str(pattern), text, re.IGNORECASE)
+            if match:
+                findings.append({
+                    "lint": "closing_meta_commentary",
+                    "detail": f"meta-commentary on the conversation itself: {pattern!r}",
+                    "span": [match.start(), match.end()],
+                })
+
+    if config.get("lint.closing_future_turn", True):
+        match = _FUTURE_TURN_CLAUSE_RE.search(text)
+        if match:
             findings.append({
-                "lint": "closing_declarative",
-                "detail": f"banned closing meta-phrase: {phrase!r}",
-                "span": [idx, idx + len(phrase)],
+                "lint": "closing_future_turn",
+                "detail": "clause-initial 'next time,' instruction addressed to a future turn",
+                "span": [match.start(), match.end()],
             })
+        lowered = text.lower()
+        for phrase in config.get("closing_future_turn_phrases", []):
+            idx = lowered.find(str(phrase).lower())
+            if idx != -1:
+                findings.append({
+                    "lint": "closing_future_turn",
+                    "detail": f"instruction addressed to a future turn or session: {phrase!r}",
+                    "span": [idx, idx + len(phrase)],
+                })
+
+    if config.get("lint.closing_markdown_leak", True):
+        match = _MARKDOWN_EMPHASIS_RE.search(text)
+        if match:
+            findings.append({
+                "lint": "closing_markdown_leak",
+                "detail": "raw markdown emphasis ('**') leaked into channel-delivered text",
+                "span": [match.start(), match.end()],
+            })
+
     return findings
 
 

@@ -216,6 +216,7 @@ def _write_outcome(
     attempts: int,
     lint_ids: tuple[str, ...] | list[str] = (),
     advisory_lints: int = 0,
+    hook: str | None = None,
 ) -> None:
     data = _state(path)
     entry = {
@@ -235,6 +236,13 @@ def _write_outcome(
         entry["confirmed_at"] = entry["updated_at"]
     if status == STATUS_AMBIGUOUS:
         entry["operator_action"] = "verify Telegram before retrying"
+    # ADR 0014 (issue #163): the structured close's machine-only hook,
+    # ledgered alongside the closing ledger entry so a replayed
+    # close_session_now (already_confirmed path) reconstructs the SAME
+    # close block — conversation.close_session's idempotency check requires
+    # byte-identical close payloads on a repeat call.
+    if hook:
+        entry["hook"] = hook
     data["entries"][key] = entry
     write_json(path, data)
 
@@ -359,6 +367,40 @@ def parse_turn_output(raw: object) -> dict | None:
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
     }
+
+
+def parse_closing_output(raw: object) -> dict | None:
+    """Parse the structured close output; None when it is unusable.
+
+    ADR 0014 (issue #163): the closing model emits ONLY
+    ``{"takeaway_prose": str, "hook": str|null}`` — never the free-form
+    ``{"message": ...}`` shape ordinary turns use (``parse_turn_output``,
+    above). Same fence-tolerance convention (a ```json fence is tolerated,
+    nothing looser), and ``_valid_message`` is the single authority for "is
+    this renderable text" on BOTH paths (recurring-defect doctrine — one
+    structural-sanity check, not a forked copy).
+
+    Deliberately no raw-text fallback: the pre-#163 behavior tried
+    ``_valid_message(generated)`` directly when JSON parsing failed
+    entirely, which is exactly the gap the incident exploited — a close
+    that isn't valid structured JSON is a malformed generation full stop,
+    and malformed generations degrade to silence (never deliver unparsed
+    text).
+    """
+    if not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(_strip_fences(raw))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    prose = _valid_message(data.get("takeaway_prose"))
+    if prose is None:
+        return None
+    hook = data.get("hook")
+    hook_text = hook.strip() if isinstance(hook, str) else None
+    return {"takeaway_prose": prose, "hook": hook_text or None}
 
 
 def _question_sentences(text: str) -> list[str]:
@@ -1802,11 +1844,12 @@ def close_session_now(
     user_turns = _count_user_turns(session)
     receipts = _session_insight_receipts(state_path, session_id)
     takeaway = ""
+    hook: str | None = None
     delivered = False
     status, detail = STATUS_SKIPPED, "no_close_message"
 
     if user_turns >= 2:
-        status, detail, takeaway = _deliver_closing(
+        status, detail, takeaway, hook = _deliver_closing(
             session,
             state_path=state_path,
             channel=channel,
@@ -1827,6 +1870,12 @@ def close_session_now(
         "insight_receipts_count": receipts,
         "filed": list(filed),
     }
+    # ADR 0014 (issue #163): the structured close's hook is persisted
+    # additively, filed only alongside an actually-delivered takeaway — a
+    # rejected/silent close carries no hook either (nothing was confirmed
+    # to have happened for the next thread to continue from).
+    if delivered and hook:
+        close["hook"] = hook
     hints = _entity_hints(session)
     if hints:
         # Classification hints for the weekly pass. The pass has no
@@ -1881,25 +1930,39 @@ def _deliver_closing(
     status_resolver: Callable[..., object] | None,
     prompt_builder: Callable[[dict], str] | None,
     vault_root: str | Path | None,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str | None]:
     """Generate/lint/send the closing takeaway; ledger it under close:{id}.
 
     A failed close is SILENT, never a fallback ack: the ack is the
     post-answer voice, and every answer in this session already got one turn
-    or one ack of its own. Returning (status, detail, takeaway).
+    or one ack of its own. Returning (status, detail, takeaway, hook) — ADR
+    0014 (issue #163) adds ``hook``, the structured close's machine-only
+    continuity label; it is None whenever the close wasn't confirmed-sent,
+    or the model supplied none.
     """
     session_id = str(session["session_id"])
     key = close_key(session_id)
     entries = _state(state_path)["entries"]
     previous = entries.get(key, {})
     if previous.get("status") == STATUS_CONFIRMED:
-        return STATUS_CONFIRMED, "already_confirmed", str(previous.get("takeaway", ""))
+        previous_hook = previous.get("hook")
+        return (
+            STATUS_CONFIRMED,
+            "already_confirmed",
+            str(previous.get("takeaway", "")),
+            previous_hook if isinstance(previous_hook, str) else None,
+        )
     if previous.get("status") == STATUS_AMBIGUOUS:
-        return STATUS_AMBIGUOUS, "ambiguous_not_retried", ""
+        return STATUS_AMBIGUOUS, "ambiguous_not_retried", "", None
     attempts = int(previous.get("attempts", 0) or 0) + 1
     turn_index = len(session.get("turns") or [])
 
-    def ledger(status: str, reason: str, lint_ids: tuple[str, ...] = ()) -> None:
+    def ledger(
+        status: str,
+        reason: str,
+        lint_ids: tuple[str, ...] = (),
+        hook: str | None = None,
+    ) -> None:
         _write_outcome(
             state_path,
             key,
@@ -1910,6 +1973,7 @@ def _deliver_closing(
             reason=reason,
             attempts=attempts,
             lint_ids=lint_ids,
+            hook=hook,
         )
 
     model = conversation_model()
@@ -1922,7 +1986,7 @@ def _deliver_closing(
             else "provider_unavailable"
         )
         ledger(STATUS_SKIPPED, reason)
-        return STATUS_SKIPPED, reason, ""
+        return STATUS_SKIPPED, reason, "", None
 
     builder = prompt_builder or conversation.build_closing_prompt
     try:
@@ -1932,34 +1996,40 @@ def _deliver_closing(
         reason = _fixed_provider_reason(exc)
         ledger(STATUS_FAILED, reason)
         _diagnostic("closing_generation", reason, session_id)
-        return STATUS_FAILED, reason, ""
+        return STATUS_FAILED, reason, "", None
     except Exception:  # noqa: BLE001
         ledger(STATUS_FAILED, "generation_failed")
         _diagnostic("closing_generation", "generation_failed", session_id)
-        return STATUS_FAILED, "generation_failed", ""
+        return STATUS_FAILED, "generation_failed", "", None
 
-    parsed = parse_turn_output(generated)
-    message = parsed["message"] if parsed else _valid_message(generated)
-    if message is None:
+    # ADR 0014 (issue #163): structured close — parse {takeaway_prose, hook}
+    # ONLY; no raw-text fallback (see parse_closing_output's docstring for
+    # why that fallback was the gap the incident exploited).
+    parsed = parse_closing_output(generated)
+    if parsed is None:
         ledger(STATUS_FAILED, "malformed_generation")
         _diagnostic("closing_generation", "malformed_generation", session_id)
-        return STATUS_FAILED, "malformed_generation", ""
+        return STATUS_FAILED, "malformed_generation", "", None
+    message = parsed["takeaway_prose"]
+    hook = parsed["hook"]
     # Behavior rule 8: a close ends on the peak and STOPS — no trailing
-    # question, no meta-framing that narrates the ending (issue #139).
-    # That makes every closing message question-free AND declarative by
-    # contract — is_closing=True adds the banned-meta-phrase check.
+    # question, no meta-framing that narrates the ending (issue #139), and
+    # (ADR 0014) no leaked scaffolding — labeled fields, meta-commentary,
+    # future-turn instructions, raw markdown. Lints run against
+    # takeaway_prose ONLY — hook is machine-only and never rendered, so it
+    # is never linted as channel text.
     blocking, _advisory = lint_outgoing(
         message, question_allowed=False, is_closing=True, config=_lints_config()
     )
     if blocking:
         ledger(STATUS_FAILED, "malformed_generation", tuple(blocking))
         _diagnostic("closing_lint", "malformed_generation", session_id)
-        return STATUS_FAILED, "malformed_generation", ""
+        return STATUS_FAILED, "malformed_generation", "", None
 
-    ledger(STATUS_AMBIGUOUS, "send_in_progress")
+    ledger(STATUS_AMBIGUOUS, "send_in_progress", hook=hook)
     send_result = (telegram_send or send_telegram_result)(message)
     if send_result.status == "confirmed":
-        ledger(STATUS_CONFIRMED, "telegram_confirmed")
+        ledger(STATUS_CONFIRMED, "telegram_confirmed", hook=hook)
         try:
             _append_turn_resilient(
                 session_id,
@@ -1974,22 +2044,48 @@ def _deliver_closing(
             )
         except Exception:  # noqa: BLE001 — already delivered
             _diagnostic("session_record", "session_write_failed", session_id)
-        return STATUS_CONFIRMED, "telegram_confirmed", message
+        return STATUS_CONFIRMED, "telegram_confirmed", message, hook
     if send_result.status == "ambiguous":
-        ledger(STATUS_AMBIGUOUS, send_result.reason)
+        ledger(STATUS_AMBIGUOUS, send_result.reason, hook=hook)
         _diagnostic("closing_send", send_result.reason, session_id)
-        return STATUS_AMBIGUOUS, send_result.reason, ""
+        return STATUS_AMBIGUOUS, send_result.reason, "", None
     status = STATUS_SKIPPED if send_result.status == "not_attempted" else STATUS_FAILED
     ledger(status, send_result.reason)
     _diagnostic("closing_send", send_result.reason, session_id)
-    return status, send_result.reason, ""
+    return status, send_result.reason, "", None
 
 
 def _closing_output_contract() -> str:
+    # ADR 0014 (issue #163): structured close — the model emits ONLY this
+    # JSON object. takeaway_prose is EVERYTHING the user will ever see;
+    # hook is a compact machine-only continuity label, filed onto the
+    # session's close block (close.hook) and never rendered. This replaces
+    # the pre-#163 {"message": ..., "question_free": ...} contract for the
+    # closing path specifically (ordinary turns keep that shape).
     return (
         "\n\nReply with a single JSON object and nothing else:\n"
-        '{"message": "the closing message, plain text", "question_free": true}\n'
-        "The closing message ends on the peak and STOPS — no trailing question.\n"
+        '{"takeaway_prose": "the complete closing message, plain text", '
+        '"hook": "a compact label for the next thread, or null"}\n\n'
+        "takeaway_prose is EVERYTHING the user will see — ONE woven "
+        "declarative statement that ends on the peak and STOPS:\n"
+        "  - No trailing question.\n"
+        "  - No labeled fields (\"Hook for next time:\", \"Takeaway:\", "
+        "\"For next time:\") — weave the hook into the prose naturally "
+        "when there is one; never render it as its own line.\n"
+        "  - No commentary on the conversation's quality or the author's "
+        "own conversational behavior (\"I appreciated that you pushed "
+        "back\", \"that made this useful\") — appreciate what they shared, "
+        "never how they conversed.\n"
+        "  - No instructions addressed to a future turn or session "
+        "(\"next time, pick up wherever...\", \"no need to re-explain\") — "
+        "continuity is the machine's job via the hook field below, not "
+        "prose talking to the next session's model.\n"
+        "  - No raw markdown emphasis (**like this**) — this channel never "
+        "renders it.\n\n"
+        "hook is a SEPARATE short label for the next thread, for MACHINE "
+        "use only — it is never shown to the user, so it may restate the "
+        "same continuity idea takeaway_prose already wove in, or be null "
+        "when there isn't one.\n"
     )
 
 

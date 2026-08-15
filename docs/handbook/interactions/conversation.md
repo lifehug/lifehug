@@ -81,7 +81,7 @@ Loop](../the-loop.md)** are defined on their own pages.
 > **This IS the prompt** — the file below is simultaneously what gets
 > sent to the seated model and the documentation a person reads (per
 > [The Interaction Pattern](index.md) §3's doc-drift guarantee). Embedded
-> verbatim from `interactions/conversation/prompt/behavior.md` at v174 —
+> verbatim from `interactions/conversation/prompt/behavior.md` at v177 —
 > `tests/test_handbook_parity.py`'s `ConversationEmbedTests` asserts this
 > block byte-matches the source file, so it cannot drift from what the
 > model actually reads.
@@ -171,6 +171,21 @@ states what this exchange was really about, a recap just repeats it back)
 to their ongoing story) + an optional deposit-frame (tunable via
 `knob.deposit_framing`, off by default) + a named hook for next time. End
 on the peak, then STOP — no trailing question after a close.
+
+**The close is structured, never scaffolded (ADR 0014, issue #163).** The
+model emits `{"takeaway_prose": "...", "hook": "... or null"}` — only
+`takeaway_prose` is ever shown to the user; `hook` is a separate, compact
+label for machine use, filed onto the session's own state rather than
+rendered. A close never contains: a labeled field ("Hook for next time:",
+"Takeaway:", "For next time:" — the hook is woven into the prose when
+there is one, never its own line); commentary on the conversation's
+quality or the author's own conversational behavior ("I appreciated that
+you pushed back", "that made this useful" — appreciate what they shared,
+never how they conversed); an instruction addressed to a future turn or
+session ("next time, pick up wherever things land", "no need to
+re-explain the setup" — continuity is the machine's job via the
+structured hook, not a sentence talking to the next session's model); or
+raw markdown emphasis (`**like this**` — this channel never renders it).
 
 **The statement IS the user's out.** A close never contains a sentence
 whose job is to grant permission to stop, announce that the conversation

@@ -87,10 +87,23 @@ EVALS_DIR = INTERACTIONS_DIR / "conversation" / "evals"
 GOLDENS_DIR = EVALS_DIR / "goldens"
 ROUTER_FIXTURES_FILE = "router_fixtures.json"
 ROUTER_SAMPLE_PREDICTIONS_FILE = "router_sample_predictions.json"
+#: ADR 0014 (issue #163): a deliberately-broken closing fixture that
+#: reproduces the leaked-scaffolding SHAPE, used only to prove the new
+#: structured-close lints trip (tests/test_structured_close.py loads it
+#: directly). It is NOT a correct reference transcript, so — like the
+#: router fixture files above — it is excluded from load_goldens()'s sweep
+#: rather than required to pass check_golden like every other committed
+#: golden.
+CLOSING_SCAFFOLD_LEAK_FIXTURE_FILE = "closing-scaffold-leak-bad-01.json"
 #: Golden-transcript filenames living in goldens/ that are NOT golden
-#: transcripts (router fixture/prediction data + the format doc) — excluded
-#: from load_goldens()'s glob.
-NON_GOLDEN_FILENAMES = frozenset({ROUTER_FIXTURES_FILE, ROUTER_SAMPLE_PREDICTIONS_FILE})
+#: transcripts (router fixture/prediction data + the format doc, plus the
+#: intentionally-broken lint fixture above) — excluded from load_goldens()'s
+#: glob.
+NON_GOLDEN_FILENAMES = frozenset({
+    ROUTER_FIXTURES_FILE,
+    ROUTER_SAMPLE_PREDICTIONS_FILE,
+    CLOSING_SCAFFOLD_LEAK_FIXTURE_FILE,
+})
 
 VALID_ROUTER_INTENTS = frozenset(
     {"answer", "new_story", "command", "continue_session", "out_of_scope"}
