@@ -106,7 +106,12 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     "conversation-turn-retry",
     "correct-source", "entity-roster", "fix", "focus-add",
     "focus-approve", "focus-dismiss", "focus-finish", "focus-new", "focus-set",
-    "ingest", "ingest-story", "mirror-compile", "perennial-add", "perennials",
+    "ingest", "ingest-story",
+    # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
+    # writes state/question_judgment/learned.md and last_edit.json directly
+    # (--dry-run/--emit-task never write) — same family as quality-update.
+    "judgment-update",
+    "mirror-compile", "perennial-add", "perennials",
     "planner-clear", "planner-objective-add", "planner-objective-clear", "planner-queue",
     "planner-state", "quality-update", "rebuild", "recommend-focuses", "reflect-source",
     "research-expand", "retract-source", "roadmap-rebuild", "second-voice-ack",
@@ -554,6 +559,21 @@ def cmd_quality_stats(_args: argparse.Namespace) -> int:
 
 def cmd_quality_update(_args: argparse.Namespace) -> int:
     return run_python("quality_profile.py", ["--update"])
+
+
+def cmd_judgment_update(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    if getattr(args, "emit_task", None):
+        flags.extend(["--emit-task", args.emit_task])
+    if getattr(args, "from_response", None):
+        flags.extend(["--from-response", args.from_response])
+    if getattr(args, "recalibrate", False):
+        flags.append("--recalibrate")
+    if getattr(args, "model", None):
+        flags.extend(["--model", args.model])
+    return run_python("question_judgment.py", flags)
 
 
 def cmd_second_voice_ack(args: argparse.Namespace) -> int:
@@ -2086,6 +2106,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("quality-update", help="Recompute quality profile from answer scores")
     p.set_defaults(func=cmd_quality_update)
+
+    p = sub.add_parser("judgment-update",
+                       help="Weekly question-judgment RUBRIC-EDIT: owner decisions -> at most one bounded, "
+                            "evidence-cited amendment to state/question_judgment/learned.md")
+    p.add_argument("--dry-run", action="store_true", help="Preview the delta and prompt without writing")
+    p.add_argument("--emit-task", metavar="PATH",
+                   help="Keyless: emit the rubric-edit prompt for agent completion")
+    p.add_argument("--from-response", metavar="PATH",
+                   help="Apply an agent-written rubric-edit response (no model call)")
+    p.add_argument("--recalibrate", action="store_true",
+                   help="Full decision-ledger context instead of the weekly delta (quarterly, manual only)")
+    p.add_argument("--model", help="AI model override for the rubric-edit call")
+    p.set_defaults(func=cmd_judgment_update)
 
     p = sub.add_parser("second-voice-ack", help="Acknowledge a second-voice offer (hides the home card)")
     p.add_argument("key", help="The offer key from state/second_voice_offers.json")

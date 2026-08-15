@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 164,
-    "revision": "vault-contract-v4",
-    "content_digest": "sha256:daeda2779cfed8adf7637c20003ff1d7eb566bda9e73ec9abf2265750efdad99"
+    "framework_version": 166,
+    "revision": "vault-contract-v5",
+    "content_digest": "sha256:af7703aed379a1bcc8acb3ab976e403fd058aa45dd1e307f917cd6fd857672aa"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -156,6 +156,13 @@
       "required": false,
       "tracked": true,
       "schema": {"format": "markdown", "version_field": null, "supported": []}
+    },
+    "question_judgment_state": {
+      "path": "state/question_judgment",
+      "kind": "directory",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "mixed_family", "version_field": null, "supported": []}
     }
   }
 }

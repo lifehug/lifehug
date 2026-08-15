@@ -1,7 +1,7 @@
 {
-  "version": 165,
+  "version": 166,
   "released": "2026-08-14",
-  "changelog": "v165: unified quality score (issue #146, ADR 0008) \u2014 question candidates now carry ONE published quality score instead of two disconnected ones plus a raw-priority display fiction. unified_quality_score() computes priority \u00d7 story-function multiplier, with craft flaws (yes/no wording, self-directed why, too broad, missing scene/stakes, no source, too short/vague, near-duplicate) dragging that SAME score down instead of tripping a separate QUALITY_GATE_MIN gate, which is retired. Auto-promote bands are unchanged (\u2265 0.82 promotes, 0.70\u20130.82 parks for review with the score and flags quoted in the reason, below 0.70 just stays a candidate \u2014 no park), and structural parks (near-duplicate, missing category) still run first regardless of score. Every auto-promote run stamps the score and its full breakdown on the candidate, additively and idempotently \u2014 an unchanged replay never churns the timestamp. The Review lane's candidates table drops its separate Priority and Quality columns for one Quality column showing the stored score with a compact breakdown, computing it live for any candidate no run has touched yet.",
+  "changelog": "v166: decisions feed the loop (ADR 0009) \u2014 the review surface's owner decisions become real training signal instead of being archived unread. Fixed a field-overwrite defect: candidates-update --reason (and the hosted platform's defer/dismiss) used to clobber the generator's own provenance reason in place; it now writes a separate decision_reason field, so both survive and both render (CLI detail view, the Review lane's history groups). The most recent owner decisions (DISMISSED/DEFERRED/PROMOTED, human-only) now feed BOTH generation prompts as an \"Owner Judgment Signals\" block (question_judgment.build_decision_context) \u2014 candidates matching the pattern of recent dismissals are told not to be re-proposed. Wires ADR 0007's declared-but-unwired weekly RUBRIC-EDIT: a new judgment-update command reads the week's decisions plus quality-profile bucket movements, calls the role.planner tier (keyless machines emit an agent task instead), and applies AT MOST one bounded, evidence-cited amendment to state/question_judgment/learned.md \u2014 never a rewrite, never a deterministic invention, with a hard per-entry character cap and mechanical oldest-entry compaction when the file grows past its own cap. A cursor file makes a same-week re-run a no-op. Runs weekly right after the quality-profile update, before candidate auto-promotion. A --recalibrate variant swaps the delta for the full decision ledger (manual only, quarterly cadence, no scheduler wiring yet). See ADR 0009; a follow-up (lifehug/lifehug#148) tracks whether the numeric quality score should also calibrate on this signal.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -56,6 +56,8 @@
     "interactions/question_judgment/README.md",
     "interactions/question_judgment/context/manifest.md",
     "interactions/question_judgment/evals/goldens/README.md",
+    "interactions/question_judgment/evals/goldens/judge-scene-slot-accept-01.json",
+    "interactions/question_judgment/evals/goldens/rubric-edit-era-anchor-carveout-01.json",
     "interactions/question_judgment/evals/lints.yaml",
     "interactions/question_judgment/evals/personas/README.md",
     "interactions/question_judgment/evals/rubrics.md",

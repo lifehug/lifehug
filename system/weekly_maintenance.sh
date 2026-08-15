@@ -158,6 +158,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$SCRIPT_DIR/lifehug.py" source-lint --no-write-findings
   run_step python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" quality-stats
+  run_step python3 "$SCRIPT_DIR/lifehug.py" judgment-update --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" timeline-retire --dry-run
   echo "==> (real run) lifehug.py mirror-compile — synthesizes wiki/self/mirror.md (skipped in dry run: costs an AI call)"
   run_step python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote --dry-run
@@ -225,6 +226,34 @@ ${out}"
 }
 
 run_learning_step "quality_update" python3 "$SCRIPT_DIR/lifehug.py" quality-update
+
+# Weekly question-judgment RUBRIC-EDIT (decisions-feed-the-loop, ADR 0009):
+# the owner's promote/dismiss/defer decisions plus this week's freshly-
+# updated quality-profile bucket movements become AT MOST ONE bounded,
+# evidence-cited amendment to state/question_judgment/learned.md — never a
+# rewrite, never a deterministic invention when no model is available.
+# Runs immediately after quality_update (freshest profile snapshot) and
+# before candidate auto-promotion (order matters: this run's edit informs
+# NEXT week's generation prompts, not this run's — see ADR 0009's one-run
+# lag). The cursor file makes a same-week re-run a no-op. Keyless machines
+# emit the rubric-edit task for agent completion instead.
+if [[ "$KEYLESS" == "1" ]]; then
+  echo
+  echo "==> keyless — emitting judgment rubric-edit task for agent completion"
+  set +e
+  JUDGMENT_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" judgment-update --emit-task "$AGENT_TASKS_DIR/judgment/edit.json" 2>&1)
+  JUDGMENT_STATUS=$?
+  set -e
+  if [[ "$JUDGMENT_STATUS" -ne 0 ]]; then
+    record_learning_failure "weekly_maintenance" "judgment_update_emit" "$JUDGMENT_STATUS" "$JUDGMENT_OUT"
+  elif ! grep -q "no change" <<< "$JUDGMENT_OUT"; then
+    JUDGMENT_OUT="⏸ keyless — rubric-edit task emitted, not a failure. Complete via the maintenance skill (--from-response).
+$JUDGMENT_OUT"
+  fi
+  echo "$JUDGMENT_OUT"
+else
+  run_learning_step "judgment_update" python3 "$SCRIPT_DIR/lifehug.py" judgment-update
+fi
 
 # Pin retirement (v105): manual timeline pins whose event the (fresh)
 # classification now places by itself retire automatically — the filed date

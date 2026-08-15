@@ -1,0 +1,17 @@
+{
+  "golden_id": "judge-scene-slot-accept-01",
+  "candidate": {
+    "text": "Walk me through a typical Tuesday during your first year running the shop — waking to closing, what did the day actually look like?",
+    "source_ids": ["src-manual-004"],
+    "story_function": "scene",
+    "targeted_scene_slot": "when_and_where"
+  },
+  "expected_verdict": {
+    "verdict": "accept",
+    "priority": 0.62,
+    "evidence": "0.55-0.70 'solid' band: serves one purpose (tell_story) with concrete evidence — targets rule 6's when_and_where scene-probe slot (currently empty for this source, not the higher-value 'what does it say about you' slot) with a specific temporal anchor, waking to closing, rather than a generic 'tell me about work' prompt.",
+    "flags": [],
+    "purposes_served": ["tell_story"]
+  },
+  "demonstrates": ["rule_6", "priority_vocabulary"]
+}

@@ -35,6 +35,11 @@ followup_model: "anthropic/claude-opus-4-6"
 # Wiki page synthesis (system/lifehug.py compile); falls back to deterministic
 # excerpts when the selected shared provider is unavailable:
 # wiki_model: "claude-opus-4-20250514"
+# Weekly question-judgment rubric edit (role.planner, high tier — the owner's
+# promote/dismiss/defer decisions become at most one bounded amendment to
+# state/question_judgment/learned.md); keyless machines emit an agent task
+# instead of calling a model:
+# judgment_edit_model: "claude-opus-4-8"
 # Anthropic API key, when that provider is selected (or set ANTHROPIC_API_KEY):
 # anthropic_api_key: ""
 

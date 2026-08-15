@@ -73,7 +73,7 @@ from lifehug_core import (
     write_json,
 )
 from neighborhoods import apply_readiness
-from question_judgment import load_judgment_rubric
+from question_judgment import build_decision_context, load_judgment_rubric, owner_judgment_signals_block
 
 __all__ = ["ai_available", "call_ai", "get_client", "model_is_kimi"]
 
@@ -667,6 +667,7 @@ def build_expansion_prompt(
     relevant_answers: list[dict],
     question_bank_categories: str,
     research_notes: str = "",
+    decision_context: str = "",
     self_signals: list[str] | None = None,
 ) -> str:
     """Build the full AI prompt for neighborhood expansion."""
@@ -838,6 +839,11 @@ def build_expansion_prompt(
     if research_notes:
         lines.append("## QUESTION-JUDGMENT RUBRIC")
         lines.append(research_notes.strip())
+        lines.append("")
+
+    signals_block = owner_judgment_signals_block(decision_context, heading="## OWNER JUDGMENT SIGNALS")
+    if signals_block:
+        lines.append(signals_block)
         lines.append("")
 
     lines.append("## OUTPUT FORMAT")
@@ -1143,6 +1149,11 @@ def _run_expansion(
     # un-upgraded vault.
     research_notes = load_judgment_rubric()
 
+    # Owner Judgment Signals (decisions-feed-the-loop): the most recent
+    # promote/dismiss/defer decisions, human-only — "" when there's no
+    # decision history yet (build_expansion_prompt omits the block).
+    decision_context = build_decision_context(limit=15)
+
     # Question bank categories summary
     qbank_text = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
     cats = parse_categories(qbank_text) if qbank_text else {}
@@ -1160,6 +1171,7 @@ def _run_expansion(
         relevant_answers=relevant_answers,
         question_bank_categories=cat_summary,
         research_notes=research_notes,
+        decision_context=decision_context,
         self_signals=load_classified_self_signals() if topic_type == "self" else None,
     )
 

@@ -13,6 +13,12 @@ role.planner: high
 # once at capture; a weekly pass makes ONE bounded, auditable edit to the
 # learned file; a quarterly pass re-examines the full candidate ledger)
 knob.weekly_edit_max_chars: 600
+# File cap on state/question_judgment/learned.md (decisions-feed-the-loop):
+# on overflow the runtime drops the oldest dated entries and writes ONE
+# "(compacted YYYY-MM-DD: N earlier amendments folded)" marker line in
+# their place — the rubric-edit prompt is told to fold going forward, the
+# code never tries to summarize what was dropped.
+knob.learned_max_chars: 8000
 knob.recalibration_cadence: quarterly
 knob.priority_floor: 0.4
 knob.priority_ceiling: 0.95

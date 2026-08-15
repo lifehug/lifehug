@@ -883,6 +883,24 @@ def _quality_cell_html(candidate: dict, quality_profile: dict | None) -> str:
     return f"{score_html} {breakdown}{flag_html}{live_html}"
 
 
+def _history_reason_cell(c: dict) -> str:
+    """Decided-row (rejected/deferred/promoted/auto_promoted) cell showing
+    BOTH the generator's provenance ``reason`` (why it was proposed) and the
+    owner's ``decision_reason`` (why it was decided) — distinct fields since
+    the decisions-feed-the-loop field-overwrite fix. Before that fix, a
+    decision's reason clobbered the provenance text in place, so nothing
+    here could ever have shown both; this is the viewer's first rendering
+    of either for a decided row."""
+    provenance = str(c.get("reason") or "").strip()
+    decision = str(c.get("decision_reason") or "").strip()
+    parts: list[str] = []
+    if provenance:
+        parts.append(f'<div class="q-provenance-reason muted">proposed: {html.escape(provenance[:240])}</div>')
+    if decision:
+        parts.append(f'<div class="q-decision-reason muted">owner: {html.escape(decision[:240])}</div>')
+    return "".join(parts) if parts else '<span class="muted">—</span>'
+
+
 def _candidates_section_html() -> str:
     """Question candidates lane of Review (v128) — the old view_candidates'
     body, unindented from its own page. Status groups render actionable-first
@@ -940,7 +958,7 @@ def _candidates_section_html() -> str:
             if status in ("candidate", "needs_review"):
                 row.append(_candidate_actions(c, letter, cat_names))
             else:
-                row.append('<span class="muted">—</span>')
+                row.append(_history_reason_cell(c))
             rows.append(row)
         parts.append(_table(["Question", "Quality", "Category", "Story fn", "Source", "Actions"], rows))
     return "".join(parts)

@@ -1,0 +1,11 @@
+{
+  "golden_id": "rubric-edit-era-anchor-carveout-01",
+  "week_delta_summary": "Decisions since last edit (4):\nDISMISSED \"What did a gallon of milk cost the year you moved to the farmhouse?\" — this is exactly the kind of specific texture I want — the too_broad flag is wrong here, promote next time\nDISMISSED \"Walk me through the house room by room the year you moved in.\" — same as c-2291 — era-anchor questions like this read as broad to the checker but are actually the good kind\nDISMISSED \"What was on the radio that whole summer?\" — another era-anchor false positive, I want more of these not fewer\nDISMISSED \"What did the car you drove that year actually cost you to keep running?\" — era-anchor again — this pattern keeps getting the too_broad flag and it should not\n\nQuality-profile bucket movements since last edit:\nscene: 1.00 → 1.08 (+0.08)",
+  "distilled_prior_amendments": "No prior amendments yet.",
+  "current_learned_file": "",
+  "expected_amendment": {
+    "amendment": "This week 4/4 candidates flagged too_broad were era-anchor questions (what things cost, the house room by room, the radio, the car) that check_quality flags but the owner explicitly said should not be. Recommend: add an explicit carve-out to rule 4 that era-anchor candidates are exempt from the broad-generality reading.",
+    "evidence": "Candidates c-2291, c-2304, c-2318, c-2340 — all flagged too_broad, all era-anchor family, all dismissed with an owner reason explicitly disputing the flag (see prompt/examples.md's rubric-edit example, same candidate ids).",
+    "char_count": 321
+  }
+}
