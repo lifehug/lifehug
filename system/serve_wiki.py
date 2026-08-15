@@ -53,7 +53,12 @@ from lifehug_core import (
 from entity_roster import ENTITY_TYPES, load_roster
 from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
 from progress import verdict
-from recommend_focuses import FOCUS_READY_SCORE_FLOOR, focus_start_gate
+from recommend_focuses import (
+    AUTOPILOT_MAX_PER_RUN,
+    AUTOPILOT_TARGET_DEVELOPING,
+    FOCUS_READY_SCORE_FLOOR,
+    focus_start_gate,
+)
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
 from vault_paths import open_vault_fd, read_vault_bytes
 
@@ -1960,29 +1965,37 @@ def _recommendations_section_html() -> str:
 
 
 def _focus_ideas_policy_line() -> str:
-    """Focus ideas lane policy line (issue #79, resolved) — reflects the
-    completion gate's actual state instead of a static 'planned threshold'
-    note. Owner approval is unchanged either way; the gate only decides
-    whether a strong pending idea may show as ready to start.
+    """Focus ideas lane policy line — reflects the completion gate's actual
+    state (issue #79, resolved) AND the autopilot posture that retired
+    "never created without you" (ADR 0011): the system keeps
+    AUTOPILOT_TARGET_DEVELOPING focuses in development on its own, approving
+    the highest-rated idea when a slot opens. Owner approval is unchanged
+    either way — this is an accelerator, not the only path (the
+    Convergence Principle, ADR 0006) — and the gate still decides whether a
+    strong pending idea may show as ready to start. Every number is read
+    from the recommend_focuses module constants, never a literal restated
+    here.
 
     Focus labels and the gate's reason text can originate from
     LLM/imported-source entities (approve_recommendation creates Focuses
     from recommendation entity names) — every interpolated value is
     html.escape()'d before being embedded."""
+    base = (
+        f"keeps {AUTOPILOT_TARGET_DEVELOPING} focuses in development — the "
+        f"highest-rated idea (score {FOCUS_READY_SCORE_FLOOR}+) is started "
+        f"for you when a slot opens (up to {AUTOPILOT_MAX_PER_RUN} a week); "
+        "approve more anytime; dismiss is forever")
     gate = focus_start_gate()
     if gate["open"]:
         return (
-            "focuses are never created without you — approving one "
-            "redirects the weekly question budget; the completion gate is "
-            "open, so strong pending ideas can show as ready to start "
-            "(lifehug/lifehug#79, resolved)")
+            f"{base}; the completion gate is open, so strong pending ideas "
+            "can show as ready to start (lifehug/lifehug#79, resolved)")
     n = len(gate["blocking"])
     labels = ", ".join(html.escape(str(b.get("label", ""))) for b in gate["blocking"])
     return (
-        "focuses are never created without you — and starting new ones is "
-        f"gated while {n} open focus{'es' if n != 1 else ''} "
-        f"{'are' if n != 1 else 'is'} unfinished ({labels}) "
-        "(lifehug/lifehug#79, resolved)")
+        f"{base}; starting new ones is gated while {n} open "
+        f"focus{'es' if n != 1 else ''} {'are' if n != 1 else 'is'} "
+        f"unfinished ({labels}) (lifehug/lifehug#79, resolved)")
 
 
 def view_review():
