@@ -73,6 +73,7 @@ from lifehug_core import (
     write_json,
 )
 from neighborhoods import apply_readiness
+from question_judgment import load_judgment_rubric
 
 __all__ = ["ai_available", "call_ai", "get_client", "model_is_kimi"]
 
@@ -835,8 +836,8 @@ def build_expansion_prompt(
         lines.append("")
 
     if research_notes:
-        lines.append("## RESEARCH NOTES")
-        lines.append(research_notes.strip()[:1000])
+        lines.append("## QUESTION-JUDGMENT RUBRIC")
+        lines.append(research_notes.strip())
         lines.append("")
 
     lines.append("## OUTPUT FORMAT")
@@ -1136,9 +1137,11 @@ def _run_expansion(
     answers = load_answers()
     relevant_answers = find_relevant_answers(answers, topic)
 
-    # Load research.md for additional methodology notes
-    research_file = _SYSTEM_DIR / "research.md"
-    research_notes = research_file.read_text(encoding="utf-8") if research_file.exists() else ""
+    # The question-judgment rubric (interactions/question_judgment/), never
+    # truncated — see system/question_judgment.py's module docstring for
+    # the graceful legacy fallback this loader falls back to on an
+    # un-upgraded vault.
+    research_notes = load_judgment_rubric()
 
     # Question bank categories summary
     qbank_text = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
@@ -1156,7 +1159,7 @@ def _run_expansion(
         source_content=source_content,
         relevant_answers=relevant_answers,
         question_bank_categories=cat_summary,
-        research_notes=research_notes[:800],
+        research_notes=research_notes,
         self_signals=load_classified_self_signals() if topic_type == "self" else None,
     )
 
