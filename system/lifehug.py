@@ -119,7 +119,15 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # state/focus_recommendations.json directly (--dry-run/--emit-task
     # never write) — same family as judgment-update.
     "focus-curate",
-    "focus-dismiss", "focus-finish", "focus-new", "focus-set",
+    "focus-dismiss", "focus-finish",
+    # focus-merge (ADR 0012): the healing verb rewrites state/roadmap.json,
+    # the question bank, entity rosters, the curation ledger and a wiki page
+    # in ONE transaction — the widest single-command vault mutation in the
+    # system, so it takes the writer lock unconditionally. --dry-run writes
+    # nothing but the command is still classified by name (same convention
+    # as focus-autopilot/focus-curate).
+    "focus-merge",
+    "focus-new", "focus-set",
     "ingest", "ingest-story",
     # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
     # writes state/question_judgment/learned.md and last_edit.json directly
@@ -1389,6 +1397,17 @@ def cmd_focus_dupes(args: argparse.Namespace) -> int:
     return run_python("focus_dupes.py", flags)
 
 
+def cmd_focus_merge(args: argparse.Namespace) -> int:
+    flags = [args.survivor, args.loser]
+    if getattr(args, "dry_run", False):
+        flags.append("--dry-run")
+    if getattr(args, "adopt_target", False):
+        flags.append("--adopt-target")
+    if getattr(args, "json", False):
+        flags.append("--json")
+    return run_python("focus_merge.py", flags)
+
+
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
     if args.emit_task:
@@ -2039,6 +2058,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--report", action="store_true", help="Print the damage list (default)")
     p.add_argument("--json", action="store_true", help="Print the damage list as JSON")
     p.set_defaults(func=cmd_focus_dupes)
+
+    p = sub.add_parser("focus-merge",
+                       help="Merge one Focus into another — an auditable multi-file "
+                            "transaction that heals a duplicate pair (ADR 0012)")
+    p.add_argument("survivor", help="The Focus id that survives and absorbs")
+    p.add_argument("loser", help="The Focus id that is absorbed and dropped")
+    p.add_argument("--dry-run", action="store_true", help="Print the full plan and write nothing")
+    p.add_argument("--adopt-target", action="store_true",
+                   help="Raise the survivor's target_depth to max(survivor, loser)")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_focus_merge)
 
     p = sub.add_parser("entity-roster",
                        help="Resolve mentioned entities (person/place/period/object/theme) into a canonical roster")

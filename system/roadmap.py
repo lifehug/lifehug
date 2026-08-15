@@ -278,6 +278,49 @@ def derive_focuses(md_text: str) -> list[dict]:
     return _fold_focus_collisions(focuses)
 
 
+def _settled_key_owners(prior_focuses: list[dict]) -> dict[str, str]:
+    """normalized_focus_key -> the EXISTING roadmap entry id that owns it.
+
+    The roadmap is the record of settled Focus identity: once an entry
+    exists under a key, that entry owns the key. First entry wins, and the
+    primary life-story focus is excluded (its identity is system-owned and
+    never a merge participant)."""
+    owners: dict[str, str] = {}
+    for focus in prior_focuses:
+        fid = focus.get("id")
+        if not fid or focus.get("primary"):
+            continue
+        for raw in (focus.get("label") or "", fid):
+            key = normalized_focus_key(raw)
+            if key:
+                owners.setdefault(key, fid)
+    return owners
+
+
+def _settled_id_for(focus: dict, prior: dict[str, dict], settled_owner: dict[str, str]) -> str:
+    """The id a freshly derived focus should claim.
+
+    Normally its own. But when the derived id is NOT already in the roadmap
+    and an EXISTING entry owns its normalized key under a different id, the
+    derived focus attaches to that existing entry instead of materializing
+    beside it.
+
+    This is the `derive_roadmap` door of ADR 0010's guard doctrine, and it
+    is what makes `focus-merge` (ADR 0012) survive a rebuild in BOTH
+    orientations. `_fold_focus_collisions` only folds focuses derived
+    within ONE pass, and derive_roadmap's "keep user-created focuses" tail
+    re-appends any prior entry the pass didn't derive — so without this,
+    merging "fear" INTO "the-fear" (i.e. the surviving id is not the one
+    the bank happens to derive first) resurrected the absorbed focus on the
+    very next `roadmap-rebuild`, silently re-splitting a healed vault.
+    """
+    fid = str(focus["id"])
+    if fid in prior or focus.get("primary"):
+        return fid
+    owner = settled_owner.get(normalized_focus_key(focus.get("label") or fid))
+    return owner if owner and owner != fid else fid
+
+
 # Fields a user can override; preserved across re-derivation.
 _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 "cap", "phase", "type", "wiki_node", "neighborhoods",
@@ -296,12 +339,15 @@ def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
     a Focus the user created.
     """
     derived = derive_focuses(md_text)
-    prior = {f["id"]: f for f in (existing or {}).get("focuses", [])}
+    prior_focuses = (existing or {}).get("focuses", [])
+    prior = {f["id"]: f for f in prior_focuses}
+    settled_owner = _settled_key_owners(prior_focuses)
 
     merged: list[dict] = []
     seen: set[str] = set()
     for focus in derived:
-        fid = focus["id"]
+        fid = _settled_id_for(focus, prior, settled_owner)
+        focus["id"] = fid
         seen.add(fid)
         if fid in prior:
             old = prior[fid]

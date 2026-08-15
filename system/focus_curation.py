@@ -113,6 +113,42 @@ def _record_settled(ids: list[str], bucket: str, *, path: Path | None = None) ->
     write_json(path or SETTLED_FILE, data)
 
 
+def record_settled_merge(idea_ids: list[str], survivor_id: str, *,
+                         aliases: list[str] | None = None, loser_id: str | None = None,
+                         path: Path | None = None) -> None:
+    """Record a `focus-merge` (ADR 0012) in THIS ledger — the one settled-
+    identity file, never a second one.
+
+    Two effects, both of which stop a healed duplicate from coming back:
+
+    1. `decisions` gains the loser's recommendation id(s) in the `merge`
+       bucket, so `build_pending_idea_list` never re-presents the absorbed
+       identity to the CURATE judge (the same mechanism `apply_verdicts`
+       uses for an AI-decided merge — one bucket vocabulary, not two).
+    2. `focus_aliases` records the survivor -> absorbed-name tie for the
+       case where NO roster entry owns the survivor yet, so the next roster
+       resolve folds the name instead of re-growing it as its own entity.
+       When a survivor roster entry does exist, focus_merge writes the
+       alias there directly and passes no `aliases` here.
+
+    Unknown top-level keys in settled.json are preserved by `_load_settled`,
+    so this is additive to the v168 file shape, not a migration."""
+    _record_settled(list(idea_ids or []), "merge", path=path)
+    if not aliases:
+        return
+    data = _load_settled(path=path)
+    bucket = data.setdefault("focus_aliases", {})
+    entry = bucket.setdefault(str(survivor_id), [])
+    known = {str(item.get("alias", "")).lower() for item in entry if isinstance(item, dict)}
+    now = now_utc()
+    for alias in aliases:
+        if not alias or str(alias).lower() in known:
+            continue
+        entry.append({"alias": str(alias), "focus_id": loser_id, "at": now})
+        known.add(str(alias).lower())
+    write_json(path or SETTLED_FILE, data)
+
+
 # ---------------------------------------------------------------------------
 # Input assembly (contract Scope 4)
 # ---------------------------------------------------------------------------

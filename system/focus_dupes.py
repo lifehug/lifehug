@@ -87,6 +87,25 @@ def _non_primary_focuses(roadmap: dict) -> list[dict]:
     return [f for f in roadmap.get("focuses", []) if f.get("id") and not f.get("primary")]
 
 
+def suggested_merge(group: list[dict]) -> dict:
+    """The survivor/loser split this report SUGGESTS for one certain-duplicate
+    group, and the exact `focus-merge` command that heals it (contract
+    focus-merge, Scope 2 — the hint line).
+
+    Deterministic and conservative: the entry carrying the most question-bank
+    categories survives (it is the one the bank has grown around), ties broken
+    by id so the same vault always yields the same hint. It is a SUGGESTION —
+    the owner picks the survivor, and merging is never automatic.
+    """
+    ordered = sorted(group, key=lambda f: (-len(f.get("categories") or []), str(f.get("id"))))
+    survivor, *losers = [str(f.get("id")) for f in ordered]
+    return {
+        "survivor": survivor,
+        "losers": losers,
+        "commands": [f"lifehug focus-merge {survivor} {loser}" for loser in losers],
+    }
+
+
 def certain_focus_duplicates(roadmap: dict) -> list[dict]:
     """(a) roadmap focuses whose normalized_focus_key collide."""
     by_key: dict[str, list[dict]] = {}
@@ -94,7 +113,11 @@ def certain_focus_duplicates(roadmap: dict) -> list[dict]:
         key = normalized_focus_key(focus.get("label") or focus.get("id") or "")
         by_key.setdefault(key, []).append(focus)
     return [
-        {"key": key, "focuses": [{"id": f.get("id"), "label": f.get("label")} for f in group]}
+        {
+            "key": key,
+            "focuses": [{"id": f.get("id"), "label": f.get("label")} for f in group],
+            "suggested_merge": suggested_merge(group),
+        }
         for key, group in by_key.items() if len(group) > 1
     ]
 
@@ -159,6 +182,10 @@ def _print_report(data: dict) -> None:
     for dup in data["certain_focus_duplicates"]:
         labels = ", ".join(f"{f['label']} ({f['id']})" for f in dup["focuses"])
         print(f"  key={dup['key']}: {labels}")
+        # The healing hint (contract focus-merge, Scope 2). Detection stays
+        # zero-write: this prints the command, it never runs it.
+        for command in dup["suggested_merge"]["commands"]:
+            print(f"      heal: {command}   (add --dry-run to see the full plan first)")
     print()
 
     print("(b) Near-name pairs (token-subset — flagged for judgment):")
