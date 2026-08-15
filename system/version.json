@@ -1,7 +1,7 @@
 {
-  "version": 170,
+  "version": 171,
   "released": "2026-08-15",
-  "changelog": "v170: focus-autopilot moves to the MONTHLY cadence (ADR 0011 amendment, owner-ratified via issue #154) \u2014 it now runs in monthly_research.sh directly after the recommendations refresh (freshest pending list) and before the roster refresh/recompile. Weekly maintenance no longer runs it; slot recovery between runs is manual approve or focus-autopilot --catch-up.",
+  "changelog": "v171: README accuracy pass for the v163\u2013v170 sprint \u2014 no behavior change, docs only. README.md and AGENTS.md now describe: the three shipped Interactions (conversation, question_judgment ADR 0007, focus_curation ADR 0010), the unified quality-score stamping detail (ADR 0008), weekly maintenance's judgment-update RUBRIC-EDIT step (ADR 0009) run right after quality-update and before candidate promotion, focus-autopilot's MONTHLY cadence (ADR 0011 as amended 2026-08-15, run after recommend-focuses and before the roster refresh \u2014 it is no longer a weekly step), the Review lane's fourth duplicate-focuses lane with its Combine button (ADR 0012), the new focus-autopilot/focus-dupes/focus-curate/focus-merge/judgment-update commands and their backing scripts, and the Convergence Principle (ADR 0006) as the framing for the Loop's self-improvement and for owner decisions as consumed accelerator signal.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
