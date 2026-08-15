@@ -124,3 +124,19 @@ permanent veto autopilot can never override.
   the gate's zero-pending exemption too (making the two definitions
   identical), this ADR's explicit "deliberately not the gate's full
   definition" note should be struck or superseded.
+
+## Amendment (2026-08-15, owner-ratified — issue #154)
+
+Cadence moves WEEKLY → MONTHLY (v170). The owner's reasoning, adopted:
+focus creation is a rare, high-weight event; the ideas supply itself
+refreshes monthly (`recommend-focuses` in `monthly_research.sh`), so the
+weekly autopilot mostly re-read a static pending list; one clock now
+rules the whole focus lifecycle (recommend → autopilot → rosters →
+recompile, in that order within the monthly run — the autopilot approves
+from the freshest list and its scaffold rides the same run's recompile).
+Unchanged: per-run cap 1, the 8.0 floor, `approved_by` provenance,
+dismissals as permanent vetoes, and `--catch-up` as a manual-only
+escalation — which, with the manual approve button, is also the answer to
+the slower slot recovery a monthly cadence implies. The hosted twin moves
+in the same step (lifehug-platform#473 wires MONTHLY_STEPS, not
+WEEKLY_STEPS).
