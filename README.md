@@ -284,7 +284,7 @@ In every case the script: loads your mission + relevant existing answers (so it 
 
 ### The candidate lifecycle
 
-Generated questions don't go live until they pass an automated quality gate — or you promote them manually. This is the safety valve between raw idea and daily prompt. Neighborhood readiness follows the same lifecycle: `candidate → promoted question → answered source`.
+Generated questions don't go live until they clear the auto-promote quality bar — or you promote them manually. This is the safety valve between raw idea and daily prompt. The bar is ONE unified quality score (ADR 0008): `priority × story-function multiplier`, with craft flaws (yes/no wording, vagueness, near-dupes, missing scene/stakes) dragging that same score down instead of tripping a separate gate. Neighborhood readiness follows the same lifecycle: `candidate → promoted question → answered source`.
 
 ```mermaid
 flowchart LR

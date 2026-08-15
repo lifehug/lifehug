@@ -51,7 +51,7 @@ from lifehug_core import (
     split_frontmatter,
 )
 from entity_roster import ENTITY_TYPES, load_roster
-from question_candidates import AUTO_PROMOTE_THRESHOLD, check_quality, _infer_category
+from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
 from progress import verdict
 from recommend_focuses import FOCUS_READY_SCORE_FLOOR, focus_start_gate
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap
@@ -835,20 +835,76 @@ def view_foundation():
     return ("Foundation", "".join(parts), False)
 
 
+def _quality_cell_html(candidate: dict, quality_profile: dict | None) -> str:
+    """Single Quality column cell (ADR 0008): the one unified score — priority
+    × story-function multiplier − craft penalties — with a compact breakdown.
+    Reads the STORED `candidate["quality"]` when an auto-promote run has
+    stamped it; falls back to computing unified_quality_score() live
+    (best-effort, marked "live") for candidates no run has touched yet. Never
+    a second scoring path — same function the auto-promote ladder uses."""
+    stored = candidate.get("quality")
+    live = False
+    unified: dict | None
+    if isinstance(stored, dict) and isinstance(stored.get("score"), (int, float)):
+        unified = stored
+    else:
+        live = True
+        try:
+            unified = unified_quality_score(candidate, quality_profile, existing_questions=None)
+        except Exception:
+            unified = None
+    if not unified or not isinstance(unified.get("score"), (int, float)):
+        return '<span class="muted">—</span>'
+
+    score = float(unified["score"])
+    score_html = f'<span class="q-score">{score:.2f}</span>'
+    components = unified.get("components")
+    if not isinstance(components, dict):
+        # Stored before components were persisted (or a stripped fixture) —
+        # show the score alone rather than fabricate a breakdown.
+        return score_html
+
+    priority = float(components.get("priority", 0) or 0)
+    multiplier = float(components.get("story_function_multiplier", 1) or 1)
+    penalty_total = float(components.get("penalty_total", 0) or 0)
+    flags = [p.get("flag") for p in components.get("craft_penalties", []) or [] if p.get("flag")]
+    penalty_note = f" −{penalty_total:.2f}" if penalty_total else ""
+    title_bits = [f"priority {priority:.2f} × story-function multiplier {multiplier:.2f}"]
+    if penalty_total:
+        title_bits.append(f"− craft penalties {penalty_total:.2f}")
+    title_bits.append(f"flags: {', '.join(flags)}" if flags else "flags: none")
+    title = html.escape("; ".join(title_bits))
+    breakdown = (
+        f'<span class="q-breakdown muted" title="{title}">'
+        f"({priority:.2f}×{multiplier:.2f}{penalty_note})</span>"
+    )
+    flag_html = f' <span class="q-flags muted">{html.escape(", ".join(flags))}</span>' if flags else ""
+    live_html = ' <span class="q-live muted">live</span>' if live else ""
+    return f"{score_html} {breakdown}{flag_html}{live_html}"
+
+
 def _candidates_section_html() -> str:
     """Question candidates lane of Review (v128) — the old view_candidates'
     body, unindented from its own page. Status groups render actionable-first
     (candidate, needs_review — the ones with a decision waiting) then the
-    rest alphabetically, so the lane opens on what needs your eye."""
+    rest alphabetically, so the lane opens on what needs your eye.
+
+    Quality is ONE column (ADR 0008, retiring the old separate Priority /
+    Quality pair) — see _quality_cell_html()."""
     cands = (read_json(QUESTION_CANDIDATES_FILE, default={}) or {}).get("candidates", [])
     if not cands:
         return _empty("No candidates yet.")
-    # Quality is not stored on candidates — it's computed on demand by
-    # check_quality (same scorer the classifier/promotion gate use). Category
-    # is only stamped at review time; until then infer it from the candidate's
-    # neighborhood (target_category → neighborhood topic_type → bank letter).
+    # Category is only stamped at review time; until then infer it from the
+    # candidate's neighborhood (target_category → neighborhood topic_type →
+    # bank letter).
     neighborhoods = read_json(NEIGHBORHOODS_FILE, default={}) or {}
     cat_names = parse_categories(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else {}
+    quality_profile: dict | None = None
+    try:
+        from quality_profile import load_profile  # noqa: PLC0415
+        quality_profile = load_profile()
+    except Exception:  # noqa: BLE001 — best-effort; live fallback still works without it
+        quality_profile = None
     by_status: dict[str, list[dict]] = {}
     for c in cands:
         by_status.setdefault(c.get("status", "candidate"), []).append(c)
@@ -860,22 +916,23 @@ def _candidates_section_html() -> str:
         parts.append(f"<h3>{html.escape(status)} ({len(group)})</h3>")
         rows = []
         for c in group:
-            stored = (c.get("quality") or {}).get("score")
-            try:
-                score = stored if isinstance(stored, (int, float)) else \
-                    check_quality(str(c.get("text", "")), source_path=c.get("source_path")).get("score")
-            except Exception:
-                score = None
             letter = _infer_category(c, neighborhoods)
             if letter:
                 name = (cat_names.get(letter) or {}).get("name", "")
                 cat_cell = html.escape(letter + (f" ({name})" if name else ""))
             else:
                 cat_cell = '<span class="muted">unassigned</span>'
+            question_cell = html.escape(str(c.get("text", ""))[:300])
+            reason = str(c.get("needs_review_reason") or "").strip()
+            if status == "needs_review" and reason:
+                # Park reason quotes the unified score and its craft flags
+                # (see auto_promote_candidates()'s park() calls) — shown
+                # here so the reason a candidate is waiting is visible
+                # without leaving the table.
+                question_cell += f'<div class="q-park-reason muted">parked: {html.escape(reason)}</div>'
             row = [
-                html.escape(str(c.get("text", ""))[:300]),
-                format(c.get("priority", 0) or 0, ".2f"),
-                (format(score, ".2f") if isinstance(score, (int, float)) else "—"),
+                question_cell,
+                _quality_cell_html(c, quality_profile),
                 cat_cell,
                 html.escape(str(c.get("story_function") or "—")),
                 html.escape(str(c.get("source_path") or "—")),
@@ -885,7 +942,7 @@ def _candidates_section_html() -> str:
             else:
                 row.append('<span class="muted">—</span>')
             rows.append(row)
-        parts.append(_table(["Question", "Priority", "Quality", "Category", "Story fn", "Source", "Actions"], rows))
+        parts.append(_table(["Question", "Quality", "Category", "Story fn", "Source", "Actions"], rows))
     return "".join(parts)
 
 

@@ -45,15 +45,21 @@ RESURFACEABLE_REVIEW_REASONS = ("score", "quality")
 # Auto-promotion constants
 # ---------------------------------------------------------------------------
 
-# Quality threshold to auto-promote (priority × story_function_multiplier).
+# Quality threshold to auto-promote — the unified score (see
+# unified_quality_score() below): priority × story_function_multiplier, with
+# craft penalties (check_quality's flags) dragging it down.
 AUTO_PROMOTE_THRESHOLD = 0.82
 
 # Below this score but above NEEDS_REVIEW_THRESHOLD → needs_review.
 NEEDS_REVIEW_THRESHOLD = 0.70
 
-# check_quality() score below which a candidate is parked for review even if
-# its promotion score clears the threshold (yes/no wording, near-dupes, vague).
-QUALITY_GATE_MIN = 0.60
+# Retired (ADR 0008, 2026-08-14): a separate QUALITY_GATE_MIN craft gate used
+# to park candidates in parallel to the promotion-score bands. Craft flaws
+# now drag the ONE unified score down instead of tripping a second gate — a
+# heavy-flag candidate lands below NEEDS_REVIEW_THRESHOLD and simply stays a
+# candidate; a mid-flag one parks in the needs_review band. Both are visible
+# in the stamped `quality.components` breakdown. The constant name stays
+# retired rather than reused, so a stale reference fails loudly.
 
 # Candidates older than this that were never promoted expire (kept for audit).
 # Deferred candidates are exempt — a human explicitly said "wait".
@@ -136,32 +142,34 @@ EMOTION_MARKERS = [
 
 
 def check_quality(text: str, *, source_path: str | None = None, existing_questions: list[dict] | None = None) -> dict:
-    """Score a candidate question for quality. Returns {score, flags, notes}.
+    """Score a candidate question for quality. Returns {score, flags, notes,
+    penalties}.
 
     Score: 0.0 (terrible) to 1.0 (excellent).
     Flags: list of issue strings.
     Notes: human-readable quality summary.
+    Penalties: [{"flag": str, "penalty": float}, ...] — the SAME weights that
+    produced `score`, exposed so unified_quality_score() can fold craft
+    penalties into the one published score without re-listing this table
+    (recurring-defect doctrine: the weight table is defined exactly HERE and
+    nowhere else).
     """
-    flags: list[str] = []
-    score = 1.0
+    penalties: list[dict] = []
     text_lower = text.strip().lower()
 
     # Check yes/no wording
     if YES_NO_PATTERNS.match(text.strip()):
-        flags.append("yes_no_wording")
-        score -= 0.25
+        penalties.append({"flag": "yes_no_wording", "penalty": 0.25})
 
     # why→what lint: introspective why-questions about the author's own
     # feelings confabulate and brood; they should be rewritten as what/when.
     if SELF_WHY_PATTERN.search(text):
-        flags.append("self_directed_why")
-        score -= 0.20
+        penalties.append({"flag": "self_directed_why", "penalty": 0.20})
 
     # Check too broad/generic
     for pattern in TOO_BROAD_PATTERNS:
         if pattern.match(text.strip()):
-            flags.append("too_broad")
-            score -= 0.20
+            penalties.append({"flag": "too_broad", "penalty": 0.20})
             break
 
     # Check for scene or emotional path
@@ -169,35 +177,32 @@ def check_quality(text: str, *, source_path: str | None = None, existing_questio
     has_emotion = any(marker in text_lower for marker in EMOTION_MARKERS)
     if not has_scene and not has_emotion:
         if not any(kw in text_lower for kw in ["who", "when", "where", "why", "how", "what"]):
-            flags.append("no_scene_or_stakes_path")
-            score -= 0.15
+            penalties.append({"flag": "no_scene_or_stakes_path", "penalty": 0.15})
 
     # Check missing source
     if not source_path:
-        flags.append("no_source_citation")
-        score -= 0.10
+        penalties.append({"flag": "no_source_citation", "penalty": 0.10})
 
     # Check for short/vague questions
     word_count = len(text.split())
     if word_count < 5:
-        flags.append("too_short")
-        score -= 0.15
+        penalties.append({"flag": "too_short", "penalty": 0.15})
     elif word_count < 8:
-        flags.append("possibly_vague")
-        score -= 0.05
+        penalties.append({"flag": "possibly_vague", "penalty": 0.05})
 
     # Check duplicate against existing questions
     if existing_questions:
         wanted = normalize_question(text)
         for q in existing_questions:
             if normalize_question(str(q.get("text", ""))) == wanted:
-                flags.append(f"duplicate_of_{q.get('id', 'unknown')}")
-                score -= 0.50
+                penalties.append({"flag": f"duplicate_of_{q.get('id', 'unknown')}", "penalty": 0.50})
                 break
 
-    score = max(0.0, min(1.0, score))
+    flags = [p["flag"] for p in penalties]
+    raw_total = sum(p["penalty"] for p in penalties)
+    score = max(0.0, min(1.0, 1.0 - raw_total))
     notes = ", ".join(flags) if flags else "good quality"
-    return {"score": round(score, 2), "flags": flags, "notes": notes}
+    return {"score": round(score, 2), "flags": flags, "notes": notes, "penalties": penalties}
 
 
 def validate_story_function(value: str | None) -> str | None:
@@ -232,6 +237,17 @@ def refresh_neighborhood_readiness_safely() -> None:
             "refresh_neighborhood_readiness",
             exc,
         )
+
+
+def _load_quality_profile_safely() -> dict | None:
+    """Best-effort quality-profile load shared by every unified-score caller
+    (auto-promote, review, stats) — one loader, never re-inlined."""
+    try:
+        from quality_profile import load_profile  # noqa: PLC0415
+        return load_profile()
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure("question_candidates", "load_quality_profile", exc)
+        return None
 
 
 def find_candidate(data: dict, candidate_id: str) -> dict:
@@ -566,15 +582,19 @@ def cmd_stats(_args: argparse.Namespace) -> int:
     for cat in sorted(cat_counts):
         print(f"  {cat}: {cat_counts[cat]}")
 
-    # Quality summary (sample first 50)
+    # Quality summary (sample first 50) — the unified score (ADR 0008), same
+    # definition the auto-promote ladder and the viewer use.
     sample = candidates[:50]
-    quality_scores = [check_quality(str(c.get("text", "")), source_path=c.get("source_path")).get("score", 0) for c in sample]
+    quality_profile = _load_quality_profile_safely()
+    quality_scores = [
+        unified_quality_score(c, quality_profile).get("score", 0) for c in sample
+    ]
     if quality_scores:
         avg = sum(quality_scores) / len(quality_scores)
-        weak = sum(1 for s in quality_scores if s < 0.6)
+        weak = sum(1 for s in quality_scores if s < NEEDS_REVIEW_THRESHOLD)
         print(f"\nQuality (sampled {len(sample)}):")
         print(f"  avg score: {avg:.2f}")
-        print(f"  weak (<0.6): {weak}")
+        print(f"  weak (<{NEEDS_REVIEW_THRESHOLD}): {weak}")
 
     return 0
 
@@ -594,17 +614,15 @@ def cmd_review(args: argparse.Namespace) -> int:
         existing = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError:
         existing = []
+    quality_profile = _load_quality_profile_safely()
     for candidate in rows:
         print_candidate(candidate, detail=True)
-        quality = check_quality(
-            str(candidate.get("text", "")),
-            source_path=candidate.get("source_path"),
-            existing_questions=existing,
-        )
-        if quality["flags"]:
-            print(f"  quality: {quality['score']:.2f} — {quality['notes']}")
+        unified = unified_quality_score(candidate, quality_profile, existing_questions=existing)
+        flags = [p["flag"] for p in unified["components"]["craft_penalties"]]
+        if flags:
+            print(f"  quality: {unified['score']:.2f} — {', '.join(flags)}")
         else:
-            print(f"  quality: {quality['score']:.2f} ✓")
+            print(f"  quality: {unified['score']:.2f} ✓")
     return 0
 
 
@@ -727,11 +745,30 @@ def _infer_category(candidate: dict, neighborhoods: dict) -> str | None:
     return None
 
 
-def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None = None) -> float:
-    """Score a candidate for auto-promotion.
+def unified_quality_score(
+    candidate: dict,
+    quality_profile: dict | None = None,
+    existing_questions: list[dict] | None = None,
+) -> dict:
+    """The ONE published quality score (owner-directed 2026-08-14, ADR 0008).
 
-    Score = priority × story_function_multiplier (from quality profile).
-    Falls back to priority alone when the profile is inactive.
+    score = clamp(priority × story_function_multiplier − penalty_total, 0, 1)
+
+    Craft penalties come from check_quality()'s flags — this function
+    consumes them, it never re-lists the weight table (recurring-defect
+    doctrine: one authoritative definition, in check_quality).
+
+    Returns:
+        {
+            "score": float,
+            "components": {
+                "priority": float,
+                "story_function_multiplier": float,
+                "craft_penalties": [{"flag": str, "penalty": float}, ...],
+                "penalty_total": float,
+            },
+            "computed_at": iso timestamp,
+        }
     """
     priority = float(candidate.get("priority", 0.5) or 0.5)
     multiplier = 1.0
@@ -739,7 +776,66 @@ def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None 
         sf = candidate.get("story_function", "")
         fn_data = quality_profile.get("by_story_function", {}).get(sf, {})
         multiplier = float(fn_data.get("multiplier", 1.0))
-    return round(priority * multiplier, 4)
+
+    quality = check_quality(
+        str(candidate.get("text", "")),
+        source_path=candidate.get("source_path"),
+        existing_questions=existing_questions,
+    )
+    craft_penalties = quality["penalties"]
+    penalty_total = round(float(sum(p["penalty"] for p in craft_penalties)), 4)
+
+    score = round(max(0.0, min(1.0, priority * multiplier - penalty_total)), 4)
+
+    return {
+        "score": score,
+        "components": {
+            "priority": priority,
+            "story_function_multiplier": multiplier,
+            "craft_penalties": craft_penalties,
+            "penalty_total": penalty_total,
+        },
+        "computed_at": now_utc(),
+    }
+
+
+def _quality_unchanged(existing: object, unified: dict) -> bool:
+    """True when a previously-stamped quality dict already reflects `unified`
+    — used to keep `computed_at` from churning on unchanged replays."""
+    return (
+        isinstance(existing, dict)
+        and existing.get("score") == unified["score"]
+        and existing.get("components") == unified["components"]
+    )
+
+
+def stamp_quality(candidate: dict, unified: dict) -> bool:
+    """Stamp candidate["quality"] additively and idempotently: computed_at
+    only advances when score/components actually changed (contract: replays
+    with an unchanged profile must not churn the store). Returns True when
+    the stamp actually changed (so callers know whether the store needs a
+    write even when nothing else about the run did)."""
+    if _quality_unchanged(candidate.get("quality"), unified):
+        return False
+    candidate["quality"] = {
+        "score": unified["score"],
+        "components": unified["components"],
+        "computed_at": unified["computed_at"],
+    }
+    return True
+
+
+def score_candidate_for_promotion(candidate: dict, quality_profile: dict | None = None) -> float:
+    """The promotion component only (priority × story_function_multiplier),
+    with NO craft penalties applied. Delegates into unified_quality_score()
+    so this repo has exactly one scoring definition — see that function for
+    the full picture (craft penalties folded in), which is what the
+    auto-promote ladder and the viewer actually rank and band by. Kept as a
+    public API for callers that specifically want the promotion math in
+    isolation.
+    """
+    components = unified_quality_score(candidate, quality_profile, existing_questions=None)["components"]
+    return round(components["priority"] * components["story_function_multiplier"], 4)
 
 
 # ---------------------------------------------------------------------------
@@ -876,7 +972,7 @@ def auto_promote_candidates(
 
     Returns a summary dict:
     {
-        "promoted": [(candidate_id, question_id, score), ...],
+        "promoted": [(candidate_id, question_id, score, craft_flags), ...],
         "needs_review": [(candidate_id, score, reason), ...],
         "skipped": [(candidate_id, reason), ...],
         "expired": [(candidate_id, age_days), ...],
@@ -893,16 +989,7 @@ def auto_promote_candidates(
     expired = expire_stale_candidates(data, dry_run=dry_run)
 
     # Load quality profile (optional)
-    quality_profile: dict | None = None
-    try:
-        from quality_profile import load_profile  # noqa: PLC0415
-        quality_profile = load_profile()
-    except Exception as exc:  # noqa: BLE001
-        record_learning_failure(
-            "question_candidates",
-            "load_quality_profile",
-            exc,
-        )
+    quality_profile = _load_quality_profile_safely()
 
     # Load neighborhoods for category inference
     try:
@@ -916,16 +1003,30 @@ def auto_promote_candidates(
         )
         neighborhoods = {}
 
-    # Collect promotable candidates (plus resurfaceable needs_review) with scores
-    eligible = []
+    # Existing bank questions for the quality checker's exact-dup flag and the
+    # near-duplicate (semantic) check.
+    existing_questions = parse_questions(question_bank_text)
+    bank_texts: list[tuple[str, str]] = [
+        (str(q.get("id", "?")), str(q.get("text", ""))) for q in existing_questions
+    ]
+
+    # Collect promotable candidates (plus resurfaceable needs_review) with the
+    # ONE unified score (priority × story_function_multiplier − craft
+    # penalties; see unified_quality_score()). Stamping happens here, once
+    # per candidate per run, additively and idempotently — this is what lets
+    # the viewer read a stored value instead of recomputing on every render.
+    eligible: list[tuple[float, dict, dict]] = []
+    any_stamp_changed = False
     for c in data.get("candidates", []):
         if c.get("status") not in PROMOTABLE_STATUSES and not _is_resurfaceable(c):
             continue
         text = str(c.get("text", "")).strip()
         if not text:
             continue
-        score = score_candidate_for_promotion(c, quality_profile)
-        eligible.append((score, c))
+        unified = unified_quality_score(c, quality_profile, existing_questions)
+        if not dry_run and stamp_quality(c, unified):
+            any_stamp_changed = True
+        eligible.append((unified["score"], unified, c))
 
     backlog = len(eligible)
     weekly_cap = dynamic_weekly_cap(unanswered, backlog)
@@ -935,14 +1036,7 @@ def auto_promote_candidates(
     # Sort best-first
     eligible.sort(key=lambda x: -x[0])
 
-    # Existing bank questions for the quality checker's exact-dup flag and the
-    # near-duplicate (semantic) check.
-    existing_questions = parse_questions(question_bank_text)
-    bank_texts: list[tuple[str, str]] = [
-        (str(q.get("id", "?")), str(q.get("text", ""))) for q in existing_questions
-    ]
-
-    promoted: list[tuple[str, str, float]] = []
+    promoted: list[tuple[str, str, float, list[str]]] = []
     needs_review: list[tuple[str, float, str]] = []
     skipped: list[tuple[str, str]] = []
     per_neighborhood: Counter = Counter()
@@ -956,7 +1050,7 @@ def auto_promote_candidates(
             candidate["needs_review_reason"] = reason
             candidate["updated_at"] = now_utc()
 
-    for score, candidate in eligible:
+    for score, unified, candidate in eligible:
         cid = candidate["id"]
         nbhd = candidate.get("neighborhood_id", "_none")
         text = str(candidate["text"]).strip()
@@ -981,24 +1075,21 @@ def auto_promote_candidates(
             park(candidate, score, f"near_duplicate of {dup_of}")
             continue
 
-        # Craft-quality gate (yes/no wording, vagueness, too-short — the
-        # research.md heuristics, previously display-only).
-        quality = check_quality(text, source_path=candidate.get("source_path"),
-                                existing_questions=existing_questions)
-        if quality["score"] < QUALITY_GATE_MIN:
-            park(candidate, score, f"quality {quality['score']:.2f}: {quality['notes']}")
-            continue
-
         # Category inference
         category = _infer_category(candidate, neighborhoods)
         if not category:
             park(candidate, score, "missing_category")
             continue
 
-        # Promotion-score gate
+        # Promotion-score gate — the separate QUALITY_GATE_MIN craft gate is
+        # retired (ADR 0008): craft penalties already dragged `score` down
+        # via unified_quality_score, so one gate does both jobs.
         if score < AUTO_PROMOTE_THRESHOLD:
             if score >= NEEDS_REVIEW_THRESHOLD:
-                park(candidate, score, f"score {score:.2f} below threshold {AUTO_PROMOTE_THRESHOLD}")
+                flags = [p["flag"] for p in unified["components"]["craft_penalties"]]
+                flag_note = f" ({', '.join(flags)})" if flags else ""
+                park(candidate, score,
+                     f"score {score:.2f} below threshold {AUTO_PROMOTE_THRESHOLD}{flag_note}")
             else:
                 skipped.append((cid, f"score {score:.2f} too low"))
             continue
@@ -1033,13 +1124,14 @@ def auto_promote_candidates(
                 candidate["promotion_score"] = score
                 candidate["promotion_reason"] = f"auto: score {score:.2f} ≥ {AUTO_PROMOTE_THRESHOLD}"
                 candidate["updated_at"] = promoted_at
-            promoted.append((cid, question_id, score))
+            flags = [p["flag"] for p in unified["components"]["craft_penalties"]]
+            promoted.append((cid, question_id, score, flags))
             per_neighborhood[nbhd] += 1
             bank_texts.append((question_id, text))  # near-dup guard for the rest of this run
         except ValueError as exc:
             skipped.append((cid, str(exc)))
 
-    if not dry_run and (promoted or needs_review or expired):
+    if not dry_run and (promoted or needs_review or expired or any_stamp_changed):
         write_text(QUESTIONS_FILE, updated_bank)
         save_store(data)
 
@@ -1088,8 +1180,9 @@ def cmd_auto_promote(args: argparse.Namespace) -> int:
             print(f"    ... and {len(expired) - 5} more")
     if promoted:
         print(f"  ✅ Promoted ({len(promoted)}):")
-        for cid, qid, score in promoted:
-            print(f"    {qid} ← {cid} (score {score:.2f})")
+        for cid, qid, score, flags in promoted:
+            flag_note = f" — flags: {', '.join(flags)}" if flags else " — no craft flags"
+            print(f"    {qid} ← {cid} (score {score:.2f}){flag_note}")
         if not args.dry_run:
             refresh_neighborhood_readiness_safely()
     else:
