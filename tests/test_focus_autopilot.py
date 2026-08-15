@@ -454,9 +454,16 @@ class WiringTests(unittest.TestCase):
         self.assertIn("focus-autopilot --dry-run", self.weekly)
 
     def test_version_bumped_with_adr_0011_changelog(self):
+        # changelog is a single STRING holding only the most recent bump's
+        # entry (not a cumulative log — confirmed convention, e.g. v164 ->
+        # v166's changelog dropped all v164 text). A later PR's own bump
+        # legitimately replaces this text with its own changelog, so this
+        # assertion checks the durable invariants (a real string, version
+        # only ever increasing) rather than this PR's own transient wording
+        # — see docs/adr/0011-focus-autopilot.md for the durable record.
         data = json.loads((SYSTEM / "version.json").read_text(encoding="utf-8"))
         self.assertIsInstance(data["changelog"], str)
-        self.assertIn("ADR 0011", data["changelog"])
+        self.assertTrue(data["changelog"].strip())
         self.assertGreaterEqual(data["version"], 167)
 
     def test_adr_0011_documents_the_binding_facts(self):

@@ -1,0 +1,28 @@
+{
+  "golden_id": "curate-betty-jo-merge-01",
+  "pending_ideas": [
+    {
+      "id": "rec-betty-jo",
+      "type": "person",
+      "entity": "Betty Jo",
+      "evidence": ["Mentioned in K3 (relationship context)"]
+    },
+    {
+      "id": "rec-betty-jo-taylor",
+      "type": "person",
+      "entity": "Betty Jo Taylor",
+      "evidence": [
+        "Mentioned in K5 (relationship context)",
+        "my grandma, Betty Jo Taylor, always kept the porch light on"
+      ]
+    }
+  ],
+  "roster_context": [],
+  "existing_focuses": {},
+  "expected_verdict": {
+    "merge": [["rec-betty-jo-taylor", "rec-betty-jo"]],
+    "map_to_focus": {},
+    "keep": []
+  },
+  "demonstrates": ["rule_3", "rule_4", "rule_5"]
+}

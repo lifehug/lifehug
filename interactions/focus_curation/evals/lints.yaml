@@ -1,0 +1,33 @@
+# interactions/focus_curation/evals/lints.yaml — flat scalar subset only
+# (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
+#
+# DATA for a future lint engine — key names here are contract, not free
+# text. No engine reads this file yet (lands with a future wiring PR,
+# mirrors interactions/question_judgment/evals/lints.yaml's own bootstrap).
+
+# prompt/behavior.md must carry numbered hard rules — a rubric missing them
+# is a shipped-file defect, not a style nit.
+lint.behavior_has_numbered_rules: on
+rule_count.min: 8
+
+# a CURATE-mode verdict must parse as the exact JSON shape
+# prompt/turn-instructions.md specifies: merge, map_to_focus, keep — no
+# other keys.
+lint.verdict_parses: on
+lint.verdict_has_exactly_three_keys: on
+
+# every id in {pending_ideas} must appear in exactly one bucket (rule 2) —
+# a dropped or duplicated id makes the whole verdict malformed.
+lint.every_input_id_partitioned_exactly_once: on
+
+# a merge group must have at least two ids (rule 3).
+lint.merge_groups_min_size_2: on
+
+# every id/slug appearing anywhere in the verdict must have been handed in
+# {pending_ideas} / {existing_focuses} — no invented ids or slugs (rule 1).
+lint.no_invented_ids_or_slugs: on
+
+# no reason/evidence/notes field of any kind (owner decision — no reason
+# capture anywhere). A verdict with a fourth key is malformed, not
+# over-thorough.
+lint.no_reason_or_evidence_field: on

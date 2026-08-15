@@ -190,6 +190,7 @@ MIRROR_RESPONSES_FILE = _data("mirror_responses")
 CONVERSATION_DELIVERIES_FILE = _data("conversation_deliveries")
 QUESTION_JUDGMENT_LEARNED_FILE = _data("question_judgment_learned")
 QUESTION_JUDGMENT_STATE_DIR = _data("question_judgment_state")
+FOCUS_CURATION_STATE_DIR = _data("focus_curation_state")
 
 TEMPLATES_DIR = framework_path("templates", framework_system_dir=SYSTEM_DIR)
 MISSION_FILE = framework_path("mission", framework_system_dir=SYSTEM_DIR)
@@ -828,6 +829,21 @@ def status_emoji(answered: int, total: int) -> str:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower())
     return slug.strip("-") or "untitled"
+
+
+def normalized_focus_key(label: str) -> str:
+    """The ONE authoritative collision key for a Focus/entity label
+    (recurring-defect doctrine, docs/BUILDING.md §8): lowercase, strip a
+    leading "the ", then slugify. Shared by every focus-creation door
+    (roadmap.focus_new / the roadmap CLI's `add` / derive_focuses) and by
+    entity_roster._entity_keys — never re-derived independently. This is
+    what catches the exact-name-modulo-case class ("fear" vs "Fear") and
+    the "the "-prefix class ("The Outside" vs "Outside") that plain
+    `slugify` alone (already lowercasing) doesn't fully collapse."""
+    value = str(label or "").strip().lower()
+    if value.startswith("the "):
+        value = value[4:]
+    return slugify(value)
 
 
 def load_mission() -> str:

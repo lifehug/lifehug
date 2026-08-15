@@ -31,6 +31,7 @@ from lifehug_core import (  # noqa: E402
     STATE_DIR,
     WIKI_DIR,
     load_config,
+    normalized_focus_key,
     now_utc,
     parse_categories,
     parse_questions,
@@ -120,6 +121,66 @@ def _header_parens(md_text: str) -> dict[str, str | None]:
     out: dict[str, str | None] = {}
     for cat_id, _name, paren in _HEADER_RE.findall(md_text):
         out[cat_id] = paren.strip() if paren else None
+    return out
+
+
+class FocusKeyCollisionError(ValueError):
+    """Raised by a Focus-creation door (focus_new, the `roadmap add` CLI)
+    when the requested label's normalized_focus_key collides with an
+    EXISTING focus — the exact-name-modulo-case / "the "-prefix duplicate
+    class (contract: focus-duplicate-curation, Scope 1). Carries the
+    colliding focus so the caller can point at it instead of materializing
+    a twin, per the door-guard doctrine: refuse and name the existing
+    Focus rather than silently creating a duplicate."""
+
+    def __init__(self, label: str, existing: dict):
+        self.label = label
+        self.existing = existing
+        existing_label = existing.get("label") or existing.get("id") or "?"
+        super().__init__(
+            f"Focus '{label}' collides with existing focus '{existing_label}' "
+            f"(id={existing.get('id')}) — attach the new category to it instead "
+            "of creating a duplicate."
+        )
+
+
+def find_focus_by_key(roadmap: dict, label: str) -> dict | None:
+    """The existing focus (if any) whose normalized_focus_key matches
+    `label`'s — the collision check every creation door runs before
+    scaffolding. Compares against both the candidate focus's `label` and
+    its `id` (ids are slugified labels, but can drift from a user-edited
+    label via _USER_FIELDS overrides)."""
+    key = normalized_focus_key(label)
+    for focus in roadmap.get("focuses", []):
+        if normalized_focus_key(focus.get("label") or "") == key:
+            return focus
+        if normalized_focus_key(focus.get("id") or "") == key:
+            return focus
+    return None
+
+
+def _fold_focus_collisions(focuses: list[dict]) -> list[dict]:
+    """Auto-derived focuses whose normalized_focus_key collides (the
+    case / "the "-prefix duplicate class — separately-scaffolded question-
+    bank categories that normalize to the same Focus, e.g. a "K: Focus —
+    Fear" and an "L: Focus — fear") fold into ONE focus entry: the later
+    category(ies) attach to the first-seen entry instead of materializing a
+    twin (contract Scope 1, the `derive_focuses` door). The primary
+    life-story focus and any focus with no id are never folded."""
+    folded_by_key: dict[str, dict] = {}
+    out: list[dict] = []
+    for focus in focuses:
+        if focus.get("primary") or not focus.get("id"):
+            out.append(focus)
+            continue
+        key = normalized_focus_key(focus.get("label") or focus.get("id") or "")
+        target = folded_by_key.get(key)
+        if target is None:
+            folded_by_key[key] = focus
+            out.append(focus)
+            continue
+        target["categories"] = sorted(set(target.get("categories", [])) | set(focus.get("categories", [])))
+        target["target_depth"] = max(int(target.get("target_depth") or 0), int(focus.get("target_depth") or 0))
     return out
 
 
@@ -214,7 +275,7 @@ def derive_focuses(md_text: str) -> list[dict]:
             "neighborhoods": [],
         })
 
-    return focuses
+    return _fold_focus_collisions(focuses)
 
 
 # Fields a user can override; preserved across re-derivation.
@@ -377,7 +438,25 @@ def _generate_and_promote(label: str, focus_type: str, deliverable: str, categor
 def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
               deliverable: str = "chapter", generate: bool = True) -> dict:
     """End-to-end: scaffold a category, register the Focus, and (optionally)
-    generate + promote starter questions. Non-destructive to existing answers."""
+    generate + promote starter questions. Non-destructive to existing answers.
+
+    Door guard (contract Scope 1): refuses when `label`'s normalized_focus_key
+    collides with an EXISTING focus under a DIFFERENT id — e.g. creating
+    "fear" when "Fear" already exists — raising FocusKeyCollisionError
+    pointing at the existing focus instead of materializing a twin. A
+    collision against the SAME id (the exact focus this label would derive)
+    is the pre-existing "zombie focus" healing case, not a duplicate, and is
+    left to the caller (see roadmap.py cli()'s `new` subcommand)."""
+    roadmap = load_roadmap()
+    if not roadmap.get("focuses"):
+        try:
+            roadmap = rebuild_roadmap(write=False)
+        except OSError:
+            roadmap = {"version": 1, "focuses": []}
+    collision = find_focus_by_key(roadmap, label)
+    if collision is not None and collision.get("id") != slugify(label):
+        raise FocusKeyCollisionError(label, collision)
+
     md = QUESTIONS_FILE.read_text(encoding="utf-8")
     tag = label if focus_type in ("project", "lifes_work") else None
     new_md, letter = scaffold_category(md, label, focus_type, tag)
@@ -493,8 +572,12 @@ def cli(argv: list[str] | None = None) -> int:
             # can never ask about it). focus-new is the healing path: scaffold
             # the category and attach it; the roadmap rebuild merges by id.
             print(f"↺ Focus '{slugify(args.label)}' exists with no question category — healing it.")
-        res = focus_new(args.label, args.type, args.tier, args.objective,
-                        args.deliverable, generate=not args.no_generate)
+        try:
+            res = focus_new(args.label, args.type, args.tier, args.objective,
+                            args.deliverable, generate=not args.no_generate)
+        except FocusKeyCollisionError as exc:
+            print(f"✗ {exc}")
+            return 1
         verb = "healed with" if existing else "added as"
         print(f"✓ Focus '{args.label}' ({res['tier']} {res['type']}) {verb} category {res['category']}.")
         if args.no_generate:
@@ -523,6 +606,14 @@ def cli(argv: list[str] | None = None) -> int:
         fid = slugify(args.label)
         if find_focus(roadmap, fid):
             print(f"✗ Focus already exists: {fid}")
+            return 1
+        collision = find_focus_by_key(roadmap, args.label)
+        if collision is not None:
+            existing_label = collision.get("label") or collision.get("id") or "?"
+            print(f"✗ Focus '{args.label}' collides with existing focus "
+                  f"'{existing_label}' (id={collision.get('id')}) — use "
+                  "roadmap-set to attach a category to it instead of "
+                  "creating a duplicate.")
             return 1
         roadmap["focuses"].append({
             "id": fid, "label": args.label, "type": args.type, "tier": args.tier,
