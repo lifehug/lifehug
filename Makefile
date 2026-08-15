@@ -26,3 +26,8 @@ walkthrough-%:
 # itself or renaming every other slug's script.
 walkthrough-unified-quality:
 	python3 tests/walkthrough_unified_quality.py --artifacts artifacts/walkthroughs/unified-quality
+
+# Explicit entry (decisions-feed-the-loop): same hyphen-vs-underscore bridge
+# as walkthrough-unified-quality above, for tests/walkthrough_decision_reason.py.
+walkthrough-decision-reason:
+	python3 tests/walkthrough_decision_reason.py --artifacts artifacts/walkthroughs/decision-reason

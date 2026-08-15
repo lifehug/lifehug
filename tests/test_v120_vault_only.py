@@ -66,6 +66,7 @@ EXPECTED_DATA_PATHS = {
     "question_bank",
     "question_candidates",
     "question_judgment_learned",
+    "question_judgment_state",
     "question_queue",
     "readme",
     "reports",
@@ -190,7 +191,7 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(vault_paths.FRAMEWORK_PATHS, exported["framework_paths"])
         self.assertEqual(list(exported["data_paths"]), sorted(exported["data_paths"]))
         self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
-        self.assertEqual(exported["identity"]["framework_version"], 164)
+        self.assertEqual(exported["identity"]["framework_version"], 166)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

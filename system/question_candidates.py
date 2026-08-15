@@ -463,8 +463,20 @@ def update_candidate(
     target_page: str | None = None,
     target_category: str | None = None,
     priority: float | None = None,
-    reason: str | None = None,
+    decision_reason: str | None = None,
 ) -> dict:
+    """Update a candidate's review metadata.
+
+    ``decision_reason`` (contract: decisions-feed-the-loop, the field-overwrite
+    fix) is the OWNER's free-text reason for a promote/dismiss/defer decision
+    — a distinct field from the generator's own provenance ``reason`` set at
+    candidate-creation time (``classify_story.py``, ``research_expand.py``,
+    ``harvest_wiki_questions``). Before this fix, a decision's ``--reason``
+    clobbered that provenance text in place; now the two coexist and both
+    remain readable (``print_candidate``, the viewer's history lane). The
+    CLI flag stays named ``--reason`` (unchanged for users/jobs.py callers)
+    — only the field it writes to changed.
+    """
     candidate = find_candidate(data, candidate_id)
     if status:
         if status not in VALID_STATUSES:
@@ -478,8 +490,8 @@ def update_candidate(
         candidate["target_category"] = target_category.upper() if target_category else None
     if priority is not None:
         candidate["priority"] = priority
-    if reason is not None:
-        candidate["reason"] = reason
+    if decision_reason is not None:
+        candidate["decision_reason"] = decision_reason
     candidate["updated_at"] = now_utc()
     return candidate
 
@@ -515,6 +527,8 @@ def print_candidate(candidate: dict, *, detail: bool = False) -> None:
             print(f"  target_page: {candidate.get('target_page')}")
         if candidate.get("reason"):
             print(f"  reason: {candidate.get('reason')}")
+        if candidate.get("decision_reason"):
+            print(f"  decision_reason: {candidate.get('decision_reason')}")
         if candidate.get("promoted_question_id"):
             print(f"  promoted_question_id: {candidate.get('promoted_question_id')}")
 
@@ -635,7 +649,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         target_page=args.target_page,
         target_category=args.target_category,
         priority=args.priority,
-        reason=args.reason,
+        decision_reason=args.reason,
     )
     save_store(data)
     print(f"✓ Updated {candidate['id']} [{candidate.get('status', 'candidate')}]")

@@ -57,7 +57,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
-from question_judgment import load_judgment_rubric
+from question_judgment import build_decision_context, load_judgment_rubric, owner_judgment_signals_block
 
 # ── constants ─────────────────────────────────────────────────────────────────
 # Non-dated alias — tracks the current Sonnet tier instead of pinning a
@@ -283,6 +283,10 @@ def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
     """Construct the full AI classification prompt for a source file."""
     mission = load_mission()
     judgment_rubric = load_judgment_rubric()
+    judgment_section = f"## Question-Judgment Rubric\n{judgment_rubric}"
+    signals_block = owner_judgment_signals_block(build_decision_context(limit=15))
+    if signals_block:
+        judgment_section += f"\n\n{signals_block}"
     categories_block = load_question_categories()
     story_functions_block = "\n".join(f"  - {sf}" for sf in STORY_FUNCTIONS)
     themes_block = ", ".join(THEME_TAXONOMY)
@@ -294,8 +298,7 @@ def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
 ## Lifehug Mission
 {mission}
 
-## Question-Judgment Rubric
-{judgment_rubric}
+{judgment_section}
 
 ---
 

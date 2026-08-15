@@ -1,11 +1,17 @@
-# Goldens — judged-verdict fixtures (format; fixtures land with the wiring PR)
+# Goldens — judged-verdict fixtures
 
-This directory will hold committed golden fixtures once a runtime exists to
-evaluate against them (the follow-up "decisions-feed-the-loop" PR wires
-the JUDGE/RUBRIC-EDIT runtime; goldens land there, per the contract's
-Scope). This README documents the intended fixture format now so the
-wiring PR has a stable target rather than inventing the shape under
-schedule pressure.
+decisions-feed-the-loop lands the first two committed fixtures
+(`judge-scene-slot-accept-01.json`, `rubric-edit-era-anchor-carveout-01.json`)
+per the format below, plus a RUBRIC-EDIT runtime
+(`system/question_judgment.py`'s `run_weekly_edit()`) that
+`rubric-edit-era-anchor-carveout-01.json` is directly exercised against
+(`tests/test_decisions_feed_loop.py`): its `expected_amendment` is fed
+through `run_weekly_edit(from_response=...)` and the write is asserted
+bounded, evidence-cited, and lint-passing. No JUDGE-mode runtime exists
+yet — `judge-scene-slot-accept-01.json` is a structural/lint fixture only
+(the per-candidate JUDGE call itself is a future generation path's job),
+mirroring `interactions/conversation/evals`'s own bootstrap PR for the
+pieces it doesn't wire yet.
 
 ## JUDGE-mode goldens (`judge-*.json`, one candidate per file)
 
