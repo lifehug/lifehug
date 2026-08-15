@@ -1,7 +1,7 @@
 {
-  "version": 171,
+  "version": 172,
   "released": "2026-08-15",
-  "changelog": "v171: README accuracy pass for the v163\u2013v170 sprint \u2014 no behavior change, docs only. README.md and AGENTS.md now describe: the three shipped Interactions (conversation, question_judgment ADR 0007, focus_curation ADR 0010), the unified quality-score stamping detail (ADR 0008), weekly maintenance's judgment-update RUBRIC-EDIT step (ADR 0009) run right after quality-update and before candidate promotion, focus-autopilot's MONTHLY cadence (ADR 0011 as amended 2026-08-15, run after recommend-focuses and before the roster refresh \u2014 it is no longer a weekly step), the Review lane's fourth duplicate-focuses lane with its Combine button (ADR 0012), the new focus-autopilot/focus-dupes/focus-curate/focus-merge/judgment-update commands and their backing scripts, and the Convergence Principle (ADR 0006) as the framing for the Loop's self-improvement and for owner decisions as consumed accelerator signal.",
+  "changelog": "v172: the How-Lifehug-Works handbook site scaffold (GitHub Pages from /docs, just-the-docs): landing page with the seven-section per-feature template, handbook index with the planned page list, Glossary seeded verbatim from the README's nomenclature, ADRs/pr-specs browsable but out of the sidebar, and the doc-parity harness (tests/test_handbook_parity.py) \u2014 every algorithm number a handbook page quotes is annotated and asserted against the live module constant, so the site cannot drift from the code.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
