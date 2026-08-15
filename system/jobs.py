@@ -351,6 +351,30 @@ def _build_focus_merge(payload: dict) -> tuple[Invocation, ...]:
     return (_cli(*args),)
 
 
+def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
+    """The Graduate-now / Not-a-page / Clear actions' envelope (ADR 0013).
+    Entity type is checked against entity_roster.ENTITY_TYPES (a lazy import
+    — the single authoritative type list, never re-typed here); the slug
+    reuses `_token`'s validator (the same charset `slugify()` produces).
+    `entity_verdict.py` does the semantic refusals (unknown slug, graduate
+    on a mapped entity) — this builder only shapes a safe argv. Re-applying
+    the same verdict converges to the same roster state, but retry_safety
+    is still "never" (the registry reserves "idempotent" for `compile`
+    alone — see test_retry_safety_registry_contains_only_success_preserving_compile);
+    an ambiguous outcome here is not auto-replayed, matching every other
+    direct roster/vault mutator (focus-merge, focus-dismiss, ...)."""
+    from entity_roster import ENTITY_TYPES  # noqa: PLC0415
+    _expect_payload(payload, required={"type", "slug", "verdict"})
+    entity_type = _text(payload, "type", maximum=16)
+    if entity_type not in ENTITY_TYPES:
+        raise ValueError("invalid entity type")
+    slug = _token(payload, "slug")
+    verdict = _text(payload, "verdict", maximum=16)
+    if verdict not in ("graduate", "never", "clear"):
+        raise ValueError("invalid verdict")
+    return (_cli("entity-verdict", entity_type, slug, verdict),)
+
+
 def _build_second_voice(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(payload, required={"key"})
     return (_cli("second-voice-ack", _token(payload, "key")),)
@@ -682,6 +706,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "compile-pending": CommandSpec(_build_schedule("compile_and_commit.sh"), "never"),
     "conversation-close": CommandSpec(_build_conversation_close, "never", timeout_seconds=1800),
     "daily": CommandSpec(_build_schedule("daily_question.sh"), "never", timeout_seconds=1800),
+    "entity-verdict": CommandSpec(_build_entity_verdict, "never"),
     "file-answer": CommandSpec(_build_file_answer, "never", timeout_seconds=1800),
     "fix-source": CommandSpec(_build_fix, "never"),
     "focus-approve": CommandSpec(_build_focus_approve, "never", timeout_seconds=1800),

@@ -1,7 +1,7 @@
 {
-  "version": 173,
+  "version": 174,
   "released": "2026-08-15",
-  "changelog": "v173: the handbook's first two content pages \u2014 Question Candidates and Focuses & the Autopilot (docs/handbook/) \u2014 each in the seven-section template: a concrete user scenario, the nouns (candidate statuses, park, promotion, auto-promotion, neighborhood-as-supply; recommendation, evidence strength, developing set, the three dedupe layers), a mermaid lifecycle/pipeline diagram per page, the unified quality score and idea-scoring formulas with every threshold parity-annotated against question_candidates.py/quality_profile.py/recommend_focuses.py/progress.py and a worked example scored step by step, the floor/accelerator Convergence Principle classification, a code map with change-safely notes, and ADR links (0006\u20130012). 21 parity annotations total, all asserted by tests/test_handbook_parity.py.",
+  "changelog": "v174: entity owner verdicts (ADR 0013) \u2014 the entity-candidates lane gains the owner's accelerator/veto, mirroring the focus lane's promote-override and dismiss-forever. `lifehug.py entity-verdict <type> <slug> graduate|never|clear`: graduate forces a roster entity's page eligibility true (drops compile's real-mention bar to >= 1 for it, but never to zero) and refuses on an already-mapped entity; never forces it false forever while the entity stays on the roster for identity/alias purposes; clear returns to fully automatic. Both settled verdicts survive every future AI/deterministic refresh, even one that actively contradicts them or omits the entity from its candidate list entirely. Review's entity lane now carries graduate-now/not-a-page actions on every candidate row (ordered by distance-to-graduation, closest first) plus an Owner-decided roster-browser table for verdicts already given.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -118,6 +118,7 @@
     "system/conversation_lints.py",
     "system/daily_question.sh",
     "system/entity_roster.py",
+    "system/entity_verdict.py",
     "system/file_answer_bg.sh",
     "system/focus_curation.py",
     "system/focus_dupes.py",

@@ -71,6 +71,7 @@ class LifehugWrapperTests(unittest.TestCase):
             ["research-expand", "--topic", "Dad", "--type", "person", "--from-response", "/tmp/response.json"],
             ["recommend-focuses", "--type", "period"],
             ["entity-roster", "--type", "object", "--force-empty"],
+            ["entity-verdict", "person", "trevor", "graduate"],
             ["serve", "--port", "8765"],
             ["rebuild"],
             ["process-answer", "A1", "--source", "text", "--summary", "Short answer"],

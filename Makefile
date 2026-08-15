@@ -36,3 +36,9 @@ walkthrough-decision-reason:
 # as walkthrough-unified-quality above, for tests/walkthrough_focus_merge.py.
 walkthrough-focus-merge:
 	python3 tests/walkthrough_focus_merge.py --artifacts artifacts/walkthroughs/focus-merge
+
+# Explicit entry (entity-owner-verdicts, ADR 0013): same hyphen-vs-underscore
+# bridge as walkthrough-unified-quality above, for
+# tests/walkthrough_entity_verdicts.py.
+walkthrough-entity-verdicts:
+	python3 tests/walkthrough_entity_verdicts.py --artifacts artifacts/walkthroughs/entity-verdicts

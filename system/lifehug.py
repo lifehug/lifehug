@@ -108,7 +108,12 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # whose send definitively failed. conversation-close is unchanged here —
     # it was already classified; #116 only upgraded what it does.
     "conversation-turn-retry",
-    "correct-source", "entity-roster", "fix", "focus-add",
+    "correct-source", "entity-roster",
+    # entity-verdict (ADR 0013): the owner's graduate-now/never-a-page/clear
+    # accelerator over one roster entity — a single-file roster mutation,
+    # same writer-lock family as entity-roster itself.
+    "entity-verdict",
+    "fix", "focus-add",
     "focus-approve",
     # ADR 0011 (the Convergence Principle's floor applied to focus
     # creation): auto-approval reuses approve_recommendation() verbatim, so
@@ -1429,6 +1434,13 @@ def cmd_entity_roster(args: argparse.Namespace) -> int:
     return run_python("entity_roster.py", flags)
 
 
+def cmd_entity_verdict(args: argparse.Namespace) -> int:
+    flags = [args.type, args.slug, args.verdict]
+    if args.json:
+        flags.append("--json")
+    return run_python("entity_verdict.py", flags)
+
+
 def cmd_focus_action(args: argparse.Namespace) -> int:
     if args.approve:
         return run_python("recommend_focuses.py", ["--approve", args.approve])
@@ -2082,6 +2094,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force-empty", action="store_true",
                    help="Allow an empty object roster to overwrite an existing one")
     p.set_defaults(func=cmd_entity_roster)
+
+    p = sub.add_parser("entity-verdict",
+                       help="Owner override for one roster entity's graduation — "
+                            "graduate now, never a page, or clear back to automatic (ADR 0013)")
+    p.add_argument("type", choices=["person", "place", "period", "object", "theme"])
+    p.add_argument("slug", help="The roster entity's slug (state/entity_rosters/<type>.json)")
+    p.add_argument("verdict", choices=["graduate", "never", "clear"])
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_entity_verdict)
 
     p = sub.add_parser("focus-approve", help="Approve a Focus recommendation")
     p.add_argument("approve", metavar="REC_ID")

@@ -41,6 +41,7 @@ EXPECTED_COMMANDS = frozenset({
     "compile-pending",
     "conversation-close",
     "daily",
+    "entity-verdict",
     "file-answer",
     "fix-source",
     "focus-approve",
