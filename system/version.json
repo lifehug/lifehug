@@ -1,7 +1,7 @@
 {
-  "version": 172,
+  "version": 173,
   "released": "2026-08-15",
-  "changelog": "v172: the How-Lifehug-Works handbook site scaffold (GitHub Pages from /docs, just-the-docs): landing page with the seven-section per-feature template, handbook index with the planned page list, Glossary seeded verbatim from the README's nomenclature, ADRs/pr-specs browsable but out of the sidebar, and the doc-parity harness (tests/test_handbook_parity.py) \u2014 every algorithm number a handbook page quotes is annotated and asserted against the live module constant, so the site cannot drift from the code.",
+  "changelog": "v173: the handbook's first two content pages \u2014 Question Candidates and Focuses & the Autopilot (docs/handbook/) \u2014 each in the seven-section template: a concrete user scenario, the nouns (candidate statuses, park, promotion, auto-promotion, neighborhood-as-supply; recommendation, evidence strength, developing set, the three dedupe layers), a mermaid lifecycle/pipeline diagram per page, the unified quality score and idea-scoring formulas with every threshold parity-annotated against question_candidates.py/quality_profile.py/recommend_focuses.py/progress.py and a worked example scored step by step, the floor/accelerator Convergence Principle classification, a code map with change-safely notes, and ADR links (0006\u20130012). 21 parity annotations total, all asserted by tests/test_handbook_parity.py.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
