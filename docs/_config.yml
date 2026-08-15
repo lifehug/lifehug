@@ -1,0 +1,39 @@
+title: How Lifehug Works
+description: >-
+  The handbook of Lifehug's mechanics — every feature's purpose, nouns,
+  algorithm, and place in the Loop, kept honest by parity tests against the
+  code itself.
+remote_theme: just-the-docs/just-the-docs
+plugins:
+  - jekyll-remote-theme
+
+search_enabled: true
+heading_anchors: true
+mermaid:
+  version: "10.9.0"
+
+aux_links:
+  "lifehug on GitHub":
+    - "https://github.com/lifehug/lifehug"
+
+# The handbook and landing page are the navigable site. Everything else in
+# /docs (ADRs, pr-specs, BUILDING.md) stays browsable at its URL but out of
+# the sidebar — those documents are the raw decision/contract record, linked
+# from handbook pages where relevant.
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+  - scope:
+      path: "adr"
+    values:
+      nav_exclude: true
+  - scope:
+      path: "pr-specs"
+    values:
+      nav_exclude: true
+  - scope:
+      path: "BUILDING.md"
+    values:
+      nav_exclude: true
