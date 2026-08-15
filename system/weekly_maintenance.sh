@@ -164,6 +164,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
   run_step python3 "$SCRIPT_DIR/lifehug.py" arc-plan --dry-run --limit "$QUEUE_LIMIT" --gap-max "${LIFEHUG_WEEKLY_ARC_GAP_MAX:-3}"
+  run_step python3 "$SCRIPT_DIR/lifehug.py" focus-autopilot --dry-run
   run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" progress
   SINCE_7D=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc)-timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
@@ -337,6 +338,24 @@ else
   ARCS_OUT="$LAST_STEP_OUT"
 fi
 
+# Focus autopilot (ADR 0011 — the Convergence Principle's floor applied to
+# focus creation): while the "developing" set (active, non-primary,
+# unsaturated Focuses) is thinner than target, the highest-scoring pending
+# idea at/above the floor is auto-approved through approve_recommendation()
+# itself — the exact same path a manual approval takes, so category
+# scaffolding and starter-question seeding ride along for free. Runs AFTER
+# candidate auto-promotion and queue planning (auto_promote, planner_queue,
+# arc_plan above): a newly-approved Focus's seeded starter questions land in
+# the question bank too late for THIS run's already-written queue/arc cards
+# — they enter NEXT week's planning. Accepted one-run lag, mirroring ADR
+# 0009's — see docs/adr/0011-focus-autopilot.md. Gentle by default (at most
+# one approval per run); --catch-up is a manual CLI-only escalation, never
+# wired into the weekly run.
+run_learning_step "focus_autopilot" python3 "$SCRIPT_DIR/lifehug.py" focus-autopilot
+# Read indirectly by the report section table below.
+# shellcheck disable=SC2034
+FOCUS_AUTOPILOT_OUT="$LAST_STEP_OUT"
+
 run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
 PROGRESS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
@@ -383,6 +402,7 @@ mkdir -p "$REPORT_DIR"
     "Candidate promotion:PROMOTE_OUT" \
     "Planner queue:QUEUE_OUT" \
     "Arc cards:ARCS_OUT" \
+    "Focus autopilot:FOCUS_AUTOPILOT_OUT" \
     "Progress:PROGRESS_OUT" \
     "Learning failures:LEARNING_OUT" \
     "Focus recommendations:RECS_OUT" \

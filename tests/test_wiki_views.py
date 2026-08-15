@@ -408,10 +408,17 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("auto-promote at quality", body)
 
     def test_review_policy_lines_present_per_lane(self):
+        # ADR 0011 retired the "never created without you" posture — the
+        # lane now states the autopilot target/floor/cap, read from
+        # recommend_focuses' own module constants (no literals here).
         self._populate()
         _, body, _ = self._view("review")
         self.assertIn("these are below the line or awaiting review", body)
-        self.assertIn("focuses are never created without you", body)
+        self.assertIn(
+            f"keeps {recommend_focuses.AUTOPILOT_TARGET_DEVELOPING} focuses in development",
+            body,
+        )
+        self.assertIn("dismiss is forever", body)
         self.assertIn("lifehug/lifehug#79", body)
         self.assertIn("fully automatic", body)
         self.assertIn("no action needed", body)

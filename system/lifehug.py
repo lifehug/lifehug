@@ -105,7 +105,13 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # it was already classified; #116 only upgraded what it does.
     "conversation-turn-retry",
     "correct-source", "entity-roster", "fix", "focus-add",
-    "focus-approve", "focus-dismiss", "focus-finish", "focus-new", "focus-set",
+    "focus-approve",
+    # ADR 0011 (the Convergence Principle's floor applied to focus
+    # creation): auto-approval reuses approve_recommendation() verbatim, so
+    # it's the same writer-lock family as focus-approve/recommend-focuses.
+    # --dry-run writes nothing but the command is still classified by name.
+    "focus-autopilot",
+    "focus-dismiss", "focus-finish", "focus-new", "focus-set",
     "ingest", "ingest-story",
     # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
     # writes state/question_judgment/learned.md and last_edit.json directly
@@ -1346,6 +1352,17 @@ def cmd_recommend_focuses(args: argparse.Namespace) -> int:
     return run_python("recommend_focuses.py", flags)
 
 
+def cmd_focus_autopilot(args: argparse.Namespace) -> int:
+    flags = ["--autopilot"]
+    if args.target is not None:
+        flags.extend(["--target", str(args.target)])
+    if args.catch_up:
+        flags.append("--catch-up")
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("recommend_focuses.py", flags)
+
+
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
     if args.emit_task:
@@ -2011,6 +2028,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("dismiss", metavar="REC_ID")
     p.add_argument("--reason", default="")
     p.set_defaults(func=cmd_focus_action, approve=None)
+
+    p = sub.add_parser("focus-autopilot",
+                       help="Convergence Principle floor (ADR 0011): auto-approve the top Focus "
+                            "idea when the developing set is thinner than target")
+    p.add_argument("--dry-run", action="store_true", help="Preview the decision; write nothing")
+    p.add_argument("--target", type=int, default=None, help="Override the developing-set target")
+    p.add_argument("--catch-up", action="store_true",
+                   help="Fill to target in one run instead of the gentle 1/run cap")
+    p.set_defaults(func=cmd_focus_autopilot)
 
     # --- Unified Ingest ---
     p = sub.add_parser("ingest", help="Import from external sources (x, email, instagram, file)")

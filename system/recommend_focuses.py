@@ -34,6 +34,7 @@ from lifehug_core import (
     WIKI_DIR,
     answer_body,
     answer_id_from_filename,
+    load_config,
     now_utc,
     parse_categories,
     parse_questions,
@@ -41,7 +42,7 @@ from lifehug_core import (
     slugify,
     write_json,
 )
-from progress import verdict  # noqa: E402
+from progress import READY, verdict  # noqa: E402
 from roadmap import focus_fill, load_roadmap, rebuild_roadmap  # noqa: E402
 
 FOCUS_RECOMMENDATION_TYPES = ("person", "place", "period", "theme")
@@ -76,6 +77,27 @@ FOCUS_RECOMMENDATION_EXPIRY_WEEKS = 6
 # from an owner-issued one. See dismissed_by usage in apply_recommendation_expiry
 # and the filtering in recommend().
 EXPIRY_DISMISSED_BY = "expiry"
+
+# ADR 0011 (the Convergence Principle's floor applied to focus creation):
+# the owner's ratified "keep N focuses in development" target. Overridable
+# per-vault via config.yaml's `focus_autopilot_target` (see
+# resolve_autopilot_target); this is the module default, never a literal
+# restated elsewhere (the viewer's policy line reads this constant).
+AUTOPILOT_TARGET_DEVELOPING = 3
+
+# Gentle by default: at most one auto-approval per weekly run, so the
+# owner's "up to three" end-state is reached over successive weeks, not in
+# one burst. --catch-up (manual CLI only, focus_autopilot(catch_up=True))
+# raises the effective per-run cap to the target for the everything-done
+# case.
+AUTOPILOT_MAX_PER_RUN = 1
+
+# approve_recommendation's additive provenance stamp. Manual approvals
+# (CLI/viewer) keep the function's own "owner" default; only
+# focus_autopilot() passes "auto". Records approved before this PR simply
+# lack the field — absent means legacy, never re-derived.
+AUTOPILOT_APPROVED_BY = "auto"
+MANUAL_APPROVED_BY = "owner"
 
 RELATIONSHIP_WORDS = re.compile(
     r"\b(mom|dad|mother|father|brother|sister|friend|mentor|boss|wife|husband|"
@@ -794,13 +816,22 @@ def dismiss_recommendation(rec_id: str, reason: str = "") -> bool:
 
 
 def approve_recommendation(rec_id: str, *, tier: str = "standard",
-                           deliverable: str = "chapter") -> bool:
+                           deliverable: str = "chapter",
+                           approved_by: str = MANUAL_APPROVED_BY) -> bool:
     """Approve a recommendation AND create the Focus. Approval used to be a
     dead end — it set status=approved, nothing read it, and focus creation was
     'a manual step' nobody performed (19 recommendations sat pending forever).
     Now it scaffolds the category, registers the Focus, and seeds starter
     questions via roadmap.focus_new — so an approved Focus always has a
-    question category (never a zombie)."""
+    question category (never a zombie).
+
+    `approved_by` is additive provenance (ADR 0011): "owner" (the default —
+    every CLI/viewer manual approval) or "auto" (focus_autopilot() only). A
+    record approved before this field existed simply lacks it — absent means
+    legacy, never re-derived. This is the ONE approval path — focus_autopilot
+    calls this function verbatim rather than a parallel scaffold, so zombie
+    protection, category scaffolding, and starter-question seeding ride
+    along for free for auto-approvals too."""
     existing = load_recommendation_state()
     recs = existing.get("recommendations", [])
 
@@ -822,6 +853,7 @@ def approve_recommendation(rec_id: str, *, tier: str = "standard",
 
     target["status"] = "approved"
     target["approved_at"] = now_utc()
+    target["approved_by"] = approved_by
     target["focus_id"] = result.get("focus_id")
     target["category"] = result.get("category")
 
@@ -831,11 +863,184 @@ def approve_recommendation(rec_id: str, *, tier: str = "standard",
         "recommendations": recs,
         "dismissed": existing.get("dismissed", []),
     })
-    print(f"✓ Approved: {rec_id} — {entity}")
+    print(f"✓ Approved ({approved_by}): {rec_id} — {entity}")
     print(f"  Focus created: {result.get('focus_id')} (category {result.get('category')}, "
           f"{result.get('generated', 0)} starter question(s)"
           f"{'' if result.get('generation_ran') else ' — seed later with focus-new tooling'})")
     return True
+
+
+# ---------------------------------------------------------------------------
+# Autopilot (ADR 0011 — the Convergence Principle's floor applied to focus
+# creation)
+# ---------------------------------------------------------------------------
+
+def resolve_autopilot_target(override: int | None = None) -> int:
+    """target = knob: an explicit --target override wins; otherwise
+    config.yaml's `focus_autopilot_target`; otherwise the module default
+    AUTOPILOT_TARGET_DEVELOPING. Never a literal restated elsewhere — the
+    viewer's policy line reads AUTOPILOT_TARGET_DEVELOPING directly."""
+    if override is not None:
+        return int(override)
+    try:
+        raw = load_config().get("focus_autopilot_target")
+    except OSError:
+        raw = None
+    if raw not in (None, ""):
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            value = None
+        if value and value > 0:
+            return value
+    return AUTOPILOT_TARGET_DEVELOPING
+
+
+def _is_developing(focus: dict, questions: list[dict]) -> bool:
+    """Owner's definition (ADR 0011): active, non-primary, saturation below
+    READY (0.70, progress.py). Mirrors focus_start_gate()'s own phase
+    exemption — a Focus explicitly parked in "maintenance" isn't unfinished
+    work the owner is tracking, so it never counts as developing (matches
+    the gate's existing convention rather than inventing a second one). The
+    primary life-story focus is exempt, same as the gate."""
+    if focus.get("primary"):
+        return False
+    if focus.get("phase") == "maintenance":
+        return False
+    fill = focus_fill(focus, questions)
+    return fill["saturation"] < READY
+
+
+def _developing_focuses(roadmap: dict, questions: list[dict]) -> list[dict]:
+    return [f for f in roadmap.get("focuses", []) if _is_developing(f, questions)]
+
+
+def _rec_folds_into_existing_focus(rec: dict, roadmap: dict) -> bool:
+    """A pending recommendation is stale evidence for an already-existing
+    Focus if the roadmap has grown a Focus with the same id since the
+    recommendation was last refreshed — recommend() only screens against
+    the roadmap/wiki it saw at refresh time, and the persisted
+    recommendations file can be older than the live roadmap."""
+    fid = slugify(str(rec.get("entity", "")))
+    return any(f.get("id") == fid for f in roadmap.get("focuses", []))
+
+
+def _autopilot_candidates(roadmap: dict) -> list[dict]:
+    """Pending recommendations eligible for auto-approval: score at/above
+    FOCUS_READY_SCORE_FLOOR, still pending (owner-dismissed and expired
+    entries never appear in `recommendations` — dismiss_recommendation and
+    apply_recommendation_expiry both move them into `dismissed`), and not
+    already folded into an existing Focus. Highest score first."""
+    state = load_recommendation_state()
+    pending = [
+        r for r in state.get("recommendations", [])
+        if r.get("status", "pending") == "pending"
+        and (r.get("score", 0) or 0) >= FOCUS_READY_SCORE_FLOOR
+        and not _rec_folds_into_existing_focus(r, roadmap)
+    ]
+    pending.sort(key=lambda r: r.get("score", 0) or 0, reverse=True)
+    return pending
+
+
+def focus_autopilot(target: int | None = None, dry_run: bool = False,
+                     *, catch_up: bool = False) -> dict:
+    """The Convergence Principle's floor applied to focus creation (ADR
+    0011): a passive user's system used to NEVER grow a new Focus —
+    approval was the only path. While the "developing" set (active,
+    non-primary, unsaturated Focuses — see _is_developing) is thinner than
+    `target`, auto-approve the single highest-scoring pending idea at/above
+    FOCUS_READY_SCORE_FLOOR through approve_recommendation() itself — the
+    exact same path a manual CLI/viewer approval takes, never a parallel
+    scaffold path, so zombie protection, category scaffolding, and
+    starter-question seeding ride along for free (including the existing
+    keyless emit-task fallback inside roadmap.focus_new when no model is
+    available in-process).
+
+    Gentle by default: AUTOPILOT_MAX_PER_RUN (1) approval per run, so the
+    owner's "keep N in development" end-state is reached over successive
+    weekly runs, not in one burst. `catch_up=True` (manual CLI `--catch-up`
+    only) raises the effective per-run cap to `target`, filling to target in
+    one run for the everything-answered/idle-queue case.
+
+    `dry_run=True` computes and returns the identical decision — including
+    which idea(s) it would approve and why — but never calls
+    approve_recommendation. Nothing is written.
+
+    Idempotent within a run and across runs: a real approval scaffolds a new
+    Focus that itself immediately counts toward `developing` (freshly
+    created, unsaturated, non-primary), so a second call the same week
+    naturally sees a thinner gap (or the target already met) purely from
+    re-reading durable state — no separate cursor file is needed.
+
+    Returns {"target", "cap", "developing_count", "dry_run", "approved",
+    "would_approve", "considered", "reason"}.
+    """
+    resolved_target = resolve_autopilot_target(target)
+    cap = resolved_target if catch_up else AUTOPILOT_MAX_PER_RUN
+
+    live_roadmap = load_roadmap()
+    if not live_roadmap.get("focuses"):
+        try:
+            live_roadmap = rebuild_roadmap(write=False)
+        except OSError:
+            live_roadmap = {"focuses": []}
+    questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
+    developing = _developing_focuses(live_roadmap, questions)
+
+    pending = _autopilot_candidates(live_roadmap)
+    considered = list(pending)
+
+    taken: list[dict] = []
+    approval_failed = False
+    while len(developing) + len(taken) < resolved_target:
+        idea = pending[0] if pending else None
+        if idea is None or len(taken) >= cap:
+            break
+        pending.pop(0)
+        if not dry_run:
+            ok = approve_recommendation(idea["id"], approved_by=AUTOPILOT_APPROVED_BY)
+            if not ok:
+                approval_failed = True
+                break
+        taken.append(idea)
+
+    approved = [] if dry_run else taken
+    would_approve = taken if dry_run else []
+
+    def _summary(items: list[dict]) -> str:
+        return ", ".join(f"{r['entity']} ({r.get('score', 0):.1f})" for r in items)
+
+    if taken:
+        verb = "would approve" if dry_run else "approved"
+        reason = (
+            f"{verb} {_summary(taken)} — developing set was "
+            f"{len(developing)}/{resolved_target}, below target"
+        )
+    elif approval_failed:
+        reason = "an approval attempt failed — see stderr; not retried this run"
+    elif len(developing) >= resolved_target:
+        reason = f"developing set at/above target ({len(developing)}/{resolved_target}) — no action"
+    elif not considered:
+        reason = (
+            f"developing set below target ({len(developing)}/{resolved_target}) "
+            f"but no pending idea clears the floor ({FOCUS_READY_SCORE_FLOOR}) — no action"
+        )
+    else:
+        reason = (
+            f"developing set below target ({len(developing)}/{resolved_target}) "
+            f"but the per-run cap ({cap}) is already spent — no action"
+        )
+
+    return {
+        "target": resolved_target,
+        "cap": cap,
+        "developing_count": len(developing),
+        "dry_run": dry_run,
+        "approved": [{"id": r["id"], "entity": r["entity"], "score": r.get("score")} for r in approved],
+        "would_approve": [{"id": r["id"], "entity": r["entity"], "score": r.get("score")} for r in would_approve],
+        "considered": [{"id": r["id"], "entity": r["entity"], "score": r.get("score")} for r in considered],
+        "reason": reason,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -881,6 +1086,31 @@ def display_recommendations(recs: list[dict], filter_type: str | None = None) ->
             print()
 
 
+def display_autopilot_result(result: dict) -> None:
+    """Dry-run prints the would-approve decision and why (contract Scope 1);
+    a real run prints the same shape with "approved" instead of
+    "would_approve". Never a second, competing message format from the
+    weekly-wiring caller — weekly_maintenance.sh's report table captures
+    this stdout verbatim."""
+    prefix = "[DRY RUN] " if result["dry_run"] else ""
+    print(f"{prefix}Focus autopilot — developing {result['developing_count']}/{result['target']} "
+          f"(per-run cap {result['cap']})")
+    print(f"  {result['reason']}")
+    items = result["would_approve"] if result["dry_run"] else result["approved"]
+    if items:
+        label = "Would approve" if result["dry_run"] else "Approved"
+        for r in items:
+            score = r.get("score")
+            score_str = f"{score:.1f}" if isinstance(score, (int, float)) else "—"
+            print(f"  → {label}: {r['entity']} (score {score_str}, {r['id']})")
+    elif result["considered"]:
+        print(f"  Considered ({len(result['considered'])} eligible, none taken):")
+        for r in result["considered"][:5]:
+            score = r.get("score")
+            score_str = f"{score:.1f}" if isinstance(score, (int, float)) else "—"
+            print(f"    - {r['entity']} (score {score_str}, {r['id']})")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -896,6 +1126,16 @@ def main() -> None:
     parser.add_argument("--reason", default="", help="Reason for dismissal")
     parser.add_argument("--approve", metavar="REC_ID", help="Approve a recommendation by id")
     parser.add_argument("--json", action="store_true", help="Print current recommendations as JSON")
+    parser.add_argument("--autopilot", action="store_true",
+                        help="Convergence Principle floor (ADR 0011): auto-approve the top idea "
+                             "when the developing set is thinner than target")
+    parser.add_argument("--target", type=int, default=None,
+                        help="Override the autopilot developing-set target (default: config or "
+                             f"{AUTOPILOT_TARGET_DEVELOPING})")
+    parser.add_argument("--catch-up", action="store_true",
+                        help="With --autopilot: fill to target in one run instead of the gentle "
+                             f"{AUTOPILOT_MAX_PER_RUN}/run cap (manual CLI only)")
+    parser.add_argument("--dry-run", action="store_true", help="With --autopilot: preview, write nothing")
 
     args = parser.parse_args()
 
@@ -905,6 +1145,11 @@ def main() -> None:
 
     if args.approve:
         approve_recommendation(args.approve)
+        return
+
+    if args.autopilot:
+        result = focus_autopilot(target=args.target, dry_run=args.dry_run, catch_up=args.catch_up)
+        display_autopilot_result(result)
         return
 
     if args.json:
