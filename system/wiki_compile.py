@@ -618,7 +618,13 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
             hit_srcs = {s["source"] for s in m_hits}
             m_hits = m_hits + [w for w in _witness_items(manual_sources, names)
                                if w["source"] not in hit_srcs]
-        if len(a_hits) < _ENTITY_MIN_MENTIONS.get(entity_type, 1) and not m_hits:
+        # Owner-graduated entities (entity-verdict ... graduate, ADR 0013)
+        # drop to the floor of a single real mention — the owner's
+        # accelerator overrides the automatic type bar, but never overrides
+        # "a page needs at least one source": zero real mentions still
+        # skips the page even when owner_verdict is graduate.
+        required_mentions = 1 if ent.get("owner_verdict") == "graduate" else _ENTITY_MIN_MENTIONS.get(entity_type, 1)
+        if len(a_hits) < required_mentions and not m_hits:
             continue  # needs a few real mentions to be worth a page
         primary, supporting = split_primary_supporting(m_hits)
         cited_items = a_hits + primary

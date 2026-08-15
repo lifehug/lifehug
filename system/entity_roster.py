@@ -352,10 +352,25 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     Tradeoff: an intentional AI re-split of a previously merged entity is
     overridden. Splitting a wrongly merged entity requires hand-editing
     state/entity_rosters/<type>.json (remove the merged entry, then re-resolve).
+
+    Owner verdicts (contract: entity-owner-verdicts, Scope 1) are a
+    stronger settled fact than any of the above: a previous entry's
+    `owner_verdict` ALWAYS carries onto its folded slot below, overriding
+    anything the raw entry says (or drops). A previous entry carrying an
+    `owner_verdict` also survives even when NO raw entry matches it at all
+    (the AI's candidate list can drop an owner-graduated or owner-vetoed
+    entity entirely — its low/zero score may not even reach the prompt) —
+    the roster is the settled-identity store for entities; a verdict on it
+    is never contingent on this refresh's raw output.
     """
     previous = (previous_roster or {}).get("entities") or []
-    if not previous or not raw_entities:
+    if not previous:
         return list(raw_entities), 0
+    if not raw_entities:
+        # Nothing to fold onto, but a settled owner_verdict must still
+        # survive an empty refresh (e.g. an empty/failed candidate pass).
+        survivors = [dict(p) for p in previous if p.get("owner_verdict")]
+        return survivors, len(survivors)
 
     key_to_prev: dict[str, dict] = {}
     for prev in previous:
@@ -421,8 +436,23 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         # a refresh response drops them (harmless no-op for other types).
         if not slot.get("keywords") and prev.get("keywords"):
             slot["keywords"] = list(prev["keywords"])
+        # An owner_verdict on the previous entry is a settled fact — it
+        # always wins, whatever this refresh's raw entry carries or omits.
+        if prev.get("owner_verdict"):
+            slot["owner_verdict"] = prev["owner_verdict"]
         if name.strip().lower() != canonical.strip().lower():
             forced += 1
+
+    # A previous entry carrying an owner_verdict must survive even when no
+    # raw entry in THIS refresh matched it at all.
+    for prev in previous:
+        if not prev.get("owner_verdict"):
+            continue
+        prev_slug = prev.get("slug") or slugify(prev.get("name") or "")
+        if prev_slug in slots:
+            continue  # already folded above
+        out.append(dict(prev))
+        forced += 1
     return out, forced
 
 
@@ -538,6 +568,47 @@ def _best_stats(entity: dict, stats: dict[str, dict]) -> tuple[float, int]:
     return float(score), int(answers)
 
 
+def base_page_eligible(entity_type: str, qualifies: bool, maps_to: str | None,
+                       score: float, answers: int, min_score: float, min_answers: int) -> bool:
+    """The AI/deterministic-derived eligibility rule, BEFORE any owner_verdict
+    override (contract: entity-owner-verdicts, Scope 1). Single authoritative
+    definition (recurring-defect doctrine) — `normalize()` and
+    `entity_verdict.py`'s `clear` both call this rather than each re-deriving
+    the per-type formula."""
+    if entity_type == "person":
+        # People are the noisiest detections → keep a score/answers bar.
+        return qualifies and maps_to is None and score >= min_score and answers >= min_answers
+    # Places/periods/objects/themes: the AI's judgment is the gate (the noisy
+    # detector undercounts real places). The actual "a few mentions" bar is
+    # enforced at compile time against real mention counts, and objects
+    # graduate on symbolic meaning regardless of frequency.
+    return qualifies and maps_to is None
+
+
+def apply_owner_verdict(entity_type: str, entry: dict) -> dict:
+    """Enforce Scope 1's settled-decision semantics on ONE normalized roster
+    entry, in place, AFTER the base eligibility above is computed. An
+    `owner_verdict` is a permanent fact the AI can never remove or override:
+
+      - `graduate`: `page_eligible` forced True — UNLESS the entity is
+        mapped to a Focus (`maps_to_focus` wins; `entity_verdict.py` refuses
+        to SET graduate on an already-mapped entity, and this guard also
+        holds continuously if a later refresh maps an already-graduated
+        entity — mapped always wins).
+      - `never`: `page_eligible` forced False, permanently. Identity and
+        alias folding continue unaffected — suppression is about pages, not
+        identity (Scope 1).
+
+    A verdict absent or unrecognized is a no-op — `entry` is returned
+    unchanged in that case."""
+    verdict = entry.get("owner_verdict")
+    if verdict == "never":
+        entry["page_eligible"] = False
+    elif verdict == "graduate" and entry.get("maps_to_focus") is None:
+        entry["page_eligible"] = True
+    return entry
+
+
 def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict],
               focus_map: dict[str, str], min_score: float, min_answers: int) -> list[dict]:
     """Validate AI/agent output into roster entries with computed page_eligible."""
@@ -557,22 +628,18 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
         if maps_to is None and slug in focus_slugs:
             maps_to = slug
         score, answers = _best_stats(e, stats)
-        if entity_type == "person":
-            # People are the noisiest detections → keep a score/answers bar.
-            page_eligible = (qualifies and maps_to is None
-                             and score >= min_score and answers >= min_answers)
-        else:
-            # Places/periods/objects: the AI's judgment is the gate (the noisy
-            # detector undercounts real places). The actual "a few mentions" bar
-            # is enforced at compile time against real mention counts, and objects
-            # graduate on symbolic meaning regardless of frequency.
-            page_eligible = qualifies and maps_to is None
+        page_eligible = base_page_eligible(entity_type, qualifies, maps_to, score, answers,
+                                           min_score, min_answers)
         entry = {
             "name": name, "slug": slug, "aliases": aliases,
             "qualifies": qualifies, "maps_to_focus": maps_to,
             "score": round(score, 2), "unique_answers": answers,
             "page_eligible": page_eligible,
         }
+        owner_verdict = e.get("owner_verdict")
+        if owner_verdict in ("graduate", "never"):
+            entry["owner_verdict"] = owner_verdict
+            apply_owner_verdict(entity_type, entry)
         if entity_type == "period":
             # Chronological rank (1 = earliest in life) drives index ordering.
             try:

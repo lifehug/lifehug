@@ -424,7 +424,11 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("dismiss is forever", body)
         self.assertIn("lifehug/lifehug#79", body)
         self.assertIn("fully automatic", body)
-        self.assertIn("no action needed", body)
+        # ADR 0013: the entity lane is no longer pure FYI — the policy line
+        # names the owner's graduate-now/never-a-page accelerator instead of
+        # the old "no action needed".
+        self.assertIn("graduate one now, or rule it never a page", body)
+        self.assertNotIn("no action needed", body)
 
     def test_review_focus_ideas_policy_cites_79_as_resolved(self):
         # Issue #79 shipped the threshold — the old "planned threshold"

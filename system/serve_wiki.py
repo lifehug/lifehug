@@ -50,7 +50,7 @@ from lifehug_core import (
     slugify,
     split_frontmatter,
 )
-from entity_roster import ENTITY_TYPES, load_roster
+from entity_roster import ENTITY_TYPES, THRESHOLDS, load_roster
 from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
 from progress import verdict
 from recommend_focuses import (
@@ -993,32 +993,107 @@ def _candidate_actions(c: dict, inferred: str | None, cat_names: dict) -> str:
         f'<button class="btn quiet" type="submit">Dismiss</button></form>')
 
 
+def _entity_sort_key(entity: dict, min_score: float) -> tuple:
+    """Distance-to-graduation ordering for the candidates table (contract:
+    entity-owner-verdicts, Scope 3). An entity the AI already marked
+    `qualifies` sorts by how close its score is to the type's page
+    threshold (`min_score − score` — closest to the line first, ties
+    resolved by the raw score); a `qualifies`-pending entity (the AI
+    hasn't judged it worthy yet — more evidence alone won't fix that)
+    sorts after every qualifying one, by score descending as a secondary
+    signal only."""
+    qualifies = bool(entity.get("qualifies"))
+    score = float(entity.get("score", 0) or 0)
+    if qualifies:
+        return (0, float(min_score) - score, -score)
+    return (1, -score, 0.0)
+
+
+def _entity_verdict_form(entity_type: str, slug: str, verdict: str, label: str, *, quiet: bool = False) -> str:
+    cls = "btn quiet" if quiet else "btn"
+    return (
+        f'<form class="actform act-inline" method="post" action="/actions/entity-verdict">'
+        f'{_token_input()}'
+        f'<input type="hidden" name="type" value="{html.escape(entity_type)}">'
+        f'<input type="hidden" name="slug" value="{html.escape(slug)}">'
+        f'<input type="hidden" name="verdict" value="{verdict}">'
+        f'<button class="{cls}" type="submit">{html.escape(label)}</button></form>')
+
+
+def _entity_candidate_actions(entity_type: str, slug: str) -> str:
+    """Graduate-now / not-a-page actions for one pending candidate row
+    (Scope 3) — the owner's accelerator and forever-veto, mirroring the
+    focus lane's approve/dismiss-forever idiom."""
+    if not slug:
+        return "—"
+    return (_entity_verdict_form(entity_type, slug, "graduate", "Graduate now")
+            + " " + _entity_verdict_form(entity_type, slug, "never", "Not a page", quiet=True))
+
+
+_VERDICT_LABEL = {"graduate": "graduate", "never": "not a page"}
+
+
 def _entities_section_html() -> str:
-    """Entity candidates lane of Review (v128) — the old view_entities' body,
-    unchanged, minus its own page title."""
+    """Entity candidates lane of Review (v128; ADR 0013 adds the owner's
+    graduate-now/not-a-page accelerator). Two tables per type:
+
+      - **Candidates** — entities still pending automatic graduation
+        (unchanged preview idiom), now carrying the two verdict actions,
+        ordered closest-to-graduation first (`_entity_sort_key`). A `never`
+        verdict is a settled decision, not a pending candidate, so it is
+        excluded from this preview (Scope 3's "suppressed entities
+        disappear from the lane" — a `never` verdict has no further viewer
+        affordance; `entity-verdict <type> <slug> clear` is the way back).
+      - **Owner-decided** — the small roster-browser table of `graduate`
+        verdicts only (Scope 3: "graduated-by-owner entities show a small
+        `owner` tag in the roster browser"), each with a Clear action back
+        to fully automatic.
+    """
     parts = []
     for etype in ENTITY_TYPES:
+        entities = load_roster(etype).get("entities", [])
         # Only show entities still in the candidate stage — anything that has
         # graduated (page-eligible) or already maps to a Focus has a wiki page,
         # so it's visible in the wiki itself and shouldn't be repeated here.
-        ents = [
-            e for e in load_roster(etype).get("entities", [])
+        # A `never` owner verdict is likewise excluded — it is settled, not
+        # pending (Scope 3), and disappears from the lane entirely.
+        cands = [
+            e for e in entities
             if not e.get("page_eligible") and not e.get("maps_to_focus")
+            and e.get("owner_verdict") != "never"
         ]
-        parts.append(f"<h3>{html.escape(etype.title())} ({len(ents)})</h3>")
-        if not ents:
+        decided = [e for e in entities if e.get("owner_verdict") == "graduate"]
+        parts.append(f"<h3>{html.escape(etype.title())} ({len(cands)})</h3>")
+        if not cands:
             parts.append(_empty("No candidates — none pending graduation."))
-            continue
-        rows = []
-        for e in sorted(ents, key=lambda x: x.get("score", 0) or 0, reverse=True):
-            rows.append([
-                html.escape(str(e.get("name", "?"))),
-                html.escape(", ".join(e.get("aliases", []) or [])) or "—",
-                format(e.get("score", 0) or 0, ".1f"),
-                str(e.get("unique_answers", 0) or 0),
-                ("yes" if e.get("qualifies") else "no"),
-            ])
-        parts.append(_table(["Name", "Aliases", "Score", "Answers", "Qualifies"], rows))
+        else:
+            min_score, _min_answers = THRESHOLDS.get(etype, (8.0, 2))
+            rows = []
+            for e in sorted(cands, key=lambda x: _entity_sort_key(x, min_score)):
+                slug = str(e.get("slug") or "")
+                rows.append([
+                    html.escape(str(e.get("name", "?"))),
+                    html.escape(", ".join(e.get("aliases", []) or [])) or "—",
+                    format(e.get("score", 0) or 0, ".1f"),
+                    str(e.get("unique_answers", 0) or 0),
+                    ("yes" if e.get("qualifies") else "no"),
+                    _entity_candidate_actions(etype, slug),
+                ])
+            parts.append(_table(["Name", "Aliases", "Score", "Answers", "Qualifies", "Actions"], rows))
+        if decided:
+            parts.append(f'<h4>Owner-decided ({len(decided)})</h4>')
+            rows = []
+            for e in decided:
+                slug = str(e.get("slug") or "")
+                verdict = str(e.get("owner_verdict") or "")
+                label = _VERDICT_LABEL.get(verdict, verdict)
+                rows.append([
+                    html.escape(str(e.get("name", "?"))),
+                    f'{_badge("owner")} {html.escape(label)}',
+                    ("yes" if e.get("page_eligible") else "no"),
+                    _entity_verdict_form(etype, slug, "clear", "Clear", quiet=True) if slug else "—",
+                ])
+            parts.append(_table(["Name", "Verdict", "Page eligible", "Actions"], rows))
     return "".join(parts)
 
 
@@ -2055,22 +2130,35 @@ def _focus_ideas_policy_line() -> str:
 
 
 def view_review():
-    """Review (v128) — the system's three self-grown proposal lanes on one
-    page: question candidates the classifier proposed, focus ideas grown
-    from entity evidence, and entity candidates auto-detected across
-    answers. Consolidates the old Question Candidates / Focus
-    Recommendations / Entity Candidates views into three collapsible
-    lanes — the fnd-focus idiom Foundation (v124) and Studio (v127)
-    established — each carrying its own autonomy-level policy line so it's
-    obvious at a glance which lane needs your judgment (question candidates,
-    focus ideas) and which is pure FYI (entity candidates)."""
+    """Review (v128) — the system's self-grown proposal lanes on one page:
+    question candidates the classifier proposed, focus ideas grown from
+    entity evidence, duplicate focuses to heal, and entity candidates
+    auto-detected across answers. Consolidates the old Question Candidates /
+    Focus Recommendations / Entity Candidates views into collapsible lanes —
+    the fnd-focus idiom Foundation (v124) and Studio (v127) established —
+    each carrying its own autonomy-level policy line so it's obvious at a
+    glance which lane needs your judgment. Entity candidates graduate fully
+    automatically (the Convergence Principle's floor, ADR 0006), but the
+    lane also carries the owner's accelerator/veto (ADR 0013): graduate an
+    entity now, or rule one never a page, forever."""
     from focus_dupes import certain_focus_duplicates  # noqa: PLC0415
 
     stats = loop_stats()
     open_cands, pending_recs = stats["open_cands"], stats["pending_recs"]
+    # Pending count mirrors _entities_section_html's own candidate filter
+    # (one definition, restated once): a `never` owner verdict is settled,
+    # not pending, so it does not inflate this count or auto-open the lane.
     entity_total = sum(
         len([e for e in load_roster(t).get("entities", [])
-             if not e.get("page_eligible") and not e.get("maps_to_focus")])
+             if not e.get("page_eligible") and not e.get("maps_to_focus")
+             and e.get("owner_verdict") != "never"])
+        for t in ENTITY_TYPES)
+    # Only `graduate` verdicts render anything below the candidates table
+    # (the Owner-decided roster browser is graduate-only — a `never`
+    # verdict has no further viewer affordance) — so only those should
+    # pull the lane open on their own.
+    entity_decided = sum(
+        len([e for e in load_roster(t).get("entities", []) if e.get("owner_verdict") == "graduate"])
         for t in ENTITY_TYPES)
     dupe_total = len(certain_focus_duplicates(load_roadmap()))
 
@@ -2083,10 +2171,13 @@ def view_review():
     ]
 
     # Lanes with something actionable start open: Review exists to be acted
-    # on, and the hub card's CTA should land on the work, not on three
-    # closed bars. The FYI entity lane always starts collapsed.
+    # on, and the hub card's CTA should land on the work, not on closed
+    # bars. The entity lane opens too once ADR 0013 gave it real actions —
+    # either a candidate to graduate/veto or a settled owner decision worth
+    # a glance (its Clear action).
     cand_open = " open" if open_cands else ""
     rec_open = " open" if pending_recs else ""
+    entity_open = " open" if (entity_total or entity_decided) else ""
 
     parts.append(
         f'<details class="fnd-focus"{cand_open}><summary>'
@@ -2122,12 +2213,12 @@ def view_review():
         + '</div></details>')
 
     parts.append(
-        '<details class="fnd-focus"><summary>'
+        f'<details class="fnd-focus"{entity_open}><summary>'
         '<div class="focus-head"><span class="focus-label">Entity candidates</span> '
         f'{_badge(entity_total)}</div>'
         '<div class="focus-sub">fully automatic — qualifying entities '
-        'graduate into wiki pages at the next compile; this is a preview, '
-        'no action needed</div>'
+        'graduate into wiki pages at the next compile; graduate one now, or '
+        'rule it never a page — both are permanent until cleared</div>'
         '</summary><div class="fnd-cats">'
         + _entities_section_html()
         + '</div></details>')
@@ -3291,6 +3382,35 @@ def act_focus_merge(form):
             job["id"] if job else None)
 
 
+_ENTITY_VERDICT_LABELS = {
+    "graduate": "graduate now", "never": "not a page", "clear": "clear",
+}
+
+
+def act_entity_verdict(form):
+    """Graduate-now / not-a-page / Clear for one roster entity (ADR 0013).
+
+    Mirrors act_focus_merge's shape: validate everything the form claims
+    against real vocabulary (`ENTITY_TYPES`, the slug charset, the three
+    known verdicts) before enqueuing — the CLI (`entity_verdict.py`) still
+    does the semantic refusals (unknown slug, `graduate` on a mapped
+    entity), so a replayed or hand-edited POST can fail there, never
+    silently mutate something the lane never showed."""
+    entity_type = _f(form, "type")
+    slug = _f(form, "slug")
+    verdict = _f(form, "verdict")
+    if entity_type not in ENTITY_TYPES:
+        return ("/views/review", "✗ unknown entity type", None)
+    if not slug or not _SLUG_RE.match(slug):
+        return ("/views/review", "✗ bad entity slug", None)
+    if verdict not in _ENTITY_VERDICT_LABELS:
+        return ("/views/review", "✗ unknown verdict", None)
+    job = _start_job("entity-verdict", {"type": entity_type, "slug": slug, "verdict": verdict})
+    return ("/views/review",
+            f"queued {_ENTITY_VERDICT_LABELS[verdict]} for {entity_type}/{slug}",
+            job["id"])
+
+
 def act_second_voice(form):
     job = _start_job("second-voice-ack", {"key": _f(form, "key")})
     return ("/", "queued acknowledgment — the card will step aside", job["id"])
@@ -3458,6 +3578,7 @@ ACTIONS = {
     "/actions/candidate": act_candidate,
     "/actions/focus-rec": act_focus_rec,
     "/actions/focus-merge": act_focus_merge,
+    "/actions/entity-verdict": act_entity_verdict,
     "/actions/second-voice-ack": act_second_voice,
     "/actions/artifact/new": act_artifact_new,
     "/actions/artifact/assemble": act_artifact_assemble,
