@@ -1,0 +1,54 @@
+{
+  "golden_id": "chat-seattle-ferry-closing-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "G20",
+    "opening": "You've mentioned Puget Sound ferries before — what's a crossing you still think about?",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["ferry"]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "You've mentioned Puget Sound ferries before — what's a crossing you still think about?",
+      "annotations": {
+        "kind": "opener",
+        "topic": "ferry",
+        "seam_ok": false,
+        "properties": []
+      }
+    },
+    {
+      "role": "user",
+      "text": "There's one specific crossing I keep coming back to, a few years after we moved to Seattle."
+    },
+    {
+      "role": "lifehug",
+      "text": "That specific crossing — few years after we moved to Seattle — sounds like one that's stayed with you. What comes back to you first about it?",
+      "annotations": {
+        "kind": "receipt",
+        "quoted_span": "few years after we moved to Seattle",
+        "topic": "ferry",
+        "seam_ok": false,
+        "properties": ["receipt_quotes_user"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "It was late November, the first winter after we moved to Seattle, and I still hadn't figured out which ferry line went where. I got on the wrong one twice that week already. This time I got it right — the 5:20 out of Colman Dock toward Bainbridge Island — and I found a seat by the window on the upper deck even though it was raining sideways and everyone else had crowded inside near the vending machines. My grandmother used to say you haven't really seen a place until you've seen it from the water, so I sat there with a thermos of coffee going cold in my hands and watched the downtown skyline shrink behind us through the fogged-up glass. The foghorn sounded twice, low and long, right as we cleared the breakwater, and a handful of seagulls kept pace with the boat for a while like they were curious about the thermos. Somewhere past the halfway point the rain let up just enough that I could make out the shape of the island ahead, dark green and low against the water, and for maybe ninety seconds the whole sound went completely quiet — no engine noise I could hear, just the water moving under the hull and that particular cold saltwater smell I still can't find anywhere else. I remember thinking, very specifically, that I finally understood why she'd loved this crossing so much before she passed, and that I wished I'd asked her more about it while I still could. I didn't cry exactly, but I sat with it the rest of the ride. When we pulled into the Bainbridge terminal the deckhands were already looping the ropes around the cleats, and I just stood there a second before I got back in the car line, not really in a hurry to be anywhere else."
+    },
+    {
+      "role": "lifehug",
+      "text": "That first November crossing to Bainbridge — the foghorn right as you cleared the breakwater, the ninety seconds of quiet, your grandmother's line about only really seeing a place from the water — sounds like the moment Seattle actually became home instead of just a new city. I'll keep it filed next to the thermos and that quiet stretch past the breakwater.",
+      "annotations": {
+        "kind": "closing",
+        "topic": "ferry",
+        "seam_ok": false,
+        "takeaway": "That first November ferry crossing to Bainbridge — the foghorn, the ninety seconds of quiet past the breakwater, your grandmother's line about seeing a place from the water — was the moment Seattle actually became home.",
+        "hook": "filed next to the thermos and that quiet stretch past the breakwater",
+        "properties": ["closing_has_takeaway_and_hook", "closing_is_declarative", "closing_engages_final_message"]
+      }
+    }
+  ]
+}

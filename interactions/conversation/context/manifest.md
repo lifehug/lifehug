@@ -74,3 +74,31 @@ diverge.
   fetches or stores the underlying data (SQLite vs a hosted DB, a local
   file vs a service call) are fine; differences in the assembly order,
   the budget semantics, or the provenance requirement are not.
+
+## Closing prompt assembly (ADR 0015)
+
+The closing prompt (`build_closing_prompt`) is a separate builder from the
+per-turn assembly above — it does not go through `assemble_context` — but
+it is bound by the same content-first requirement: it must actually read
+the conversation, not just `mode` + `rolling_summary`.
+
+- **The FINAL USER TURN is verbatim and unbudgeted.** The last turn with
+  `role: user` is included in full, regardless of length — it is never
+  truncated or dropped by `budget.closing_transcript` or any other budget.
+  It is the reason a reply is owed, and the close responds to it first.
+- **Earlier turns respect `budget.closing_transcript`** (a flat
+  `interaction.yaml` token budget, same units and truncation convention as
+  every `budget.*` key above). When the window is tight, the OLDEST
+  preceding turns yield first — the most recent context survives.
+- **`rolling_summary`, when non-empty, is included** as older context the
+  recent-turns window dropped — additive, not a substitute for the
+  transcript above it (the pre-ADR-0015 builder read only this field,
+  which the hosted platform never wrote and which never contained the
+  message actually being replied to; that gap was the two incidents' root
+  cause).
+- **Starvation is refused, not rendered.** When there are no user turns
+  AND no non-empty `rolling_summary`, `build_closing_prompt` raises
+  (`conversation.ConversationPromptError`) instead of emitting a prompt
+  that asks a model to appreciate nothing. The engine
+  (`conversation_delivery._deliver_closing`) degrades per its own table —
+  see ADR 0015 — rather than ever shipping a starved prompt to a model.

@@ -43,8 +43,9 @@ Four layers, always in this order:
    committed `evals/goldens/*.json` transcript: the closed vocabulary
    (`receipt_quotes_user`, `no_new_topic_mid_arc`,
    `closing_has_takeaway_and_hook`, `closing_is_declarative`,
-   `deflects_off_scope`, `demonstrated_knowledge_opener_shape`) plus
-   Layer-1 lints over every lifehug turn (seam_ok-aware).
+   `closing_engages_final_message`, `deflects_off_scope`,
+   `demonstrated_knowledge_opener_shape`) plus Layer-1 lints over every
+   lifehug turn (seam_ok-aware).
 4. **Judge rubrics + personas** — model-backed, keyless-skippable. Every
    model-backed step is SKIPPED loudly (named step + reason), never
    silently green, never red without keys. `--emit-tasks` writes agent-task
@@ -116,11 +117,17 @@ VALID_TURN_KINDS = frozenset({"opener", "receipt", "receipt_payout", "closing", 
 #: "closing_is_declarative" (issue #139, pure-chat wave) is an additive
 #: extension: a closing turn has no question anywhere and no banned
 #: closing meta-phrase — behavior.md rule 8's declarative-close doctrine.
+#: "closing_engages_final_message" (ADR 0015, issue #167, content-first
+#: close) is a NEW property id as of this PR — FLAGGED for the platform's
+#: closed-vocabulary reconciliation at the next pin bump (contract,
+#: Scope 4): a closing turn must demonstrably respond to the final user
+#: turn, not just the rolling summary.
 PROPERTY_IDS = frozenset({
     "receipt_quotes_user",
     "no_new_topic_mid_arc",
     "closing_has_takeaway_and_hook",
     "closing_is_declarative",
+    "closing_engages_final_message",
     "deflects_off_scope",
     "demonstrated_knowledge_opener_shape",
 })
@@ -566,6 +573,50 @@ def _check_closing_is_declarative(golden: dict) -> list[str]:
     return errors
 
 
+#: "Distinctive" content tokens for the overlap check below — plain
+#: alphabetic words of at least this length, lowercased. Deliberately
+#: crude (contract, Scope 4: "keep the checker honest and simple") — this
+#: is not an NLP overlap measure, just a concrete, verifiable signal that
+#: the closing turn's text shares real content with the final user turn
+#: rather than being generic.
+_DISTINCTIVE_TOKEN_MIN_LEN = 6
+_WORD_RE = re.compile(r"[A-Za-z']+")
+
+
+def _distinctive_tokens(text: str) -> set[str]:
+    return {
+        word.lower() for word in _WORD_RE.findall(text or "")
+        if len(word) >= _DISTINCTIVE_TOKEN_MIN_LEN
+    }
+
+
+def _check_closing_engages_final_message(golden: dict) -> list[str]:
+    """ADR 0015 (issue #167): the closing turn must engage the final user
+    turn's actual content, not just a generic sign-off. Verifiable via
+    content-token overlap — the closing text must share at least one
+    distinctive token with the immediately preceding user turn."""
+    errors = []
+    for index, turn in _turns_with_property(golden, "closing_engages_final_message"):
+        annotations = turn.get("annotations") or {}
+        if annotations.get("kind") != "closing":
+            errors.append(f"turns[{index}]: closing_engages_final_message requires kind == 'closing'")
+        prior_user_text = _preceding_user_text(golden, index) or ""
+        final_tokens = _distinctive_tokens(prior_user_text)
+        if not final_tokens:
+            errors.append(
+                f"turns[{index}]: closing_engages_final_message requires a "
+                "preceding user turn with distinctive content tokens to check against"
+            )
+            continue
+        closing_tokens = _distinctive_tokens(turn.get("text") or "")
+        if not (final_tokens & closing_tokens):
+            errors.append(
+                f"turns[{index}]: closing turn shares no distinctive content "
+                f"token with the final user message (candidates: {sorted(final_tokens)})"
+            )
+    return errors
+
+
 def _check_deflects_off_scope(golden: dict) -> list[str]:
     errors = []
     for index, turn in _turns_with_property(golden, "deflects_off_scope"):
@@ -610,6 +661,7 @@ PROPERTY_CHECKERS: dict[str, Callable[[dict], list[str]]] = {
     "no_new_topic_mid_arc": _check_no_new_topic_mid_arc,
     "closing_has_takeaway_and_hook": _check_closing_has_takeaway_and_hook,
     "closing_is_declarative": _check_closing_is_declarative,
+    "closing_engages_final_message": _check_closing_engages_final_message,
     "deflects_off_scope": _check_deflects_off_scope,
     "demonstrated_knowledge_opener_shape": _check_demonstrated_knowledge_opener_shape,
 }
