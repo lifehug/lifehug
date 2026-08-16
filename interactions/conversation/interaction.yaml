@@ -4,7 +4,9 @@ interaction: conversation
 version: 1.0.0
 modes: chat|conversation
 # file load order (per-turn assembly; also documented in context/manifest.md)
-load_order: identity|behavior|examples|profile|record|session|turn_instructions
+# asking_supply (issue #168, ADR 0016) sits between record and session:
+# per-session-but-whole-vault-derived like record, cache-tier correct.
+load_order: identity|behavior|examples|profile|record|asking_supply|session|turn_instructions
 # model roles by capability tier (config keys resolved by the runtime;
 # OSS config keys land in Wave 2 — these name the ROLES, not providers)
 role.router: haiku-class
@@ -28,6 +30,11 @@ knob.janitor_idle_hours: 36
 knob.deposit_framing: off
 knob.grief_deferral_days: 60
 knob.router_confidence_threshold: 0.7
+# issue #168 / ADR 0016 (asking-supply): the ASKING_SUPPLY block's own
+# Top-K — a whisper, not a flood (prior-art cap applies to the BLOCK SIZE
+# only; there is deliberately no per-session cap on how many of these get
+# asked across a great conversation — see behavior.md's Defaults).
+knob.asking_supply_top_k: 3
 # per-block context budgets (tokens, approximate; top-K small,
 # whole-corpus never loaded)
 budget.identity: 600
@@ -35,6 +42,7 @@ budget.behavior: 1200
 budget.examples: 900
 budget.profile: 400
 budget.record: 1800
+budget.asking_supply: 400
 budget.session: 1200
 budget.turn_instructions: 400
 # ADR 0015 (issue #167, content-first close): the closing prompt's own

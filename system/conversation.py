@@ -111,6 +111,7 @@ ASSEMBLE_CONTEXT_BLOCK_ORDER = (
     "examples",
     "profile",
     "record",
+    "asking_supply",
     "session",
 )
 
@@ -120,6 +121,24 @@ CHARS_PER_TOKEN = 4  # contract-pinned approximation for budget truncation
 #: knob is absent or the manifest fails to load — sized like the turn
 #: prompt's own transcript allowance (`budget.session`, ADR 0015).
 DEFAULT_CLOSING_TRANSCRIPT_BUDGET = 1200
+
+#: Default `knob.asking_supply_top_k` (ADR 0016) when the manifest is
+#: absent or the knob isn't an int.
+DEFAULT_ASKING_SUPPLY_TOP_K = 3
+
+#: A14 -> A14, A14b -> A14 (the suffix chain's root). Single authority —
+#: moved here from conversation_delivery.py (issue #168 / ADR 0016) so the
+#: focus-derivation ladder (arc.question_id / turn question_ids ->
+#: _chain_root -> qid[0] -> question_planner.build_focus_index()) and the
+#: turn engine's session-selection matching both read the SAME function
+#: rather than each keeping their own copy of this regex (recurring-defect
+#: doctrine); conversation_delivery imports this one.
+_CHAIN_ROOT_RE = re.compile(r"^([A-Z]\d+)[a-z]*$")
+
+
+def _chain_root(question_id: str) -> str:
+    match = _CHAIN_ROOT_RE.match(question_id or "")
+    return match.group(1) if match else (question_id or "")
 
 
 class ConversationError(Exception):
@@ -339,7 +358,11 @@ def append_turn(
     # find which template candidates a session's classifier-grade extraction
     # should flip to "superseded". Optional and additive; existing callers
     # that never pass it are unaffected.
-    for optional in ("router", "model", "question_id", "source_path"):
+    # "asked_from_supply" (issue #168, ADR 0016): marks a lifehug turn's
+    # question_id as a HELD pick from asking_supply, not an ordinary minted
+    # follow-up — the decline-detection rule (Scope 4) reads this back to
+    # know which turns' offers are even eligible to be "declined".
+    for optional in ("router", "model", "question_id", "source_path", "asked_from_supply"):
         if turn.get(optional) is not None:
             new_turn[optional] = turn[optional]
     doc["turns"] = [*turns, new_turn]
@@ -432,6 +455,45 @@ def merge_session_extraction(
             current[bucket] = existing
         doc["extracted"] = current
     _write_json_at(_conversations_dir(root) / f"{session_id}.json", doc, vault_root=root)
+    return doc
+
+
+def record_declined_questions(
+    session_id: str,
+    question_ids: list[str],
+    *,
+    vault_root: str | Path | None = None,
+) -> dict:
+    """Additively record held-question ids this session has declined.
+
+    Issue #168 / ADR 0016, Scope 4 (session-scoped decline memory): a held
+    question offered from ``asking_supply`` and declined (the next user
+    turn doesn't engage it — ``conversation_delivery``'s deterministic
+    detection rule) is excluded from that block for the rest of this
+    session — rule 4's "never re-offer" made structural. De-duplicated,
+    order-preserving; a no-op on a closed session (nothing left to protect)
+    or an empty ``question_ids``. Plain read-modify-write, same posture as
+    ``merge_session_extraction`` above — this field is additive-only and a
+    concurrent double-write is at worst a harmless duplicate-suppressed
+    append, never a data loss.
+    """
+    if not question_ids:
+        return load_session(session_id, vault_root=vault_root)
+    root = _resolve_root(vault_root)
+    doc = load_session(session_id, vault_root=root)
+    if doc.get("status") == "closed":
+        return doc
+    existing = doc.get("declined_question_ids")
+    current = list(existing) if isinstance(existing, list) else []
+    changed = False
+    for qid in question_ids:
+        text = str(qid) if qid else ""
+        if text and text not in current:
+            current.append(text)
+            changed = True
+    if changed:
+        doc["declined_question_ids"] = current
+        _write_json_at(_conversations_dir(root) / f"{session_id}.json", doc, vault_root=root)
     return doc
 
 
@@ -636,6 +698,131 @@ def _assemble_record_block(session: dict, root: Path) -> str:
     return f"[{question_id}, {answered_date}] {body.strip()}"
 
 
+# --------------------------------------------------------------------------
+# The asking_supply block (issue #168, ADR 0016) — conversations see and ask
+# the session focus's held bank questions. Producer is
+# `_assemble_asking_supply_block`; `asking_supply_selection` /
+# `asking_supply_question_ids` are the public seam `conversation_delivery`'s
+# invitation-hatch gate reuses so the "which qids are actually in the block"
+# answer is never re-derived (recurring-defect doctrine) — one selection,
+# read by both the renderer and the gate.
+# --------------------------------------------------------------------------
+
+
+def _declined_question_ids(session: dict) -> frozenset[str]:
+    ids = session.get("declined_question_ids")
+    if not isinstance(ids, list):
+        return frozenset()
+    return frozenset(str(i) for i in ids if i)
+
+
+def _session_focus_question_id(session: dict) -> str | None:
+    """arc.question_id first, else any turn's question_id (contract's
+    focus-derivation ladder, step 1) — a story session's turns carry
+    ``source_path``, never ``question_id``, so this returns None for them
+    and the ladder resolves nothing, honestly (Binding facts)."""
+    arc = session.get("arc") or {}
+    if isinstance(arc, dict) and arc.get("question_id"):
+        return str(arc["question_id"])
+    for turn in session.get("turns") or []:
+        qid = turn.get("question_id")
+        if qid:
+            return str(qid)
+    return None
+
+
+def _resolve_session_focus_and_candidates(session: dict) -> tuple[dict | None, list[dict]]:
+    """The focus-derivation ladder + gate-ranked candidate rows.
+
+    Ladder: arc.question_id / turn question_ids -> ``_chain_root`` ->
+    ``qid[0]`` (the category letter) -> ``question_planner.build_focus_index``'s
+    ``cat_to_focus`` -> the roadmap focus object. Any failure at any rung
+    (no question id, no category match, question_planner unavailable)
+    degrades to ``(None, [])`` — an honestly empty supply, never a
+    fabricated focus (Binding facts: "Story sessions may resolve nothing").
+
+    Candidate rows come from ``question_planner.enriched_pending_questions``
+    — REUSED, never re-derived (recurring-defect doctrine): its own
+    rumination-cooldown and escalation-gate weight multipliers govern
+    ranking here exactly as they do the weekly queue. Declined-in-session
+    ids (rule 4, made structural) are excluded before ranking. Sorted
+    richest-weight-first; the caller trims to ``knob.asking_supply_top_k``.
+    """
+    question_id = _session_focus_question_id(session)
+    if not question_id:
+        return None, []
+    category = _chain_root(question_id)[:1]
+    if not category:
+        return None, []
+    try:
+        import question_planner  # noqa: PLC0415
+
+        questions, categories, coverage = question_planner.load_question_state()
+        roadmap = question_planner.resolve_roadmap(questions)
+        focuses = roadmap.get("focuses") or []
+        findex = question_planner.build_focus_index(focuses, questions)
+        focus_id = findex["cat_to_focus"].get(category)
+        if not focus_id:
+            return None, []
+        focus = findex["info"].get(focus_id, {}).get("focus")
+        if not isinstance(focus, dict):
+            return None, []
+        focus_categories = {str(c) for c in (focus.get("categories") or [])}
+        if not focus_categories:
+            return focus, []
+        declined = _declined_question_ids(session)
+        rows = question_planner.enriched_pending_questions(questions, categories, coverage, [], findex)
+        candidates = [
+            row for row in rows
+            if str(row.get("category")) in focus_categories and str(row.get("id")) not in declined
+        ]
+        candidates.sort(key=lambda r: (-float(r.get("weight") or 0.0), str(r.get("id"))))
+        return focus, candidates
+    except Exception:  # noqa: BLE001 — an honestly empty block beats a crash
+        return None, []
+
+
+def asking_supply_selection(session: dict) -> tuple[dict | None, list[dict]]:
+    """(focus_or_None, top-K selected rows) — the exact rows the
+    ``asking_supply`` block renders for this session right now. Public seam:
+    ``conversation_delivery``'s invitation-hatch gate calls this (via
+    ``asking_supply_question_ids`` below) rather than re-deriving the
+    selection, so "is this qid actually in the block" is always answered
+    from the one true selection."""
+    focus, candidates = _resolve_session_focus_and_candidates(session)
+    if focus is None:
+        return None, []
+    manifest = _safe_manifest()
+    top_k = manifest.get("knob.asking_supply_top_k")
+    top_k = top_k if isinstance(top_k, int) and top_k > 0 else DEFAULT_ASKING_SUPPLY_TOP_K
+    return focus, candidates[:top_k]
+
+
+def asking_supply_question_ids(session: dict) -> frozenset[str]:
+    """The qids currently in this session's asking_supply selection."""
+    _focus, selected = asking_supply_selection(session)
+    return frozenset(str(row["id"]) for row in selected)
+
+
+def _assemble_asking_supply_block(session: dict, root: Path) -> str:
+    focus, selected = asking_supply_selection(session)
+    if focus is None or not selected:
+        return ""
+    try:
+        import question_planner  # noqa: PLC0415
+        from roadmap import focus_fill  # noqa: PLC0415
+
+        questions, _categories, _coverage = question_planner.load_question_state()
+        fill = focus_fill(focus, questions)
+    except Exception:  # noqa: BLE001
+        return ""
+    label = str(focus.get("label") or focus.get("id") or "this focus")
+    lines = [f"Focus: {label} — {fill['answered']} of {fill['total']} answered"]
+    for row in selected:
+        lines.append(f"[{row['id']}] {row['text']}")
+    return "\n".join(lines)
+
+
 #: The closed six-kind arc-card intent vocabulary (mid-flight audit amendment
 #: M10) — arc.intents holds typed objects shaped like {"kind": <one of
 #: these>, ...}, never plain strings.
@@ -678,7 +865,7 @@ def assemble_context(
     vault_root: str | Path | None = None,
     blocks: dict[str, str] | None = None,
 ) -> str:
-    """Deterministic identity->behavior->examples->profile->record->session context."""
+    """Deterministic identity->behavior->examples->profile->record->asking_supply->session context."""
     root = _resolve_root(vault_root)
     blocks = blocks or {}
     manifest = _safe_manifest()
@@ -688,6 +875,13 @@ def assemble_context(
         "examples": _read_framework_text("prompt", "examples.md"),
         "profile": blocks.get("profile") if "profile" in blocks else _assemble_profile_block(root),
         "record": blocks.get("record") if "record" in blocks else _assemble_record_block(session, root),
+        # issue #168 / ADR 0016: the platform seam — the pinned
+        # assemble_context accepts "asking_supply" in the blocks override
+        # exactly like "profile"/"record" above, so the hosted platform can
+        # resolve this block from its own projections rather than the
+        # vault-local question_planner producer below.
+        "asking_supply": blocks.get("asking_supply") if "asking_supply" in blocks
+        else _assemble_asking_supply_block(session, root),
         "session": _assemble_session_block(session),
     }
     rendered = []

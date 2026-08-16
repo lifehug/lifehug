@@ -32,25 +32,49 @@ diverge.
    (behavior.md rule 6 requires this — an insight claim with no
    provenance ID behind it is not backed by anything real).
 
+6. **`asking_supply`** block (issue #168, ADR 0016) — the session focus's
+   own held bank questions: a header line naming the focus and its
+   answered/total count, followed by up to `knob.asking_supply_top_k`
+   unanswered questions from that focus's categories, each rendered
+   `[{qid}] {text}`. Sits here — after `record`, before `session` — because
+   it is per-session-but-whole-vault-derived exactly like `record` (it
+   reads the bank and the roadmap, not just this session's own turns) and
+   changes only as slowly as the bank itself, cache-tier correct alongside
+   `record`. Producer: `conversation._assemble_asking_supply_block`.
+   Resolves the focus via the ladder documented in `system/conversation.py`
+   (arc/turn question ids → the planner's category → focus index); a
+   session with no resolvable focus (a story session, most often) renders
+   this block as an honest empty string, never a fabricated focus. Reuses
+   `question_planner.enriched_pending_questions`'s own ranking gates
+   (rumination cooldown, escalation) rather than re-deriving weights, and
+   excludes any qid this session has already recorded as declined
+   (`session["declined_question_ids"]`, additive and session-scoped — see
+   `prompt/behavior.md` rules 3/6/9 and the Defaults for how this block is
+   actually used in a turn).
+
 `[per-session, this session only]`
 
-6. **`session`** block — the active arc card (see
+7. **`session`** block — the active arc card (see
    `plan/arc-templates.md`), a rolling summary of the session so far, and
    the recent turns verbatim (not summarized — the model needs the exact
    words just exchanged).
 
 `[last]`
 
-7. **`turn_instructions`** — `prompt/turn-instructions.md` with its
+8. **`turn_instructions`** — `prompt/turn-instructions.md` with its
    `{placeholder}` slots filled for this specific turn.
 
 ## Rules
 
 - **Token budgets** come from `interaction.yaml`'s `budget.*` keys, one
   per block above (`budget.identity`, `budget.behavior`, `budget.examples`,
-  `budget.profile`, `budget.record`, `budget.session`,
-  `budget.turn_instructions`). A runtime that assembles a block over its
-  budget must trim that block, not silently ignore the budget.
+  `budget.profile`, `budget.record`, `budget.asking_supply`,
+  `budget.session`, `budget.turn_instructions`). A runtime that assembles a
+  block over its budget must trim that block, not silently ignore the
+  budget. `budget.asking_supply`'s 400 tokens caps the BLOCK SIZE only
+  (Top-K small, "whisper, not flood") — it says nothing about how many of
+  those questions may be asked across a session; that is quality-governed,
+  not counter-governed (`prompt/behavior.md`'s Defaults).
 - **Top-K small.** The `record` block is always a small, relevance-ranked
   top-K selection. The whole corpus (all of a user's answers and wiki
   pages) is never loaded into a single turn's context — this is a hard

@@ -1,0 +1,38 @@
+{
+  "golden_id": "chat-cabin-hatch-honored-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "K3",
+    "opening": "How's the cabin project going?",
+    "intents": [{"kind": "sit_with"}],
+    "topics": ["cabin"],
+    "asking_supply": [
+      {"qid": "K7", "text": "What's a detail about that stretch of river you haven't told me yet?"},
+      {"qid": "K9", "text": "Who else has stayed there with you since?"}
+    ]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "How's the cabin project going?",
+      "annotations": {"kind": "opener", "topic": "cabin", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "Good — the roof's framed in now. That's really all I've got on it today, though. What else you got?"
+    },
+    {
+      "role": "lifehug",
+      "text": "The roof framed in — good milestone. Since you're asking: who else has stayed there with you since?",
+      "annotations": {
+        "kind": "receipt_payout",
+        "topic": "cabin",
+        "seam_ok": false,
+        "held_question_id": "K9",
+        "user_invited_question": true,
+        "properties": ["invitation_hatch_honored"]
+      }
+    }
+  ]
+}
