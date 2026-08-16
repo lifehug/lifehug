@@ -17,8 +17,8 @@ paraphrase), `topic` (slug), `seam_ok` (bool — permits a closed/
 option-posing/presupposing question at a seam per behavior.md rule 3), and
 `properties[]` — the closed assertion vocabulary: `receipt_quotes_user`,
 `no_new_topic_mid_arc`, `closing_has_takeaway_and_hook`,
-`closing_is_declarative`, `deflects_off_scope`,
-`demonstrated_knowledge_opener_shape`. A `closing`-kind turn asserting
+`closing_is_declarative`, `closing_engages_final_message`,
+`deflects_off_scope`, `demonstrated_knowledge_opener_shape`. A `closing`-kind turn asserting
 `closing_has_takeaway_and_hook` also carries `takeaway` and `hook`
 (non-empty strings — the harness checks their presence structurally;
 content quality is the judge layer's job, not this deterministic one).
@@ -53,6 +53,17 @@ enforces the structured-close scaffolding-leak checks —
 data in `evals/lints.yaml`) — since it already runs that function over the
 closing turn's text. `chat-porch-swing-closing.json` is the new committed
 PASS example demonstrating the woven, un-scaffolded shape.
+
+**ADR 0015 (issue #167, content-first close) amendment**:
+`closing_engages_final_message` is a NEW property id as of this PR — a
+closing turn asserting it must demonstrably respond to the final user
+turn's actual content (checked via distinctive-token overlap between the
+closing text and the immediately preceding user turn — a concrete,
+verifiable signal, not a judge-layer quality call). FLAGGED for the
+platform's closed-vocabulary reconciliation at the next pin bump.
+`chat-seattle-ferry-closing.json` is the new committed PASS example: a
+long final user message (the incident's own shape — a several-hundred-word
+memory) that the closing turn visibly engages.
 
 One exception to "every committed golden must pass every Layer-1 lint":
 `closing-scaffold-leak-bad-01.json` is a deliberately-broken fixture

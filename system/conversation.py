@@ -116,6 +116,11 @@ ASSEMBLE_CONTEXT_BLOCK_ORDER = (
 
 CHARS_PER_TOKEN = 4  # contract-pinned approximation for budget truncation
 
+#: Default `budget.closing_transcript` (tokens) when interaction.yaml's own
+#: knob is absent or the manifest fails to load — sized like the turn
+#: prompt's own transcript allowance (`budget.session`, ADR 0015).
+DEFAULT_CLOSING_TRANSCRIPT_BUDGET = 1200
+
 
 class ConversationError(Exception):
     """Base error for conversation-store operations."""
@@ -131,6 +136,18 @@ class SessionClosedError(ConversationError):
 
 class InvalidCloseError(ConversationError):
     """A close was attempted with a vocabulary or idempotency mismatch."""
+
+
+class ConversationPromptError(ConversationError):
+    """A prompt builder was given a payload it cannot honestly build from.
+
+    ADR 0015 (issue #167): raised by ``build_closing_prompt`` when the
+    session carries no user turns AND no non-empty rolling summary — there
+    is nothing to close on, and a model asked to appreciate nothing
+    confabulates (the #163/2026-08-16 incident pair). Callers degrade per
+    the engine's degradation table (``conversation_delivery._deliver_closing``)
+    rather than ever emitting a starved prompt.
+    """
 
 
 # --------------------------------------------------------------------------
@@ -826,8 +843,53 @@ def build_arc_prompt(payload: dict) -> str:
     )
 
 
+def _final_user_turn_index(turns: list) -> int | None:
+    """Index of the LAST turn with role == "user", or None if there is none."""
+    for idx in range(len(turns) - 1, -1, -1):
+        turn = turns[idx]
+        if isinstance(turn, dict) and turn.get("role") == "user":
+            return idx
+    return None
+
+
+def _closing_transcript_lines(turns: list, final_index: int, char_budget: int) -> list[str]:
+    """Preceding-turn lines (chronological) that fit ``char_budget``.
+
+    ADR 0015: the FINAL user turn is handled separately and is never
+    truncated or dropped — this only windows the turns strictly BEFORE it.
+    Walks backward from the most recent preceding turn so that, when the
+    budget is tight, the OLDEST turns yield first (contract, Scope 1).
+    """
+    preceding = turns[:final_index]
+    kept_reversed: list[str] = []
+    used = 0
+    for turn in reversed(preceding):
+        if not isinstance(turn, dict):
+            continue
+        line = f"{turn.get('role', '')}: {turn.get('text', '')}"
+        length = len(line) + 1  # +1 for the joining newline
+        if used + length > char_budget:
+            break
+        kept_reversed.append(line)
+        used += length
+    return list(reversed(kept_reversed))
+
+
 def build_closing_prompt(payload: dict) -> str:
     """Assemble the closing-takeaway prompt per behavior rule 8.
+
+    ADR 0015 (issue #167, content-first close): unlike the pre-#167
+    builder, this one actually reads the conversation. It includes the
+    FINAL USER TURN verbatim — never truncated away, regardless of length
+    or budget, because it is the reason a reply is owed — preceded by
+    recent turns within ``budget.closing_transcript`` (oldest dropped
+    first when the window is tight), plus ``rolling_summary`` when
+    non-empty (older context the window dropped). RAISES
+    ``ConversationPromptError`` when the session has no user turns AND no
+    non-empty rolling summary — a model with nothing to see never speaks
+    (fix B, the starvation guard); the engine
+    (``conversation_delivery._deliver_closing``) degrades per its own
+    table, never by emitting a starved prompt.
 
     ADR 0014 (issue #163): the close is STRUCTURED — this checklist
     describes what goes into the ONE woven ``takeaway_prose`` statement;
@@ -838,22 +900,66 @@ def build_closing_prompt(payload: dict) -> str:
     """
     session = payload["session"]
     manifest = _safe_manifest()
+    turns = session.get("turns") or []
+    rolling_summary = str(session.get("rolling_summary") or "").strip()
+    final_index = _final_user_turn_index(turns)
+
+    if final_index is None and not rolling_summary:
+        raise ConversationPromptError(
+            "build_closing_prompt: no user turns and no rolling summary — "
+            "nothing to close on"
+        )
+
     deposit_framing = str(manifest.get("knob.deposit_framing", "off")).strip().lower() == "on"
+    budget_tokens = manifest.get("budget.closing_transcript")
+    if not isinstance(budget_tokens, int):
+        budget_tokens = DEFAULT_CLOSING_TRANSCRIPT_BUDGET
+    char_budget = budget_tokens * CHARS_PER_TOKEN
+
+    transcript_lines = (
+        _closing_transcript_lines(turns, final_index, char_budget)
+        if final_index is not None else []
+    )
+
     lines = [
         "=" * 70,
         "LIFEHUG — CLOSING TAKEAWAY",
         "=" * 70,
         "",
         f"Mode: {session.get('mode', '')}",
-        f"Rolling summary: {session.get('rolling_summary', '')}",
-        "",
-        "Write the closing takeaway_prose for this session (behavior rule 8)",
-        "— ONE woven statement, never labeled sections, composed of:",
-        "  1. A takeaway — NOT a recap.",
-        "  2. Specific appreciation for what they shared (never commentary",
-        "     on how they conversed).",
-        "  3. A continuity line, woven into the prose.",
     ]
+    if rolling_summary:
+        lines.append(
+            f"Rolling summary (earlier context the recent window dropped): "
+            f"{rolling_summary}"
+        )
+    lines.append("")
+    if transcript_lines:
+        lines.append("Recent conversation (oldest first):")
+        lines.extend(transcript_lines)
+        lines.append("")
+    if final_index is not None:
+        final_turn = turns[final_index]
+        lines.append(
+            "FINAL MESSAGE — the reason a reply is owed here, included in "
+            "full regardless of length:"
+        )
+        lines.append(f"user: {final_turn.get('text', '')}")
+        lines.append("")
+
+    lines.append(
+        "Respond to the FINAL MESSAGE FIRST — give it the same receipt and "
+        "payout an ordinary turn would (rules 2 and 6) — and let that "
+        "response settle into the closing takeaway_prose for this session "
+        "(behavior rule 8): ONE woven statement, never labeled sections,"
+    )
+    lines.append("composed of:")
+    lines.append("  1. A takeaway growing out of what they just said — NOT a recap.")
+    lines.append(
+        "  2. Specific appreciation for what they shared (never commentary"
+    )
+    lines.append("     on how they conversed).")
+    lines.append("  3. A continuity line, woven into the prose.")
     if deposit_framing:
         lines.append("  4. An optional deposit-frame (knob.deposit_framing is ON).")
     else:
@@ -865,6 +971,10 @@ def build_closing_prompt(payload: dict) -> str:
     lines.append(
         "Then name that same hook again, separately, as a short machine-only "
         "continuity label — it is never shown to the user."
+    )
+    lines.append(
+        "A close that ignores what was just said is a defect — respond to "
+        "it, do not summarize past it."
     )
     return "\n".join(lines)
 
@@ -894,7 +1004,7 @@ def _run_prompt_builder(required: dict[str, type], builder) -> None:
         sys.exit(1)
     try:
         print(builder(payload))
-    except (OSError, ValueError, KeyError) as exc:
+    except (OSError, ValueError, KeyError, ConversationError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 

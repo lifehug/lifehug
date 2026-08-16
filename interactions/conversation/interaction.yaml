@@ -37,3 +37,10 @@ budget.profile: 400
 budget.record: 1800
 budget.session: 1200
 budget.turn_instructions: 400
+# ADR 0015 (issue #167, content-first close): the closing prompt's own
+# transcript window — recent turns PRECEDING the final user turn, oldest
+# dropped first when this budget is tight. The final user turn itself is
+# never subject to this budget (or any budget) — see
+# system/conversation.py::build_closing_prompt. Sized like the turn
+# prompt's own transcript allowance (budget.session).
+budget.closing_transcript: 1200

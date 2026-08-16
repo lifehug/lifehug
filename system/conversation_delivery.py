@@ -104,6 +104,17 @@ FALLBACK_SKIP_REASONS = frozenset({"no_unattended_provider", "provider_unavailab
 #: false positive there would silently downgrade a good turn to the ack.
 RUNTIME_BLOCKING_LINTS = ("one_question_per_turn", "banned_phrases", "length_caps")
 
+#: ADR 0015 (issue #167, content-first close): close reasons that fire ONLY
+#: from a sweep/janitor/day-rollover context — no person is necessarily
+#: present in the moment. When ``build_closing_prompt`` starves here
+#: (``conversation.ConversationPromptError``), the degradation is SILENCE
+#: (the existing no-takeaway close path) — the session still closes
+#: cleanly. Every other reason ("done", "exit_taken") is a live,
+#: budget-reached closing beat: a starved builder there degrades to an
+#: ordinary question-free turn instead — never silence on a present
+#: person — and the close itself is deferred to a later attempt.
+SWEEP_CLOSE_REASONS = frozenset({"idle_timeout", "day_rollover"})
+
 #: Prompt-echo markers — the same class of structural check as
 #: answer_ack_delivery._valid_completion, adapted to this prompt's blocks.
 _ECHO_MARKERS = (
@@ -1858,8 +1869,27 @@ def close_session_now(
             status_resolver=status_resolver,
             prompt_builder=prompt_builder,
             vault_root=vault_root,
+            close_reason=reason,
         )
         delivered = status == STATUS_CONFIRMED
+        if detail == "starved_fallback_turn":
+            # ADR 0015: the builder starved (no user turns, no rolling
+            # summary — structurally shouldn't happen given user_turns >= 2
+            # above, but the engine still honors its own degradation table
+            # defensively) and this was a live/budget-reached closing beat,
+            # not a sweep. The engine sent an ordinary reply instead of a
+            # close and the close itself is deferred — the session stays
+            # OPEN; it does not close today.
+            return CloseOutcome(
+                session_id,
+                reason,
+                silent=False,
+                takeaway_delivered=False,
+                status=status,
+                detail=detail,
+                filed=filed,
+                user_turns=user_turns,
+            )
     else:
         detail = "silent_no_nag"
 
@@ -1920,6 +1950,60 @@ def close_session_now(
     )
 
 
+def _deliver_starvation_fallback_turn(
+    session: dict,
+    *,
+    channel: str,
+    ai_call: Callable[[str, str], str] | None,
+    telegram_send: Callable[[str], TelegramSendResult] | None,
+    status_resolver: Callable[..., object] | None,
+    vault_root: str | Path | None,
+    session_id: str,
+) -> bool:
+    """ADR 0015 (issue #167): a starved, budget-reached closing beat still
+    owes the person a real reply. Builds and sends an ORDINARY,
+    question-free turn via ``conversation.build_turn_prompt`` — the same
+    generation/lint/send shape ``run_post_answer_turn`` uses, never the
+    closing path — so the person gets a genuine response instead of
+    silence. The close itself was already deferred by the caller; this is
+    purely best-effort on top of that: any failure here just means the
+    fallback also goes silent, which is no worse than the close it
+    replaced. Returns True only on a confirmed send.
+    """
+    model = conversation_model()
+    resolve_status = status_resolver or provider_status
+    selected = resolve_status(model, probe=False)
+    if not getattr(selected, "ready", False):
+        return False
+    turns = session.get("turns") or []
+    shape = TurnShape("past_target", False, _count_user_turns(session), 0)
+    try:
+        prompt = conversation.build_turn_prompt({"session": session}) + _output_contract_block(shape)
+        generated = (ai_call or call_ai)(prompt, model)
+    except Exception:  # noqa: BLE001 — a failed fallback is silence, not worse
+        return False
+    parsed = parse_turn_output(generated)
+    if parsed is None:
+        return False
+    message = parsed["message"]
+    blocking, _advisory = lint_outgoing(message, question_allowed=False, config=_lints_config())
+    if blocking:
+        return False
+    send_result = (telegram_send or send_telegram_result)(message)
+    if send_result.status != "confirmed":
+        return False
+    try:
+        _append_turn_resilient(
+            session_id,
+            {"role": "lifehug", "text": message, "channel": channel, "model": model},
+            expected_turns=len(turns),
+            vault_root=vault_root,
+        )
+    except Exception:  # noqa: BLE001 — already delivered
+        _diagnostic("session_record", "session_write_failed", session_id)
+    return True
+
+
 def _deliver_closing(
     session: dict,
     *,
@@ -1930,6 +2014,7 @@ def _deliver_closing(
     status_resolver: Callable[..., object] | None,
     prompt_builder: Callable[[dict], str] | None,
     vault_root: str | Path | None,
+    close_reason: str = "done",
 ) -> tuple[str, str, str, str | None]:
     """Generate/lint/send the closing takeaway; ledger it under close:{id}.
 
@@ -1939,6 +2024,14 @@ def _deliver_closing(
     0014 (issue #163) adds ``hook``, the structured close's machine-only
     continuity label; it is None whenever the close wasn't confirmed-sent,
     or the model supplied none.
+
+    ``close_reason`` (ADR 0015, issue #167) is ``close_session_now``'s own
+    ``reason`` — the ONLY signal this function has for which of the
+    starvation guard's two degradation classes applies when
+    ``conversation.build_closing_prompt`` raises ``ConversationPromptError``:
+    a sweep/idle/day close (``SWEEP_CLOSE_REASONS``) degrades to silence;
+    every other reason is a live, budget-reached closing beat and degrades
+    to an ordinary question-free turn instead (see the except clause below).
     """
     session_id = str(session["session_id"])
     key = close_key(session_id)
@@ -1992,6 +2085,29 @@ def _deliver_closing(
     try:
         prompt = builder({"session": session}) + _closing_output_contract()
         generated = (ai_call or call_ai)(prompt, model)
+    except conversation.ConversationPromptError:
+        # ADR 0015 (issue #167): the builder refused — no user turns and no
+        # rolling summary, nothing to close on. Degrade per the engine's
+        # table, keyed on WHY this close was attempted, never by emitting a
+        # starved prompt.
+        _diagnostic("closing_generation", "starved_no_content", session_id)
+        if close_reason in SWEEP_CLOSE_REASONS:
+            ledger(STATUS_FAILED, "starved_no_content")
+            return STATUS_FAILED, "starved_no_content", "", None
+        # A live, budget-reached closing beat: never silence on a present
+        # person. Send an ordinary, question-free reply instead of a close
+        # and defer the close itself — "the thread lands another day."
+        _deliver_starvation_fallback_turn(
+            session,
+            channel=channel,
+            ai_call=ai_call,
+            telegram_send=telegram_send,
+            status_resolver=status_resolver,
+            vault_root=vault_root,
+            session_id=session_id,
+        )
+        ledger(STATUS_SKIPPED, "starved_fallback_turn")
+        return STATUS_SKIPPED, "starved_fallback_turn", "", None
     except AIProviderError as exc:
         reason = _fixed_provider_reason(exc)
         ledger(STATUS_FAILED, reason)
