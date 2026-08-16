@@ -127,8 +127,6 @@ _ECHO_MARKERS = (
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _SESSION_TS_RE = re.compile(r"^conv-(\d{8})-(\d{6})-[0-9a-f]{6}$")
-#: A14 -> A14, A14b -> A14 (the suffix chain's root).
-_CHAIN_ROOT_RE = re.compile(r"^([A-Z]\d+)[a-z]*$")
 
 
 class TurnEngineError(Exception):
@@ -297,14 +295,23 @@ def _output_contract_block(shape: TurnShape) -> str:
     """
     if shape.question_allowed:
         question_rule = (
-            "Ask AT MOST ONE question, and it must be a cued invitation that "
-            "quotes the user's own phrase. Put that same question's text in "
-            "\"followup_question\"."
+            "Ask AT MOST ONE question, and it must be either a cued "
+            "invitation that quotes the user's own phrase, OR — when one "
+            "fits naturally — a held question from the ASKING_SUPPLY block "
+            "below, asked verbatim or lightly adapted and introduced "
+            "honestly as held (never passed off as improvised). Put that "
+            "same question's text in \"followup_question\"."
         )
     else:
         question_rule = (
-            "Ask NO question — keep receiving. Set \"followup_question\" to "
-            "null and \"question_free\" to true."
+            "Ask NO question — keep receiving — UNLESS the user's own last "
+            "message genuinely invites another question (an explicit "
+            "request like \"what else you got\", or open-ended receptivity "
+            "like \"that's all I remember\") AND the question you'd ask is "
+            "one of ASKING_SUPPLY's held questions; when genuinely unsure "
+            "whether they invited it, treat it as invited (fail toward "
+            "asking). Otherwise set \"followup_question\" to null and "
+            "\"question_free\" to true."
         )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
@@ -313,12 +320,21 @@ def _output_contract_block(shape: TurnShape) -> str:
         '  "message": "the one Telegram message, plain text",\n'
         '  "followup_question": "the question you asked, verbatim, or null",\n'
         '  "question_free": true | false,\n'
+        '  "user_invited_question": true | false,\n'
+        '  "held_question_id": "the [qid] you asked from ASKING_SUPPLY, or null",\n'
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
         '"mirror_responses": []}\n'
         "}\n\n"
         f"- {question_rule}\n"
+        '- "user_invited_question" is your own judgment of whether the '
+        "user's latest message invites another question at all — true for "
+        "an explicit request or open-ended receptivity, false otherwise, "
+        "and true whenever you are genuinely unsure.\n"
+        '- "held_question_id" is the ASKING_SUPPLY qid of the question you '
+        "asked, only when you actually asked one from that block; null "
+        "otherwise. Never a qid that wasn't actually offered there.\n"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -370,10 +386,18 @@ def parse_turn_output(raw: object) -> dict | None:
     extracted = data.get("extracted")
     summary = data.get("rolling_summary")
     receipts = data.get("insight_receipts")
+    # ADR 0016 (issue #168, asking-supply): additive fields — absent on any
+    # generation from before this PR, or from an overlay that hasn't caught
+    # up, degrade to "no invitation, no held qid" (the pre-existing discard
+    # behavior), never an error.
+    held_question_id = data.get("held_question_id")
+    held_question_id = held_question_id.strip() if isinstance(held_question_id, str) else None
     return {
         "message": message,
         "followup_question": followup_text or None,
         "question_free": bool(data.get("question_free", not followup_text)),
+        "user_invited_question": bool(data.get("user_invited_question", False)),
+        "held_question_id": held_question_id or None,
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
@@ -526,11 +550,6 @@ def decide_turn_shape(
 # --------------------------------------------------------------------------
 
 
-def _chain_root(question_id: str) -> str:
-    match = _CHAIN_ROOT_RE.match(question_id or "")
-    return match.group(1) if match else (question_id or "")
-
-
 def _session_question_ids(session: dict) -> set[str]:
     ids = set()
     arc = session.get("arc") or {}
@@ -551,7 +570,7 @@ def find_open_session_for_question(
     vault_root: str | Path | None = None,
 ) -> dict | None:
     """The open chat session whose question chain contains ``question_id``."""
-    root = _chain_root(question_id)
+    root = conversation._chain_root(question_id)  # noqa: SLF001 — single authority, see conversation.py
     newest = None
     for summary in conversation.list_sessions(status="open", vault_root=vault_root):
         session_id = summary.get("session_id")
@@ -561,7 +580,7 @@ def find_open_session_for_question(
             doc = conversation.load_session(session_id, vault_root=vault_root)
         except (OSError, ValueError):
             continue
-        if any(_chain_root(qid) == root for qid in _session_question_ids(doc)):
+        if any(conversation._chain_root(qid) == root for qid in _session_question_ids(doc)):  # noqa: SLF001
             newest = doc if newest is None else newest
     return newest
 
@@ -690,6 +709,34 @@ def _locate_user_turn(session: dict, question_id: str, answer_text: str) -> int 
         if (turn.get("text") or "").strip() == text:
             return index
     return None
+
+
+def _detect_declined_held_question(session: dict, user_turn_index: int) -> str | None:
+    """Issue #168 / ADR 0016, Scope 4's deterministic decline rule.
+
+    The turn immediately before ``user_turn_index`` asked a held question
+    from asking_supply (``role: lifehug`` + ``asked_from_supply: true``) IFF
+    this user turn's own ``question_id`` doesn't match that held qid (a
+    different qid, or none at all): that held question was declined —
+    moved past, not engaged. Returns the declined qid, or None when there
+    is nothing to detect (no preceding lifehug turn, it wasn't a held ask,
+    or the user turn actually engaged it).
+    """
+    turns = session.get("turns") or []
+    if user_turn_index <= 0 or user_turn_index >= len(turns):
+        return None
+    prior = turns[user_turn_index - 1]
+    if not isinstance(prior, dict) or prior.get("role") != "lifehug" or not prior.get("asked_from_supply"):
+        return None
+    held_qid = prior.get("question_id")
+    if not held_qid:
+        return None
+    current = turns[user_turn_index]
+    if not isinstance(current, dict):
+        return str(held_qid)
+    if str(current.get("question_id") or "") == str(held_qid):
+        return None  # engaged — not declined
+    return str(held_qid)
 
 
 def _resolve_model(config: dict, key: str, default: str) -> str:
@@ -1029,6 +1076,18 @@ def run_post_answer_turn(
             return TurnOutcome(session_id, -1, STATUS_SKIPPED, "turn_already_minted", False)
         existing_index = len(session.get("turns") or []) - 1
 
+    # Session-scoped decline memory (issue #168 / ADR 0016, Scope 4): if the
+    # turn just before this user turn asked a HELD question (asking_supply
+    # pick — asked_from_supply) and this user turn's own question_id doesn't
+    # match it, the held question was declined — a simple deterministic
+    # rule, never a model judgment call. Recorded before the prompt is built
+    # so THIS turn's own asking_supply block already excludes it.
+    declined_qid = _detect_declined_held_question(session, existing_index)
+    if declined_qid:
+        session = conversation.record_declined_questions(
+            session_id, [declined_qid], vault_root=vault_root
+        )
+
     turn_index = existing_index + 1
     key = turn_key(session_id, turn_index)
     entries = _state(state_path)["entries"]
@@ -1099,7 +1158,20 @@ def run_post_answer_turn(
         return _degrade(STATUS_FAILED, "malformed_generation")
 
     message = parsed["message"]
-    question_allowed = shape.question_allowed and not parsed["question_free"]
+    # ADR 0016 (issue #168, asking-supply): past target the blocking lint
+    # amends from "no questions" to "no UNINVITED questions" — a question is
+    # permitted there IFF the model declared user_invited_question AND the
+    # qid it asked is actually present in this session's asking_supply
+    # selection (never trusted on the model's say-so alone). Within target,
+    # behavior is unchanged (shape.question_allowed already covers it) — the
+    # held-question option is just another way to fill the one question
+    # slot. asking_supply_question_ids is resolved lazily (only when the
+    # model actually named a held_question_id) so the common ordinary-turn
+    # path pays no extra cost.
+    held_id = parsed.get("held_question_id")
+    asking_supply_ids = conversation.asking_supply_question_ids(session) if held_id else frozenset()
+    hatch_honored = bool(parsed.get("user_invited_question")) and held_id in asking_supply_ids
+    question_allowed = (shape.question_allowed or hatch_honored) and not parsed["question_free"]
     blocking, advisory = lint_outgoing(
         message,
         question_allowed=question_allowed,
@@ -1159,7 +1231,15 @@ def run_post_answer_turn(
         return TurnOutcome(session_id, turn_index, status, reason, True, fallback_used=True)
 
     followup_id = None
-    if question_allowed and parsed["followup_question"]:
+    asked_from_supply = False
+    if question_allowed and held_id and held_id in asking_supply_ids:
+        # A held pick, not a delivery (contract, Scope 3 / consumption
+        # semantics precedent): no mint, no rotation mutation, no queue/
+        # ledger write — the bank already has this question; the reply
+        # files against it through the ordinary turn-chain below.
+        followup_id = held_id
+        asked_from_supply = True
+    elif question_allowed and parsed["followup_question"]:
         followup_id = _mint_followup(
             question_id,
             parsed["followup_question"],
@@ -1175,6 +1255,8 @@ def run_post_answer_turn(
         "model": model,
         "question_id": followup_id or question_id,
     }
+    if asked_from_supply:
+        lifehug_turn["asked_from_supply"] = True
     try:
         _append_turn_resilient(
             session_id, lifehug_turn, expected_turns=turn_index, vault_root=vault_root

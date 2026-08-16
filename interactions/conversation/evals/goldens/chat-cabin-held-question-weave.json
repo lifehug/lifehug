@@ -1,0 +1,40 @@
+{
+  "golden_id": "chat-cabin-held-question-weave-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "K3",
+    "opening": "Tell me about starting the cabin project — what's the first thing you remember about picking the land?",
+    "intents": [{"kind": "scene_slot"}],
+    "topics": ["cabin"],
+    "coverage": {"answered": 4, "total": 11},
+    "asking_supply": [
+      {"qid": "K7", "text": "What's a detail about that stretch of river you haven't told me yet?"},
+      {"qid": "K9", "text": "Who else has stayed there with you since?"}
+    ]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "Tell me about starting the cabin project — what's the first thing you remember about picking the land?",
+      "annotations": {"kind": "opener", "topic": "cabin", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "It was actually my dad's idea originally. He found the land back in the nineties, way before any of us kids were even thinking about cabins."
+    },
+    {
+      "role": "lifehug",
+      "text": "Your dad finding that land back in the nineties — long before any of you were even thinking about cabins. Something I've been holding about the cabin project: what's a detail about that stretch of river you haven't told me yet?",
+      "annotations": {
+        "kind": "receipt_payout",
+        "topic": "cabin",
+        "seam_ok": false,
+        "quoted_span": "back in the nineties",
+        "held_question_id": "K7",
+        "user_invited_question": false,
+        "properties": ["receipt_quotes_user", "held_question_offered_as_door", "coverage_not_volunteered"]
+      }
+    }
+  ]
+}

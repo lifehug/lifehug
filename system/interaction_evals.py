@@ -122,6 +122,11 @@ VALID_TURN_KINDS = frozenset({"opener", "receipt", "receipt_payout", "closing", 
 #: closed-vocabulary reconciliation at the next pin bump (contract,
 #: Scope 4): a closing turn must demonstrably respond to the final user
 #: turn, not just the rolling summary.
+#: FIVE NEW property ids as of issue #168 / ADR 0016 (asking-supply) —
+#: FLAGGED for the platform's closed-vocabulary reconciliation at the next
+#: pin bump: "held_question_offered_as_door", "no_uninvited_question_past_target",
+#: "invitation_hatch_honored", "empty_supply_honest_reply",
+#: "coverage_not_volunteered".
 PROPERTY_IDS = frozenset({
     "receipt_quotes_user",
     "no_new_topic_mid_arc",
@@ -130,6 +135,11 @@ PROPERTY_IDS = frozenset({
     "closing_engages_final_message",
     "deflects_off_scope",
     "demonstrated_knowledge_opener_shape",
+    "held_question_offered_as_door",
+    "no_uninvited_question_past_target",
+    "invitation_hatch_honored",
+    "empty_supply_honest_reply",
+    "coverage_not_volunteered",
 })
 
 #: The seven-persona suite (filenames under evals/personas/, contract order).
@@ -469,6 +479,37 @@ def validate_golden_schema(golden: object) -> list[str]:
                 "when no_new_topic_mid_arc is declared"
             )
 
+    # issue #168 / ADR 0016 (asking-supply): arc.asking_supply is this
+    # harness's own extension for the ASKING_SUPPLY block's contents —
+    # [{"qid": ..., "text": ...}, ...], possibly empty/absent (the honest
+    # empty case). Required, and non-empty, when a golden declares a
+    # property that asserts something was actually offered from it.
+    if declared_properties & {
+        "held_question_offered_as_door", "invitation_hatch_honored", "no_uninvited_question_past_target",
+    }:
+        supply = arc.get("asking_supply")
+        if not isinstance(supply, list) or not supply:
+            errors.append(
+                f"{label}: arc.asking_supply (this harness's extension) must "
+                "be a non-empty list when held_question_offered_as_door, "
+                "invitation_hatch_honored, or no_uninvited_question_past_target "
+                "is declared"
+            )
+    if "empty_supply_honest_reply" in declared_properties:
+        supply = arc.get("asking_supply")
+        if supply not in (None, []):
+            errors.append(
+                f"{label}: arc.asking_supply must be empty or absent when "
+                "empty_supply_honest_reply is declared"
+            )
+        coverage = arc.get("coverage")
+        if not isinstance(coverage, dict) or not isinstance(coverage.get("answered"), int) \
+                or not isinstance(coverage.get("total"), int):
+            errors.append(
+                f"{label}: arc.coverage.{{answered,total}} (ints) is required "
+                "when empty_supply_honest_reply is declared"
+            )
+
     return errors
 
 
@@ -656,6 +697,150 @@ def _check_demonstrated_knowledge_opener_shape(golden: dict) -> list[str]:
     return errors
 
 
+#: issue #168 / ADR 0016 (asking-supply) checkers below.
+
+
+def _asking_supply_qids(golden: dict) -> set[str]:
+    supply = (golden.get("arc") or {}).get("asking_supply") or []
+    return {str(item.get("qid")) for item in supply if isinstance(item, dict) and item.get("qid")}
+
+
+#: A crude, concrete, "introduced honestly as held" signal (contract, Scope
+#: 5: "keep the checker honest and simple" — same spirit as
+#: _distinctive_tokens above, not an NLP quality measure).
+_HELD_FRAMING_MARKERS = ("holding", "been sitting with", "been meaning to ask")
+
+
+def _check_held_question_offered_as_door(golden: dict) -> list[str]:
+    """A held question, when offered, is the turn's declinable door —
+    introduced honestly as held and actually drawn from arc.asking_supply
+    (never fabricated)."""
+    errors = []
+    supply_qids = _asking_supply_qids(golden)
+    for index, turn in _turns_with_property(golden, "held_question_offered_as_door"):
+        annotations = turn.get("annotations") or {}
+        held_qid = annotations.get("held_question_id")
+        if not held_qid or str(held_qid) not in supply_qids:
+            errors.append(
+                f"turns[{index}]: held_question_offered_as_door requires "
+                "annotations.held_question_id to be one of arc.asking_supply's qids"
+            )
+        text = (turn.get("text") or "").lower()
+        if not any(marker in text for marker in _HELD_FRAMING_MARKERS):
+            errors.append(
+                f"turns[{index}]: held_question_offered_as_door requires the "
+                "question to be introduced honestly as held (e.g. containing "
+                f"one of {_HELD_FRAMING_MARKERS!r})"
+            )
+    return errors
+
+
+def _check_no_uninvited_question_past_target(golden: dict) -> list[str]:
+    """Past target, with supply present, an uninvited moment gets no
+    question at all — the gate's discard behavior, demonstrated as a
+    correct turn shape."""
+    errors = []
+    for index, turn in _turns_with_property(golden, "no_uninvited_question_past_target"):
+        annotations = turn.get("annotations") or {}
+        if annotations.get("user_invited_question") is not False:
+            errors.append(
+                f"turns[{index}]: no_uninvited_question_past_target requires "
+                "annotations.user_invited_question == false"
+            )
+        stripped = conversation_lints._strip_echoed_questions(turn.get("text") or "")  # noqa: SLF001
+        if "?" in stripped:
+            errors.append(
+                f"turns[{index}]: no_uninvited_question_past_target requires "
+                "no question in the turn text"
+            )
+    return errors
+
+
+def _check_invitation_hatch_honored(golden: dict) -> list[str]:
+    """Past target, an invited moment ("what else you got?") gets exactly
+    one question, drawn from asking_supply, with the invitation honestly
+    declared."""
+    errors = []
+    supply_qids = _asking_supply_qids(golden)
+    for index, turn in _turns_with_property(golden, "invitation_hatch_honored"):
+        annotations = turn.get("annotations") or {}
+        if annotations.get("user_invited_question") is not True:
+            errors.append(
+                f"turns[{index}]: invitation_hatch_honored requires "
+                "annotations.user_invited_question == true"
+            )
+        held_qid = annotations.get("held_question_id")
+        if not held_qid or str(held_qid) not in supply_qids:
+            errors.append(
+                f"turns[{index}]: invitation_hatch_honored requires "
+                "annotations.held_question_id to be one of arc.asking_supply's qids"
+            )
+        stripped = conversation_lints._strip_echoed_questions(turn.get("text") or "")  # noqa: SLF001
+        sentences = [s for s in conversation_lints._split_sentences(stripped) if s.strip()]  # noqa: SLF001
+        questions = [s for s in sentences if conversation_lints._is_question(s)]  # noqa: SLF001
+        if len(questions) != 1:
+            errors.append(
+                f"turns[{index}]: invitation_hatch_honored requires exactly "
+                f"one question in the turn, found {len(questions)}"
+            )
+    return errors
+
+
+def _check_empty_supply_honest_reply(golden: dict) -> list[str]:
+    """A hatch with nothing in the supply gets an honest no-questions
+    reply naming answered/total — never a fabricated question."""
+    errors = []
+    supply_qids = _asking_supply_qids(golden)
+    coverage = (golden.get("arc") or {}).get("coverage") or {}
+    for index, turn in _turns_with_property(golden, "empty_supply_honest_reply"):
+        if supply_qids:
+            errors.append(
+                f"turns[{index}]: empty_supply_honest_reply requires "
+                "arc.asking_supply to be empty or absent"
+            )
+        answered, total = coverage.get("answered"), coverage.get("total")
+        if not isinstance(answered, int) or not isinstance(total, int):
+            errors.append(
+                f"turns[{index}]: empty_supply_honest_reply requires "
+                "arc.coverage.answered/total (ints) to check against"
+            )
+            continue
+        text = turn.get("text") or ""
+        stripped = conversation_lints._strip_echoed_questions(text)  # noqa: SLF001
+        if "?" in stripped:
+            errors.append(
+                f"turns[{index}]: empty_supply_honest_reply requires no "
+                "fabricated question when the supply is empty"
+            )
+        if str(answered) not in text or str(total) not in text:
+            errors.append(
+                f"turns[{index}]: empty_supply_honest_reply requires the "
+                f"reply to actually name the coverage numbers ({answered} "
+                f"of {total})"
+            )
+    return errors
+
+
+#: Crude, concrete "an answered/total count was stated" signal — same
+#: honest-and-simple spirit as _distinctive_tokens/_HELD_FRAMING_MARKERS
+#: above, not a language-understanding check.
+_COVERAGE_STATEMENT_RE = re.compile(r"\d+\s+of\s+\d+", re.IGNORECASE)
+
+
+def _check_coverage_not_volunteered(golden: dict) -> list[str]:
+    """Coverage numbers ride in context but are never volunteered
+    unprompted (Defaults) — this checker asserts the DECLARING turn's own
+    text contains no answered/total statement."""
+    errors = []
+    for index, turn in _turns_with_property(golden, "coverage_not_volunteered"):
+        if _COVERAGE_STATEMENT_RE.search(turn.get("text") or ""):
+            errors.append(
+                f"turns[{index}]: coverage_not_volunteered requires the "
+                "reply not to state an answered/total count unprompted"
+            )
+    return errors
+
+
 PROPERTY_CHECKERS: dict[str, Callable[[dict], list[str]]] = {
     "receipt_quotes_user": _check_receipt_quotes_user,
     "no_new_topic_mid_arc": _check_no_new_topic_mid_arc,
@@ -664,6 +849,11 @@ PROPERTY_CHECKERS: dict[str, Callable[[dict], list[str]]] = {
     "closing_engages_final_message": _check_closing_engages_final_message,
     "deflects_off_scope": _check_deflects_off_scope,
     "demonstrated_knowledge_opener_shape": _check_demonstrated_knowledge_opener_shape,
+    "held_question_offered_as_door": _check_held_question_offered_as_door,
+    "no_uninvited_question_past_target": _check_no_uninvited_question_past_target,
+    "invitation_hatch_honored": _check_invitation_hatch_honored,
+    "empty_supply_honest_reply": _check_empty_supply_honest_reply,
+    "coverage_not_volunteered": _check_coverage_not_volunteered,
 }
 
 

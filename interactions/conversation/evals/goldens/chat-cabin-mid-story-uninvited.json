@@ -1,0 +1,53 @@
+{
+  "golden_id": "chat-cabin-mid-story-uninvited-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "K3",
+    "opening": "How's the cabin project going?",
+    "intents": [{"kind": "sit_with"}],
+    "topics": ["cabin"],
+    "asking_supply": [
+      {"qid": "K7", "text": "What's a detail about that stretch of river you haven't told me yet?"},
+      {"qid": "K9", "text": "Who else has stayed there with you since?"}
+    ]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "How's the cabin project going?",
+      "annotations": {"kind": "opener", "topic": "cabin", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "Good, actually — we finally got the roof trusses up last weekend. My brother drove up from Tulsa to help, and we got the whole frame closed in before it rained Sunday night."
+    },
+    {
+      "role": "lifehug",
+      "text": "The roof trusses up, and your brother who drove up from Tulsa helping close in the whole frame before Sunday's rain — that's real progress.",
+      "annotations": {
+        "kind": "receipt",
+        "topic": "cabin",
+        "seam_ok": false,
+        "quoted_span": "drove up from Tulsa",
+        "user_invited_question": false,
+        "properties": ["receipt_quotes_user", "no_uninvited_question_past_target"]
+      }
+    },
+    {
+      "role": "user",
+      "text": "Yeah, and we're hoping to get the windows in before the first frost."
+    },
+    {
+      "role": "lifehug",
+      "text": "Windows in before the first frost — that's a good next target with the frame already closed in.",
+      "annotations": {
+        "kind": "receipt",
+        "topic": "cabin",
+        "seam_ok": false,
+        "user_invited_question": false,
+        "properties": ["no_uninvited_question_past_target"]
+      }
+    }
+  ]
+}

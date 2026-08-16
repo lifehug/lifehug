@@ -1,0 +1,35 @@
+{
+  "golden_id": "chat-cabin-empty-supply-honest-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "K3",
+    "opening": "How's the cabin project going?",
+    "intents": [{"kind": "sit_with"}],
+    "topics": ["cabin"],
+    "coverage": {"answered": 8, "total": 9},
+    "asking_supply": []
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "How's the cabin project going?",
+      "annotations": {"kind": "opener", "topic": "cabin", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "It's basically done now — we moved the last of the furniture in over the weekend. That's really everything on it. Any other questions?"
+    },
+    {
+      "role": "lifehug",
+      "text": "The last of the furniture in — the cabin's actually done. I don't have another question waiting on it right now; you've answered 8 of the 9 I had for that project.",
+      "annotations": {
+        "kind": "receipt",
+        "topic": "cabin",
+        "seam_ok": false,
+        "user_invited_question": true,
+        "properties": ["empty_supply_honest_reply"]
+      }
+    }
+  ]
+}
