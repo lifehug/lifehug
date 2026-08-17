@@ -39,6 +39,14 @@ Four layers, always in this order:
    arithmetic and gate enforcement deterministically (contract: "the
    scorer + a committed sample predictions fixture prove the gate math
    deterministically").
+   Issue #169 (ADR 0017 — the thread binder) extends this layer additively:
+   fixtures MAY carry a `threads` roster + ground-truth `target`;
+   `score_binding_predictions` scores binding accuracy over ONLY the
+   threads-bearing fixtures (matched by text, same shape as
+   `score_predictions`'s per-class dict) and merges into the same scores
+   passed to `check_router_gates`, so `router_gates.binding.accuracy`
+   (lints.yaml) is enforced by the SAME generic gate checker — no new one.
+   Fixtures without `threads` are entirely unaffected.
 3. **Golden-transcript property assertions** — always run, over every
    committed `evals/goldens/*.json` transcript: the closed vocabulary
    (`receipt_quotes_user`, `no_new_topic_mid_arc`,
@@ -55,7 +63,8 @@ Four layers, always in this order:
 Public surface (each function pure except where documented):
 
     load_router_fixtures / validate_router_fixtures / score_predictions /
-    load_router_gates / check_router_gates / deterministic_router_predictions
+    score_binding_predictions / load_router_gates / check_router_gates /
+    deterministic_router_predictions
     load_goldens / validate_golden_schema / check_golden
     build_judge_prompt / parse_judge_response / run_judge
     build_persona_prompt / parse_persona_response / run_persona
@@ -188,7 +197,16 @@ def load_router_sample_predictions(*, framework_root: str | Path | None = None) 
 
 
 def validate_router_fixture(entry: object) -> list[str]:
-    """Schema errors for one {text, session_open, intent} fixture; [] if clean."""
+    """Schema errors for one {text, session_open, intent} fixture; [] if clean.
+
+    ``threads`` + ``target`` (issue #169, ADR 0017 — the thread binder) are
+    an ADDITIVE optional pair: absent on every pre-#169 fixture (schema
+    unchanged for them), and when present, ``threads`` is a non-empty
+    bounded roster (``{"id","question","last_exchange","awaiting_ask"}``
+    each) and ``target`` is the fixture's ground-truth binding — one of
+    the roster's ids or the literal string ``"new"``. ``target`` without
+    ``threads`` is a schema error (there is nothing to bind against).
+    """
     if not isinstance(entry, dict):
         return ["fixture is not an object"]
     errors = []
@@ -201,6 +219,41 @@ def validate_router_fixture(entry: object) -> list[str]:
     intent = entry.get("intent")
     if intent not in VALID_ROUTER_INTENTS:
         errors.append(f"fixture.intent must be one of {sorted(VALID_ROUTER_INTENTS)}, got {intent!r}")
+
+    threads = entry.get("threads")
+    if threads is None:
+        if "target" in entry:
+            errors.append("fixture.target is only valid when fixture.threads is present")
+        return errors
+
+    thread_ids: set[str] = set()
+    if not isinstance(threads, list) or not threads:
+        errors.append("fixture.threads, when present, must be a non-empty list")
+    else:
+        for index, candidate in enumerate(threads):
+            if not isinstance(candidate, dict):
+                errors.append(f"fixture.threads[{index}] must be an object")
+                continue
+            cid = candidate.get("id")
+            if not isinstance(cid, str) or not cid.strip():
+                errors.append(f"fixture.threads[{index}].id must be a non-empty string")
+            else:
+                thread_ids.add(cid)
+            question = candidate.get("question")
+            if not isinstance(question, str) or not question.strip():
+                errors.append(f"fixture.threads[{index}].question must be a non-empty string")
+            last_exchange = candidate.get("last_exchange")
+            if not isinstance(last_exchange, str):
+                errors.append(f"fixture.threads[{index}].last_exchange must be a string")
+            if not isinstance(candidate.get("awaiting_ask", False), bool):
+                errors.append(f"fixture.threads[{index}].awaiting_ask must be a boolean")
+
+    target = entry.get("target")
+    if not isinstance(target, str) or (target != "new" and target not in thread_ids):
+        errors.append(
+            f"fixture.target must be one of {sorted(thread_ids)} or 'new' when "
+            f"fixture.threads is present, got {target!r}"
+        )
     return errors
 
 
@@ -267,8 +320,57 @@ def score_predictions(fixtures: list[dict], predictions: list[dict]) -> dict[str
     return scores
 
 
+def score_binding_predictions(fixtures: list[dict], predictions: list[dict]) -> dict[str, dict]:
+    """Binding accuracy over threads-bearing fixtures only, matched by text.
+
+    Issue #169 (ADR 0017 — the thread binder). Fixtures with no `threads`
+    roster carry no binding ground truth and are excluded entirely —
+    binding is only ever evaluated where a roster existed (contract,
+    Scope 5). Returns ``{"binding": {"total", "correct", "accuracy",
+    "_unmatched"}}`` — the SAME ``{class: {metric: ...}}`` shape
+    `score_predictions` returns, so `check_router_gates` (generic over any
+    class/metric pair already) enforces `router_gates.binding.accuracy`
+    unchanged (recurring-defect doctrine — no second gate-checking
+    function).
+    """
+    by_text: dict[str, object] = {}
+    for prediction in predictions:
+        if not isinstance(prediction, dict):
+            continue
+        text = prediction.get("text")
+        if isinstance(text, str):
+            by_text[text] = prediction.get("predicted_target")
+
+    total = 0
+    correct = 0
+    unmatched: list[str] = []
+    for fixture in fixtures:
+        if not fixture.get("threads"):
+            continue
+        text = fixture.get("text")
+        expected = fixture.get("target")
+        if not isinstance(text, str) or text not in by_text:
+            if isinstance(text, str):
+                unmatched.append(text)
+            continue
+        total += 1
+        if by_text[text] == expected:
+            correct += 1
+
+    accuracy = correct / total if total else None
+    return {"binding": {"total": total, "correct": correct, "accuracy": accuracy, "_unmatched": unmatched}}
+
+
+#: Metric names load_router_gates recognizes as the third dotted segment —
+#: "accuracy" (issue #169, ADR 0017) is the binding scorer's own metric,
+#: alongside the pre-existing per-intent precision/recall pair.
+_ROUTER_GATE_METRICS = frozenset({"precision", "recall", "accuracy"})
+
+
 def load_router_gates(config: dict | None = None) -> dict[str, dict[str, float]]:
-    """Parse router_gates.<class>.<precision|recall> flat dotted keys from lints.yaml.
+    """Parse router_gates.<class>.<precision|recall|accuracy> flat dotted
+    keys from lints.yaml — "binding.accuracy" (issue #169) alongside the
+    pre-existing per-intent precision/recall pairs.
 
     Reuses conversation_lints.load_lints_config's raw loader rather than
     re-parsing the file (single authority for the flat-scalar-subset format).
@@ -279,7 +381,7 @@ def load_router_gates(config: dict | None = None) -> dict[str, dict[str, float]]
         if not key.startswith("router_gates."):
             continue
         parts = key.split(".")
-        if len(parts) != 3 or parts[2] not in ("precision", "recall"):
+        if len(parts) != 3 or parts[2] not in _ROUTER_GATE_METRICS:
             continue
         _, intent, metric = parts
         try:
@@ -380,6 +482,7 @@ def run_router_live(
     predictions = []
     for fixture in fixtures:
         session_open = bool(fixture.get("session_open"))
+        threads = fixture.get("threads")
         result = route_message(
             str(fixture.get("text", "")),
             channel="cli",
@@ -387,10 +490,20 @@ def run_router_live(
             open_session={"session_id": "eval-fixture"} if session_open else None,
             ai_call=ai_call,
             status_resolver=resolve_status,
+            threads=threads if isinstance(threads, list) else None,
         )
-        predictions.append({"text": fixture.get("text"), "predicted": result["intent"]})
+        predictions.append({
+            "text": fixture.get("text"),
+            "predicted": result["intent"],
+            "predicted_target": result.get("target"),
+        })
 
     scores = score_predictions(fixtures, predictions)
+    # issue #169 / ADR 0017 (the thread binder): binding accuracy merges into
+    # the same {class: {metric: ...}} scores dict — check_router_gates is
+    # generic over class/metric already, so `router_gates.binding.accuracy`
+    # (lints.yaml) is enforced through the SAME gate checker, no new one.
+    scores.update(score_binding_predictions(fixtures, predictions))
     gates = load_router_gates()
     failures = check_router_gates(scores, gates)
     return {"status": "ran", "model": resolved_model, "scores": scores, "gate_failures": failures}
@@ -1236,6 +1349,11 @@ def run(*, emit_tasks_flag: bool = False, seed: int | None = None) -> tuple[int,
     sample_predictions = load_router_sample_predictions()
     gates = load_router_gates()
     sample_scores = score_predictions(fixtures, sample_predictions)
+    # issue #169 / ADR 0017 (the thread binder): merges "binding" into the
+    # same scores dict — check_router_gates enforces router_gates.binding.*
+    # through the same generic checker, proven keylessly here against the
+    # committed sample predictions exactly like the pre-#169 intent gates.
+    sample_scores.update(score_binding_predictions(fixtures, sample_predictions))
     gate_failures = check_router_gates(sample_scores, gates)
     if gate_failures:
         ok = False

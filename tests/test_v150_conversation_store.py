@@ -355,6 +355,67 @@ class BuilderTests(unittest.TestCase):
         for intent in ("answer", "new_story", "command", "continue_session", "out_of_scope"):
             self.assertIn(intent, prompt)
 
+    # ---- issue #169 / ADR 0017 — the thread binder: roster in the prompt ----
+
+    BASE_PAYLOAD = {
+        "message": "It was my uncle who built it.",
+        "session_open": True,
+        "pending_question_id": "A14",
+        "recently_closed": False,
+    }
+
+    def test_absent_threads_is_byte_identical_to_no_threads_key_at_all(self):
+        without_key = conversation.build_router_prompt(dict(self.BASE_PAYLOAD))
+        with_none = conversation.build_router_prompt(dict(self.BASE_PAYLOAD, threads=None))
+        with_empty = conversation.build_router_prompt(dict(self.BASE_PAYLOAD, threads=[]))
+        self.assertEqual(without_key, with_none)
+        self.assertEqual(without_key, with_empty)
+
+    def test_absent_threads_never_renders_a_roster_block(self):
+        prompt = conversation.build_router_prompt(dict(self.BASE_PAYLOAD))
+        # router.md's own prose mentions "ROSTER" (the doctrine section) —
+        # only the runtime INPUT block (after the marker) must never
+        # render one when no threads were given.
+        input_block = prompt.split("## INPUT (assembled at runtime", 1)[1]
+        self.assertNotIn("ROSTER", input_block)
+
+    def test_present_threads_renders_roster_block_with_candidate_fields(self):
+        payload = dict(self.BASE_PAYLOAD, threads=[
+            {"id": "thread-a", "question": "Who built it?", "last_exchange": "user: no idea",
+             "awaiting_ask": True},
+        ])
+        prompt = conversation.build_router_prompt(payload)
+        self.assertIn("ROSTER", prompt)
+        self.assertIn("id=thread-a", prompt)
+        self.assertIn("awaiting_ask=true", prompt)
+        self.assertIn("Who built it?", prompt)
+        # the roster block sits before MESSAGE, never after (input order).
+        self.assertLess(prompt.index("ROSTER"), prompt.index("MESSAGE:"))
+
+    def test_roster_is_bounded_by_router_roster_max_knob(self):
+        threads = [
+            {"id": f"t{i}", "question": f"Q{i}?", "last_exchange": "x", "awaiting_ask": False}
+            for i in range(10)
+        ]
+        small_manifest = dict(conversation.load_interaction_manifest())
+        small_manifest["knob.router_roster_max"] = 2
+        with mock.patch.object(conversation, "load_interaction_manifest", return_value=small_manifest):
+            prompt = conversation.build_router_prompt(dict(self.BASE_PAYLOAD, threads=threads))
+        self.assertIn("id=t0", prompt)
+        self.assertIn("id=t1", prompt)
+        self.assertNotIn("id=t2", prompt)
+
+    def test_roster_defaults_to_six_when_knob_absent(self):
+        threads = [
+            {"id": f"t{i}", "question": f"Q{i}?", "last_exchange": "x", "awaiting_ask": False}
+            for i in range(10)
+        ]
+        with mock.patch.object(conversation, "load_interaction_manifest", return_value={}):
+            prompt = conversation.build_router_prompt(dict(self.BASE_PAYLOAD, threads=threads))
+        for i in range(6):
+            self.assertIn(f"id=t{i}", prompt)
+        self.assertNotIn("id=t6", prompt)
+
     def test_build_arc_prompt_embeds_question_and_gap_inputs(self):
         prompt = conversation.build_arc_prompt({
             "question": {"id": "A22", "text": "Who taught you to drive?", "category": "A", "focus": "Family"},

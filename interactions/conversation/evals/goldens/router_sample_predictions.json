@@ -78,5 +78,49 @@
   {
     "text": "Can you recommend a good recipe for lasagna?",
     "predicted": "out_of_scope"
+  },
+  {
+    "text": "It was my uncle Walt who built it, back before I was even born.",
+    "predicted": "answer",
+    "predicted_target": "thread-lighthouse-01"
+  },
+  {
+    "text": "Okay, what's next?",
+    "predicted": "command",
+    "predicted_target": "thread-lighthouse-01"
+  },
+  {
+    "text": "When I said 'the point' I actually meant the rocky point past the marina, not the lighthouse itself.",
+    "predicted": "continue_session",
+    "predicted_target": "thread-lighthouse-01"
+  },
+  {
+    "text": "Wait — are we talking about the old lighthouse or the new one they built in the 90s?",
+    "predicted": "continue_session",
+    "predicted_target": "thread-lighthouse-01"
+  },
+  {
+    "text": "Do you not remember? I already told you uncle Walt built it.",
+    "predicted": "continue_session",
+    "predicted_target": "thread-lighthouse-01"
+  },
+  {
+    "text": "Actually, back to the garden — I forgot to mention we planted the tomatoes the same summer as the flood.",
+    "predicted": "continue_session",
+    "predicted_target": "thread-garden-01"
+  },
+  {
+    "text": "It was my great-aunt who built it — she never got enough credit for it.",
+    "predicted": "answer",
+    "predicted_target": "thread-lighthouse-01"
+  },
+  {
+    "text": "Yeah, I think that's about right.",
+    "predicted": "answer",
+    "predicted_target": "thread-bakery-01"
+  },
+  {
+    "text": "Sounds good, let's keep going.",
+    "predicted": "continue_session"
   }
 ]

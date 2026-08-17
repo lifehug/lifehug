@@ -22,5 +22,51 @@
   {"text": "What's the capital of Peru?", "session_open": false, "intent": "out_of_scope"},
   {"text": "Can you help me write an email to my boss?", "session_open": true, "intent": "out_of_scope"},
   {"text": "lol ok what's 47 times 12", "session_open": false, "intent": "out_of_scope"},
-  {"text": "Can you recommend a good recipe for lasagna?", "session_open": false, "intent": "out_of_scope"}
+  {"text": "Can you recommend a good recipe for lasagna?", "session_open": false, "intent": "out_of_scope"},
+
+  {"text": "It was my uncle Walt who built it, back before I was even born.", "session_open": true, "intent": "answer",
+   "threads": [
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "lifehug: Who actually built the old lighthouse out past the point?", "awaiting_ask": true},
+     {"id": "thread-garden-01", "question": "What did the garden look like in high summer?", "last_exchange": "user: We had tomatoes running right along the back fence.", "awaiting_ask": false}
+   ], "target": "thread-lighthouse-01"},
+  {"text": "Okay, what's next?", "session_open": true, "intent": "command",
+   "threads": [
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "user: It was my uncle Walt who built it, back before I was even born.", "awaiting_ask": false},
+     {"id": "thread-garden-01", "question": "What did the garden look like in high summer?", "last_exchange": "user: We had tomatoes running right along the back fence.", "awaiting_ask": false}
+   ], "target": "thread-lighthouse-01"},
+  {"text": "When I said 'the point' I actually meant the rocky point past the marina, not the lighthouse itself.", "session_open": true, "intent": "continue_session",
+   "threads": [
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "user: It was my uncle Walt who built it, back before I was even born.", "awaiting_ask": false},
+     {"id": "thread-garden-01", "question": "What did the garden look like in high summer?", "last_exchange": "user: We had tomatoes running right along the back fence.", "awaiting_ask": false}
+   ], "target": "thread-lighthouse-01"},
+  {"text": "Wait — are we talking about the old lighthouse or the new one they built in the 90s?", "session_open": true, "intent": "continue_session",
+   "threads": [
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "user: It was my uncle Walt who built it, back before I was even born.", "awaiting_ask": false},
+     {"id": "thread-garden-01", "question": "What did the garden look like in high summer?", "last_exchange": "user: We had tomatoes running right along the back fence.", "awaiting_ask": false}
+   ], "target": "thread-lighthouse-01"},
+  {"text": "Do you not remember? I already told you uncle Walt built it.", "session_open": true, "intent": "continue_session",
+   "threads": [
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "user: It was my uncle Walt who built it, back before I was even born.", "awaiting_ask": false},
+     {"id": "thread-garden-01", "question": "What did the garden look like in high summer?", "last_exchange": "user: We had tomatoes running right along the back fence.", "awaiting_ask": false}
+   ], "target": "thread-lighthouse-01"},
+
+  {"text": "Actually, back to the garden — I forgot to mention we planted the tomatoes the same summer as the flood.", "session_open": true, "intent": "continue_session",
+   "threads": [
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "lifehug: Who actually built the old lighthouse out past the point?", "awaiting_ask": true},
+     {"id": "thread-garden-01", "question": "What did the garden look like in high summer?", "last_exchange": "user: We had tomatoes running right along the back fence.", "awaiting_ask": false}
+   ], "target": "thread-garden-01"},
+
+  {"text": "It was my great-aunt who built it — she never got enough credit for it.", "session_open": true, "intent": "answer",
+   "threads": [
+     {"id": "thread-porch-01", "question": "What was your favorite thing about the porch swing?", "last_exchange": "user: Just how it creaked in a particular way.", "awaiting_ask": false},
+     {"id": "thread-lighthouse-01", "question": "Who actually built the old lighthouse out past the point?", "last_exchange": "lifehug: Who actually built the old lighthouse out past the point?", "awaiting_ask": true}
+   ], "target": "thread-lighthouse-01"},
+
+  {"text": "Yeah, I think that's about right.", "session_open": true, "intent": "answer",
+   "threads": [
+     {"id": "thread-bakery-01", "question": "What was the smell like inside the bakery in the mornings?", "last_exchange": "lifehug: What was the smell like inside the bakery in the mornings?", "awaiting_ask": false},
+     {"id": "thread-roadtrip-01", "question": "How long was that first road trip?", "last_exchange": "user: Maybe two weeks? Hard to remember exactly.", "awaiting_ask": false}
+   ], "target": "thread-bakery-01"},
+
+  {"text": "Sounds good, let's keep going.", "session_open": true, "intent": "continue_session"}
 ]

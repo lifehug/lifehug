@@ -132,6 +132,17 @@ class LintsYamlLoaderTests(unittest.TestCase):
         gates = ie.load_router_gates({"router_gates.answer": "0.9", "router_gates.answer.precision": "0.9"})
         self.assertEqual(gates, {"answer": {"precision": 0.9}})
 
+    def test_load_router_gates_picks_up_binding_accuracy(self):
+        """issue #169 / ADR 0017 — accuracy is a NEW recognized metric
+        (alongside precision/recall), needed for router_gates.binding.*."""
+        gates = ie.load_router_gates({"router_gates.binding.accuracy": "0.85"})
+        self.assertEqual(gates, {"binding": {"accuracy": 0.85}})
+
+    def test_committed_lints_yaml_declares_binding_accuracy_gate(self):
+        gates = ie.load_router_gates()
+        self.assertIn("binding", gates)
+        self.assertIn("accuracy", gates["binding"])
+
 
 # --------------------------------------------------------------------------
 # Layer 2 — router fixtures: schema + scorer + gates
@@ -166,6 +177,68 @@ class RouterFixtureSchemaTests(unittest.TestCase):
 
     def test_non_list_is_flagged(self):
         self.assertTrue(ie.validate_router_fixtures({"not": "a list"}))
+
+
+class RouterFixtureRosterSchemaTests(unittest.TestCase):
+    """issue #169 / ADR 0017 (the thread binder) — the additive
+    threads/target pair on router_fixtures.json entries."""
+
+    VALID = {
+        "text": "It was my uncle who built it.",
+        "session_open": True,
+        "intent": "answer",
+        "threads": [
+            {"id": "t1", "question": "Who built it?", "last_exchange": "user: no idea", "awaiting_ask": True},
+            {"id": "t2", "question": "What was the trip like?", "last_exchange": "user: long", "awaiting_ask": False},
+        ],
+        "target": "t1",
+    }
+
+    def test_threads_bearing_fixture_validates_clean(self):
+        self.assertEqual(ie.validate_router_fixture(self.VALID), [])
+
+    def test_target_new_is_valid(self):
+        entry = dict(self.VALID, target="new")
+        self.assertEqual(ie.validate_router_fixture(entry), [])
+
+    def test_target_not_in_roster_is_flagged(self):
+        entry = dict(self.VALID, target="not-a-thread")
+        errors = ie.validate_router_fixture(entry)
+        self.assertTrue(any("target" in e for e in errors))
+
+    def test_target_without_threads_is_flagged(self):
+        entry = {"text": "hi", "session_open": True, "intent": "answer", "target": "t1"}
+        errors = ie.validate_router_fixture(entry)
+        self.assertTrue(any("target" in e for e in errors))
+
+    def test_threads_present_but_target_missing_is_flagged(self):
+        entry = {k: v for k, v in self.VALID.items() if k != "target"}
+        errors = ie.validate_router_fixture(entry)
+        self.assertTrue(any("target" in e for e in errors))
+
+    def test_empty_threads_list_is_flagged(self):
+        entry = dict(self.VALID, threads=[])
+        errors = ie.validate_router_fixture(entry)
+        self.assertTrue(any("threads" in e for e in errors))
+
+    def test_thread_candidate_missing_id_is_flagged(self):
+        entry = dict(self.VALID, threads=[{"question": "q", "last_exchange": "x", "awaiting_ask": False}])
+        errors = ie.validate_router_fixture(entry)
+        self.assertTrue(any("id" in e for e in errors))
+
+    def test_no_threads_no_target_is_still_the_pre_169_shape(self):
+        """The back-compat guarantee: fixtures with neither key validate
+        exactly as they did before issue #169."""
+        entry = {"text": "Sounds good, let's keep going.", "session_open": True, "intent": "continue_session"}
+        self.assertEqual(ie.validate_router_fixture(entry), [])
+
+    def test_all_committed_fixtures_still_validate_clean(self):
+        fixtures = ie.load_router_fixtures()
+        self.assertEqual(ie.validate_router_fixtures(fixtures), [])
+
+    def test_at_least_one_committed_fixture_carries_a_roster(self):
+        fixtures = ie.load_router_fixtures()
+        self.assertTrue(any(f.get("threads") for f in fixtures))
 
 
 class RouterScorerTests(unittest.TestCase):
@@ -239,6 +312,63 @@ class RouterScorerTests(unittest.TestCase):
         self.assertTrue(failures)
 
 
+class BindingScorerTests(unittest.TestCase):
+    """issue #169 / ADR 0017 (the thread binder) — score_binding_predictions."""
+
+    FIXTURES = [
+        {"text": "a", "session_open": True, "intent": "answer",
+         "threads": [{"id": "t1", "question": "q1", "last_exchange": "x", "awaiting_ask": True}],
+         "target": "t1"},
+        {"text": "b", "session_open": True, "intent": "answer",
+         "threads": [{"id": "t2", "question": "q2", "last_exchange": "y", "awaiting_ask": False}],
+         "target": "new"},
+        {"text": "c", "session_open": False, "intent": "new_story"},  # no roster — excluded from binding
+    ]
+
+    def test_perfect_binding_scores_1_0(self):
+        predictions = [
+            {"text": "a", "predicted": "answer", "predicted_target": "t1"},
+            {"text": "b", "predicted": "answer", "predicted_target": "new"},
+            {"text": "c", "predicted": "new_story"},
+        ]
+        scores = ie.score_binding_predictions(self.FIXTURES, predictions)
+        self.assertEqual(scores["binding"]["total"], 2)
+        self.assertEqual(scores["binding"]["correct"], 2)
+        self.assertEqual(scores["binding"]["accuracy"], 1.0)
+
+    def test_no_roster_fixture_never_counted(self):
+        predictions = [{"text": "c", "predicted": "new_story", "predicted_target": "some-hallucinated-id"}]
+        scores = ie.score_binding_predictions(self.FIXTURES, predictions)
+        self.assertEqual(scores["binding"]["total"], 0)
+
+    def test_wrong_target_lowers_accuracy(self):
+        predictions = [
+            {"text": "a", "predicted": "answer", "predicted_target": "wrong-id"},
+            {"text": "b", "predicted": "answer", "predicted_target": "new"},
+        ]
+        scores = ie.score_binding_predictions(self.FIXTURES, predictions)
+        self.assertEqual(scores["binding"]["accuracy"], 0.5)
+
+    def test_no_predictions_at_all_is_none_accuracy(self):
+        scores = ie.score_binding_predictions(self.FIXTURES, [])
+        self.assertIsNone(scores["binding"]["accuracy"])
+        self.assertEqual(scores["binding"]["total"], 0)
+        # both threads-bearing fixtures went unmatched — never silently dropped.
+        self.assertEqual(set(scores["binding"]["_unmatched"]), {"a", "b"})
+
+    def test_check_router_gates_enforces_binding_accuracy_generically(self):
+        """The whole point of reusing check_router_gates: no second gate
+        checker exists for binding."""
+        predictions = [
+            {"text": "a", "predicted": "answer", "predicted_target": "wrong-id"},
+            {"text": "b", "predicted": "answer", "predicted_target": "new"},
+        ]
+        scores = ie.score_binding_predictions(self.FIXTURES, predictions)
+        failures = ie.check_router_gates(scores, {"binding": {"accuracy": 0.85}})
+        self.assertEqual(len(failures), 1)
+        self.assertIn("router_gates.binding.accuracy", failures[0])
+
+
 class CommittedSamplePredictionsProveGateMathTests(unittest.TestCase):
     """The contract's own words: 'the scorer + a committed sample predictions
     fixture prove the gate math deterministically' — until a live provider
@@ -249,6 +379,7 @@ class CommittedSamplePredictionsProveGateMathTests(unittest.TestCase):
         predictions = ie.load_router_sample_predictions()
         gates = ie.load_router_gates()
         scores = ie.score_predictions(fixtures, predictions)
+        scores.update(ie.score_binding_predictions(fixtures, predictions))
         self.assertEqual(ie.check_router_gates(scores, gates), [])
 
     def test_corrupting_one_class_trips_the_gate(self):
@@ -261,8 +392,26 @@ class CommittedSamplePredictionsProveGateMathTests(unittest.TestCase):
                 flipped += 1
         gates = ie.load_router_gates()
         scores = ie.score_predictions(fixtures, predictions)
+        scores.update(ie.score_binding_predictions(fixtures, predictions))
         failures = ie.check_router_gates(scores, gates)
         self.assertTrue(any("router_gates.answer" in f for f in failures))
+
+    def test_corrupting_binding_trips_the_binding_gate(self):
+        """issue #169 / ADR 0017 — the thread binder's own gate math proof,
+        same idiom as test_corrupting_one_class_trips_the_gate above."""
+        fixtures = ie.load_router_fixtures()
+        predictions = [dict(p) for p in ie.load_router_sample_predictions()]
+        flipped = 0
+        for p in predictions:
+            if p.get("predicted_target") and flipped < 3:
+                p["predicted_target"] = "not-a-real-thread-id"
+                flipped += 1
+        self.assertEqual(flipped, 3, "fixture drift: expected >=3 threads-bearing sample predictions")
+        gates = ie.load_router_gates()
+        scores = ie.score_predictions(fixtures, predictions)
+        scores.update(ie.score_binding_predictions(fixtures, predictions))
+        failures = ie.check_router_gates(scores, gates)
+        self.assertTrue(any("router_gates.binding" in f for f in failures))
 
 
 class DeterministicSafeDefaultTests(unittest.TestCase):

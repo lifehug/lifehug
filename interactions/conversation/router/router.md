@@ -1,4 +1,4 @@
-# Router — inbound intent classifier
+# Router — inbound intent classifier + thread binder
 
 Prompt for the cheap router model (`role.router` in `interaction.yaml`,
 default `haiku-class`). This is the definition's own router contract —
@@ -6,6 +6,9 @@ default `haiku-class`). This is the definition's own router contract —
 they may not diverge on the intent taxonomy, the default-class rule, or
 the unsure-fallback policy documented here — except the unsure-fallback
 policy's own terminal step, which is explicitly per-runtime (see below).
+Issue #169 (platform #490 PR B) extends this same one call with an
+additive binding judgment — see "Roster & binding" below — never a second
+model call.
 
 ## Task
 
@@ -75,16 +78,74 @@ genuinely new story told inside a resumed session still gets told). This
 rule only narrows `new_story`; it does not change how `answer`,
 `out_of_scope`, or `command` are classified.
 
+## Roster & binding (the thread binder — issue #169, platform #490 PR B)
+
+The runtime INPUT block below may include a ROSTER — a bounded, top-K
+list of candidate threads this message might belong to
+(`knob.router_roster_max` in `interaction.yaml`, default 6). A ROSTER only
+ever appears on genuine multi-thread ambiguity (the platform's own
+deterministic ladder — roster, native-reply, single-thread fast path —
+handles everything simpler without a model call); when it is absent,
+there is no binding judgment to make.
+
+When a ROSTER is present, classify AND bind in the same call: decide the
+intent exactly as above, and separately decide which thread the message
+belongs to. **Binding says WHERE a message lands; intent says WHAT it
+is** — two independent judgments in one output, never conflated.
+
+The roster is the **closed set** of valid targets: every candidate's
+`id`, plus the literal string `"new"` for a message that plainly starts a
+subject none of the candidates contain. **Never invent a thread** — a
+message that doesn't cleanly match any listed candidate and doesn't
+plainly start something new still gets a target (continuity default,
+below), never a fabricated id.
+
+Binding rules, in priority order:
+
+1. **Awaiting-ask precedence.** A candidate flagged `awaiting_ask: true`
+   has a question sitting out unanswered. A message that plausibly
+   answers or otherwise engages that ask targets that thread — even when
+   a newer or more recently active thread is also in the roster. Recency
+   never outranks an unanswered ask.
+2. **Content match.** Otherwise, when the message's content plainly
+   belongs to one candidate (it references that thread's subject,
+   continues a specific detail from its `last_exchange`, or directly
+   answers its `question`), target that thread regardless of its
+   position in the roster. This is the genuine bounce: an older thread is
+   still the right target when the content says so.
+3. **Meta-messages** — about the conversation itself rather than any
+   thread's subject ("anything else?", "what's next?", "can I answer
+   another question?") — target the thread the user is CURRENTLY in (the
+   day's active thread), never `"new"`; the request itself is carried by
+   `intent`, not by `target`.
+4. **Continuity default.** When nothing above resolves it — the message
+   is generic, could plausibly belong to more than one candidate, or
+   gives no distinguishing content — target the MOST RECENTLY ACTIVE
+   thread in the roster. Continuity is the default whenever binding is
+   unsure; being unsure is never a reason to guess `"new"` or to leave
+   `target` unresolved.
+5. **`"new"` is a last resort.** Use it only when the message plainly
+   starts a subject that appears in none of the roster's candidates —
+   never as a hedge for "unsure" (rule 4 covers that case).
+
 ## Output schema
 
 Return exactly this shape, nothing else:
 
 ```json
 {"intent": "answer|new_story|command|continue_session|out_of_scope",
- "confidence": 0.0}
+ "confidence": 0.0,
+ "target": "<roster-id>|\"new\"|null"}
 ```
 
-`confidence` is a float in `[0.0, 1.0]`.
+`confidence` is a float in `[0.0, 1.0]`. `target` is additive (issue
+#169): when the INPUT carries no ROSTER, always return `target: null` —
+there is nothing to bind against. When a ROSTER is present, resolve
+`target` to a concrete roster id or `"new"` per the binding rules above;
+only fall back to `null` when the classification itself is this unsure
+about intent too (an honest "no judgment" reading, never a silent guess)
+— the runtime treats an out-of-roster or otherwise invalid `target` the
+same way, and always keeps the classified `intent` regardless.
 
 ## Unsure-fallback policy
 
@@ -122,4 +183,8 @@ This file is the definition both runtimes must match: the taxonomy, the
 default-class rule, and steps 1–3 above admit no runtime divergence at
 all; only the terminal step (4) is explicitly per-runtime, and only
 because the two runtimes' delivery models make a single shared mechanic
-impossible — not because the definition is silent on it.
+impossible — not because the definition is silent on it. The Roster &
+binding doctrine above is the same kind of shared, non-divergent
+contract — the ONE difference is that OSS's single-open-session model
+gives it nothing to bind against yet (`target` passes through
+unconsumed); the hosted platform is the first full consumer (ADR 0017).

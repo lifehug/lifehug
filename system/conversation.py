@@ -126,6 +126,10 @@ DEFAULT_CLOSING_TRANSCRIPT_BUDGET = 1200
 #: absent or the knob isn't an int.
 DEFAULT_ASKING_SUPPLY_TOP_K = 3
 
+#: Default `knob.router_roster_max` (issue #169, ADR 0017 — the thread
+#: binder) when the manifest is absent or the knob isn't a positive int.
+DEFAULT_ROUTER_ROSTER_MAX = 6
+
 #: A14 -> A14, A14b -> A14 (the suffix chain's root). Single authority —
 #: moved here from conversation_delivery.py (issue #168 / ADR 0016) so the
 #: focus-derivation ladder (arc.question_id / turn question_ids ->
@@ -997,8 +1001,45 @@ def _lint_cap_turn_chars() -> int:
     return 1200
 
 
+def _build_router_roster_block(threads: list) -> str:
+    """Render the optional ROSTER block for build_router_prompt (issue #169,
+    ADR 0017 — the thread binder). Returns "" when ``threads`` is empty —
+    the caller relies on this to keep the prompt BYTE-IDENTICAL to
+    pre-#169 output whenever no roster is given (contract, Scope 1).
+
+    Bounded to ``knob.router_roster_max`` (default
+    ``DEFAULT_ROUTER_ROSTER_MAX``) — a top-K whisper, never the whole
+    day's thread history, even if a caller hands in more.
+    """
+    if not threads:
+        return ""
+    manifest = _safe_manifest()
+    roster_max = manifest.get("knob.router_roster_max")
+    roster_max = roster_max if isinstance(roster_max, int) and roster_max > 0 else DEFAULT_ROUTER_ROSTER_MAX
+    lines = ['ROSTER (candidate threads — "target" must be one of these ids, "new", or null):']
+    for candidate in threads[:roster_max]:
+        if not isinstance(candidate, dict):
+            continue
+        cid = candidate.get("id", "")
+        question = candidate.get("question", "")
+        last_exchange = candidate.get("last_exchange", "")
+        awaiting = "true" if candidate.get("awaiting_ask") else "false"
+        lines.append(
+            f"- id={cid} awaiting_ask={awaiting} question: {question} | last_exchange: {last_exchange}"
+        )
+    return "\n".join(lines) + "\n\n"
+
+
 def build_router_prompt(payload: dict) -> str:
-    """Substitute message/state into router.md — never restates its schema/intents."""
+    """Substitute message/state into router.md — never restates its schema/intents.
+
+    ``threads`` (issue #169, ADR 0017 — the thread binder, additive) is an
+    optional bounded roster of candidate threads
+    (``{"id","question","last_exchange","awaiting_ask"}`` each); absent or
+    empty, the rendered prompt is BYTE-IDENTICAL to pre-#169 output
+    (contract, Scope 1) — the ROSTER block only appears when ``threads``
+    is non-empty.
+    """
     message = payload["message"]
     session_open = payload["session_open"]
     pending_question_id = payload.get("pending_question_id")
@@ -1007,14 +1048,17 @@ def build_router_prompt(payload: dict) -> str:
     # Reply-after-close rule's own signal (router.md). Optional/additive:
     # callers that never pass it get "False", the pre-#139 reading.
     recently_closed = bool(payload.get("recently_closed", False))
+    threads = payload.get("threads") or []
     template = _read_framework_text("router", "router.md")
     pending = "(none)" if pending_question_id is None else str(pending_question_id)
+    roster_block = _build_router_roster_block(threads)
     return (
         f"{template}\n\n"
         "## INPUT (assembled at runtime — classify this message)\n\n"
         f"SESSION OPEN: {session_open}\n"
         f"PENDING QUESTION: {pending}\n"
         f"RECENTLY CLOSED: {recently_closed}\n\n"
+        f"{roster_block}"
         "MESSAGE:\n"
         f"{message}\n"
     )

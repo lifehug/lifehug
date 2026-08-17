@@ -30,6 +30,12 @@ knob.janitor_idle_hours: 36
 knob.deposit_framing: off
 knob.grief_deferral_days: 60
 knob.router_confidence_threshold: 0.7
+# issue #169 / ADR 0017 (router-thread-binding, platform #490 PR B): the
+# binder's own roster top-K — a bounded list of candidate threads offered
+# to the router only on genuine multi-thread ambiguity, never the whole
+# day's history. Absent/empty `threads` leaves the router prompt and
+# output byte-identical to pre-#169 behavior (contract, Scope 1).
+knob.router_roster_max: 6
 # issue #168 / ADR 0016 (asking-supply): the ASKING_SUPPLY block's own
 # Top-K — a whisper, not a flood (prior-art cap applies to the BLOCK SIZE
 # only; there is deliberately no per-session cap on how many of these get
