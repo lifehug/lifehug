@@ -1260,6 +1260,7 @@ def cmd_route(_args: argparse.Namespace) -> int:
         return 1
     text = raw.strip()
     channel = "cli"
+    threads = None
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
@@ -1270,10 +1271,17 @@ def cmd_route(_args: argparse.Namespace) -> int:
         if channel not in ("telegram", "web", "cli"):
             print(f"Error: invalid channel: {channel!r}", file=sys.stderr)
             return 1
+        # issue #169 / ADR 0017 (thread binder, additive): an optional
+        # bounded roster of candidate threads, passed straight through to
+        # route_message. Absent (the common case) leaves routing exactly
+        # as it was pre-#169.
+        raw_threads = payload.get("threads")
+        if isinstance(raw_threads, list) and raw_threads:
+            threads = raw_threads
 
     from conversation_delivery import route_message  # noqa: PLC0415
 
-    result = route_message(text, channel=channel)
+    result = route_message(text, channel=channel, threads=threads)
     print(json.dumps(result))
     return 0
 

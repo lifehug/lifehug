@@ -799,8 +799,17 @@ _ROUTER_ACTION_BY_INTENT = {
 }
 
 
-def _parse_router_output(raw: object) -> tuple[str, float] | None:
-    """Parse router.md's ``{"intent": ..., "confidence": ...}`` schema.
+def _parse_router_output(
+    raw: object, *, valid_targets: frozenset[str] | None = None
+) -> tuple[str, float, str | None] | None:
+    """Parse router.md's ``{"intent": ..., "confidence": ..., "target": ...}``
+    schema. ``target`` is additive (issue #169, ADR 0017 — the thread
+    binder): strict — it must be a roster id from ``valid_targets``, the
+    literal string ``"new"``, or ``null``; anything else (a hallucinated
+    id, wrong type, or any value at all when ``valid_targets`` is None —
+    no roster was given, so no binding judgment applies) becomes ``None``
+    rather than discarding the whole parse. The classified ``intent`` is
+    never dropped for an invalid ``target`` (contract, Scope 4).
 
     None on anything unusable — malformed output is the "treat as
     unavailable" path (contract, Part B mechanics #2), never a guess.
@@ -822,7 +831,14 @@ def _parse_router_output(raw: object) -> tuple[str, float] | None:
     confidence = float(confidence)
     if not (0.0 <= confidence <= 1.0):
         return None
-    return intent, confidence
+    target = data.get("target")
+    target_out_of_roster = (
+        isinstance(target, str) and valid_targets is not None
+        and target != "new" and target not in valid_targets
+    )
+    if valid_targets is None or not isinstance(target, str) or target_out_of_roster:
+        target = None
+    return intent, confidence, target
 
 
 def route_message(
@@ -836,10 +852,11 @@ def route_message(
     rotation: dict | None = None,
     open_session: dict | None = None,
     now: datetime | None = None,
+    threads: list | None = None,
 ) -> dict:
     """Classify one inbound message per router.md; never mutates anything.
 
-    Returns ``{"intent", "confidence", "source", "action",
+    Returns ``{"intent", "confidence", "source", "action", "target",
     "pending_question_id", "open_session_id", "reopen_session_id"}`` —
     always, and always with exit-0 semantics for the CLI wrapper
     (``cmd_route`` in ``lifehug.py``): a provider that is not ready, a
@@ -854,6 +871,17 @@ def route_message(
     like the platform's thread-composer pattern for a closed thread. A
     reply landing in that gap is never guessed as an unrelated
     ``new_story`` — see the Reply-after-close rule in ``router.md``.
+
+    ``threads`` (issue #169, ADR 0017 — the thread binder, additive) is an
+    optional bounded roster passed straight through to
+    ``build_router_prompt``; ``target`` in the result reflects the
+    model's own binding judgment (a roster id, ``"new"``, or ``None``)
+    ONLY when the model's classification was itself accepted (``source ==
+    "model"``) — any fallback path is honestly "no binding judgment",
+    never a guess. OSS's single-open-session model has nothing to bind
+    multiple candidates INTO today, so this is a pass-through: the value
+    is reported, never consumed to redirect routing (ADR 0017 records
+    this — the hosted platform is the first full consumer).
 
     Injectable collaborators (``ai_call`` / ``status_resolver`` /
     ``prompt_builder`` / ``rotation`` / ``open_session``) mirror the turn
@@ -892,8 +920,15 @@ def route_message(
     resolve_status = status_resolver or provider_status
     selected = resolve_status(model, probe=False)
 
+    roster_ids = frozenset(
+        candidate["id"]
+        for candidate in (threads or [])
+        if isinstance(candidate, dict) and isinstance(candidate.get("id"), str)
+    ) if threads else None
+
     model_intent: str | None = None
     model_confidence: float | None = None
+    model_target: str | None = None
     if getattr(selected, "ready", False):
         builder = prompt_builder or conversation.build_router_prompt
         payload = {
@@ -902,21 +937,25 @@ def route_message(
             "pending_question_id": pending_question_id,
             "recently_closed": reopen_session_id is not None,
         }
+        if threads:
+            payload["threads"] = threads
         try:
             prompt = builder(payload)
             generated = (ai_call or call_ai)(prompt, model)
-            parsed = _parse_router_output(generated)
+            parsed = _parse_router_output(generated, valid_targets=roster_ids)
         except Exception:  # noqa: BLE001 — a classify call is never capture
             parsed = None
         if parsed is None:
             _diagnostic("route_classify", "malformed_generation", open_session_id or "-")
         else:
-            model_intent, model_confidence = parsed
+            model_intent, model_confidence, model_target = parsed
 
+    target: str | None = None
     if model_intent is not None and model_confidence is not None and model_confidence >= threshold:
         intent = model_intent
         confidence = model_confidence
         source = "model"
+        target = model_target
         if intent == "new_story" and same_day_reopen:
             # Reply-after-close rule (design K item 6, owner ruling): a
             # same-day reply after a close is never an unrelated new
@@ -955,6 +994,7 @@ def route_message(
         "confidence": round(float(confidence), 4),
         "source": source,
         "action": action,
+        "target": target,
         "pending_question_id": pending_question_id,
         "open_session_id": open_session_id,
         "reopen_session_id": reopen_session_id if open_session_id is None else None,

@@ -19,7 +19,9 @@ named explicitly, v130/v131 precedent).
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -429,6 +431,277 @@ class ReplyAfterCloseTests(unittest.TestCase):
         second_doc = conversation.load_session(second_id, vault_root=vault)
         self.assertEqual(second_doc["status"], "closed")
         self.assertNotEqual(first_session_id, second_id)
+
+
+def router_json_with_target(intent, confidence, target):
+    return json.dumps({"intent": intent, "confidence": confidence, "target": target})
+
+
+ROSTER = [
+    {"id": "thread-a", "question": "Who built it?", "last_exchange": "user: no idea", "awaiting_ask": True},
+    {"id": "thread-b", "question": "What was the trip like?", "last_exchange": "user: long", "awaiting_ask": False},
+]
+
+
+class ThreadBinderTests(unittest.TestCase):
+    """issue #169 / ADR 0017 — the thread binder: additive `threads` in,
+    `target` out. OSS's single-open-session model has nothing to bind
+    multiple candidates INTO yet, so this is a pass-through: `target` is
+    reported, never consumed to redirect routing (ADR 0017)."""
+
+    def test_no_threads_target_is_always_none(self):
+        result = engine.route_message(
+            "irrelevant text",
+            ai_call=lambda *_a, **_k: router_json("answer", 0.95),
+            status_resolver=ready_status,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+        )
+        self.assertIsNone(result["target"])
+
+    def test_threads_present_model_target_passes_through(self):
+        result = engine.route_message(
+            "It was my uncle who built it.",
+            ai_call=lambda *_a, **_k: router_json_with_target("answer", 0.95, "thread-a"),
+            status_resolver=ready_status,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+            threads=ROSTER,
+        )
+        self.assertEqual(result["target"], "thread-a")
+        self.assertEqual(result["intent"], "answer")
+
+    def test_target_new_passes_through(self):
+        result = engine.route_message(
+            "Something totally different happened today.",
+            ai_call=lambda *_a, **_k: router_json_with_target("new_story", 0.95, "new"),
+            status_resolver=ready_status,
+            rotation={},
+            open_session=None,
+            threads=ROSTER,
+        )
+        self.assertEqual(result["target"], "new")
+
+    def test_out_of_roster_target_becomes_none_intent_kept(self):
+        result = engine.route_message(
+            "It was my uncle who built it.",
+            ai_call=lambda *_a, **_k: router_json_with_target("answer", 0.95, "hallucinated-id"),
+            status_resolver=ready_status,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+            threads=ROSTER,
+        )
+        self.assertIsNone(result["target"])
+        self.assertEqual(result["intent"], "answer")  # never discarded for an invalid target
+
+    def test_target_present_but_no_threads_given_is_ignored(self):
+        """A model hallucinating a target with no roster in the prompt at
+        all — there was nothing to bind against, so target is null
+        regardless of what the (malformed, off-contract) reply says."""
+        result = engine.route_message(
+            "irrelevant text",
+            ai_call=lambda *_a, **_k: router_json_with_target("answer", 0.95, "thread-a"),
+            status_resolver=ready_status,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+        )
+        self.assertIsNone(result["target"])
+
+    def test_below_threshold_fallback_target_is_none_even_with_threads(self):
+        result = engine.route_message(
+            "hmm not sure what this is",
+            ai_call=lambda *_a, **_k: router_json_with_target("out_of_scope", 0.4, "thread-a"),
+            status_resolver=ready_status,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+            threads=ROSTER,
+        )
+        self.assertEqual(result["source"], "default")
+        self.assertIsNone(result["target"])
+
+    def test_keyless_default_path_never_calls_model_target_is_none(self):
+        ai = mock.Mock(side_effect=AssertionError("keyless must never call the model"))
+        result = engine.route_message(
+            "some reply", ai_call=ai, status_resolver=keyless_status,
+            rotation={"last_question_id": "A14"}, open_session=None, threads=ROSTER,
+        )
+        self.assertIsNone(result["target"])
+        ai.assert_not_called()
+
+    def test_threads_reach_the_prompt_builder(self):
+        captured = {}
+
+        def capturing_builder(payload):
+            captured.update(payload)
+            return "SYNTHETIC PROMPT"
+
+        engine.route_message(
+            "It was my uncle who built it.",
+            ai_call=lambda *_a, **_k: router_json_with_target("answer", 0.95, "thread-a"),
+            status_resolver=ready_status,
+            prompt_builder=capturing_builder,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+            threads=ROSTER,
+        )
+        self.assertEqual(captured.get("threads"), ROSTER)
+
+    def test_absent_threads_never_added_to_prompt_payload(self):
+        """Contract, Scope 1: absent/empty threads keeps the payload the
+        prompt builder sees exactly as it was pre-#169."""
+        captured = {}
+
+        def capturing_builder(payload):
+            captured.update(payload)
+            return "SYNTHETIC PROMPT"
+
+        engine.route_message(
+            "irrelevant text",
+            ai_call=lambda *_a, **_k: router_json("answer", 0.95),
+            status_resolver=ready_status,
+            prompt_builder=capturing_builder,
+            rotation={"last_question_id": "A14"},
+            open_session=None,
+        )
+        self.assertNotIn("threads", captured)
+
+
+class ParseRouterOutputTests(unittest.TestCase):
+    """issue #169 / ADR 0017 — _parse_router_output's target strictness."""
+
+    def test_target_absent_defaults_to_none(self):
+        parsed = engine._parse_router_output(
+            router_json("answer", 0.9), valid_targets=frozenset({"thread-a"})
+        )
+        self.assertEqual(parsed, ("answer", 0.9, None))
+
+    def test_valid_target_kept(self):
+        parsed = engine._parse_router_output(
+            router_json_with_target("answer", 0.9, "thread-a"),
+            valid_targets=frozenset({"thread-a", "thread-b"}),
+        )
+        self.assertEqual(parsed, ("answer", 0.9, "thread-a"))
+
+    def test_literal_new_always_valid(self):
+        parsed = engine._parse_router_output(
+            router_json_with_target("new_story", 0.9, "new"),
+            valid_targets=frozenset({"thread-a"}),
+        )
+        self.assertEqual(parsed, ("new_story", 0.9, "new"))
+
+    def test_out_of_roster_target_becomes_none(self):
+        parsed = engine._parse_router_output(
+            router_json_with_target("answer", 0.9, "not-in-roster"),
+            valid_targets=frozenset({"thread-a"}),
+        )
+        self.assertEqual(parsed, ("answer", 0.9, None))
+
+    def test_non_string_target_becomes_none(self):
+        parsed = engine._parse_router_output(
+            router_json_with_target("answer", 0.9, 7),
+            valid_targets=frozenset({"thread-a"}),
+        )
+        self.assertEqual(parsed, ("answer", 0.9, None))
+
+    def test_no_valid_targets_forces_none_even_if_model_returns_one(self):
+        parsed = engine._parse_router_output(
+            router_json_with_target("answer", 0.9, "thread-a"), valid_targets=None
+        )
+        self.assertEqual(parsed, ("answer", 0.9, None))
+
+    def test_invalid_target_never_discards_the_intent(self):
+        parsed = engine._parse_router_output(
+            router_json_with_target("command", 0.88, "nonsense"),
+            valid_targets=frozenset({"thread-a"}),
+        )
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed[0], "command")
+
+
+QUESTION_BANK = """# Synthetic Lifehug questions
+
+## A: Origins
+- [ ] A1: What is your earliest synthetic memory?
+"""
+
+
+def _make_minimal_vault(root: Path) -> Path:
+    """Minimal on-disk vault (question bank + rotation/coverage state) —
+    matches tests/test_conversation_close.py's own ``make_vault`` shape,
+    the established precedent for driving ``lifehug.py`` via subprocess
+    against a synthetic ``LIFEHUG_VAULT_ROOT``."""
+    root.mkdir(parents=True)
+    state = root / "state"
+    state.mkdir()
+    (root / "question-bank.md").write_text(QUESTION_BANK, encoding="utf-8")
+    (state / "rotation.json").write_text(json.dumps({
+        "version": 1,
+        "current_pass": 1,
+        "pass_names": ["skeleton"],
+        "last_question_id": None,
+        "last_asked_at": None,
+        "questions_asked": 0,
+        "questions_answered": 0,
+        "next_question_id": None,
+        "focus_frequency": 4,
+    }, indent=2) + "\n", encoding="utf-8")
+    (state / "coverage.json").write_text(json.dumps({
+        "version": 1,
+        "last_updated": None,
+        "categories": {"A": {"total": 1, "answered": 0, "status": "red"}},
+    }, indent=2) + "\n", encoding="utf-8")
+    return root
+
+
+class CmdRouteCliThreadsTests(unittest.TestCase):
+    """issue #169 / ADR 0017 — `lifehug.py route`'s stdin JSON accepts an
+    optional `threads` array and forwards it (CLI-level smoke test, no
+    provider configured in this environment so it always resolves through
+    the deterministic default — the point here is that the extra key
+    parses and the `target` field is always present in the reply)."""
+
+    def _run_route(self, tmp, stdin_payload: str):
+        full_env = {**os.environ, "LIFEHUG_VAULT_ROOT": str(tmp)}
+        return subprocess.run(
+            [sys.executable, str(SYSTEM / "lifehug.py"), "route"],
+            input=stdin_payload,
+            capture_output=True,
+            text=True,
+            env=full_env,
+        )
+
+    def test_plain_text_stdin_still_works(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v169-route-cli-")
+        vault = _make_minimal_vault(tmp / "vault")
+        result = self._run_route(vault, "hello there")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("target", payload)
+        self.assertIsNone(payload["target"])
+
+    def test_json_stdin_with_threads_parses_and_target_key_present(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v169-route-cli-")
+        vault = _make_minimal_vault(tmp / "vault")
+        stdin_payload = json.dumps({
+            "text": "It was my uncle who built it.",
+            "channel": "cli",
+            "threads": [
+                {"id": "thread-a", "question": "Who built it?", "last_exchange": "x", "awaiting_ask": True},
+            ],
+        })
+        result = self._run_route(vault, stdin_payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("target", payload)
+
+    def test_empty_threads_list_is_treated_as_absent(self):
+        tmp = root_parent_tmp(self, ROOT, prefix="lifehug-v169-route-cli-")
+        vault = _make_minimal_vault(tmp / "vault")
+        stdin_payload = json.dumps({"text": "hello there", "channel": "cli", "threads": []})
+        result = self._run_route(vault, stdin_payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIsNone(payload["target"])
 
 
 class ProseContractGuardTests(unittest.TestCase):

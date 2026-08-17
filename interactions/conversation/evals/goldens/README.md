@@ -82,6 +82,25 @@ A flat JSON list of `{text, session_open, intent}`, `intent` one of
 and scored by `interaction_evals.py`'s Layer-2 scorer against
 `router_gates.*` (flat dotted keys in `evals/lints.yaml`).
 
+**Issue #169 / ADR 0017 (the thread binder, platform #490 PR B) —
+additive extension**: a fixture MAY also carry `threads` (a non-empty
+bounded roster of `{id, question, last_exchange, awaiting_ask}` candidate
+threads — mirrors the runtime ROSTER block `conversation
+.build_router_prompt` renders) and, only when `threads` is present,
+`target` — the fixture's ground-truth binding: one of the roster's `id`s
+or the literal string `"new"`. Fixtures with no `threads` are entirely
+unaffected (schema, scoring, and gating all unchanged for them) — this is
+how the pre-#169 20 fixtures stay valid untouched. The roster-bearing
+rows near the end of the file are ALL synthetic (invented people/topics,
+e.g. an invented lighthouse/garden/porch/bakery/road-trip) — a stepwise
+shape-replay of the kind of same-day multi-thread ambiguity the binder
+exists for (delivered question → answer → a "what's next?" meta-message
+→ a held-ask reply that redefines a term → a clarification → "do you not
+remember?", each asserting the single correct `target`), plus a genuine
+content-driven bounce back to an older thread, an awaiting-ask-beats-
+recency case, and an unsure-defaults-to-most-recent case — never anything
+resembling the owner's real vault.
+
 ## Sample router predictions (`router_sample_predictions.json`)
 
 A flat JSON list of `{text, predicted}` — a committed, hand-authored
@@ -91,3 +110,9 @@ enforcement deterministically and keylessly (contract: "the scorer + a
 committed sample predictions fixture prove the gate math deterministically"
 until a live provider is available to generate real predictions via
 `lifehug.py route`).
+
+**Issue #169 / ADR 0017 amendment**: rows matching a `threads`-bearing
+fixture also carry `predicted_target` (parallel to `target`) so
+`interaction_evals.score_binding_predictions` can prove
+`router_gates.binding.accuracy` the same keyless way. Rows matching a
+fixture with no `threads` never carry `predicted_target`.

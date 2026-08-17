@@ -113,3 +113,16 @@ router_gates.continue_session.precision: 0.75
 router_gates.continue_session.recall: 0.85
 router_gates.out_of_scope.precision: 0.85
 router_gates.out_of_scope.recall: 0.8
+
+# router_gates.binding.accuracy (issue #169, ADR 0017 — the thread
+# binder): the SAME flat-dotted-key mechanism as the per-intent gates
+# above, one new "class" (binding, a pseudo-class — not one of the five
+# intents) with one metric (accuracy, not precision/recall — there is no
+# fixed target vocabulary to split into positive/negative classes, only a
+# closed per-fixture roster). Scored ONLY over threads-bearing fixtures
+# (interaction_evals.score_binding_predictions); fixtures with no roster
+# never touch this gate. Threshold targets a STRONG live model exactly
+# like the intent gates — FLAGGED for the platform's pin-bump
+# reconciliation (contract, Scope 7): a new gate class the platform's own
+# closed-vocabulary/gate mirror needs to pick up.
+router_gates.binding.accuracy: 0.85
