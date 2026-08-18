@@ -106,8 +106,10 @@ class CandidateManagerTests(unittest.TestCase):
         updated, question_id = candidates.promote_candidate_record(store, bank, "cand-redlands-1", "A")
         self.assertEqual(question_id, "A3")
         self.assertIn("- [ ] A3: What did the room look like", updated)
-        self.assertIn("candidate: cand-redlands-1", updated)
-        self.assertIn("source: sources/manual/redlands.md", updated)
+        marker, _line, _text = candidates.candidate_promotion._marker_records(updated)[0]
+        self.assertEqual(marker["candidate_id"], "cand-redlands-1")
+        self.assertEqual(marker["category_id"], "A")
+        self.assertEqual(marker["question_id"], "A3")
         self.assertEqual(store["candidates"][0]["status"], "promoted")
         self.assertEqual(store["candidates"][0]["promoted_question_id"], "A3")
 

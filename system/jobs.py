@@ -36,10 +36,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
 
 import format_frameworks
 from vault_paths import (
@@ -700,7 +700,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "artifact-promote": CommandSpec(_build_artifact_promote, "never"),
     "artifact-revise": CommandSpec(_build_artifact_revise, "never", timeout_seconds=1800),
     "artifact-save": CommandSpec(_build_artifact_save, "never"),
-    "candidate-promote": CommandSpec(_build_candidate_promote, "never"),
+    "candidate-promote": CommandSpec(_build_candidate_promote, "idempotent"),
     "candidate-update": CommandSpec(_build_candidate_update, "never"),
     "compile": CommandSpec(_build_compile, "idempotent"),
     "compile-pending": CommandSpec(_build_schedule("compile_and_commit.sh"), "never"),
@@ -928,7 +928,7 @@ class _KernelLock:
                 if time.monotonic() >= deadline:
                     os.close(self.fd)
                     self.fd = None
-                    raise TimeoutError("vault lock is busy")
+                    raise TimeoutError("vault lock is busy") from None
                 time.sleep(0.02)
 
     def __exit__(self, _exc_type, _exc, _tb):

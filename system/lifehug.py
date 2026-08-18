@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import runpy
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -26,7 +26,6 @@ bootstrap_cli_vault_root(sys.argv[1:])
 
 from lifehug_core import (
     ANSWERS_DIR,
-    STATE_DIR,
     CLASSIFICATIONS_DIR,
     CONFIG_FILE,
     COVERAGE_FILE,
@@ -37,6 +36,7 @@ from lifehug_core import (
     QUESTIONS_FILE,
     REPO_DIR,
     ROTATION_FILE,
+    STATE_DIR,
     WIKI_DIR,
     format_learning_failure,
     load_config,
@@ -95,6 +95,7 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # weekly/monthly learning-loop family.
     "arc-plan", "arc-thread-offers",
     "book-offers", "candidates-auto-promote", "candidates-promote",
+    "candidates-promotion-receipt",
     "candidates-promote-neighborhood", "candidates-update", "classify-story",
     "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
     "connector-fetch",
@@ -485,6 +486,28 @@ def cmd_candidates_update(args: argparse.Namespace) -> int:
 
 def cmd_candidates_promote(args: argparse.Namespace) -> int:
     return run_python("question_candidates.py", ["promote", args.candidate_id, "--category", args.category])
+
+
+def cmd_candidates_promotion_receipt(args: argparse.Namespace) -> int:
+    import candidate_promotion
+    try:
+        request = candidate_promotion.build_revision_bound_request(
+            args.candidate_id, args.category,
+            candidate_revision=args.candidate_revision,
+            category_revision=args.category_revision,
+            placement_revision=args.placement_revision,
+            source_revision=args.source_revision,
+            proposal_revision=args.proposal_revision,
+            decision_revision=args.decision_revision,
+            vault_root=REPO_DIR,
+        )
+        receipt = candidate_promotion.resolve_candidate_promotion(
+            request, vault_root=REPO_DIR, promotion_mode="manual", push=True)
+    except candidate_promotion.CandidatePromotionError as exc:
+        print(f"candidate-promotion: {exc}", file=sys.stderr)
+        return 2
+    print(candidate_promotion.canonical_receipt_json(receipt))
+    return 0
 
 
 def cmd_candidates_promote_neighborhood(args: argparse.Namespace) -> int:
@@ -2009,6 +2032,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("candidate_id")
     p.add_argument("--category", required=True)
     p.set_defaults(func=cmd_candidates_promote)
+
+    p = sub.add_parser("candidates-promotion-receipt",
+                       help="Promote exact revisions and return a canonical JSON receipt")
+    p.add_argument("candidate_id")
+    p.add_argument("--category", required=True)
+    p.add_argument("--candidate-revision", required=True)
+    p.add_argument("--category-revision", required=True)
+    p.add_argument("--placement-revision", required=True)
+    p.add_argument("--source-revision")
+    p.add_argument("--proposal-revision")
+    p.add_argument("--decision-revision")
+    p.add_argument("--json", action="store_true", required=True)
+    p.set_defaults(func=cmd_candidates_promotion_receipt)
 
     p = sub.add_parser("candidates-promote-neighborhood", help="Promote all of a neighborhood's candidates into one category")
     p.add_argument("--neighborhood", required=True)

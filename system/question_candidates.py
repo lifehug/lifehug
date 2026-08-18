@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -11,11 +12,13 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+import candidate_promotion
 from lifehug_core import (
     PERENNIALS_FILE,
     QUESTION_CANDIDATES_FILE,
     QUESTIONS_FILE,
     REPO_DIR,
+    STORY_FUNCTIONS,
     WIKI_DIR,
     now_utc,
     parse_categories,
@@ -25,8 +28,6 @@ from lifehug_core import (
     write_json,
     write_text,
 )
-
-from lifehug_core import STORY_FUNCTIONS
 
 VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted",
                    "needs_review", "expired", "superseded"}
@@ -397,27 +398,11 @@ def insert_question(
 
 def promote_candidate_record(data: dict, question_bank_text: str, candidate_id: str, category: str) -> tuple[str, str]:
     candidate = find_candidate(data, candidate_id)
-    status = candidate.get("status", "candidate")
-    if status not in PROMOTABLE_STATUSES:
-        raise ValueError(f"candidate {candidate_id} cannot be promoted from status '{status}'")
-
-    text = str(candidate.get("text", "")).strip()
-    if not text:
-        raise ValueError(f"candidate has no text: {candidate_id}")
-
-    category = category.upper()
-    ensure_category_exists(question_bank_text, category)
-    ensure_not_duplicate(question_bank_text, text)
-    question_id = next_question_id(question_bank_text, category)
-    promoted_at = now_utc()
-    updated_bank = insert_question(question_bank_text, category, question_id, text, candidate, promoted_at)
-
-    candidate["status"] = "promoted"
-    candidate["target_category"] = category
-    candidate["promoted_question_id"] = question_id
-    candidate["promoted_at"] = promoted_at
-    candidate["updated_at"] = promoted_at
-    return updated_bank, question_id
+    request = candidate_promotion.build_candidate_promotion_request(
+        candidate, question_bank_text, category)
+    updated_bank, payload = candidate_promotion.apply_candidate_promotion(
+        data, question_bank_text, request, promotion_mode="manual")
+    return updated_bank, payload["question_id"]
 
 
 def promote_neighborhood(data: dict, question_bank_text: str, neighborhood_id: str, category: str) -> tuple[str, list[str]]:
@@ -439,19 +424,13 @@ def promote_neighborhood(data: dict, question_bank_text: str, neighborhood_id: s
         if not text:
             continue
         try:
-            ensure_not_duplicate(question_bank_text, text)
-        except ValueError:
-            continue  # already in the bank — skip, keep going
-        question_id = next_question_id(question_bank_text, category)
-        promoted_at = now_utc()
-        question_bank_text = insert_question(
-            question_bank_text, category, question_id, text, candidate, promoted_at)
-        candidate["status"] = "promoted"
-        candidate["target_category"] = category
-        candidate["promoted_question_id"] = question_id
-        candidate["promoted_at"] = promoted_at
-        candidate["updated_at"] = promoted_at
-        new_ids.append(question_id)
+            request = candidate_promotion.build_candidate_promotion_request(
+                candidate, question_bank_text, category)
+            question_bank_text, payload = candidate_promotion.apply_candidate_promotion(
+                data, question_bank_text, request, promotion_mode="neighborhood")
+            new_ids.append(payload["question_id"])
+        except candidate_promotion.CandidatePromotionError:
+            continue
     return question_bank_text, new_ids
 
 
@@ -657,13 +636,12 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def cmd_promote(args: argparse.Namespace) -> int:
-    data = load_store()
-    question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
-    updated_bank, question_id = promote_candidate_record(data, question_bank_text, args.candidate_id, args.category)
-    write_text(QUESTIONS_FILE, updated_bank)
-    save_store(data)
+    request = candidate_promotion.build_current_request(
+        args.candidate_id, args.category, vault_root=REPO_DIR)
+    receipt = candidate_promotion.resolve_candidate_promotion(
+        request, vault_root=REPO_DIR, promotion_mode="manual", push=True)
     refresh_neighborhood_readiness_safely()
-    print(f"✓ Promoted {args.candidate_id} to {question_id}")
+    print(f"✓ Promoted {args.candidate_id} to {receipt['question_id']} ({receipt['commit_sha']})")
     return 0
 
 
@@ -1120,24 +1098,28 @@ def auto_promote_candidates(
 
         # Promote
         try:
-            ensure_category_exists(updated_bank, category)
-            question_id = next_question_id(updated_bank, category)
-            promoted_at = now_utc()
-            updated_bank = insert_question(
-                updated_bank, category, question_id,
-                text, candidate, promoted_at,
-            )
-            # Augment provenance with auto-promotion metadata
-            # (insert_question writes the comment; we update candidate record)
-            if not dry_run:
-                candidate["status"] = "auto_promoted"
-                candidate["target_category"] = category
-                candidate["promoted_question_id"] = question_id
-                candidate["promoted_at"] = promoted_at
-                candidate["promoted_by"] = "auto"
-                candidate["promotion_score"] = score
-                candidate["promotion_reason"] = f"auto: score {score:.2f} ≥ {AUTO_PROMOTE_THRESHOLD}"
-                candidate["updated_at"] = promoted_at
+            request = candidate_promotion.build_candidate_promotion_request(
+                candidate, updated_bank, category)
+            if dry_run:
+                preview = copy.deepcopy(data)
+                updated_bank, payload = candidate_promotion.apply_candidate_promotion(
+                    preview, updated_bank, request,
+                    promotion_mode="auto", auto_score=score)
+                question_id = payload["question_id"]
+            else:
+                # Persist current stamps/parking decisions before the canonical
+                # resolver reloads fresh state under the writer lease.
+                save_store(data)
+                receipt = candidate_promotion.resolve_candidate_promotion(
+                    request, vault_root=REPO_DIR, promotion_mode="auto",
+                    push=True, auto_score=score)
+                question_id = receipt["question_id"]
+                updated_bank = QUESTIONS_FILE.read_text(encoding="utf-8")
+                fresh_store = load_store()
+                stored = find_candidate(fresh_store, cid)
+                candidate.clear()
+                candidate.update(stored)
+                data["last_updated"] = fresh_store.get("last_updated")
             flags = [p["flag"] for p in unified["components"]["craft_penalties"]]
             promoted.append((cid, question_id, score, flags))
             per_neighborhood[nbhd] += 1
@@ -1164,10 +1146,24 @@ def auto_promote_candidates(
 def cmd_promote_neighborhood(args: argparse.Namespace) -> int:
     data = load_store()
     question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
-    updated_bank, new_ids = promote_neighborhood(data, question_bank_text, args.neighborhood, args.category)
+    ensure_category_exists(question_bank_text, args.category)
+    rows = [c for c in data.get("candidates", [])
+            if c.get("neighborhood_id") == args.neighborhood
+            and c.get("status") in PROMOTABLE_STATUSES]
+    rows.sort(key=lambda c: (-float(c.get("priority", 0) or 0), c.get("created_at", "")))
+    new_ids: list[str] = []
+    for candidate in rows:
+        try:
+            request = candidate_promotion.build_candidate_promotion_request(
+                candidate, question_bank_text, args.category)
+            receipt = candidate_promotion.resolve_candidate_promotion(
+                request, vault_root=REPO_DIR,
+                promotion_mode="neighborhood", push=True)
+        except candidate_promotion.CandidatePromotionError:
+            continue
+        new_ids.append(receipt["question_id"])
+        question_bank_text = QUESTIONS_FILE.read_text(encoding="utf-8")
     if new_ids:
-        write_text(QUESTIONS_FILE, updated_bank)
-        save_store(data)
         refresh_neighborhood_readiness_safely()
     print(f"✓ Promoted {len(new_ids)} question(s) from {args.neighborhood} → {args.category.upper()}: {', '.join(new_ids) or 'none'}")
     return 0

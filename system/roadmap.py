@@ -27,9 +27,9 @@ if str(_SYSTEM_DIR) not in sys.path:
 
 from lifehug_core import (  # noqa: E402
     QUESTIONS_FILE,
+    REPO_DIR,
     ROADMAP_FILE,
     STATE_DIR,
-    WIKI_DIR,
     load_config,
     normalized_focus_key,
     now_utc,
@@ -471,13 +471,24 @@ def _generate_and_promote(label: str, focus_type: str, deliverable: str, categor
     if proc.returncode != 0:
         return False, 0
 
+    import candidate_promotion
     import question_candidates as qc
     data = qc.load_store()
     bank = QUESTIONS_FILE.read_text(encoding="utf-8")
-    updated, ids = qc.promote_neighborhood(data, bank, f"nbhd-{slugify(label)}", category)
-    if ids:
-        write_text(QUESTIONS_FILE, updated)
-        qc.save_store(data)
+    rows = [candidate for candidate in data.get("candidates", [])
+            if candidate.get("neighborhood_id") == f"nbhd-{slugify(label)}"
+            and candidate.get("status") in qc.PROMOTABLE_STATUSES]
+    rows.sort(key=lambda candidate: (
+        -float(candidate.get("priority", 0) or 0), candidate.get("created_at", "")))
+    ids: list[str] = []
+    for candidate in rows:
+        request = candidate_promotion.build_candidate_promotion_request(
+            candidate, bank, category)
+        receipt = candidate_promotion.resolve_candidate_promotion(
+            request, vault_root=REPO_DIR,
+            promotion_mode="neighborhood", push=True)
+        ids.append(receipt["question_id"])
+        bank = QUESTIONS_FILE.read_text(encoding="utf-8")
     return True, len(ids)
 
 

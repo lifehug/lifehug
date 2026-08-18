@@ -434,12 +434,12 @@ class DurableJobsTests(unittest.TestCase):
             self.assertNotIn(marker, " ".join(process.argv))
         self.assertTrue(any(marker in (process.input or "") for process in seen))
 
-    def test_retry_safety_registry_contains_only_success_preserving_compile(self):
+    def test_retry_safety_registry_contains_only_success_preserving_commands(self):
         retryable = {
             name for name, spec in jobs.COMMANDS.items()
             if spec.retry_safety == "idempotent"
         }
-        self.assertEqual(retryable, {"compile"})
+        self.assertEqual(retryable, {"candidate-promote", "compile"})
 
     def test_ref_families_reject_symlink_traversal_at_execution(self):
         outside = self.tmp / "outside"

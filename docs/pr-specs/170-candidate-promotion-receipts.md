@@ -179,9 +179,10 @@ The exact `CandidatePromotionReceipt` schema is:
 - The candidate-store row is a projection of the canonical marker. New manual
   and neighborhood rows retain status `promoted`; weekly rows retain
   `auto_promoted`, score, reason, and `promoted_by:auto`. Every row records the
-  canonical question id, category, promotion time, request revision, and
-  commit SHA when known. Adoption does not require that projection to exist or
-  be fresh.
+  canonical question id, category, promotion time, and request revision.
+  The row cannot contain the commit that writes itself; commit SHA is derived
+  from Git history for the receipt. Adoption does not require that projection
+  to exist or be fresh.
 - A crash after the bank write but before projection/commit completes the same
   marker transaction on replay. A crash after commit or push adopts the exact
   marker and reconstructs the original receipt without inserting a duplicate.
@@ -317,7 +318,7 @@ Add `tests/test_candidate_promotion.py` with named state-machine cases:
   same qid/provenance/commit without duplication or projection dependency;
 - conflicting question bytes, category, candidate/category/placement revision,
   proposal revision, and decision revision fail closed;
-- two-process same-request race produces one question/commit identity; two
+- concurrent same-request race produces one question/commit identity; two
   distinct candidates in one category produce distinct qids;
 - unrelated staged/unstaged files survive and are absent from the promotion
   commit; push rejection/rebase revalidates or fails closed;
@@ -341,6 +342,7 @@ python3 -m unittest \
   tests.test_ingest_and_planner \
   tests.test_unified_quality_score \
   tests.test_lifehug_wrapper \
+  tests.test_v16_focus_skill \
   tests.test_v101_actions \
   tests.test_v119_jobs \
   tests.test_question_candidate \
@@ -354,9 +356,9 @@ python3 scripts/ci/check_version_bump.py --base bb7ff387 --head HEAD
 python3 -m compileall -q system tests
 ruff check --select E4,E7,E9,F,I,UP,B --ignore E402 \
   system/candidate_promotion.py system/question_candidates.py system/lifehug.py \
-  system/jobs.py tests/test_candidate_promotion.py
-ruff format --check system/candidate_promotion.py system/question_candidates.py \
-  system/lifehug.py system/jobs.py tests/test_candidate_promotion.py
+  system/jobs.py system/roadmap.py tests/test_candidate_promotion.py
+# Legacy modules predate the formatter baseline; format only new v182 files.
+ruff format --check system/candidate_promotion.py tests/test_candidate_promotion.py
 git diff --check
 ```
 
