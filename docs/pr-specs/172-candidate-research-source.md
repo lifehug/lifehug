@@ -16,23 +16,18 @@ approved or graduated.
 
 ### Dependency train and release
 
-- The branch starts from the v181 annotated tag / merge
-  `bb7ff387624bc9624acdbecff287bfd4c68bf1b2`.
-- PR #173 is the v182 dependency. Its checked-in contract owns the first
+- The contract branch started from the v181 annotated tag / merge
+  `bb7ff387624bc9624acdbecff287bfd4c68bf1b2`. PR #173 merged and v182 now
+  resolves to `639f2d2555d80e80fc41b85d313077f4a2113060`; this branch is rebased on
+  that exact release and lands as v183.
+- PR #173/v182 owns the first
   canonical writer-lease, pull/rebase, exact-path commit, push, and Git-tree
-  adoption authority for candidate promotion. This PR must rebase onto the
-  merged v182 release and lands as v183.
-- Until v182 lands, this branch implements and verifies the dependency-free
-  evidence, assessment, rendering, marker, manifest, compiler, and adoption
-  validation surfaces. It does **not** copy PR #173's private Git/lease helpers,
-  acquire a second/nested writer, or claim the final mutation gate is green.
-- The contract-first and dependency-free implementation SHAs intentionally
-  remain red only on the version-bump/dependency gate: `system/version.json`
-  stays v181 until the v182 rebase. A synthetic v183 bump before that rebase
-  would hide the dependency and is forbidden.
-- After the v182 rebase, the final implementation wires the exact adapter in
-  this contract to the canonical Git authority, bumps v182 to v183, adds ADR
-  0020, and runs the full scoped gates against the rebased SHA.
+  adoption authority for candidate promotion. This PR consumes and extends
+  its public `system/exact_file_git.py` boundary; it does not copy its Git or
+  lease helpers and never acquires a second/nested writer.
+- The dependency-free implementation deliberately stayed at v181 before the
+  dependency landed. The final rebased implementation now bumps v182 to v183,
+  wires the live adapter, and runs the scoped gates against the rebased SHA.
 - `interactions/focus_candidate/` and `interactions/entity_candidate/`, their
   prompts, manifests, registration, runtime binding, routers, model evals, and
   seat decisions are out of scope. This PR gives them one frozen source API to
@@ -41,7 +36,8 @@ approved or graduated.
   surfaces. All files under `interactions/conversation/` and
   `interactions/question_candidate/`, plus `system/conversation.py`,
   `system/conversation_lints.py`, `system/question_candidate.py`, and
-  `system/question_candidate_evals.py`, remain byte-identical to v181.
+  `system/question_candidate_evals.py`, remain byte-identical to v182 (and
+  therefore preserve the v181 behavior this contract depends on).
 
 ### Closed subject authority
 
@@ -376,7 +372,8 @@ they are excluded from every generic manual-source keyword/mention route.
 
 ### Canonical mutation adapter and receipt
 
-The dependency-free module freezes this protocol for v182 wiring:
+The domain module exposes this protocol while its default implementation
+delegates to v182's public exact-file transaction:
 
 ```python
 class CandidateResearchGitAuthority(Protocol):
@@ -420,11 +417,15 @@ only this canonical adapter, and returns:
 
 - The adapter owns the one existing writer token/lease, pre-decision pull,
   atomic source+manifest writes, `git commit --only`, first-introducing-commit
-  lookup, push/rebase retry, post-rebase revalidation, and failpoints. The
+  lookup, push/rebase retry, post-rebase revalidation, and failpoints. Its
+  declared path snapshot represents a missing optional target as `None`,
+  creates safe parents only while writing that declared target, and rejects
+  traversal, normalization aliases, symlinks, or unbounded paths. The
   research module may not acquire or nest a lease and may not shell out to Git.
 - `resolve_candidate_research_source` requires a `current_subject_loader`.
-  The public v182 exact-file transaction adapter invokes the supplied
-  `revalidate_current_subject` callback after its pre-decision pull, so a
+  The public exact-file transaction invokes the supplied
+  `revalidate_current_subject` callback inside both the post-pull decision and
+  every fresh validation (including after a push-rejection rebase), so a
   deletion, tombstone, approval/graduation, rename, or mapping racing the
   transaction fails before write/commit. No caller may omit or substitute a
   cached/default `None` subject.
@@ -432,6 +433,10 @@ only this canonical adapter, and returns:
   tree and returns `changed:false` with the original introducing commit. The
   manifest/projection may be missing or stale and is repaired from the source;
   it is never the adoption authority.
+- Candidate identity discovery scans only the closed
+  `sources/candidate-research/` subtree under the same lease and after pull.
+  It supplies immutable raw bytes to the domain validator, which strict-decodes
+  and validates every source marker. The manifest is not identity authority.
 - The same candidate marker at another path, another marker at the canonical
   path, same marker with different bytes, different research revision, changed
   subject facts, or an unmarked equal-text file is a hard conflict. There is no
@@ -442,9 +447,9 @@ only this canonical adapter, and returns:
 - When `push=True`, no receipt exists until the exact current commit is pushed
   successfully. `push=False` is test/development-only but still returns a real
   commit SHA.
-- If v182 does not expose this exact generic adapter after merge, v183 extracts
-  it once into one shared authority used by both promotion and research. It
-  must not leave two copies of writer, Git, rebase, or adoption logic.
+- v183 extends the one shared v182 authority only where research requires
+  optional declared targets and closed-subtree discovery. Promotion continues
+  through the ordinary callback shape and retains behavior parity.
 
 ## Scope
 
@@ -460,7 +465,7 @@ In scope:
   manifest validation.
 - Compiler attachment for later Focuses and all five entity types without
   changing approval/graduation state.
-- Frozen v182 Git adapter plus final post-rebase integration, idempotency,
+- Public v182 Git adapter extension plus final post-rebase integration, idempotency,
   conflict, crash-adoption, and concurrency gates.
 - ADR 0020; source/Focus/entity handbook and central research methodology
   updates; v183 version/manifest/changelog.
@@ -521,9 +526,9 @@ Add `tests/test_candidate_research.py` with named cases for:
   rendered citations, and generated-question non-evidence labeling;
 - same-byte replay, different-byte/path/revision conflict, unmarked equal-text
   non-adoption, stale/missing manifest adoption, crash after write/commit/push,
-  and same-subject two-contender convergence through a synthetic canonical
-  adapter;
-- final v182-backed disposable-Git integration after rebase, including one
+  and same-subject two-contender convergence through a rebuilt on-disk
+  canonical tree;
+- v182-backed disposable-Git integration after rebase, including one
   introducing commit, real commit SHA, unrelated-work preservation, lease
   reuse/no nesting, push/rebase revalidation, and first-commit adoption.
 
@@ -543,7 +548,7 @@ Extend:
 - `tests/test_handbook_parity.py`: closed types, evidence minima, and typed
   compiler/source constants where scalar parity annotations apply.
 
-Exact dependency-free gates before the v182 rebase:
+Exact scoped gates on the rebased implementation:
 
 ```bash
 python3 -m unittest \
@@ -566,11 +571,11 @@ ruff format --check \
 git diff --check
 ```
 
-The version-bump check is expected to fail before the dependency rebase and is
-reported as such, never called green. After v182 merges, rebase and add:
+The historical pre-dependency SHAs correctly failed the version-bump gate.
+On the final v183 SHA also run:
 
 ```bash
-python3 scripts/ci/check_version_bump.py --base <v182-merge-sha> --head HEAD
+python3 scripts/ci/check_version_bump.py --base 639f2d2555d80e80fc41b85d313077f4a2113060 --head HEAD
 python3 -m unittest tests.test_candidate_promotion tests.test_candidate_research -v
 ```
 
@@ -580,24 +585,24 @@ rebased v183 SHA.
 ## Launch-and-verify
 
 No viewer code changes; screenshots/motion are not required. The committed
-synthetic walkthrough is:
+disposable-vault walkthrough is:
 
 ```bash
 python3 tests/walkthrough_candidate_research.py
 ```
 
-It creates only a disposable synthetic vault, builds a Focus assessment from
-exact user spans, demonstrates not-ready then ready-but-unconfirmed then
-confirmed completion, renders/registers the immutable source through the
-synthetic canonical adapter, replays it with `changed:false`, compiles a later
+It creates only a disposable synthetic vault and real local Git repository,
+builds a Focus assessment from exact user spans, demonstrates not-ready then
+ready-but-unconfirmed then confirmed completion, renders/registers the
+immutable source through the public v182 exact-file adapter, replays it with
+`changed:false`, compiles a later
 synthetic Focus without an empty placeholder, then repeats entity consumption
 for all five supported types. It renders the compiled page and asserts a literal
 user quote is present while marker/base64 text is absent, and proves generic
 keyword routing plus static-theme routing cannot attach the source. It prints a
-compact JSON results table and exits
-nonzero unless every assertion passes. After the v182 rebase it also runs the
-real local-only Git adapter in the disposable repo and asserts one introducing
-commit/adopted receipt.
+compact JSON results table and exits nonzero unless every assertion passes. It
+asserts one introducing commit and an adopted receipt directly from canonical
+local Git history.
 
 ## Owner closeout template
 
@@ -628,24 +633,23 @@ commit/adopted receipt.
 
 ### Done when
 
-Approval after the v182 rebase merges v183 and triggers the normal tag. That
+Approval merges v183 and triggers the normal tag. That
 unblocks the two separate Interaction implementation PRs, which must consume
 this exact source contract and run their own prompt/eval/seat review. It does
 not approve a Focus, graduate an entity, or close the hosted platform twin.
 
 ## Definition of done
 
-- [ ] This contract is the first commit; the draft PR exists before code.
-- [ ] Dependency-free schemas, validation, rendering, marker, source integrity,
-      typed manifest, compiler consumption, synthetic adapter, and walkthrough
-      are implemented and pass their scoped gates on v181.
-- [ ] PR #173/v182 is merged; this branch is rebased; one shared writer/Git
+- [x] This contract is the first commit; the draft PR exists before code.
+- [x] Dependency-free schemas, validation, rendering, marker, source integrity,
+      typed manifest, compiler consumption, and walkthrough are implemented.
+- [x] PR #173/v182 is merged; this branch is rebased; one shared writer/Git
       authority is wired without copied/nested lease logic.
 - [ ] Final idempotency/conflict/crash/concurrency Git gates pass on the rebased
       SHA; exact-SHA GitHub CI is green.
-- [ ] `system/version.json` is v183 with a user-visible changelog and every new
+- [x] `system/version.json` is v183 with a user-visible changelog and every new
       framework file included after the v182 rebase, not before.
-- [ ] ADR 0020, `system/research.md`, `system/source_contract.md`, CLAUDE.md,
+- [x] ADR 0020, `system/research.md`, `system/source_contract.md`, CLAUDE.md,
       `docs/handbook/focuses.md`, and `docs/handbook/entities.md` describe the
       shipped boundary.
 - [ ] Issue #172 receives exact-SHA evidence and the PR has a current Owner

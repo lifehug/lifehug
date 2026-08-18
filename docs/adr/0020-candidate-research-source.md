@@ -58,14 +58,21 @@ never enters generic keyword routing; a static theme needs an independently
 eligible roster row before its research attaches. Research never approves,
 maps, qualifies, sets an owner verdict, or graduates anything.
 
-The live mutation delegates to the canonical v182 writer/Git authority. The
-research module does not acquire a writer lease or run Git. Adoption derives
-from the immutable source marker and canonical Git tree/first introducing
-commit, never a projection. If v182 does not expose the necessary generic
-adapter, v183 extracts one shared authority used by both promotion and
-research; two implementations are forbidden.
-The source resolver requires a fresh-subject loader, and the adapter invokes
-its revalidation callback after pull and before mutation.
+The live mutation delegates to the canonical v182 writer/Git authority in
+`system/exact_file_git.py`. The research module does not acquire a writer
+lease or run Git. v183 extends that single public authority with optional
+declared targets and closed-subtree discovery; promotion retains the ordinary
+callback path. Missing targets may create safe parents only inside the same
+bounded exact-file transaction. Candidate identity discovery occurs after
+pull and under the same lease, strict-decodes raw subtree bytes, and never
+treats the manifest as authority.
+
+Adoption derives from the immutable source marker and canonical Git tree/first
+introducing commit, never a projection. A validated missing or stale manifest
+may be repaired on adoption while the receipt remains `changed:false` and
+keeps the source-introducing commit. The source resolver requires a
+fresh-subject loader, and the adapter invokes its revalidation callback in the
+post-pull decision and every fresh validation, including after rebase.
 
 ## Consequences
 
@@ -80,8 +87,8 @@ its revalidation callback after pull and before mutation.
   author said.
 - The framework gains no second writer, receipt ledger, or projection-based
   recovery path. Git remains the crash-adoption authority.
-- v183 must follow v182 in the merge/release train; dependency-free pure logic
-  may be reviewed first, but the PR is not releasable until the shared live
-  adapter and version gates pass.
+- v183 follows merged v182 (`639f2d2555d80e80fc41b85d313077f4a2113060`)
+  in the release train and uses its shared live adapter rather than creating a
+  second authority.
 
 🤖 Generated with Codex

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -122,17 +123,54 @@ def confirm(assessment, user_turns):
 def main() -> int:
     user_turns = turns()
     evidence = spans(user_turns)
-    authority = SyntheticFileAuthority()
     results: dict[str, object] = {
-        "adapter": "synthetic-exact-byte-v181",
-        "live_git_adapter": "blocked-on-pr-173-v182",
+        "adapter": "v182-public-exact-file-git",
+        "live_git_adapter": "integrated",
     }
 
-    with tempfile.TemporaryDirectory(prefix="lifehug-candidate-research-") as td:
+    with tempfile.TemporaryDirectory(
+        dir=ROOT.parent, prefix="lifehug-candidate-research-"
+    ) as td:
         vault = Path(td)
         (vault / "answers").mkdir()
         (vault / "state").mkdir()
         (vault / "wiki").mkdir()
+        (vault / ".gitignore").write_text("state/jobs/\n", encoding="utf-8")
+        (vault / "question-bank.md").write_text("# Questions\n", encoding="utf-8")
+        (vault / "state" / "rotation.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "current_pass": 1,
+                    "pass_names": ["skeleton"],
+                    "last_question_id": None,
+                    "last_asked_at": None,
+                    "questions_asked": 0,
+                    "questions_answered": 0,
+                    "next_question_id": None,
+                    "focus_frequency": 4,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (vault / "state" / "coverage.json").write_text(
+            '{"version":1,"last_updated":null,"categories":{}}\n',
+            encoding="utf-8",
+        )
+        for args in (
+            ("init", "-b", "main"),
+            ("config", "user.name", "Fixture"),
+            ("config", "user.email", "fixture@example.invalid"),
+            ("add", "."),
+            ("commit", "-m", "fixture"),
+        ):
+            subprocess.run(
+                ["git", "-C", str(vault), *args],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
 
         focus_subject = research.build_focus_candidate_subject(
             {
@@ -175,7 +213,6 @@ def main() -> int:
             completed,
             authoritative_turns=user_turns,
             current_subject_loader=lambda: focus_subject,
-            authority=authority,
             vault_root=vault,
             push=False,
         )
@@ -185,7 +222,6 @@ def main() -> int:
             completed,
             authoritative_turns=user_turns,
             current_subject_loader=lambda: focus_subject,
-            authority=SyntheticFileAuthority(),
             vault_root=vault,
             push=False,
         )
@@ -222,7 +258,6 @@ def main() -> int:
                 confirm(assessment, user_turns),
                 authoritative_turns=user_turns,
                 current_subject_loader=lambda subject=subject: subject,
-                authority=authority,
                 vault_root=vault,
                 push=False,
             )

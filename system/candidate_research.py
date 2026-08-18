@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
+import exact_file_git
 from lifehug_core import slugify, split_frontmatter
 from question_candidate import REVISION_RE, canonical_revision
 from source_integrity import (
@@ -179,6 +180,212 @@ class CandidateResearchGitAuthority(Protocol):
         failpoint: Callable[[str], None] | None = None,
         revalidate_current_subject: Callable[[], None],
     ) -> dict: ...
+
+
+def _manifest_text(plan: dict, existing: str | None) -> str:
+    if existing is None:
+        manifest: dict[str, object] = {
+            "version": 1,
+            "updated_at": plan["metadata"]["captured_at"],
+            "sources": {},
+        }
+    else:
+        try:
+            manifest = json.loads(existing)
+        except json.JSONDecodeError as exc:
+            raise CandidateResearchConflict(
+                "candidate research source manifest is invalid JSON"
+            ) from exc
+        if (
+            not isinstance(manifest, dict)
+            or type(manifest.get("version")) is not int
+            or manifest.get("version") != 1
+            or not isinstance(manifest.get("sources"), dict)
+        ):
+            raise CandidateResearchConflict(
+                "candidate research source manifest schema is invalid"
+            )
+    sources = dict(manifest["sources"])
+    path = plan["source_path"]
+    existing_entry = sources.get(path, {})
+    if not isinstance(existing_entry, dict):
+        raise CandidateResearchConflict("candidate research manifest entry is invalid")
+    stamp = plan["metadata"]["captured_at"]
+    file_digest = hashlib.sha256(plan["source_bytes"]).hexdigest()
+    entry = dict(existing_entry)
+    entry.setdefault("first_seen_at", stamp)
+    entry.setdefault("original_content_sha256", plan["content_sha256"])
+    entry.setdefault("original_file_sha256", file_digest)
+    entry.update(
+        {
+            "source_id": plan["source_id"],
+            "type": "candidate_research",
+            "title": plan["metadata"]["title"],
+            "captured_at": stamp,
+            "source_medium": "candidate_research",
+            "current_content_sha256": plan["content_sha256"],
+            "current_file_sha256": file_digest,
+            "last_verified_at": stamp,
+            "changed_since_first_seen": (
+                entry["original_content_sha256"] != plan["content_sha256"]
+            ),
+            **plan["manifest_fields"],
+        }
+    )
+    sources[path] = entry
+    manifest["sources"] = sources
+    manifest["updated_at"] = stamp
+    return json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+
+
+def _discover_candidate_identity(
+    discovered: exact_file_git.SubtreeSnapshot,
+    *,
+    candidate_kind: str,
+    candidate_id: str,
+) -> list[tuple[str, str]]:
+    matches: list[tuple[str, str]] = []
+    for physical_path, raw in discovered.items():
+        if physical_path.endswith("/.gitkeep"):
+            continue
+        if not physical_path.endswith(".md"):
+            raise CandidateResearchConflict(
+                "candidate research subtree contains an unexpected entry"
+            )
+        try:
+            text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise CandidateResearchConflict(
+                "candidate research subtree contains invalid UTF-8"
+            ) from exc
+        try:
+            parsed = validate_candidate_research_source_text(text)
+        except CandidateResearchError as exc:
+            raise CandidateResearchConflict(
+                "candidate research subtree contains an invalid source"
+            ) from exc
+        marker = parsed["marker"]
+        if parsed["source_path"] != physical_path:
+            raise CandidateResearchConflict(
+                "candidate research marker lives at a conflicting path"
+            )
+        if (
+            marker["candidate_kind"] == candidate_kind
+            and marker["candidate_id"] == candidate_id
+        ):
+            matches.append((physical_path, text))
+    return matches
+
+
+class ExactFileCandidateResearchAuthority:
+    """Candidate domain adapter over v182's one public Git/lease authority."""
+
+    MANIFEST_PATH = "state/source_manifest.json"
+
+    def resolve_exact_source(
+        self,
+        plan: dict,
+        *,
+        vault_root: str | Path | None = None,
+        push: bool = True,
+        failpoint: Callable[[str], None] | None = None,
+        revalidate_current_subject: Callable[[], None],
+    ) -> dict:
+        if vault_root is None:
+            raise CandidateResearchError("candidate research vault_root is required")
+        try:
+            source_text = plan["source_bytes"].decode("utf-8", errors="strict")
+        except (KeyError, AttributeError, UnicodeDecodeError) as exc:
+            raise CandidateResearchError(
+                "candidate research plan source_bytes must be strict UTF-8"
+            ) from exc
+        source_path = plan["source_path"]
+        intended_manifest = ""
+
+        def decide(snapshot, discovered):
+            nonlocal intended_manifest
+            revalidate_current_subject()
+            matches = _discover_candidate_identity(
+                discovered,
+                candidate_kind=plan["candidate_kind"],
+                candidate_id=plan["candidate_id"],
+            )
+            if len(matches) > 1:
+                raise CandidateResearchConflict(
+                    "candidate research identity has multiple source contenders"
+                )
+            if matches and matches[0][0] != source_path:
+                raise CandidateResearchConflict(
+                    "candidate research identity exists at another path"
+                )
+            existing_source = snapshot[source_path]
+            if existing_source is not None and existing_source != source_text:
+                raise CandidateResearchConflict(
+                    "candidate research canonical source bytes conflict"
+                )
+            if existing_source is None and matches:
+                raise CandidateResearchConflict(
+                    "candidate research discovery disagrees with declared source"
+                )
+            intended_manifest = _manifest_text(plan, snapshot[self.MANIFEST_PATH])
+            # Re-declare exact source bytes even on replay: the shared adapter
+            # filters clean paths, while a crash-left untracked source must be
+            # included in the eventual introducing commit.
+            writes: list[tuple[str, str]] = [(source_path, source_text)]
+            if snapshot[self.MANIFEST_PATH] != intended_manifest:
+                writes.append((self.MANIFEST_PATH, intended_manifest))
+            verb = "Add" if existing_source is None else "Repair"
+            return exact_file_git.ExactFilePlan(
+                tuple(writes),
+                source_path,
+                plan["marker_line"],
+                f"{verb} candidate research {plan['candidate_id']}",
+            )
+
+        def validate(snapshot, discovered, transaction_plan):
+            revalidate_current_subject()
+            matches = _discover_candidate_identity(
+                discovered,
+                candidate_kind=plan["candidate_kind"],
+                candidate_id=plan["candidate_id"],
+            )
+            if matches != [(source_path, source_text)]:
+                raise CandidateResearchConflict(
+                    "candidate research canonical identity changed"
+                )
+            if snapshot[source_path] != source_text:
+                raise CandidateResearchConflict(
+                    "candidate research source changed during transaction"
+                )
+            if snapshot[self.MANIFEST_PATH] != intended_manifest:
+                raise CandidateResearchConflict(
+                    "candidate research manifest repair changed during transaction"
+                )
+            if transaction_plan.marker_line != plan["marker_line"]:
+                raise CandidateResearchConflict(
+                    "candidate research transaction marker changed"
+                )
+
+        try:
+            result = exact_file_git.resolve_exact_file_transaction(
+                vault_root=vault_root,
+                declared_paths=(source_path, self.MANIFEST_PATH),
+                discovery_subtree=SOURCE_ROOT.as_posix(),
+                decide_with_discovery=decide,
+                validate_with_discovery=validate,
+                push=push,
+                failpoint=failpoint,
+            )
+        except exact_file_git.ExactFileTransactionError as exc:
+            raise CandidateResearchError(str(exc)) from exc
+        return {
+            "source_path": source_path,
+            "changed": result.changed,
+            "commit_sha": result.commit_sha,
+        }
+
+
+EXACT_FILE_GIT_AUTHORITY = ExactFileCandidateResearchAuthority()
 
 
 def _object(value: object, *, name: str, keys: frozenset[str]) -> dict:
@@ -1330,8 +1537,8 @@ def resolve_candidate_research_source(
     assessment: dict,
     *,
     authoritative_turns: Sequence[dict],
-    authority: CandidateResearchGitAuthority,
     current_subject_loader: Callable[[], dict],
+    authority: CandidateResearchGitAuthority = EXACT_FILE_GIT_AUTHORITY,
     vault_root: str | Path | None = None,
     push: bool = True,
     failpoint: Callable[[str], None] | None = None,

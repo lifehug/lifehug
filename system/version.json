@@ -1,7 +1,7 @@
 {
-  "version": 182,
+  "version": 183,
   "released": "2026-08-18",
-  "changelog": "v182: feat(170): add the canonical idempotent candidate-promotion receipt authority (ADR 0019). Manual, weekly-auto, and neighborhood promotion now share one revision-bound mutation over the public closed-path exact_file_git transaction adapter: it holds the root-aware writer lease, commits only declared files, pushes without force, revalidates the entire intended candidate/question/provenance record after rebase, and reconstructs the first canonical question_id/category/commit_sha receipt from Git history after retries or crashes. Conflicting bytes, candidate/category/placement revisions, unproved proposal/decision hashes, and legacy text-only matches fail closed. The stable candidates-promotion-receipt JSON CLI supplies exact bound interaction objects through bounded stdin when hashes are non-null. Question Candidate v181 and ordinary Conversation bytes remain unchanged, and starting Play still never promotes.",
+  "changelog": "v183: feat(172): add the generic candidate-research source authority (ADR 0020). Exact revision-bound user-turn spans, deterministic readiness, and a distinct user confirmation now render one immutable typed source; assistant/model summaries and generated seed questions can never become evidence. The compiler consumes completed research only after an independently eligible Focus or entity exists, including all five entity types, while generic keyword and static-theme routes cannot attach it. Candidate research extends v182's single exact-file Git transaction with safe missing targets, closed-subtree marker discovery, strict UTF-8, and validated manifest repair: replay stays changed=false and retains the first source-introducing commit. Candidate lifecycle changes, conflicting bytes/paths/contenders, stale subjects after pull/rebase, malformed schemas, and tampering fail closed. No Focus/Entity Candidate interaction package or lifecycle approval/graduation is introduced; ordinary Conversation, Question Candidate, and promotion receipt behavior remain unchanged.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -132,6 +132,7 @@
     "system/ask.py",
     "system/book.py",
     "system/candidate_promotion.py",
+    "system/candidate_research.py",
     "system/exact_file_git.py",
     "system/classify_story.py",
     "system/compile_and_commit.sh",
@@ -217,6 +218,7 @@
     "tests/tempdirs.py",
     "tests/test_artifact_workflow.py",
     "tests/test_candidate_promotion.py",
+    "tests/test_candidate_research.py",
     "tests/test_exact_file_git.py",
     "tests/test_connectors.py",
     "tests/test_conversation_delivery.py",
@@ -274,6 +276,7 @@
     "tests/test_wiki_views.py",
     "tests/v119_job_pill_evidence.py",
     "tests/walkthrough_answers.py",
+    "tests/walkthrough_candidate_research.py",
     "tests/walkthrough_lib.py",
     "wiki/SCHEMA.md"
   ]

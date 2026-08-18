@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import copy
 import hashlib
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import candidate_research as research
 from question_candidate import canonical_revision
+from tempdirs import root_parent_tmp
 
 FOCUS_RECOMMENDATION = {
     "id": "rec-synthetic-harbor",
@@ -22,6 +28,15 @@ FOCUS_RECOMMENDATION = {
     "status": "pending",
     "score": 12.0,
 }
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 class SyntheticGitAuthority:
@@ -771,6 +786,247 @@ class SourceAndReceiptTests(unittest.TestCase):
                 current_subject_loader=lambda: subject,
                 authority=BadAuthority(),
             )
+
+
+class RealGitAuthorityTests(unittest.TestCase):
+    def setUp(self):
+        self.root = root_parent_tmp(self, ROOT, prefix="lifehug-research-git-")
+        self._init_root(self.root)
+        self.subject, self.turns, self.assessment = _focus_assessment(confirmed=True)
+
+    def _init_root(self, root: Path) -> None:
+        state = root / "state"
+        state.mkdir()
+        (root / ".gitignore").write_text("state/jobs/\n", encoding="utf-8")
+        (root / "question-bank.md").write_text("# Questions\n", encoding="utf-8")
+        (state / "rotation.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "current_pass": 1,
+                    "pass_names": ["skeleton"],
+                    "last_question_id": None,
+                    "last_asked_at": None,
+                    "questions_asked": 0,
+                    "questions_answered": 0,
+                    "next_question_id": None,
+                    "focus_frequency": 4,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (state / "coverage.json").write_text(
+            '{"version":1,"last_updated":null,"categories":{}}\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(_git(root, "init", "-b", "main").returncode, 0)
+        _git(root, "config", "user.name", "Fixture")
+        _git(root, "config", "user.email", "fixture@example.invalid")
+        _git(root, "add", ".")
+        self.assertEqual(_git(root, "commit", "-m", "fixture").returncode, 0)
+
+    def resolve(self, **kwargs):
+        return research.resolve_candidate_research_source(
+            self.assessment,
+            authoritative_turns=self.turns,
+            current_subject_loader=lambda: self.subject,
+            vault_root=self.root,
+            push=False,
+            **kwargs,
+        )
+
+    def add_remote(self) -> Path:
+        remote = root_parent_tmp(self, ROOT, prefix="lifehug-research-remote-")
+        self.assertEqual(_git(remote, "init", "--bare").returncode, 0)
+        _git(self.root, "remote", "add", "origin", str(remote))
+        self.assertEqual(
+            _git(self.root, "push", "--set-upstream", "origin", "main").returncode,
+            0,
+        )
+        return remote
+
+    def test_real_git_first_commit_replay_and_manifest_repairs(self):
+        first = self.resolve()
+        replay = self.resolve()
+        self.assertTrue(first["changed"])
+        self.assertFalse(replay["changed"])
+        self.assertEqual(first["commit_sha"], replay["commit_sha"])
+        self.assertEqual(_git(self.root, "status", "--porcelain").stdout, "")
+
+        manifest = self.root / "state" / "source_manifest.json"
+        manifest.unlink()
+        _git(self.root, "add", "state/source_manifest.json")
+        _git(self.root, "commit", "-m", "remove repairable projection")
+        repaired = self.resolve()
+        self.assertFalse(repaired["changed"])
+        self.assertEqual(repaired["commit_sha"], first["commit_sha"])
+        self.assertTrue(manifest.is_file())
+
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["sources"][first["source_path"]]["research_revision"] = (
+            "sha256:" + "0" * 64
+        )
+        manifest.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        _git(self.root, "add", "state/source_manifest.json")
+        _git(self.root, "commit", "-m", "stale repairable projection")
+        repaired_again = self.resolve()
+        self.assertFalse(repaired_again["changed"])
+        self.assertEqual(repaired_again["commit_sha"], first["commit_sha"])
+        fixed = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(
+            fixed["sources"][first["source_path"]]["research_revision"],
+            self.assessment["research_revision"],
+        )
+
+    def test_real_git_crash_after_write_and_commit_adopts(self):
+        for stage_prefix in ("after_write:sources/candidate-research", "after_commit"):
+            with self.subTest(stage=stage_prefix):
+                root = root_parent_tmp(self, ROOT, prefix="lifehug-research-crash-")
+                self._init_root(root)
+
+                def failpoint(stage, expected=stage_prefix):
+                    if stage.startswith(expected):
+                        raise RuntimeError(expected)
+
+                with self.assertRaisesRegex(RuntimeError, stage_prefix):
+                    research.resolve_candidate_research_source(
+                        self.assessment,
+                        authoritative_turns=self.turns,
+                        current_subject_loader=lambda: self.subject,
+                        vault_root=root,
+                        push=False,
+                        failpoint=failpoint,
+                    )
+                adopted = research.resolve_candidate_research_source(
+                    self.assessment,
+                    authoritative_turns=self.turns,
+                    current_subject_loader=lambda: self.subject,
+                    vault_root=root,
+                    push=False,
+                )
+                self.assertRegex(adopted["commit_sha"], r"^[0-9a-f]{40}$")
+                self.assertEqual(_git(root, "status", "--porcelain").stdout, "")
+
+    def test_real_git_concurrency_and_two_contender_conflict(self):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            receipts = list(pool.map(lambda _index: self.resolve(), range(2)))
+        self.assertEqual(sorted(row["changed"] for row in receipts), [False, True])
+        source = self.root / receipts[0]["source_path"]
+        contender = source.with_name("contender.md")
+        contender.write_bytes(source.read_bytes())
+        _git(self.root, "add", contender.relative_to(self.root).as_posix())
+        _git(self.root, "commit", "-m", "add conflicting contender")
+        with self.assertRaisesRegex(
+            research.CandidateResearchConflict, "conflicting path"
+        ):
+            self.resolve()
+
+    def test_push_and_rebase_tamper_revalidate_exact_source(self):
+        self.add_remote()
+        real_git = research.exact_file_git._git
+        rejected = False
+
+        def tampering_git(root: Path, *args: str):
+            nonlocal rejected
+            if args == ("push",) and not rejected:
+                rejected = True
+                return subprocess.CompletedProcess(args, 1, "", "synthetic reject")
+            if rejected and args == ("pull", "--rebase", "--autostash"):
+                source = next((root / "sources" / "candidate-research").rglob("*.md"))
+                source.write_text(
+                    source.read_text(encoding="utf-8").replace(
+                        "Only the literal user-turn excerpts",
+                        "Tampered user-turn excerpts",
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return real_git(root, *args)
+
+        with mock.patch.object(research.exact_file_git, "_git", tampering_git):
+            with self.assertRaises(research.CandidateResearchConflict):
+                research.resolve_candidate_research_source(
+                    self.assessment,
+                    authoritative_turns=self.turns,
+                    current_subject_loader=lambda: self.subject,
+                    vault_root=self.root,
+                    push=True,
+                )
+
+    def test_crash_after_push_adopts_original_commit(self):
+        self.add_remote()
+
+        def failpoint(stage):
+            if stage == "after_push":
+                raise RuntimeError(stage)
+
+        with self.assertRaisesRegex(RuntimeError, "after_push"):
+            research.resolve_candidate_research_source(
+                self.assessment,
+                authoritative_turns=self.turns,
+                current_subject_loader=lambda: self.subject,
+                vault_root=self.root,
+                push=True,
+                failpoint=failpoint,
+            )
+        introducing = research.exact_file_git.find_first_marker_commit(
+            self.root,
+            research.candidate_research_source_path(
+                self.subject["candidate_kind"], self.subject["candidate_id"]
+            ),
+            research.build_candidate_research_source(
+                self.assessment,
+                authoritative_turns=self.turns,
+                current_subject=self.subject,
+            )["marker_line"],
+        )
+        replay = research.resolve_candidate_research_source(
+            self.assessment,
+            authoritative_turns=self.turns,
+            current_subject_loader=lambda: self.subject,
+            vault_root=self.root,
+            push=True,
+        )
+        self.assertFalse(replay["changed"])
+        self.assertEqual(replay["commit_sha"], introducing)
+
+    def test_post_rebase_callback_reloads_current_subject(self):
+        self.add_remote()
+        real_git = research.exact_file_git._git
+        rejected = False
+
+        def rejecting_git(root: Path, *args: str):
+            nonlocal rejected
+            if args == ("push",) and not rejected:
+                rejected = True
+                return subprocess.CompletedProcess(args, 1, "", "synthetic reject")
+            if rejected and args == ("pull", "--rebase", "--autostash"):
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return real_git(root, *args)
+
+        consumed = research.build_focus_candidate_subject(
+            {**FOCUS_RECOMMENDATION, "status": "approved"}
+        )
+        calls = 0
+
+        def load_subject():
+            nonlocal calls
+            calls += 1
+            return consumed if calls >= 4 else self.subject
+
+        with mock.patch.object(research.exact_file_git, "_git", rejecting_git):
+            with self.assertRaisesRegex(
+                research.CandidateResearchError, "not active|stale"
+            ):
+                research.resolve_candidate_research_source(
+                    self.assessment,
+                    authoritative_turns=self.turns,
+                    current_subject_loader=load_subject,
+                    vault_root=self.root,
+                    push=True,
+                )
+        self.assertGreaterEqual(calls, 4)
 
 
 if __name__ == "__main__":

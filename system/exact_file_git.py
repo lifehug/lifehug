@@ -25,6 +25,7 @@ from vault_paths import (
     atomic_write_vault_text,
     ensure_vault_directory,
     open_vault_fd,
+    read_vault_bytes,
     read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
@@ -61,10 +62,18 @@ class ExactFileResult:
     commit_sha: str
 
 
-Snapshot = Mapping[str, str]
+Snapshot = Mapping[str, str | None]
+SubtreeSnapshot = Mapping[str, bytes]
 Decision = Callable[[Snapshot], ExactFilePlan]
 Validator = Callable[[Snapshot, ExactFilePlan], None]
+DiscoveredDecision = Callable[[Snapshot, SubtreeSnapshot], ExactFilePlan]
+DiscoveredValidator = Callable[[Snapshot, SubtreeSnapshot, ExactFilePlan], None]
 Failpoint = Callable[[str], None]
+
+_MAX_PATH_BYTES = 1024
+_MAX_PATH_PARTS = 32
+_MAX_DISCOVERY_FILES = 1024
+_MAX_DISCOVERY_BYTES = 16 * 1024 * 1024
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -95,8 +104,19 @@ def _git_ok(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _relative_path(value: object) -> str:
     if not isinstance(value, str) or not value or "\x00" in value:
         raise ExactFileTransactionError("transaction path is invalid")
+    if (
+        "\\" in value
+        or len(value.encode("utf-8")) > _MAX_PATH_BYTES
+        or value != Path(value).as_posix()
+    ):
+        raise ExactFileTransactionError("transaction path is invalid")
     path = Path(value)
-    if path.is_absolute() or path == Path(".") or ".." in path.parts:
+    if (
+        path.is_absolute()
+        or path == Path(".")
+        or ".." in path.parts
+        or len(path.parts) > _MAX_PATH_PARTS
+    ):
         raise ExactFileTransactionError("transaction path escaped vault root")
     return path.as_posix()
 
@@ -110,21 +130,74 @@ def _closed_paths(root: Path, declared_paths: tuple[str, ...]) -> dict[str, Path
     normalized = tuple(_relative_path(value) for value in declared_paths)
     if len(set(normalized)) != len(normalized):
         raise ExactFileTransactionError("declared_paths contains duplicates")
-    return {
-        relative: validate_contained_path(
-            root / relative, root, label="exact-file transaction path"
-        )
-        for relative in normalized
-    }
+    try:
+        return {
+            relative: validate_contained_path(
+                root / relative, root, label="exact-file transaction path"
+            )
+            for relative in normalized
+        }
+    except ValueError as exc:
+        raise ExactFileTransactionError(str(exc)) from exc
 
 
 def _snapshot(root: Path, paths: Mapping[str, Path]) -> Snapshot:
-    return MappingProxyType(
-        {
-            relative: read_vault_text(path, vault_root=root)
-            for relative, path in paths.items()
-        }
-    )
+    values: dict[str, str | None] = {}
+    for relative, path in paths.items():
+        try:
+            values[relative] = read_vault_text(path, vault_root=root)
+        except FileNotFoundError:
+            values[relative] = None
+        except UnicodeDecodeError as exc:
+            raise ExactFileTransactionError(
+                f"declared path is not strict UTF-8: {relative}"
+            ) from exc
+    return MappingProxyType(values)
+
+
+def _closed_subtree(root: Path, value: object) -> tuple[str, Path]:
+    relative = _relative_path(value)
+    try:
+        path = validate_contained_path(
+            root / relative, root, label="exact-file discovery subtree"
+        )
+    except ValueError as exc:
+        raise ExactFileTransactionError(str(exc)) from exc
+    if path.exists() and not path.is_dir():
+        raise ExactFileTransactionError("discovery subtree must be a directory")
+    return relative, path
+
+
+def _subtree_snapshot(root: Path, subtree: tuple[str, Path] | None) -> SubtreeSnapshot:
+    if subtree is None or not subtree[1].exists():
+        return MappingProxyType({})
+    _relative, directory = subtree
+    values: dict[str, bytes] = {}
+    total = 0
+    for path in sorted(directory.rglob("*")):
+        if path.is_symlink():
+            raise ExactFileTransactionError(
+                "discovery subtree contains a symlink or special entry"
+            )
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ExactFileTransactionError(
+                "discovery subtree contains a symlink or special entry"
+            )
+        relative = path.relative_to(root).as_posix()
+        _relative_path(relative)
+        try:
+            content = read_vault_bytes(path, vault_root=root)
+        except (OSError, ValueError) as exc:
+            raise ExactFileTransactionError(
+                "cannot read discovery subtree entry"
+            ) from exc
+        total += len(content)
+        if len(values) >= _MAX_DISCOVERY_FILES or total > _MAX_DISCOVERY_BYTES:
+            raise ExactFileTransactionError("discovery subtree exceeds bounded size")
+        values[relative] = content
+    return MappingProxyType(values)
 
 
 def _validate_plan(plan: object, paths: Mapping[str, Path]) -> ExactFilePlan:
@@ -171,9 +244,10 @@ def find_first_marker_commit(
 ) -> str | None:
     """Return the first commit whose exact file contains the exact marker line."""
     marker_path = _relative_path(marker_path)
-    result = _git(
-        root, "log", "--reverse", "--format=%H", f"-S{marker_line}", "--", marker_path
-    )
+    # Inspect the closed path history directly. Git pickaxe (`-S`) silently
+    # misses sufficiently long single-line base64 markers, so it cannot be the
+    # adoption authority for bounded-but-large provenance records.
+    result = _git(root, "log", "--reverse", "--format=%H", "--", marker_path)
     if result.returncode not in {0, 128}:
         raise ExactFileTransactionError("cannot inspect exact-file Git history")
     for value in result.stdout.splitlines():
@@ -231,9 +305,8 @@ def vault_writer(root: Path):
 
 def _push(
     root: Path,
-    paths: Mapping[str, Path],
     plan: ExactFilePlan,
-    validate: Validator,
+    validate_fresh: Callable[[ExactFilePlan], None],
 ) -> str:
     last_error = ""
     for attempt in range(2):
@@ -256,7 +329,7 @@ def _push(
             # This hook is the adoption boundary: marker presence alone proves
             # nothing after history changed.  The domain must prove its entire
             # intended record again from fresh exact file bytes.
-            validate(_snapshot(root, paths), plan)
+            validate_fresh(plan)
             if (
                 find_first_marker_commit(root, plan.marker_path, plan.marker_line)
                 is None
@@ -265,12 +338,49 @@ def _push(
     raise ExactFileTransactionError(f"git push failed: {last_error[:4000]}")
 
 
+def _write_and_commit(
+    root: Path,
+    paths: Mapping[str, Path],
+    plan: ExactFilePlan,
+    validate_fresh: Callable[[ExactFilePlan], None],
+    failpoint: Failpoint | None,
+) -> bool:
+    for relative, content in plan.writes:
+        atomic_write_vault_text(paths[relative], content, vault_root=root)
+        if failpoint:
+            failpoint(f"after_write:{relative}")
+    validate_fresh(plan)
+    dirty = []
+    for relative, _content in plan.writes:
+        status = _git_ok(root, "status", "--porcelain", "--", relative)
+        if status.stdout.strip():
+            dirty.append(relative)
+    if not dirty:
+        return False
+    _git_ok(root, "add", "--", *dirty)
+    _git_ok(
+        root,
+        "commit",
+        "--only",
+        "-m",
+        plan.commit_message,
+        "--",
+        *dirty,
+    )
+    if failpoint:
+        failpoint("after_commit")
+    return True
+
+
 def resolve_exact_file_transaction(
     *,
     vault_root: str | Path,
     declared_paths: tuple[str, ...],
-    decide: Decision,
-    validate: Validator,
+    decide: Decision | None = None,
+    validate: Validator | None = None,
+    discovery_subtree: str | None = None,
+    decide_with_discovery: DiscoveredDecision | None = None,
+    validate_with_discovery: DiscoveredValidator | None = None,
     push: bool = True,
     failpoint: Failpoint | None = None,
 ) -> ExactFileResult:
@@ -284,42 +394,60 @@ def resolve_exact_file_transaction(
         vault_root, framework_system_dir=framework, bind_process=False
     )
     paths = _closed_paths(root, declared_paths)
+    if (decide is None) == (decide_with_discovery is None):
+        raise ExactFileTransactionError("provide exactly one decision callback shape")
+    if decide_with_discovery is not None:
+        if validate_with_discovery is None or discovery_subtree is None:
+            raise ExactFileTransactionError(
+                "discovered decision requires subtree and validator"
+            )
+    elif (
+        validate is None
+        or discovery_subtree is not None
+        or validate_with_discovery is not None
+    ):
+        raise ExactFileTransactionError("ordinary decision callback shape is invalid")
+    subtree = (
+        _closed_subtree(root, discovery_subtree)
+        if discovery_subtree is not None
+        else None
+    )
+
+    def decide_fresh() -> ExactFilePlan:
+        snapshot = _snapshot(root, paths)
+        if decide_with_discovery is not None:
+            return decide_with_discovery(snapshot, _subtree_snapshot(root, subtree))
+        assert decide is not None
+        return decide(snapshot)
+
+    def validate_fresh(plan: ExactFilePlan) -> None:
+        snapshot = _snapshot(root, paths)
+        if validate_with_discovery is not None:
+            validate_with_discovery(snapshot, _subtree_snapshot(root, subtree), plan)
+            return
+        assert validate is not None
+        validate(snapshot, plan)
+
     with vault_writer(root):
         if push:
             _git_ok(root, "pull", "--rebase", "--autostash")
-        plan = _validate_plan(decide(_snapshot(root, paths)), paths)
+        plan = _validate_plan(decide_fresh(), paths)
         adopted_commit = find_first_marker_commit(
             root, plan.marker_path, plan.marker_line
         )
         if adopted_commit is not None:
-            validate(_snapshot(root, paths), plan)
+            _write_and_commit(root, paths, plan, validate_fresh, failpoint)
             changed = False
         elif plan.writes:
-            for relative, content in plan.writes:
-                atomic_write_vault_text(paths[relative], content, vault_root=root)
-                if failpoint:
-                    failpoint(f"after_write:{relative}")
-            validate(_snapshot(root, paths), plan)
-            _git_ok(
-                root,
-                "commit",
-                "--only",
-                "-m",
-                plan.commit_message,
-                "--",
-                *(relative for relative, _content in plan.writes),
-            )
-            changed = True
-            if failpoint:
-                failpoint("after_commit")
+            changed = _write_and_commit(root, paths, plan, validate_fresh, failpoint)
         else:
-            validate(_snapshot(root, paths), plan)
+            validate_fresh(plan)
             changed = False
         commit = find_first_marker_commit(root, plan.marker_path, plan.marker_line)
         if commit is None:
             raise ExactFileTransactionError("exact marker commit cannot be resolved")
         if push:
-            commit = _push(root, paths, plan, validate)
+            commit = _push(root, plan, validate_fresh)
             if failpoint:
                 failpoint("after_push")
         return ExactFileResult(changed=changed, commit_sha=commit)
