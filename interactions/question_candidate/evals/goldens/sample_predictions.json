@@ -1,0 +1,10 @@
+[
+  {"fixture_id": "play-opens-without-modal", "model_output": {"reply": null, "turn_kind": null, "placement_action": "defer", "category_id": null, "confidence": 0.45, "placement_question": null}},
+  {"fixture_id": "during-answer-silent-family", "model_output": {"reply": "Counting the dark seconds with your dad made the waiting something you shared.", "turn_kind": "answer", "placement_action": "resolved", "category_id": "F", "confidence": 0.94, "placement_question": null}},
+  {"fixture_id": "after-answer-completes-place", "model_output": {"reply": "The lighthouse became a place you could carry patience back to.", "turn_kind": "answer", "placement_action": "resolved", "category_id": "P", "confidence": 0.93, "placement_question": null}},
+  {"fixture_id": "during-answer-natural-question", "model_output": {"reply": "The whole season shifted around that waiting. Who were you going through it with?", "turn_kind": "mixed", "placement_action": "ask_now", "category_id": null, "confidence": 0.48, "placement_question": "Who were you going through it with?"}},
+  {"fixture_id": "during-answer-defers-placement", "model_output": {"reply": "You can still see the beam crossing the kitchen wall as you tell it.", "turn_kind": "answer", "placement_action": "defer", "category_id": null, "confidence": 0.55, "placement_question": null}},
+  {"fixture_id": "placement-only-family", "model_output": {"reply": "Your dad was part of it.", "turn_kind": "placement_only", "placement_action": "resolved", "category_id": "F", "confidence": 0.98, "placement_question": null}},
+  {"fixture_id": "explicit-decline", "model_output": null},
+  {"fixture_id": "explicit-defer", "model_output": null}
+]

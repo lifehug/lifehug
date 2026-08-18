@@ -1,0 +1,22 @@
+# interactions/question_candidate/interaction.yaml — flat scalar subset only
+interaction: question_candidate
+version: 1.0.0
+extends: conversation
+extends.version: 1.0.0
+modes: engage
+load_order: identity|behavior|examples|candidate|category_roster|conversation|turn_instructions
+composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
+composition.leaf: prompt/turn-instructions.md|context/manifest.md
+# Capability tiers name roles, not providers or default concrete seats.
+role.router: haiku-class
+role.worker: sonnet-class
+role.planner: sonnet-class
+knob.placement_confidence_threshold: 0.8
+knob.category_roster_max: 64
+budget.identity: 800
+budget.behavior: 1800
+budget.examples: 1200
+budget.candidate: 5500
+budget.category_roster: 2400
+budget.conversation: 1600
+budget.turn_instructions: 700

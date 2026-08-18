@@ -105,11 +105,11 @@ class EmbedParityTests(unittest.TestCase):
     module docstring. A drifted embed (source file edited, page not) fails
     here exactly like a drifted parity number fails HandbookParityTests."""
 
-    def test_the_harness_sees_the_three_seated_interaction_embeds(self):
+    def test_the_harness_sees_the_four_interaction_embeds(self):
         # One embed per shipped interaction page (conversation,
-        # question_judgment, focus_curation) — an empty/short scan means
+        # question_judgment, focus_curation, question_candidate) — a short scan means
         # the embed grammar broke, or a page lost its embed block.
-        self.assertGreaterEqual(len(_embeds()), 3)
+        self.assertGreaterEqual(len(_embeds()), 4)
 
     def test_every_embed_byte_matches_its_source_file(self):
         for page, source_relpath, body in _embeds():
@@ -131,7 +131,7 @@ class EmbedParityTests(unittest.TestCase):
 
     def test_each_seated_interaction_page_embeds_its_own_behavior_md(self):
         # Belt-and-suspenders on top of the byte-match test above: the
-        # three pages this mechanism was built for each carry exactly the
+        # pages this mechanism covers each carry exactly the
         # embed they're supposed to, not e.g. two pages both embedding the
         # same file by copy-paste mistake.
         expected = {
@@ -141,6 +141,8 @@ class EmbedParityTests(unittest.TestCase):
                 "interactions/question_judgment/prompt/behavior.md",
             HANDBOOK_INTERACTIONS / "focus-curation.md":
                 "interactions/focus_curation/prompt/behavior.md",
+            HANDBOOK_INTERACTIONS / "question-candidate.md":
+                "interactions/question_candidate/prompt/behavior.md",
         }
         by_page: dict[Path, list[str]] = {}
         for page, source_relpath, _body in _embeds():

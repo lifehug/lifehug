@@ -86,6 +86,7 @@ from typing import Callable
 
 import conversation
 import conversation_lints
+import eval_gates
 from ai_provider import AIProviderError, ProviderStatus, call_ai, provider_status
 from lifehug_core import AGENT_TASKS_DIR, INTERACTIONS_DIR, load_config, now_utc, write_json, write_text
 
@@ -399,16 +400,7 @@ def check_router_gates(scores: dict[str, dict], gates: dict[str, dict[str, float
     (no predictions for that class) with a configured gate is a failure —
     a gate that can never be checked is not a passed gate.
     """
-    failures: list[str] = []
-    for intent, thresholds in gates.items():
-        class_scores = scores.get(intent, {})
-        for metric, threshold in thresholds.items():
-            actual = class_scores.get(metric)
-            if actual is None or actual < threshold:
-                failures.append(
-                    f"router_gates.{intent}.{metric}: {actual!r} < {threshold} required"
-                )
-    return failures
+    return eval_gates.check_score_gates(scores, gates, prefix="router_gates")
 
 
 def deterministic_router_predictions(

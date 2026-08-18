@@ -1,0 +1,9 @@
+# Question Candidate eval gates — flat scalar subset only
+cap.reply_chars: 2200
+placement_gates.category.accuracy: 0.9
+placement_gates.turn_kind.accuracy: 0.9
+placement_gates.closed_roster.compliance: 1.0
+placement_gates.question.validity: 1.0
+placement_gates.timing.validity: 1.0
+placement_gates.completion.validity: 1.0
+placement_gates.stale_revision.rejection: 1.0
