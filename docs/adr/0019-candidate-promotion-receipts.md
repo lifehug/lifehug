@@ -21,7 +21,10 @@ question does not prove which candidate or placement decision created it.
 `system/candidate_promotion.py` is the sole candidate-to-question mutation
 authority. Every request binds the candidate source/anchor, category, and
 placement revisions, plus optional exact proposal and validated-decision
-hashes. The authority revalidates fresh facts under the vault writer lease,
+hashes. A non-null interaction hash is accepted only alongside the full exact
+object whose canonical hash it claims; the stable CLI receives those objects
+through a bounded closed JSON stdin envelope, never free-floating argv
+metadata. The authority revalidates fresh facts under the vault writer lease,
 inserts one question plus a closed canonical-base64 provenance marker, updates
 the candidate projection, and commits only those two paths.
 
@@ -33,6 +36,17 @@ a crash is completed after candidate/question validation. Conflicting bytes or
 revisions fail closed. Existing equal text without the structured marker is
 never adopted.
 
+`system/exact_file_git.py` is the one public, reusable Git transaction/adoption
+adapter beneath promotion. It accepts a closed set of exact relative paths and
+immutable-snapshot decision/validation callbacks; the returned plan cannot add
+paths. The adapter alone owns the root-aware writer lease, pull-before-decision,
+atomic exact-file replacements, `commit --only`, first-marker commit lookup,
+push retry, and post-rebase validation. Candidate promotion uses this adapter
+rather than retaining a private writer. After any rejected push and rebase,
+the candidate validator re-proves exact marker adjacency, question bytes and
+revision, all request provenance/hashes, and the intended record before a
+retry or adoption. Marker presence by itself is never sufficient.
+
 One commit per promotion won over a separate receipt ledger because it makes
 the durable content and proof indivisible and avoids another projection.
 Embedding raw proposal/decision content lost to hash-only binding because the
@@ -43,6 +57,8 @@ because it cannot be made safe or auditable.
 
 - Manual, weekly-auto, neighborhood, viewer/job, and future hosted callers use
   the same authority; recurring-defect tests reject renderer/write bypasses.
+- Future exact-file lifecycle mutations may reuse the narrow adapter, but must
+  supply their own closed domain validator; it cannot write undeclared paths.
 - `candidate-promote` is safely retryable. A crash after bank write,
   projection write, commit, or push converges on one question and one receipt.
 - The stable `candidates-promotion-receipt ... --json` door requires the

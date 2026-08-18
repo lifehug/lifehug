@@ -82,7 +82,11 @@ category, and placement revisions, writes a structured provenance marker, and
 returns the canonical question id and Git commit. The marker and Git history —
 not the candidate-store projection — prove the durable result, so an exact
 retry returns the same result with `changed:false` and never adds a duplicate.
-Conflicting text, category, or revisions stop without guessing.
+Conflicting text, category, or revisions stop without guessing. Non-null
+Question Candidate proposal/decision hashes are accepted only with the exact
+objects that produce them. The shared `exact_file_git.py` transaction adapter
+owns writer locking, exact-path commits, first-marker adoption, and post-rebase
+validation; promotion supplies the closed candidate-specific validator.
 **Auto-promotion** is promotion the system performs
 itself, unattended, during `weekly_maintenance.sh` — the no-human path the
 Convergence Principle requires this stage to have.
@@ -368,7 +372,7 @@ system keeps improving its own questions.
 | Quality-profile aggregation | `quality_profile.compute_profile()` |
 | Question-judgment rubric (JUDGE priority/penalty vocabulary) | `interactions/question_judgment/prompt/behavior.md`, `question_judgment.py` |
 | Owner decisions → generation prompts | `question_judgment.build_decision_context()`, `owner_judgment_signals_block()` |
-| Promotion authority | `candidate_promotion.build_candidate_promotion_request()`, `resolve_candidate_promotion()` (ADR 0019) |
+| Promotion authority | `candidate_promotion.build_candidate_promotion_request()`, `resolve_candidate_promotion()` over `exact_file_git.resolve_exact_file_transaction()` (ADR 0019) |
 | CLI | `lifehug.py candidates-list \| candidates-review \| candidates-update \| candidates-promote \| candidates-promotion-receipt ... --json \| candidates-promote-neighborhood \| candidates-stats \| candidates-auto-promote [--dry-run]` |
 | Weekly wiring | `weekly_maintenance.sh` — `quality_update` → `judgment_update` → `timeline_retire` → `wiki_harvest` → `mirror_compile` → `auto_promote` → `planner_queue` → `arc_plan` |
 | Interaction | [`interactions/question_judgment/`](https://github.com/lifehug/lifehug/tree/main/interactions/question_judgment) (ADR 0007) |

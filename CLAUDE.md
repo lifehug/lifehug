@@ -1176,8 +1176,12 @@ and neighborhood paths all bind exact candidate/category/placement revisions,
 write one structured base64 marker, and return the canonical question id and
 Git commit. Git tree/history is the receipt authority, so exact retries return
 `changed:false` without trusting a candidate-store projection; conflicting
-bytes or revisions fail closed. The stable
-`candidates-promotion-receipt ... --json` command is the hosted handoff.
+bytes or revisions fail closed. Non-null proposal/decision hashes require the
+exact bound objects on the same call. The narrow `exact_file_git.py` adapter
+owns the shared writer/Git/rebase order and requires full domain revalidation
+after a rejected push; marker presence alone is insufficient. The stable
+`candidates-promotion-receipt ... --json` command is the hosted handoff, with
+bounded binding JSON on stdin when interaction hashes are present.
 `answer_ack_model` selects the fallback acknowledgment model (default
 `claude-sonnet-5`; a configured local provider still uses its own local model).
 

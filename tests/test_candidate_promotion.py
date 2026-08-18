@@ -10,6 +10,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
@@ -363,6 +364,88 @@ class ReceiptTests(PromotionCase):
         self.assertEqual(first_receipt, replay_receipt)
         self.assertEqual(first.stdout.count("\n"), 1)
 
+    def test_stable_cli_requires_and_recomputes_bound_interaction_objects(self):
+        remote = root_parent_tmp(self, ROOT, prefix="lifehug-promotion-bound-cli-")
+        self.assertEqual(_run(remote, "init", "--bare").returncode, 0)
+        _run(self.tmp, "remote", "add", "origin", str(remote))
+        self.assertEqual(
+            _run(self.tmp, "push", "--set-upstream", "origin", "main").returncode,
+            0,
+        )
+        bank = (self.tmp / "question-bank.md").read_text(encoding="utf-8")
+        anchor, _text = promotion._candidate_facts(self.candidate)
+        roster = promotion._category_roster(bank)
+        payload = {
+            "schema_version": 1,
+            "candidate": anchor,
+            "roster": roster,
+            "association_stage": "after_answer",
+            "provisional_category_id": "A",
+            "latest_user_turn": "The synthetic answer is durable.",
+            "previous_placement_question": None,
+            "conversation_context": None,
+            "answer_status": "durable",
+            "requested_outcome": "engage",
+        }
+        decision = promotion.question_candidate.parse_question_candidate_output(
+            {}, payload=payload
+        )
+        proposal = {"placement_action": "resolved"}
+        request = promotion.build_current_request(
+            self.candidate["id"],
+            "A",
+            vault_root=self.tmp,
+            proposal=proposal,
+            decision=decision,
+        )
+        command = [
+            sys.executable,
+            str(SYSTEM / "lifehug.py"),
+            "--vault-root",
+            str(self.tmp),
+            "candidates-promotion-receipt",
+            request["candidate_id"],
+            "--category",
+            "A",
+            "--candidate-revision",
+            request["candidate_revision"],
+            "--category-revision",
+            request["category_revision"],
+            "--placement-revision",
+            request["placement_revision"],
+            "--source-revision",
+            request["source_revision"],
+            "--proposal-revision",
+            request["proposal_revision"],
+            "--decision-revision",
+            request["decision_revision"],
+            "--question-candidate-binding-stdin",
+            "--json",
+        ]
+        missing = subprocess.run(
+            [item for item in command if item != "--question-candidate-binding-stdin"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("exact bound proposal", missing.stderr)
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            input=json.dumps({"proposal": proposal, "decision": decision}),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        receipt = json.loads(result.stdout)
+        self.assertEqual(
+            receipt["candidate_provenance"]["decision_revision"],
+            request["decision_revision"],
+        )
+
     def test_all_caller_held_revisions_fail_closed_when_forged(self):
         current = self.request()
         for field in (
@@ -381,6 +464,21 @@ class ReceiptTests(PromotionCase):
 
     def test_revision_bound_builder_requires_exact_caller_facts(self):
         current = self.request()
+        proposal = {"placement_action": "resolved", "category_id": "A"}
+        proposal_revision = promotion.question_candidate.canonical_revision(proposal)
+        with self.assertRaisesRegex(
+            promotion.CandidatePromotionError, "exact bound proposal"
+        ):
+            promotion.build_revision_bound_request(
+                current["candidate_id"],
+                current["category_id"],
+                candidate_revision=current["candidate_revision"],
+                category_revision=current["category_revision"],
+                placement_revision=current["placement_revision"],
+                source_revision=current["source_revision"],
+                proposal_revision=proposal_revision,
+                vault_root=self.tmp,
+            )
         rebuilt = promotion.build_revision_bound_request(
             current["candidate_id"],
             current["category_id"],
@@ -388,10 +486,22 @@ class ReceiptTests(PromotionCase):
             category_revision=current["category_revision"],
             placement_revision=current["placement_revision"],
             source_revision=current["source_revision"],
-            proposal_revision="sha256:" + "1" * 64,
+            proposal_revision=proposal_revision,
+            proposal=proposal,
             vault_root=self.tmp,
         )
-        self.assertEqual(rebuilt["proposal_revision"], "sha256:" + "1" * 64)
+        self.assertEqual(rebuilt["proposal_revision"], proposal_revision)
+        with self.assertRaisesRegex(promotion.CandidatePromotionError, "stale"):
+            promotion.build_revision_bound_request(
+                current["candidate_id"],
+                current["category_id"],
+                candidate_revision=current["candidate_revision"],
+                category_revision=current["category_revision"],
+                placement_revision=current["placement_revision"],
+                proposal_revision="sha256:" + "1" * 64,
+                proposal=proposal,
+                vault_root=self.tmp,
+            )
         with self.assertRaisesRegex(promotion.CandidatePromotionError, "stale"):
             promotion.build_revision_bound_request(
                 current["candidate_id"],
@@ -401,6 +511,100 @@ class ReceiptTests(PromotionCase):
                 placement_revision=current["placement_revision"],
                 vault_root=self.tmp,
             )
+
+    def test_non_null_hashes_require_exact_objects_at_resolver_boundary(self):
+        proposal = {"placement_action": "resolved", "category_id": "A"}
+        request = promotion.build_current_request(
+            self.candidate["id"], "A", vault_root=self.tmp, proposal=proposal
+        )
+        with self.assertRaisesRegex(
+            promotion.CandidatePromotionError, "exact bound proposal"
+        ):
+            promotion.resolve_candidate_promotion(
+                request, vault_root=self.tmp, push=False
+            )
+        with self.assertRaisesRegex(promotion.CandidatePromotionError, "stale"):
+            promotion.resolve_candidate_promotion(
+                request,
+                vault_root=self.tmp,
+                push=False,
+                proposal={"placement_action": "ask_now"},
+            )
+        receipt = promotion.resolve_candidate_promotion(
+            request, vault_root=self.tmp, push=False, proposal=proposal
+        )
+        self.assertTrue(receipt["changed"])
+
+    def test_push_rejection_revalidates_question_bytes_after_rebase(self):
+        remote = root_parent_tmp(self, ROOT, prefix="lifehug-promotion-tamper-")
+        self.assertEqual(_run(remote, "init", "--bare").returncode, 0)
+        _run(self.tmp, "remote", "add", "origin", str(remote))
+        self.assertEqual(
+            _run(self.tmp, "push", "--set-upstream", "origin", "main").returncode,
+            0,
+        )
+        real_git = promotion.exact_file_git._git
+        rejected = False
+
+        def tampering_git(root: Path, *args: str):
+            nonlocal rejected
+            if args == ("push",) and not rejected:
+                rejected = True
+                return subprocess.CompletedProcess(args, 1, "", "synthetic reject")
+            if rejected and args == ("pull", "--rebase", "--autostash"):
+                bank_path = self.tmp / "question-bank.md"
+                bank_path.write_text(
+                    bank_path.read_text(encoding="utf-8").replace(
+                        "paper lighthouse", "tampered lighthouse"
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return real_git(root, *args)
+
+        with mock.patch.object(promotion.exact_file_git, "_git", tampering_git):
+            with self.assertRaisesRegex(
+                promotion.CandidatePromotionError,
+                "bytes changed|intended record changed",
+            ):
+                promotion.resolve_candidate_promotion(
+                    self.request(), vault_root=self.tmp, push=True
+                )
+
+    def test_push_rejection_revalidates_request_provenance_after_rebase(self):
+        remote = root_parent_tmp(self, ROOT, prefix="lifehug-promotion-stale-")
+        self.assertEqual(_run(remote, "init", "--bare").returncode, 0)
+        _run(self.tmp, "remote", "add", "origin", str(remote))
+        self.assertEqual(
+            _run(self.tmp, "push", "--set-upstream", "origin", "main").returncode,
+            0,
+        )
+        request = self.request()
+        real_git = promotion.exact_file_git._git
+        rejected = False
+
+        def tampering_git(root: Path, *args: str):
+            nonlocal rejected
+            if args == ("push",) and not rejected:
+                rejected = True
+                return subprocess.CompletedProcess(args, 1, "", "synthetic reject")
+            if rejected and args == ("pull", "--rebase", "--autostash"):
+                store_path = self.tmp / "state" / "question_candidates.json"
+                store = json.loads(store_path.read_text(encoding="utf-8"))
+                store["candidates"][0]["source_id"] = "FORGED"
+                store_path.write_text(
+                    json.dumps(store, indent=2) + "\n", encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return real_git(root, *args)
+
+        with mock.patch.object(promotion.exact_file_git, "_git", tampering_git):
+            with self.assertRaisesRegex(
+                promotion.CandidatePromotionError, "source_revision is stale"
+            ):
+                promotion.resolve_candidate_promotion(
+                    request, vault_root=self.tmp, push=True
+                )
 
     def test_complete_question_candidate_decision_binds_and_incomplete_fails(self):
         bank = (self.tmp / "question-bank.md").read_text(encoding="utf-8")
@@ -430,6 +634,23 @@ class ReceiptTests(PromotionCase):
         )
         self.assertIsNotNone(request["proposal_revision"])
         self.assertIsNotNone(request["decision_revision"])
+        with self.assertRaisesRegex(
+            promotion.CandidatePromotionError, "exact bound decision"
+        ):
+            promotion.resolve_candidate_promotion(
+                request,
+                vault_root=self.tmp,
+                push=False,
+                proposal={"placement_action": "resolved"},
+            )
+        receipt = promotion.resolve_candidate_promotion(
+            request,
+            vault_root=self.tmp,
+            push=False,
+            proposal={"placement_action": "resolved"},
+            decision=decision,
+        )
+        self.assertTrue(receipt["changed"])
         incomplete = {**decision, "status": "active"}
         with self.assertRaisesRegex(
             promotion.CandidatePromotionError, "decision invalid"
@@ -454,6 +675,9 @@ class ReceiptTests(PromotionCase):
         roadmap_source = inspect.getsource(roadmap._generate_and_promote)
         self.assertIn("candidate_promotion.resolve_candidate_promotion", roadmap_source)
         self.assertNotIn("promote_neighborhood(", roadmap_source)
+        authority = inspect.getsource(promotion)
+        self.assertIn("exact_file_git.resolve_exact_file_transaction", authority)
+        self.assertNotIn("subprocess.run", authority)
 
 
 if __name__ == "__main__":

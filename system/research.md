@@ -373,4 +373,8 @@ revision-bound request through `candidate_promotion.py`. The inserted bank
 marker carries canonical hashed provenance, while Git history supplies the
 commit SHA. This closes the crash/retry ambiguity without copying proposal,
 decision, or conversation text into the question bank and without granting a
-model any write capability.
+model any write capability. A non-null proposal/decision hash must be proved by
+the exact object at mutation time. The reusable exact-file Git adapter owns the
+writer/pull/commit/push order and invokes candidate-specific full-record
+validation after a rebase, so an unchanged marker cannot hide altered question
+bytes.

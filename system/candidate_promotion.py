@@ -10,24 +10,16 @@ from __future__ import annotations
 
 import argparse
 import base64
-import contextlib
-import fcntl
 import json
-import os
 import re
-import subprocess
 import sys
-import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
 
+import exact_file_git
 import question_candidate
 from lifehug_core import now_utc, parse_categories, parse_questions
 from vault_paths import (
-    atomic_write_vault_text,
-    ensure_vault_directory,
-    open_vault_fd,
     read_vault_text,
     resolve_framework_system_dir,
     resolve_vault_root,
@@ -103,7 +95,6 @@ SOURCE_FIELDS = (
     "reason",
     "neighborhood_id",
 )
-_LOCK_BOOTSTRAP = threading.Lock()
 
 
 class CandidatePromotionError(ValueError):
@@ -290,6 +281,7 @@ def validate_candidate_promotion_request(
     candidate: dict,
     question_bank_text: str,
     *,
+    proposal: object | None = None,
     decision: dict | None = None,
 ) -> dict:
     """Revalidate a closed request against fresh source/category facts."""
@@ -322,8 +314,24 @@ def validate_candidate_promotion_request(
             request["decision_revision"], name="decision_revision"
         ),
     }
+    if normalized["proposal_revision"] is not None and proposal is None:
+        raise CandidatePromotionError(
+            "proposal_revision requires the exact bound proposal object"
+        )
+    if normalized["decision_revision"] is not None and decision is None:
+        raise CandidatePromotionError(
+            "decision_revision requires the exact bound decision object"
+        )
+    if normalized["proposal_revision"] is None and proposal is not None:
+        raise CandidatePromotionError("proposal object has no bound revision")
+    if normalized["decision_revision"] is None and decision is not None:
+        raise CandidatePromotionError("decision object has no bound revision")
     current = build_candidate_promotion_request(
-        candidate, question_bank_text, category_id, decision=decision
+        candidate,
+        question_bank_text,
+        category_id,
+        proposal=proposal,
+        decision=decision,
     )
     for field in (
         "candidate_id",
@@ -335,11 +343,9 @@ def validate_candidate_promotion_request(
     ):
         if normalized[field] != current[field]:
             raise CandidatePromotionError(f"promotion request {field} is stale")
-    if (
-        decision is not None
-        and normalized["decision_revision"] != current["decision_revision"]
-    ):
-        raise CandidatePromotionError("promotion request decision_revision is stale")
+    for field in ("proposal_revision", "decision_revision"):
+        if normalized[field] != current[field]:
+            raise CandidatePromotionError(f"promotion request {field} is stale")
     return normalized
 
 
@@ -359,6 +365,43 @@ def _candidate_provenance(request: dict) -> dict:
         "decision_revision": request["decision_revision"],
         "request_revision": request_revision(request),
     }
+
+
+def _assert_bound_interaction_objects(
+    request: dict,
+    *,
+    proposal: object | None,
+    decision: dict | None,
+) -> None:
+    for field, value in (
+        ("proposal_revision", proposal),
+        ("decision_revision", decision),
+    ):
+        if (
+            field == "decision_revision"
+            and value is not None
+            and not isinstance(value, dict)
+        ):
+            raise CandidatePromotionError("bound decision must be an object")
+        expected = _nullable_revision(request.get(field), name=field)
+        if expected is not None and value is None:
+            label = field.removesuffix("_revision")
+            raise CandidatePromotionError(
+                f"{field} requires the exact bound {label} object"
+            )
+        if expected is None and value is not None:
+            raise CandidatePromotionError(
+                f"{field.removesuffix('_revision')} object has no bound revision"
+            )
+        if value is not None:
+            try:
+                actual = question_candidate.canonical_revision(value)
+            except (TypeError, ValueError) as exc:
+                raise CandidatePromotionError(
+                    f"bound {field.removesuffix('_revision')} is not canonical JSON"
+                ) from exc
+            if actual != expected:
+                raise CandidatePromotionError(f"promotion request {field} is stale")
 
 
 def _encode_marker(payload: dict) -> str:
@@ -553,6 +596,8 @@ def apply_candidate_promotion(
     promotion_mode: str = "manual",
     promoted_at: str | None = None,
     auto_score: float | None = None,
+    proposal: object | None = None,
+    decision: dict | None = None,
 ) -> tuple[str, dict]:
     """Pure compatibility planner; all promotion rendering lives here."""
     if promotion_mode not in PROMOTION_MODES:
@@ -571,7 +616,13 @@ def apply_candidate_promotion(
         raise CandidatePromotionError(
             f"candidate not found: {request.get('candidate_id')}"
         )
-    validate_candidate_promotion_request(request, candidate, question_bank_text)
+    validate_candidate_promotion_request(
+        request,
+        candidate,
+        question_bank_text,
+        proposal=proposal,
+        decision=decision,
+    )
     status = candidate.get("status", "candidate")
     promotable_statuses = (
         AUTO_PROMOTABLE_STATUSES
@@ -623,45 +674,20 @@ def _paths(vault_root: str | Path | None) -> tuple[Path, Path, Path]:
 
 def _read_store(path: Path, root: Path) -> dict:
     try:
-        value = json.loads(read_vault_text(path, vault_root=root))
+        text = read_vault_text(path, vault_root=root)
     except (FileNotFoundError, json.JSONDecodeError, UnicodeError, ValueError) as exc:
+        raise CandidatePromotionError(f"cannot read candidate store: {exc}") from exc
+    return _parse_store_text(text)
+
+
+def _parse_store_text(text: str) -> dict:
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, UnicodeError, ValueError) as exc:
         raise CandidatePromotionError(f"cannot read candidate store: {exc}") from exc
     if not isinstance(value, dict) or not isinstance(value.get("candidates"), list):
         raise CandidatePromotionError("candidate store is invalid")
     return value
-
-
-def _write_store(path: Path, root: Path, data: dict) -> None:
-    atomic_write_vault_text(
-        path,
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        vault_root=root,
-    )
-
-
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    try:
-        return subprocess.run(
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise CandidatePromotionError(
-            f"git {' '.join(args[:2])} failed: {exc}"
-        ) from exc
-
-
-def _git_ok(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    result = _git(root, *args)
-    if result.returncode != 0:
-        detail = f"{result.stdout or ''}{result.stderr or ''}".strip()[:4000]
-        raise CandidatePromotionError(
-            f"git {' '.join(args[:2])} failed: {detail or result.returncode}"
-        )
-    return result
 
 
 def _relative(root: Path, path: Path) -> str:
@@ -669,22 +695,6 @@ def _relative(root: Path, path: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError as exc:
         raise CandidatePromotionError("promotion path escaped vault root") from exc
-
-
-def _find_marker_commit(root: Path, bank_path: Path, marker_line: str) -> str | None:
-    relative = _relative(root, bank_path)
-    token = marker_line.removeprefix(MARKER_PREFIX).removesuffix(MARKER_SUFFIX)
-    result = _git(root, "log", "--format=%H", f"-S{token}", "--", relative)
-    if result.returncode not in {0, 128}:
-        raise CandidatePromotionError("cannot inspect promotion Git history")
-    for value in result.stdout.splitlines():
-        commit = value.strip()
-        if not COMMIT_RE.fullmatch(commit):
-            continue
-        tree = _git(root, "show", f"{commit}:{relative}")
-        if tree.returncode == 0 and marker_line in tree.stdout.splitlines():
-            return commit
-    return None
 
 
 def _receipt(payload: dict, commit_sha: str, *, changed: bool) -> dict:
@@ -709,75 +719,24 @@ def canonical_receipt_json(receipt: dict) -> str:
     return _canonical_json(receipt)
 
 
-@contextlib.contextmanager
-def _writer(root: Path):
-    import jobs
-
-    token = os.environ.get("LIFEHUG_JOB_RUNNER_TOKEN")
-    if jobs.writer_token_is_live(token, vault_root=root):
-        yield
-        return
-    if jobs.VAULT_ROOT == root:
-        with jobs.writer_session(root):
-            yield
-        return
-
-    # An explicit external vault may be used by an embedding process that is
-    # already bound to its own vault. Take that vault's exact writer-lock path
-    # without rebinding process-global framework state.
-    jobs_dir = vault_data_path(
-        "jobs", vault_root=root, framework_system_dir=resolve_framework_system_dir()
-    )
-    lock_path = jobs_dir / ".writer-v2.lock"
-    with _LOCK_BOOTSTRAP:
-        ensure_vault_directory(jobs_dir, vault_root=root)
-        fd = open_vault_fd(
-            lock_path,
-            os.O_RDWR | os.O_CREAT,
-            vault_root=root,
-            create_parents=True,
-        )
-    deadline = time.monotonic() + 120
+def parse_question_candidate_bindings(raw: str) -> tuple[object | None, dict | None]:
+    """Parse the closed, bounded stdin envelope for hash-bound interaction facts."""
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 1_000_000:
+        raise CandidatePromotionError("Question Candidate binding JSON is too large")
     try:
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise CandidatePromotionError("vault writer lock is busy") from None
-                time.sleep(0.02)
-        yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-
-
-def _pull_before_decision(root: Path) -> None:
-    _git_ok(root, "pull", "--rebase", "--autostash")
-
-
-def _push_commit(root: Path, bank_path: Path, marker_line: str) -> str:
-    last_error = ""
-    for attempt in range(2):
-        pushed = _git(root, "push")
-        if pushed.returncode == 0:
-            commit = _find_marker_commit(root, bank_path, marker_line)
-            if commit is None:
-                raise CandidatePromotionError("pushed marker commit cannot be resolved")
-            return commit
-        last_error = f"{pushed.stdout or ''}{pushed.stderr or ''}".strip()
-        if attempt == 0:
-            pulled = _git(root, "pull", "--rebase", "--autostash")
-            if pulled.returncode != 0:
-                _git(root, "rebase", "--abort")
-                raise CandidatePromotionError(
-                    f"push retry rebase failed: {pulled.stderr.strip()[:4000]}"
-                )
-            bank = read_vault_text(bank_path, vault_root=root)
-            if marker_line not in bank.splitlines():
-                raise CandidatePromotionError("promotion marker changed during rebase")
-    raise CandidatePromotionError(f"git push failed: {last_error[:4000]}")
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CandidatePromotionError(
+            "Question Candidate binding JSON is invalid"
+        ) from exc
+    if not isinstance(value, dict) or frozenset(value) != {"proposal", "decision"}:
+        raise CandidatePromotionError(
+            "Question Candidate binding JSON keys are invalid"
+        )
+    decision = value["decision"]
+    if decision is not None and not isinstance(decision, dict):
+        raise CandidatePromotionError("bound decision must be an object or null")
+    return value["proposal"], decision
 
 
 def _resolve_locked(
@@ -790,111 +749,182 @@ def _resolve_locked(
     push: bool,
     failpoint: Callable[[str], None] | None,
     auto_score: float | None,
+    proposal: object | None,
+    decision: dict | None,
 ) -> dict:
     if promotion_mode not in PROMOTION_MODES:
         raise CandidatePromotionError("promotion_mode is invalid")
-    if push:
-        _pull_before_decision(root)
-    bank_text = read_vault_text(bank_path, vault_root=root)
-    existing = _marker_for_candidate(
-        bank_text, _candidate_id(request.get("candidate_id"))
-    )
-    if existing is not None:
-        payload, marker_line, question_text = existing
-        _assert_marker_matches_request(payload, request)
-        commit = _find_marker_commit(root, bank_path, marker_line)
-        if commit is not None:
-            if push:
-                commit = _push_commit(root, bank_path, marker_line)
-                if failpoint:
-                    failpoint("after_push")
-            return _receipt(payload, commit, changed=False)
-    else:
-        payload = None
-        marker_line = None
-        question_text = None
-
-    data = _read_store(store_path, root)
-    candidate = next(
-        (
-            row
-            for row in data["candidates"]
-            if isinstance(row, dict) and row.get("id") == request.get("candidate_id")
-        ),
-        None,
-    )
-    if candidate is None:
-        raise CandidatePromotionError(
-            f"candidate not found: {request.get('candidate_id')}"
-        )
-
-    if existing is None:
-        request = validate_candidate_promotion_request(request, candidate, bank_text)
-        updated_bank, payload = apply_candidate_promotion(
-            data,
-            bank_text,
-            request,
-            promotion_mode=promotion_mode,
-            auto_score=auto_score,
-        )
-        marker_line = _encode_marker(payload)
-        atomic_write_vault_text(bank_path, updated_bank, vault_root=root)
-        if failpoint:
-            failpoint("after_bank_write")
-    else:
-        assert (
-            payload is not None
-            and marker_line is not None
-            and question_text is not None
-        )
-        validate_candidate_promotion_request(request, candidate, bank_text)
-        _assert_marker_matches_request(payload, request)
-        if _candidate_text(candidate) != question_text:
-            raise CandidatePromotionError(
-                "uncommitted promotion marker question differs from candidate"
-            )
-        status = candidate.get("status")
-        if status not in AUTO_PROMOTABLE_STATUSES | {"promoted", "auto_promoted"}:
-            raise CandidatePromotionError(
-                f"candidate projection has conflicting status {status!r}"
-            )
-        candidate["status"] = (
-            "auto_promoted" if promotion_mode == "auto" else "promoted"
-        )
-        candidate["target_category"] = payload["category_id"]
-        candidate["promoted_question_id"] = payload["question_id"]
-        candidate["promoted_at"] = payload["promoted_at"]
-        candidate["updated_at"] = payload["promoted_at"]
-        candidate["promotion_request_revision"] = payload["candidate_provenance"][
-            "request_revision"
-        ]
-        data["last_updated"] = payload["promoted_at"]
-
-    _write_store(store_path, root, data)
-    if failpoint:
-        failpoint("after_projection_write")
     bank_relative = _relative(root, bank_path)
     store_relative = _relative(root, store_path)
-    _git_ok(
-        root,
-        "commit",
-        "--only",
-        "-m",
-        f"Promote candidate {payload['candidate_id']} to {payload['question_id']}",
-        "--",
-        bank_relative,
-        store_relative,
-    )
-    commit = _find_marker_commit(root, bank_path, marker_line)
-    if commit is None:
-        raise CandidatePromotionError("promotion commit cannot be resolved")
-    if failpoint:
-        failpoint("after_commit")
-    if push:
-        commit = _push_commit(root, bank_path, marker_line)
-        if failpoint:
-            failpoint("after_push")
-    return _receipt(payload, commit, changed=True)
+    intended: dict[str, object] = {}
+
+    def decide(snapshot: exact_file_git.Snapshot) -> exact_file_git.ExactFilePlan:
+        bank_text = snapshot[bank_relative]
+        existing = _marker_for_candidate(
+            bank_text, _candidate_id(request.get("candidate_id"))
+        )
+        data = _parse_store_text(snapshot[store_relative])
+        candidate = next(
+            (
+                row
+                for row in data["candidates"]
+                if isinstance(row, dict)
+                and row.get("id") == request.get("candidate_id")
+            ),
+            None,
+        )
+        if existing is not None:
+            payload, marker_line, question_text = existing
+            _assert_marker_matches_request(payload, request)
+            intended.update(
+                payload=payload,
+                marker_line=marker_line,
+                question_text=question_text,
+            )
+            if candidate is None:
+                return exact_file_git.ExactFilePlan(
+                    (),
+                    bank_relative,
+                    marker_line,
+                    f"Adopt candidate {payload['candidate_id']} at {payload['question_id']}",
+                )
+            validate_candidate_promotion_request(
+                request,
+                candidate,
+                bank_text,
+                proposal=proposal,
+                decision=decision,
+            )
+            if _candidate_text(candidate) != question_text:
+                raise CandidatePromotionError(
+                    "uncommitted promotion marker question differs from candidate"
+                )
+            status = candidate.get("status")
+            if status not in AUTO_PROMOTABLE_STATUSES | {"promoted", "auto_promoted"}:
+                raise CandidatePromotionError(
+                    f"candidate projection has conflicting status {status!r}"
+                )
+            candidate["status"] = (
+                "auto_promoted" if promotion_mode == "auto" else "promoted"
+            )
+            candidate["target_category"] = payload["category_id"]
+            candidate["promoted_question_id"] = payload["question_id"]
+            candidate["promoted_at"] = payload["promoted_at"]
+            candidate["updated_at"] = payload["promoted_at"]
+            candidate["promotion_request_revision"] = payload["candidate_provenance"][
+                "request_revision"
+            ]
+            data["last_updated"] = payload["promoted_at"]
+            updated_bank = bank_text
+        else:
+            if candidate is None:
+                raise CandidatePromotionError(
+                    f"candidate not found: {request.get('candidate_id')}"
+                )
+            validated = validate_candidate_promotion_request(
+                request,
+                candidate,
+                bank_text,
+                proposal=proposal,
+                decision=decision,
+            )
+            updated_bank, payload = apply_candidate_promotion(
+                data,
+                bank_text,
+                validated,
+                promotion_mode=promotion_mode,
+                auto_score=auto_score,
+                proposal=proposal,
+                decision=decision,
+            )
+            marker_line = _encode_marker(payload)
+            intended.update(
+                payload=payload,
+                marker_line=marker_line,
+                question_text=_candidate_text(candidate),
+            )
+        store_text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+        return exact_file_git.ExactFilePlan(
+            ((bank_relative, updated_bank), (store_relative, store_text)),
+            bank_relative,
+            marker_line,
+            f"Promote candidate {payload['candidate_id']} to {payload['question_id']}",
+        )
+
+    def validate(
+        snapshot: exact_file_git.Snapshot, plan: exact_file_git.ExactFilePlan
+    ) -> None:
+        expected_payload = intended.get("payload")
+        expected_text = intended.get("question_text")
+        expected_marker = intended.get("marker_line")
+        if not isinstance(expected_payload, dict) or not isinstance(expected_text, str):
+            raise CandidatePromotionError("promotion intended record is unavailable")
+        existing = _marker_for_candidate(
+            snapshot[bank_relative], _candidate_id(request.get("candidate_id"))
+        )
+        if existing is None:
+            raise CandidatePromotionError("promotion marker changed during rebase")
+        payload, marker_line, question_text = existing
+        if (
+            payload != expected_payload
+            or marker_line != expected_marker
+            or marker_line != plan.marker_line
+            or question_text != expected_text
+        ):
+            raise CandidatePromotionError(
+                "promotion intended record changed during rebase"
+            )
+        _assert_marker_matches_request(payload, request)
+        # Revalidate source, candidate text, category, placement, proposal, and
+        # decision facts whenever the repairable projection still has the row.
+        data = _parse_store_text(snapshot[store_relative])
+        candidates = data["candidates"]
+        candidate = next(
+            (
+                row
+                for row in candidates
+                if isinstance(row, dict)
+                and row.get("id") == request.get("candidate_id")
+            ),
+            None,
+        )
+        if candidate is not None:
+            validate_candidate_promotion_request(
+                request,
+                candidate,
+                snapshot[bank_relative],
+                proposal=proposal,
+                decision=decision,
+            )
+            if _candidate_text(candidate) != expected_text:
+                raise CandidatePromotionError(
+                    "promotion candidate question changed during rebase"
+                )
+
+    def transaction_failpoint(stage: str) -> None:
+        if not failpoint:
+            return
+        translated = {
+            f"after_write:{bank_relative}": "after_bank_write",
+            f"after_write:{store_relative}": "after_projection_write",
+        }.get(stage, stage)
+        failpoint(translated)
+
+    try:
+        result = exact_file_git.resolve_exact_file_transaction(
+            vault_root=root,
+            declared_paths=(bank_relative, store_relative),
+            decide=decide,
+            validate=validate,
+            push=push,
+            failpoint=transaction_failpoint,
+        )
+    except exact_file_git.ExactFileTransactionError as exc:
+        raise CandidatePromotionError(str(exc)) from exc
+    payload = intended.get("payload")
+    if not isinstance(payload, dict):
+        raise CandidatePromotionError("promotion intended record is unavailable")
+    return _receipt(payload, result.commit_sha, changed=result.changed)
 
 
 def resolve_candidate_promotion(
@@ -905,22 +935,26 @@ def resolve_candidate_promotion(
     push: bool = True,
     failpoint: Callable[[str], None] | None = None,
     auto_score: float | None = None,
+    proposal: object | None = None,
+    decision: dict | None = None,
 ) -> dict:
     """Resolve, commit, optionally push, and return an idempotent receipt."""
     if not isinstance(request, dict) or frozenset(request) != REQUEST_KEYS:
         raise CandidatePromotionError("promotion request keys are invalid")
+    _assert_bound_interaction_objects(request, proposal=proposal, decision=decision)
     root, bank_path, store_path = _paths(vault_root)
-    with _writer(root):
-        return _resolve_locked(
-            dict(request),
-            root=root,
-            bank_path=bank_path,
-            store_path=store_path,
-            promotion_mode=promotion_mode,
-            push=push,
-            failpoint=failpoint,
-            auto_score=auto_score,
-        )
+    return _resolve_locked(
+        dict(request),
+        root=root,
+        bank_path=bank_path,
+        store_path=store_path,
+        promotion_mode=promotion_mode,
+        push=push,
+        failpoint=failpoint,
+        auto_score=auto_score,
+        proposal=proposal,
+        decision=decision,
+    )
 
 
 def resolve_candidate_promotions(
@@ -948,6 +982,8 @@ def build_current_request(
     category_id: str,
     *,
     vault_root: str | Path | None = None,
+    proposal: object | None = None,
+    decision: dict | None = None,
 ) -> dict:
     root, bank_path, store_path = _paths(vault_root)
     bank = read_vault_text(bank_path, vault_root=root)
@@ -962,7 +998,13 @@ def build_current_request(
     )
     if candidate is None:
         raise CandidatePromotionError(f"candidate not found: {candidate_id}")
-    return build_candidate_promotion_request(candidate, bank, category_id)
+    return build_candidate_promotion_request(
+        candidate,
+        bank,
+        category_id,
+        proposal=proposal,
+        decision=decision,
+    )
 
 
 def build_revision_bound_request(
@@ -975,10 +1017,26 @@ def build_revision_bound_request(
     source_revision: str | None = None,
     proposal_revision: str | None = None,
     decision_revision: str | None = None,
+    proposal: object | None = None,
+    decision: dict | None = None,
     vault_root: str | Path | None = None,
 ) -> dict:
     """Build the stable CLI request while rejecting stale caller-held facts."""
-    request = build_current_request(candidate_id, category_id, vault_root=vault_root)
+    if proposal_revision is not None and proposal is None:
+        raise CandidatePromotionError(
+            "proposal_revision requires the exact bound proposal object"
+        )
+    if decision_revision is not None and decision is None:
+        raise CandidatePromotionError(
+            "decision_revision requires the exact bound decision object"
+        )
+    request = build_current_request(
+        candidate_id,
+        category_id,
+        vault_root=vault_root,
+        proposal=proposal,
+        decision=decision,
+    )
     supplied = {
         "candidate_revision": _revision(candidate_revision, name="candidate_revision"),
         "category_revision": _revision(category_revision, name="category_revision"),
@@ -989,12 +1047,17 @@ def build_revision_bound_request(
     for field, value in supplied.items():
         if request[field] != value:
             raise CandidatePromotionError(f"promotion request {field} is stale")
-    request["proposal_revision"] = _nullable_revision(
-        proposal_revision, name="proposal_revision"
-    )
-    request["decision_revision"] = _nullable_revision(
-        decision_revision, name="decision_revision"
-    )
+    supplied_bindings = {
+        "proposal_revision": _nullable_revision(
+            proposal_revision, name="proposal_revision"
+        ),
+        "decision_revision": _nullable_revision(
+            decision_revision, name="decision_revision"
+        ),
+    }
+    for field, value in supplied_bindings.items():
+        if request[field] != value:
+            raise CandidatePromotionError(f"promotion request {field} is stale")
     return request
 
 

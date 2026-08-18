@@ -1,7 +1,7 @@
 {
   "version": 182,
   "released": "2026-08-18",
-  "changelog": "v182: feat(170): add the canonical idempotent candidate-promotion receipt authority (ADR 0019). Manual, weekly-auto, and neighborhood promotion now share one revision-bound writer-serialized mutation that emits a strict base64 provenance marker, commits only the question bank and candidate projection, pushes without force, and reconstructs the same canonical question_id/category/commit_sha receipt from Git tree history after retries or crashes. Conflicting bytes, candidate/category/placement revisions, proposal/decision hashes, and legacy text-only matches fail closed. The stable candidates-promotion-receipt JSON CLI supplies the downstream platform handoff; candidate-promote becomes safely retryable. Question Candidate v181 and ordinary Conversation bytes remain unchanged, and starting Play still never promotes.",
+  "changelog": "v182: feat(170): add the canonical idempotent candidate-promotion receipt authority (ADR 0019). Manual, weekly-auto, and neighborhood promotion now share one revision-bound mutation over the public closed-path exact_file_git transaction adapter: it holds the root-aware writer lease, commits only declared files, pushes without force, revalidates the entire intended candidate/question/provenance record after rebase, and reconstructs the first canonical question_id/category/commit_sha receipt from Git history after retries or crashes. Conflicting bytes, candidate/category/placement revisions, unproved proposal/decision hashes, and legacy text-only matches fail closed. The stable candidates-promotion-receipt JSON CLI supplies exact bound interaction objects through bounded stdin when hashes are non-null. Question Candidate v181 and ordinary Conversation bytes remain unchanged, and starting Play still never promotes.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -132,6 +132,7 @@
     "system/ask.py",
     "system/book.py",
     "system/candidate_promotion.py",
+    "system/exact_file_git.py",
     "system/classify_story.py",
     "system/compile_and_commit.sh",
     "system/compose.py",
@@ -216,6 +217,7 @@
     "tests/tempdirs.py",
     "tests/test_artifact_workflow.py",
     "tests/test_candidate_promotion.py",
+    "tests/test_exact_file_git.py",
     "tests/test_connectors.py",
     "tests/test_conversation_delivery.py",
     "tests/test_ingest_and_planner.py",

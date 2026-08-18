@@ -491,6 +491,13 @@ def cmd_candidates_promote(args: argparse.Namespace) -> int:
 def cmd_candidates_promotion_receipt(args: argparse.Namespace) -> int:
     import candidate_promotion
     try:
+        proposal = None
+        decision = None
+        if args.question_candidate_binding_stdin:
+            raw = sys.stdin.read(1_000_001)
+            proposal, decision = candidate_promotion.parse_question_candidate_bindings(
+                raw
+            )
         request = candidate_promotion.build_revision_bound_request(
             args.candidate_id, args.category,
             candidate_revision=args.candidate_revision,
@@ -499,10 +506,18 @@ def cmd_candidates_promotion_receipt(args: argparse.Namespace) -> int:
             source_revision=args.source_revision,
             proposal_revision=args.proposal_revision,
             decision_revision=args.decision_revision,
+            proposal=proposal,
+            decision=decision,
             vault_root=REPO_DIR,
         )
         receipt = candidate_promotion.resolve_candidate_promotion(
-            request, vault_root=REPO_DIR, promotion_mode="manual", push=True)
+            request,
+            vault_root=REPO_DIR,
+            promotion_mode="manual",
+            push=True,
+            proposal=proposal,
+            decision=decision,
+        )
     except candidate_promotion.CandidatePromotionError as exc:
         print(f"candidate-promotion: {exc}", file=sys.stderr)
         return 2
@@ -2043,6 +2058,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source-revision")
     p.add_argument("--proposal-revision")
     p.add_argument("--decision-revision")
+    p.add_argument("--question-candidate-binding-stdin", action="store_true")
     p.add_argument("--json", action="store_true", required=True)
     p.set_defaults(func=cmd_candidates_promotion_receipt)
 

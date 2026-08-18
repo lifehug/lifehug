@@ -28,6 +28,10 @@ enter planning or answer filing.
   and candidate-store compatibility helpers, but manual promotion,
   `auto_promote_candidates()`, and `promote_neighborhood()` may not allocate,
   render, write, commit, or adopt promoted questions independently.
+- `system/exact_file_git.py` is the one generic exact-file Git
+  transaction/adoption adapter, and promotion must consume it. No sibling
+  writer implementation is allowed; domain callbacks receive immutable file
+  text only and cannot expand the declared write roster.
 - The v181 `interactions/question_candidate/` package, registry, schemas,
   prompts, and eval contract remain independent and byte-identical. Ordinary
   Conversation definition/rendered bytes remain v180-identical. PR B adds no
@@ -69,9 +73,11 @@ missing keys:
   revision exactly as v181 placement does.
 - `proposal_revision` and `decision_revision` are nullable canonical hashes.
   Manual, weekly-auto, and neighborhood promotion use null because no Question
-  Candidate proposal/decision occurred. Answer Now supplies hashes of the
-  exact untrusted proposal and validated decision; full conversation text is
-  never written into the bank marker.
+  Candidate proposal/decision occurred. A non-null hash is valid only when the
+  same resolver call supplies the exact proposal/decision object and its
+  canonical hash matches; hash-shaped free-floating metadata fails closed.
+  Answer Now supplies both hashes and objects through the bounded stdin binding
+  envelope; full conversation text is never written into the bank marker.
 - A supplied Question Candidate decision must revalidate against the current
   candidate/category roster, be `complete`/`answered`, have a durable answer,
   and name this exact category. A model proposal alone never authorizes a
@@ -168,7 +174,9 @@ The exact `CandidatePromotionReceipt` schema is:
 - With `push=True`, pull/rebase happens before reading decision state. A pull,
   rebase, commit, history-resolution, or push ambiguity fails closed and never
   fabricates a receipt. Push rejection may pull/rebase and retry only after the
-  exact marker/request/question are revalidated.
+  exact marker adjacency, question text/bytes and revision, request provenance
+  and hashes, and canonical intended record are revalidated from fresh bytes.
+  Marker presence alone never authorizes retry or adoption.
 - Two same-request contenders serialize: one writes; the other adopts and
   returns `changed:false`. Two different candidates in one category allocate
   distinct ids. Same candidate with changed text/category/revisions conflicts.
@@ -211,7 +219,23 @@ validate_candidate_promotion_request(
     candidate: dict,
     question_bank_text: str,
     *,
+    proposal: object | None = None,
     decision: dict | None = None,
+) -> dict
+
+build_revision_bound_request(
+    candidate_id: str,
+    category_id: str,
+    *,
+    candidate_revision: str,
+    category_revision: str,
+    placement_revision: str,
+    source_revision: str | None = None,
+    proposal_revision: str | None = None,
+    decision_revision: str | None = None,
+    proposal: object | None = None,
+    decision: dict | None = None,
+    vault_root: str | Path | None = None,
 ) -> dict
 
 resolve_candidate_promotion(
@@ -221,6 +245,8 @@ resolve_candidate_promotion(
     promotion_mode: str = "manual",
     push: bool = True,
     failpoint: Callable[[str], None] | None = None,
+    proposal: object | None = None,
+    decision: dict | None = None,
 ) -> dict
 
 resolve_candidate_promotions(
@@ -232,6 +258,34 @@ resolve_candidate_promotions(
 ) -> list[dict]
 ```
 
+`system/exact_file_git.py` exposes the single reusable lower-level authority:
+
+```python
+@dataclass(frozen=True)
+class ExactFilePlan:
+    writes: tuple[tuple[str, str], ...]
+    marker_path: str
+    marker_line: str
+    commit_message: str
+
+resolve_exact_file_transaction(
+    *,
+    vault_root: str | Path,
+    declared_paths: tuple[str, ...],
+    decide: Callable[[Mapping[str, str]], ExactFilePlan],
+    validate: Callable[[Mapping[str, str], ExactFilePlan], None],
+    push: bool = True,
+    failpoint: Callable[[str], None] | None = None,
+) -> ExactFileResult
+```
+
+The adapter owns the root-aware writer lease, pull-before-locked-decision,
+atomic replacements, `commit --only`, first exact-marker commit resolution,
+push/rebase retry, and mandatory post-rebase validation hook. Snapshots are
+immutable, plans may write only their up-front closed path roster (maximum
+eight), and marker/path/message syntax is bounded. It is not a second writer
+or an arbitrary Git callback surface. Candidate promotion itself uses it.
+
 The final resolver door is:
 
 ```text
@@ -242,12 +296,17 @@ python3 system/lifehug.py candidates-promotion-receipt \
   --placement-revision <sha256:...> \
   [--source-revision <sha256:...>] \
   [--proposal-revision <sha256:...>] \
-  [--decision-revision <sha256:...>] --json
+  [--decision-revision <sha256:...>] \
+  [--question-candidate-binding-stdin] --json
 ```
 
 - The CLI builds an exact closed request, requires JSON mode, runs the resolver,
   and prints exactly one compact receipt object to stdout. Diagnostics go to
-  stderr. `--no-push` exists only on `system/candidate_promotion.py`'s direct
+  stderr. When either interaction revision is non-null,
+  `--question-candidate-binding-stdin` is mandatory and stdin is a bounded JSON
+  object with exact keys `{proposal,decision}`; each supplied hash is recomputed
+  from that object before mutation. `--no-push` exists only on
+  `system/candidate_promotion.py`'s direct
   test/development CLI, not the stable `lifehug.py` door.
 - `source_revision` may be omitted only for backward-compatible local callers;
   the resolver then requires it to equal the fresh canonical candidate source
@@ -321,7 +380,11 @@ Add `tests/test_candidate_promotion.py` with named state-machine cases:
 - concurrent same-request race produces one question/commit identity; two
   distinct candidates in one category produce distinct qids;
 - unrelated staged/unstaged files survive and are absent from the promotion
-  commit; push rejection/rebase revalidates or fails closed;
+  commit; push rejection/rebase with an unchanged marker but changed preceding
+  question bytes fails closed before retry;
+- the public exact-file adapter rejects path escape/undeclared writes, commits
+  only its closed roster, resolves the first marker commit, and requires its
+  domain validator after rebase;
 - compact final CLI receipt and error-channel behavior;
 - all manual/auto/neighborhood paths use the authority, preserve their status
   and summaries, and the recurring-defect source scan finds no bypass.
@@ -339,6 +402,7 @@ Exact local gates (no broad full suite while sibling agents share the host):
 ```bash
 python3 -m unittest \
   tests.test_candidate_promotion \
+  tests.test_exact_file_git \
   tests.test_ingest_and_planner \
   tests.test_unified_quality_score \
   tests.test_lifehug_wrapper \
@@ -356,9 +420,11 @@ python3 scripts/ci/check_version_bump.py --base bb7ff387 --head HEAD
 python3 -m compileall -q system tests
 ruff check --select E4,E7,E9,F,I,UP,B --ignore E402 \
   system/candidate_promotion.py system/question_candidates.py system/lifehug.py \
-  system/jobs.py system/roadmap.py tests/test_candidate_promotion.py
+  system/exact_file_git.py system/jobs.py system/roadmap.py \
+  tests/test_candidate_promotion.py tests/test_exact_file_git.py
 # Legacy modules predate the formatter baseline; format only new v182 files.
-ruff format --check system/candidate_promotion.py tests/test_candidate_promotion.py
+ruff format --check system/candidate_promotion.py system/exact_file_git.py \
+  tests/test_candidate_promotion.py tests/test_exact_file_git.py
 git diff --check
 ```
 
@@ -387,8 +453,8 @@ compact receipt command above.
    history instead of a projected receipt ledger.
 2. **One commit per promotion resolver transaction — yes/no?** Yes ratifies the
    crash-recovery boundary for manual, auto, and neighborhood paths.
-3. **Hash-only proposal/decision binding — yes/no?** Yes keeps private answer
-   text out of the question bank while binding the exact objects.
+3. **Object-proved hash binding — yes/no?** Yes requires the exact interaction
+   objects at mutation time while keeping their private content out of the bank.
 4. **Legacy non-adoption — yes/no?** Yes refuses text-matched guesses for
    pre-v182 promotions without the structured marker.
 
