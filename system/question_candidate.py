@@ -449,13 +449,12 @@ def lint_inherited_reply(
     )
 
 
-def _question_is_valid(question: str, *, reply: str, substantive: bool) -> bool:
+def _question_is_valid(question: str, *, reply: str) -> bool:
     if question.count("?") != 1 or not question.rstrip().endswith("?"):
         return False
     if reply.count(question) != 1:
         return False
-    findings = lint_inherited_reply(reply, is_reply_to_substantive=substantive)
-    return not findings and reply.count("?") == 1
+    return reply.count("?") == 1
 
 
 def parse_question_candidate_output(raw: object, *, payload: dict) -> dict:
@@ -495,6 +494,10 @@ def parse_question_candidate_output(raw: object, *, payload: dict) -> dict:
             return _invalid(canonical)
         if turn_kind not in VALID_TURN_KINDS:
             return _invalid(canonical, reply=reply)
+        if lint_inherited_reply(
+            reply, is_reply_to_substantive=len(latest.strip()) >= 20
+        ):
+            return _invalid(canonical, turn_kind=turn_kind, reply=reply)
 
     action = proposal["placement_action"]
     confidence = proposal["confidence"]
@@ -549,7 +552,7 @@ def parse_question_candidate_output(raw: object, *, payload: dict) -> dict:
     except QuestionCandidateError:
         return _invalid(canonical, turn_kind=turn_kind, reply=reply)
     if confidence >= threshold or not _question_is_valid(
-        placement_question, reply=reply, substantive=len(latest.strip()) >= 20
+        placement_question, reply=reply
     ):
         return _invalid(canonical, turn_kind=turn_kind, reply=reply)
     if canonical["previous_placement_question"] == placement_question:
@@ -634,11 +637,8 @@ def validate_question_candidate_decision(
         raise QuestionCandidateError("decision status/outcome is inconsistent")
     if decision["status"] == "complete" and not completion["complete"]:
         raise QuestionCandidateError("complete status requires complete facts")
-    if (
-        decision["candidate_id"] != candidate["candidate_id"]
-        or decision["candidate_revision"] != candidate["candidate_revision"]
-        or decision["source_revision"] != candidate["source_revision"]
-    ):
+
+    def invalidated() -> dict:
         return {
             **decision,
             "status": "invalid",
@@ -652,41 +652,29 @@ def validate_question_candidate_decision(
                 candidate_outcome=None,
             ),
         }
+
+    if (
+        decision["candidate_id"] != candidate["candidate_id"]
+        or decision["candidate_revision"] != candidate["candidate_revision"]
+        or decision["source_revision"] != candidate["source_revision"]
+    ):
+        return invalidated()
     if decision["category_id"] is None:
+        if (
+            decision["category_revision"] is not None
+            or decision["placement_revision"] is not None
+        ):
+            return invalidated()
         return dict(decision)
     category = _category(roster, decision["category_id"])
     if (
         category is None
         or category["category_revision"] != decision["category_revision"]
     ):
-        return {
-            **decision,
-            "status": "invalid",
-            "candidate_outcome": None,
-            "category_id": None,
-            "category_revision": None,
-            "placement_revision": None,
-            "completion": _completion(
-                answer_status=decision["answer_status"],
-                placement_resolved=False,
-                candidate_outcome=None,
-            ),
-        }
+        return invalidated()
     expected = _placement_revision(candidate["candidate_revision"], category)
     if decision["placement_revision"] != expected:
-        return {
-            **decision,
-            "status": "invalid",
-            "candidate_outcome": None,
-            "category_id": None,
-            "category_revision": None,
-            "placement_revision": None,
-            "completion": _completion(
-                answer_status=decision["answer_status"],
-                placement_resolved=False,
-                candidate_outcome=None,
-            ),
-        }
+        return invalidated()
     return dict(decision)
 
 

@@ -72,6 +72,14 @@ class QuestionCandidateEvalTests(unittest.TestCase):
         direct = eval_gates.check_score_gates(scores, gates, prefix="router_gates")
         self.assertEqual(interaction_evals.check_router_gates(scores, gates), direct)
 
+    def test_inherited_lints_cover_every_model_reply_action(self):
+        payload = next(
+            row["input"]
+            for row in qce.load_fixtures()
+            if row["input"]["latest_user_turn"] is not None
+        )
+        self.assertEqual(qce.inherited_lint_action_failures(payload), [])
+
     def test_live_seat_skips_loudly_without_provider(self):
         result = qce.run_live(
             qce.load_fixtures(),

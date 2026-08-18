@@ -54,12 +54,12 @@ class RegistryContractTests(unittest.TestCase):
         child = (
             ROOT / "interactions/question_candidate/prompt/behavior.md"
         ).read_text()
-        self.assertIn(parent.rstrip(), composed)
-        self.assertIn(child.rstrip(), composed)
-        self.assertLess(composed.index(parent.rstrip()), composed.index(child.rstrip()))
-        self.assertIn("interaction:conversation asset:prompt/behavior.md", composed)
-        self.assertIn(
-            "interaction:question_candidate asset:prompt/behavior.md", composed
+        self.assertEqual(
+            composed,
+            "<!-- interaction:conversation asset:prompt/behavior.md -->\n"
+            + parent
+            + "\n<!-- interaction:question_candidate asset:prompt/behavior.md -->\n"
+            + child,
         )
 
     def test_leaf_composition_uses_only_child_authority(self):
@@ -99,6 +99,51 @@ class RegistryContractTests(unittest.TestCase):
             registry.compose_interaction_asset("question_candidate", "README.md")
         with self.assertRaises(registry.InteractionRegistryError):
             registry.compose_interaction_asset("question_candidate", "../version.json")
+
+    def test_direct_composition_rejects_manifest_declared_noncomposable_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(ROOT / "interactions", root / "interactions")
+            manifest = root / "interactions/question_candidate/interaction.yaml"
+            manifest.write_text(
+                manifest.read_text().replace(
+                    "composition.leaf: prompt/turn-instructions.md|context/manifest.md",
+                    "composition.leaf: prompt/turn-instructions.md|context/manifest.md|README.md",
+                )
+            )
+            with self.assertRaises(registry.InteractionRegistryError):
+                registry.compose_interaction_asset(
+                    "question_candidate", "README.md", framework_root=root
+                )
+            self.assertTrue(
+                registry.audit_interaction_package(
+                    "question_candidate", framework_root=root
+                )
+            )
+
+    def test_composition_preserves_trailing_spaces_tabs_and_newlines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(ROOT / "interactions", root / "interactions")
+            parent = "parent line  \nparent tail\t"
+            child = "child line \t\n\n"
+            (root / "interactions/conversation/prompt/behavior.md").write_bytes(
+                parent.encode("utf-8")
+            )
+            (root / "interactions/question_candidate/prompt/behavior.md").write_bytes(
+                child.encode("utf-8")
+            )
+            self.assertEqual(
+                registry.compose_interaction_asset(
+                    "question_candidate",
+                    "prompt/behavior.md",
+                    framework_root=root,
+                ),
+                "<!-- interaction:conversation asset:prompt/behavior.md -->\n"
+                + parent
+                + "\n<!-- interaction:question_candidate asset:prompt/behavior.md -->\n"
+                + child,
+            )
 
     def test_unregistered_package_is_not_executable(self):
         with tempfile.TemporaryDirectory() as tmp:

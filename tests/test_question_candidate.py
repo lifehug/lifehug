@@ -237,6 +237,41 @@ class LifecycleAndProposalTests(QuestionCandidateCase):
         self.assertEqual(decision["turn_kind"], "answer")
         self.assertIn("detail", decision["reply"])
 
+    def test_every_placement_action_enforces_inherited_conversation_lints(self):
+        cases = {
+            "resolved": proposal(reply="That must have been difficult."),
+            "defer": proposal(
+                reply="That must have been difficult.",
+                action="defer",
+                category_id=None,
+                confidence=0.5,
+            ),
+            "ask_now": proposal(
+                reply="That must have been difficult. Who were you going through it with?",
+                turn_kind="mixed",
+                action="ask_now",
+                category_id=None,
+                confidence=0.4,
+                question="Who were you going through it with?",
+            ),
+        }
+        for action, model_output in cases.items():
+            with self.subTest(action=action):
+                self.assertEqual(
+                    qc.parse_question_candidate_output(
+                        model_output, payload=self.payload()
+                    )["status"],
+                    "invalid",
+                )
+
+    def test_resolved_reply_with_two_questions_fails_inherited_lint(self):
+        decision = qc.parse_question_candidate_output(
+            proposal(reply="Was it family? Or was it work?"),
+            payload=self.payload(),
+        )
+        self.assertEqual(decision["status"], "invalid")
+        self.assertIsNone(decision["category_id"])
+
     def test_natural_question_may_happen_during_or_after(self):
         reply = "That whole season changed around the waiting. Who were you going through it with?"
         question = "Who were you going through it with?"
@@ -367,6 +402,28 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
                 current_candidate=self.anchor,
                 current_roster=self.roster,
             )
+
+    def test_unplaced_revalidation_rejects_forged_or_stale_revisions(self):
+        decision = qc.parse_question_candidate_output(
+            proposal(action="defer", category_id=None, confidence=0.5),
+            payload=self.payload(),
+        )
+        self.assertIsNone(decision["category_id"])
+        for field in ("category_revision", "placement_revision"):
+            with self.subTest(field=field):
+                forged = {
+                    **decision,
+                    field: "sha256:" + "0" * 64,
+                }
+                rejected = qc.validate_question_candidate_decision(
+                    forged,
+                    current_candidate=self.anchor,
+                    current_roster=self.roster,
+                )
+                self.assertEqual(rejected["status"], "invalid")
+                self.assertIsNone(rejected["category_id"])
+                self.assertIsNone(rejected["category_revision"])
+                self.assertIsNone(rejected["placement_revision"])
 
     def test_read_only_cli_prints_composed_prompt(self):
         proc = subprocess.run(

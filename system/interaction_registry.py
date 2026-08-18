@@ -34,6 +34,17 @@ REQUIRED_FILES = frozenset(
         "evals/goldens/README.md",
     }
 )
+COMPOSABLE_FILES = frozenset(
+    {
+        "prompt/identity.md",
+        "prompt/behavior.md",
+        "prompt/examples.md",
+        "prompt/turn-instructions.md",
+        "context/manifest.md",
+        "router/router.md",
+        "router/deflection.md",
+    }
+)
 ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -198,6 +209,11 @@ def _composition_policy(
         raise InteractionRegistryError(
             "composition.append and composition.leaf overlap"
         )
+    unknown = (append | leaf) - COMPOSABLE_FILES
+    if unknown:
+        raise InteractionRegistryError(
+            f"composition contains unknown assets: {sorted(unknown)}"
+        )
     if manifest.get("extends") and (not append or not leaf):
         raise InteractionRegistryError(
             "child composition requires append and leaf assets"
@@ -213,6 +229,10 @@ def compose_interaction_asset(
 ) -> str:
     """Compose one manifest-declared asset with deterministic provenance."""
     relative_path = _relative_path(relative_path, name="relative_path")
+    if relative_path not in COMPOSABLE_FILES:
+        raise InteractionRegistryError(
+            f"{relative_path} is not a composable Interaction asset"
+        )
     lineage = resolve_interaction_lineage(interaction_id, framework_root=framework_root)
     if len(lineage) == 1:
         packages = lineage
@@ -232,13 +252,13 @@ def compose_interaction_asset(
     for package in packages:
         path = _package_dir(package, framework_root=framework_root) / relative_path
         try:
-            source = path.read_text(encoding="utf-8")
-        except OSError as exc:
+            source = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
             raise InteractionRegistryError(
                 f"missing composed asset {package}/{relative_path}"
             ) from exc
         marker = f"<!-- interaction:{package} asset:{relative_path} -->"
-        chunks.append(f"{marker}\n{source.rstrip()}\n")
+        chunks.append(f"{marker}\n{source}")
     return "\n".join(chunks)
 
 
@@ -273,18 +293,7 @@ def audit_interaction_package(
                 errors.append(f"missing required asset: {relative_path}")
     if manifest.get("extends"):
         declared = append | leaf
-        required_composed = frozenset(
-            {
-                "prompt/identity.md",
-                "prompt/behavior.md",
-                "prompt/examples.md",
-                "prompt/turn-instructions.md",
-                "context/manifest.md",
-                "router/router.md",
-                "router/deflection.md",
-            }
-        )
-        if declared != required_composed:
+        if declared != COMPOSABLE_FILES:
             errors.append(
                 "composition policy must cover every prompt/context/router asset exactly"
             )

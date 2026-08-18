@@ -244,9 +244,11 @@ For an engaged turn the composed prompt requests one JSON object and no prose:
 - Confidence is a real number in `[0, 1]`; booleans are invalid. Category ids
   below threshold are cleared. Out-of-roster ids invalidate placement but do
   not discard a separately valid turn kind or caller-held answer.
-- Placement questions pass the Conversation lints and may not expose ids,
-  offer a menu, ask yes/no, presuppose a category, contain multiple questions,
-  or repeat a question the user already answered.
+- Every model-controlled `reply` passes the inherited Conversation lints for
+  `resolved`, `defer`, and `ask_now`; no placement action bypasses chat
+  mechanics. Placement questions additionally may not expose ids, offer a
+  menu, ask yes/no, presuppose a category, contain multiple questions, or
+  repeat a question the user already answered.
 
 The normalized `QuestionCandidateDecision` is:
 
@@ -287,7 +289,9 @@ The normalized `QuestionCandidateDecision` is:
   completion.
 - `placement_revision` hashes exactly candidate revision, category id, and
   selected category revision. Candidate or selected-category churn invalidates
-  it; unrelated roster churn does not.
+  it; unrelated roster churn does not. An unplaced decision must carry null
+  `category_revision` and null `placement_revision`; either non-null value is
+  forged or stale state and invalidates the decision.
 - The decision describes portable coordination facts. PR A performs no
   candidate/session/vault/Git mutation. A consuming coordinator revalidates the
   decision against current revisions before any durable transition.
@@ -384,7 +388,8 @@ Add or revise focused tests:
   clauses, and ordinary Conversation self-lineage.
 - `tests/test_question_candidate.py`: strict anchors/rosters/revisions,
   before/during/after prompt data, initial Play no modal/no promotion,
-  resolved/defer/ask-now consistency, reply/turn retention, injection boundary,
+  resolved/defer/ask-now consistency and inherited-lint action matrix,
+  reply/turn retention, injection boundary,
   threshold typing, decline/defer bypass, all completion permutations,
   staleness, read-only CLI, and ordinary Conversation v180 byte hashes.
 - `tests/test_question_candidate_evals.py`: independent fixture schemas,

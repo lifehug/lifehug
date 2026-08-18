@@ -223,6 +223,44 @@ def check_gates(
     return eval_gates.check_score_gates(scores, gates, prefix=GATE_PREFIX)
 
 
+def inherited_lint_action_failures(payload: dict) -> list[str]:
+    """Return actions whose structurally valid reply bypassed parent lints."""
+    outputs = {
+        "resolved": {
+            "reply": "That must have been difficult.",
+            "turn_kind": "answer",
+            "placement_action": "resolved",
+            "category_id": payload["roster"]["categories"][0]["category_id"],
+            "confidence": 0.95,
+            "placement_question": None,
+        },
+        "defer": {
+            "reply": "That must have been difficult.",
+            "turn_kind": "answer",
+            "placement_action": "defer",
+            "category_id": None,
+            "confidence": 0.5,
+            "placement_question": None,
+        },
+        "ask_now": {
+            "reply": "That must have been difficult. Who were you going through it with?",
+            "turn_kind": "mixed",
+            "placement_action": "ask_now",
+            "category_id": None,
+            "confidence": 0.4,
+            "placement_question": "Who were you going through it with?",
+        },
+    }
+    return [
+        action
+        for action, output in outputs.items()
+        if question_candidate.parse_question_candidate_output(output, payload=payload)[
+            "status"
+        ]
+        != "invalid"
+    ]
+
+
 def run_live(
     fixtures: list[dict],
     *,
@@ -283,12 +321,23 @@ def run() -> tuple[int, str]:
         report.extend(f"  ✗ {failure}" for failure in failures)
         return 1, "\n".join(report)
     report.append(f"Layer 2 (sample gates): PASSED {len(load_gates())} gate classes")
-    # Structural proof that inherited Conversation lints execute in this seat.
+    # Structural proof that inherited Conversation lints execute for every
+    # model-controlled reply action in this seat.
     inherited_findings = question_candidate.lint_inherited_reply(
         "Did it happen? Or not?"
     )
-    if not any(row["lint"] == "one_question_per_turn" for row in inherited_findings):
+    action_payload = next(
+        fixture["input"]
+        for fixture in fixtures
+        if fixture["input"]["latest_user_turn"] is not None
+    )
+    action_failures = inherited_lint_action_failures(action_payload)
+    if (
+        not any(row["lint"] == "one_question_per_turn" for row in inherited_findings)
+        or action_failures
+    ):
         report.append("Layer 3 (inherited Conversation parity): FAILED")
+        report.extend(f"  ✗ lint bypass: {action}" for action in action_failures)
         return 1, "\n".join(report)
     report.append("Layer 3 (inherited Conversation parity): PASSED")
     live = run_live(fixtures)

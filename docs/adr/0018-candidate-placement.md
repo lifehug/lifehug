@@ -72,6 +72,9 @@ placement action:
 - `ask_now`: no id, below threshold, exactly one natural open placement
   question embedded as the sole question in the reply.
 
+Every model-controlled reply, including `resolved` and `defer`, passes the
+inherited Conversation lint engine before its placement action is accepted.
+
 The caller retains every original user turn independent of model metadata.
 Only the durable coordinator may attest `answer_status: durable`. An answered
 candidate becomes complete only when durable answer, revision-valid placement,
@@ -82,8 +85,10 @@ without a model judgment; Direct Promote bypasses this Interaction entirely.
 Canonical placement revisions bind the candidate revision, selected category
 id, and selected category revision, not the entire roster. Selected-category
 removal/rename/focus remapping invalidates placement; unrelated roster churn
-does not. PR A is pure coordination authority and writes no candidate, session,
-vault, question-bank, projection, or Git state.
+does not. An unplaced decision must carry neither a category revision nor a
+placement revision; any non-null value is rejected as forged or stale state.
+PR A is pure coordination authority and writes no candidate, session, vault,
+question-bank, projection, or Git state.
 
 Promotion remains separate. PR B will own question-id allocation, idempotency,
 question-bank/candidate mutation, provenance, Git commit, and a structured
