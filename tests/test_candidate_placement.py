@@ -580,25 +580,21 @@ class OrdinaryConversationByteIdentityTests(unittest.TestCase):
         manifest = conversation.load_interaction_manifest()
         self.assertEqual(manifest["modes"], "chat|conversation")
         self.assertEqual(manifest["steps"], "turn|close|candidate_placement")
-        diff = subprocess.run(
-            [
-                "git",
-                "diff",
-                "886e96918e2da3c672e3aef73081c4453e2bf677",
-                "--",
-                "interactions/conversation/prompt/behavior.md",
-                "interactions/conversation/prompt/examples.md",
-                "interactions/conversation/prompt/turn-instructions.md",
-                "interactions/conversation/context/manifest.md",
-                "interactions/conversation/router",
-                "interactions/conversation/plan",
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        self.assertEqual(diff.stdout, "")
+        frozen_v180_hashes = {
+            "prompt/behavior.md": "c2e8dbfb2a26d12cc75a4c0420fe714d3836b67ebb105bc6e85db4831d8e9aad",
+            "prompt/examples.md": "f24be4c0ff2bde524d1c2ecfb667ac1ef613f80d8ba36aee6f6e55bc52e4fda6",
+            "prompt/turn-instructions.md": "1f60bc704f15fe083df00b3c90804ccb45708b40b796b0dd0557da56d71241e7",
+            "context/manifest.md": "8e6724a6d262282701742adbbad923caaedc1fcb85372c442636b2063c2763d9",
+            "router/deflection.md": "7e5804812e99affac6e71aa19a01e2c039ab38392e7e5697e9759e85fa9a38f1",
+            "router/router.md": "35153bdd414b0d262912bed9bd81c3e5d0ecff1eeccf880c76cfe1c939639a0c",
+            "plan/arc-templates.md": "fb8298407e88c7bff87b038350e0620b4ea185177e62f57e705aad2b37c35216",
+        }
+        definition_root = ROOT / "interactions" / "conversation"
+        actual = {
+            relative: hashlib.sha256((definition_root / relative).read_bytes()).hexdigest()
+            for relative in frozen_v180_hashes
+        }
+        self.assertEqual(actual, frozen_v180_hashes)
 
 
 if __name__ == "__main__":
