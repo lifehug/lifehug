@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,8 +37,17 @@ class SyntheticGitAuthority:
     def _commit(source_bytes: bytes) -> str:
         return hashlib.sha1(b"synthetic-commit\0" + source_bytes).hexdigest()
 
-    def resolve_exact_source(self, plan, *, vault_root=None, push=True, failpoint=None):
+    def resolve_exact_source(
+        self,
+        plan,
+        *,
+        vault_root=None,
+        push=True,
+        failpoint=None,
+        revalidate_current_subject,
+    ):
         del vault_root
+        revalidate_current_subject()
         path = plan["source_path"]
         identity = (plan["candidate_kind"], plan["candidate_id"])
         other_path = self.marker_paths.get(identity)
@@ -144,6 +154,7 @@ def _focus_assessment(*, confirmed=False, missing_dimension=None):
             end=len(turns[-1]["text"]),
             confirmed_at="2026-08-18T20:00:00Z",
             authoritative_turns=turns,
+            current_subject=subject,
         )
     return subject, turns, assessment
 
@@ -246,6 +257,10 @@ class SubjectAuthorityTests(unittest.TestCase):
             research.build_entity_candidate_subject(
                 "object", {**base, "owner_verdict": "maybe"}
             )
+        with self.assertRaisesRegex(research.CandidateResearchError, "must be boolean"):
+            research.build_entity_candidate_subject(
+                "object", {**base, "page_eligible": 1}
+            )
         self.assertEqual(
             research.build_entity_candidate_subject(
                 "object", {**base, "page_eligible": True}
@@ -322,6 +337,38 @@ class EvidenceTests(unittest.TestCase):
 
 
 class AssessmentTests(unittest.TestCase):
+    def test_confirmation_cannot_reuse_or_overlap_substantive_evidence(self):
+        subject, turns, ready = _focus_assessment()
+        evidence_turn = turns[0]
+        with self.assertRaisesRegex(
+            research.CandidateResearchError, "must not overlap substantive evidence"
+        ):
+            research.build_research_confirmation(
+                ready,
+                turn=evidence_turn,
+                start=0,
+                end=len(evidence_turn["text"]),
+                confirmed_at="2026-08-18T20:00:00Z",
+                authoritative_turns=turns,
+                current_subject=subject,
+            )
+
+    def test_boolean_schema_and_readiness_integers_fail_closed(self):
+        subject, turns, assessment = _focus_assessment(confirmed=True)
+        forged_subject = {**subject, "schema_version": True}
+        with self.assertRaisesRegex(research.CandidateResearchError, "integer 1"):
+            research.validate_candidate_research_subject(
+                forged_subject, require_active=True
+            )
+        forged = copy.deepcopy(assessment)
+        forged["readiness"]["substantive_evidence_count"] = True
+        with self.assertRaisesRegex(
+            research.CandidateResearchError, "must be an integer"
+        ):
+            research.validate_research_assessment(
+                forged, authoritative_turns=turns, current_subject=subject
+            )
+
     def test_readiness_is_recomputed_and_confirmation_is_separate(self):
         _subject, turns, not_ready = _focus_assessment(
             missing_dimension="why_it_matters"
@@ -337,6 +384,7 @@ class AssessmentTests(unittest.TestCase):
                 end=len(turns[-1]["text"]),
                 confirmed_at="2026-08-18T20:00:00Z",
                 authoritative_turns=turns,
+                current_subject=not_ready["subject"],
             )
 
         _subject, turns, ready = _focus_assessment()
@@ -349,6 +397,7 @@ class AssessmentTests(unittest.TestCase):
             end=len(turns[-1]["text"]),
             confirmed_at="2026-08-18T20:00:00Z",
             authoritative_turns=turns,
+            current_subject=ready["subject"],
         )
         self.assertTrue(confirmed["complete"])
         self.assertNotEqual(ready["research_revision"], confirmed["research_revision"])
@@ -358,13 +407,17 @@ class AssessmentTests(unittest.TestCase):
         forged = copy.deepcopy(assessment)
         forged["readiness"]["substantive_evidence_count"] = 99
         with self.assertRaisesRegex(research.CandidateResearchError, "readiness"):
-            research.validate_research_assessment(forged, authoritative_turns=turns)
+            research.validate_research_assessment(
+                forged, authoritative_turns=turns, current_subject=forged["subject"]
+            )
         forged = copy.deepcopy(assessment)
         forged["confirmation"]["assessment_revision"] = canonical_revision("stale")
         with self.assertRaisesRegex(
             research.CandidateResearchError, "stale assessment"
         ):
-            research.validate_research_assessment(forged, authoritative_turns=turns)
+            research.validate_research_assessment(
+                forged, authoritative_turns=turns, current_subject=forged["subject"]
+            )
 
     def test_focus_requires_three_spans_concrete_and_two_non_evidence_questions(self):
         subject = research.build_focus_candidate_subject(FOCUS_RECOMMENDATION)
@@ -405,6 +458,152 @@ class AssessmentTests(unittest.TestCase):
 
 
 class SourceAndReceiptTests(unittest.TestCase):
+    def test_disk_tree_restart_ignores_manifest_and_rejects_unmarked_or_contenders(
+        self,
+    ):
+        from tests.walkthrough_candidate_research import SyntheticFileAuthority
+
+        subject, turns, assessment = _focus_assessment(confirmed=True)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            kwargs = {
+                "authoritative_turns": turns,
+                "current_subject_loader": lambda: subject,
+                "vault_root": root,
+                "push": False,
+            }
+            first = research.resolve_candidate_research_source(
+                assessment, authority=SyntheticFileAuthority(), **kwargs
+            )
+            manifest = root / "state" / "source_manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('{"sources":{"stale":true}}', encoding="utf-8")
+            restarted = research.resolve_candidate_research_source(
+                assessment, authority=SyntheticFileAuthority(), **kwargs
+            )
+            self.assertTrue(first["changed"])
+            self.assertFalse(restarted["changed"])
+            manifest.unlink()
+            self.assertFalse(
+                research.resolve_candidate_research_source(
+                    assessment, authority=SyntheticFileAuthority(), **kwargs
+                )["changed"]
+            )
+
+            source_path = root / first["source_path"]
+            valid_bytes = source_path.read_bytes()
+            marker = next(
+                line
+                for line in valid_bytes.decode("utf-8").splitlines()
+                if line.startswith(research.MARKER_PREFIX)
+            )
+            source_path.write_text(
+                valid_bytes.decode("utf-8").replace(marker + "\n", "", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaises(research.CandidateResearchConflict):
+                research.resolve_candidate_research_source(
+                    assessment, authority=SyntheticFileAuthority(), **kwargs
+                )
+
+            source_path.write_bytes(valid_bytes)
+            contender = source_path.with_name("contender.md")
+            contender.write_bytes(valid_bytes)
+            with self.assertRaisesRegex(
+                research.CandidateResearchConflict, "second identity contender"
+            ):
+                research.resolve_candidate_research_source(
+                    assessment, authority=SyntheticFileAuthority(), **kwargs
+                )
+
+    def test_source_requires_current_subject_and_post_pull_reload(self):
+        subject, turns, assessment = _focus_assessment(confirmed=True)
+        with self.assertRaises(TypeError):
+            research.build_candidate_research_source(
+                assessment, authoritative_turns=turns
+            )
+        with self.assertRaises(TypeError):
+            research.resolve_candidate_research_source(
+                assessment,
+                authoritative_turns=turns,
+                authority=SyntheticGitAuthority(),
+            )
+        consumed = research.build_focus_candidate_subject(
+            {**FOCUS_RECOMMENDATION, "status": "approved"}
+        )
+        calls = iter((subject, consumed))
+        with self.assertRaisesRegex(
+            research.CandidateResearchError, "not active|stale"
+        ):
+            research.resolve_candidate_research_source(
+                assessment,
+                authoritative_turns=turns,
+                current_subject_loader=lambda: next(calls),
+                authority=SyntheticGitAuthority(),
+            )
+
+        class OmitsCallback:
+            def resolve_exact_source(self, plan, **kwargs):
+                del kwargs
+                return {
+                    "source_path": plan["source_path"],
+                    "changed": False,
+                    "commit_sha": "a" * 40,
+                }
+
+        with self.assertRaisesRegex(
+            research.CandidateResearchError, "omitted post-pull"
+        ):
+            research.resolve_candidate_research_source(
+                assessment,
+                authoritative_turns=turns,
+                current_subject_loader=lambda: subject,
+                authority=OmitsCallback(),
+            )
+
+    def test_body_and_seed_sections_are_marker_bound_not_just_content_hashed(self):
+        subject, turns, assessment = _focus_assessment(confirmed=True)
+        plan = research.build_candidate_research_source(
+            assessment, authoritative_turns=turns, current_subject=subject
+        )
+        text = plan["source_bytes"].decode("utf-8")
+        for original, replacement in (
+            (
+                assessment["evidence"][0]["quote"],
+                "Model summary replacing the exact first-person evidence span.",
+            ),
+            (
+                assessment["seed_questions"][0]["question"],
+                "A replacement generated question?",
+            ),
+        ):
+            with self.subTest(original=original):
+                metadata, body = research.split_frontmatter(text)
+                body = body.replace(original, replacement, 1)
+                metadata["content_sha256"] = research.payload_sha256(body)
+                tampered = f"{research.format_frontmatter(metadata)}\n\n{body}"
+                with self.assertRaisesRegex(
+                    research.CandidateResearchError, "marker-bound"
+                ):
+                    research.validate_candidate_research_source_text(
+                        tampered, expected_path=plan["source_path"]
+                    )
+
+    def test_boolean_frontmatter_schema_fails_even_though_true_equals_one(self):
+        subject, turns, assessment = _focus_assessment(confirmed=True)
+        plan = research.build_candidate_research_source(
+            assessment, authoritative_turns=turns, current_subject=subject
+        )
+        text = (
+            plan["source_bytes"]
+            .decode("utf-8")
+            .replace("schema_version: 1", "schema_version: true", 1)
+        )
+        with self.assertRaisesRegex(research.CandidateResearchError, "schema_version"):
+            research.validate_candidate_research_source_text(
+                text, expected_path=plan["source_path"]
+            )
+
     def test_source_bytes_are_deterministic_typed_and_summary_free(self):
         subject, turns, assessment = _focus_assessment(confirmed=True)
         first = research.build_candidate_research_source(
@@ -421,6 +620,14 @@ class SourceAndReceiptTests(unittest.TestCase):
         self.assertEqual(parsed["metadata"]["type"], "candidate_research")
         self.assertTrue(parsed["metadata"]["user_confirmed"])
         self.assertFalse(parsed["metadata"]["generated_seed_questions_evidence"])
+        self.assertEqual(
+            parsed["evidence_quotes"],
+            [span["quote"] for span in assessment["evidence"]],
+        )
+        self.assertEqual(
+            parsed["seed_questions"],
+            [row["question"] for row in assessment["seed_questions"]],
+        )
         self.assertIn("Generated seed questions — not evidence", source_text)
         self.assertNotIn("model summary", source_text.lower())
         for span in assessment["evidence"]:
@@ -447,6 +654,7 @@ class SourceAndReceiptTests(unittest.TestCase):
             end=len(turns[-1]["text"]),
             confirmed_at="2026-08-18T20:00:00Z",
             authoritative_turns=turns,
+            current_subject=subject,
         )
         plan = research.build_candidate_research_source(
             confirmed, authoritative_turns=turns, current_subject=subject
@@ -469,14 +677,14 @@ class SourceAndReceiptTests(unittest.TestCase):
         first = research.resolve_candidate_research_source(
             assessment,
             authoritative_turns=turns,
-            current_subject=subject,
+            current_subject_loader=lambda: subject,
             authority=authority,
             push=True,
         )
         second = research.resolve_candidate_research_source(
             assessment,
             authoritative_turns=turns,
-            current_subject=subject,
+            current_subject_loader=lambda: subject,
             authority=authority,
             push=True,
         )
@@ -501,14 +709,14 @@ class SourceAndReceiptTests(unittest.TestCase):
                     research.resolve_candidate_research_source(
                         assessment,
                         authoritative_turns=turns,
-                        current_subject=subject,
+                        current_subject_loader=lambda: subject,
                         authority=authority,
                         failpoint=failpoint,
                     )
                 adopted = research.resolve_candidate_research_source(
                     assessment,
                     authoritative_turns=turns,
-                    current_subject=subject,
+                    current_subject_loader=lambda: subject,
                     authority=authority,
                 )
                 self.assertFalse(adopted["changed"])
@@ -520,14 +728,14 @@ class SourceAndReceiptTests(unittest.TestCase):
             assessment, authoritative_turns=turns, current_subject=subject
         )
         authority = SyntheticGitAuthority()
-        authority.resolve_exact_source(plan)
+        authority.resolve_exact_source(plan, revalidate_current_subject=lambda: None)
         source_bytes, commit = authority.tree[plan["source_path"]]
         authority.tree[plan["source_path"]] = (source_bytes + b"changed", commit)
         with self.assertRaises(research.CandidateResearchConflict):
             research.resolve_candidate_research_source(
                 assessment,
                 authoritative_turns=turns,
-                current_subject=subject,
+                current_subject_loader=lambda: subject,
                 authority=authority,
             )
 
@@ -539,7 +747,7 @@ class SourceAndReceiptTests(unittest.TestCase):
             research.resolve_candidate_research_source(
                 assessment,
                 authoritative_turns=turns,
-                current_subject=subject,
+                current_subject_loader=lambda: subject,
                 authority=authority,
             )
 
@@ -548,6 +756,7 @@ class SourceAndReceiptTests(unittest.TestCase):
 
         class BadAuthority:
             def resolve_exact_source(self, plan, **kwargs):
+                kwargs["revalidate_current_subject"]()
                 del plan, kwargs
                 return {
                     "source_path": "sources/elsewhere.md",
@@ -559,7 +768,7 @@ class SourceAndReceiptTests(unittest.TestCase):
             research.resolve_candidate_research_source(
                 assessment,
                 authoritative_turns=turns,
-                current_subject=subject,
+                current_subject_loader=lambda: subject,
                 authority=BadAuthority(),
             )
 

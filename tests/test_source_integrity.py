@@ -266,6 +266,20 @@ class CandidateResearchIntegrityTests(unittest.TestCase):
         self.src.apply_safe_fixes([record])
         self.assertEqual(path.read_bytes(), before)
 
+    def test_candidate_research_invalid_utf8_fails_closed_without_rewrite(self):
+        path, _record, _manifest = self._record_and_manifest()
+        path.write_bytes(path.read_bytes() + b"\xff")
+        before = path.read_bytes()
+        record = self.src.source_record(path)
+        self.assertEqual(record["type"], "candidate_research")
+        self.assertIn("not strict UTF-8", record["candidate_research_error"])
+        findings = self.src.lint_records([record])
+        self.assertIn(
+            "candidate_research_invalid", {item["type"] for item in findings}
+        )
+        self.src.apply_safe_fixes([record])
+        self.assertEqual(path.read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

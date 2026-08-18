@@ -237,6 +237,8 @@ User confirmation is a separate exact-keyed object:
   `confirmation` span from a later or same authoritative user turn. The caller
   supplies the explicit `confirmed` action; neither a model proposal nor
   positive sentiment can manufacture it.
+- The confirmation span is a distinct act: it may not duplicate or overlap any
+  substantive evidence interval, including when it comes from the same turn.
 - `confirmation_revision` hashes status, assessment revision, exact span, and
   timestamp. `complete` is true only when recomputed readiness is true and the
   confirmation is valid.
@@ -247,8 +249,9 @@ User confirmation is a separate exact-keyed object:
 
 ### Immutable source bytes and marker
 
-`build_candidate_research_source(assessment)` accepts only a freshly validated,
-complete assessment and returns a strict `CandidateResearchSourcePlan` with
+`build_candidate_research_source(assessment, current_subject=...)` requires a
+fresh current subject (omission fails closed), accepts only a freshly validated,
+complete assessment, and returns a strict `CandidateResearchSourcePlan` with
 exact `source_path`, `source_id`, UTF-8 `source_bytes`, metadata, manifest
 fields, marker line, and research revision.
 
@@ -309,6 +312,8 @@ The decoded payload has exact keys:
   "subject_revision": "sha256:...",
   "assessment_revision": "sha256:...",
   "research_revision": "sha256:...",
+  "body_sha256": "<64 lowercase hex>",
+  "source_revision": "sha256:<64 lowercase hex>",
   "source_id": "candidate-research:focus_candidate:<digest>",
   "source_path": "sources/candidate-research/focus_candidate/<digest32>.md"
 }
@@ -317,6 +322,10 @@ The decoded payload has exact keys:
 Standard base64 prevents comment termination by user text. Parsing is strict,
 size-bounded, canonical, and rejects unknown keys, duplicate markers, malformed
 UTF-8/JSON/base64, non-canonical encoding, path mismatch, or revision mismatch.
+`body_sha256` binds every byte of the rendered evidence/seed sections excluding
+the marker; `source_revision` hashes that digest together with
+`research_revision`. Updating only the generic frontmatter content hash can
+never legitimize replaced evidence or an inserted model summary.
 The body contains only exact evidence quotes in indented literal blocks plus
 generated seed questions in the explicitly non-evidence section. It contains
 no model-authored summary, inferred fact, approval claim, graduation claim, or
@@ -341,6 +350,9 @@ candidate status mutation.
 
 `wiki_compile.read_manual_sources()` retains the typed research metadata and
 routes sources by metadata, never by model summary or path guessing.
+Candidate-research paths decode as strict UTF-8 and fail closed. Their parsed
+citation body contains literal evidence quotes—not marker/base64/path prose—and
+they are excluded from every generic manual-source keyword/mention route.
 
 - A completed `focus_candidate` research source attaches to a later Focus only
   when its typed subject slug/label/aliases exactly match that Focus through
@@ -351,7 +363,9 @@ routes sources by metadata, never by model summary or path guessing.
   settled roster identity by exact type and subject slug/name/alias. Once that
   entity separately becomes page-eligible, the research source satisfies the
   real-material floor and is cited for every supported type: person, place,
-  period, object, and theme. It never sets `page_eligible`, writes an owner
+  period, object, and theme. A static/bootstrap theme alone is not eligibility:
+  theme research requires a matching independently page-eligible roster row.
+  It never sets `page_eligible`, writes an owner
   verdict, changes `qualifies`, maps to a Focus, or bypasses roster identity.
 - Typed research association is additive to ordinary real mentions. It does
   not change automatic graduation thresholds for candidates that lack a
@@ -373,6 +387,7 @@ class CandidateResearchGitAuthority(Protocol):
         vault_root: str | Path | None = None,
         push: bool = True,
         failpoint: Callable[[str], None] | None = None,
+        revalidate_current_subject: Callable[[], None],
     ) -> dict: ...
 ```
 
@@ -407,6 +422,12 @@ only this canonical adapter, and returns:
   atomic source+manifest writes, `git commit --only`, first-introducing-commit
   lookup, push/rebase retry, post-rebase revalidation, and failpoints. The
   research module may not acquire or nest a lease and may not shell out to Git.
+- `resolve_candidate_research_source` requires a `current_subject_loader`.
+  The public v182 exact-file transaction adapter invokes the supplied
+  `revalidate_current_subject` callback after its pre-decision pull, so a
+  deletion, tombstone, approval/graduation, rename, or mapping racing the
+  transaction fails before write/commit. No caller may omit or substitute a
+  cached/default `None` subject.
 - A same-path exact-byte replay adopts the marker/source from the canonical Git
   tree and returns `changed:false` with the original introducing commit. The
   manifest/projection may be missing or stale and is repaired from the source;
@@ -492,10 +513,12 @@ Add `tests/test_candidate_research.py` with named cases for:
   concrete / 2-question minimum, per-entity-type 2/3-span minima, deterministic
   missing codes, forged readiness and stale assessment rejection;
 - exact confirmation binding, non-user/model confirmation refusal, completion
-  boundary, deterministic assessment/confirmation/research revisions;
+  boundary, nonoverlap with substantive evidence, deterministic assessment/
+  confirmation/research revisions;
 - deterministic safe path/source bytes, strict marker round-trip, comment/path
-  injection resistance, exact frontmatter/payload hash, literal evidence, and
-  generated-question non-evidence labeling;
+  injection resistance, strict UTF-8 and scalar types (including bool-vs-int),
+  marker-bound body/evidence/seed bytes, exact frontmatter/payload hash, literal
+  rendered citations, and generated-question non-evidence labeling;
 - same-byte replay, different-byte/path/revision conflict, unmarked equal-text
   non-adoption, stale/missing manifest adoption, crash after write/commit/push,
   and same-subject two-contender convergence through a synthetic canonical
@@ -510,8 +533,9 @@ Extend:
   hash parity, safe manifest repair, correction/retraction compatibility.
 - `tests/test_wiki_compile.py`: completed Focus research replaces the empty
   placeholder; entity research becomes cited material for person/place/period/
-  object/theme only after independent eligibility; wrong kind/type/identity and
-  retracted research do not attach.
+  object/theme only after independent eligibility; static themes and generic
+  keyword routes cannot consume it; wrong kind/type/identity, malformed UTF-8,
+  and retracted research do not attach. Tests parse real rendered sources.
 - `tests/test_v120_vault_only.py`: candidate-research path family, exported
   classification, identity digest, and schema authority.
 - `tests/test_v150_conversation_store.py`: v181 Conversation and Question
@@ -567,7 +591,10 @@ exact user spans, demonstrates not-ready then ready-but-unconfirmed then
 confirmed completion, renders/registers the immutable source through the
 synthetic canonical adapter, replays it with `changed:false`, compiles a later
 synthetic Focus without an empty placeholder, then repeats entity consumption
-for all five supported types. It prints a compact JSON results table and exits
+for all five supported types. It renders the compiled page and asserts a literal
+user quote is present while marker/base64 text is absent, and proves generic
+keyword routing plus static-theme routing cannot attach the source. It prints a
+compact JSON results table and exits
 nonzero unless every assertion passes. After the v182 rebase it also runs the
 real local-only Git adapter in the disposable repo and asserts one introducing
 commit/adopted receipt.

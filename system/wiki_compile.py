@@ -187,13 +187,22 @@ def read_manual_sources() -> dict[str, dict]:
     if not SOURCES_DIR.exists():
         return sources
     for path in sorted(p for p in SOURCES_DIR.rglob("*.md") if p.name != ".gitkeep"):
-        text = path.read_text(encoding="utf-8", errors="replace")
+        candidate_path = rel(path).startswith("sources/candidate-research/")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            if candidate_path:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
         metadata, raw_body = split_frontmatter(text)
         title = frontmatter_value(text, "title", path.stem.replace("-", " ").title())
         body = raw_body.strip() if raw_body != text else strip_frontmatter(text)
         body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
         source_id = frontmatter_value(text, "source_id", f"source:{path.stem}")
         kind = frontmatter_value(text, "type", "manual_source")
+        if candidate_path and kind != "candidate_research":
+            continue
+        validated_candidate = None
         if kind == "candidate_research":
             # Typed candidate research is accepted only through its immutable
             # marker/frontmatter/hash contract. Source Integrity reports the
@@ -203,9 +212,12 @@ def read_manual_sources() -> dict[str, dict]:
                     validate_candidate_research_source_text,
                 )
 
-                validate_candidate_research_source_text(text, expected_path=rel(path))
+                validated_candidate = validate_candidate_research_source_text(
+                    text, expected_path=rel(path)
+                )
             except (TypeError, ValueError):
                 continue
+            body = validated_candidate["citation_body"]
         generated_from = metadata.get("generated_from", [])
         if not isinstance(generated_from, list):
             generated_from = []
@@ -825,14 +837,25 @@ def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
             if any(keyword in haystack for keyword in keywords):
                 answer_hits.append(item)
         for item in manual_sources.values():
+            if item.get("kind") == "candidate_research":
+                continue
             haystack = item["body"].lower()
             if any(keyword in haystack for keyword in keywords):
                 manual_hits.append(item)
-        research_items = matching_candidate_research(
-            manual_sources,
-            candidate_kind="entity_candidate",
-            subject_type="theme",
-            names=[spec["title"], theme],
+        eligible_theme_slugs = {
+            (entry.get("slug") or slugify(entry.get("name", "")))
+            for entry in (theme_roster or {}).get("entities", [])
+            if entry.get("page_eligible") is True and not entry.get("maps_to_focus")
+        }
+        research_items = (
+            matching_candidate_research(
+                manual_sources,
+                candidate_kind="entity_candidate",
+                subject_type="theme",
+                names=[spec["title"], theme],
+            )
+            if theme in eligible_theme_slugs
+            else []
         )
         research_items = [
             item for item in research_items if not _is_retracted(item, theme)

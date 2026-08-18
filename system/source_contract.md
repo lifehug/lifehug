@@ -43,6 +43,10 @@ revision-bound slices of raw user turns; assistant turns and generated
 summaries are ineligible. Generated seed questions may travel with the source
 only under an explicit **not evidence** heading and never count toward
 readiness or compilation claims.
+The marker cryptographically binds the exact rendered evidence and seed
+sections to the research revision. Candidate-research files decode as strict
+UTF-8, and compiler citations render the parsed literal quotes rather than the
+marker or a generic path excerpt.
 
 A deterministic assessment enforces the closed Focus/entity dimension and
 evidence minima. Readiness alone cannot write: an explicit user confirmation
@@ -55,7 +59,9 @@ truth. Corrections and retractions remain additive through the normal flow.
 Research and candidate lifecycle stay separate. The compiler may cite matching
 Focus research after that Focus is independently approved, or matching entity
 research after that entity independently becomes page-eligible. The source
-never approves, maps, qualifies, sets an owner verdict, or graduates anything.
+never uses generic keyword routing; even a bootstrap/static theme requires an
+eligible matching roster row. It never approves, maps, qualifies, sets an owner
+verdict, or graduates anything.
 Exact-byte replay is idempotent; different bytes/revisions/paths conflict, and
 crash adoption comes from the source marker plus canonical Git history rather
 than the source manifest or another projection (ADR 0020).

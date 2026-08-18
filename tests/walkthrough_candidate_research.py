@@ -20,10 +20,39 @@ import wiki_compile
 class SyntheticFileAuthority:
     """Dependency-free exact-byte adapter; v182 supplies the live Git adapter."""
 
-    def resolve_exact_source(self, plan, *, vault_root=None, push=True, failpoint=None):
+    def resolve_exact_source(
+        self,
+        plan,
+        *,
+        vault_root=None,
+        push=True,
+        failpoint=None,
+        revalidate_current_subject,
+    ):
         del push
+        revalidate_current_subject()
         root = Path(vault_root)
         path = root / plan["source_path"]
+        for candidate in sorted(
+            (root / "sources" / "candidate-research").rglob("*.md")
+        ):
+            try:
+                parsed = research.validate_candidate_research_source_text(
+                    candidate.read_text(encoding="utf-8")
+                )
+            except (UnicodeDecodeError, research.CandidateResearchError) as exc:
+                raise research.CandidateResearchConflict(
+                    "synthetic canonical tree contains invalid candidate research"
+                ) from exc
+            marker = parsed["marker"]
+            if (
+                marker["candidate_kind"] == plan["candidate_kind"]
+                and marker["candidate_id"] == plan["candidate_id"]
+                and candidate != path
+            ):
+                raise research.CandidateResearchConflict(
+                    "synthetic canonical tree has a second identity contender"
+                )
         path.parent.mkdir(parents=True, exist_ok=True)
         changed = not path.exists()
         if path.exists() and path.read_bytes() != plan["source_bytes"]:
@@ -86,6 +115,7 @@ def confirm(assessment, user_turns):
         end=len(user_turns[-1]["text"]),
         confirmed_at="2026-08-18T20:00:00Z",
         authoritative_turns=user_turns,
+        current_subject=assessment["subject"],
     )
 
 
@@ -144,16 +174,18 @@ def main() -> int:
         first = research.resolve_candidate_research_source(
             completed,
             authoritative_turns=user_turns,
-            current_subject=focus_subject,
+            current_subject_loader=lambda: focus_subject,
             authority=authority,
             vault_root=vault,
             push=False,
         )
+        # A brand-new adapter instance discovers the canonical bytes from disk;
+        # no memory-only index or manifest projection participates in adoption.
         replay = research.resolve_candidate_research_source(
             completed,
             authoritative_turns=user_turns,
-            current_subject=focus_subject,
-            authority=authority,
+            current_subject_loader=lambda: focus_subject,
+            authority=SyntheticFileAuthority(),
             vault_root=vault,
             push=False,
         )
@@ -189,7 +221,7 @@ def main() -> int:
             entity_receipts[entity_type] = research.resolve_candidate_research_source(
                 confirm(assessment, user_turns),
                 authoritative_turns=user_turns,
-                current_subject=subject,
+                current_subject_loader=lambda subject=subject: subject,
                 authority=authority,
                 vault_root=vault,
                 push=False,
@@ -224,6 +256,19 @@ def main() -> int:
         )[0]
         assert focus_desc["sources"]
         assert "no source material yet" not in focus_desc["summary"]
+        focus_synthesis = wiki_compile.fallback_synthesis(focus_desc)
+        focus_page = wiki_compile.render_page(focus_desc, focus_synthesis, [], [], {})
+        focus_quote = completed["evidence"][0]["quote"]
+        assert focus_quote in focus_page
+        assert research.MARKER_PREFIX not in focus_page
+
+        generic_project = wiki_compile.plan_projects(
+            {"P": {"group": "project", "name": "Synthetic Harbor"}},
+            [],
+            {},
+            manual_sources,
+        )[0]
+        assert not generic_project["sources"]
 
         compiled_entity_types = []
         for entity_type in ("person", "place", "period", "object"):
@@ -267,6 +312,15 @@ def main() -> int:
         assert next(row for row in theme_descs if row["slug"] == "synthetic-theme")[
             "sources"
         ]
+        assert not any(
+            row["slug"] == "family"
+            for row in wiki_compile.plan_themes(
+                {},
+                manual_sources,
+                {"entities": []},
+                author_slug="synthetic-author",
+            )
+        )
         compiled_entity_types.append("theme")
 
         results.update(
@@ -279,7 +333,12 @@ def main() -> int:
                 "replay_changed": replay["changed"],
                 "same_receipt_identity": first["commit_sha"] == replay["commit_sha"],
                 "typed_manifest_sources": len(manifest["sources"]),
-                "focus_placeholder_replaced": True,
+                "focus_placeholder_replaced": (
+                    "no source material yet" not in focus_desc["summary"]
+                    and focus_quote in focus_page
+                ),
+                "rendered_exact_user_quote": focus_quote in focus_page,
+                "generic_keyword_route_excluded": not generic_project["sources"],
                 "entity_types_cited": compiled_entity_types,
                 "entity_receipts": len(entity_receipts),
             }

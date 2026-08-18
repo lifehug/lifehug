@@ -325,14 +325,26 @@ def apply_metadata_fix(path: Path) -> None:
 
 
 def source_record(path: Path) -> dict[str, object]:
-    content = path.read_text(encoding="utf-8", errors="replace")
+    candidate_path = rel(path).startswith("sources/candidate-research/")
+    candidate_research_error = ""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        content = path.read_text(encoding="utf-8", errors="replace")
+        if candidate_path:
+            candidate_research_error = f"candidate research is not strict UTF-8: {exc}"
     metadata, payload = split_frontmatter(content)
     inferred = build_source_metadata(path, content)
     source_id = str(metadata.get("source_id") or inferred["source_id"])
-    source_type = str(metadata.get("type") or inferred["type"])
-    candidate_research_error = ""
+    source_type = (
+        "candidate_research"
+        if candidate_path
+        else str(metadata.get("type") or inferred["type"])
+    )
     if source_type == "candidate_research":
         try:
+            if candidate_research_error:
+                raise ValueError(candidate_research_error)
             from candidate_research import (  # noqa: PLC0415
                 validate_candidate_research_source_text,
             )

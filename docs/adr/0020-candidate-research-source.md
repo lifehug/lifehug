@@ -33,12 +33,17 @@ Readiness is not completion. Completion additionally requires an explicit user
 confirmation span bound to the exact ready assessment revision. The resulting
 research revision deterministically binds the subject identity/state,
 evidence, coverage, generated non-evidence questions, and confirmation.
+Confirmation cannot overlap a substantive evidence span: attesting to the
+assessment is a distinct user act, not a relabeled excerpt.
 
 Completion renders one immutable `type: candidate_research` Markdown source at
 a safe identity-digest path. It carries a closed base64 marker and typed source
 metadata/manifest fields. The body contains literal user excerpts and a
 visibly separate generated-question section; it contains no generated
-summary. One candidate identity has one source path. Exact-byte replay adopts;
+summary. A marker-bound body digest and source revision bind those exact
+sections to the research revision; a rewritten frontmatter content hash alone
+cannot bless changed prose. Candidate sources decode as strict UTF-8 and use
+strict scalar types. One candidate identity has one source path. Exact-byte replay adopts;
 different bytes, revisions, or paths conflict. A pre-completion candidate
 tombstone blocks the write; a later candidate deletion never deletes completed
 source truth, which remains subject to the normal additive correction and
@@ -49,7 +54,9 @@ lifecycle. After an independently approved Focus exists, matching Focus
 research is primary citable material and prevents an empty placeholder. After
 an independently page-eligible entity exists, matching entity research is
 citable material for person, place, period, object, and theme. Research itself
-never approves, maps, qualifies, sets an owner verdict, or graduates anything.
+never enters generic keyword routing; a static theme needs an independently
+eligible roster row before its research attaches. Research never approves,
+maps, qualifies, sets an owner verdict, or graduates anything.
 
 The live mutation delegates to the canonical v182 writer/Git authority. The
 research module does not acquire a writer lease or run Git. Adoption derives
@@ -57,6 +64,8 @@ from the immutable source marker and canonical Git tree/first introducing
 commit, never a projection. If v182 does not expose the necessary generic
 adapter, v183 extracts one shared authority used by both promotion and
 research; two implementations are forbidden.
+The source resolver requires a fresh-subject loader, and the adapter invokes
+its revalidation callback after pull and before mutation.
 
 ## Consequences
 

@@ -150,6 +150,8 @@ _MARKER_KEYS = frozenset(
         "subject_revision",
         "assessment_revision",
         "research_revision",
+        "body_sha256",
+        "source_revision",
         "source_id",
         "source_path",
     }
@@ -175,6 +177,7 @@ class CandidateResearchGitAuthority(Protocol):
         vault_root: str | Path | None = None,
         push: bool = True,
         failpoint: Callable[[str], None] | None = None,
+        revalidate_current_subject: Callable[[], None],
     ) -> dict: ...
 
 
@@ -201,6 +204,24 @@ def _text(value: object, *, name: str, maximum: int) -> str:
 def _revision(value: object, *, name: str) -> str:
     if not isinstance(value, str) or not REVISION_RE.fullmatch(value):
         raise CandidateResearchError(f"{name} must be sha256:<64 lowercase hex>")
+    return value
+
+
+def _schema_version(value: object, *, name: str) -> int:
+    if type(value) is not int or value != SCHEMA_VERSION:
+        raise CandidateResearchError(f"{name} must be integer 1")
+    return value
+
+
+def _boolean(value: object, *, name: str) -> bool:
+    if type(value) is not bool:
+        raise CandidateResearchError(f"{name} must be boolean")
+    return value
+
+
+def _integer(value: object, *, name: str, minimum: int = 0) -> int:
+    if type(value) is not int or value < minimum:
+        raise CandidateResearchError(f"{name} must be an integer >= {minimum}")
     return value
 
 
@@ -335,13 +356,15 @@ def build_entity_candidate_subject(
     verdict = roster_entry.get("owner_verdict")
     if verdict not in {None, "", "never", "graduate"}:
         raise CandidateResearchError("entity owner_verdict is invalid")
+    page_eligible = roster_entry.get("page_eligible", False)
+    if type(page_eligible) is not bool:
+        raise CandidateResearchError("entity page_eligible must be boolean")
+    maps_to_focus = roster_entry.get("maps_to_focus")
+    if maps_to_focus is not None and not isinstance(maps_to_focus, str):
+        raise CandidateResearchError("entity maps_to_focus must be a string or null")
     if verdict == "never":
         candidate_state = "tombstoned"
-    elif (
-        verdict == "graduate"
-        or bool(roster_entry.get("page_eligible"))
-        or bool(roster_entry.get("maps_to_focus"))
-    ):
+    elif verdict == "graduate" or page_eligible or bool(maps_to_focus):
         candidate_state = "consumed"
     else:
         candidate_state = "active"
@@ -358,8 +381,7 @@ def build_entity_candidate_subject(
 
 def validate_candidate_research_subject(value: object, *, require_active: bool) -> dict:
     subject = _object(value, name="subject", keys=_SUBJECT_KEYS)
-    if subject["schema_version"] != SCHEMA_VERSION:
-        raise CandidateResearchError("subject.schema_version must be 1")
+    _schema_version(subject["schema_version"], name="subject.schema_version")
     canonical = build_candidate_research_subject(
         candidate_kind=subject["candidate_kind"],
         candidate_id=subject["candidate_id"],
@@ -411,8 +433,7 @@ def build_authoritative_user_turn(turn_id: str, text: str) -> dict:
 
 def validate_authoritative_user_turn(value: object) -> dict:
     turn = _object(value, name="user_turn", keys=_TURN_KEYS)
-    if turn["schema_version"] != SCHEMA_VERSION:
-        raise CandidateResearchError("user_turn.schema_version must be 1")
+    _schema_version(turn["schema_version"], name="user_turn.schema_version")
     if turn["role"] != "user":
         raise CandidateResearchError("only authoritative user turns are evidence")
     canonical = build_authoritative_user_turn(turn["turn_id"], turn["text"])
@@ -469,8 +490,7 @@ def validate_research_evidence_span(
     value: object, authoritative_turns: Sequence[dict]
 ) -> dict:
     span = _object(value, name="evidence_span", keys=_SPAN_KEYS)
-    if span["schema_version"] != SCHEMA_VERSION:
-        raise CandidateResearchError("evidence_span.schema_version must be 1")
+    _schema_version(span["schema_version"], name="evidence_span.schema_version")
     turns = _turn_index(authoritative_turns)
     turn_id = _text(span["turn_id"], name="evidence_span.turn_id", maximum=256)
     turn = turns.get(turn_id)
@@ -659,11 +679,52 @@ def _assessment_core(
     }
 
 
+def _validate_readiness(value: object) -> dict:
+    readiness = _object(value, name="readiness", keys=_READINESS_KEYS)
+    ready = _boolean(readiness["ready"], name="readiness.ready")
+    missing = readiness["missing"]
+    if not isinstance(missing, list) or any(
+        not isinstance(item, str) for item in missing
+    ):
+        raise CandidateResearchError("readiness.missing must be a list of strings")
+    return {
+        "ready": ready,
+        "missing": list(missing),
+        "substantive_evidence_count": _integer(
+            readiness["substantive_evidence_count"],
+            name="readiness.substantive_evidence_count",
+        ),
+        "concrete_evidence_count": _integer(
+            readiness["concrete_evidence_count"],
+            name="readiness.concrete_evidence_count",
+        ),
+        "seed_question_count": _integer(
+            readiness["seed_question_count"], name="readiness.seed_question_count"
+        ),
+    }
+
+
+def _assert_confirmation_is_distinct(
+    confirmation_span: dict, evidence: Sequence[dict]
+) -> None:
+    for span in evidence:
+        if confirmation_span["turn_id"] != span["turn_id"]:
+            continue
+        if (
+            confirmation_span["start"] < span["end"]
+            and span["start"] < confirmation_span["end"]
+        ):
+            raise CandidateResearchError(
+                "confirmation span must not overlap substantive evidence"
+            )
+
+
 def _normalize_confirmation(
     value: object,
     *,
     assessment_revision: str,
     authoritative_turns: Sequence[dict],
+    evidence: Sequence[dict],
 ) -> dict | None:
     if value is None:
         return None
@@ -680,6 +741,7 @@ def _normalize_confirmation(
     )
     if span["evidence_kind"] != "confirmation":
         raise CandidateResearchError("confirmation requires an exact confirmation span")
+    _assert_confirmation_is_distinct(span, evidence)
     confirmed_at = _utc_seconds(
         confirmation["confirmed_at"], name="confirmation.confirmed_at"
     )
@@ -711,15 +773,19 @@ def build_research_confirmation(
     end: int,
     confirmed_at: str,
     authoritative_turns: Sequence[dict],
+    current_subject: dict,
 ) -> dict:
     canonical = validate_research_assessment(
-        assessment, authoritative_turns=authoritative_turns
+        assessment,
+        authoritative_turns=authoritative_turns,
+        current_subject=current_subject,
     )
     if not canonical["readiness"]["ready"]:
         raise CandidateResearchError("research cannot be confirmed before readiness")
     span = extract_research_evidence_span(turn, start, end, "confirmation")
     if span != validate_research_evidence_span(span, authoritative_turns):
         raise CandidateResearchError("confirmation turn is not authoritative")
+    _assert_confirmation_is_distinct(span, canonical["evidence"])
     source = {
         "status": "confirmed",
         "assessment_revision": canonical["assessment_revision"],
@@ -756,6 +822,7 @@ def build_research_assessment(
         confirmation,
         assessment_revision=assessment_revision,
         authoritative_turns=authoritative_turns,
+        evidence=canonical_evidence,
     )
     complete = bool(readiness["ready"] and canonical_confirmation is not None)
     research_revision = canonical_revision(
@@ -778,11 +845,10 @@ def validate_research_assessment(
     value: object,
     *,
     authoritative_turns: Sequence[dict],
-    current_subject: dict | None = None,
+    current_subject: dict,
 ) -> dict:
     assessment = _object(value, name="assessment", keys=_ASSESSMENT_KEYS)
-    if assessment["schema_version"] != SCHEMA_VERSION:
-        raise CandidateResearchError("assessment.schema_version must be 1")
+    _schema_version(assessment["schema_version"], name="assessment.schema_version")
     canonical = build_research_assessment(
         subject=assessment["subject"],
         evidence=assessment["evidence"],
@@ -791,11 +857,8 @@ def validate_research_assessment(
         authoritative_turns=authoritative_turns,
         confirmation=assessment["confirmation"],
     )
-    if current_subject is not None:
-        revalidate_candidate_research_subject(canonical["subject"], current_subject)
-    supplied_readiness = _object(
-        assessment["readiness"], name="readiness", keys=_READINESS_KEYS
-    )
+    revalidate_candidate_research_subject(canonical["subject"], current_subject)
+    supplied_readiness = _validate_readiness(assessment["readiness"])
     if supplied_readiness != canonical["readiness"]:
         raise CandidateResearchError("readiness does not match recomputation")
     if (
@@ -803,7 +866,10 @@ def validate_research_assessment(
         != canonical["assessment_revision"]
     ):
         raise CandidateResearchError("assessment_revision does not match assessment")
-    if assessment["complete"] is not canonical["complete"]:
+    if (
+        _boolean(assessment["complete"], name="assessment.complete")
+        is not canonical["complete"]
+    ):
         raise CandidateResearchError(
             "complete does not match readiness and confirmation"
         )
@@ -823,6 +889,7 @@ def confirm_research_assessment(
     end: int,
     confirmed_at: str,
     authoritative_turns: Sequence[dict],
+    current_subject: dict,
 ) -> dict:
     confirmation = build_research_confirmation(
         assessment,
@@ -831,6 +898,7 @@ def confirm_research_assessment(
         end=end,
         confirmed_at=confirmed_at,
         authoritative_turns=authoritative_turns,
+        current_subject=current_subject,
     )
     return build_research_assessment(
         subject=assessment["subject"],
@@ -861,9 +929,11 @@ def candidate_research_source_id(candidate_kind: str, candidate_id: str) -> str:
     return f"candidate-research:{candidate_kind}:{_identity_digest(candidate_kind, candidate_id)}"
 
 
-def _marker_payload(assessment: dict, source_id: str, source_path: str) -> dict:
+def _marker_payload(
+    assessment: dict, source_id: str, source_path: str, body_sha256: str
+) -> dict:
     subject = assessment["subject"]
-    return {
+    payload = {
         "schema_version": SCHEMA_VERSION,
         "candidate_kind": subject["candidate_kind"],
         "candidate_id": subject["candidate_id"],
@@ -871,15 +941,22 @@ def _marker_payload(assessment: dict, source_id: str, source_path: str) -> dict:
         "subject_revision": subject["subject_revision"],
         "assessment_revision": assessment["assessment_revision"],
         "research_revision": assessment["research_revision"],
+        "body_sha256": body_sha256,
         "source_id": source_id,
         "source_path": source_path,
     }
+    payload["source_revision"] = canonical_revision(
+        {
+            "research_revision": assessment["research_revision"],
+            "body_sha256": body_sha256,
+        }
+    )
+    return payload
 
 
 def encode_candidate_research_marker(payload: dict) -> str:
     payload = _object(payload, name="marker", keys=_MARKER_KEYS)
-    if payload["schema_version"] != SCHEMA_VERSION:
-        raise CandidateResearchError("marker.schema_version must be 1")
+    _schema_version(payload["schema_version"], name="marker.schema_version")
     raw = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
@@ -922,13 +999,12 @@ def _indented_literal(text: str) -> list[str]:
     return [f"    {line}" if line else "    " for line in text.split("\n")]
 
 
-def _source_body(assessment: dict, marker_line: str) -> str:
+def _source_body(assessment: dict) -> str:
     reverse_dimensions: dict[str, list[str]] = {}
     for dimension, revisions in assessment["dimension_evidence"].items():
         for revision in revisions:
             reverse_dimensions.setdefault(revision, []).append(dimension)
     lines = [
-        marker_line,
         "# Candidate research evidence",
         "",
         "Only the literal user-turn excerpts below are evidence.",
@@ -968,7 +1044,7 @@ def build_candidate_research_source(
     assessment: dict,
     *,
     authoritative_turns: Sequence[dict],
-    current_subject: dict | None = None,
+    current_subject: dict,
 ) -> dict:
     assessment = validate_research_assessment(
         assessment,
@@ -984,9 +1060,11 @@ def build_candidate_research_source(
     source_id = candidate_research_source_id(
         subject["candidate_kind"], subject["candidate_id"]
     )
-    marker = _marker_payload(assessment, source_id, source_path)
+    evidence_body = _source_body(assessment)
+    body_sha256 = hashlib.sha256(evidence_body.encode("utf-8")).hexdigest()
+    marker = _marker_payload(assessment, source_id, source_path, body_sha256)
     marker_line = encode_candidate_research_marker(marker)
-    body = _source_body(assessment, marker_line)
+    body = f"{marker_line}\n{evidence_body}"
     metadata = {
         "title": f"Candidate research — {subject['subject_label']}",
         "type": "candidate_research",
@@ -1049,6 +1127,82 @@ def _validate_source_path(
     return path
 
 
+def _unindent_literal(value: str, *, name: str) -> str:
+    lines = value.split("\n")
+    if not lines or any(not line.startswith("    ") for line in lines):
+        raise CandidateResearchError(f"{name} must be an indented literal block")
+    return "\n".join(line[4:] for line in lines)
+
+
+def _parse_rendered_sections(rendered: str) -> tuple[list[str], list[str]]:
+    prefix = (
+        "# Candidate research evidence\n\n"
+        "Only the literal user-turn excerpts below are evidence.\n\n"
+        "## User-grounded evidence\n\n"
+    )
+    seed_heading = "\n\n## Generated seed questions — not evidence"
+    if not rendered.startswith(prefix) or rendered.count(seed_heading) != 1:
+        raise CandidateResearchError("candidate research body headings are invalid")
+    evidence_text, seed_text = rendered[len(prefix) :].split(seed_heading)
+    if not evidence_text.startswith("### Evidence "):
+        raise CandidateResearchError("candidate research evidence layout is invalid")
+    evidence_blocks = evidence_text.removeprefix("### Evidence ").split(
+        "\n\n### Evidence "
+    )
+    quotes: list[str] = []
+    header_re = re.compile(
+        r"^(\d+) — (statement|concrete event|concrete observation)\n\n"
+        r"Turn `([^`]+)` · code points (\d+):(\d+) · dimensions: ([^\n]+)\n\n"
+        r"([\s\S]+)$"
+    )
+    for expected_index, block in enumerate(evidence_blocks, start=1):
+        match = header_re.fullmatch(block)
+        if match is None or int(match.group(1)) != expected_index:
+            raise CandidateResearchError("candidate research evidence block is invalid")
+        start, end = int(match.group(4)), int(match.group(5))
+        quote = _unindent_literal(
+            match.group(7), name=f"candidate research evidence {expected_index}"
+        )
+        if end <= start or len(quote) != end - start:
+            raise CandidateResearchError(
+                "candidate research evidence offsets are invalid"
+            )
+        dimensions = match.group(6).split(", ")
+        if not dimensions or any(
+            dimension not in FOCUS_DIMENSIONS + ENTITY_DIMENSIONS
+            for dimension in dimensions
+        ):
+            raise CandidateResearchError("candidate research dimensions are invalid")
+        quotes.append(quote)
+
+    questions: list[str] = []
+    if seed_text == "\n\nNone.\n":
+        return quotes, questions
+    if not seed_text.startswith(
+        "\n\n### Generated question "
+    ) or not seed_text.endswith("\n"):
+        raise CandidateResearchError(
+            "candidate research seed-question layout is invalid"
+        )
+    seed_blocks = seed_text[:-1].split("\n\n### Generated question ")
+    if seed_blocks[0] != "":
+        raise CandidateResearchError(
+            "candidate research seed-question layout is invalid"
+        )
+    seed_re = re.compile(r"^(\d+) \(not evidence\)\n\n([\s\S]+)$")
+    for expected_index, block in enumerate(seed_blocks[1:], start=1):
+        match = seed_re.fullmatch(block)
+        if match is None or int(match.group(1)) != expected_index:
+            raise CandidateResearchError("candidate research seed question is invalid")
+        questions.append(
+            _unindent_literal(
+                match.group(2),
+                name=f"candidate research seed question {expected_index}",
+            )
+        )
+    return quotes, questions
+
+
 def validate_candidate_research_source_text(
     content: str, *, expected_path: str | None = None
 ) -> dict:
@@ -1065,8 +1219,28 @@ def validate_candidate_research_source_text(
             "candidate research source requires one leading marker"
         )
     marker = decode_candidate_research_marker(marker_lines[0])
-    if marker["schema_version"] != SCHEMA_VERSION:
-        raise CandidateResearchError("candidate research marker schema is invalid")
+    _schema_version(marker["schema_version"], name="marker.schema_version")
+    marker_body_sha256 = marker["body_sha256"]
+    if not isinstance(marker_body_sha256, str) or not CONTENT_HASH_RE.fullmatch(
+        marker_body_sha256
+    ):
+        raise CandidateResearchError("candidate research marker body_sha256 is invalid")
+    _revision(marker["source_revision"], name="marker.source_revision")
+    rendered = body.removeprefix(marker_lines[0] + "\n")
+    if rendered == body:
+        raise CandidateResearchError("candidate research marker must lead body")
+    body_sha256 = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    if marker_body_sha256 != body_sha256:
+        raise CandidateResearchError("candidate research body is not marker-bound")
+    expected_source_revision = canonical_revision(
+        {
+            "research_revision": marker["research_revision"],
+            "body_sha256": body_sha256,
+        }
+    )
+    if marker["source_revision"] != expected_source_revision:
+        raise CandidateResearchError("candidate research source_revision is invalid")
+    evidence_quotes, seed_questions = _parse_rendered_sections(rendered)
     kind = marker["candidate_kind"]
     candidate_id = marker["candidate_id"]
     path = _validate_source_path(
@@ -1095,7 +1269,8 @@ def validate_candidate_research_source_text(
         "source_path": path,
     }
     for key, expected in fixed.items():
-        if metadata.get(key) != expected:
+        actual = metadata.get(key)
+        if type(actual) is not type(expected) or actual != expected:
             raise CandidateResearchError(
                 f"candidate research metadata {key} is invalid"
             )
@@ -1127,13 +1302,9 @@ def validate_candidate_research_source_text(
         raise CandidateResearchError(
             "candidate research evidence_span_count is invalid"
         )
-    if body.count("\n### Evidence ") != count:
+    if len(evidence_quotes) != count:
         raise CandidateResearchError(
             "candidate research evidence count does not match body"
-        )
-    if "## Generated seed questions — not evidence" not in body:
-        raise CandidateResearchError(
-            "candidate research seed questions are not labeled"
         )
     declared_hash = metadata.get("content_sha256")
     if not isinstance(declared_hash, str) or not CONTENT_HASH_RE.fullmatch(
@@ -1144,7 +1315,15 @@ def validate_candidate_research_source_text(
         raise CandidateResearchError(
             "candidate research content hash does not match body"
         )
-    return {"metadata": metadata, "marker": marker, "body": body, "source_path": path}
+    return {
+        "metadata": metadata,
+        "marker": marker,
+        "body": body,
+        "evidence_quotes": evidence_quotes,
+        "seed_questions": seed_questions,
+        "citation_body": "\n\n".join(evidence_quotes),
+        "source_path": path,
+    }
 
 
 def resolve_candidate_research_source(
@@ -1152,22 +1331,40 @@ def resolve_candidate_research_source(
     *,
     authoritative_turns: Sequence[dict],
     authority: CandidateResearchGitAuthority,
-    current_subject: dict | None = None,
+    current_subject_loader: Callable[[], dict],
     vault_root: str | Path | None = None,
     push: bool = True,
     failpoint: Callable[[str], None] | None = None,
 ) -> dict:
+    if not callable(current_subject_loader):
+        raise CandidateResearchError("current_subject_loader must be callable")
+    current_subject = current_subject_loader()
     plan = build_candidate_research_source(
         assessment,
         authoritative_turns=authoritative_turns,
         current_subject=current_subject,
     )
+
+    callback_called = False
+
+    def revalidate_current_subject() -> None:
+        nonlocal callback_called
+        revalidate_candidate_research_subject(
+            assessment["subject"], current_subject_loader()
+        )
+        callback_called = True
+
     raw = authority.resolve_exact_source(
         plan,
         vault_root=vault_root,
         push=push,
         failpoint=failpoint,
+        revalidate_current_subject=revalidate_current_subject,
     )
+    if not callback_called:
+        raise CandidateResearchError(
+            "Git authority omitted post-pull current-subject revalidation"
+        )
     result = _object(raw, name="authority_receipt", keys=_AUTHORITY_RECEIPT_KEYS)
     if result["source_path"] != plan["source_path"]:
         raise CandidateResearchConflict(
