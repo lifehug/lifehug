@@ -72,10 +72,6 @@ first (stable, cacheable), turn instructions last (freshest, turn-specific)
 6. **`prompt/turn-instructions.md`** — the per-turn task template. Loaded
    LAST, after the per-user and per-session context blocks, so it is the
    freshest thing the model reads before generating.
-   An interaction may also carry step-specific prompt files; their specialized
-   builder loads them only for that step. They never join the ordinary load
-   order implicitly (Conversation's candidate-placement files are the first
-   example).
 7. **`router/`** (only if the interaction receives free-form inbound
    messages, not just replies to a delivered prompt) — `router.md`, the
    cheap classifier prompt that sorts inbound into intents, and
@@ -136,6 +132,23 @@ To add a new interaction `interactions/<name>/`:
 12. Models are seated in the interaction only after passing its
     `evals/` harness — a new interaction ships with no default seat until
     the harness says who may hold it.
+
+## Registration and composition
+
+`interactions/registry.json` is the closed list of executable Interaction
+packages. A complete-looking directory that is absent from the registry is not
+an Interaction that a runtime may execute or seat. `system/interaction_registry.py`
+validates the registry and package manifests and provides the package audit.
+
+An Interaction may declare `extends: <registered-id>` plus an exact
+`extends.version`. A child declares every composed text asset under flat-scalar
+`composition.append` (parent-to-child, with provenance) or `composition.leaf`
+(child authority only). The two sets are disjoint and callers cannot choose a
+different policy. This is behavioral inheritance without copy drift: a child
+reads current parent files directly, and a parent-version mismatch forces
+review. Question Candidate is the first composed Interaction; it inherits
+Conversation chat mechanics while keeping its own identity, lifecycle,
+context, evals, registration, version, and seat surface (ADR 0018).
 
 ## Model-agnosticism rule
 

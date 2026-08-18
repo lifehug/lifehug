@@ -1,0 +1,130 @@
+[
+  {
+    "fixture_id": "play-opens-without-modal",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "before_answer", "provisional_category_id": null,
+      "latest_user_turn": null, "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "none", "requested_outcome": "engage"
+    },
+    "expected": {"status": "active", "category_id": null, "turn_kind": null, "complete": false, "timing_valid": true}
+  },
+  {
+    "fixture_id": "during-answer-silent-family",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "during_answer", "provisional_category_id": null,
+      "latest_user_turn": "Dad made me count the dark seconds between every sweep.", "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "held", "requested_outcome": "engage"
+    },
+    "expected": {"status": "active", "category_id": "F", "turn_kind": "answer", "complete": false, "timing_valid": true}
+  },
+  {
+    "fixture_id": "after-answer-completes-place",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "after_answer", "provisional_category_id": null,
+      "latest_user_turn": "The lighthouse itself became the place I returned to whenever patience ran thin.", "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "durable", "requested_outcome": "engage"
+    },
+    "expected": {"status": "complete", "category_id": "P", "turn_kind": "answer", "complete": true, "timing_valid": true}
+  },
+  {
+    "fixture_id": "during-answer-natural-question",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "during_answer", "provisional_category_id": null,
+      "latest_user_turn": "The waiting changed how I approached that whole season of my life.", "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "held", "requested_outcome": "engage"
+    },
+    "expected": {"status": "needs_clarification", "category_id": null, "turn_kind": "mixed", "complete": false, "timing_valid": true}
+  },
+  {
+    "fixture_id": "during-answer-defers-placement",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "during_answer", "provisional_category_id": null,
+      "latest_user_turn": "I can still see the beam crossing the kitchen wall as I tell this.", "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "held", "requested_outcome": "engage"
+    },
+    "expected": {"status": "active", "category_id": null, "turn_kind": "answer", "complete": false, "timing_valid": true}
+  },
+  {
+    "fixture_id": "placement-only-family",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "during_answer", "provisional_category_id": null,
+      "latest_user_turn": "With my dad.", "previous_placement_question": "Who were you going through it with?", "conversation_context": null,
+      "answer_status": "held", "requested_outcome": "engage"
+    },
+    "expected": {"status": "active", "category_id": "F", "turn_kind": "placement_only", "complete": false, "timing_valid": true}
+  },
+  {
+    "fixture_id": "explicit-decline",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "before_answer", "provisional_category_id": null,
+      "latest_user_turn": null, "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "none", "requested_outcome": "decline"
+    },
+    "expected": {"status": "declined", "category_id": null, "turn_kind": null, "complete": false, "timing_valid": true}
+  },
+  {
+    "fixture_id": "explicit-defer",
+    "input": {
+      "schema_version": 1,
+      "candidate": {"schema_version": 1, "candidate_id": "cand-lighthouse-1", "question": "What did the lighthouse teach you about waiting?", "source_revision": "capture:synthetic-lighthouse:3", "candidate_revision": "sha256:786dbd0fcb50aa4aa611c78184e642ecab84db94ae0ebf086757b4c1163a3cc1"},
+      "roster": {"schema_version": 1, "roster_revision": "sha256:3f840b5d52fce9f82dd1781509698ffbc7a5a36af975c0b606b9f85d06c6e036", "categories": [
+        {"category_id": "F", "label": "Family", "group": "people", "qualifier": null, "focus_id": "focus-family-stories", "focus_label": "Family stories", "category_revision": "sha256:788692153db872eea300a4d61450e0842becc61a8d148d312fe18761ad9dc201"},
+        {"category_id": "P", "label": "Places", "group": "settings", "qualifier": null, "focus_id": "focus-places", "focus_label": "Places that shaped me", "category_revision": "sha256:c366f7cf317abd45c275615d691c7f87b28c8cf982ca7ae6efff89b1cd1e938b"},
+        {"category_id": "W", "label": "Work", "group": "chapters", "qualifier": null, "focus_id": null, "focus_label": null, "category_revision": "sha256:c4ed16c76ae26a5eb5c17ee9ac338795a58cebf6b031e21f80c2db36837f1afc"}
+      ]},
+      "association_stage": "before_answer", "provisional_category_id": null,
+      "latest_user_turn": null, "previous_placement_question": null, "conversation_context": null,
+      "answer_status": "none", "requested_outcome": "defer"
+    },
+    "expected": {"status": "deferred", "category_id": null, "turn_kind": null, "complete": false, "timing_valid": true}
+  }
+]

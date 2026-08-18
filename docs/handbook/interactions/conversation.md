@@ -46,13 +46,6 @@ takeaway. Both are defined once in the [Glossary](../glossary.md); this
 page is the interaction that runs both modes (`interaction.yaml`'s
 `modes: chat|conversation`).
 
-**Candidate placement** is an additive step before Answer Now starts an
-ordinary Conversation around an exact candidate. A complete closed roster
-allows a high-confidence placement to stay silent; genuine ambiguity gets one
-natural clarification. It is `steps: candidate_placement`, never a third mode,
-and its specialized prompt files are not loaded into ordinary turns ([ADR
-0018](https://github.com/lifehug/lifehug/blob/main/docs/adr/0018-candidate-placement.md)).
-
 **Arc card** — the pre-planned skeleton for either mode: an opening
 framing plus 2–4 follow-up *intents* (not scripted text), planned ahead of
 time by the weekly/monthly loops (see [The Loop](../the-loop.md) §4) and
@@ -349,12 +342,6 @@ Question Judgment's weekly rubric-edit for this interaction as of this
 page (its behavior contract changes through PR review, not a scheduled
 self-amendment).
 
-For candidate Answer Now, the placement step feeds the coordinator one typed,
-revision-bound decision. A placement-only, answer-only, or mixed user turn is
-routing metadata; the exact original turn is retained in every case. This
-step writes nothing and never claims promotion—question-bank mutation and a
-Git-backed promotion receipt are issue #170's separate PR B.
-
 **Classification (Convergence Principle):** Chat is system-initiated on
 the daily clock — a passive user who only answers still gets the full
 payout-turn treatment, unattended, every day; this is the interaction's
@@ -374,19 +361,17 @@ review verbs.
 |---|---|
 | Definition | `interactions/conversation/` |
 | Behavior contract (embedded above) | `interactions/conversation/prompt/behavior.md` |
-| Candidate-placement contract + examples | `interactions/conversation/prompt/candidate-placement.md`, `interactions/conversation/prompt/candidate-placement-examples.md` |
 | Identity / self-reference rules | `interactions/conversation/prompt/identity.md` |
 | Context assembly recipe | `interactions/conversation/context/manifest.md` |
 | Arc planning | `interactions/conversation/plan/arc-templates.md` |
 | Router + deflection (free-form inbound) | `interactions/conversation/router/router.md`, `interactions/conversation/router/deflection.md` |
 | Research basis (4 phases, committed verbatim) | `interactions/conversation/research/` |
 | OSS runtime | `system/conversation.py`, `system/conversation_delivery.py` |
-| Candidate-placement schema/runtime | `system/candidate_placement.py` |
 | Durable state | `state/conversations/<session_id>.json`, `state/arc_cards.json` |
 | Session close sweep | `system/compile_and_commit.sh` (`conversation-close --expired`) |
-| CLI | `lifehug.py conversation-open \| conversation-record-turn \| conversation-close \| conversation-status \| conversation-candidate-placement-prompt \| conversation-evals` |
+| CLI | `lifehug.py conversation-open \| conversation-record-turn \| conversation-close \| conversation-status \| conversation-evals` |
 | Eval harness (wired, issue #120) | `lifehug.py conversation-evals`, `system/interaction_evals.py` |
-| Guard tests | `tests/test_candidate_placement.py`, `tests/test_conversation_close.py`, `tests/test_conversation_delivery.py`, `tests/test_conversation_router.py`, `tests/test_v150_conversation_store.py` |
+| Guard tests | `tests/test_conversation_close.py`, `tests/test_conversation_delivery.py`, `tests/test_conversation_router.py`, `tests/test_v150_conversation_store.py` (repo-verify exact names before citing in a PR) |
 
 **Change-safely notes.** Behavior changes go through
 `interactions/conversation/prompt/behavior.md` and its evals, never
@@ -404,4 +389,3 @@ just its wording) should prompt a re-read of this page's framing too.
 - `interactions/conversation/README.md` — the full research basis (four phases) and the owner's 2026-08-11 decision log this page's §1/§2 summarize; the authority on any wording question this page doesn't resolve.
 - [The Interaction Pattern](index.md) — the shared pattern this page is one instance of.
 - [The Loop](../the-loop.md) §4 — where arc planning and session close sit on the weekly clock and the per-answer event track.
-- [ADR 0018 — Candidate placement is a closed-roster Conversation step](https://github.com/lifehug/lifehug/blob/main/docs/adr/0018-candidate-placement.md) — proposal-only model boundary, revision binding, original-turn retention, and the PR B promotion split.

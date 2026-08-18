@@ -48,7 +48,9 @@ ordinary Conversation caller never loads the child.
 Question Candidate composes Conversation identity, behavior, examples,
 router, and deflection so it inherits chat voice, response-before-ask,
 receipts, question craft, scope, and closing mechanics. Its leaf context and
-turn instructions own candidate-specific assembly/output. It has its own role
+turn instructions own candidate-specific assembly/output while accepting the
+standard bounded Conversation profile/record/asking-supply/session/arc/turn
+context object from the coordinator. It has its own role
 keys and eval harness. Passing Conversation alone does not seat a model in the
 child; candidate-specific plus inherited-parity gates must also pass.
 

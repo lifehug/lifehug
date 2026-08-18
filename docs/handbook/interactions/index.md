@@ -41,9 +41,9 @@ An **Interaction** is defined once, precisely, in the
 situation — purpose, behavior contract, context recipe, scope, and evals,
 packaged as files any qualified model can execute. "Interaction" names
 the *definition*, not any one model's behavior, and not the code that
-runs it. Three exist today, each with its own handbook page:
+runs it. Four exist today, each with its own handbook page:
 [Conversation](conversation.md), [Question Judgment](question-judgment.md),
-and [Focus Curation](focus-curation.md).
+[Focus Curation](focus-curation.md), and [Question Candidate](question-candidate.md).
 
 The **three-way split** every interaction observes:
 
@@ -86,7 +86,6 @@ need them):
 | `prompt/behavior.md` | The behavior contract: objectives, numbered hard rules, defaults. The load-bearing file — this is what the model is graded against. |
 | `prompt/examples.md` | Canonical good/bad exchanges, each showing the rule it demonstrates or violates. Loaded after behavior. |
 | `prompt/turn-instructions.md` | The per-turn task template. Loaded LAST, after per-user and per-session context, so it's the freshest thing the model reads before generating. |
-| `prompt/<step>.md`, `prompt/<step>-examples.md` *(optional)* | A step-specific contract loaded only by that step's specialized builder; never added implicitly to ordinary turns. |
 | `router/` *(only if free-form inbound)* | `router.md` (a cheap classifier prompt sorting inbound into intents) + `deflection.md` (the out-of-scope response template). |
 | `context/manifest.md` | The deterministic per-turn context recipe: which blocks, in what order, from what sources, under what token budgets. The runtime implements exactly this document. |
 | `overlays/<provider>.md` | ONLY verified behavioral deltas for one model provider. Empty is the expected, healthy default. |
@@ -94,8 +93,8 @@ need them):
 | `plan/` *(only if pre-planned turns)* | How a planning loop assembles a plan before the interaction executes it live, turn by turn. |
 
 **Out-of-scope input is politely deflected** — every interaction that
-receives free-form inbound (only Conversation does, among the three
-today) carries a `router/deflection.md` template rather than attempting
+receives free-form inbound (Conversation and its Question Candidate child
+do today) carries a `router/deflection.md` template rather than attempting
 to improvise a redirect.
 
 Shared vocabulary this page relies on without redefining:
@@ -114,6 +113,16 @@ learned → examples → profile → turn_instructions`; `focus_curation`'s,
 the simplest of the three (no learning file, no per-user profile signal
 relevant to an identity judgment), is `identity → behavior → examples →
 turn_instructions`.
+
+**Registered composition.** `interactions/registry.json` is the closed list of
+packages a runtime may execute or seat. `system/interaction_registry.py`
+audits each package and resolves explicit inheritance. A child pins an exact
+parent version and declares every inherited asset as parent-to-child append or
+child leaf authority. Callers cannot select a merge strategy, and provenance
+markers show exactly which package supplied each assembled block. Question
+Candidate is the first child: it inherits Conversation chat mechanics without
+copying them while retaining its own behavior, context, lifecycle, eval, and
+seat boundary ([ADR 0018](https://github.com/lifehug/lifehug/blob/main/docs/adr/0018-candidate-placement.md)).
 
 **Why doc-drift is structurally impossible.** A conventional system has
 a prompt string somewhere in a runtime, and — if it's disciplined — a
@@ -144,7 +153,7 @@ run.
 **Tier guidance.** `role.router` / `role.worker` / `role.planner` name
 **capability tiers**, never vendor products (ADR 0002's model-agnosticism
 rule, restated explicitly in every interaction's owner-decisions
-section). The working rule across all three interactions: a
+section). The working rule across all four interactions: a
 high-volume, low-stakes, per-item call (judging one candidate, routing
 one inbound message) is a lower tier (`medium`, or the router's
 `haiku-class`); a low-volume, high-stakes call that changes behavior for
@@ -181,7 +190,7 @@ dependency-free runtime doesn't otherwise need.
 ## 5. In the loop
 
 **What feeds it:** every generation and judgment call already covered on
-this handbook's other pages routes through one of the three interactions
+this handbook's other pages routes through one of the four interactions
 here — [Question Candidates](../question-candidates.md)' classifier and
 research-expander generation both read the Question-Judgment rubric as
 context (§3 of that page); [Focuses & the Autopilot](../focuses.md)'
@@ -215,16 +224,18 @@ roster-fold dedupe layers beneath it are already the floor (see [Focuses
 | Concern | Location |
 |---|---|
 | The pattern's own definition | `interactions/README.md` |
-| Three shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/` |
+| Closed package registry | `interactions/registry.json` |
+| Four shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/` |
+| Registry, composition, and package audit | `system/interaction_registry.py` |
 | The flat-YAML parser every `interaction.yaml` depends on | `system/lifehug_core.py:557`, `_parse_simple_yaml` |
-| Eval CLI (only `conversation` wired as of this page) | `lifehug.py conversation-evals`, `system/interaction_evals.py` |
+| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals` |
 | New-interaction checklist | `interactions/README.md`'s "The new-interaction checklist" section (12 steps: README → `interaction.yaml` → `prompt/` → `router/` if needed → `context/manifest.md` → `overlays/` → `evals/` → `plan/` if needed → vault-contract registration → `framework_files` registration → an ADR → no default seat until evals pass) |
 | Guard tests | `tests/test_interaction_evals.py`, `tests/test_conversation_router.py`, `tests/test_question_judgment.py`, `tests/test_focus_duplicate_curation.py` (repo-verify exact names before citing in a PR) |
 
 **Change-safely notes.** A new interaction that skips the
 definition/runtime/seat split, or ships without an eval harness, is a
 design defect per ADR 0002's Consequences — not a valid shortcut for a
-"simple" case. Behavior changes to any of the three interactions go
+"simple" case. Behavior changes to any of the four interactions go
 through their own `interactions/<name>/` files and evals, never through
 ad hoc edits to a runtime's prompt strings; a runtime-side divergence
 from the definition is a runtime bug, not a legitimate platform variant.

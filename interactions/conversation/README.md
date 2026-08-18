@@ -38,10 +38,6 @@ added to the top-level `README.md` Nomenclature section):
   by the loops ahead of time, executed live per turn by the seated model.
 - **Session** — one bounded run: open → turns → close; the durable record
   is the session document (`state/conversations/`, registered in PR 2).
-- **Candidate placement** — an additive pre-conversation step for Answer Now:
-  silently place an exact candidate from a complete closed category roster at
-  high confidence, or ask one natural clarification. It is a step, not a third
-  mode; ordinary Chat and Conversation prompts do not load it.
 
 ## 3. The research basis
 
@@ -135,11 +131,6 @@ phases. These bind this interaction; they are not implementer discretion.
 
 - **Behavior contract**: `prompt/behavior.md` — the load-bearing file,
   both the prompt sent to the model and its documentation.
-- **Candidate-placement contract**: `prompt/candidate-placement.md` plus
-  synthetic shapes in `prompt/candidate-placement-examples.md`, loaded only by
-  `system/candidate_placement.py`. The model proposes; the runtime validates
-  exact closed-roster membership and canonical revisions and performs no
-  promotion or write (ADR 0018).
 - **Context recipe**: `context/manifest.md` — the deterministic per-turn
   assembly order and token budgets.
 - **Arc planning**: `plan/arc-templates.md` — how the weekly/monthly loops
@@ -148,10 +139,10 @@ phases. These bind this interaction; they are not implementer discretion.
 - **Durable state**: `state/conversations/` (session documents) and
   `state/arc_cards.json` — both registered in `system/vault_contract.json`
   by PR 2 (issue #115); not touched by this PR.
-- **Runtimes**: the OSS single-user turn/session runtime is
-  `system/conversation.py`; `system/candidate_placement.py` is its pure,
-  stdlib-only placement authority. The hosted platform loads the same
-  definition and schemas.
+- **Runtimes**: the OSS single-user runtime is `system/conversation.py`,
+  landing in PR 2; the hosted platform runs its own vendored loader against
+  the same definition. Neither runtime exists yet as of this PR — this PR
+  ships only the definition.
 
 ## 6. How to eval
 
@@ -159,9 +150,8 @@ phases. These bind this interaction; they are not implementer discretion.
 checks — one question per turn, banned phrases, question-grammar audit,
 length caps, receipt-before-question, year-question detection, plus
 `router_gates.*` per-class precision/recall thresholds), `goldens/`
-(golden transcripts with property assertions, `router_fixtures.json` /
-`router_sample_predictions.json` for the router scorer, and candidate-
-placement fixtures/predictions for the five `placement_gates.*`), `rubrics.md` (a
+(golden transcripts with property assertions, and `router_fixtures.json` /
+`router_sample_predictions.json` for the router scorer), `rubrics.md` (a
 binary yes/no judge question per hard rule, 1:1 with `prompt/behavior.md`'s
 13 rules), and `personas/` (seven simulated users whose runs must
 demonstrate specific properties — e.g. the `grief-fresh` persona's runs
@@ -169,9 +159,9 @@ must show deferral, the `ruminator` persona's runs must show mid-thread
 back-off).
 
 **The eval harness (issue #120)**: `python3 system/lifehug.py
-conversation-evals` runs deterministic lints, router and candidate-placement
-fixture scorers, golden-transcript properties, and model-backed,
-keyless-skippable placement/judge/persona layers over this directory.
+conversation-evals` runs all four layers — deterministic lints, router
+fixtures + scorer, golden-transcript properties, and (model-backed,
+keyless-skippable) judge rubrics + personas — over this directory.
 `--emit-tasks` writes judge/persona agent-task prompts to
 `state/agent_tasks/evals/` when no provider is configured. See
 `system/interaction_evals.py`'s module docstring for the full layer

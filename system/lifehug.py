@@ -71,7 +71,7 @@ READ_ONLY_COMMANDS = frozenset({
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
-    "conversation-arc-prompt", "conversation-candidate-placement-prompt",
+    "conversation-arc-prompt",
     "conversation-closing-prompt", "conversation-lint",
     "conversation-router-prompt", "conversation-status", "conversation-turn-prompt",
     "daily-dry-run", "doctor",
@@ -80,7 +80,8 @@ READ_ONLY_COMMANDS = frozenset({
     # focus_recommendations.json.
     "focus-dupes",
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
-    "planner-report", "progress", "quality-stats", "roadmap", "serve",
+    "planner-report", "progress", "quality-stats", "question-candidate-evals",
+    "question-candidate-prompt", "roadmap", "serve",
     "source-findings", "source-scan", "status", "weekly-summary",
     # Issue #117: routing reads rotation + session state and makes a model
     # call, but mutates nothing durable (test_route_mutates_nothing pins
@@ -1227,8 +1228,8 @@ def cmd_conversation_router_prompt(_args: argparse.Namespace) -> int:
     return run_python("conversation.py", ["router-prompt"])
 
 
-def cmd_conversation_candidate_placement_prompt(_args: argparse.Namespace) -> int:
-    return run_python("candidate_placement.py", ["prompt"])
+def cmd_question_candidate_prompt(_args: argparse.Namespace) -> int:
+    return run_python("question_candidate.py", ["prompt"])
 
 
 def cmd_conversation_arc_prompt(_args: argparse.Namespace) -> int:
@@ -1294,6 +1295,10 @@ def cmd_route(_args: argparse.Namespace) -> int:
 def cmd_conversation_evals(args: argparse.Namespace) -> int:
     flags = ["--emit-tasks"] if getattr(args, "emit_tasks", False) else []
     return run_python("interaction_evals.py", flags)
+
+
+def cmd_question_candidate_evals(_args: argparse.Namespace) -> int:
+    return run_python("question_candidate_evals.py", [])
 
 
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
@@ -2450,10 +2455,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_conversation_router_prompt)
 
     p = sub.add_parser(
-        "conversation-candidate-placement-prompt",
-        help="stdin CandidatePlacementInput JSON -> the read-only placement prompt",
+        "question-candidate-prompt",
+        help="stdin QuestionCandidateInput JSON -> the composed read-only prompt",
     )
-    p.set_defaults(func=cmd_conversation_candidate_placement_prompt)
+    p.set_defaults(func=cmd_question_candidate_prompt)
 
     p = sub.add_parser("conversation-arc-prompt", help="stdin JSON -> the arc-card planning prompt")
     p.set_defaults(func=cmd_conversation_arc_prompt)
@@ -2473,6 +2478,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--emit-tasks", action="store_true",
                    help="Also write judge/persona agent-task prompts to state/agent_tasks/evals/")
     p.set_defaults(func=cmd_conversation_evals)
+
+    p = sub.add_parser(
+        "question-candidate-evals",
+        help="Run the independent Question Candidate Interaction eval harness",
+    )
+    p.set_defaults(func=cmd_question_candidate_evals)
 
     p = sub.add_parser(
         "route",

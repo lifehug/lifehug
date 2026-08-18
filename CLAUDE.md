@@ -1162,13 +1162,16 @@ touching `interactions/conversation/**`, a `conversation_model`/
 `router_model`/`judge_model` config default, or `overlays/*` gates through
 `python3 system/lifehug.py conversation-evals` — a harness run belongs in
 that PR's evidence.
-Candidate Answer Now placement (v181) is an additive Conversation step, not a
-mode: `system/candidate_placement.py` validates an exact candidate and complete
-1–64-entry category roster, renders the specialized prompt, and normalizes the
-model's proposal. The model cannot invent categories or authorize writes;
-ordinary Conversation prompts do not load the placement files. The read-only
-`conversation-candidate-placement-prompt` command accepts the exact JSON input
-on stdin. Candidate promotion and receipts remain separate.
+Candidate Answer Now (v181, ADR 0018) is the independently registered
+`question_candidate` Interaction, not a Conversation step or mode. It composes
+an exact Conversation parent version through `system/interaction_registry.py`
+for chat mechanics while owning candidate anchor, closed-roster category/focus
+association, before/during/after placement timing, completion, and lifecycle.
+Play begins substantive answering without a category modal and never promotes;
+the caller alone supplies explicit Decline/defer and answer durability. The
+read-only `question-candidate-prompt` and `question-candidate-evals` commands
+expose its prompt and independent seat harness. Direct promotion, canonical
+question id, Git commit, and structured receipt remain issue #170 PR B.
 `answer_ack_model` selects the fallback acknowledgment model (default
 `claude-sonnet-5`; a configured local provider still uses its own local model).
 
@@ -1387,7 +1390,7 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 
 **Framework files** (updated automatically):
 - `CLAUDE.md`, `system/ai_provider.py`, `system/answer_ack.py`, `system/answer_ack_delivery.py`, `system/ask.py`,
-  `system/candidate_placement.py`, `system/conversation.py`, `system/conversation_delivery.py`, `system/conversation_lints.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+  `system/conversation.py`, `system/conversation_delivery.py`, `system/conversation_lints.py`, `system/eval_gates.py`, `system/interaction_registry.py`, `system/question_candidate.py`, `system/question_candidate_evals.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 

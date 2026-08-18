@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "interactions": [
+    {"id": "conversation", "package": "conversation"},
+    {"id": "focus_curation", "package": "focus_curation"},
+    {"id": "question_judgment", "package": "question_judgment"},
+    {"id": "question_candidate", "package": "question_candidate"}
+  ]
+}

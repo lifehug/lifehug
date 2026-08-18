@@ -186,6 +186,7 @@ and never paraphrased by the builder.
   "provisional_category_id": null,
   "latest_user_turn": null,
   "previous_placement_question": null,
+  "conversation_context": null,
   "answer_status": "none",
   "requested_outcome": "engage"
 }
@@ -200,6 +201,12 @@ and never paraphrased by the builder.
   turn. `previous_placement_question` is nullable conversational context. The
   runtime retains the original turn independently of any classification or
   prompt budget.
+- `conversation_context` is null only when Play has just opened and there is no
+  prior context, or an exact object with nullable `profile`, `record`,
+  `asking_supply`, `session`, `arc_card_current_intent`,
+  `previous_turn_summary`, `turn_position`, and `applicable_rule_hints`
+  strings. These are the standard Conversation context capabilities supplied
+  by the coordinator; the child does not copy or weaken their assembly rules.
 - `answer_status` is caller-attested `none|held|durable`. Only the coordinator
   that durably stores an answer may say `durable`; model output can never
   upgrade it.
@@ -262,7 +269,7 @@ The normalized `QuestionCandidateDecision` is:
   "completion": {
     "answer_durable": false,
     "placement_resolved": false,
-    "outcome_resolved": true,
+    "outcome_resolved": false,
     "complete": false
   }
 }
@@ -396,7 +403,7 @@ python3 -m unittest \
 python3 system/lifehug.py conversation-evals
 python3 system/lifehug.py question-candidate-evals
 python3 scripts/ci/check_framework_files.py
-python3 scripts/check_version_bump.py
+python3 scripts/ci/check_version_bump.py --base 886e969 --head <implementation-sha>
 python3 -m compileall -q system tests
 git diff --check
 ```

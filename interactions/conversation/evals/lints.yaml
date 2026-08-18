@@ -126,13 +126,3 @@ router_gates.out_of_scope.recall: 0.8
 # reconciliation (contract, Scope 7): a new gate class the platform's own
 # closed-vocabulary/gate mirror needs to pick up.
 router_gates.binding.accuracy: 0.85
-
-# placement_gates.* (issue #170 / ADR 0018): candidate placement is scored
-# over the runtime-normalized decision, never raw model category text. The
-# same generic check_score_gates arithmetic enforces both these thresholds
-# and router_gates.*; only the flat prefix and metric vocabulary differ.
-placement_gates.category.accuracy: 0.9
-placement_gates.turn_kind.accuracy: 0.9
-placement_gates.closed_roster.compliance: 1.0
-placement_gates.ambiguity_question.validity: 1.0
-placement_gates.stale_revision.rejection: 1.0
