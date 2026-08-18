@@ -76,8 +76,18 @@ re-scoring resolves "this needs a category" or "this duplicates something
 else."
 
 **Promotion** is the act of turning a candidate into a real, numbered
-question-bank entry, with a provenance comment recording which candidate it
-came from and when. **Auto-promotion** is promotion the system performs
+question-bank entry. Manual, weekly-auto, and neighborhood promotion all use
+one authority (`candidate_promotion.py`). It binds the exact candidate,
+category, and placement revisions, writes a structured provenance marker, and
+returns the canonical question id and Git commit. The marker and Git history —
+not the candidate-store projection — prove the durable result, so an exact
+retry returns the same result with `changed:false` and never adds a duplicate.
+Conflicting text, category, or revisions stop without guessing. Non-null
+Question Candidate proposal/decision hashes are accepted only with the exact
+objects that produce them. The shared `exact_file_git.py` transaction adapter
+owns writer locking, exact-path commits, first-marker adoption, and post-rebase
+validation; promotion supplies the closed candidate-specific validator.
+**Auto-promotion** is promotion the system performs
 itself, unattended, during `weekly_maintenance.sh` — the no-human path the
 Convergence Principle requires this stage to have.
 
@@ -362,7 +372,8 @@ system keeps improving its own questions.
 | Quality-profile aggregation | `quality_profile.compute_profile()` |
 | Question-judgment rubric (JUDGE priority/penalty vocabulary) | `interactions/question_judgment/prompt/behavior.md`, `question_judgment.py` |
 | Owner decisions → generation prompts | `question_judgment.build_decision_context()`, `owner_judgment_signals_block()` |
-| CLI | `lifehug.py candidates-list \| candidates-review \| candidates-update \| candidates-promote \| candidates-promote-neighborhood \| candidates-stats \| candidates-auto-promote [--dry-run]` |
+| Promotion authority | `candidate_promotion.build_candidate_promotion_request()`, `resolve_candidate_promotion()` over `exact_file_git.resolve_exact_file_transaction()` (ADR 0019) |
+| CLI | `lifehug.py candidates-list \| candidates-review \| candidates-update \| candidates-promote \| candidates-promotion-receipt ... --json \| candidates-promote-neighborhood \| candidates-stats \| candidates-auto-promote [--dry-run]` |
 | Weekly wiring | `weekly_maintenance.sh` — `quality_update` → `judgment_update` → `timeline_retire` → `wiki_harvest` → `mirror_compile` → `auto_promote` → `planner_queue` → `arc_plan` |
 | Interaction | [`interactions/question_judgment/`](https://github.com/lifehug/lifehug/tree/main/interactions/question_judgment) (ADR 0007) |
 | Guard tests | `tests/test_unified_quality_score.py`, `tests/test_decisions_feed_loop.py`, `tests/test_question_candidates.py` (repo-verify exact names before citing in a PR — this table names the concern, not a promise of one file per row) |
@@ -387,4 +398,5 @@ field-overwrite fix).
 - [ADR 0007 — The Question-Judgment Interaction](https://github.com/lifehug/lifehug/blob/main/docs/adr/0007-question-judgment-interaction.md) — the priority/penalty vocabulary §4 quotes, and the JUDGE/RUBRIC-EDIT split §5 describes; see also the interaction's own [behavior contract](https://github.com/lifehug/lifehug/blob/main/interactions/question_judgment/prompt/behavior.md).
 - [ADR 0008 — One published quality score, craft penalties folded in](https://github.com/lifehug/lifehug/blob/main/docs/adr/0008-unified-quality-score.md) — the formula in §4.
 - [ADR 0009 — Decisions Feed The Loop](https://github.com/lifehug/lifehug/blob/main/docs/adr/0009-decisions-feed-the-loop.md) — the `decision_reason` field, owner judgment signals, and the weekly rubric-edit runtime.
+- [ADR 0019 — Git-tree candidate promotion receipts](../adr/0019-candidate-promotion-receipts.md) — the one mutation authority, structured marker, replay, and receipt contract.
 - The hosted platform's review-loop contracts (parallel PR review, owner closeout, executable walkthroughs) that this feature's Review lane is built against: [`lifehug-platform` docs/BUILDING.md](https://github.com/lifehug/lifehug-platform/blob/main/docs/BUILDING.md) and [docs/REVIEWING.md](https://github.com/lifehug/lifehug-platform/blob/main/docs/REVIEWING.md) (external repo — platform orchestrates this package, never forks it).

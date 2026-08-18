@@ -36,10 +36,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
 
 import format_frameworks
 from vault_paths import (
@@ -700,7 +700,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "artifact-promote": CommandSpec(_build_artifact_promote, "never"),
     "artifact-revise": CommandSpec(_build_artifact_revise, "never", timeout_seconds=1800),
     "artifact-save": CommandSpec(_build_artifact_save, "never"),
-    "candidate-promote": CommandSpec(_build_candidate_promote, "never"),
+    "candidate-promote": CommandSpec(_build_candidate_promote, "idempotent"),
     "candidate-update": CommandSpec(_build_candidate_update, "never"),
     "compile": CommandSpec(_build_compile, "idempotent"),
     "compile-pending": CommandSpec(_build_schedule("compile_and_commit.sh"), "never"),
@@ -900,13 +900,22 @@ def _owned_lock_record(owner_id: str, lease_seconds: int) -> dict:
 
 
 def _open_lock_file(path: Path) -> int:
-    _ensure_layout()
-    return open_vault_fd(
-        path,
-        os.O_RDWR | os.O_CREAT,
-        vault_root=VAULT_ROOT,
-        mode=0o600,
-    )
+    # Two cold-start workers can create the jobs directory concurrently. On
+    # some filesystems one process can briefly retain a stale parent dirfd;
+    # reopen the bounded path rather than weakening the no-follow boundary.
+    for attempt in range(3):
+        _ensure_layout()
+        try:
+            return open_vault_fd(
+                path,
+                os.O_RDWR | os.O_CREAT,
+                vault_root=VAULT_ROOT,
+                mode=0o600,
+            )
+        except FileNotFoundError:
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable writer lock retry")
 
 
 class _KernelLock:
@@ -928,7 +937,7 @@ class _KernelLock:
                 if time.monotonic() >= deadline:
                     os.close(self.fd)
                     self.fd = None
-                    raise TimeoutError("vault lock is busy")
+                    raise TimeoutError("vault lock is busy") from None
                 time.sleep(0.02)
 
     def __exit__(self, _exc_type, _exc, _tb):

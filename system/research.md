@@ -362,3 +362,19 @@ conversations) is a designed Interaction: its research basis, behavior
 contract, and eval harness live in `interactions/conversation/` —
 README.md there is the orientation doc. The four research phases behind
 it are committed in full under `interactions/conversation/research/`.
+
+## 12. Candidate promotion receipt authority (v182)
+
+Candidate placement remains owned by the independent Question Candidate
+Interaction (ADR 0018); promotion is a deterministic mutation after an
+authorized lifecycle decision. ADR 0019 makes the Git tree the durable receipt
+authority. Manual, weekly-auto, and neighborhood paths all pass an exact
+revision-bound request through `candidate_promotion.py`. The inserted bank
+marker carries canonical hashed provenance, while Git history supplies the
+commit SHA. This closes the crash/retry ambiguity without copying proposal,
+decision, or conversation text into the question bank and without granting a
+model any write capability. A non-null proposal/decision hash must be proved by
+the exact object at mutation time. The reusable exact-file Git adapter owns the
+writer/pull/commit/push order and invokes candidate-specific full-record
+validation after a rebase, so an unchanged marker cannot hide altered question
+bytes.

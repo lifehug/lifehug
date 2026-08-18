@@ -1,7 +1,7 @@
 {
-  "version": 181,
+  "version": 182,
   "released": "2026-08-18",
-  "changelog": "v181: feat(170): ship Question Candidate as an independently registered Interaction (PR A of two, ADR 0018). A new closed interactions/registry.json and stdlib interaction_registry.py audit package identity and compose an exact Conversation 1.0.0 parent with deterministic provenance, parent-version binding, cycle/path rejection, and child-declared append/leaf policy—Conversation supplies chat mechanics without copied prompt drift and its ordinary manifest/definition/turn/router bytes remain v180-identical. The complete interactions/question_candidate/ package owns candidate anchor, closed 1–64 category roster, category/focus inference before/during/after substantive answering, its own context/router/evals/version/role seat, and explicit engaged/answered/declined/deferred lifecycle. Play begins answering without a category modal and never promotes; placement may resolve silently at confidence >=0.8, defer while the story continues, or ask exactly one natural Conversation-lint-clean question when appropriate. The pure question_candidate.py runtime treats candidate/user/category strings as untrusted JSON, gives the model no write authority, retains placement_only|answer|mixed turns independently, and declares answered completion only after caller-attested durable answer plus revision-valid selected category. Explicit Decline/defer bypass model judgment. Independent question-candidate-prompt and question-candidate-evals commands expose the composed prompt and seven-class schema/timing/completion/staleness seat gates; live seating skips loudly without a provider. Direct promotion, canonical question_id/category, Git commit_sha, idempotency, and the structured receipt remain PR B; platform #469 waits for that final release, then implements green Promote, red Decline, and modal-free Play opening Home/Today with the exact candidate preloaded.",
+  "changelog": "v182: feat(170): add the canonical idempotent candidate-promotion receipt authority (ADR 0019). Manual, weekly-auto, and neighborhood promotion now share one revision-bound mutation over the public closed-path exact_file_git transaction adapter: it holds the root-aware writer lease, commits only declared files, pushes without force, revalidates the entire intended candidate/question/provenance record after rebase, and reconstructs the first canonical question_id/category/commit_sha receipt from Git history after retries or crashes. Conflicting bytes, candidate/category/placement revisions, unproved proposal/decision hashes, and legacy text-only matches fail closed. The stable candidates-promotion-receipt JSON CLI supplies exact bound interaction objects through bounded stdin when hashes are non-null. Question Candidate v181 and ordinary Conversation bytes remain unchanged, and starting Play still never promotes.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -131,6 +131,8 @@
     "system/artifact.py",
     "system/ask.py",
     "system/book.py",
+    "system/candidate_promotion.py",
+    "system/exact_file_git.py",
     "system/classify_story.py",
     "system/compile_and_commit.sh",
     "system/compose.py",
@@ -214,6 +216,8 @@
     "templates/unsent_letter.md",
     "tests/tempdirs.py",
     "tests/test_artifact_workflow.py",
+    "tests/test_candidate_promotion.py",
+    "tests/test_exact_file_git.py",
     "tests/test_connectors.py",
     "tests/test_conversation_delivery.py",
     "tests/test_ingest_and_planner.py",

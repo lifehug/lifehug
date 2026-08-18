@@ -171,11 +171,32 @@ class AutoPromoteLadderTests(unittest.TestCase):
         self._orig_load_defaults = qc.load_store.__defaults__
         self._orig_save_defaults = qc.save_store.__defaults__
         self._orig_profile_loader = qc._load_quality_profile_safely
+        self._orig_promotion_resolver = qc.candidate_promotion.resolve_candidate_promotion
         qc.QUESTIONS_FILE = self.bank_path
         qc.QUESTION_CANDIDATES_FILE = self.cand_path
         qc.load_store.__defaults__ = (self.cand_path,)
         qc.save_store.__defaults__ = (self.cand_path,)
         qc._load_quality_profile_safely = lambda: None  # inactive profile: multiplier 1.0
+
+        def resolve_fixture(request, **kwargs):
+            data = qc.load_store()
+            bank = qc.QUESTIONS_FILE.read_text(encoding="utf-8")
+            updated, payload = qc.candidate_promotion.apply_candidate_promotion(
+                data, bank, request,
+                promotion_mode=kwargs.get("promotion_mode", "auto"),
+                auto_score=kwargs.get("auto_score"))
+            qc.write_text(qc.QUESTIONS_FILE, updated)
+            qc.save_store(data)
+            return {
+                "candidate_id": payload["candidate_id"],
+                "category_id": payload["category_id"],
+                "question_id": payload["question_id"],
+                "changed": True,
+                "commit_sha": "0" * 40,
+                "candidate_provenance": payload["candidate_provenance"],
+            }
+
+        qc.candidate_promotion.resolve_candidate_promotion = resolve_fixture
 
     def tearDown(self):
         qc.QUESTIONS_FILE = self._orig_questions_file
@@ -183,6 +204,7 @@ class AutoPromoteLadderTests(unittest.TestCase):
         qc.load_store.__defaults__ = self._orig_load_defaults
         qc.save_store.__defaults__ = self._orig_save_defaults
         qc._load_quality_profile_safely = self._orig_profile_loader
+        qc.candidate_promotion.resolve_candidate_promotion = self._orig_promotion_resolver
 
     def _write_store(self, candidates):
         self.cand_path.write_text(
