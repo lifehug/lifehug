@@ -8,7 +8,6 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-import conversation_lints
 import eval_gates
 import interaction_registry
 import question_candidate
@@ -285,7 +284,9 @@ def run() -> tuple[int, str]:
         return 1, "\n".join(report)
     report.append(f"Layer 2 (sample gates): PASSED {len(load_gates())} gate classes")
     # Structural proof that inherited Conversation lints execute in this seat.
-    inherited_findings = conversation_lints.lint_turn("Did it happen? Or not?")
+    inherited_findings = question_candidate.lint_inherited_reply(
+        "Did it happen? Or not?"
+    )
     if not any(row["lint"] == "one_question_per_turn" for row in inherited_findings):
         report.append("Layer 3 (inherited Conversation parity): FAILED")
         return 1, "\n".join(report)

@@ -438,14 +438,23 @@ def _proposal(raw: object) -> dict:
     return _object(raw, name="model_output", keys=_MODEL_OUTPUT_KEYS)
 
 
+def lint_inherited_reply(
+    text: str, *, is_reply_to_substantive: bool = False
+) -> list[dict]:
+    """Apply the inherited Conversation lint authority without duplicating it."""
+    return conversation_lints.lint_turn(
+        text,
+        is_reply_to_substantive=is_reply_to_substantive,
+        seam_ok=False,
+    )
+
+
 def _question_is_valid(question: str, *, reply: str, substantive: bool) -> bool:
     if question.count("?") != 1 or not question.rstrip().endswith("?"):
         return False
     if reply.count(question) != 1:
         return False
-    findings = conversation_lints.lint_turn(
-        reply, is_reply_to_substantive=substantive, seam_ok=False
-    )
+    findings = lint_inherited_reply(reply, is_reply_to_substantive=substantive)
     return not findings and reply.count("?") == 1
 
 
