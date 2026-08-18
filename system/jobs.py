@@ -900,13 +900,22 @@ def _owned_lock_record(owner_id: str, lease_seconds: int) -> dict:
 
 
 def _open_lock_file(path: Path) -> int:
-    _ensure_layout()
-    return open_vault_fd(
-        path,
-        os.O_RDWR | os.O_CREAT,
-        vault_root=VAULT_ROOT,
-        mode=0o600,
-    )
+    # Two cold-start workers can create the jobs directory concurrently. On
+    # some filesystems one process can briefly retain a stale parent dirfd;
+    # reopen the bounded path rather than weakening the no-follow boundary.
+    for attempt in range(3):
+        _ensure_layout()
+        try:
+            return open_vault_fd(
+                path,
+                os.O_RDWR | os.O_CREAT,
+                vault_root=VAULT_ROOT,
+                mode=0o600,
+            )
+        except FileNotFoundError:
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable writer lock retry")
 
 
 class _KernelLock:
