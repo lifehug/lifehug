@@ -6,20 +6,20 @@ import base64
 import concurrent.futures
 import inspect
 import json
-import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import candidate_promotion as promotion
 import question_candidates as manager
 import roadmap
+from tempdirs import root_parent_tmp
 
 BANK = (
     "# Questions\n\n"
@@ -41,8 +41,7 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 class PromotionCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-promotion-", dir=ROOT.parent))
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-promotion-")
         state = self.tmp / "state"
         state.mkdir()
         (self.tmp / ".gitignore").write_text("state/jobs/\n", encoding="utf-8")
@@ -290,10 +289,7 @@ class ReceiptTests(PromotionCase):
         self.assertEqual(sorted(row["changed"] for row in receipts), [False, True])
 
     def test_push_then_crash_is_adopted_from_remote_commit(self):
-        remote = Path(
-            tempfile.mkdtemp(prefix="lifehug-promotion-remote-", dir=ROOT.parent)
-        )
-        self.addCleanup(shutil.rmtree, remote, ignore_errors=True)
+        remote = root_parent_tmp(self, ROOT, prefix="lifehug-promotion-remote-")
         self.assertEqual(_run(remote, "init", "--bare").returncode, 0)
         self.assertEqual(
             _run(self.tmp, "remote", "add", "origin", str(remote)).returncode, 0
@@ -325,10 +321,7 @@ class ReceiptTests(PromotionCase):
         )
 
     def test_stable_cli_prints_one_compact_canonical_receipt(self):
-        remote = Path(
-            tempfile.mkdtemp(prefix="lifehug-promotion-cli-", dir=ROOT.parent)
-        )
-        self.addCleanup(shutil.rmtree, remote, ignore_errors=True)
+        remote = root_parent_tmp(self, ROOT, prefix="lifehug-promotion-cli-")
         self.assertEqual(_run(remote, "init", "--bare").returncode, 0)
         _run(self.tmp, "remote", "add", "origin", str(remote))
         self.assertEqual(
