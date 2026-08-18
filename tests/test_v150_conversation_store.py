@@ -636,6 +636,10 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             # router-fixture/judge/persona runner. Never re-derives lint
             # logic (recurring-defect doctrine).
             "interaction_evals.py",
+            # issue #170 / ADR 0018: the dedicated, pure candidate-placement
+            # authority reuses Conversation's framework-scoped prompt reader
+            # and lint engine; it does not import session/delivery mechanics.
+            "candidate_placement.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):

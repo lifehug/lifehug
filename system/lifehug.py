@@ -71,7 +71,8 @@ READ_ONLY_COMMANDS = frozenset({
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
-    "conversation-arc-prompt", "conversation-closing-prompt", "conversation-lint",
+    "conversation-arc-prompt", "conversation-candidate-placement-prompt",
+    "conversation-closing-prompt", "conversation-lint",
     "conversation-router-prompt", "conversation-status", "conversation-turn-prompt",
     "daily-dry-run", "doctor",
     # focus-duplicate-curation contract, Scope 3: the damage list is
@@ -1224,6 +1225,10 @@ def cmd_conversation_turn_prompt(_args: argparse.Namespace) -> int:
 
 def cmd_conversation_router_prompt(_args: argparse.Namespace) -> int:
     return run_python("conversation.py", ["router-prompt"])
+
+
+def cmd_conversation_candidate_placement_prompt(_args: argparse.Namespace) -> int:
+    return run_python("candidate_placement.py", ["prompt"])
 
 
 def cmd_conversation_arc_prompt(_args: argparse.Namespace) -> int:
@@ -2443,6 +2448,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("conversation-router-prompt", help="stdin JSON -> the conversation router prompt")
     p.set_defaults(func=cmd_conversation_router_prompt)
+
+    p = sub.add_parser(
+        "conversation-candidate-placement-prompt",
+        help="stdin CandidatePlacementInput JSON -> the read-only placement prompt",
+    )
+    p.set_defaults(func=cmd_conversation_candidate_placement_prompt)
 
     p = sub.add_parser("conversation-arc-prompt", help="stdin JSON -> the arc-card planning prompt")
     p.set_defaults(func=cmd_conversation_arc_prompt)

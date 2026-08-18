@@ -13,7 +13,7 @@ Four layers, always in this order:
 1. **Deterministic lints** (`conversation_lints`, issue #115/#120) — always
    run, dependency-free. This module never re-implements lint logic
    (recurring-defect doctrine); it IMPORTS the shared engine.
-2. **Router fixtures + scorer** — schema-validates
+2. **Router + candidate-placement fixtures and scorers** — schema-validates
    `evals/goldens/router_fixtures.json` (always run) and scores
    predictions per class against `router_gates.*` (flat dotted keys in
    `evals/lints.yaml`). Two prediction sources, both scored by the SAME
@@ -46,7 +46,10 @@ Four layers, always in this order:
    `score_predictions`'s per-class dict) and merges into the same scores
    passed to `check_router_gates`, so `router_gates.binding.accuracy`
    (lints.yaml) is enforced by the SAME generic gate checker — no new one.
-   Fixtures without `threads` are entirely unaffected.
+   Fixtures without `threads` are entirely unaffected. Issue #170 / ADR 0018
+   adds a candidate-placement fixture/sample layer under the same generic
+   gate arithmetic: closed-roster category/turn accuracy, ambiguity-question
+   validity, and stale-revision rejection.
 3. **Golden-transcript property assertions** — always run, over every
    committed `evals/goldens/*.json` transcript: the closed vocabulary
    (`receipt_quotes_user`, `no_new_topic_mid_arc`,
@@ -84,6 +87,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+import candidate_placement
 import conversation
 import conversation_lints
 from ai_provider import AIProviderError, ProviderStatus, call_ai, provider_status
@@ -97,6 +101,8 @@ EVALS_DIR = INTERACTIONS_DIR / "conversation" / "evals"
 GOLDENS_DIR = EVALS_DIR / "goldens"
 ROUTER_FIXTURES_FILE = "router_fixtures.json"
 ROUTER_SAMPLE_PREDICTIONS_FILE = "router_sample_predictions.json"
+CANDIDATE_PLACEMENT_FIXTURES_FILE = "candidate_placement_fixtures.json"
+CANDIDATE_PLACEMENT_SAMPLE_PREDICTIONS_FILE = "candidate_placement_sample_predictions.json"
 #: ADR 0014 (issue #163): a deliberately-broken closing fixture that
 #: reproduces the leaked-scaffolding SHAPE, used only to prove the new
 #: structured-close lints trip (tests/test_structured_close.py loads it
@@ -112,6 +118,8 @@ CLOSING_SCAFFOLD_LEAK_FIXTURE_FILE = "closing-scaffold-leak-bad-01.json"
 NON_GOLDEN_FILENAMES = frozenset({
     ROUTER_FIXTURES_FILE,
     ROUTER_SAMPLE_PREDICTIONS_FILE,
+    CANDIDATE_PLACEMENT_FIXTURES_FILE,
+    CANDIDATE_PLACEMENT_SAMPLE_PREDICTIONS_FILE,
     CLOSING_SCAFFOLD_LEAK_FIXTURE_FILE,
 })
 
@@ -399,14 +407,24 @@ def check_router_gates(scores: dict[str, dict], gates: dict[str, dict[str, float
     (no predictions for that class) with a configured gate is a failure —
     a gate that can never be checked is not a passed gate.
     """
+    return check_score_gates(scores, gates, prefix="router_gates")
+
+
+def check_score_gates(
+    scores: dict[str, dict],
+    gates: dict[str, dict[str, float]],
+    *,
+    prefix: str,
+) -> list[str]:
+    """Generic threshold arithmetic shared by router and placement gates."""
     failures: list[str] = []
-    for intent, thresholds in gates.items():
-        class_scores = scores.get(intent, {})
+    for score_class, thresholds in gates.items():
+        class_scores = scores.get(score_class, {})
         for metric, threshold in thresholds.items():
             actual = class_scores.get(metric)
             if actual is None or actual < threshold:
                 failures.append(
-                    f"router_gates.{intent}.{metric}: {actual!r} < {threshold} required"
+                    f"{prefix}.{score_class}.{metric}: {actual!r} < {threshold} required"
                 )
     return failures
 
@@ -507,6 +525,290 @@ def run_router_live(
     gates = load_router_gates()
     failures = check_router_gates(scores, gates)
     return {"status": "ran", "model": resolved_model, "scores": scores, "gate_failures": failures}
+
+
+# --------------------------------------------------------------------------
+# Layer 2b — candidate-placement fixtures + scorer (issue #170 / ADR 0018)
+# --------------------------------------------------------------------------
+
+
+def load_candidate_placement_fixtures(
+    *, framework_root: str | Path | None = None
+) -> list[dict]:
+    path = _goldens_path(CANDIDATE_PLACEMENT_FIXTURES_FILE, framework_root=framework_root)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_candidate_placement_sample_predictions(
+    *, framework_root: str | Path | None = None
+) -> list[dict]:
+    path = _goldens_path(
+        CANDIDATE_PLACEMENT_SAMPLE_PREDICTIONS_FILE,
+        framework_root=framework_root,
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def validate_candidate_placement_fixture(entry: object) -> list[str]:
+    """Validate one fixture, including deliberate expected input failures."""
+    if not isinstance(entry, dict):
+        return ["fixture must be an object"]
+    allowed = {
+        "fixture_id", "input", "expected", "expected_input_error",
+        "current_candidate", "current_roster", "expect_stale_rejection",
+    }
+    unknown = sorted(set(entry) - allowed)
+    errors = [f"unknown keys: {unknown}"] if unknown else []
+    if not isinstance(entry.get("fixture_id"), str) or not entry["fixture_id"].strip():
+        errors.append("fixture_id must be a non-empty string")
+
+    expects_input_error = entry.get("expected_input_error", False)
+    if not isinstance(expects_input_error, bool):
+        errors.append("expected_input_error must be a boolean")
+        expects_input_error = False
+    canonical = None
+    try:
+        canonical = candidate_placement.validate_candidate_placement_input(entry.get("input"))
+    except (TypeError, ValueError) as exc:
+        if not expects_input_error:
+            errors.append(f"input invalid: {exc}")
+    else:
+        if expects_input_error:
+            errors.append("expected_input_error is true but input validated")
+
+    if expects_input_error:
+        return errors
+    expected = entry.get("expected")
+    if not isinstance(expected, dict) or set(expected) != {
+        "status", "category_id", "turn_kind", "clarification_required",
+    }:
+        errors.append("expected must contain exact status/category_id/turn_kind/clarification_required keys")
+        return errors
+    if expected.get("status") not in candidate_placement.VALID_STATUSES:
+        errors.append("expected.status is invalid")
+    category_id = expected.get("category_id")
+    if category_id is not None and not isinstance(category_id, str):
+        errors.append("expected.category_id must be a string or null")
+    if canonical is not None and category_id is not None:
+        roster_ids = {item["category_id"] for item in canonical["roster"]["categories"]}
+        if category_id not in roster_ids:
+            errors.append("expected.category_id is outside the input roster")
+    if expected.get("turn_kind") not in candidate_placement.VALID_TURN_KINDS | {None}:
+        errors.append("expected.turn_kind is invalid")
+    if not isinstance(expected.get("clarification_required"), bool):
+        errors.append("expected.clarification_required must be a boolean")
+
+    if canonical is not None and "current_candidate" in entry:
+        try:
+            candidate_placement.validate_candidate_placement_input(
+                {**canonical, "candidate": entry["current_candidate"]}
+            )
+        except (TypeError, ValueError) as exc:
+            errors.append(f"current_candidate invalid: {exc}")
+    if canonical is not None and "current_roster" in entry:
+        try:
+            candidate_placement.validate_candidate_placement_input(
+                {**canonical, "roster": entry["current_roster"]}
+            )
+        except (TypeError, ValueError) as exc:
+            errors.append(f"current_roster invalid: {exc}")
+    if not isinstance(entry.get("expect_stale_rejection", False), bool):
+        errors.append("expect_stale_rejection must be a boolean")
+    return errors
+
+
+def validate_candidate_placement_fixtures(fixtures: object) -> list[str]:
+    if not isinstance(fixtures, list) or not fixtures:
+        return ["candidate_placement_fixtures.json must be a non-empty JSON list"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(fixtures):
+        if isinstance(entry, dict) and isinstance(entry.get("fixture_id"), str):
+            fixture_id = entry["fixture_id"]
+            if fixture_id in seen:
+                errors.append(f"fixture[{index}]: duplicate fixture_id {fixture_id!r}")
+            seen.add(fixture_id)
+        for detail in validate_candidate_placement_fixture(entry):
+            errors.append(f"fixture[{index}]: {detail}")
+    return errors
+
+
+def _placement_prediction_map(predictions: list[dict]) -> tuple[dict[str, object], list[str]]:
+    by_id: dict[str, object] = {}
+    malformed: list[str] = []
+    for index, prediction in enumerate(predictions):
+        if not isinstance(prediction, dict) or set(prediction) != {"fixture_id", "model_output"}:
+            malformed.append(f"prediction[{index}]")
+            continue
+        fixture_id = prediction.get("fixture_id")
+        if not isinstance(fixture_id, str) or fixture_id in by_id:
+            malformed.append(f"prediction[{index}]")
+            continue
+        by_id[fixture_id] = prediction.get("model_output")
+    return by_id, malformed
+
+
+def _ratio(correct: int, total: int) -> float | None:
+    return correct / total if total else None
+
+
+def score_candidate_placement_predictions(
+    fixtures: list[dict], predictions: list[dict]
+) -> dict[str, dict]:
+    """Score normalized runtime decisions, never untrusted raw category text."""
+    by_id, malformed = _placement_prediction_map(predictions)
+    counts = {
+        "category": [0, 0],
+        "turn_kind": [0, 0],
+        "closed_roster": [0, 0],
+        "ambiguity_question": [0, 0],
+        "stale_revision": [0, 0],
+    }
+    matched: set[str] = set()
+    missing: list[str] = []
+
+    for fixture in fixtures:
+        if fixture.get("expected_input_error"):
+            continue
+        fixture_id = fixture.get("fixture_id")
+        if not isinstance(fixture_id, str) or fixture_id not in by_id:
+            if isinstance(fixture_id, str):
+                missing.append(fixture_id)
+            expected = fixture.get("expected") or {}
+            if expected.get("category_id") is not None:
+                counts["category"][1] += 1
+            if expected.get("turn_kind") is not None:
+                counts["turn_kind"][1] += 1
+            counts["closed_roster"][1] += 1
+            if expected.get("clarification_required"):
+                counts["ambiguity_question"][1] += 1
+            if fixture.get("expect_stale_rejection"):
+                counts["stale_revision"][1] += 1
+            continue
+        matched.add(fixture_id)
+        payload = fixture["input"]
+        decision = candidate_placement.parse_candidate_placement_output(
+            by_id[fixture_id], payload=payload
+        )
+        if "current_candidate" in fixture or "current_roster" in fixture:
+            decision = candidate_placement.validate_candidate_placement(
+                decision,
+                current_candidate=fixture.get("current_candidate", payload["candidate"]),
+                current_roster=fixture.get("current_roster", payload["roster"]),
+            )
+        expected = fixture["expected"]
+
+        if expected["category_id"] is not None:
+            counts["category"][1] += 1
+            counts["category"][0] += decision["category_id"] == expected["category_id"]
+        if expected["turn_kind"] is not None:
+            counts["turn_kind"][1] += 1
+            counts["turn_kind"][0] += decision["turn_kind"] == expected["turn_kind"]
+
+        counts["closed_roster"][1] += 1
+        roster_ids = {item["category_id"] for item in payload["roster"]["categories"]}
+        counts["closed_roster"][0] += (
+            decision["category_id"] is None or decision["category_id"] in roster_ids
+        )
+
+        if expected["clarification_required"]:
+            counts["ambiguity_question"][1] += 1
+            counts["ambiguity_question"][0] += (
+                decision["status"] == "needs_clarification"
+                and isinstance(decision["clarification"], str)
+            )
+        if fixture.get("expect_stale_rejection"):
+            counts["stale_revision"][1] += 1
+            counts["stale_revision"][0] += decision["status"] == "invalid"
+
+    metric_names = {
+        "category": "accuracy",
+        "turn_kind": "accuracy",
+        "closed_roster": "compliance",
+        "ambiguity_question": "validity",
+        "stale_revision": "rejection",
+    }
+    scores: dict[str, dict] = {}
+    for name, (correct, total) in counts.items():
+        scores[name] = {
+            "correct": correct,
+            "total": total,
+            metric_names[name]: _ratio(correct, total),
+        }
+    scores["_unmatched"] = sorted(set(by_id) - matched)
+    scores["_missing"] = missing
+    scores["_malformed"] = malformed
+    return scores
+
+
+_PLACEMENT_GATE_METRICS = frozenset({"accuracy", "compliance", "validity", "rejection"})
+
+
+def load_candidate_placement_gates(
+    config: dict | None = None,
+) -> dict[str, dict[str, float]]:
+    raw = config if config is not None else conversation_lints.load_lints_config()
+    gates: dict[str, dict[str, float]] = {}
+    for key, value in raw.items():
+        if not key.startswith("placement_gates."):
+            continue
+        parts = key.split(".")
+        if len(parts) != 3 or parts[2] not in _PLACEMENT_GATE_METRICS:
+            continue
+        _, score_class, metric = parts
+        try:
+            gates.setdefault(score_class, {})[metric] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return gates
+
+
+def check_candidate_placement_gates(
+    scores: dict[str, dict], gates: dict[str, dict[str, float]]
+) -> list[str]:
+    return check_score_gates(scores, gates, prefix="placement_gates")
+
+
+def run_candidate_placement_live(
+    fixtures: list[dict],
+    *,
+    model: str | None = None,
+    ai_call: Callable[[str, str], str] | None = None,
+    status_resolver: Callable[..., object] | None = None,
+) -> dict:
+    """Run the placement worker over valid fixtures; keyless means loud skip."""
+    from conversation_delivery import conversation_model  # noqa: PLC0415
+
+    config = _safe_config()
+    resolved_model = model or conversation_model(config)
+    resolve_status = status_resolver or provider_status
+    selected = resolve_status(resolved_model, probe=False)
+    if not getattr(selected, "ready", False):
+        return {"status": "skipped", "reason": "no unattended AI provider is ready"}
+
+    predictions: list[dict] = []
+    for fixture in fixtures:
+        if fixture.get("expected_input_error"):
+            continue
+        payload = fixture["input"]
+        if payload.get("provisional_category_id") is not None:
+            generated: object = None
+        else:
+            prompt = candidate_placement.build_candidate_placement_prompt(payload)
+            try:
+                generated = (ai_call or call_ai)(prompt, resolved_model)
+            except AIProviderError:
+                generated = ""
+        predictions.append({"fixture_id": fixture["fixture_id"], "model_output": generated})
+
+    scores = score_candidate_placement_predictions(fixtures, predictions)
+    failures = check_candidate_placement_gates(scores, load_candidate_placement_gates())
+    return {
+        "status": "ran",
+        "model": resolved_model,
+        "scores": scores,
+        "gate_failures": failures,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -1376,6 +1678,62 @@ def run(*, emit_tasks_flag: bool = False, seed: int | None = None) -> tuple[int,
                 report.append(f"  ✗ {detail}")
         else:
             report.append(f"Layer 2 (live router model, {live_router['model']}): PASSED all router_gates.*")
+
+    # Layer 2b — candidate-placement fixtures, deterministic sample gates,
+    # and an optional live seating run.
+    placement_fixtures = load_candidate_placement_fixtures()
+    placement_fixture_errors = validate_candidate_placement_fixtures(placement_fixtures)
+    if placement_fixture_errors:
+        ok = False
+        report.append(
+            f"Layer 2b (candidate placement fixtures): FAILED schema — "
+            f"{len(placement_fixture_errors)} error(s)"
+        )
+        for detail in placement_fixture_errors:
+            report.append(f"  ✗ {detail}")
+    else:
+        report.append(
+            f"Layer 2b (candidate placement fixtures): "
+            f"{len(placement_fixtures)} fixtures validated OK"
+        )
+
+    placement_scores = score_candidate_placement_predictions(
+        placement_fixtures,
+        load_candidate_placement_sample_predictions(),
+    )
+    placement_gates = load_candidate_placement_gates()
+    placement_failures = check_candidate_placement_gates(
+        placement_scores, placement_gates
+    )
+    if placement_failures:
+        ok = False
+        report.append("Layer 2b (candidate placement sample gates): FAILED")
+        for detail in placement_failures:
+            report.append(f"  ✗ {detail}")
+    else:
+        report.append(
+            "Layer 2b (candidate placement sample gates): PASSED all "
+            f"{sum(len(v) for v in placement_gates.values())} configured placement_gates.*"
+        )
+
+    live_placement = run_candidate_placement_live(placement_fixtures)
+    if live_placement["status"] == "skipped":
+        report.append(
+            f"Layer 2b (live candidate placement model): SKIPPED "
+            f"({live_placement['reason']})"
+        )
+    elif live_placement["gate_failures"]:
+        ok = False
+        report.append(
+            f"Layer 2b (live candidate placement model, {live_placement['model']}): FAILED"
+        )
+        for detail in live_placement["gate_failures"]:
+            report.append(f"  ✗ {detail}")
+    else:
+        report.append(
+            f"Layer 2b (live candidate placement model, {live_placement['model']}): "
+            "PASSED all placement_gates.*"
+        )
 
     # Layer 3 — golden-transcript properties.
     goldens = load_goldens()

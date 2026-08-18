@@ -86,6 +86,7 @@ need them):
 | `prompt/behavior.md` | The behavior contract: objectives, numbered hard rules, defaults. The load-bearing file — this is what the model is graded against. |
 | `prompt/examples.md` | Canonical good/bad exchanges, each showing the rule it demonstrates or violates. Loaded after behavior. |
 | `prompt/turn-instructions.md` | The per-turn task template. Loaded LAST, after per-user and per-session context, so it's the freshest thing the model reads before generating. |
+| `prompt/<step>.md`, `prompt/<step>-examples.md` *(optional)* | A step-specific contract loaded only by that step's specialized builder; never added implicitly to ordinary turns. |
 | `router/` *(only if free-form inbound)* | `router.md` (a cheap classifier prompt sorting inbound into intents) + `deflection.md` (the out-of-scope response template). |
 | `context/manifest.md` | The deterministic per-turn context recipe: which blocks, in what order, from what sources, under what token budgets. The runtime implements exactly this document. |
 | `overlays/<provider>.md` | ONLY verified behavioral deltas for one model provider. Empty is the expected, healthy default. |

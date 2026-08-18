@@ -1,8 +1,12 @@
 # interactions/conversation/interaction.yaml — flat scalar subset only
 # (parsed by lifehug_core._parse_simple_yaml; no nesting, no lists)
 interaction: conversation
-version: 1.0.0
+version: 1.1.0
 modes: chat|conversation
+# issue #170 / ADR 0018: candidate placement is an additive Conversation
+# step, never a third mode. Its prompt files are loaded only by the dedicated
+# builder, so the ordinary turn/router prompt load order below stays frozen.
+steps: turn|close|candidate_placement
 # file load order (per-turn assembly; also documented in context/manifest.md)
 # asking_supply (issue #168, ADR 0016) sits between record and session:
 # per-session-but-whole-vault-derived like record, cache-tier correct.
@@ -36,6 +40,11 @@ knob.router_confidence_threshold: 0.7
 # day's history. Absent/empty `threads` leaves the router prompt and
 # output byte-identical to pre-#169 behavior (contract, Scope 1).
 knob.router_roster_max: 6
+# issue #170 / ADR 0018: a model may propose only one id from the complete
+# runtime roster. Above the hard completeness bound the runtime fails closed;
+# it never truncates possible placements.
+knob.candidate_placement_confidence_threshold: 0.8
+knob.candidate_placement_roster_max: 64
 # issue #168 / ADR 0016 (asking-supply): the ASKING_SUPPLY block's own
 # Top-K — a whisper, not a flood (prior-art cap applies to the BLOCK SIZE
 # only; there is deliberately no per-session cap on how many of these get
@@ -51,6 +60,9 @@ budget.record: 1800
 budget.asking_supply: 400
 budget.session: 1200
 budget.turn_instructions: 400
+# Specialized candidate-placement prompt/data block. It is outside the
+# ordinary turn load_order and cannot alter ordinary Conversation bytes.
+budget.candidate_placement: 2400
 # ADR 0015 (issue #167, content-first close): the closing prompt's own
 # transcript window — recent turns PRECEDING the final user turn, oldest
 # dropped first when this budget is tight. The final user turn itself is

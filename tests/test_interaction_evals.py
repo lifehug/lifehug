@@ -414,6 +414,79 @@ class CommittedSamplePredictionsProveGateMathTests(unittest.TestCase):
         self.assertTrue(any("router_gates.binding" in f for f in failures))
 
 
+class CandidatePlacementEvalTests(unittest.TestCase):
+    """Issue #170 / ADR 0018 — closed-roster placement eval contract."""
+
+    def test_committed_fixtures_validate_including_deliberate_bad_inputs(self):
+        fixtures = ie.load_candidate_placement_fixtures()
+        self.assertGreaterEqual(len(fixtures), 14)
+        self.assertEqual(ie.validate_candidate_placement_fixtures(fixtures), [])
+        self.assertTrue(any(f.get("expected_input_error") for f in fixtures))
+
+    def test_committed_samples_clear_every_placement_gate(self):
+        fixtures = ie.load_candidate_placement_fixtures()
+        predictions = ie.load_candidate_placement_sample_predictions()
+        scores = ie.score_candidate_placement_predictions(fixtures, predictions)
+        gates = ie.load_candidate_placement_gates()
+        self.assertEqual(ie.check_candidate_placement_gates(scores, gates), [])
+        self.assertEqual(scores["closed_roster"]["compliance"], 1.0)
+        self.assertEqual(scores["stale_revision"]["rejection"], 1.0)
+        self.assertEqual(scores["_unmatched"], [])
+        self.assertEqual(scores["_missing"], [])
+
+    def test_all_five_flat_gate_classes_are_loaded(self):
+        self.assertEqual(
+            set(ie.load_candidate_placement_gates()),
+            {"category", "turn_kind", "closed_roster", "ambiguity_question", "stale_revision"},
+        )
+
+    def test_generic_gate_checker_enforces_placement_prefix(self):
+        failures = ie.check_candidate_placement_gates(
+            {"category": {"accuracy": 0.5}},
+            {"category": {"accuracy": 0.9}},
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("placement_gates.category.accuracy", failures[0])
+
+    def test_corrupting_sample_categories_trips_accuracy_gate(self):
+        fixtures = ie.load_candidate_placement_fixtures()
+        predictions = [dict(p) for p in ie.load_candidate_placement_sample_predictions()]
+        changed = 0
+        for prediction in predictions:
+            output = prediction.get("model_output")
+            if isinstance(output, dict) and output.get("category_id") in {"P", "L"} and changed < 3:
+                prediction["model_output"] = {**output, "category_id": "NOT-IN-ROSTER"}
+                changed += 1
+        self.assertEqual(changed, 3)
+        scores = ie.score_candidate_placement_predictions(fixtures, predictions)
+        failures = ie.check_candidate_placement_gates(
+            scores, ie.load_candidate_placement_gates()
+        )
+        self.assertTrue(any("placement_gates.category" in item for item in failures))
+
+    def test_missing_prediction_counts_against_applicable_gates(self):
+        fixtures = ie.load_candidate_placement_fixtures()
+        predictions = ie.load_candidate_placement_sample_predictions()
+        omitted_id = predictions[0]["fixture_id"]
+        scores = ie.score_candidate_placement_predictions(
+            fixtures,
+            [row for row in predictions if row["fixture_id"] != omitted_id],
+        )
+        self.assertEqual(scores["_missing"], [omitted_id])
+        self.assertTrue(
+            ie.check_candidate_placement_gates(
+                scores, ie.load_candidate_placement_gates()
+            )
+        )
+
+    def test_live_candidate_placement_skips_loudly_without_provider(self):
+        result = ie.run_candidate_placement_live(
+            ie.load_candidate_placement_fixtures(), status_resolver=NOT_READY
+        )
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("no unattended AI provider", result["reason"])
+
+
 class DeterministicSafeDefaultTests(unittest.TestCase):
     """Layer 2's always-on, keyless offline evaluation: router.md's own
     safe-default rule, proven directly rather than gated against

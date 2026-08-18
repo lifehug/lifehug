@@ -72,6 +72,10 @@ first (stable, cacheable), turn instructions last (freshest, turn-specific)
 6. **`prompt/turn-instructions.md`** — the per-turn task template. Loaded
    LAST, after the per-user and per-session context blocks, so it is the
    freshest thing the model reads before generating.
+   An interaction may also carry step-specific prompt files; their specialized
+   builder loads them only for that step. They never join the ordinary load
+   order implicitly (Conversation's candidate-placement files are the first
+   example).
 7. **`router/`** (only if the interaction receives free-form inbound
    messages, not just replies to a delivered prompt) — `router.md`, the
    cheap classifier prompt that sorts inbound into intents, and
