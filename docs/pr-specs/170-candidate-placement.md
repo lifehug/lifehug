@@ -1,64 +1,137 @@
-# Contract: candidate-placement (issue #170, PR A of two)
+# Contract: question-candidate interaction (issue #170, PR A of two)
 
 ## Why
 
-Answer Now must begin as an ordinary Conversation around an exact question
-candidate, without asking the user to operate a category picker first. Today
-the framework has neither a candidate-placement step nor a model contract for
-deciding where that candidate belongs. Issue #170 therefore needs one upstream
-behavior authority that can silently accept a high-confidence placement or ask
-one natural clarification when placement is genuinely ambiguous, while the
-runtime retains every substantive story turn. This PR is **PR A of two**: it
-ships the closed-roster placement Interaction/schema/evals. PR B will separately
-ship the provenance-safe promotion state machine and the structured,
-Git-backed promotion receipt.
+Answer Now must remove the category modal between a question candidate and a
+real conversation. Green **Promote** is the explicit direct-promotion action,
+red **Decline** resolves the candidate without an answer, and **Play** opens
+Home/Today in a new tab with the exact candidate id and question preloaded and
+starts the substantive exchange immediately. Placement is an Interaction
+responsibility, not setup the user must finish first: the model infers the
+required category/focus association from the candidate and conversation and,
+only when still necessary, asks naturally at an appropriate before/during/after
+point. Before an answered candidate completes, its durable answer, placement,
+and lifecycle outcome must all be resolved. Starting Play never promotes.
+
+This is **PR A of two**. It ships the independently registered and auditable
+Question Candidate Interaction, its generic Conversation-composition
+mechanism, closed-roster schema/runtime, and eval authority. PR B separately
+ships question-id allocation, idempotent promotion, provenance, Git commit,
+and the structured promotion receipt.
 
 ## Binding facts
 
-- Base for this contract: `origin/main` at
-  `886e96918e2da3c672e3aef73081c4453e2bf677` (v180). At implementation and
-  rebase time, re-check live `origin/main`; the implementation takes the next
-  free version and ADR number rather than assuming v181/ADR 0018 remain free.
-- This is an additive **step inside the existing Conversation Interaction**,
-  not a third top-level Conversation mode. `interactions/conversation/interaction.yaml`
-  keeps `modes: chat|conversation` and gains
-  `steps: turn|close|candidate_placement`. `system/conversation.py::VALID_MODES`
-  remains `{"chat", "conversation"}`.
-- Definition/runtime/seat separation in `interactions/README.md` remains
-  binding. The definition under `interactions/conversation/` is behavior
-  authority; the stdlib-only runtime validates model proposals; a model is not
-  seated until the existing `conversation-evals` harness passes it.
-- The ordinary Conversation prompt path is frozen by this PR. The general
-  `prompt/behavior.md`, `prompt/examples.md`, `prompt/turn-instructions.md`,
-  `context/manifest.md`, router definition, arc definition, load order, and
-  behavior-rule numbering 1–13 do not change. Candidate-only instructions and
-  examples live in new files loaded only by the candidate-placement builder.
-  When no candidate-placement API is called, `build_turn_prompt`,
-  `build_router_prompt`, router parsing, and their rendered bytes are identical
-  to v180. The expected manifest `interaction_version` increment in newly
-  opened session metadata is the only ordinary-session metadata delta.
-- The model receives a caller/runtime-supplied, complete, bounded roster. It
-  may propose exactly one supplied `category_id`; it cannot invent a category,
-  focus mapping, revision, question id, vault path, Git operation, or promotion
-  result. Category selection is always runtime-validated.
-- `knob.candidate_placement_confidence_threshold: 0.8` is the silent-placement
-  threshold. `knob.candidate_placement_roster_max: 64` is a hard completeness
-  bound: 1–64 categories are valid; 0 or more than 64 fails validation. The
-  builder never truncates a roster, because truncation would silently remove
-  valid placement choices.
-- `interaction.yaml` stays in the repository's flat-scalar YAML subset. Add
-  `budget.candidate_placement: 2400` for the specialized prompt block; existing
-  budget keys are unchanged.
-- All revisions below use lowercase `sha256:<64 hex>` over UTF-8 canonical JSON
-  (`json.dumps(..., sort_keys=True, separators=(",", ":"), ensure_ascii=False)`).
-  Lists retain their declared order. Hash helpers are public so the platform
-  pin consumes the same authority instead of reimplementing it.
-- All committed fixtures are synthetic. Never copy real vault content into
-  tests, evals, screenshots, comments, or evidence.
+- The implementation base for this PR was `origin/main` at
+  `886e96918e2da3c672e3aef73081c4453e2bf677` (v180). This PR takes v181 and
+  ADR 0018. Rebase work must re-check live upstream without changing the
+  architecture or silently reusing an occupied version/ADR number.
+- “Build an interaction” means an independently registered package satisfying
+  `interactions/README.md`. Question Candidate therefore lives at the
+  canonical source path `interactions/question_candidate/`, uses the registry
+  id `question_candidate`, and has its own README, manifest, prompt, context,
+  router, overlays, evals, version, and role/seat surface. Source directories
+  and ids use snake_case, matching `question_judgment` and `focus_curation`;
+  user-facing names and handbook filenames use “Question Candidate” and
+  `question-candidate`.
+- Question Candidate **extends Conversation**. Conversation supplies general
+  chat mechanics—identity/voice, response-before-ask, receipts, question
+  craft, scope/deflection, closings, and other ordinary behavioral rules.
+  Question Candidate supplies the exact candidate anchor, placement inference,
+  before/during/after association timing, completion criteria, and lifecycle
+  coordination. It is not a Conversation step, mode, alias, or pile of prompt
+  fragments stored under `interactions/conversation/`.
+- `interactions/registry.json` is the closed framework registry. Every
+  Interaction package is listed exactly once. A package directory or manifest
+  that is absent from the registry is not executable or seatable; a registry
+  entry without a complete package fails the audit.
+- `system/interaction_registry.py` is the stdlib-only registry/composition
+  authority. It resolves a registered `extends` chain, rejects cycles and
+  unregistered parents, verifies the child-declared parent version, and
+  assembles declared assets deterministically. Composition policy is declared
+  in the child's flat-scalar manifest, never selected ad hoc by a caller.
+- Question Candidate's manifest declares `extends: conversation` and
+  `extends.version: 1.0.0`. It appends parent then child for identity,
+  behavior, examples, router, and deflection; it uses the child context recipe
+  and child turn instructions as leaf authority. Provenance boundaries name
+  every package and asset in assembled text. Duplicate, missing, overlapping,
+  or unknown composition paths fail closed. Parent bytes are read directly at
+  runtime; no copied Conversation prose is permitted in the child package.
+- Ordinary Conversation is restored exactly to its v180 definition and
+  behavior: manifest version 1.0.0, `modes: chat|conversation`, no candidate
+  step/knobs/budget/prompt/eval assets, unchanged rules 1–13, and unchanged
+  turn/router rendered bytes. Adding the generic registry does not cause an
+  ordinary Conversation caller to compose or load Question Candidate.
+- Question Candidate ships with no default concrete model. Its manifest names
+  capability roles (`role.router`, `role.worker`, `role.planner`) and its own
+  eval gates. A model passing Conversation does not automatically pass Question
+  Candidate; seating requires the child harness, which includes inherited
+  Conversation parity and candidate-specific gates.
+- The model receives a caller-supplied exact candidate plus a **complete,
+  closed, ordered** category roster. It may echo one exact roster id but cannot
+  invent an id, focus mapping, revision, question id, path, write, promotion,
+  or lifecycle transition. Roster size is 1–64; empty or larger rosters fail
+  before prompting and are never truncated.
+- Candidate/category/user strings are untrusted JSON data, not instructions.
+  The model gets no tools. Runtime code rejects unknown keys, forged hashes,
+  ambiguous types, duplicate ids, out-of-roster selections, prompt-injection
+  attempts, and invalid lifecycle combinations.
+- `knob.placement_confidence_threshold: 0.8` is the silent-placement threshold;
+  `knob.category_roster_max: 64` is the completeness bound. Placement may be
+  deferred while substantive conversation continues. If the model asks now,
+  it asks exactly one natural, open, Conversation-shaped question embedded in
+  the user-visible reply—not a modal, menu, id list, or yes/no presupposition.
+- All revisions are lowercase `sha256:<64 hex>` over canonical UTF-8 JSON via
+  `json.dumps(value, sort_keys=True, separators=(",", ":"),
+  ensure_ascii=False)`. Ordered lists retain order. Exported hash helpers are
+  the platform authority; downstream code must not recreate them.
+- All fixtures are synthetic. Never access or reference a private user repo or
+  copy real vault data into tests, prompts, logs, evidence, or screenshots.
 
-### Canonical input schemas
+### Registration and composition interfaces
 
-`CandidateAnchor` is exact and immutable for one placement attempt:
+`interactions/registry.json` has this exact top-level shape and these entries:
+
+```json
+{
+  "schema_version": 1,
+  "interactions": [
+    {"id": "conversation", "package": "conversation"},
+    {"id": "focus_curation", "package": "focus_curation"},
+    {"id": "question_judgment", "package": "question_judgment"},
+    {"id": "question_candidate", "package": "question_candidate"}
+  ]
+}
+```
+
+`system/interaction_registry.py` exposes:
+
+```python
+load_interaction_registry(*, framework_root: str | Path | None = None) -> dict
+load_interaction_manifest(interaction_id: str, *, framework_root=None) -> dict
+resolve_interaction_lineage(interaction_id: str, *, framework_root=None) -> tuple[str, ...]
+compose_interaction_asset(interaction_id: str, relative_path: str, *, framework_root=None) -> str
+audit_interaction_package(interaction_id: str, *, framework_root=None) -> list[str]
+```
+
+- `resolve_interaction_lineage("question_candidate")` is exactly
+  `("conversation", "question_candidate")`; Conversation resolves only to
+  itself. Each manifest's `interaction` must match the registered id.
+- Child manifest keys `composition.append` and `composition.leaf` are
+  pipe-delimited relative paths. The sets are non-empty, disjoint, reject
+  absolute/parent-traversal paths, and may name only required package assets.
+- `compose_interaction_asset` uses the declared policy. `append` emits each
+  lineage asset in parent-to-child order with deterministic provenance markers;
+  `leaf` emits only the child asset with its provenance marker. An undeclared
+  asset is rejected. Text is UTF-8 and newline-normalized only at the
+  provenance seam; source bytes are otherwise unchanged.
+- The audit requires README, manifest, four prompt files, context manifest,
+  four provider overlays, lints, rubrics, goldens README, and personas README;
+  it also verifies every declared asset and exact parent version. Router files
+  are required because this Interaction receives free-form answers.
+
+### Canonical domain schemas
+
+`CandidateAnchor` is immutable for one Question Candidate run:
 
 ```json
 {
@@ -70,12 +143,11 @@ Git-backed promotion receipt.
 }
 ```
 
-`candidate_revision` hashes exactly
-`{"candidate_id", "question", "source_revision"}`. IDs and source revisions
-are opaque non-empty strings, not paths or instructions. The question is the
-exact candidate text; the builder does not paraphrase it.
+`candidate_revision` hashes exactly `candidate_id`, `question`, and
+`source_revision`. These values are opaque data; the exact question is retained
+and never paraphrased by the builder.
 
-`CategoryRoster` is runtime-derived and closed:
+`CategoryRoster` remains ordered and closed:
 
 ```json
 {
@@ -95,362 +167,337 @@ exact candidate text; the builder does not paraphrase it.
 }
 ```
 
-- `category_id` values are opaque, non-empty, unique strings of at most 64
-  characters. The model must echo one exactly; it does not infer identifier
-  syntax.
+- Category ids are unique opaque non-empty strings of at most 64 characters.
+  Runtime selection uses exact membership—no case folding, fuzzy matching,
+  label lookup, or closest-category fallback.
 - `label` is non-empty. `group`, `qualifier`, `focus_id`, and `focus_label` are
-  nullable strings. `focus_id` and `focus_label` are either both null or both
-  non-null.
-- `category_revision` hashes the six category fields other than itself.
-  `roster_revision` hashes the ordered list of complete category entries.
-- The local roster builder derives category facts from the question bank and
-  roadmap/focus mapping. Callers may supply an already-derived roster only
-  through the same strict validator and hash functions.
+  nullable; focus id/label are both null or both non-null.
+- `category_revision` hashes the six source fields; `roster_revision` hashes
+  the complete ordered category entries.
 
-`CandidatePlacementInput` is the only prompt-builder input:
+`QuestionCandidateInput` is the prompt/runtime input:
 
 ```json
 {
   "schema_version": 1,
   "candidate": {"...": "CandidateAnchor"},
   "roster": {"...": "CategoryRoster"},
-  "phase": "initial",
+  "association_stage": "before_answer",
   "provisional_category_id": null,
   "latest_user_turn": null,
-  "previous_clarification": null
+  "previous_placement_question": null,
+  "answer_status": "none",
+  "requested_outcome": "engage"
 }
 ```
 
-- `phase` is `initial|clarifying`.
-- `provisional_category_id`, when non-null, must be in the roster. A valid
-  provisional placement resolves without a model judgment; an invalid one is
-  rejected, never sent as an open-ended hint.
-- `latest_user_turn` is null before the user has spoken and otherwise contains
-  the exact current turn. `previous_clarification` is required only in the
-  clarifying phase. Prompt rendering may apply the declared context budget,
-  but truncation in the model copy never authorizes truncation or deletion of
-  the runtime's durably held original turn.
+- `association_stage` is `before_answer|during_answer|after_answer`.
+  Before/during/after records when this placement judgment occurs; it does not
+  force a question at that time.
+- `provisional_category_id`, when present, must be one exact roster id and
+  resolves placement without a model guess.
+- `latest_user_turn` is null before speech and otherwise the exact current
+  turn. `previous_placement_question` is nullable conversational context. The
+  runtime retains the original turn independently of any classification or
+  prompt budget.
+- `answer_status` is caller-attested `none|held|durable`. Only the coordinator
+  that durably stores an answer may say `durable`; model output can never
+  upgrade it.
+- `requested_outcome` is `engage|decline|defer`. Play supplies `engage`.
+  Decline/defer are explicit caller actions, not semantic guesses by the model.
+  Direct Promote does not enter this Interaction.
 
 ### Model proposal and normalized decision
 
-The specialized prompt requires one JSON object and no prose:
+For an engaged turn the composed prompt requests one JSON object and no prose:
 
 ```json
 {
+  "reply": "<Conversation-shaped user-visible turn>|null",
   "turn_kind": "placement_only|answer|mixed|null",
+  "placement_action": "resolved|ask_now|defer",
   "category_id": "<one roster id>|null",
   "confidence": 0.0,
-  "clarification": "<one natural question>|null"
+  "placement_question": "<one natural question>|null"
 }
 ```
 
-- With no `latest_user_turn`, `turn_kind` must be null. With a user turn, it
-  must be `placement_only`, `answer`, or `mixed`.
-- `placement_only` means the turn only locates the candidate. `answer` means it
-  contains substantive answer/story content but no usable placement signal.
-  `mixed` means it does both. This classification is routing metadata only;
-  every class retains the original turn.
-- `confidence` is a real number in `[0, 1]`; booleans are invalid.
-- A valid category at confidence `>= 0.8` resolves silently and requires
-  `clarification: null`.
-- Anything below threshold does not resolve. Normalization sets
-  `category_id: null` even if the raw model proposed one, and requires exactly
-  one natural clarification question. It may not expose category IDs, present
-  a menu, ask yes/no, presuppose an answer, or contain more than one question;
-  it must pass the existing Conversation lint engine.
-- A hallucinated/out-of-roster category degrades placement only: retain a
-  separately valid `turn_kind`, set normalized category/confidence resolution
-  to null/invalid, and never discard the turn. This follows the router target
-  precedent in `conversation_delivery._parse_router_output`.
-- Malformed JSON, unknown keys, wrong types, invalid confidence, invalid
-  clarification, or an inconsistent phase returns a typed `invalid` decision.
-  It never guesses and never produces a promotion-ready placement.
+- With no latest user turn, `reply` and `turn_kind` are null. Initial Play may
+  silently resolve placement from candidate context or defer it, but may not
+  block substantive answering behind an initial placement question.
+- With a user turn, `reply` is a non-empty Conversation-shaped response and
+  `turn_kind` is `placement_only|answer|mixed`. Classification is metadata;
+  every class retains the exact original turn.
+- `resolved` requires an exact roster id, confidence `>= 0.8`, and null
+  placement question. `defer` has null category/question and lets the
+  substantive exchange proceed. `ask_now` has null category, confidence below
+  threshold, and exactly one open placement question. That same question must
+  appear verbatim as the sole question in `reply`, after a receipt where the
+  user supplied substantive content.
+- Confidence is a real number in `[0, 1]`; booleans are invalid. Category ids
+  below threshold are cleared. Out-of-roster ids invalidate placement but do
+  not discard a separately valid turn kind or caller-held answer.
+- Placement questions pass the Conversation lints and may not expose ids,
+  offer a menu, ask yes/no, presuppose a category, contain multiple questions,
+  or repeat a question the user already answered.
 
-The normalized `CandidatePlacementDecision` is:
+The normalized `QuestionCandidateDecision` is:
 
 ```json
 {
   "schema_version": 1,
-  "status": "resolved|needs_clarification|invalid",
-  "resolution": "provisional|model|conversation|null",
+  "status": "active|needs_clarification|complete|declined|deferred|invalid",
+  "candidate_outcome": "engaged|answered|declined|deferred|null",
   "candidate_id": "cand-lighthouse-1",
   "candidate_revision": "sha256:<64 lowercase hex>",
   "source_revision": "capture:synthetic-lighthouse:3",
+  "association_stage": "before_answer|during_answer|after_answer",
   "category_id": "F|null",
   "category_revision": "sha256:<64 lowercase hex>|null",
+  "placement_revision": "sha256:<64 lowercase hex>|null",
+  "answer_status": "none|held|durable",
   "turn_kind": "placement_only|answer|mixed|null",
-  "confidence": "number|null",
-  "clarification": "string|null",
-  "placement_revision": "sha256:<64 lowercase hex>|null"
+  "reply": "string|null",
+  "placement_question": "string|null",
+  "completion": {
+    "answer_durable": false,
+    "placement_resolved": false,
+    "outcome_resolved": true,
+    "complete": false
+  }
 }
 ```
 
-- `resolution` is `provisional` for a valid caller provisional,
-  `model` for an initial high-confidence proposal, and `conversation` for a
-  high-confidence result in the clarifying phase.
-- `placement_revision` is present only on `resolved` and hashes exactly
-  `{"candidate_revision", "category_id", "category_revision"}`. It does not
-  include `roster_revision`: removing, renaming, or remapping the selected
-  category invalidates the placement, while unrelated roster additions do not.
-- Validation against a changed candidate revision or changed selected-category
-  revision returns a typed stale/invalid result. An implementation must not
-  silently rerun or substitute the closest category.
+- Play starts/continues `candidate_outcome: engaged`. This is not accepted,
+  promoted, or promotion-ready state.
+- An engaged answer becomes `complete`/`answered` only when the caller attests
+  `answer_status: durable` and an exact revision-valid placement is resolved.
+  If the answer is durable first, status stays `active` or
+  `needs_clarification`; if placement resolves first, status stays `active`.
+- Explicit decline/defer yields terminal `declined`/`deferred` without a model
+  call and without requiring an answer or placement. Those outcomes are
+  resolved but `completion.complete` is false because they are not answered
+  completion.
+- `placement_revision` hashes exactly candidate revision, category id, and
+  selected category revision. Candidate or selected-category churn invalidates
+  it; unrelated roster churn does not.
+- The decision describes portable coordination facts. PR A performs no
+  candidate/session/vault/Git mutation. A consuming coordinator revalidates the
+  decision against current revisions before any durable transition.
 
-### Public runtime API
+### Public runtime and CLI
 
-New stdlib-only `system/candidate_placement.py` owns the schema, hashes,
-validation, prompt construction, and parse normalization:
+`system/question_candidate.py` owns schema, hashes, prompt construction,
+normalization, completion, and staleness validation:
 
 ```python
-build_candidate_anchor(
-    candidate_id: str,
-    question: str,
-    source_revision: str,
-) -> dict
-
-build_category_roster(
-    categories: list[dict],
-) -> dict
-
-build_candidate_placement_prompt(payload: dict) -> str
-
-parse_candidate_placement_output(
-    raw: object,
-    *,
-    payload: dict,
-) -> dict
-
-validate_candidate_placement(
-    placement: dict,
-    *,
-    current_candidate: dict,
-    current_roster: dict,
-) -> dict
+build_candidate_anchor(candidate_id: str, question: str, source_revision: str) -> dict
+build_category_roster(categories: list[dict]) -> dict
+build_question_candidate_prompt(payload: dict) -> str
+parse_question_candidate_output(raw: object, *, payload: dict) -> dict
+validate_question_candidate_decision(decision: dict, *, current_candidate: dict, current_roster: dict) -> dict
 ```
 
-`system/conversation.py` exposes thin public wrapper/re-export seams if needed
-by the existing CLI layout; it does not duplicate validation. Add read-only
-`system/lifehug.py conversation-candidate-placement-prompt`, taking the exact
-`CandidatePlacementInput` JSON on stdin and printing the assembled prompt. It
-must be in `READ_ONLY_COMMANDS`, never `DIRECT_MUTATION_COMMANDS`.
+The prompt builder uses `compose_interaction_asset("question_candidate", ...)`
+for inherited behavior; it never imports or copies Conversation prompt text.
+`system/lifehug.py question-candidate-prompt` reads exact input JSON on stdin,
+prints the composed prompt, and is classified read-only.
+
+`system/question_candidate_evals.py` is the independent harness and CLI
+`question-candidate-evals`. It reuses generic gate arithmetic from a shared
+module rather than importing candidate logic into `conversation-evals`.
+Ordinary `conversation-evals` returns to its pre-PR-A surface.
 
 ## Scope
 
 In:
 
-1. Add candidate-placement step metadata, knobs, and budget to
-   `interactions/conversation/interaction.yaml`; bump its semantic version.
-2. Add `interactions/conversation/prompt/candidate-placement.md` as the
-   specialized behavior/output authority and
-   `prompt/candidate-placement-examples.md` for synthetic good/bad examples.
-   These files explicitly inherit general Conversation rules 1–13 without
-   changing or being loaded into ordinary turns.
-3. Add the schema/runtime API and read-only prompt CLI above. Validate all
-   model output and every caller-supplied revision/roster at runtime.
-4. Extend `system/interaction_evals.py` with candidate-placement fixture
-   validation, sample-prediction scoring, deterministic gates, and a live model
-   layer that skips loudly without a configured provider. Generalize/reuse the
-   existing gate arithmetic; do not create a second subtly different threshold
-   engine.
-5. Add synthetic `candidate_placement_fixtures.json` and parallel
-   `candidate_placement_sample_predictions.json`. Required cases: valid
-   provisional; high-confidence silent initial placement; natural ambiguity;
-   follow-up clarification; placement-only, answer-only, and mixed user turns;
-   hallucinated category with retained turn kind; prompt injection in candidate
-   question, user text, and category label; malformed output; threshold edge;
-   removed/renamed/focus-remapped selected category; unrelated roster churn;
-   duplicate roster IDs; empty/oversized roster.
-6. Add flat gates under `placement_gates.*`: category accuracy, turn-kind
-   accuracy, closed-roster compliance, ambiguity-question validity, and stale
-   revision rejection. The committed sample predictions must prove gate math
-   keylessly; live seating remains provider-dependent and skip-annotated.
-7. Add the next available ADR recording: candidate placement is a Conversation
-   step, not a mode; the model is proposal-only; the roster is closed and
-   complete; original turns are retained independently of classification;
-   per-category revision binding; platform #469 is the first full coordinator.
-8. Update the Conversation README, `interactions/README.md` only if its file-role
-   catalog needs the specialized prompt documented, and the generated/embedded
-   handbook page in lockstep where parity tests require it. Update
-   `AGENTS.md`/`CLAUDE.md` only where they describe affected behavior.
-9. Take the next free `system/version.json` version, set `released`, write a
-   user-impact changelog, and add every new distributable definition/runtime/
-   eval file to `framework_files`. Run the manifest and version-bump gates.
-10. In the evidence comment, enumerate the downstream pin reconciliation
-    surface: new system module/CLI; two prompt files; manifest steps/knobs/budget;
-    schemas and closed vocabularies; fixture/prediction fields; gate keys; and
-    ordinary-prompt byte-identity proof.
+1. Revise this contract and ADR 0018 before code so the independent
+   Interaction/audit/composition boundary is reviewable.
+2. Add the closed registry and generic registry/composition/audit runtime; add
+   all existing Interactions plus Question Candidate.
+3. Add the complete `interactions/question_candidate/` package, own manifest
+   version 1.0.0, child prompts/context/router/overlays/evals, and empty seat.
+4. Add the pure runtime and read-only CLI above, including explicit
+   engage/decline/defer outcomes and answered-completion criteria.
+5. Add synthetic fixtures covering initial direct-to-conversation, placement
+   before/during/after, silent resolution, deferred association, natural
+   clarification, placement-only/answer/mixed turns, lifecycle actions,
+   prompt injection, malformed output, threshold edge, and revision churn.
+6. Add independent candidate gates for category accuracy, turn-kind accuracy,
+   closed-roster compliance, question validity, timing/defer validity,
+   completion validity, and stale-revision rejection. Add composition parity,
+   registration isolation, and no-copy-drift tests.
+7. Restore every candidate-specific modification under Conversation and prove
+   ordinary manifest/source/prompt/eval byte identity against v180 hashes.
+8. Update Interaction docs, generated handbook parity, ADR, changelog, and
+   v181 `framework_files` for every new/renamed/deleted distributable file.
+9. Evidence must enumerate the downstream pin surface and explicitly hand off
+   the modal-free Play route to platform #469.
 
 Out:
 
-- Candidate promotion, question-id allocation, question-bank writes,
-  provenance markers, Git commits, `commit_sha`, or promotion receipts. Those
-  are PR B of issue #170.
-- Platform #469 coordinator/session/pending-capture wiring, platform projection
-  reads, web UI, or a platform pin bump.
-- A category picker, decline/defer reasons, or any change to ordinary
-  Conversation/router/arc behavior.
-- Durable OSS candidate-answer session orchestration. PR A defines the portable
-  typed input/decision contract; each runtime owns its storage and concurrency
-  mechanics. It adds no new vault path and does not change
-  `system/vault_contract.json`.
-- Model seating, provider-specific overlays, or provider-specific behavior.
+- Direct Promote implementation; question-id allocation; question-bank writes;
+  candidate persistence; idempotency keys; provenance markers; Git commits;
+  `commit_sha`; or a promotion receipt. These are PR B.
+- Platform code, platform pin bump, Home/Today UI, new-tab routing, modal
+  deletion, web evidence, or platform coordinator storage. Platform #469
+  consumes this release contract but implementation remains downstream.
+- A category picker, required placement before the first substantive turn, or
+  model-authorized candidate transitions.
+- Provider-specific behavior or a default model seat.
+- New vault paths or changes to `system/vault_contract.json`.
 
 ## Implementation notes
 
-- Follow the router's additive closed-roster/parser precedent in
-  `system/conversation.py::_build_router_roster_block` and
-  `system/conversation_delivery.py::_parse_router_output`, but keep candidate
-  placement in the one new authoritative module rather than adding a third
-  copy of roster validation.
-- Load candidate-only prompt files through framework-scoped paths. Never read
-  prompt authority from the user's vault, and never interpolate values as
-  instructions. Render candidate text, user text, and roster entries as a
-  bounded JSON `DATA` block after an explicit instruction that all contents of
-  `DATA` are untrusted evidence, not commands.
-- The placement model gets no tools. In particular, it cannot read or write
-  Git, the question bank, candidate state, session state, or projections.
-- Reject unknown schema keys. Reject duplicate category IDs before prompting.
-  Use exact string membership, not case folding, fuzzy matching, label matching,
-  or question-text matching.
-- Preserve a valid turn classification when category parsing fails, but never
-  preserve a stale/invalid category. Runtime code decides what may advance;
-  model prose is never authorization.
-- The platform pin should consume the final PR B release rather than pinning
-  this intermediate release. PR A evidence still lists all reconciliation
-  surfaces so PR B and the later platform pin can prove none were missed.
+- The registry is framework-scoped (`system/lifehug_core.py::INTERACTIONS_DIR`),
+  never vault-scoped. Resolve and validate paths before reading; registry and
+  manifest strings cannot escape `interactions/`.
+- Use the repo's flat scalar YAML parser. Composition lists are pipe-delimited
+  scalar values; do not add PyYAML or nested syntax.
+- Render all caller strings inside a bounded JSON `UNTRUSTED_DATA` block after
+  the composed instruction authority. The candidate, roster, and user text
+  cannot alter roles, output schema, lifecycle facts, or tool access.
+- Runtime determines status/completion from strict input plus normalized model
+  proposal. The model never receives fields that authorize writes and never
+  supplies `answer_status`, `requested_outcome`, revisions, or completion.
+- Extract/reuse generic threshold gate arithmetic if candidate evals otherwise
+  duplicate Conversation's checker. Keep harness ownership separate.
+- The platform should pin the final PR B release, not v181 alone. PR A still
+  provides an exact reconciliation checklist so the eventual bump cannot miss
+  the registry, composition, schema, prompt, eval, or lifecycle surface.
 
 ## Test plan
 
-Add `tests/test_candidate_placement.py` with named test classes/subtests for:
+Add or revise focused tests:
 
-- canonical hash determinism, Unicode handling, and mutable-field exclusion;
-- anchor, roster, focus-pair, uniqueness, bounds, and unknown-key validation;
-- prompt boundary/escaping and prompt-injection fixtures;
-- valid provisional and model/conversation resolution;
-- `0.8` threshold boundary and strict confidence typing;
-- all three turn kinds, no-user-turn nullability, and classification retention
-  when category output is invalid;
-- natural one-question ambiguity linting and menu/yes-no/multi-question
-  rejection;
-- candidate/category staleness, selected-category churn, and unrelated roster
-  churn;
-- malformed model output and fail-closed normalization;
-- read-only CLI stdin/stdout behavior and no durable mutation;
-- v180 byte fixtures proving ordinary turn/router prompts are unchanged when
-  the candidate-placement API is unused.
+- `tests/test_interaction_registry.py`: exact registry, complete audit,
+  lineage/version/cycle/traversal rejection, append/leaf provenance, direct
+  parent-byte parity, unregistered package isolation, no copied Conversation
+  clauses, and ordinary Conversation self-lineage.
+- `tests/test_question_candidate.py`: strict anchors/rosters/revisions,
+  before/during/after prompt data, initial Play no modal/no promotion,
+  resolved/defer/ask-now consistency, reply/turn retention, injection boundary,
+  threshold typing, decline/defer bypass, all completion permutations,
+  staleness, read-only CLI, and ordinary Conversation v180 byte hashes.
+- `tests/test_question_candidate_evals.py`: independent fixture schemas,
+  scorer math/gate boundaries, timing/completion/lifecycle cases, inherited
+  Conversation lint parity, and loud provider skips.
+- Restore `tests/test_interaction_evals.py` to ordinary Conversation coverage.
 
-Extend `tests/test_interaction_evals.py` for fixture schema, sample scorer math,
-every configured `placement_gates.*` boundary, and loud keyless live skips.
-Extend the existing handbook parity test if an embedded definition changes.
-
-Exact focused gate:
+Scoped local gates (no broad full suite while sibling agents share the host):
 
 ```bash
 python3 -m unittest \
-  tests.test_candidate_placement \
+  tests.test_interaction_registry \
+  tests.test_question_candidate \
+  tests.test_question_candidate_evals \
   tests.test_interaction_evals -v
-```
-
-Exact full gates:
-
-```bash
 python3 system/lifehug.py conversation-evals
+python3 system/lifehug.py question-candidate-evals
 python3 scripts/ci/check_framework_files.py
-python3 -m unittest discover -s tests -p "test_*.py" -v
+python3 scripts/check_version_bump.py
+python3 -m compileall -q system tests
+git diff --check
 ```
 
-CI must pass on Python 3.11 and 3.14. Record the exact SHA and concise counts in
-the implementation evidence comment; do not normalize a red baseline into an
-acceptance.
+CI is the authoritative broad suite and must pass on Python 3.11 and 3.14 for
+the exact pushed SHA. Report failing test names and fixes; do not normalize a
+red baseline.
 
 ## Launch-and-verify
 
-This PR does not touch `serve_wiki.py`; no browser walkthrough, screenshots, or
-motion evidence are required. The executable/viewable review surface is:
+No viewer code changes; screenshots/motion are not required. The executable
+review surface is:
 
 ```bash
 python3 -c '
 import json
 from pathlib import Path
-rows = json.loads(Path("interactions/conversation/evals/goldens/candidate_placement_fixtures.json").read_text())
+rows = json.loads(Path("interactions/question_candidate/evals/goldens/fixtures.json").read_text())
 print(json.dumps(rows[0]["input"]))
-' | python3 system/lifehug.py conversation-candidate-placement-prompt
+' | python3 system/lifehug.py question-candidate-prompt
 
-python3 system/lifehug.py conversation-evals
+python3 system/lifehug.py question-candidate-evals
 ```
 
-Pass means the first command prints a candidate-placement prompt containing the
-exact synthetic candidate and only the supplied closed roster, with untrusted
-content inside the JSON `DATA` block; the second command reports all
-deterministic candidate-placement schemas, sample gates, and goldens passed,
-while any unavailable live provider layer is named and skipped loudly.
+Pass means the first command shows inherited Conversation authority followed by
+Question Candidate authority and one bounded `UNTRUSTED_DATA` block containing
+the exact synthetic candidate/closed roster; it does not present a category
+menu or claim promotion. The second command names all deterministic layers as
+green and marks any unavailable live provider step `SKIPPED` loudly.
 
 ## Acceptance criteria
 
-- [ ] A high-confidence valid roster proposal resolves silently; ambiguity asks
-      one natural Conversation-shaped question.
-- [ ] The model cannot resolve to any category absent from the exact caller
-      roster, including via prompt injection, label matching, or case folding.
-- [ ] `placement_only|answer|mixed` classification never discards or rewrites
-      the original turn; invalid placement retains any independently valid
-      classification.
-- [ ] Exact candidate and selected-category revisions bind a resolved placement;
-      relevant churn invalidates it and unrelated roster churn does not.
-- [ ] Empty, duplicate, oversized, malformed, or stale inputs fail closed.
-- [ ] Ordinary Conversation and router prompt bytes match v180 fixtures whenever
-      candidate placement is unused; modes and rules 1–13 remain unchanged.
-- [ ] Deterministic and sample-prediction eval layers cover every required case;
-      live model layers skip loudly when unavailable.
-- [ ] No production path writes candidate, question-bank, Conversation, Git, or
-      projection state in this PR.
-- [ ] The implementation evidence names every platform pin reconciliation
-      surface and states that platform should wait for PR B's final release.
+- [ ] Question Candidate is independently registered, auditable, versioned,
+      seatable, and eval-gated; it is not a Conversation step or mode.
+- [ ] The child composes current Conversation assets with deterministic
+      provenance and version binding; no parent prose is copied into the child.
+- [ ] Ordinary Conversation definition, behavior, prompts, router, and eval
+      surface retain v180 bytes and semantics.
+- [ ] Play can open directly on the exact candidate and begin substantive
+      conversation without a modal or required initial placement question.
+- [ ] Placement may resolve or be asked naturally before/during/after; deferred
+      placement never causes an answer turn to be discarded.
+- [ ] Answered completion requires a durable answer, revision-valid category,
+      and answered outcome. Starting Play is engaged, never promoted.
+- [ ] Direct Promote is outside this Interaction; explicit Decline and defer
+      are runtime-authored outcomes and never model authorization.
+- [ ] Empty/duplicate/oversized/malformed/forged/stale inputs fail closed; model
+      output cannot escape the exact roster or prompt/data boundary.
+- [ ] Independent deterministic/sample eval gates pass; live seating skips
+      loudly without credentials.
+- [ ] No PR A path writes candidate, question bank, session, vault, Git, or
+      projection state.
+- [ ] Evidence names all platform handoff changes and says to wait for PR B's
+      final version before pinning.
 
 ## Owner closeout template
 
 **Look**
 
-1. Run the two commands under Launch-and-verify.
-2. In the printed prompt, confirm that the candidate/user/category values appear
-   only inside the bounded JSON `DATA` block and that the output vocabulary names
-   only roster IDs.
-3. Read the candidate-placement eval summary: high-confidence, ambiguity,
-   mixed-turn, injection, malformed, and churn cases should all be named and
-   green; an unavailable live model must say `SKIPPED`, not silently pass.
+1. Run both Launch-and-verify commands.
+2. Confirm the prompt names `conversation` then `question_candidate` at the
+   provenance seams, keeps candidate/user/category strings only in
+   `UNTRUSTED_DATA`, and never shows a picker or promotion claim.
+3. Confirm the eval summary separately names composition, initial Play,
+   before/during/after placement, lifecycle, injection, malformed, and stale
+   cases; unavailable live seating says `SKIPPED`.
 
 **Judge**
 
-1. Yes/no: approve `0.8` as the silent-placement threshold? Yes makes it the
-   portable default both OSS and platform runtimes must honor.
-2. Yes/no: approve 64 as the complete-roster hard maximum? Yes means runtimes
-   fail closed above 64 rather than truncating possible placements.
-3. Yes/no: approve one natural open clarification with no category picker,
-   yes/no question, or forced-choice menu? Yes binds the Answer Now ambiguity
-   experience and its eval rubric.
-4. Yes/no: approve per-selected-category revision binding instead of binding to
-   the entire roster? Yes means unrelated category additions do not invalidate a
-   resolved placement, while removal/rename/focus remapping does.
+1. Yes/no: approve an independently registered Question Candidate Interaction
+   that composes Conversation chat mechanics? Yes ratifies the audit boundary
+   and rejects storing candidate behavior inside Conversation.
+2. Yes/no: approve `0.8` silent placement and a complete 64-entry hard bound?
+   Yes makes those portable OSS/platform defaults; above 64 fails closed.
+3. Yes/no: approve letting placement resolve before/during/after, with one
+   natural question only when appropriate? Yes rejects the pre-conversation
+   modal and forced initial category choice.
+4. Yes/no: approve answered completion only after durable answer + current
+   placement + answered outcome? Yes makes Play engagement non-promoting and
+   makes partial progress explicitly non-terminal.
+5. Yes/no: approve per-selected-category revision binding? Yes lets unrelated
+   roster additions survive while selected-category removal/remapping fails.
 
 **Done when**
 
-Approval merges only PR A's placement authority and triggers its automatic
-version tag. It does not make Answer Now promotable. PR B must then land the
-idempotent promotion/receipt authority; the platform pins the final PR B release
-and implements its coordinator in platform #469.
+Approval merges PR A's independent Interaction/composition authority and
+triggers its normal version tag. It does not promote candidates. PR B must land
+the idempotent structured promotion receipt; platform #469 then pins the final
+PR B release and implements green Promote, red Decline, and modal-free Play.
 
 ## Definition of done
 
-- [ ] Focused tests and `conversation-evals` pass locally.
-- [ ] Full dependency-free unittest suite passes; CI is green on Python 3.11
-      and 3.14.
-- [ ] `system/version.json` takes the next free version, date, user-impact
-      changelog, and complete `framework_files` additions.
-- [ ] The next available ADR records the binding decisions above.
-- [ ] Conversation/Interaction handbook and operating docs are updated where
-      behavior changed; byte-embedded docs pass parity.
-- [ ] Covering issue #170 receives concise implementation/eval/pin-handoff
-      evidence, but remains open for PR B.
-- [ ] Owner-closeout comment is current and self-contained.
+- [ ] Contract and ADR record the independent Interaction/audit architecture
+      before implementation commits.
+- [ ] Scoped local gates pass; exact pushed SHA is green on both CI matrices.
+- [ ] v181 version, release date, changelog, and framework manifest exactly
+      reflect the registered package and runtime/eval surfaces.
+- [ ] Interaction README/handbook and operating docs are updated where the
+      architecture changed; parity checks pass.
+- [ ] PR #171 has substantive exact-SHA evidence plus current Owner closeout;
+      issue #170 remains open for PR B.
 - [ ] No viewer evidence is required because `serve_wiki.py` is untouched.
 
 🤖 Generated with GPT-5.6-Sol via Codex
