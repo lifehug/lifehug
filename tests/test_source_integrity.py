@@ -1,9 +1,9 @@
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
@@ -178,6 +178,93 @@ class EntityPageLintTests(unittest.TestCase):
         self.write_page("katie", full, origin="focus")
         self.write_page("mom", full[:2], origin="focus")
         self.assertNotIn("duplicate_entity_suspect", self.lint_types())
+
+
+class CandidateResearchIntegrityTests(unittest.TestCase):
+    def setUp(self):
+        self.src = load("source_integrity")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.original_paths = (
+            self.src.REPO_DIR,
+            self.src.ANSWERS_DIR,
+            self.src.SOURCES_DIR,
+            self.src.SOURCE_MANIFEST_FILE,
+            self.src.WIKI_DIR,
+        )
+        self.src.REPO_DIR = self.root
+        self.src.ANSWERS_DIR = self.root / "answers"
+        self.src.SOURCES_DIR = self.root / "sources"
+        self.src.SOURCE_MANIFEST_FILE = self.root / "state" / "source_manifest.json"
+        self.src.WIKI_DIR = self.root / "wiki"
+
+    def tearDown(self):
+        (
+            self.src.REPO_DIR,
+            self.src.ANSWERS_DIR,
+            self.src.SOURCES_DIR,
+            self.src.SOURCE_MANIFEST_FILE,
+            self.src.WIKI_DIR,
+        ) = self.original_paths
+        self.tmp.cleanup()
+
+    def _record_and_manifest(self):
+        import candidate_research
+
+        from tests.test_candidate_research import _focus_assessment
+
+        subject, turns, assessment = _focus_assessment(confirmed=True)
+        plan = candidate_research.build_candidate_research_source(
+            assessment, authoritative_turns=turns, current_subject=subject
+        )
+        path = self.root / plan["source_path"]
+        path.parent.mkdir(parents=True)
+        path.write_bytes(plan["source_bytes"])
+        record = self.src.source_record(path)
+        manifest = self.src.sync_manifest([record], write=False)
+        self.src.SOURCE_MANIFEST_FILE.parent.mkdir(parents=True)
+        self.src.SOURCE_MANIFEST_FILE.write_text(json.dumps(manifest), encoding="utf-8")
+        return path, record, manifest
+
+    def test_typed_fields_survive_manifest_and_lint_cleanly(self):
+        _path, record, manifest = self._record_and_manifest()
+        entry = manifest["sources"][record["path"]]
+        self.assertEqual(entry["candidate_kind"], "focus_candidate")
+        self.assertEqual(entry["subject_type"], "place")
+        self.assertTrue(entry["user_confirmed"])
+        self.assertFalse(entry["generated_seed_questions_evidence"])
+        findings = self.src.lint_records([record])
+        self.assertNotIn(
+            "candidate_research_invalid", {finding["type"] for finding in findings}
+        )
+        self.assertNotIn(
+            "candidate_research_manifest_mismatch",
+            {finding["type"] for finding in findings},
+        )
+
+    def test_typed_manifest_mismatch_is_safe_manifest_repair(self):
+        _path, record, manifest = self._record_and_manifest()
+        manifest["sources"][record["path"]]["research_revision"] = "sha256:" + "0" * 64
+        self.src.SOURCE_MANIFEST_FILE.write_text(json.dumps(manifest), encoding="utf-8")
+        findings = self.src.lint_records([record])
+        finding = next(
+            item
+            for item in findings
+            if item["type"] == "candidate_research_manifest_mismatch"
+        )
+        self.assertEqual(finding["fixability"], "safe")
+
+    def test_invalid_immutable_source_is_never_rewritten_by_safe_fix(self):
+        path, _record, _manifest = self._record_and_manifest()
+        tampered = path.read_text(encoding="utf-8").replace(
+            "Only the literal user-turn excerpts", "Tampered user-turn excerpts", 1
+        )
+        path.write_text(tampered, encoding="utf-8")
+        before = path.read_bytes()
+        record = self.src.source_record(path)
+        self.assertTrue(record["candidate_research_error"])
+        self.src.apply_safe_fixes([record])
+        self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":

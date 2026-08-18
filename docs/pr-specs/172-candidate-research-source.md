@@ -199,10 +199,11 @@ identity_or_disambiguation | relevance_or_relationship | history |
 connections | tension_or_open_question | type_specific_context
 ```
 
-- Every dimension value is a non-empty ordered list of evidence revisions.
-  Every reference must name an exact validated substantive span. Every
-  substantive span must support at least one dimension. Unknown/missing
-  dimensions or references fail closed.
+- Every dimension key is present. Its value is an ordered list of evidence
+  revisions; an empty list is the explicit not-ready representation for that
+  dimension. Every non-empty reference must name an exact validated
+  substantive span. Every substantive span must support at least one
+  dimension. Unknown/missing keys or references fail closed.
 - Focus readiness requires all seven dimensions, at least three distinct
   non-overlapping substantive spans, at least one
   `concrete_event|concrete_observation`, and at least two seed questions.
@@ -511,7 +512,8 @@ Extend:
   placeholder; entity research becomes cited material for person/place/period/
   object/theme only after independent eligibility; wrong kind/type/identity and
   retracted research do not attach.
-- `tests/test_vault_contract.py`: candidate-research path family and schema.
+- `tests/test_v120_vault_only.py`: candidate-research path family, exported
+  classification, identity digest, and schema authority.
 - `tests/test_v150_conversation_store.py`: v181 Conversation and Question
   Candidate byte-parity/no-behavior-change guard.
 - `tests/test_handbook_parity.py`: closed types, evidence minima, and typed
@@ -524,14 +526,14 @@ python3 -m unittest \
   tests.test_candidate_research \
   tests.test_source_integrity \
   tests.test_wiki_compile \
-  tests.test_vault_contract \
+  tests.test_v120_vault_only.VaultContractTests \
   tests.test_handbook_parity \
   tests.test_question_candidate \
   tests.test_v150_conversation_store.NoBehaviorChangeGuardTests -v
 python3 tests/walkthrough_candidate_research.py
 python3 scripts/ci/check_framework_files.py
 python3 -m compileall -q system tests
-ruff check --select E4,E7,E9,F,I,UP,B --ignore E402 \
+ruff check --select E4,E7,E9,F,I,UP,B --ignore E402,B905 \
   system/candidate_research.py system/source_integrity.py system/wiki_compile.py \
   tests/test_candidate_research.py tests/walkthrough_candidate_research.py
 ruff format --check \

@@ -559,6 +559,18 @@ python3 system/lifehug.py candidates-promote <candidate-id> --category A
 
 Candidate promotion appends a new unchecked question to `system/question-bank.md`, records source provenance in a metadata comment, and marks the candidate as promoted. Do not promote rejected or already promoted candidates. Do not let candidates become daily prompts until they have been promoted into the question bank.
 
+**Candidate research source boundary (v183, ADR 0020).** Future Focus
+Candidate and Entity Candidate conversations share one source authority: only
+exact revision-bound spans of raw user turns count as evidence; model summaries
+never do, and generated seed questions are labeled non-evidence. Readiness is
+recomputed from the closed Focus/entity rubric, then the author must explicitly
+confirm that exact assessment before one immutable
+`sources/candidate-research/` record is written. Research never approves a
+Focus or graduates an entity. After those existing lifecycle mechanisms act,
+the compiler uses the source so a researched Focus is not an empty placeholder
+and a researched page-eligible entity has citable material for every supported
+type.
+
 ### Planner
 
 Use the planner when new sources or uneven coverage should influence future questions without letting one corpus dominate the whole system.

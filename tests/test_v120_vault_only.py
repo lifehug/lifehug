@@ -41,6 +41,7 @@ EXPECTED_DATA_PATHS = {
     "arc_cards",
     "artifact_sources",
     "book_offers",
+    "candidate_research_sources",
     "classifications",
     "compile_needed",
     "config",
@@ -212,6 +213,18 @@ class VaultContractTests(unittest.TestCase):
                 "rotation": "state/rotation.json",
                 "coverage": "state/coverage.json",
             },
+        )
+        candidate_research = exported["data_paths"]["candidate_research_sources"]
+        self.assertEqual(
+            candidate_research["external_path"], "sources/candidate-research"
+        )
+        self.assertEqual(candidate_research["schema"]["supported_versions"], [1])
+        self.assertEqual(
+            vault_paths.classify_contract_path(
+                "sources/candidate-research/entity_candidate/a.md",
+                authority="vault",
+            ),
+            "durable_data",
         )
         for entry in exported["data_paths"].values():
             self.assertIn("external_path", entry)

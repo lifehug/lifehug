@@ -78,6 +78,33 @@ class HandbookParityTests(unittest.TestCase):
                 )
 
 
+class CandidateResearchHandbookParityTests(unittest.TestCase):
+    def test_candidate_research_minima_and_closed_types_match_handbook(self):
+        if str(SYSTEM) not in sys.path:
+            sys.path.insert(0, str(SYSTEM))
+        import candidate_research
+
+        focuses = (DOCS / "handbook" / "focuses.md").read_text()
+        entities = (DOCS / "handbook" / "entities.md").read_text()
+        self.assertIn(
+            f"Readiness requires at least "
+            f"{candidate_research.FOCUS_MIN_EVIDENCE_SPANS} substantive evidence "
+            f"spans, including concrete\nmaterial, plus at least "
+            f"{candidate_research.FOCUS_MIN_SEED_QUESTIONS} generated seed questions "
+            "labeled non-evidence.",
+            focuses,
+        )
+        by_minimum: dict[int, list[str]] = {}
+        for subject_type, minimum in candidate_research.ENTITY_MIN_EVIDENCE_SPANS.items():
+            by_minimum.setdefault(minimum, []).append(subject_type)
+        self.assertEqual(by_minimum, {2: ["person", "object"], 3: ["place", "period", "theme"]})
+        self.assertIn(
+            "The evidence minimum is 2 spans for person and object candidates, and 3 spans\n"
+            "for place, period, and theme candidates; every type also needs concrete material.",
+            entities,
+        )
+
+
 HANDBOOK_INTERACTIONS = DOCS / "handbook" / "interactions"
 
 _EMBED = re.compile(

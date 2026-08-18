@@ -57,6 +57,16 @@ page's §4 derives), and — only when the owner has spoken — `owner_verdict`.
 by ADR 0013): there is no parallel ledger anywhere for entity identity or
 graduation decisions.
 
+**Candidate research** is a separate immutable source about one still-pending
+roster entry (ADR 0020), never a roster verdict. Exact raw user-turn spans must
+cover the entity usefulness rubric and include concrete material; the author
+must explicitly confirm the exact ready assessment. Model summaries and
+generated seed questions are not evidence. The source preserves identity and
+state revisions so a rename, mapping, verdict, graduation, or tombstone is
+revalidated rather than silently redirected.
+The evidence minimum is 2 spans for person and object candidates, and 3 spans
+for place, period, and theme candidates; every type also needs concrete material.
+
 **Qualifying** is the type-specific bar for "is this a real thing of this
 type at all," independent of frequency: a person must be a real, distinct,
 identifiable individual (not a pronoun, role, or place); a place must be a
@@ -308,6 +318,14 @@ own future mention resolution (a page-worthy entity's canonical name and
 aliases are exactly what `_entity_keys()` matches future raw detections
 against).
 
+A completed `entity_candidate` research source supplies citable material only
+after the matching roster entry independently becomes page-eligible. This
+works for person, place, period, object, and theme, including the types whose
+ordinary real-mention bar is higher than one source: the completed research
+already proved its own per-type multi-span minimum. It never sets
+`page_eligible`, `qualifies`, `maps_to_focus`, or `owner_verdict`, so automatic
+graduation and the owner's accelerate/veto pair remain unchanged.
+
 **How it self-improves:** every monthly refresh sees a strictly settled
 starting point (the previous roster's folded identities and any owner
 verdicts) rather than starting from raw detections cold — so identity
@@ -335,6 +353,7 @@ working.
 | Base eligibility formula (shared by `normalize()` and `entity_verdict.py`) | `entity_roster.base_page_eligible()` |
 | Owner verdicts (ADR 0013) | `entity_verdict.py` — `apply_verdict()`; CLI `entity-verdict <type> <slug> graduate\|never\|clear [--json]` |
 | Graduation (mention bars, page build) | `wiki_compile.plan_entities()` |
+| Candidate-research evidence/source authority | `candidate_research.py`, `sources/candidate-research/entity_candidate/` |
 | Orphan-page cleanup/demotion | `wiki_compile.cleanup_orphan_entity_pages()` |
 | Theme-specific keyword curation (v97, out of this page's core scope) | `wiki_compile.theme_keyword_map()` |
 | CLI | `lifehug.py entity-roster --type <t> [--resolve\|--emit-task PATH\|--from-response PATH\|--show] [--min-score\|--min-answers]`, `entity-verdict <type> <slug> graduate\|never\|clear` |

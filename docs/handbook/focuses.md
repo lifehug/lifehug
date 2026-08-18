@@ -49,6 +49,16 @@ justify it, and a `status` (`pending`, `approved`, or dismissed/expired,
 tracked separately). A recommendation only becomes a Focus through
 **approval** (§4) — never automatically materialized just for existing.
 
+**Candidate research** is source-building work about one still-pending
+recommendation (ADR 0020). It is deliberately not approval: exact slices of
+the author's raw turns are assessed against the closed Focus usefulness rubric,
+then written only after the author confirms that exact ready assessment.
+Model summaries are never evidence; generated seed questions are labeled
+non-evidence. The immutable source waits under `sources/candidate-research/`
+until the ordinary manual/autopilot approval path creates the Focus.
+Readiness requires at least 3 substantive evidence spans, including concrete
+material, plus at least 2 generated seed questions labeled non-evidence.
+
 **Evidence strength** is a three-band label on a recommendation's score:
 `weak`, `moderate`, or `strong` (§4 gives the exact cutoffs). It's
 informational — the number that actually gates approval is the floor
@@ -306,6 +316,13 @@ list), the question bank (starter questions), and downstream, the weekly
 planner's Focus-weighted queue — a Focus the autopilot just created is
 immediately eligible for next week's question selection.
 
+When a pending recommendation already has a completed candidate-research
+source, later approval also gives the compiler immediate citable material. A
+new Focus with no dedicated answers therefore renders from the author's exact
+research spans instead of the empty-Focus placeholder. The research source
+does not call `approve_recommendation()`, scaffold a category, or promote its
+generated seed questions; approval/autopilot remains the only creation door.
+
 **How it self-improves:** the roster fold means idea extraction gets
 *more* accurate over time without any change to the extraction regexes
 themselves — as the monthly entity-roster curation resolves more aliases,
@@ -350,6 +367,7 @@ not.
 | Duplicate detection/report (zero-write) | `focus_dupes.py` (`focus-dupes --report`) |
 | Duplicate healing (owner-initiated) | `focus_merge.py` (`focus-merge <survivor> <loser>`) |
 | Approval + scaffolding | `recommend_focuses.approve_recommendation()`, `roadmap.focus_new()` |
+| Candidate-research evidence/source authority | `candidate_research.py`, `sources/candidate-research/focus_candidate/` |
 | Autopilot | `recommend_focuses.focus_autopilot()`, `resolve_autopilot_target()` |
 | Saturation / verdicts | `roadmap.focus_fill()`, `progress.verdict()` |
 | CLI | `lifehug.py recommend-focuses [--recommend\|--dismiss\|--approve\|--autopilot [--dry-run\|--catch-up]\|--target N]`, `roadmap [show\|rebuild\|add\|set\|finish\|new]`, `focus-dupes --report`, `focus-merge <survivor> <loser> [--dry-run]` |

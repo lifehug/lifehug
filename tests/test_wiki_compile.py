@@ -163,6 +163,164 @@ class SynthesisTests(unittest.TestCase):
         self.assertIn("A1", synth["narrative"])
 
 
+class CandidateResearchCompilerTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+        self.wc._RETRACTIONS = []
+
+    @staticmethod
+    def research_item(
+        *, candidate_kind="focus_candidate", subject_type="place", slug="synthetic-harbor"
+    ):
+        return {
+            "id": f"research:{candidate_kind}:{slug}",
+            "source": f"sources/candidate-research/{candidate_kind}/synthetic.md",
+            "title": "Candidate research",
+            "body": "The literal user evidence does not need to repeat the subject label.",
+            "kind": "candidate_research",
+            "candidate_kind": candidate_kind,
+            "candidate_id": f"candidate:{slug}",
+            "subject_type": subject_type,
+            "subject_label": slug.replace("-", " ").title(),
+            "subject_slug": slug,
+            "subject_aliases": [],
+            "identity_revision": "sha256:" + "1" * 64,
+            "subject_revision": "sha256:" + "2" * 64,
+            "assessment_revision": "sha256:" + "3" * 64,
+            "research_revision": "sha256:" + "4" * 64,
+            "user_confirmed": True,
+            "generated_seed_questions_evidence": False,
+            "content_sha256": "5" * 64,
+            "sensitivity": "private",
+            "source_trust": "user_attested_primary",
+            "authority": "first_person_memory",
+        }
+
+    def test_focus_research_prevents_empty_placeholder_and_is_cited(self):
+        item = self.research_item()
+        descs = self.wc.plan_focuses(
+            {"K": {"group": "focus", "name": "Focus — Synthetic Harbor"}},
+            [],
+            {},
+            {item["id"]: item},
+            {"entities": []},
+        )
+        self.assertEqual(len(descs), 1)
+        self.assertIn(item, descs[0]["cited_items"])
+        self.assertIn(item["source"], descs[0]["sources"])
+        self.assertNotIn("no source material yet", descs[0]["summary"])
+        self.assertIn("completed research", descs[0]["summary"])
+
+    def test_wrong_kind_or_identity_does_not_fill_focus(self):
+        item = self.research_item(
+            candidate_kind="entity_candidate", subject_type="place"
+        )
+        item["body"] += " Synthetic Harbor appears only as fuzzy body text."
+        desc = self.wc.plan_focuses(
+            {"K": {"group": "focus", "name": "Focus — Synthetic Harbor"}},
+            [],
+            {},
+            {item["id"]: item},
+            {"entities": []},
+        )[0]
+        self.assertEqual(desc["cited_items"], [])
+        self.assertIn("no source material yet", desc["summary"])
+
+    def test_retracted_focus_research_does_not_fill_placeholder(self):
+        item = self.research_item()
+        self.wc._RETRACTIONS = [
+            {
+                "id": "retraction",
+                "retracts": item["id"],
+                "retracts_path": "",
+                "retracts_sha256": item["content_sha256"],
+                "suppress_on": [],
+                "voided": False,
+            }
+        ]
+        desc = self.wc.plan_focuses(
+            {"K": {"group": "focus", "name": "Focus — Synthetic Harbor"}},
+            [],
+            {},
+            {item["id"]: item},
+            {"entities": []},
+        )[0]
+        self.assertEqual(desc["cited_items"], [])
+        self.assertIn("no source material yet", desc["summary"])
+
+    def test_typed_research_supplies_citable_material_for_node_types(self):
+        for entity_type in ("person", "place", "period", "object"):
+            with self.subTest(entity_type=entity_type):
+                slug = f"synthetic-{entity_type}"
+                item = self.research_item(
+                    candidate_kind="entity_candidate",
+                    subject_type=entity_type,
+                    slug=slug,
+                )
+                roster = {
+                    "entities": [
+                        {
+                            "name": slug.replace("-", " ").title(),
+                            "slug": slug,
+                            "aliases": [],
+                            "page_eligible": True,
+                            "maps_to_focus": None,
+                        }
+                    ]
+                }
+                descs = self.wc.plan_entities(
+                    entity_type, {}, {item["id"]: item}, roster, set()
+                )
+                self.assertEqual(len(descs), 1)
+                self.assertIn(item, descs[0]["cited_items"])
+                self.assertIn(item["source"], descs[0]["sources"])
+
+    def test_typed_theme_research_is_cited_after_theme_eligibility(self):
+        item = self.research_item(
+            candidate_kind="entity_candidate",
+            subject_type="theme",
+            slug="synthetic-theme",
+        )
+        roster = {
+            "entities": [
+                {
+                    "name": "Synthetic Theme",
+                    "slug": "synthetic-theme",
+                    "aliases": [],
+                    "keywords": ["phrase-not-in-the-source-body"],
+                    "page_eligible": True,
+                    "maps_to_focus": None,
+                }
+            ]
+        }
+        descs = self.wc.plan_themes(
+            {}, {item["id"]: item}, roster, author_slug="author"
+        )
+        desc = next(row for row in descs if row["slug"] == "synthetic-theme")
+        self.assertIn(item, desc["cited_items"])
+
+    def test_research_never_changes_entity_eligibility(self):
+        item = self.research_item(
+            candidate_kind="entity_candidate",
+            subject_type="place",
+            slug="synthetic-place",
+        )
+        roster = {
+            "entities": [
+                {
+                    "name": "Synthetic Place",
+                    "slug": "synthetic-place",
+                    "aliases": [],
+                    "page_eligible": False,
+                    "maps_to_focus": None,
+                }
+            ]
+        }
+        self.assertEqual(
+            self.wc.plan_entities("place", {}, {item["id"]: item}, roster, set()),
+            [],
+        )
+
 # ---------------------------------------------------------------------------
 # Compiler: rendering
 # ---------------------------------------------------------------------------

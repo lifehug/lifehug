@@ -70,6 +70,19 @@ FRONTMATTER_ORDER = (
     "source_type",
     "source_trust",
     "authority",
+    "candidate_kind",
+    "candidate_id",
+    "subject_type",
+    "subject_label",
+    "subject_slug",
+    "subject_aliases",
+    "identity_revision",
+    "subject_revision",
+    "assessment_revision",
+    "research_revision",
+    "user_confirmed",
+    "evidence_span_count",
+    "generated_seed_questions_evidence",
     "artifact_id",
     "artifact_title",
     "artifact_format",
@@ -95,6 +108,22 @@ FRONTMATTER_ORDER = (
     "source_path",
     "content_sha256",
     "metadata",
+)
+
+CANDIDATE_RESEARCH_MANIFEST_FIELDS = (
+    "candidate_kind",
+    "candidate_id",
+    "subject_type",
+    "subject_label",
+    "subject_slug",
+    "subject_aliases",
+    "identity_revision",
+    "subject_revision",
+    "assessment_revision",
+    "research_revision",
+    "user_confirmed",
+    "evidence_span_count",
+    "generated_seed_questions_evidence",
 )
 
 
@@ -301,6 +330,16 @@ def source_record(path: Path) -> dict[str, object]:
     inferred = build_source_metadata(path, content)
     source_id = str(metadata.get("source_id") or inferred["source_id"])
     source_type = str(metadata.get("type") or inferred["type"])
+    candidate_research_error = ""
+    if source_type == "candidate_research":
+        try:
+            from candidate_research import (  # noqa: PLC0415
+                validate_candidate_research_source_text,
+            )
+
+            validate_candidate_research_source_text(content, expected_path=rel(path))
+        except (TypeError, ValueError) as exc:
+            candidate_research_error = str(exc)
     return {
         "path": rel(path),
         "abs_path": path,
@@ -315,6 +354,7 @@ def source_record(path: Path) -> dict[str, object]:
         "content_sha256": payload_sha256(payload),
         "declared_content_sha256": str(metadata.get("content_sha256", "")),
         "file_sha256": file_sha256(path),
+        "candidate_research_error": candidate_research_error,
     }
 
 
@@ -356,6 +396,15 @@ def sync_manifest(records: list[dict[str, object]], *, write: bool = True, prune
                 != record["content_sha256"]
             ),
         })
+        if record["type"] == "candidate_research":
+            metadata = record.get("metadata", {})
+            if isinstance(metadata, dict):
+                entry.update(
+                    {
+                        key: metadata.get(key)
+                        for key in CANDIDATE_RESEARCH_MANIFEST_FIELDS
+                    }
+                )
         sources[path] = entry
     if prune_missing:
         current_paths = {str(record["path"]) for record in records}
@@ -380,7 +429,7 @@ def finding(
     fixability: str,
     recommended_action: str,
 ) -> dict[str, str]:
-    digest = hashlib.sha256(f"{issue_type}:{path}:{message}".encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(f"{issue_type}:{path}:{message}".encode()).hexdigest()[:12]
     return {
         "id": f"src-{digest}",
         "type": issue_type,
@@ -504,6 +553,20 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
             ))
 
         metadata = record.get("metadata", {})
+        if record["type"] == "candidate_research":
+            candidate_error = str(record.get("candidate_research_error") or "")
+            if candidate_error:
+                findings.append(finding(
+                    "candidate_research_invalid",
+                    "error",
+                    path,
+                    candidate_error,
+                    fixability="manual",
+                    recommended_action=(
+                        "restore the immutable source from Git or file an additive "
+                        "correction/retraction; never rewrite it in place"
+                    ),
+                ))
         declared = str(record.get("declared_content_sha256") or "")
         if declared and declared != record["content_sha256"]:
             findings.append(finding(
@@ -545,6 +608,25 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
                 fixability="manual",
                 recommended_action="restore the original, accept as repair with an audit note, or create a correction/reflection source",
             ))
+        if entry and record["type"] == "candidate_research" and isinstance(metadata, dict):
+            mismatched = [
+                key
+                for key in CANDIDATE_RESEARCH_MANIFEST_FIELDS
+                if entry.get(key) != metadata.get(key)
+            ]
+            if mismatched:
+                findings.append(finding(
+                    "candidate_research_manifest_mismatch",
+                    "error",
+                    path,
+                    "typed candidate-research manifest mismatch: "
+                    + ", ".join(mismatched),
+                    fixability="safe",
+                    recommended_action=(
+                        "run source-manifest --rebuild or source-lint --fix; "
+                        "the immutable source remains authority"
+                    ),
+                ))
 
         target = ""
         if isinstance(metadata, dict):
@@ -710,6 +792,11 @@ def print_findings(findings: list[dict[str, str]], *, limit: int | None = None) 
 
 def apply_safe_fixes(records: list[dict[str, object]]) -> list[dict[str, object]]:
     for record in records:
+        if record["type"] == "candidate_research":
+            # Its marker/frontmatter/body are one immutable signed-by-revision
+            # record. Safe repair may rebuild the manifest below, never rewrite
+            # the source file itself.
+            continue
         if not record["has_frontmatter"] or record.get("required_missing"):
             apply_metadata_fix(Path(record["abs_path"]))
             continue
