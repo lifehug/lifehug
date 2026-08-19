@@ -164,7 +164,12 @@ Readiness is recomputed against a closed usefulness rubric (identity,
 relevance/history/connections/tension/type context for entities; identity,
 meaning/scope/direction/relationships/tension/open questions for Focuses),
 with multiple non-overlapping substantive spans and at least one concrete
-event/observation. The author then explicitly confirms that exact assessment.
+event/observation. Entity type context is semantic as well as structural: a
+person needs human action or observation; a place needs character plus lived
+inhabitation; a period needs daily texture plus a boundary; an object needs
+provenance/use plus symbolic meaning; and a theme needs two manifestations plus
+continuity, change, or contradiction. The author then explicitly confirms that
+exact assessment.
 Only that ready + confirmed boundary can render an immutable
 `candidate_research` source. The compiler cites it after the existing,
 independent Focus approval or entity-graduation mechanism succeeds; research

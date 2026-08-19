@@ -232,7 +232,9 @@ The dimensions mean:
 7. **grounded_evidence** — at least one exact substantive concrete event or
    observation, which may also support another dimension.
 
-The closed type rule is:
+The closed type rule is executable runtime authority, evaluated from the
+canonical quotes assigned to `type_specific_context`; a count alone is never
+sufficient:
 
 | Type | Required type-specific meaning |
 |---|---|
@@ -262,7 +264,9 @@ Ready is runtime-derived only when:
 
 No model-supplied ready, complete, count, revision, missing list, type result,
 lifecycle fact, or source fact is trusted. Semantic false positives are the
-recorded/live eval gate; structural readiness is recomputed in code.
+recorded/live eval gate; structural readiness and type meaning are recomputed
+in code on parse, decision validation, and every direct or CLI completion
+entrypoint before the candidate-research writer is called.
 
 ### Deterministic next-gap policy
 
@@ -662,17 +666,20 @@ No serve_wiki.py change; visual evidence is not required.
 python3 tests/walkthrough_entity_candidate.py
 ~~~
 
-The disposable-vault/local-Git walkthrough must prove:
+The disposable-vault/canonical-adapter walkthrough must prove:
 
 1. Play/prompt for all five types creates no vault/Git change.
 2. Natural turns cover ordered gaps; a type-specific near-miss stays not ready.
 3. Ready remains unconfirmed; a distinct explicit latest user turn completes.
 4. First completion is changed:true without lifecycle change; replay is
    changed:false with the same path/revision/introducing commit.
-5. Completion alone compiles no page. Separate canonical automatic eligibility
-   or owner graduation then yields a cited non-placeholder page for every type.
-6. Injection is inert; concurrent rename/graduate/never/delete fails before
-   write; same-revision contention converges; different bytes conflict.
+5. Completion alone produces no compiler descriptor while the roster remains
+   pending. The walkthrough then applies the separate pure canonical owner-
+   graduation rule to a copy of the roster row and invokes the canonical
+   `wiki_compile` entity/theme planning paths, proving a cited descriptor for
+   every type without letting the Interaction mutate lifecycle state.
+6. Injection is inert; lifecycle/revision churn fails before the writer;
+   crash adoption and same-revision contention converge; replay remains exact.
 
 It prints compact JSON and exits nonzero unless every row passes. It never uses
 a private vault, real remote, production verdict, viewer, or screenshots.

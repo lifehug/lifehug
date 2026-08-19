@@ -81,9 +81,12 @@ closed seven-key dimension schema.
 
 Ready is not complete. Once ready, the interaction asks one natural
 confirmation question. A later explicit user span confirms the exact current
-assessment. Completion delegates to v183's idempotent candidate-research source
-resolver, including fresh post-pull lifecycle validation and its structured
-receipt. It never calls roster or verdict authority.
+assessment. The trusted runtime recomputes all seven interaction gates and the
+type's actual meaning from canonical quotes on every completion entrypoint;
+reference counts alone never pass a type rule. Completion delegates to v183's
+idempotent candidate-research source resolver only after that current lifecycle,
+revision, and confirmation check, including its post-pull validation and
+structured receipt. It never calls roster or verdict authority.
 
 After separate eligibility or a graduate verdict, the compiler may attach the research by typed subject identity. Completion alone compiles no page.
 
@@ -102,9 +105,10 @@ After separate eligibility or a graduate verdict, the compiler may attach the re
 
 The package declares role tiers but no default concrete seat. Recorded gates
 require zero readiness false positives, perfect grounding, identity safety,
-one-question and inherited-Conversation compliance, next-gap accuracy of at
-least 0.85, and readiness recall of at least 0.90. An unavailable live provider
-skips loudly; it never seats by default.
+one-question and inherited-Conversation compliance, exact type-rubric
+precision/recall for every type, next-gap accuracy of at least 0.85, and
+readiness recall of at least 0.90. An unavailable live provider skips loudly;
+it never seats by default.
 
-See [ADR 0021](../../adr/0021-entity-candidate-interaction.md),
-[Focuses](../focuses.md), and [the Interaction Pattern](index.md).
+See [ADR 0022](../../adr/0022-entity-candidate-interaction.md) and
+[the Interaction Pattern](index.md).

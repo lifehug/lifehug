@@ -41,6 +41,77 @@ ENTITY_TYPE_SPECIFIC_MIN_REFS = {
     "object": 1,
     "theme": 2,
 }
+# These are deliberately conservative semantic signals, not a substitute for
+# the model's judgment.  The model proposes exact evidence; this authority
+# rejects a proposed type-context mapping unless the quoted user material
+# contains the contract-specific meaning.  Keeping this here (rather than in a
+# prompt or evaluator) makes every entry point enforce the same boundary.
+_TYPE_RUBRIC_PATTERNS = {
+    "person": {
+        "human": re.compile(
+            r"\b(?:he|she|they|my|mother|father|parent|sister|brother|aunt|uncle|"
+            r"grandm(?:other|a)|grandf(?:ather|a)|friend|neighbor|teacher|coach|"
+            r"mentor|partner|colleague|child|son|daughter)\b",
+            re.IGNORECASE,
+        ),
+        "action": re.compile(
+            r"\b(?:said|told|asked|taught|showed|helped|made|kept|worked|"
+            r"laughed|sang|fixed|built|called|visited|held|changed|became|"
+            r"worry|worried|hoped|believed|wanted|refused|forgave)\b",
+            re.IGNORECASE,
+        ),
+    },
+    "place": {
+        "character": re.compile(
+            r"\b(?:street|room|house|home|harbor|pier|shore|river|lake|"
+            r"neighborhood|town|city|school|church|yard|kitchen|apartment|"
+            r"smell(?:ed|s)?|sound(?:ed|s)?|quiet|crowded|salt|dusty|warm|cold)\b",
+            re.IGNORECASE,
+        ),
+        "inhabited": re.compile(
+            r"\b(?:lived|grew up|stayed|returned|visited|walked|worked|"
+            r"played|slept|waited|belonged|used to go|spent .* there)\b",
+            re.IGNORECASE,
+        ),
+    },
+    "period": {
+        "texture": re.compile(
+            r"\b(?:every day|each day|most days|typical|morning|afternoon|"
+            r"evening|routine|weekday|weekend|worked|studied|commuted|"
+            r"school|college|job|home)\b",
+            re.IGNORECASE,
+        ),
+        "boundary": re.compile(
+            r"\b(?:before|after|when .* ended|when .* began|transition|"
+            r"moved|graduated|left|started|became|until|between)\b",
+            re.IGNORECASE,
+        ),
+    },
+    "object": {
+        "provenance_or_use": re.compile(
+            r"\b(?:gave|gift|inherited|bought|found|kept|carried|used|"
+            r"wore|held|made|owned|belongs|came from|passed down)\b",
+            re.IGNORECASE,
+        ),
+        "meaning": re.compile(
+            r"\b(?:means|meaning|reminds|symbol|represents|memory|"
+            r"connection|matters|comfort|promise|belonging)\b",
+            re.IGNORECASE,
+        ),
+    },
+    "theme": {
+        "recurrence": re.compile(
+            r"\b(?:again|recurs?|kept|always|repeated|another|later|"
+            r"at school|at work|at home|in .* relationship|across)\b",
+            re.IGNORECASE,
+        ),
+        "meaning_change": re.compile(
+            r"\b(?:changed|change|grew|growth|used to|now|then|but|"
+            r"although|contradiction|different)\b",
+            re.IGNORECASE,
+        ),
+    },
+}
 ENTITY_GAP_PRIORITY = {
     "person": (
         "identity_disambiguation",
@@ -117,12 +188,13 @@ _EXPLICIT_CONFIRMATION_RE = re.compile(
 )
 _AUTHORITY_CLAIM_RE = re.compile(
     r"\b(?:i|we)\s+(?:(?:have|has|had|will)\s+)?"
-    r"(?:approved|created|scaffolded|wrote|saved|persisted|committed|"
-    r"pushed|promoted)\b"
-    r"|\b(?:the|a|your)\s+(?:focus|recommendation|research|"
-    r"candidate\s+research|commit)\s+(?:(?:has|have)\s+been\s+|was\s+|is\s+)?"
-    r"(?:approved|created|scaffolded|written|saved|persisted|committed|"
-    r"pushed|promoted)\b"
+    r"(?:approved|created|scaffolded|wrote|saved|persisted|preserved|"
+    r"recorded|stored|committed|pushed|promoted)\b"
+    r"|\b(?:the|a|your)\s+(?:recommendation|research|"
+    r"candidate\s+research|entity\s+page|page|source|excerpt(?:s)?|record|commit)\s+"
+    r"(?:(?:has|have)\s+been\s+|was\s+|were\s+|is\s+|are\s+)?"
+    r"(?:approved|created|scaffolded|written|saved|persisted|preserved|"
+    r"recorded|stored|committed|pushed|promoted)\b"
     r"|\bcommit\s+[0-9a-f]{7,40}\b",
     re.IGNORECASE,
 )
@@ -439,16 +511,108 @@ def _unsupported_dimensions(assessment: dict, subject: dict) -> set[str]:
     }
     if assessment["readiness"]["concrete_evidence_count"] < 1:
         unsupported.add("grounded_evidence")
-    refs = assessment["dimension_evidence"]["type_specific_context"]
-    if len(refs) < ENTITY_TYPE_SPECIFIC_MIN_REFS[subject["subject_type"]]:
+    if not type_specific_context_passes(assessment, subject=subject):
         unsupported.add("type_specific_context")
     return unsupported
+
+
+def _type_specific_quotes(assessment: dict) -> list[str]:
+    evidence_by_revision = {
+        span["evidence_revision"]: span["quote"] for span in assessment["evidence"]
+    }
+    return [
+        evidence_by_revision[revision]
+        for revision in assessment["dimension_evidence"]["type_specific_context"]
+    ]
+
+
+def type_specific_context_passes(assessment: dict, *, subject: dict) -> bool:
+    """Return whether exact type-context evidence meets its closed meaning rule.
+
+    This is intentionally recomputed from canonical quotes at parse, decision,
+    and completion time.  A model cannot turn a bare reference count into a
+    person, place, period, object, or theme semantic pass.
+    """
+    entity_type = subject["subject_type"]
+    quotes = _type_specific_quotes(assessment)
+    if len(quotes) < ENTITY_TYPE_SPECIFIC_MIN_REFS[entity_type]:
+        return False
+    text = "\n".join(quotes)
+    patterns = _TYPE_RUBRIC_PATTERNS[entity_type]
+    if entity_type == "person":
+        return bool(patterns["human"].search(text) and patterns["action"].search(text))
+    if entity_type == "place":
+        return bool(
+            patterns["character"].search(text) and patterns["inhabited"].search(text)
+        )
+    if entity_type == "period":
+        return bool(
+            patterns["texture"].search(text) and patterns["boundary"].search(text)
+        )
+    if entity_type == "object":
+        return bool(
+            patterns["provenance_or_use"].search(text)
+            and patterns["meaning"].search(text)
+        )
+    # Themes need separate manifestations, not repeated wording from one
+    # moment, and a continuity/change/contradiction in their significance.
+    return bool(
+        len(set(quotes)) >= 2
+        and any(patterns["recurrence"].search(quote) for quote in quotes)
+        and patterns["meaning_change"].search(text)
+    )
 
 
 def _interaction_ready(assessment: dict, subject: dict) -> bool:
     return assessment["readiness"]["ready"] and not _unsupported_dimensions(
         assessment, subject
     )
+
+
+def validate_entity_candidate_completion_assessment(
+    assessment: object,
+    *,
+    authoritative_turns: Sequence[dict],
+    candidate_id: str,
+    current_subject: dict,
+) -> dict:
+    """The one Entity-specific pre-write authority for every completion path."""
+    try:
+        subject = candidate_research.validate_candidate_research_subject(
+            current_subject, require_active=True
+        )
+        canonical = candidate_research.validate_research_assessment(
+            assessment,
+            authoritative_turns=authoritative_turns,
+            current_subject=subject,
+        )
+    except candidate_research.CandidateResearchError as exc:
+        raise EntityCandidateError(str(exc)) from exc
+    if (
+        candidate_id != subject["candidate_id"]
+        or subject["candidate_kind"] != "entity_candidate"
+    ):
+        raise EntityCandidateError(
+            "completion candidate does not match current subject"
+        )
+    if not _interaction_ready(canonical, subject):
+        raise EntityCandidateError("completion requires recomputed Entity readiness")
+    confirmation = canonical["confirmation"]
+    if not canonical["complete"] or confirmation is None:
+        raise EntityCandidateError("completion requires a confirmed ready assessment")
+    turns = [
+        candidate_research.validate_authoritative_user_turn(turn)
+        for turn in authoritative_turns
+    ]
+    latest_turn = turns[-1] if turns else None
+    evidence = confirmation["evidence"]
+    if latest_turn is None or evidence["turn_id"] != latest_turn["turn_id"]:
+        raise EntityCandidateError("completion confirmation is not current")
+    if not _is_explicit_confirmation(
+        latest_turn["text"][evidence["start"] : evidence["end"]]
+    ):
+        raise EntityCandidateError("completion confirmation is not explicit consent")
+    return canonical
 
 
 def _expected_next_gap(assessment: dict, subject: dict) -> str | None:
@@ -591,7 +755,7 @@ def parse_entity_candidate_output(
                 if revision not in existing:
                     existing.append(revision)
         # Concrete spans must also support a source dimension; grounded_evidence
-        # is an Interaction gate, not an eighth v183 source-schema key.
+        # is an Interaction gate, not an additional v183 source-schema key.
         grounded = {s["evidence_revision"] for s in referenced["grounded_evidence"]}
         source_refs = {ref for refs in dimensions.values() for ref in refs}
         if not grounded <= source_refs:
@@ -843,22 +1007,15 @@ def resolve_entity_candidate_completion(
 ) -> dict:
     if not callable(current_subject_loader):
         raise EntityCandidateError("current_subject_loader must be callable")
-    try:
-        subject = candidate_research.validate_candidate_research_subject(
-            current_subject_loader(), require_active=True
-        )
-    except candidate_research.CandidateResearchError as exc:
-        raise EntityCandidateError(str(exc)) from exc
-    if (
-        subject["candidate_id"] != candidate_id
-        or subject["candidate_kind"] != "entity_candidate"
-    ):
-        raise EntityCandidateError(
-            "completion candidate does not match current subject"
-        )
+    canonical = validate_entity_candidate_completion_assessment(
+        assessment,
+        authoritative_turns=authoritative_turns,
+        candidate_id=candidate_id,
+        current_subject=current_subject_loader(),
+    )
     try:
         return candidate_research.resolve_candidate_research_source(
-            assessment,
+            canonical,
             authoritative_turns=authoritative_turns,
             current_subject_loader=current_subject_loader,
             authority=authority,
@@ -914,7 +1071,7 @@ def main(argv: list[str] | None = None) -> int:
         EntityCandidateError,
         interaction_registry.InteractionRegistryError,
     ) as exc:
-        print(f"focus-candidate: {exc}", file=sys.stderr)
+        print(f"entity-candidate: {exc}", file=sys.stderr)
         return 2
 
 

@@ -1,57 +1,12 @@
 [
-  {
-    "fixture_id": "person-needs-gap",
-    "candidate_id": "entity:person:synthetic-person",
-    "turns": [
-      "Synthetic person is part of my life story, and I remember it clearly."
-    ],
-    "expected_next_gap": "identity_disambiguation",
-    "expected_ready": false
-  },
-  {
-    "fixture_id": "place-needs-gap",
-    "candidate_id": "entity:place:synthetic-place",
-    "turns": [
-      "Synthetic place is part of my life story, and I remember it clearly."
-    ],
-    "expected_next_gap": "type_specific_context",
-    "expected_ready": false
-  },
-  {
-    "fixture_id": "period-needs-gap",
-    "candidate_id": "entity:period:synthetic-period",
-    "turns": [
-      "Synthetic period is part of my life story, and I remember it clearly."
-    ],
-    "expected_next_gap": "timeline_context",
-    "expected_ready": false
-  },
-  {
-    "fixture_id": "object-needs-gap",
-    "candidate_id": "entity:object:synthetic-object",
-    "turns": [
-      "Synthetic object is part of my life story, and I remember it clearly."
-    ],
-    "expected_next_gap": "type_specific_context",
-    "expected_ready": false
-  },
-  {
-    "fixture_id": "theme-needs-gap",
-    "candidate_id": "entity:theme:synthetic-theme",
-    "turns": [
-      "Synthetic theme is part of my life story, and I remember it clearly."
-    ],
-    "expected_next_gap": "relationship_relevance_and_significance",
-    "expected_ready": false
-  },
-  {
-    "fixture_id": "person-ready",
-    "candidate_id": "entity:person:synthetic-person",
-    "turns": [
-      "Synthetic Person was my neighbor and taught me repair work.",
-      "When the storm broke our fence, she showed me how to mend it."
-    ],
-    "expected_next_gap": null,
-    "expected_ready": true
-  }
+  {"fixture_id":"person-positive","candidate_id":"entity:person:synthetic-person","entity_type":"person","turns":["My aunt Marisol taught me to fix radios, and her patient voice changed how I listen."],"expected_next_gap":null,"expected_ready":true,"expected_type_specific_context":true},
+  {"fixture_id":"person-near-miss","candidate_id":"entity:person:synthetic-person","entity_type":"person","turns":["My aunt Marisol is important to me."],"expected_next_gap":"type_specific_context","expected_ready":false,"expected_type_specific_context":false},
+  {"fixture_id":"place-positive","candidate_id":"entity:place:synthetic-place","entity_type":"place","turns":["The salt harbor and its broken pier were where I returned to wait for the tide."],"expected_next_gap":null,"expected_ready":true,"expected_type_specific_context":true},
+  {"fixture_id":"place-near-miss","candidate_id":"entity:place:synthetic-place","entity_type":"place","turns":["Synthetic Harbor is important in my story."],"expected_next_gap":"type_specific_context","expected_ready":false,"expected_type_specific_context":false},
+  {"fixture_id":"period-positive","candidate_id":"entity:period:synthetic-period","entity_type":"period","turns":["During college, most mornings I studied before work; after graduation that routine ended."],"expected_next_gap":null,"expected_ready":true,"expected_type_specific_context":true},
+  {"fixture_id":"period-near-miss","candidate_id":"entity:period:synthetic-period","entity_type":"period","turns":["College was an important time in my life."],"expected_next_gap":"type_specific_context","expected_ready":false,"expected_type_specific_context":false},
+  {"fixture_id":"object-positive","candidate_id":"entity:object:synthetic-object","entity_type":"object","turns":["My grandmother gave me the brass compass; I carried it because it reminds me of her promise."],"expected_next_gap":null,"expected_ready":true,"expected_type_specific_context":true},
+  {"fixture_id":"object-near-miss","candidate_id":"entity:object:synthetic-object","entity_type":"object","turns":["I kept the brass compass in a drawer."],"expected_next_gap":"type_specific_context","expected_ready":false,"expected_type_specific_context":false},
+  {"fixture_id":"theme-positive","candidate_id":"entity:theme:synthetic-theme","entity_type":"theme","turns":["At school, I kept starting over after mistakes.","Later at work, starting over changed from shame into confidence."],"expected_next_gap":null,"expected_ready":true,"expected_type_specific_context":true},
+  {"fixture_id":"theme-near-miss","candidate_id":"entity:theme:synthetic-theme","entity_type":"theme","turns":["At school I felt resilient whenever my plans fell apart.","At work I felt resilient whenever a project went wrong."],"expected_next_gap":"type_specific_context","expected_ready":false,"expected_type_specific_context":false}
 ]

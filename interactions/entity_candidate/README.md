@@ -6,8 +6,8 @@ by reference and owns only the candidate-specific evidence, next-gap,
 confirmation, and completion contract.
 
 Play is read-only. Confirmed completion delegates to the canonical
-candidate-research source authority and leaves the recommendation pending.
-Only the existing approval/autopilot path creates a Focus.
+candidate-research source authority and leaves the entity roster pending.
+Only independent entity eligibility or an owner graduation can create a page.
 
 Run the deterministic seat gate with:
 

@@ -20,14 +20,15 @@ silently versioning the source format.
 ## Decision
 
 Add registered `entity_candidate`, exact-composed from Conversation 1.0.0. It
-owns candidate anchoring, natural next-gap choice, an seven-dimension
+owns candidate anchoring, natural next-gap choice, a seven-dimension
 conversation rubric, explicit confirmation, and completion coordination. It
 does not own approval or Git writes.
 
 The first seven semantic dimensions map to v183's six source dimensions.
 `grounded_evidence` remains a separate interaction gate satisfied by an exact
 concrete-event/observation span that also supports a source dimension. Trusted
-runtime code validates exact spans and recomputes readiness. A distinct later,
+runtime code validates exact spans, recomputes readiness, and evaluates the
+closed type meaning from canonical quotes (not a reference count). A distinct later,
 closed whole-span affirmative user span confirms a ready assessment; qualified
 or negated phrasing is not confirmation. Completion delegates unchanged to
 `candidate_research.resolve_candidate_research_source()`; the recommendation
@@ -35,7 +36,7 @@ remains pending until the existing automatic eligibility or owner verdict author
 
 Alternatives rejected: a Conversation mode is not independently auditable or
 seatable; a entity lifecycle mode conflates dedupe judgment with research; copied
-Conversation prompts create drift; adding an eighth v183 source-schema key
+Conversation prompts create drift; adding another v183 source-schema key
 breaks the frozen generic authority without adding evidence safety; approving
 at completion collapses research consent into the separate creation decision.
 
@@ -45,8 +46,10 @@ at completion collapses research consent into the separate creation decision.
   while Conversation behavior remains inherited by exact reference.
 - Play/start is read-only. Model output has no lifecycle, write, Git, receipt,
   or approval authority.
-- Every completion uses v183's source resolver and post-pull subject
-  revalidation; a second writer or approval shortcut is forbidden.
+- Every completion entrypoint first recomputes the Entity interaction gates,
+  validates a distinct current explicit confirmation, and then uses v183's
+  source resolver and post-pull subject revalidation; a second writer or
+  approval shortcut is forbidden.
 - Platform Play may deep-link into this Interaction after pinning v185, but
   must resolve the anchor server-side and must not approve on entry/completion.
 - Entity Candidate may reuse the generic v183 source authority but must ship as

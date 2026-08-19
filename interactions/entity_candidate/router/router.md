@@ -1,4 +1,4 @@
-# Router extension — Focus research signal
+# Router extension — Entity research signal
 
 The inherited Conversation router still governs chat mechanics. For this exact
 candidate, also distinguish whether the latest user turn supplies a useful

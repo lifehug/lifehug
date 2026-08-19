@@ -1,63 +1,12 @@
 [
-  {
-    "fixture_id": "person-needs-gap",
-    "reply": "That gives this person a place in your story. What else would help make it clear?",
-    "next_gap": "identity_disambiguation",
-    "ready": false,
-    "evidence_quotes": [
-      "Synthetic person is part of my life story, and I remember it clearly."
-    ],
-    "candidate_id": "entity:person:synthetic-person"
-  },
-  {
-    "fixture_id": "place-needs-gap",
-    "reply": "That gives this place a place in your story. What else would help make it clear?",
-    "next_gap": "type_specific_context",
-    "ready": false,
-    "evidence_quotes": [
-      "Synthetic place is part of my life story, and I remember it clearly."
-    ],
-    "candidate_id": "entity:place:synthetic-place"
-  },
-  {
-    "fixture_id": "period-needs-gap",
-    "reply": "That gives this period a place in your story. What else would help make it clear?",
-    "next_gap": "timeline_context",
-    "ready": false,
-    "evidence_quotes": [
-      "Synthetic period is part of my life story, and I remember it clearly."
-    ],
-    "candidate_id": "entity:period:synthetic-period"
-  },
-  {
-    "fixture_id": "object-needs-gap",
-    "reply": "That gives this object a place in your story. What else would help make it clear?",
-    "next_gap": "type_specific_context",
-    "ready": false,
-    "evidence_quotes": [
-      "Synthetic object is part of my life story, and I remember it clearly."
-    ],
-    "candidate_id": "entity:object:synthetic-object"
-  },
-  {
-    "fixture_id": "theme-needs-gap",
-    "reply": "That gives this theme a place in your story. What else would help make it clear?",
-    "next_gap": "relationship_relevance_and_significance",
-    "ready": false,
-    "evidence_quotes": [
-      "Synthetic theme is part of my life story, and I remember it clearly."
-    ],
-    "candidate_id": "entity:theme:synthetic-theme"
-  },
-  {
-    "fixture_id": "person-ready",
-    "reply": "Those exact memories show why she matters. Shall I preserve these exact excerpts as candidate research?",
-    "next_gap": null,
-    "ready": true,
-    "evidence_quotes": [
-      "Synthetic Person was my neighbor and taught me repair work.",
-      "When the storm broke our fence, she showed me how to mend it."
-    ],
-    "candidate_id": "entity:person:synthetic-person"
-  }
+  {"fixture_id":"person-positive","reply":"Her patient teaching makes her distinct in your story. Would you like me to preserve these exact excerpts?","next_gap":null,"ready":true,"type_specific_context":true,"evidence_quotes":["My aunt Marisol taught me to fix radios, and her patient voice changed how I listen."],"candidate_id":"entity:person:synthetic-person"},
+  {"fixture_id":"person-near-miss","reply":"What do you remember about the way Marisol acted around you?","next_gap":"type_specific_context","ready":false,"type_specific_context":false,"evidence_quotes":["My aunt Marisol is important to me."],"candidate_id":"entity:person:synthetic-person"},
+  {"fixture_id":"place-positive","reply":"That harbor has a lived character in your story. Would you like me to preserve these exact excerpts?","next_gap":null,"ready":true,"type_specific_context":true,"evidence_quotes":["The salt harbor and its broken pier were where I returned to wait for the tide."],"candidate_id":"entity:place:synthetic-place"},
+  {"fixture_id":"place-near-miss","reply":"What was the harbor like when you spent time there?","next_gap":"type_specific_context","ready":false,"type_specific_context":false,"evidence_quotes":["Synthetic Harbor is important in my story."],"candidate_id":"entity:place:synthetic-place"},
+  {"fixture_id":"period-positive","reply":"That period has a daily shape and an ending. Would you like me to preserve these exact excerpts?","next_gap":null,"ready":true,"type_specific_context":true,"evidence_quotes":["During college, most mornings I studied before work; after graduation that routine ended."],"candidate_id":"entity:period:synthetic-period"},
+  {"fixture_id":"period-near-miss","reply":"What did an ordinary day feel like then, and what changed afterward?","next_gap":"type_specific_context","ready":false,"type_specific_context":false,"evidence_quotes":["College was an important time in my life."],"candidate_id":"entity:period:synthetic-period"},
+  {"fixture_id":"object-positive","reply":"The compass carries both a history and a meaning. Would you like me to preserve these exact excerpts?","next_gap":null,"ready":true,"type_specific_context":true,"evidence_quotes":["My grandmother gave me the brass compass; I carried it because it reminds me of her promise."],"candidate_id":"entity:object:synthetic-object"},
+  {"fixture_id":"object-near-miss","reply":"What does keeping the compass say about its meaning for you?","next_gap":"type_specific_context","ready":false,"type_specific_context":false,"evidence_quotes":["I kept the brass compass in a drawer."],"candidate_id":"entity:object:synthetic-object"},
+  {"fixture_id":"theme-positive","reply":"That pattern changes meaning across different parts of your life. Would you like me to preserve these exact excerpts?","next_gap":null,"ready":true,"type_specific_context":true,"evidence_quotes":["At school, I kept starting over after mistakes.","Later at work, starting over changed from shame into confidence."],"candidate_id":"entity:theme:synthetic-theme"},
+  {"fixture_id":"theme-near-miss","reply":"Where else has resilience appeared, and how has its meaning changed?","next_gap":"type_specific_context","ready":false,"type_specific_context":false,"evidence_quotes":["At school I felt resilient whenever my plans fell apart.","At work I felt resilient whenever a project went wrong."],"candidate_id":"entity:theme:synthetic-theme"}
 ]

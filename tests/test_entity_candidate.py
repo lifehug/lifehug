@@ -1,4 +1,4 @@
-"""v184 / ADR 0021 — independent Entity Candidate runtime."""
+"""v185 / ADR 0022 — independent Entity Candidate runtime."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ class EntityCandidateTests(unittest.TestCase):
                 "timeline_context": [1],
                 "connections": [2],
                 "tension_or_open_question": [1],
-                "type_specific_context": [0, 2],
+                "type_specific_context": [1],
                 "grounded_evidence": [1],
             },
             "seed_questions": [
@@ -251,6 +251,189 @@ class EntityCandidateTests(unittest.TestCase):
                 proposal, payload=self.payload(), current_subject=self.subject()
             )["status"],
             "invalid",
+        )
+
+    @staticmethod
+    def _type_assessment(entity_type: str, type_context: list[str], *, confirmed=False):
+        entry = {
+            "name": f"Synthetic {entity_type.title()}",
+            "slug": f"synthetic-{entity_type}",
+            "aliases": [],
+            "page_eligible": False,
+            "maps_to_focus": None,
+            "owner_verdict": None,
+        }
+        subject = research.build_entity_candidate_subject(entity_type, entry)
+        texts = [
+            *type_context,
+            "During the storm, I saw the broken pier and carried that memory home.",
+            "It connects this part of my story to a question I still hold.",
+        ]
+        if confirmed:
+            texts.append("Yes, preserve these exact excerpts.")
+        turns = [
+            research.build_authoritative_user_turn(f"t{index}", text)
+            for index, text in enumerate(texts, start=1)
+        ]
+        evidence_count = max(research.ENTITY_MIN_EVIDENCE_SPANS[entity_type], 3)
+        evidence = [
+            research.extract_research_evidence_span(
+                turn,
+                0,
+                len(turn["text"]),
+                "concrete_event" if index == len(type_context) else "statement",
+            )
+            for index, turn in enumerate(turns[:evidence_count])
+        ]
+        refs = [span["evidence_revision"] for span in evidence]
+        dimensions = {
+            name: [refs[index % len(refs)]]
+            for index, name in enumerate(research.ENTITY_DIMENSIONS)
+        }
+        dimensions["type_specific_context"] = refs[: len(type_context)]
+        assessment = research.build_research_assessment(
+            subject=subject,
+            evidence=evidence,
+            dimension_evidence=dimensions,
+            seed_questions=[],
+            authoritative_turns=turns,
+        )
+        if confirmed:
+            assessment = research.confirm_research_assessment(
+                assessment,
+                turn=turns[-1],
+                start=0,
+                end=len(turns[-1]["text"]),
+                confirmed_at="2026-08-18T20:00:00Z",
+                authoritative_turns=turns,
+                current_subject=subject,
+            )
+        return subject, turns, assessment
+
+    def test_type_specific_semantic_rubrics_reject_plausible_near_misses(self):
+        cases = {
+            "person": (
+                [
+                    "My aunt Marisol taught me to fix radios, and her patient voice changed how I listen."
+                ],
+                ["My aunt Marisol is important to me."],
+            ),
+            "place": (
+                [
+                    "The salt harbor and its broken pier were where I returned to wait for the tide."
+                ],
+                ["Synthetic Harbor is important in my story."],
+            ),
+            "period": (
+                [
+                    "During college, most mornings I studied before work; after graduation that routine ended."
+                ],
+                ["College was an important time in my life."],
+            ),
+            "object": (
+                [
+                    "My grandmother gave me the brass compass; I carried it because it reminds me of her promise."
+                ],
+                ["I kept the brass compass in a drawer."],
+            ),
+            "theme": (
+                [
+                    "At school, I kept starting over after mistakes.",
+                    "Later at work, starting over changed from shame into confidence.",
+                ],
+                [
+                    "At school I felt resilient whenever my plans fell apart.",
+                    "At work I felt resilient whenever a project went wrong.",
+                ],
+            ),
+        }
+        for entity_type, (positive, negative) in cases.items():
+            with self.subTest(entity_type=entity_type, result="positive"):
+                subject, _turns, assessment = self._type_assessment(
+                    entity_type, positive
+                )
+                self.assertTrue(assessment["readiness"]["ready"])
+                self.assertTrue(
+                    focus.type_specific_context_passes(assessment, subject=subject)
+                )
+            with self.subTest(entity_type=entity_type, result="near-miss"):
+                subject, _turns, assessment = self._type_assessment(
+                    entity_type, negative
+                )
+                self.assertTrue(assessment["readiness"]["ready"])
+                self.assertFalse(
+                    focus.type_specific_context_passes(assessment, subject=subject)
+                )
+
+    def test_direct_completion_cannot_bypass_entity_readiness_or_confirmation(self):
+        subject, turns, structural_only = self._type_assessment(
+            "theme",
+            [
+                "At school I felt resilient whenever my plans fell apart.",
+                "At work I felt resilient whenever a project went wrong.",
+            ],
+            confirmed=True,
+        )
+        authority = MemoryAuthority()
+        with self.assertRaisesRegex(
+            focus.EntityCandidateError, "recomputed Entity readiness"
+        ):
+            focus.resolve_entity_candidate_completion(
+                structural_only,
+                authoritative_turns=turns,
+                candidate_id=subject["candidate_id"],
+                current_subject_loader=lambda: subject,
+                authority=authority,
+                vault_root="/synthetic",
+            )
+        self.assertEqual(authority.calls, 0)
+
+        subject, turns, completed = self._type_assessment(
+            "person",
+            [
+                "My aunt Marisol taught me to fix radios, and her patient voice changed how I listen."
+            ],
+            confirmed=True,
+        )
+        turns.append(
+            research.build_authoritative_user_turn(
+                "t-final", "One more detail came to mind."
+            )
+        )
+        with self.assertRaisesRegex(focus.EntityCandidateError, "not current"):
+            focus.resolve_entity_candidate_completion(
+                completed,
+                authoritative_turns=turns,
+                candidate_id=subject["candidate_id"],
+                current_subject_loader=lambda: subject,
+                authority=MemoryAuthority(),
+                vault_root="/synthetic",
+            )
+
+    def test_authority_guard_catches_durability_variants_without_blocking_an_offer(
+        self,
+    ):
+        for reply in (
+            "I preserved those excerpts.",
+            "We recorded the research.",
+            "Your excerpts were stored.",
+            "The candidate research has been preserved.",
+        ):
+            with self.subTest(reply=reply):
+                self.assertTrue(
+                    any(
+                        finding["lint"] == "entity_candidate_authority_claim"
+                        for finding in focus.lint_entity_candidate_reply(reply)
+                    )
+                )
+        offer_findings = focus.lint_entity_candidate_reply(
+            "Would you like me to preserve these exact excerpts?", seam_ok=True
+        )
+        self.assertFalse(
+            any(
+                finding["lint"] == "entity_candidate_authority_claim"
+                for finding in offer_findings
+            )
         )
         proposal = self.ready_proposal()
         proposal["evidence_spans"][0]["end"] += 1000
@@ -434,9 +617,12 @@ class EntityCandidateTests(unittest.TestCase):
 
         base = self.ready_proposal()
         for reply in (
-            "The Focus was created.",
+            "The entity page was created.",
             "I have approved this recommendation.",
             "Your research has been saved.",
+            "I preserved your excerpts.",
+            "Your research was recorded.",
+            "The source is stored.",
             "A commit was pushed.",
             "The next identity_disambiguation is unclear.",
         ):

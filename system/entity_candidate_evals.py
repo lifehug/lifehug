@@ -60,9 +60,11 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
     expected_keys = {
         "fixture_id",
         "candidate_id",
+        "entity_type",
         "turns",
         "expected_next_gap",
         "expected_ready",
+        "expected_type_specific_context",
     }
     for index, row in enumerate(fixtures):
         if not isinstance(row, dict) or set(row) != expected_keys:
@@ -73,8 +75,12 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
         seen.add(row["fixture_id"])
         if row["expected_next_gap"] not in entity_candidate.ENTITY_DIMENSIONS + (None,):
             errors.append(f"fixture[{index}] next gap invalid")
+        if row["entity_type"] not in entity_candidate.ENTITY_TYPE_SPECIFIC_MIN_REFS:
+            errors.append(f"fixture[{index}] entity type invalid")
         if type(row["expected_ready"]) is not bool:
             errors.append(f"fixture[{index}] ready invalid")
+        if type(row["expected_type_specific_context"]) is not bool:
+            errors.append(f"fixture[{index}] type rubric invalid")
         if not isinstance(row["turns"], list) or any(
             not isinstance(turn, str) for turn in row["turns"]
         ):
@@ -90,15 +96,34 @@ def score_predictions(fixtures: list[dict], predictions: list[dict]) -> dict:
         "identity_safety": [0, 0],
         "one_question": [0, 0],
         "next_gap": [0, 0],
+        "type_specific.precision": [0, 0],
+        "type_specific.recall": [0, 0],
+    }
+    per_type = {
+        entity_type: {"precision": [0, 0], "recall": [0, 0]}
+        for entity_type in entity_candidate.ENTITY_TYPE_SPECIFIC_MIN_REFS
     }
     false_positive = false_positive_total = recall = ready_total = 0
     for fixture in fixtures:
         prediction = by_id.get(fixture["fixture_id"])
-        for values in totals.values():
+        for name in (
+            "inherited_conversation",
+            "grounding",
+            "identity_safety",
+            "one_question",
+            "next_gap",
+        ):
+            values = totals[name]
             values[1] += 1
+        expected_type_specific = fixture["expected_type_specific_context"]
+        if expected_type_specific:
+            totals["type_specific.recall"][1] += 1
+            per_type[fixture["entity_type"]]["recall"][1] += 1
+        if fixture["expected_ready"]:
+            ready_total += 1
+        else:
+            false_positive_total += 1
         if not isinstance(prediction, dict):
-            if fixture["expected_ready"]:
-                ready_total += 1
             continue
         reply = prediction.get("reply")
         if isinstance(reply, str):
@@ -129,17 +154,26 @@ def score_predictions(fixtures: list[dict], predictions: list[dict]) -> dict:
             prediction.get("next_gap") == fixture["expected_next_gap"]
         )
         predicted_ready = prediction.get("ready") is True
+        predicted_type_specific = prediction.get("type_specific_context") is True
+        if predicted_type_specific:
+            totals["type_specific.precision"][1] += 1
+            per_type[fixture["entity_type"]]["precision"][1] += 1
+            if expected_type_specific:
+                totals["type_specific.precision"][0] += 1
+                per_type[fixture["entity_type"]]["precision"][0] += 1
+        if expected_type_specific:
+            if predicted_type_specific:
+                totals["type_specific.recall"][0] += 1
+                per_type[fixture["entity_type"]]["recall"][0] += 1
         if not fixture["expected_ready"]:
-            false_positive_total += 1
             false_positive += predicted_ready
         else:
-            ready_total += 1
             recall += predicted_ready
 
     def ratio(values: list[int]) -> float:
         return values[0] / values[1] if values[1] else 0.0
 
-    return {
+    scores = {
         "inherited_conversation.compliance": ratio(totals["inherited_conversation"]),
         "grounding.compliance": ratio(totals["grounding"]),
         "identity_safety.compliance": ratio(totals["identity_safety"]),
@@ -150,6 +184,21 @@ def score_predictions(fixtures: list[dict], predictions: list[dict]) -> dict:
         else 0.0,
         "readiness.recall": recall / ready_total if ready_total else 0.0,
     }
+    scores.update(
+        {
+            name: ratio(values)
+            for name, values in totals.items()
+            if name.startswith("type_specific.")
+        }
+    )
+    for entity_type, metrics in per_type.items():
+        scores.update(
+            {
+                f"type_specific.{entity_type}.{name}": ratio(values)
+                for name, values in metrics.items()
+            }
+        )
+    return scores
 
 
 def check_gates(scores: dict[str, float], gates: dict[str, float]) -> list[str]:

@@ -41,9 +41,10 @@ An **Interaction** is defined once, precisely, in the
 situation — purpose, behavior contract, context recipe, scope, and evals,
 packaged as files any qualified model can execute. "Interaction" names
 the *definition*, not any one model's behavior, and not the code that
-runs it. Four exist today, each with its own handbook page:
+runs it. Five exist today, each with its own handbook page:
 [Conversation](conversation.md), [Question Judgment](question-judgment.md),
-[Focus Curation](focus-curation.md), and [Question Candidate](question-candidate.md).
+[Focus Curation](focus-curation.md), [Question Candidate](question-candidate.md),
+and [Entity Candidate](entity-candidate.md).
 
 The **three-way split** every interaction observes:
 
