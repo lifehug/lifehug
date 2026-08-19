@@ -113,6 +113,140 @@ class PromotionCase(unittest.TestCase):
 
 
 class ReceiptTests(PromotionCase):
+    def _set_candidate_status(self, status: str) -> None:
+        self.candidate["status"] = status
+        self._write_store([self.candidate])
+
+    def test_manual_needs_review_first_promotion_and_exact_replay_receipt(self):
+        self._set_candidate_status("needs_review")
+        request = self.request()
+
+        first = promotion.resolve_candidate_promotion(
+            request, vault_root=self.tmp, push=False
+        )
+        replay = promotion.resolve_candidate_promotion(
+            request, vault_root=self.tmp, push=False
+        )
+
+        self.assertTrue(first["changed"])
+        self.assertFalse(replay["changed"])
+        self.assertEqual(
+            {key: value for key, value in first.items() if key != "changed"},
+            {key: value for key, value in replay.items() if key != "changed"},
+        )
+        self.assertEqual(first["question_id"], "A2")
+        self.assertEqual(
+            json.loads(
+                (self.tmp / "state" / "question_candidates.json").read_text(
+                    encoding="utf-8"
+                )
+            )["candidates"][0]["status"],
+            "promoted",
+        )
+
+    def test_manual_needs_review_adopts_exact_commit_after_resolver_crash(self):
+        self._set_candidate_status("needs_review")
+        request = self.request()
+
+        def failpoint(stage: str) -> None:
+            if stage == "after_commit":
+                raise RuntimeError(stage)
+
+        with self.assertRaisesRegex(RuntimeError, "after_commit"):
+            promotion.resolve_candidate_promotion(
+                request,
+                vault_root=self.tmp,
+                push=False,
+                failpoint=failpoint,
+            )
+
+        adopted = promotion.resolve_candidate_promotion(
+            request, vault_root=self.tmp, push=False
+        )
+
+        self.assertFalse(adopted["changed"])
+        self.assertEqual(
+            adopted["commit_sha"],
+            _run(self.tmp, "rev-parse", "HEAD").stdout.strip(),
+        )
+        self.assertEqual(adopted["question_id"], "A2")
+
+    def test_manual_needs_review_still_requires_current_candidate_and_category(self):
+        self._set_candidate_status("needs_review")
+        request = self.request()
+
+        stale_candidate = dict(request)
+        stale_candidate["candidate_revision"] = "sha256:" + "0" * 64
+        with self.assertRaisesRegex(promotion.CandidatePromotionError, "stale"):
+            promotion.resolve_candidate_promotion(
+                stale_candidate, vault_root=self.tmp, push=False
+            )
+
+        self.candidate["source_id"] = "SYN-1-current"
+        self._write_store([self.candidate])
+        with self.assertRaisesRegex(promotion.CandidatePromotionError, "stale"):
+            promotion.resolve_candidate_promotion(
+                request, vault_root=self.tmp, push=False
+            )
+
+        self._write_store([self.candidate])
+        current = self.request()
+        bank_path = self.tmp / "question-bank.md"
+        bank_path.write_text(
+            bank_path.read_text(encoding="utf-8").replace(
+                "Origins (Childhood)", "Origins (Current)"
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(promotion.CandidatePromotionError, "stale"):
+            promotion.resolve_candidate_promotion(
+                current, vault_root=self.tmp, push=False
+            )
+
+    def test_manual_terminal_statuses_remain_refused(self):
+        for status in (
+            "promoted",
+            "auto_promoted",
+            "rejected",
+            "expired",
+            "superseded",
+        ):
+            with self.subTest(status=status):
+                self._set_candidate_status(status)
+                request = self.request()
+                with self.assertRaisesRegex(
+                    promotion.CandidatePromotionError,
+                    rf"cannot be promoted from status '{status}'",
+                ):
+                    promotion.resolve_candidate_promotion(
+                        request, vault_root=self.tmp, push=False
+                    )
+
+    def test_neighborhood_needs_review_remains_refused_but_candidate_works(self):
+        self._set_candidate_status("needs_review")
+        request = self.request()
+        with self.assertRaisesRegex(
+            promotion.CandidatePromotionError,
+            "cannot be promoted from status 'needs_review'",
+        ):
+            promotion.resolve_candidate_promotion(
+                request,
+                vault_root=self.tmp,
+                promotion_mode="neighborhood",
+                push=False,
+            )
+
+        self._set_candidate_status("candidate")
+        request = self.request()
+        receipt = promotion.resolve_candidate_promotion(
+            request,
+            vault_root=self.tmp,
+            promotion_mode="neighborhood",
+            push=False,
+        )
+        self.assertTrue(receipt["changed"])
+        self.assertEqual(receipt["question_id"], "A2")
+
     def test_first_promotion_and_replay_have_one_question_and_stable_receipt(self):
         request = self.request()
         first = promotion.resolve_candidate_promotion(

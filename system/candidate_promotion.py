@@ -30,8 +30,16 @@ SCHEMA_VERSION = 1
 MARKER_PREFIX = "  <!-- lifehug:candidate-promotion:v1 "
 MARKER_SUFFIX = " -->"
 PROMOTION_MODES = frozenset({"manual", "auto", "neighborhood"})
-MANUAL_PROMOTABLE_STATUSES = frozenset({"candidate", "accepted", "deferred"})
-AUTO_PROMOTABLE_STATUSES = MANUAL_PROMOTABLE_STATUSES | {"needs_review"}
+MANUAL_PROMOTABLE_STATUSES = frozenset(
+    {"candidate", "accepted", "deferred", "needs_review"}
+)
+NEIGHBORHOOD_PROMOTABLE_STATUSES = frozenset({"candidate", "accepted", "deferred"})
+AUTO_PROMOTABLE_STATUSES = MANUAL_PROMOTABLE_STATUSES
+PROMOTABLE_STATUSES_BY_MODE = {
+    "manual": MANUAL_PROMOTABLE_STATUSES,
+    "auto": AUTO_PROMOTABLE_STATUSES,
+    "neighborhood": NEIGHBORHOOD_PROMOTABLE_STATUSES,
+}
 REQUEST_KEYS = frozenset(
     {
         "schema_version",
@@ -624,11 +632,7 @@ def apply_candidate_promotion(
         decision=decision,
     )
     status = candidate.get("status", "candidate")
-    promotable_statuses = (
-        AUTO_PROMOTABLE_STATUSES
-        if promotion_mode == "auto"
-        else MANUAL_PROMOTABLE_STATUSES
-    )
+    promotable_statuses = PROMOTABLE_STATUSES_BY_MODE[promotion_mode]
     if status not in promotable_statuses:
         raise CandidatePromotionError(
             f"candidate {request['candidate_id']} cannot be promoted from status {status!r}"
@@ -800,7 +804,10 @@ def _resolve_locked(
                     "uncommitted promotion marker question differs from candidate"
                 )
             status = candidate.get("status")
-            if status not in AUTO_PROMOTABLE_STATUSES | {"promoted", "auto_promoted"}:
+            if status not in PROMOTABLE_STATUSES_BY_MODE[promotion_mode] | {
+                "promoted",
+                "auto_promoted",
+            }:
                 raise CandidatePromotionError(
                     f"candidate projection has conflicting status {status!r}"
                 )
