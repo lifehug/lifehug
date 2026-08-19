@@ -224,8 +224,10 @@ class FocusCandidateTests(unittest.TestCase):
                     hasher.update(path.read_bytes())
                     hasher.update(b"\0")
             self.assertEqual(hasher.hexdigest(), digest)
-        self.assertFalse((ROOT / "interactions/entity_candidate").exists())
-        self.assertFalse((SYSTEM / "entity_candidate.py").exists())
+        # v185 adds Entity Candidate independently; this guard protects the
+        # existing package digests above rather than forbidding new siblings.
+        self.assertTrue((ROOT / "interactions/entity_candidate").exists())
+        self.assertTrue((SYSTEM / "entity_candidate.py").exists())
 
     def test_eight_dimension_mapping_yields_v183_ready_assessment(self):
         decision = self.ready_decision()
@@ -585,7 +587,7 @@ class FocusCandidateTests(unittest.TestCase):
         }
         version = json.loads((ROOT / "system/version.json").read_text())
         self.assertEqual(shipped - set(version["framework_files"]), set())
-        self.assertEqual(version["version"], 184)
+        self.assertEqual(version["version"], 185)
 
     def test_runtime_has_one_completion_delegation_and_no_parallel_writer_or_approval(
         self,
