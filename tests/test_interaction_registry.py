@@ -27,6 +27,7 @@ class RegistryContractTests(unittest.TestCase):
                 ("question_judgment", "question_judgment"),
                 ("question_candidate", "question_candidate"),
                 ("focus_candidate", "focus_candidate"),
+                ("entity_candidate", "entity_candidate"),
             ],
         )
         for entry in value["interactions"]:
@@ -56,6 +57,16 @@ class RegistryContractTests(unittest.TestCase):
         self.assertEqual(manifest["interaction"], "focus_candidate")
         self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["extends"], "conversation")
+        self.assertEqual(manifest["extends.version"], "1.0.0")
+
+    def test_entity_candidate_has_distinct_identity_and_parent_lineage(self):
+        self.assertEqual(
+            registry.resolve_interaction_lineage("entity_candidate"),
+            ("conversation", "entity_candidate"),
+        )
+        manifest = registry.load_interaction_manifest("entity_candidate")
+        self.assertEqual(manifest["interaction"], "entity_candidate")
+        self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["extends.version"], "1.0.0")
 
     def test_focus_candidate_composition_preserves_exact_parent_and_child_bytes(self):

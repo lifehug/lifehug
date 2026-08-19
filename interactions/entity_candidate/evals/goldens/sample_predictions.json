@@ -1,0 +1,63 @@
+[
+  {
+    "fixture_id": "person-needs-gap",
+    "reply": "That gives this person a place in your story. What else would help make it clear?",
+    "next_gap": "identity_disambiguation",
+    "ready": false,
+    "evidence_quotes": [
+      "Synthetic person is part of my life story, and I remember it clearly."
+    ],
+    "candidate_id": "entity:person:synthetic-person"
+  },
+  {
+    "fixture_id": "place-needs-gap",
+    "reply": "That gives this place a place in your story. What else would help make it clear?",
+    "next_gap": "type_specific_context",
+    "ready": false,
+    "evidence_quotes": [
+      "Synthetic place is part of my life story, and I remember it clearly."
+    ],
+    "candidate_id": "entity:place:synthetic-place"
+  },
+  {
+    "fixture_id": "period-needs-gap",
+    "reply": "That gives this period a place in your story. What else would help make it clear?",
+    "next_gap": "timeline_context",
+    "ready": false,
+    "evidence_quotes": [
+      "Synthetic period is part of my life story, and I remember it clearly."
+    ],
+    "candidate_id": "entity:period:synthetic-period"
+  },
+  {
+    "fixture_id": "object-needs-gap",
+    "reply": "That gives this object a place in your story. What else would help make it clear?",
+    "next_gap": "type_specific_context",
+    "ready": false,
+    "evidence_quotes": [
+      "Synthetic object is part of my life story, and I remember it clearly."
+    ],
+    "candidate_id": "entity:object:synthetic-object"
+  },
+  {
+    "fixture_id": "theme-needs-gap",
+    "reply": "That gives this theme a place in your story. What else would help make it clear?",
+    "next_gap": "relationship_relevance_and_significance",
+    "ready": false,
+    "evidence_quotes": [
+      "Synthetic theme is part of my life story, and I remember it clearly."
+    ],
+    "candidate_id": "entity:theme:synthetic-theme"
+  },
+  {
+    "fixture_id": "person-ready",
+    "reply": "Those exact memories show why she matters. Shall I preserve these exact excerpts as candidate research?",
+    "next_gap": null,
+    "ready": true,
+    "evidence_quotes": [
+      "Synthetic Person was my neighbor and taught me repair work.",
+      "When the storm broke our fence, she showed me how to mend it."
+    ],
+    "candidate_id": "entity:person:synthetic-person"
+  }
+]

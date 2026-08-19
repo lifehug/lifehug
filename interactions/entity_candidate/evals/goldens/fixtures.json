@@ -1,0 +1,57 @@
+[
+  {
+    "fixture_id": "person-needs-gap",
+    "candidate_id": "entity:person:synthetic-person",
+    "turns": [
+      "Synthetic person is part of my life story, and I remember it clearly."
+    ],
+    "expected_next_gap": "identity_disambiguation",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "place-needs-gap",
+    "candidate_id": "entity:place:synthetic-place",
+    "turns": [
+      "Synthetic place is part of my life story, and I remember it clearly."
+    ],
+    "expected_next_gap": "type_specific_context",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "period-needs-gap",
+    "candidate_id": "entity:period:synthetic-period",
+    "turns": [
+      "Synthetic period is part of my life story, and I remember it clearly."
+    ],
+    "expected_next_gap": "timeline_context",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "object-needs-gap",
+    "candidate_id": "entity:object:synthetic-object",
+    "turns": [
+      "Synthetic object is part of my life story, and I remember it clearly."
+    ],
+    "expected_next_gap": "type_specific_context",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "theme-needs-gap",
+    "candidate_id": "entity:theme:synthetic-theme",
+    "turns": [
+      "Synthetic theme is part of my life story, and I remember it clearly."
+    ],
+    "expected_next_gap": "relationship_relevance_and_significance",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "person-ready",
+    "candidate_id": "entity:person:synthetic-person",
+    "turns": [
+      "Synthetic Person was my neighbor and taught me repair work.",
+      "When the storm broke our fence, she showed me how to mend it."
+    ],
+    "expected_next_gap": null,
+    "expected_ready": true
+  }
+]

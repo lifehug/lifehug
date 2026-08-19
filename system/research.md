@@ -1,5 +1,13 @@
 # Life Hug — Research & Methodology (v2)
 
+## Entity candidate research
+
+For a person, place, period, object, or theme candidate, use ordinary
+conversation and exact user excerpts. Seek identity, relevance, timeline,
+connections, tension/open questions, type-specific texture, and a concrete
+observation or event; preserve uncertainty rather than inventing dates or
+links. Research completion never creates or graduates a page.
+
 **Original research:** 2026-02-25 (StoryCorps, ghostwriting frameworks, memoir structure)
 **Deep-research revision:** 2026-07-04 — verified against primary sources (McAdams, Pennebaker, Frattaroli meta-analysis, Aron, Bridges, Birren, Belli, Tversky & Marsh, Cochrane reviews) plus competitor post-mortems (StoryWorth, Remento, HereAfter AI). Implementation status is tagged per section: **[shipped]**, or the wave that lands it (v70–v73, issues lifehug/lifehug#27–#30).
 
