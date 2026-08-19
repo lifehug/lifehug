@@ -1,0 +1,9 @@
+# Focus Candidate eval gates — flat scalar subset only
+cap.reply_chars: 2200
+research_gates.inherited_conversation.compliance: 1.0
+research_gates.readiness.false_positive_rate: 0.0
+research_gates.grounding.compliance: 1.0
+research_gates.identity_safety.compliance: 1.0
+research_gates.one_question.compliance: 1.0
+research_gates.next_gap.accuracy: 0.85
+research_gates.readiness.recall: 0.90

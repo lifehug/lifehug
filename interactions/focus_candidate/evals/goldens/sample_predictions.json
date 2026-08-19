@@ -1,0 +1,46 @@
+[
+  {
+    "fixture_id": "start-needs-identity",
+    "reply": "What does Synthetic Harbor mean in your own life?",
+    "next_gap": "focus_identity",
+    "ready": false,
+    "evidence_quotes": [],
+    "candidate_id": "rec-synthetic-harbor"
+  },
+  {
+    "fixture_id": "identity-needs-why",
+    "reply": "Waiting for the tide with her gives the harbor a clear place in your story. What makes that memory matter now?",
+    "next_gap": "why_it_matters",
+    "ready": false,
+    "evidence_quotes": ["Synthetic Harbor is the inlet where my grandmother taught me to wait for the tide."],
+    "candidate_id": "rec-synthetic-harbor"
+  },
+  {
+    "fixture_id": "meaning-needs-concrete",
+    "reply": "The harbor carries both her memory and the patience you want to keep. What happened there that still feels vivid?",
+    "next_gap": "grounded_evidence",
+    "ready": false,
+    "evidence_quotes": ["Synthetic Harbor matters because it joins my memory of her with the patience I want to keep."],
+    "candidate_id": "rec-synthetic-harbor"
+  },
+  {
+    "fixture_id": "nearly-ready-needs-open-question",
+    "reply": "Returning to the broken pier gives the loss a concrete edge. What question about the harbor still pulls at you?",
+    "next_gap": "open_questions",
+    "ready": false,
+    "evidence_quotes": ["After the synthetic winter storm I returned alone and found the old pier broken."],
+    "candidate_id": "rec-synthetic-harbor"
+  },
+  {
+    "fixture_id": "ready-offers-confirmation",
+    "reply": "The harbor now holds patience, grief, and what you hope to pass on. What would you change before I preserve these exact excerpts as candidate research?",
+    "next_gap": null,
+    "ready": true,
+    "evidence_quotes": [
+      "My grandmother taught me to wait for the tide at Synthetic Harbor.",
+      "After the synthetic winter storm I returned alone and found the old pier broken.",
+      "Now it connects patience and grief with what I want to pass to my children."
+    ],
+    "candidate_id": "rec-synthetic-harbor"
+  }
+]

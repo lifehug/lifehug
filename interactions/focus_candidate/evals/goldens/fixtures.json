@@ -1,0 +1,41 @@
+[
+  {
+    "fixture_id": "start-needs-identity",
+    "candidate_id": "rec-synthetic-harbor",
+    "turns": [],
+    "expected_next_gap": "focus_identity",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "identity-needs-why",
+    "candidate_id": "rec-synthetic-harbor",
+    "turns": ["Synthetic Harbor is the inlet where my grandmother taught me to wait for the tide."],
+    "expected_next_gap": "why_it_matters",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "meaning-needs-concrete",
+    "candidate_id": "rec-synthetic-harbor",
+    "turns": ["Synthetic Harbor matters because it joins my memory of her with the patience I want to keep."],
+    "expected_next_gap": "grounded_evidence",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "nearly-ready-needs-open-question",
+    "candidate_id": "rec-synthetic-harbor",
+    "turns": ["After the synthetic winter storm I returned alone and found the old pier broken."],
+    "expected_next_gap": "open_questions",
+    "expected_ready": false
+  },
+  {
+    "fixture_id": "ready-offers-confirmation",
+    "candidate_id": "rec-synthetic-harbor",
+    "turns": [
+      "My grandmother taught me to wait for the tide at Synthetic Harbor.",
+      "After the synthetic winter storm I returned alone and found the old pier broken.",
+      "Now it connects patience and grief with what I want to pass to my children."
+    ],
+    "expected_next_gap": null,
+    "expected_ready": true
+  }
+]

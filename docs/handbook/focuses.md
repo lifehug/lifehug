@@ -323,6 +323,13 @@ research spans instead of the empty-Focus placeholder. The research source
 does not call `approve_recommendation()`, scaffold a category, or promote its
 generated seed questions; approval/autopilot remains the only creation door.
 
+The independently registered [Focus Candidate
+Interaction](interactions/focus-candidate.md) is the conversational collection
+surface for this source. Play is read-only; it gathers eight useful dimensions
+through exact user spans, asks the highest-value natural gap, and requires a
+distinct confirmation before delegating to the candidate-research authority.
+Its completion still leaves the recommendation pending.
+
 **How it self-improves:** the roster fold means idea extraction gets
 *more* accurate over time without any change to the extraction regexes
 themselves — as the monthly entity-roster curation resolves more aliases,
@@ -368,6 +375,7 @@ not.
 | Duplicate healing (owner-initiated) | `focus_merge.py` (`focus-merge <survivor> <loser>`) |
 | Approval + scaffolding | `recommend_focuses.approve_recommendation()`, `roadmap.focus_new()` |
 | Candidate-research evidence/source authority | `candidate_research.py`, `sources/candidate-research/focus_candidate/` |
+| Focus Candidate Interaction | `interactions/focus_candidate/`, `focus_candidate.py` |
 | Autopilot | `recommend_focuses.focus_autopilot()`, `resolve_autopilot_target()` |
 | Saturation / verdicts | `roadmap.focus_fill()`, `progress.verdict()` |
 | CLI | `lifehug.py recommend-focuses [--recommend\|--dismiss\|--approve\|--autopilot [--dry-run\|--catch-up]\|--target N]`, `roadmap [show\|rebuild\|add\|set\|finish\|new]`, `focus-dupes --report`, `focus-merge <survivor> <loser> [--dry-run]` |

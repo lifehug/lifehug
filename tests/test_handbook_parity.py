@@ -134,9 +134,9 @@ class EmbedParityTests(unittest.TestCase):
 
     def test_the_harness_sees_the_four_interaction_embeds(self):
         # One embed per shipped interaction page (conversation,
-        # question_judgment, focus_curation, question_candidate) — a short scan means
+        # question_judgment, focus_curation, question_candidate, focus_candidate) — a short scan means
         # the embed grammar broke, or a page lost its embed block.
-        self.assertGreaterEqual(len(_embeds()), 4)
+        self.assertGreaterEqual(len(_embeds()), 5)
 
     def test_every_embed_byte_matches_its_source_file(self):
         for page, source_relpath, body in _embeds():
@@ -170,6 +170,8 @@ class EmbedParityTests(unittest.TestCase):
                 "interactions/focus_curation/prompt/behavior.md",
             HANDBOOK_INTERACTIONS / "question-candidate.md":
                 "interactions/question_candidate/prompt/behavior.md",
+            HANDBOOK_INTERACTIONS / "focus-candidate.md":
+                "interactions/focus_candidate/prompt/behavior.md",
         }
         by_page: dict[Path, list[str]] = {}
         for page, source_relpath, _body in _embeds():

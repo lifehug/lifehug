@@ -153,7 +153,7 @@ run.
 **Tier guidance.** `role.router` / `role.worker` / `role.planner` name
 **capability tiers**, never vendor products (ADR 0002's model-agnosticism
 rule, restated explicitly in every interaction's owner-decisions
-section). The working rule across all four interactions: a
+section). The working rule across all five interactions: a
 high-volume, low-stakes, per-item call (judging one candidate, routing
 one inbound message) is a lower tier (`medium`, or the router's
 `haiku-class`); a low-volume, high-stakes call that changes behavior for
@@ -190,7 +190,7 @@ dependency-free runtime doesn't otherwise need.
 ## 5. In the loop
 
 **What feeds it:** every generation and judgment call already covered on
-this handbook's other pages routes through one of the four interactions
+this handbook's other pages routes through one of the five interactions
 here — [Question Candidates](../question-candidates.md)' classifier and
 research-expander generation both read the Question-Judgment rubric as
 context (§3 of that page); [Focuses & the Autopilot](../focuses.md)'
@@ -225,17 +225,17 @@ roster-fold dedupe layers beneath it are already the floor (see [Focuses
 |---|---|
 | The pattern's own definition | `interactions/README.md` |
 | Closed package registry | `interactions/registry.json` |
-| Four shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/` |
+| Five shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/`, `interactions/focus_candidate/` |
 | Registry, composition, and package audit | `system/interaction_registry.py` |
 | The flat-YAML parser every `interaction.yaml` depends on | `system/lifehug_core.py:557`, `_parse_simple_yaml` |
-| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals` |
+| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals`, `lifehug.py focus-candidate-evals --json` |
 | New-interaction checklist | `interactions/README.md`'s "The new-interaction checklist" section (12 steps: README → `interaction.yaml` → `prompt/` → `router/` if needed → `context/manifest.md` → `overlays/` → `evals/` → `plan/` if needed → vault-contract registration → `framework_files` registration → an ADR → no default seat until evals pass) |
 | Guard tests | `tests/test_interaction_evals.py`, `tests/test_conversation_router.py`, `tests/test_question_judgment.py`, `tests/test_focus_duplicate_curation.py` (repo-verify exact names before citing in a PR) |
 
 **Change-safely notes.** A new interaction that skips the
 definition/runtime/seat split, or ships without an eval harness, is a
 design defect per ADR 0002's Consequences — not a valid shortcut for a
-"simple" case. Behavior changes to any of the four interactions go
+"simple" case. Behavior changes to any of the five interactions go
 through their own `interactions/<name>/` files and evals, never through
 ad hoc edits to a runtime's prompt strings; a runtime-side divergence
 from the definition is a runtime bug, not a legitimate platform variant.
