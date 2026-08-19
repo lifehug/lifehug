@@ -1,7 +1,7 @@
 {
-  "version": 185,
-  "released": "2026-08-18",
-  "changelog": "v185: feat(172): add Entity Candidate research for people, places, periods, objects, and themes. It starts read-only, keeps useful material as exact user excerpts, evaluates each type's actual meaning instead of reference counts, and requires a distinct current explicit confirmation before preserving candidate research. Every completion path rechecks lifecycle and revisions, never approves, graduates, or creates a page, and leaves a later independent roster decision required.",
+  "version": 186,
+  "released": "2026-08-19",
+  "changelog": "v186: fix: manual owner promotion now accepts needs_review candidates through the same exact-file Git receipt, replay, and adoption authority as other manually promotable candidates; auto-promotion and terminal-status refusals are unchanged.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

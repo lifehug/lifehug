@@ -777,7 +777,7 @@ class EntityCandidateTests(unittest.TestCase):
         }
         version = json.loads((ROOT / "system/version.json").read_text())
         self.assertEqual(shipped - set(version["framework_files"]), set())
-        self.assertEqual(version["version"], 185)
+        self.assertEqual(version["version"], 186)
 
     def test_runtime_has_one_completion_delegation_and_no_parallel_writer_or_approval(
         self,
