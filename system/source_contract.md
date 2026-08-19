@@ -34,6 +34,38 @@ The generated layer is:
    directories, and symlinks fail closed; reading never lints, repairs, or
    rewrites the source or state.
 
+## Candidate Research Sources
+
+Completed research about a pending Focus or entity becomes one immutable
+`type: candidate_research` source under `sources/candidate-research/`. This is
+not a model dossier. Its citable body is assembled only from exact,
+revision-bound slices of raw user turns; assistant turns and generated
+summaries are ineligible. Generated seed questions may travel with the source
+only under an explicit **not evidence** heading and never count toward
+readiness or compilation claims.
+The marker cryptographically binds the exact rendered evidence and seed
+sections to the research revision. Candidate-research files decode as strict
+UTF-8, and compiler citations render the parsed literal quotes rather than the
+marker or a generic path excerpt.
+
+A deterministic assessment enforces the closed Focus/entity dimension and
+evidence minima. Readiness alone cannot write: an explicit user confirmation
+must bind the exact ready assessment revision. The source then receives a
+typed base64 marker, subject/research revisions, `user_attested_primary` trust,
+and first-person-memory authority. Candidate deletion before confirmation
+blocks completion; candidate cleanup after completion does not delete source
+truth. Corrections and retractions remain additive through the normal flow.
+
+Research and candidate lifecycle stay separate. The compiler may cite matching
+Focus research after that Focus is independently approved, or matching entity
+research after that entity independently becomes page-eligible. The source
+never uses generic keyword routing; even a bootstrap/static theme requires an
+eligible matching roster row. It never approves, maps, qualifies, sets an owner
+verdict, or graduates anything.
+Exact-byte replay is idempotent; different bytes/revisions/paths conflict, and
+crash adoption comes from the source marker plus canonical Git history rather
+than the source manifest or another projection (ADR 0020).
+
 ## Artifact Sources
 
 Drafting happens under `outputs/<artifact>/`. When an artifact is final enough

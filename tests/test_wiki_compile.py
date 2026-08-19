@@ -163,6 +163,240 @@ class SynthesisTests(unittest.TestCase):
         self.assertIn("A1", synth["narrative"])
 
 
+class CandidateResearchCompilerTests(unittest.TestCase):
+    def setUp(self):
+        self.wc = load("wiki_compile")
+        self.wc._RETRACTIONS = []
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.wc.REPO_DIR = self.root
+        self.wc.SOURCES_DIR = self.root / "sources"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def real_research_item(self, *, entity_type=None, name=None, slug=None):
+        import candidate_research
+
+        from tests.test_candidate_research import _entity_assessment, _focus_assessment
+
+        if entity_type is None:
+            subject, turns, assessment = _focus_assessment(confirmed=True)
+        else:
+            subject, turns, assessment = _entity_assessment(
+                entity_type, candidate_research.ENTITY_MIN_EVIDENCE_SPANS[entity_type]
+            )
+            if name is not None or slug is not None:
+                label = name or subject["subject_label"]
+                identity_slug = slug or subject["subject_slug"]
+                subject = candidate_research.build_entity_candidate_subject(
+                    entity_type,
+                    {
+                        "name": label,
+                        "slug": identity_slug,
+                        "aliases": [],
+                        "page_eligible": False,
+                        "maps_to_focus": None,
+                    },
+                )
+                assessment = candidate_research.build_research_assessment(
+                    subject=subject,
+                    evidence=assessment["evidence"],
+                    dimension_evidence=assessment["dimension_evidence"],
+                    seed_questions=[],
+                    authoritative_turns=turns,
+                )
+            assessment = candidate_research.confirm_research_assessment(
+                assessment,
+                turn=turns[-1],
+                start=0,
+                end=len(turns[-1]["text"]),
+                confirmed_at="2026-08-18T20:00:00Z",
+                authoritative_turns=turns,
+                current_subject=subject,
+            )
+        plan = candidate_research.build_candidate_research_source(
+            assessment, authoritative_turns=turns, current_subject=subject
+        )
+        path = self.root / plan["source_path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(plan["source_bytes"])
+        return next(iter(self.wc.read_manual_sources().values())), assessment, path
+
+    @staticmethod
+    def research_item(
+        *, candidate_kind="focus_candidate", subject_type="place", slug="synthetic-harbor"
+    ):
+        return {
+            "id": f"research:{candidate_kind}:{slug}",
+            "source": f"sources/candidate-research/{candidate_kind}/synthetic.md",
+            "title": "Candidate research",
+            "body": "The literal user evidence does not need to repeat the subject label.",
+            "kind": "candidate_research",
+            "candidate_kind": candidate_kind,
+            "candidate_id": f"candidate:{slug}",
+            "subject_type": subject_type,
+            "subject_label": slug.replace("-", " ").title(),
+            "subject_slug": slug,
+            "subject_aliases": [],
+            "identity_revision": "sha256:" + "1" * 64,
+            "subject_revision": "sha256:" + "2" * 64,
+            "assessment_revision": "sha256:" + "3" * 64,
+            "research_revision": "sha256:" + "4" * 64,
+            "user_confirmed": True,
+            "generated_seed_questions_evidence": False,
+            "content_sha256": "5" * 64,
+            "sensitivity": "private",
+            "source_trust": "user_attested_primary",
+            "authority": "first_person_memory",
+        }
+
+    def test_focus_research_prevents_empty_placeholder_and_is_cited(self):
+        item, assessment, _path = self.real_research_item()
+        descs = self.wc.plan_focuses(
+            {"K": {"group": "focus", "name": "Focus — Synthetic Harbor"}},
+            [],
+            {},
+            {item["id"]: item},
+            {"entities": []},
+        )
+        self.assertEqual(len(descs), 1)
+        self.assertIn(item, descs[0]["cited_items"])
+        self.assertIn(item["source"], descs[0]["sources"])
+        self.assertNotIn("no source material yet", descs[0]["summary"])
+        self.assertIn("completed research", descs[0]["summary"])
+        rendered = "\n".join(self.wc.cited_blocks(descs[0]["cited_items"]))
+        self.assertIn(assessment["evidence"][0]["quote"], rendered)
+        self.assertNotIn("lifehug:candidate-research", rendered)
+
+    def test_wrong_kind_or_identity_does_not_fill_focus(self):
+        item, _assessment, _path = self.real_research_item(entity_type="place")
+        item["body"] += " Synthetic Place appears only as fuzzy body text."
+        desc = self.wc.plan_focuses(
+            {"K": {"group": "focus", "name": "Focus — Synthetic Place"}},
+            [],
+            {},
+            {item["id"]: item},
+            {"entities": []},
+        )[0]
+        self.assertEqual(desc["cited_items"], [])
+        self.assertIn("no source material yet", desc["summary"])
+
+    def test_retracted_focus_research_does_not_fill_placeholder(self):
+        item = self.research_item()
+        self.wc._RETRACTIONS = [
+            {
+                "id": "retraction",
+                "retracts": item["id"],
+                "retracts_path": "",
+                "retracts_sha256": item["content_sha256"],
+                "suppress_on": [],
+                "voided": False,
+            }
+        ]
+        desc = self.wc.plan_focuses(
+            {"K": {"group": "focus", "name": "Focus — Synthetic Harbor"}},
+            [],
+            {},
+            {item["id"]: item},
+            {"entities": []},
+        )[0]
+        self.assertEqual(desc["cited_items"], [])
+        self.assertIn("no source material yet", desc["summary"])
+
+    def test_typed_research_supplies_citable_material_for_node_types(self):
+        for entity_type in ("person", "place", "period", "object"):
+            with self.subTest(entity_type=entity_type):
+                slug = f"synthetic-{entity_type}"
+                item = self.research_item(
+                    candidate_kind="entity_candidate",
+                    subject_type=entity_type,
+                    slug=slug,
+                )
+                roster = {
+                    "entities": [
+                        {
+                            "name": slug.replace("-", " ").title(),
+                            "slug": slug,
+                            "aliases": [],
+                            "page_eligible": True,
+                            "maps_to_focus": None,
+                        }
+                    ]
+                }
+                descs = self.wc.plan_entities(
+                    entity_type, {}, {item["id"]: item}, roster, set()
+                )
+                self.assertEqual(len(descs), 1)
+                self.assertIn(item, descs[0]["cited_items"])
+                self.assertIn(item["source"], descs[0]["sources"])
+
+    def test_typed_theme_research_is_cited_after_theme_eligibility(self):
+        item, _assessment, _path = self.real_research_item(entity_type="theme")
+        roster = {
+            "entities": [
+                {
+                    "name": "Synthetic Theme",
+                    "slug": "synthetic-theme",
+                    "aliases": [],
+                    "keywords": ["phrase-not-in-the-source-body"],
+                    "page_eligible": True,
+                    "maps_to_focus": None,
+                }
+            ]
+        }
+        descs = self.wc.plan_themes(
+            {}, {item["id"]: item}, roster, author_slug="author"
+        )
+        desc = next(row for row in descs if row["slug"] == "synthetic-theme")
+        self.assertIn(item, desc["cited_items"])
+
+    def test_static_theme_cannot_consume_research_without_eligible_roster_row(self):
+        item, _assessment, _path = self.real_research_item(
+            entity_type="theme", name="Family", slug="family"
+        )
+        descs = self.wc.plan_themes(
+            {}, {item["id"]: item}, {"entities": []}, author_slug="author"
+        )
+        self.assertFalse(any(row["slug"] == "family" for row in descs))
+
+    def test_real_candidate_source_is_excluded_from_generic_project_keywords(self):
+        item, _assessment, _path = self.real_research_item()
+        desc = self.wc.plan_projects(
+            {"P": {"group": "project", "name": "Synthetic Harbor"}},
+            [],
+            {},
+            {item["id"]: item},
+        )[0]
+        self.assertEqual(desc["sources"], [])
+
+    def test_malformed_utf8_candidate_source_is_not_loaded(self):
+        _item, _assessment, path = self.real_research_item()
+        path.write_bytes(path.read_bytes() + b"\xff")
+        self.assertEqual(self.wc.read_manual_sources(), {})
+
+    def test_research_never_changes_entity_eligibility(self):
+        item = self.research_item(
+            candidate_kind="entity_candidate",
+            subject_type="place",
+            slug="synthetic-place",
+        )
+        roster = {
+            "entities": [
+                {
+                    "name": "Synthetic Place",
+                    "slug": "synthetic-place",
+                    "aliases": [],
+                    "page_eligible": False,
+                    "maps_to_focus": None,
+                }
+            ]
+        }
+        self.assertEqual(
+            self.wc.plan_entities("place", {}, {item["id"]: item}, roster, set()),
+            [],
+        )
+
 # ---------------------------------------------------------------------------
 # Compiler: rendering
 # ---------------------------------------------------------------------------

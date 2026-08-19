@@ -142,7 +142,30 @@ directly create pages.
 
 ---
 
-## 7c. External evidence connectors **[shipped v106]**
+## 7c. Candidate research as source material **[v183 source authority]**
+
+A pending Focus/entity candidate can be worth pursuing before it has enough
+material to improve the wiki. Conversational research closes that gap, but the
+evidence rule is stricter than ordinary generated synthesis: only exact,
+revision-bound spans from authoritative **user** turns count. A model-authored
+summary is never evidence, and generated seed questions are explicitly
+non-evidence. This follows the memory rule in §1.9 — quote exactly rather than
+paraphrasing an account into a new apparent fact.
+
+Readiness is recomputed against a closed usefulness rubric (identity,
+relevance/history/connections/tension/type context for entities; identity,
+meaning/scope/direction/relationships/tension/open questions for Focuses),
+with multiple non-overlapping substantive spans and at least one concrete
+event/observation. The author then explicitly confirms that exact assessment.
+Only that ready + confirmed boundary can render an immutable
+`candidate_research` source. The compiler cites it after the existing,
+independent Focus approval or entity-graduation mechanism succeeds; research
+itself never makes that lifecycle decision. This preserves the Loop's useful
+floor without upgrading model prose into primary evidence (ADR 0020).
+
+---
+
+## 7d. External evidence connectors **[shipped v106]**
 
 Email (Gmail first) joins the source layer as a **selective evidence and
 discovery source** — not a bulk import, and not a per-item review queue. The

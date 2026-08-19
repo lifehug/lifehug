@@ -24,6 +24,8 @@ from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
+from ai_provider import call_ai, failure_metadata
+from entity_roster import load_roster
 from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
@@ -42,6 +44,7 @@ from lifehug_core import (
     answer_id_from_filename,
     load_config,
     load_mission,
+    normalized_focus_key,
     parse_categories,
     parse_questions,
     read_json,
@@ -50,9 +53,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
-from ai_provider import call_ai, failure_metadata
 from research_expand import DEFAULT_MODEL, parse_ai_json
-from entity_roster import load_roster
 from roadmap import load_roadmap
 
 # `Entity Type` is the code/frontmatter routing term. Most values are graph
@@ -186,13 +187,37 @@ def read_manual_sources() -> dict[str, dict]:
     if not SOURCES_DIR.exists():
         return sources
     for path in sorted(p for p in SOURCES_DIR.rglob("*.md") if p.name != ".gitkeep"):
-        text = path.read_text(encoding="utf-8", errors="replace")
+        candidate_path = rel(path).startswith("sources/candidate-research/")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            if candidate_path:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
         metadata, raw_body = split_frontmatter(text)
         title = frontmatter_value(text, "title", path.stem.replace("-", " ").title())
         body = raw_body.strip() if raw_body != text else strip_frontmatter(text)
         body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
         source_id = frontmatter_value(text, "source_id", f"source:{path.stem}")
         kind = frontmatter_value(text, "type", "manual_source")
+        if candidate_path and kind != "candidate_research":
+            continue
+        validated_candidate = None
+        if kind == "candidate_research":
+            # Typed candidate research is accepted only through its immutable
+            # marker/frontmatter/hash contract. Source Integrity reports the
+            # malformed file; compile simply refuses to cite it.
+            try:
+                from candidate_research import (  # noqa: PLC0415
+                    validate_candidate_research_source_text,
+                )
+
+                validated_candidate = validate_candidate_research_source_text(
+                    text, expected_path=rel(path)
+                )
+            except (TypeError, ValueError):
+                continue
+            body = validated_candidate["citation_body"]
         generated_from = metadata.get("generated_from", [])
         if not isinstance(generated_from, list):
             generated_from = []
@@ -217,6 +242,26 @@ def read_manual_sources() -> dict[str, dict]:
             "source_trust": str(metadata.get("source_trust", "")),
             "authority": str(metadata.get("authority", "")),
             "generated_from": [str(item) for item in generated_from],
+            "candidate_kind": str(metadata.get("candidate_kind", "")),
+            "candidate_id": str(metadata.get("candidate_id", "")),
+            "subject_type": str(metadata.get("subject_type", "")),
+            "subject_label": str(metadata.get("subject_label", "")),
+            "subject_slug": str(metadata.get("subject_slug", "")),
+            "subject_aliases": [
+                str(item)
+                for item in metadata.get("subject_aliases", [])
+                if isinstance(item, str)
+            ]
+            if isinstance(metadata.get("subject_aliases"), list)
+            else [],
+            "identity_revision": str(metadata.get("identity_revision", "")),
+            "subject_revision": str(metadata.get("subject_revision", "")),
+            "assessment_revision": str(metadata.get("assessment_revision", "")),
+            "research_revision": str(metadata.get("research_revision", "")),
+            "user_confirmed": metadata.get("user_confirmed") is True,
+            "generated_seed_questions_evidence": (
+                metadata.get("generated_seed_questions_evidence") is True
+            ),
         }
     return sources
 
@@ -376,10 +421,53 @@ def matching_sources(sources: dict[str, dict], terms: list[str]) -> list[dict]:
     clean_terms = [term.lower() for term in terms if term and len(term.strip()) >= 3]
     matches = []
     for source in sources.values():
+        # Candidate research routes only through closed subject metadata.
+        if source.get("kind") == "candidate_research":
+            continue
         haystack = f"{source.get('title', '')} {source.get('body', '')}".lower()
         if any(term in haystack for term in clean_terms):
             matches.append(source)
     return matches
+
+
+def matching_candidate_research(
+    sources: dict[str, dict],
+    *,
+    candidate_kind: str,
+    names: list[str],
+    subject_type: str | None = None,
+) -> list[dict]:
+    """Attach completed research by typed subject identity, never body text.
+
+    normalized_focus_key is the existing shared Focus/entity identity floor;
+    aliases carried by the immutable source let a later settled rename retain
+    the same research without fuzzy matching.
+    """
+    target_keys = {normalized_focus_key(name) for name in names if name}
+    target_keys.discard("")
+    matches = []
+    for source in sources.values():
+        if source.get("kind") != "candidate_research":
+            continue
+        if source.get("candidate_kind") != candidate_kind:
+            continue
+        if subject_type is not None and source.get("subject_type") != subject_type:
+            continue
+        if not source.get("user_confirmed") or source.get(
+            "generated_seed_questions_evidence"
+        ):
+            continue
+        source_names = [
+            source.get("subject_label", ""),
+            source.get("subject_slug", ""),
+            *source.get("subject_aliases", []),
+        ]
+        source_keys = {
+            normalized_focus_key(str(name)) for name in source_names if name
+        }
+        if target_keys & source_keys:
+            matches.append(source)
+    return sorted(matches, key=lambda item: item.get("source", ""))
 
 
 def split_primary_supporting(items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -482,7 +570,11 @@ def scan_mentions(names, answers, manual_sources):
         scored.sort(key=lambda t: (-t[0], t[1].get("source", "")))
         return [it for _, it in scored]
 
-    return ranked(answers.values()), ranked(manual_sources.values())
+    return ranked(answers.values()), ranked(
+        item
+        for item in manual_sources.values()
+        if item.get("kind") != "candidate_research"
+    )
 
 
 _ALIAS_STOPWORDS = {"the", "my", "our", "a", "an"}
@@ -544,7 +636,6 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         title = clean_focus_name(info["name"])
         slug = slugify(title)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
-        source_items = matching_sources(manual_sources, [title])
 
         # Mention enrichment: pull answers/sources that mention this person by
         # name or any roster alias, even when filed under other categories. This
@@ -554,6 +645,20 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         first_alias = _first_name_alias(title)
         if first_alias and first_alias not in names:
             names.append(first_alias)
+        research_items = matching_candidate_research(
+            manual_sources,
+            candidate_kind="focus_candidate",
+            names=names,
+        )
+        research_items = [
+            item for item in research_items if not _is_retracted(item, slug)
+        ]
+        research_sources = {item["source"] for item in research_items}
+        source_items = [
+            item
+            for item in matching_sources(manual_sources, [title])
+            if item["source"] not in research_sources
+        ]
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
         # Retraction filter runs BEFORE the summary counts (v88) — the page
         # banner must not claim prompts the compiler refuses to assert.
@@ -561,7 +666,7 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         cited_srcs = {a["source"] for a in answer_items}
         extra_answers = [it for it in a_hits if it["source"] not in cited_srcs
                          and not _is_retracted(it, slug)]
-        cited_items = answer_items + extra_answers
+        cited_items = answer_items + extra_answers + research_items
         src_srcs = {s["source"] for s in source_items}
         supporting_items = source_items + [it for it in m_hits if it["source"] not in src_srcs]
         for wit in _witness_items(manual_sources, names):
@@ -570,15 +675,23 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
         sources = [x["source"] for x in cited_items] + [x["source"] for x in supporting_items]
 
-        if answer_items and extra_answers:
+        if answer_items and extra_answers and not research_items:
             summary = (f"A Lifehug Focus from {len(answer_items)} answered prompts "
                        f"(+{len(extra_answers)} mentions across the story). Owner-only.")
+        elif answer_items and (extra_answers or research_items):
+            summary = (f"A Lifehug Focus from {len(answer_items)} answered prompts "
+                       f"(+{len(extra_answers)} mentions and {len(research_items)} completed "
+                       f"research sources). Owner-only.")
         elif answer_items:
             summary = (f"A Lifehug Focus compiled from {len(answer_items)} answered prompts. "
                        f"Owner-only; cites its source answers.")
-        elif extra_answers:
+        elif extra_answers and not research_items:
             summary = (f"A Lifehug Focus — no dedicated answers yet; compiled from "
                        f"{len(extra_answers)} mentions across the story. Owner-only.")
+        elif extra_answers or research_items:
+            summary = (f"A Lifehug Focus — no dedicated answers yet; compiled from "
+                       f"{len(extra_answers)} mentions and {len(research_items)} completed "
+                       f"research sources. Owner-only.")
         else:
             summary = ("A Lifehug Focus with no source material yet. Owner-only.")
 
@@ -614,6 +727,17 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
             continue  # a Focus owns it, or already emitted
         names = [ent.get("name", "")] + ent.get("aliases", [])
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
+        research_items = matching_candidate_research(
+            manual_sources,
+            candidate_kind="entity_candidate",
+            subject_type=entity_type,
+            names=names,
+        )
+        research_items = [
+            item for item in research_items if not _is_retracted(item, slug)
+        ]
+        research_sources = {item["source"] for item in research_items}
+        m_hits = [item for item in m_hits if item["source"] not in research_sources]
         if entity_type == "person":
             hit_srcs = {s["source"] for s in m_hits}
             m_hits = m_hits + [w for w in _witness_items(manual_sources, names)
@@ -624,10 +748,10 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
         # "a page needs at least one source": zero real mentions still
         # skips the page even when owner_verdict is graduate.
         required_mentions = 1 if ent.get("owner_verdict") == "graduate" else _ENTITY_MIN_MENTIONS.get(entity_type, 1)
-        if len(a_hits) < required_mentions and not m_hits:
+        if len(a_hits) < required_mentions and not m_hits and not research_items:
             continue  # needs a few real mentions to be worth a page
         primary, supporting = split_primary_supporting(m_hits)
-        cited_items = a_hits + primary
+        cited_items = a_hits + research_items + primary
         sources = [x["source"] for x in cited_items + supporting]
         taken_slugs.add(slug)
         name = ent.get("name", slug)
@@ -713,11 +837,35 @@ def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
             if any(keyword in haystack for keyword in keywords):
                 answer_hits.append(item)
         for item in manual_sources.values():
+            if item.get("kind") == "candidate_research":
+                continue
             haystack = item["body"].lower()
             if any(keyword in haystack for keyword in keywords):
                 manual_hits.append(item)
+        eligible_theme_slugs = {
+            (entry.get("slug") or slugify(entry.get("name", "")))
+            for entry in (theme_roster or {}).get("entities", [])
+            if entry.get("page_eligible") is True and not entry.get("maps_to_focus")
+        }
+        research_items = (
+            matching_candidate_research(
+                manual_sources,
+                candidate_kind="entity_candidate",
+                subject_type="theme",
+                names=[spec["title"], theme],
+            )
+            if theme in eligible_theme_slugs
+            else []
+        )
+        research_items = [
+            item for item in research_items if not _is_retracted(item, theme)
+        ]
+        research_sources = {item["source"] for item in research_items}
+        manual_hits = [
+            item for item in manual_hits if item["source"] not in research_sources
+        ]
         primary_sources, supporting_sources = split_primary_supporting(manual_hits)
-        hits = answer_hits + primary_sources
+        hits = answer_hits + research_items + primary_sources
         if not hits and not supporting_sources:
             continue
         title = spec["title"]

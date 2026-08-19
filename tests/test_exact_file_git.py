@@ -155,6 +155,128 @@ class ExactFileGitTests(unittest.TestCase):
                 push=False,
             )
 
+    def test_missing_nested_target_is_created_inside_closed_transaction(self):
+        marker = "<!-- exact-file:new:v1 -->"
+        target = "sources/candidate-research/focus_candidate/new.md"
+
+        def decide(snapshot: exact_file_git.Snapshot) -> exact_file_git.ExactFilePlan:
+            self.assertIsNone(snapshot[target])
+            return exact_file_git.ExactFilePlan(
+                ((target, marker + "\n"),), target, marker, "Create exact source"
+            )
+
+        result = exact_file_git.resolve_exact_file_transaction(
+            vault_root=self.tmp,
+            declared_paths=(target,),
+            decide=decide,
+            validate=lambda snapshot, plan: self.assertEqual(
+                snapshot[plan.marker_path], marker + "\n"
+            ),
+            push=False,
+        )
+        self.assertTrue(result.changed)
+        self.assertEqual((self.tmp / target).read_text(), marker + "\n")
+        self.assertEqual(_run(self.tmp, "status", "--porcelain").stdout, "")
+
+        for unsafe in ("a//b.md", "a/./b.md", "a\\b.md", "x" * 1025):
+            with (
+                self.subTest(unsafe=unsafe),
+                self.assertRaises(exact_file_git.ExactFileTransactionError),
+            ):
+                exact_file_git.resolve_exact_file_transaction(
+                    vault_root=self.tmp,
+                    declared_paths=(unsafe,),
+                    decide=lambda _snapshot: None,  # type: ignore[arg-type,return-value]
+                    validate=lambda _snapshot, _plan: None,
+                    push=False,
+                )
+
+    def test_adopted_marker_commits_projection_repair_but_returns_first_commit(self):
+        marker = "<!-- exact-file:adopt:v1 -->"
+        (self.tmp / "record.md").write_text(marker + "\n", encoding="utf-8")
+        _run(self.tmp, "add", "record.md")
+        _run(self.tmp, "commit", "-m", "introduce marker")
+        introducing = _run(self.tmp, "rev-parse", "HEAD").stdout.strip()
+        projection = "state/nested/projection.json"
+
+        def decide(snapshot: exact_file_git.Snapshot) -> exact_file_git.ExactFilePlan:
+            writes = (
+                ()
+                if snapshot[projection] == '{"repaired":true}\n'
+                else ((projection, '{"repaired":true}\n'),)
+            )
+            return exact_file_git.ExactFilePlan(
+                writes, "record.md", marker, "Repair exact projection"
+            )
+
+        def validate(snapshot, plan):
+            self.assertIn(plan.marker_line, snapshot[plan.marker_path].splitlines())
+            self.assertEqual(snapshot[projection], '{"repaired":true}\n')
+
+        result = exact_file_git.resolve_exact_file_transaction(
+            vault_root=self.tmp,
+            declared_paths=("record.md", projection),
+            decide=decide,
+            validate=validate,
+            push=False,
+        )
+        self.assertFalse(result.changed)
+        self.assertEqual(result.commit_sha, introducing)
+        self.assertNotEqual(
+            _run(self.tmp, "rev-parse", "HEAD").stdout.strip(), introducing
+        )
+
+        (self.tmp / projection).write_text('{"stale":true}\n', encoding="utf-8")
+        _run(self.tmp, "add", projection)
+        _run(self.tmp, "commit", "-m", "stale projection")
+        replay = exact_file_git.resolve_exact_file_transaction(
+            vault_root=self.tmp,
+            declared_paths=("record.md", projection),
+            decide=decide,
+            validate=validate,
+            push=False,
+        )
+        self.assertFalse(replay.changed)
+        self.assertEqual(replay.commit_sha, introducing)
+
+    def test_discovery_subtree_is_bounded_and_preserves_raw_bytes(self):
+        subtree = self.tmp / "sources" / "candidate-research"
+        subtree.mkdir(parents=True)
+        raw_path = subtree / "raw.md"
+        raw_path.write_bytes(b"marker\xff")
+        seen = {}
+
+        def decide(snapshot, discovered):
+            seen.update(discovered)
+            return exact_file_git.ExactFilePlan(
+                (("record.md", "marker\n"),), "record.md", "marker", "Discover"
+            )
+
+        exact_file_git.resolve_exact_file_transaction(
+            vault_root=self.tmp,
+            declared_paths=("record.md",),
+            discovery_subtree="sources/candidate-research",
+            decide_with_discovery=decide,
+            validate_with_discovery=lambda snapshot, _discovered, plan: self.assertIn(
+                plan.marker_line, snapshot[plan.marker_path].splitlines()
+            ),
+            push=False,
+        )
+        self.assertEqual(seen["sources/candidate-research/raw.md"], b"marker\xff")
+
+    def test_invalid_utf8_declared_target_fails_closed(self):
+        (self.tmp / "record.md").write_bytes(b"marker\xff")
+        with self.assertRaisesRegex(
+            exact_file_git.ExactFileTransactionError, "not strict UTF-8"
+        ):
+            exact_file_git.resolve_exact_file_transaction(
+                vault_root=self.tmp,
+                declared_paths=("record.md",),
+                decide=lambda _snapshot: None,  # type: ignore[arg-type,return-value]
+                validate=lambda _snapshot, _plan: None,
+                push=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

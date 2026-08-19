@@ -4,7 +4,7 @@
     "framework": "lifehug/lifehug",
     "framework_version": 169,
     "revision": "vault-contract-v6",
-    "content_digest": "sha256:8be2e65d3e116edc6560a91ab0383ff41c008fb35c578b90e87480f4ba2fb022"
+    "content_digest": "sha256:0ee4af73521e9ca74803470ef088f5781b7276eb2c335dcf137671357cd48b6f"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -95,6 +95,7 @@
     "import_sources": {"path": "sources/imports", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "correction_sources": {"path": "sources/corrections", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "artifact_sources": {"path": "sources/artifacts", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "candidate_research_sources": {"path": "sources/candidate-research", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "wiki": {"path": "wiki", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "compiled_markdown_family", "version_field": null, "supported": []}},
     "state": {"path": "state", "kind": "directory", "required": false, "tracked": false, "schema": {"format": "directory", "version_field": null, "supported": []}},
     "question_candidates": {"path": "state/question_candidates.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
