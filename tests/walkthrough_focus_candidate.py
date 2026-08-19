@@ -23,7 +23,9 @@ from tests.walkthrough_candidate_research import SyntheticFileAuthority  # noqa:
 def main() -> int:
     fixture = FocusCandidateTests()
     turns = fixture.turns()
-    with tempfile.TemporaryDirectory(prefix="lifehug-focus-candidate-") as tmp:
+    with tempfile.TemporaryDirectory(
+        dir=ROOT.parent, prefix="lifehug-focus-candidate-"
+    ) as tmp:
         vault = Path(tmp)
         (vault / "state").mkdir()
         (vault / "sources").mkdir()

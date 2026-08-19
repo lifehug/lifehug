@@ -641,6 +641,9 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             # engine. No Conversation definition/session/delivery code is
             # copied into the child.
             "question_candidate.py",
+            # ADR 0021: Focus Candidate is another independently registered
+            # Conversation child and imports only the canonical lint engine.
+            "focus_candidate.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):

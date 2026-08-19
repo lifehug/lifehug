@@ -130,6 +130,13 @@ class RegistryContractTests(unittest.TestCase):
                 offenders.append(path.name)
         self.assertEqual(offenders, ["question_candidate.py"])
 
+    def test_only_focus_child_runtime_imports_parent_lint_engine(self):
+        offenders = []
+        for path in sorted(SYSTEM.glob("focus_candidate*.py")):
+            if "import conversation_lints" in path.read_text():
+                offenders.append(path.name)
+        self.assertEqual(offenders, ["focus_candidate.py"])
+
     def test_undeclared_and_traversal_assets_fail_closed(self):
         with self.assertRaises(registry.InteractionRegistryError):
             registry.compose_interaction_asset("question_candidate", "README.md")

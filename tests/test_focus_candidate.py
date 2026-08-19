@@ -137,7 +137,7 @@ class FocusCandidateTests(unittest.TestCase):
     def test_loader_resolves_one_active_candidate_and_rejects_lifecycle_or_duplicates(
         self,
     ):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir=ROOT.parent) as tmp:
             state = Path(tmp) / "state"
             state.mkdir()
             path = state / "focus_recommendations.json"

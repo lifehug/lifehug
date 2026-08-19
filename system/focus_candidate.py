@@ -14,6 +14,7 @@ import candidate_research
 import conversation_lints
 import interaction_registry
 from lifehug_core import REPO_DIR
+from vault_paths import read_vault_text, vault_data_path
 
 SCHEMA_VERSION = 1
 FOCUS_DIMENSIONS = (
@@ -125,8 +126,12 @@ def _nullable_text(value: object, *, name: str, maximum: int) -> str | None:
 
 
 def _state_path(vault_root: str | Path | None) -> Path:
-    root = Path(vault_root) if vault_root is not None else Path(REPO_DIR)
-    return root / "state" / "focus_recommendations.json"
+    root = Path(vault_root) if vault_root is not None else REPO_DIR
+    return vault_data_path("focus_recommendations", vault_root=root)
+
+
+def _vault_root(vault_root: str | Path | None) -> Path:
+    return Path(vault_root) if vault_root is not None else REPO_DIR
 
 
 def load_focus_candidate_subject(
@@ -134,9 +139,10 @@ def load_focus_candidate_subject(
 ) -> dict:
     """Resolve one recommendation from canonical state; never trust a client anchor."""
     candidate_id = _text(candidate_id, name="candidate_id", maximum=256)
-    path = _state_path(vault_root)
+    root = _vault_root(vault_root)
+    path = _state_path(root)
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(read_vault_text(path, vault_root=root, encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise FocusCandidateError(
             "cannot load canonical focus recommendations"
@@ -287,6 +293,17 @@ def _question_count(reply: str) -> int:
     )
 
 
+def lint_inherited_reply(
+    text: str, *, is_reply_to_substantive: bool = False, seam_ok: bool = False
+) -> list[dict]:
+    """Apply the one inherited Conversation lint authority."""
+    return conversation_lints.lint_turn(
+        text,
+        is_reply_to_substantive=is_reply_to_substantive,
+        seam_ok=seam_ok,
+    )
+
+
 def _is_explicit_confirmation(text: str) -> bool:
     return bool(
         _EXPLICIT_CONFIRMATION_RE.match(text)
@@ -353,7 +370,7 @@ def parse_focus_candidate_output(
         if action not in ACTIONS:
             raise FocusCandidateError("action is invalid")
         seam_ok = action == "offer_confirmation"
-        if conversation_lints.lint_turn(
+        if lint_inherited_reply(
             reply,
             is_reply_to_substantive=_is_substantive_latest(canonical),
             seam_ok=seam_ok,
@@ -588,7 +605,7 @@ def validate_focus_candidate_decision(
         raise FocusCandidateError("decision action/status combination is invalid")
     if value["reply"] is not None:
         reply = _text(value["reply"], name="decision.reply", maximum=MAX_REPLY_CHARS)
-        if conversation_lints.lint_turn(
+        if lint_inherited_reply(
             reply,
             is_reply_to_substantive=_is_substantive_latest(canonical),
             seam_ok=value["action"] == "offer_confirmation",

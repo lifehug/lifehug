@@ -7,7 +7,6 @@ import argparse
 import json
 from pathlib import Path
 
-import conversation_lints
 import focus_candidate
 from ai_provider import AIProviderError, call_ai, provider_status
 from lifehug_core import INTERACTIONS_DIR, _parse_simple_yaml, load_config
@@ -103,7 +102,7 @@ def score_predictions(fixtures: list[dict], predictions: list[dict]) -> dict:
             continue
         reply = prediction.get("reply")
         if isinstance(reply, str):
-            findings = conversation_lints.lint_turn(
+            findings = focus_candidate.lint_inherited_reply(
                 reply, seam_ok=fixture["expected_ready"]
             )
             totals["inherited_conversation"][0] += not findings
