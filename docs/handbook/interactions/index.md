@@ -41,9 +41,10 @@ An **Interaction** is defined once, precisely, in the
 situation — purpose, behavior contract, context recipe, scope, and evals,
 packaged as files any qualified model can execute. "Interaction" names
 the *definition*, not any one model's behavior, and not the code that
-runs it. Four exist today, each with its own handbook page:
+runs it. Five exist today, each with its own handbook page:
 [Conversation](conversation.md), [Question Judgment](question-judgment.md),
-[Focus Curation](focus-curation.md), and [Question Candidate](question-candidate.md).
+[Focus Curation](focus-curation.md), [Question Candidate](question-candidate.md),
+and [Entity Candidate](entity-candidate.md).
 
 The **three-way split** every interaction observes:
 
@@ -225,17 +226,17 @@ roster-fold dedupe layers beneath it are already the floor (see [Focuses
 |---|---|
 | The pattern's own definition | `interactions/README.md` |
 | Closed package registry | `interactions/registry.json` |
-| Five shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/`, `interactions/focus_candidate/` |
+| Six shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/`, `interactions/focus_candidate/`, `interactions/entity_candidate/` |
 | Registry, composition, and package audit | `system/interaction_registry.py` |
 | The flat-YAML parser every `interaction.yaml` depends on | `system/lifehug_core.py:557`, `_parse_simple_yaml` |
-| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals`, `lifehug.py focus-candidate-evals --json` |
+| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals`, `lifehug.py focus-candidate-evals --json`, `lifehug.py entity-candidate-evals --json` |
 | New-interaction checklist | `interactions/README.md`'s "The new-interaction checklist" section (12 steps: README → `interaction.yaml` → `prompt/` → `router/` if needed → `context/manifest.md` → `overlays/` → `evals/` → `plan/` if needed → vault-contract registration → `framework_files` registration → an ADR → no default seat until evals pass) |
 | Guard tests | `tests/test_interaction_evals.py`, `tests/test_conversation_router.py`, `tests/test_question_judgment.py`, `tests/test_focus_duplicate_curation.py` (repo-verify exact names before citing in a PR) |
 
 **Change-safely notes.** A new interaction that skips the
 definition/runtime/seat split, or ships without an eval harness, is a
 design defect per ADR 0002's Consequences — not a valid shortcut for a
-"simple" case. Behavior changes to any of the five interactions go
+"simple" case. Behavior changes to any of the six interactions go
 through their own `interactions/<name>/` files and evals, never through
 ad hoc edits to a runtime's prompt strings; a runtime-side divergence
 from the definition is a runtime bug, not a legitimate platform variant.

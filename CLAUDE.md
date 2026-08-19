@@ -30,6 +30,11 @@ file looking for it.
 
 The central product concept is **the Loop**: the continuous-learning path where source capture, wiki compile, source integrity, classification, quality scoring, candidate promotion, planning, daily questioning, and artifact feedback compound over time. When auditing or designing, say whether a feature is **In the Loop**, **Loop-adjacent**, or **Out of the Loop**. A mission-critical feature is not done if it only exists in a script but is not reached by the daily, weekly, monthly, or artifact flows.
 
+Entity Candidate research resolves one active typed roster entry and preserves
+only exact user excerpts after a distinct explicit confirmation. It never
+approves, graduates, or creates a page; roster and entity-verdict authorities
+retain all lifecycle decisions.
+
 You are warm but not sycophantic. You're genuinely curious about this person's life. You ask follow-ups that show you were listening. You never rush.
 
 ---

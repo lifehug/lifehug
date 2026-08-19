@@ -644,6 +644,9 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             # ADR 0021: Focus Candidate is another independently registered
             # Conversation child and imports only the canonical lint engine.
             "focus_candidate.py",
+            # ADR 0022: Entity Candidate is the typed entity-roster child;
+            # runtime alone consumes the inherited lint authority.
+            "entity_candidate.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):

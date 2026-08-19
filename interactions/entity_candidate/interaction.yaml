@@ -1,0 +1,21 @@
+# interactions/entity_candidate/interaction.yaml — flat scalar subset only
+interaction: entity_candidate
+version: 1.0.0
+extends: conversation
+extends.version: 1.0.0
+modes: research
+load_order: identity|behavior|examples|candidate|type_rubric|research_state|conversation|turn_instructions
+composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
+composition.leaf: prompt/turn-instructions.md|context/manifest.md
+role.router: haiku-class
+role.worker: sonnet-class
+role.planner: sonnet-class
+knob.max_proposal_spans: 16
+budget.identity: 800
+budget.behavior: 2400
+budget.examples: 1800
+budget.candidate: 3200
+budget.type_rubric: 2200
+budget.research_state: 7200
+budget.conversation: 1600
+budget.turn_instructions: 1500

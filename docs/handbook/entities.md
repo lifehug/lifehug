@@ -6,6 +6,13 @@ nav_order: 8
 
 # Entities & Graduation
 
+## Candidate research
+
+Entity Candidate can preserve exact user-grounded research for an active typed
+roster entry. Completion creates a source only: qualification, page
+eligibility, Focus mapping, and owner verdicts remain unchanged until their
+separate lifecycle authorities act.
+
 ## 1. What it does & what it's for
 
 Say you've mentioned your childhood next-door neighbor, "Mrs. Alvarez," in

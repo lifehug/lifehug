@@ -80,7 +80,7 @@ READ_ONLY_COMMANDS = frozenset({
     # focus_recommendations.json.
     "focus-dupes",
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
-    "focus-candidate-evals", "focus-candidate-prompt",
+    "focus-candidate-evals", "focus-candidate-prompt", "entity-candidate-evals", "entity-candidate-prompt",
     "planner-report", "progress", "quality-stats", "question-candidate-evals",
     "question-candidate-prompt", "roadmap", "serve",
     "source-findings", "source-scan", "status", "weekly-summary",
@@ -97,7 +97,7 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     "arc-plan", "arc-thread-offers",
     "book-offers", "candidates-auto-promote", "candidates-promote",
     "candidates-promotion-receipt",
-    "focus-candidate-complete",
+    "focus-candidate-complete", "entity-candidate-complete",
     "candidates-promote-neighborhood", "candidates-update", "classify-story",
     "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
     "connector-fetch",
@@ -1285,6 +1285,19 @@ def cmd_focus_candidate_complete(args: argparse.Namespace) -> int:
     return run_python("focus_candidate.py", flags)
 
 
+def cmd_entity_candidate_prompt(args: argparse.Namespace) -> int:
+    return run_python(
+        "entity_candidate.py", ["prompt", "--candidate-id", args.candidate_id]
+    )
+
+
+def cmd_entity_candidate_complete(args: argparse.Namespace) -> int:
+    flags = ["complete", "--candidate-id", args.candidate_id, "--json"]
+    if args.no_push:
+        flags.append("--no-push")
+    return run_python("entity_candidate.py", flags)
+
+
 def cmd_conversation_arc_prompt(_args: argparse.Namespace) -> int:
     return run_python("conversation.py", ["arc-prompt"])
 
@@ -1359,6 +1372,13 @@ def cmd_focus_candidate_evals(args: argparse.Namespace) -> int:
     if args.live:
         flags.append("--live")
     return run_python("focus_candidate_evals.py", flags)
+
+
+def cmd_entity_candidate_evals(args: argparse.Namespace) -> int:
+    flags = ["--json"] if args.json else []
+    if args.live:
+        flags.append("--live")
+    return run_python("entity_candidate_evals.py", flags)
 
 
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
@@ -2550,6 +2570,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_focus_candidate_complete)
 
+    p = sub.add_parser("entity-candidate-prompt", help="stdin research state -> Entity Candidate prompt")
+    p.add_argument("--candidate-id", required=True)
+    p.set_defaults(func=cmd_entity_candidate_prompt)
+
+    p = sub.add_parser("entity-candidate-complete", help="complete confirmed Entity Candidate research; never graduates")
+    p.add_argument("--candidate-id", required=True)
+    p.add_argument("--no-push", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_entity_candidate_complete)
+
     p = sub.add_parser("conversation-arc-prompt", help="stdin JSON -> the arc-card planning prompt")
     p.set_defaults(func=cmd_conversation_arc_prompt)
 
@@ -2582,6 +2612,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_focus_candidate_evals)
+
+    p = sub.add_parser("entity-candidate-evals", help="Run Entity Candidate evals")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_entity_candidate_evals)
 
     p = sub.add_parser(
         "route",

@@ -1,0 +1,21 @@
+# Entity Candidate eval gates — flat scalar subset only
+cap.reply_chars: 2200
+research_gates.inherited_conversation.compliance: 1.0
+research_gates.readiness.false_positive_rate: 0.0
+research_gates.grounding.compliance: 1.0
+research_gates.identity_safety.compliance: 1.0
+research_gates.one_question.compliance: 1.0
+research_gates.next_gap.accuracy: 0.85
+research_gates.readiness.recall: 0.90
+research_gates.type_specific.precision: 1.0
+research_gates.type_specific.recall: 1.0
+research_gates.type_specific.person.precision: 1.0
+research_gates.type_specific.person.recall: 1.0
+research_gates.type_specific.place.precision: 1.0
+research_gates.type_specific.place.recall: 1.0
+research_gates.type_specific.period.precision: 1.0
+research_gates.type_specific.period.recall: 1.0
+research_gates.type_specific.object.precision: 1.0
+research_gates.type_specific.object.recall: 1.0
+research_gates.type_specific.theme.precision: 1.0
+research_gates.type_specific.theme.recall: 1.0
