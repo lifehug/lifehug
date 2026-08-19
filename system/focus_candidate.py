@@ -44,14 +44,40 @@ MAX_PROPOSAL_SPANS = 16
 MAX_REPLY_CHARS = 2_200
 MAX_PREVIOUS_QUESTION_CHARS = 2_200
 _REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+# Confirmation is a closed, whole-span language rather than a positive prefix.
+# A leading "yes" is not consent when it is qualified or negated later in the
+# same exact user span.
 _EXPLICIT_CONFIRMATION_RE = re.compile(
-    r"^\s*(?:yes\b|i confirm\b|confirmed\b|that(?:'s| is) right\b|"
-    r"looks right\b|go ahead\b|preserve (?:it|this|these)\b)",
+    r"^\s*(?:"
+    r"yes(?:\s*,?\s*(?:please\s+)?preserve\s+(?:it|this|these)"
+    r"(?:\s+exact)?(?:\s+(?:research|excerpts))?)?"
+    r"|i\s+confirm(?:\s+(?:it|this|these)(?:\s+exact)?"
+    r"(?:\s+(?:research|excerpts))?)?"
+    r"|confirmed"
+    r"|that(?:'s|\s+is)\s+right"
+    r"|looks\s+right"
+    r"|go\s+ahead"
+    r"|preserve\s+(?:it|this|these)(?:\s+exact)?"
+    r"(?:\s+(?:research|excerpts))?"
+    r")\s*[.!]*\s*$",
     re.IGNORECASE,
 )
 _AUTHORITY_CLAIM_RE = re.compile(
-    r"\b(?:i|we)\s+(?:approved|created|scaffolded|wrote|saved|persisted|"
-    r"committed|pushed|promoted)\b|\bcommit\s+[0-9a-f]{7,40}\b",
+    r"\b(?:i|we)\s+(?:(?:have|has|had|will)\s+)?"
+    r"(?:approved|created|scaffolded|wrote|saved|persisted|committed|"
+    r"pushed|promoted)\b"
+    r"|\b(?:the|a|your)\s+(?:focus|recommendation|research|"
+    r"candidate\s+research|commit)\s+(?:(?:has|have)\s+been\s+|was\s+|is\s+)?"
+    r"(?:approved|created|scaffolded|written|saved|persisted|committed|"
+    r"pushed|promoted)\b"
+    r"|\bcommit\s+[0-9a-f]{7,40}\b",
+    re.IGNORECASE,
+)
+_INTERNAL_SCHEMA_KEY_RE = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(name) for name in FOCUS_DIMENSIONS)
+    + r"|schema_version|candidate_id|subject_revision|assessment_revision|"
+    r"decision_revision|dimension_evidence|evidence_spans|confirmation_span)\b",
     re.IGNORECASE,
 )
 _INPUT_KEYS = frozenset(
@@ -149,20 +175,27 @@ def load_focus_candidate_subject(
         ) from exc
     if not isinstance(state, dict) or state.get("version") != 1:
         raise FocusCandidateError("focus recommendation state schema is invalid")
-    matches: list[dict] = []
+    matches: list[tuple[str, dict]] = []
+    allowed_statuses = {
+        "recommendations": {"pending", "approved"},
+        "dismissed": {"dismissed", "expired"},
+    }
     for collection in ("recommendations", "dismissed"):
         rows = state.get(collection, [])
         if not isinstance(rows, list):
             raise FocusCandidateError(f"focus recommendation {collection} is invalid")
-        matches.extend(
-            row
-            for row in rows
-            if isinstance(row, dict) and row.get("id") == candidate_id
-        )
+        for row in rows:
+            if not isinstance(row, dict) or row.get("id") != candidate_id:
+                continue
+            if row.get("status") not in allowed_statuses[collection]:
+                raise FocusCandidateError(
+                    "focus recommendation collection/status contradiction"
+                )
+            matches.append((collection, row))
     if len(matches) != 1:
         raise FocusCandidateError("focus candidate id must resolve exactly once")
     try:
-        subject = candidate_research.build_focus_candidate_subject(matches[0])
+        subject = candidate_research.build_focus_candidate_subject(matches[0][1])
         return candidate_research.validate_candidate_research_subject(
             subject, require_active=True
         )
@@ -304,6 +337,34 @@ def lint_inherited_reply(
     )
 
 
+def lint_focus_candidate_reply(
+    text: str, *, is_reply_to_substantive: bool = False, seam_ok: bool = False
+) -> list[dict]:
+    """Apply inherited Conversation lints plus this Interaction's authority guard."""
+    findings = lint_inherited_reply(
+        text,
+        is_reply_to_substantive=is_reply_to_substantive,
+        seam_ok=seam_ok,
+    )
+    if _AUTHORITY_CLAIM_RE.search(text):
+        findings.append(
+            {
+                "lint": "focus_candidate_authority_claim",
+                "detail": "reply claims lifecycle or durable-write authority",
+                "span": [0, len(text)],
+            }
+        )
+    if _INTERNAL_SCHEMA_KEY_RE.search(text):
+        findings.append(
+            {
+                "lint": "focus_candidate_schema_leak",
+                "detail": "reply exposes an internal Focus Candidate schema key",
+                "span": [0, len(text)],
+            }
+        )
+    return findings
+
+
 def _is_explicit_confirmation(text: str) -> bool:
     return bool(
         _EXPLICIT_CONFIRMATION_RE.match(text)
@@ -370,14 +431,12 @@ def parse_focus_candidate_output(
         if action not in ACTIONS:
             raise FocusCandidateError("action is invalid")
         seam_ok = action == "offer_confirmation"
-        if lint_inherited_reply(
+        if lint_focus_candidate_reply(
             reply,
             is_reply_to_substantive=_is_substantive_latest(canonical),
             seam_ok=seam_ok,
         ):
             raise FocusCandidateError("reply violates inherited Conversation lints")
-        if _AUTHORITY_CLAIM_RE.search(reply):
-            raise FocusCandidateError("reply claims lifecycle or durability authority")
         next_gap = proposal["next_gap"]
         if next_gap is not None and next_gap not in FOCUS_DIMENSIONS:
             raise FocusCandidateError("next_gap is invalid")
@@ -593,8 +652,12 @@ def validate_focus_candidate_decision(
         or value["subject_revision"] != canonical["subject_revision"]
     ):
         raise FocusCandidateError("focus candidate decision is stale")
-    if value["status"] not in STATUSES:
+    if not isinstance(value["status"], str) or value["status"] not in STATUSES:
         raise FocusCandidateError("decision status is invalid")
+    if value["action"] is not None and not isinstance(value["action"], str):
+        raise FocusCandidateError("decision action is invalid")
+    if type(value["ready"]) is not bool or type(value["complete"]) is not bool:
+        raise FocusCandidateError("decision ready and complete must be booleans")
     matrix = {
         "continue": {"ask_gap", "continue"},
         "awaiting_confirmation": {"offer_confirmation"},
@@ -605,14 +668,15 @@ def validate_focus_candidate_decision(
         raise FocusCandidateError("decision action/status combination is invalid")
     if value["reply"] is not None:
         reply = _text(value["reply"], name="decision.reply", maximum=MAX_REPLY_CHARS)
-        if lint_inherited_reply(
+        if lint_focus_candidate_reply(
             reply,
             is_reply_to_substantive=_is_substantive_latest(canonical),
             seam_ok=value["action"] == "offer_confirmation",
-        ) or _AUTHORITY_CLAIM_RE.search(reply):
+        ):
             raise FocusCandidateError("decision reply violates inherited authority")
     else:
         reply = None
+    assessment = None
     if value["assessment"] is not None:
         assessment = candidate_research.validate_research_assessment(
             value["assessment"],
@@ -646,8 +710,32 @@ def validate_focus_candidate_decision(
         ):
             raise FocusCandidateError("offer_confirmation decision shape is invalid")
     elif action == "accept_confirmation":
-        if next_gap is not None or reply is None or not value["complete"]:
+        if (
+            assessment is None
+            or next_gap is not None
+            or reply is None
+            or value["ready"] is not True
+            or value["complete"] is not True
+            or assessment["readiness"]["ready"] is not True
+            or assessment["complete"] is not True
+        ):
             raise FocusCandidateError("accept_confirmation decision shape is invalid")
+        confirmation = assessment["confirmation"]
+        if (
+            confirmation is None
+            or confirmation["evidence"]["turn_id"] != canonical["latest_turn_id"]
+        ):
+            raise FocusCandidateError("completion confirmation is not current")
+        latest_turn = next(
+            turn
+            for turn in canonical["authoritative_turns"]
+            if turn["turn_id"] == canonical["latest_turn_id"]
+        )
+        evidence = confirmation["evidence"]
+        if not _is_explicit_confirmation(
+            latest_turn["text"][evidence["start"] : evidence["end"]]
+        ):
+            raise FocusCandidateError("completion confirmation is not explicit consent")
     elif next_gap is not None or value["complete"]:
         raise FocusCandidateError("invalid decision carries authoritative facts")
     return dict(value)

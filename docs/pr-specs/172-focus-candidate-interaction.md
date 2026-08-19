@@ -67,9 +67,11 @@ or the existing approval policy.
   concrete event/observation, and at least two distinct worthwhile generated
   seed questions exist. Seed questions are always `evidence=false`.
 - Readiness and completeness are deterministic runtime results, never trusted
-  booleans from the model. Completion additionally requires a distinct exact
-  user confirmation span bound to the current assessment revision. Evidence
-  and confirmation may not overlap. A request to confirm is not confirmation.
+  booleans from the model. Completion additionally requires a distinct exact,
+  closed whole-span affirmative user confirmation bound to the current
+  assessment revision. Qualified or negated phrases (for example, "Yes, but
+  do not preserve this research") are not confirmation. Evidence and
+  confirmation may not overlap. A request to confirm is not confirmation.
 - Conversation is natural, not a checklist. On each turn the worker selects
   the highest-value unsupported dimension; it may ask before, during, or after
   other substantive exchange. It asks at most one open question, obeys all
@@ -213,7 +215,8 @@ decision adds canonical `subject`, `assessment`, `ready`, `complete`,
 all runtime-derived. `accept_confirmation` is valid only when the supplied
 prior assessment was already ready before the latest turn, adds no
 evidence/dimensions/seed questions, and `confirmation_span` is an exact distinct
-`evidence_kind=confirmation` user slice; other actions require it to be null.
+`evidence_kind=confirmation` user slice with closed whole-span affirmative
+semantics; other actions require it to be null.
 `offer_confirmation` is valid only when ready. `ask_gap` requires exactly one
 question, a currently unsupported `next_gap`, and no checklist/schema wording.
 All other actions require `next_gap=null`; replies on every action pass the

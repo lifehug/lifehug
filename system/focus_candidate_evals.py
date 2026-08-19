@@ -102,11 +102,13 @@ def score_predictions(fixtures: list[dict], predictions: list[dict]) -> dict:
             continue
         reply = prediction.get("reply")
         if isinstance(reply, str):
-            findings = focus_candidate.lint_inherited_reply(
+            findings = focus_candidate.lint_focus_candidate_reply(
                 reply, seam_ok=fixture["expected_ready"]
             )
             totals["inherited_conversation"][0] += not findings
-            totals["one_question"][0] += reply.count("?") <= 1
+            totals["one_question"][0] += not any(
+                finding["lint"] == "one_question_per_turn" for finding in findings
+            )
         quotes = prediction.get("evidence_quotes")
         grounded = isinstance(quotes, list) and all(
             isinstance(quote, str)

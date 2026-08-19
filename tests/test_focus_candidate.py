@@ -175,6 +175,24 @@ class FocusCandidateTests(unittest.TestCase):
                             "rec-synthetic-harbor", vault_root=tmp
                         )
 
+            # Collection membership is lifecycle authority; a tombstoned row
+            # cannot be made active by a forged payload status.
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "recommendations": [],
+                        "dismissed": [self.recommendation("pending")],
+                    }
+                )
+            )
+            with self.assertRaisesRegex(
+                focus.FocusCandidateError, "collection/status contradiction"
+            ):
+                focus.load_focus_candidate_subject(
+                    "rec-synthetic-harbor", vault_root=tmp
+                )
+
     def test_prompt_exact_composes_and_treats_candidate_as_untrusted(self):
         prompt = focus.build_focus_candidate_prompt(
             self.payload(), current_subject=self.subject()
@@ -308,6 +326,12 @@ class FocusCandidateTests(unittest.TestCase):
         )
         self.assertEqual(decision["status"], "complete")
         self.assertTrue(decision["complete"])
+        self.assertEqual(
+            focus.validate_focus_candidate_decision(
+                decision, payload=payload, current_subject=self.subject()
+            ),
+            decision,
+        )
         authority = MemoryAuthority()
         loader = self.subject
         first = focus.resolve_focus_candidate_completion(
@@ -370,6 +394,56 @@ class FocusCandidateTests(unittest.TestCase):
             )["status"],
             "invalid",
         )
+
+    def test_qualified_confirmation_and_indirect_authority_claims_fail_closed(self):
+        ready = self.ready_decision()["assessment"]
+        for confirmation in (
+            "Yes, but do not preserve this research.",
+            "I confirm not to preserve.",
+        ):
+            with self.subTest(confirmation=confirmation):
+                turns = self.turns() + [
+                    research.build_authoritative_user_turn("t4", confirmation)
+                ]
+                decision = focus.parse_focus_candidate_output(
+                    {
+                        "reply": "I will keep this available for your review.",
+                        "action": "accept_confirmation",
+                        "next_gap": None,
+                        "evidence_spans": [],
+                        "dimension_evidence": {
+                            name: [] for name in focus.FOCUS_DIMENSIONS
+                        },
+                        "seed_questions": [],
+                        "confirmation_span": {
+                            "turn_id": "t4",
+                            "start": 0,
+                            "end": len(confirmation),
+                        },
+                    },
+                    payload=self.payload(turns=turns, assessment=ready, latest="t4"),
+                    current_subject=self.subject(),
+                    confirmed_at="2026-08-18T20:00:00Z",
+                )
+                self.assertEqual(decision["status"], "invalid")
+
+        base = self.ready_proposal()
+        for reply in (
+            "The Focus was created.",
+            "I have approved this recommendation.",
+            "Your research has been saved.",
+            "A commit was pushed.",
+            "The next focus_identity is relationships.",
+        ):
+            with self.subTest(reply=reply):
+                self.assertEqual(
+                    focus.parse_focus_candidate_output(
+                        {**base, "reply": reply},
+                        payload=self.payload(),
+                        current_subject=self.subject(),
+                    )["status"],
+                    "invalid",
+                )
 
     def test_confirmation_cannot_create_readiness_in_the_same_turn(self):
         turns = self.turns(confirmed=True)
@@ -451,6 +525,40 @@ class FocusCandidateTests(unittest.TestCase):
             focus.validate_focus_candidate_decision(
                 decision, payload=payload, current_subject=self.subject()
             )
+
+        decision = self.ready_decision()
+        decision.update(
+            {
+                "status": "complete",
+                "action": "accept_confirmation",
+                "assessment": None,
+                "ready": True,
+                "complete": True,
+            }
+        )
+        source = {
+            key: value for key, value in decision.items() if key != "decision_revision"
+        }
+        decision["decision_revision"] = research.canonical_revision(source)
+        with self.assertRaises(focus.FocusCandidateError):
+            focus.validate_focus_candidate_decision(
+                decision, payload=payload, current_subject=self.subject()
+            )
+
+        for field, forged in (("ready", 1), ("complete", 0)):
+            with self.subTest(field=field):
+                decision = self.ready_decision()
+                decision[field] = forged
+                source = {
+                    key: value
+                    for key, value in decision.items()
+                    if key != "decision_revision"
+                }
+                decision["decision_revision"] = research.canonical_revision(source)
+                with self.assertRaises(focus.FocusCandidateError):
+                    focus.validate_focus_candidate_decision(
+                        decision, payload=payload, current_subject=self.subject()
+                    )
         decision = self.ready_decision()
         decision["status"] = "complete"
         source = {

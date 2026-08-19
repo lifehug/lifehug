@@ -27,8 +27,9 @@ does not own approval or Git writes.
 The first seven semantic dimensions map to v183's seven source dimensions.
 `grounded_evidence` remains a separate interaction gate satisfied by an exact
 concrete-event/observation span that also supports a source dimension. Trusted
-runtime code validates exact spans and recomputes readiness. A distinct later
-user span confirms a ready assessment. Completion delegates unchanged to
+runtime code validates exact spans and recomputes readiness. A distinct later,
+closed whole-span affirmative user span confirms a ready assessment; qualified
+or negated phrasing is not confirmation. Completion delegates unchanged to
 `candidate_research.resolve_candidate_research_source()`; the recommendation
 remains pending until the existing approval/autopilot authority acts.
 

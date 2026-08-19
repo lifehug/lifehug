@@ -37,6 +37,44 @@ class FocusCandidateEvalTests(unittest.TestCase):
         self.assertTrue(any("false_positive_rate" in item for item in failures))
         self.assertTrue(any("grounding.compliance" in item for item in failures))
 
+    def test_one_question_score_uses_the_inherited_lint_result(self):
+        fixture = {
+            "fixture_id": "quoted-question",
+            "candidate_id": "rec-synthetic-harbor",
+            "turns": [],
+            "expected_next_gap": "focus_identity",
+            "expected_ready": False,
+        }
+        prediction = {
+            "fixture_id": "quoted-question",
+            "candidate_id": "rec-synthetic-harbor",
+            "reply": 'You once asked, "was it hard?". What comes to mind now?',
+            "next_gap": "focus_identity",
+            "ready": False,
+            "evidence_quotes": [],
+        }
+        scores = evals.score_predictions([fixture], [prediction])
+        self.assertEqual(scores["one_question.compliance"], 1.0)
+
+    def test_recorded_eval_rejects_indirect_durability_claim(self):
+        fixture = {
+            "fixture_id": "durability-claim",
+            "candidate_id": "rec-synthetic-harbor",
+            "turns": [],
+            "expected_next_gap": "focus_identity",
+            "expected_ready": False,
+        }
+        prediction = {
+            "fixture_id": "durability-claim",
+            "candidate_id": "rec-synthetic-harbor",
+            "reply": "Your research has been saved.",
+            "next_gap": "focus_identity",
+            "ready": False,
+            "evidence_quotes": [],
+        }
+        scores = evals.score_predictions([fixture], [prediction])
+        self.assertEqual(scores["inherited_conversation.compliance"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
