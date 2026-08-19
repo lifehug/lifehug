@@ -26,6 +26,7 @@ class RegistryContractTests(unittest.TestCase):
                 ("focus_curation", "focus_curation"),
                 ("question_judgment", "question_judgment"),
                 ("question_candidate", "question_candidate"),
+                ("focus_candidate", "focus_candidate"),
             ],
         )
         for entry in value["interactions"]:
@@ -45,6 +46,41 @@ class RegistryContractTests(unittest.TestCase):
         self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["extends"], "conversation")
         self.assertEqual(manifest["extends.version"], "1.0.0")
+
+    def test_focus_candidate_has_distinct_identity_and_parent_lineage(self):
+        self.assertEqual(
+            registry.resolve_interaction_lineage("focus_candidate"),
+            ("conversation", "focus_candidate"),
+        )
+        manifest = registry.load_interaction_manifest("focus_candidate")
+        self.assertEqual(manifest["interaction"], "focus_candidate")
+        self.assertEqual(manifest["version"], "1.0.0")
+        self.assertEqual(manifest["extends"], "conversation")
+        self.assertEqual(manifest["extends.version"], "1.0.0")
+
+    def test_focus_candidate_composition_preserves_exact_parent_and_child_bytes(self):
+        composed = registry.compose_interaction_asset(
+            "focus_candidate", "prompt/behavior.md"
+        )
+        parent = (ROOT / "interactions/conversation/prompt/behavior.md").read_text()
+        child = (ROOT / "interactions/focus_candidate/prompt/behavior.md").read_text()
+        self.assertEqual(
+            composed,
+            "<!-- interaction:conversation asset:prompt/behavior.md -->\n"
+            + parent
+            + "\n<!-- interaction:focus_candidate asset:prompt/behavior.md -->\n"
+            + child,
+        )
+
+    def test_existing_interaction_assets_are_absent_from_focus_candidate_package(self):
+        child_files = {
+            path.relative_to(ROOT / "interactions/focus_candidate").as_posix()
+            for path in (ROOT / "interactions/focus_candidate").rglob("*")
+            if path.is_file()
+        }
+        self.assertNotIn("conversation.py", child_files)
+        self.assertNotIn("question_candidate.py", child_files)
+        self.assertNotIn("entity_candidate.py", child_files)
 
     def test_append_composition_reads_parent_then_child_with_provenance(self):
         composed = registry.compose_interaction_asset(

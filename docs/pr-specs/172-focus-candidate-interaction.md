@@ -132,7 +132,11 @@ build_focus_candidate_prompt(
 ) -> str
 
 parse_focus_candidate_output(
-    raw: object, *, payload: dict, current_subject: dict
+    raw: object,
+    *,
+    payload: dict,
+    current_subject: dict,
+    confirmed_at: str | None = None,
 ) -> dict
 
 validate_focus_candidate_decision(
@@ -206,13 +210,16 @@ assessment without duplicates/overlap, and recomputes every dimension and
 counter. `grounded_evidence` indices must name concrete spans. The normalized
 decision adds canonical `subject`, `assessment`, `ready`, `complete`,
 `decision_revision`, and `status` (`continue|awaiting_confirmation|complete`),
-all runtime-derived. `accept_confirmation` is valid only when the prior/current
-assessment is ready and `confirmation_span` is an exact distinct
+all runtime-derived. `accept_confirmation` is valid only when the supplied
+prior assessment was already ready before the latest turn, adds no
+evidence/dimensions/seed questions, and `confirmation_span` is an exact distinct
 `evidence_kind=confirmation` user slice; other actions require it to be null.
 `offer_confirmation` is valid only when ready. `ask_gap` requires exactly one
 question, a currently unsupported `next_gap`, and no checklist/schema wording.
 All other actions require `next_gap=null`; replies on every action pass the
-same inherited Conversation lint engine.
+same inherited Conversation lint engine. `accept_confirmation` additionally
+requires caller-supplied trusted UTC-seconds `confirmed_at`; model output never
+authors a timestamp, and retries reuse the original event timestamp.
 
 ### CLI and seat surface
 
