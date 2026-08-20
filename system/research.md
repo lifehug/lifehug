@@ -413,4 +413,9 @@ model any write capability. A non-null proposal/decision hash must be proved by
 the exact object at mutation time. The reusable exact-file Git adapter owns the
 writer/pull/commit/push order and invokes candidate-specific full-record
 validation after a rebase, so an unchanged marker cannot hide altered question
-bytes.
+bytes. The marker remains valid after answer filing changes its canonical bank
+row from unchecked to checked, with or without its answer annotation:
+replay hashes the full text first and strips only a terminal valid ISO answer
+date on mismatch, so arbitrary italic suffixes stay question text. The exact id
+and text revision remain bound, and malformed or tampered rows still fail
+closed (v187).

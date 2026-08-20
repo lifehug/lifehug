@@ -1,7 +1,7 @@
 {
-  "version": 186,
-  "released": "2026-08-19",
-  "changelog": "v186: fix: manual owner promotion now accepts needs_review candidates through the same exact-file Git receipt, replay, and adoption authority as other manually promotable candidates; auto-promotion and terminal-status refusals are unchanged.",
+  "version": 187,
+  "released": "2026-08-20",
+  "changelog": "v187: fix: answered candidate-promotion markers remain valid, so checking off one promoted question no longer blocks every later promotion; exact question identity and tamper checks remain fail-closed.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

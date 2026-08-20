@@ -1193,8 +1193,13 @@ and neighborhood paths all bind exact candidate/category/placement revisions,
 write one structured base64 marker, and return the canonical question id and
 Git commit. Git tree/history is the receipt authority, so exact retries return
 `changed:false` without trusting a candidate-store projection; conflicting
-bytes or revisions fail closed. Non-null proposal/decision hashes require the
-exact bound objects on the same call. The narrow `exact_file_git.py` adapter
+bytes or revisions fail closed. Once the promoted question is answered, its
+canonical checked row preserves the same receipt: checkbox/answer metadata may
+change, but replay strips only a valid terminal ISO answer date after checking
+the full text first, so the exact question id and text revision remain bound
+(v187).
+Non-null proposal/decision hashes require the exact bound objects on
+the same call. The narrow `exact_file_git.py` adapter
 owns the shared writer/Git/rebase order and requires full domain revalidation
 after a rejected push; marker presence alone is insufficient. The stable
 `candidates-promotion-receipt ... --json` command is the hosted handoff, with
