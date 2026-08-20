@@ -14,6 +14,7 @@ import json
 import re
 import sys
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 import exact_file_git
@@ -93,7 +94,9 @@ CANDIDATE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 MARKER_RE = re.compile(
     rf"^{re.escape(MARKER_PREFIX)}([A-Za-z0-9+/]+={{0,2}}){re.escape(MARKER_SUFFIX)}$"
 )
-QUESTION_LINE_RE = re.compile(r"^- \[ \] ([A-Z][0-9]+): (.+)$")
+UNCHECKED_QUESTION_LINE_RE = re.compile(r"^- \[ \] ([A-Z][0-9]+): (.+)$")
+CHECKED_QUESTION_LINE_RE = re.compile(r"^- \[x\] ([A-Z][0-9]+): (.+)$")
+ANSWER_ANNOTATION_RE = re.compile(r"^(.+) \*\((\d{4}-[^)\n]*)\)\*$")
 SOURCE_FIELDS = (
     "source_path",
     "source_id",
@@ -476,6 +479,43 @@ def _validate_marker_payload(payload: object) -> dict:
     }
 
 
+def _marker_question_facts(line: str) -> tuple[str, str, bool]:
+    unchecked = UNCHECKED_QUESTION_LINE_RE.fullmatch(line)
+    if unchecked:
+        question_id, question_text = unchecked.groups()
+        return question_id, question_text, False
+    checked = CHECKED_QUESTION_LINE_RE.fullmatch(line)
+    if checked:
+        question_id, question_text = checked.groups()
+        return question_id, question_text, True
+    raise CandidatePromotionError(
+        "promotion marker must immediately follow a canonical unchecked or "
+        "checked question"
+    )
+
+
+def _question_revision(question_id: str, question_text: str) -> str:
+    return question_candidate.canonical_revision(
+        {"question_id": question_id, "question": question_text}
+    )
+
+
+def _checked_question_without_answer_annotation(question_text: str) -> str | None:
+    match = ANSWER_ANNOTATION_RE.fullmatch(question_text)
+    if not match:
+        return None
+    original_text, answered_date = match.groups()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", answered_date):
+        raise CandidatePromotionError("checked question answer annotation is malformed")
+    try:
+        date.fromisoformat(answered_date)
+    except ValueError as exc:
+        raise CandidatePromotionError(
+            "checked question answer annotation is malformed"
+        ) from exc
+    return original_text
+
+
 def _marker_records(question_bank_text: str) -> list[tuple[dict, str, str]]:
     lines = question_bank_text.splitlines()
     records: list[tuple[dict, str, str]] = []
@@ -485,17 +525,17 @@ def _marker_records(question_bank_text: str) -> list[tuple[dict, str, str]]:
         payload = _decode_marker(line)
         if index == 0:
             raise CandidatePromotionError("promotion marker has no question line")
-        question_match = QUESTION_LINE_RE.fullmatch(lines[index - 1])
-        if not question_match:
-            raise CandidatePromotionError(
-                "promotion marker must immediately follow an unchecked question"
-            )
-        question_id, question_text = question_match.groups()
+        question_id, question_text, checked = _marker_question_facts(lines[index - 1])
         if question_id != payload["question_id"]:
             raise CandidatePromotionError("promotion marker question line id mismatch")
-        expected = question_candidate.canonical_revision(
-            {"question_id": question_id, "question": question_text}
-        )
+        expected = _question_revision(question_id, question_text)
+        if expected != payload["question_revision"] and checked:
+            without_annotation = _checked_question_without_answer_annotation(
+                question_text
+            )
+            if without_annotation is not None:
+                question_text = without_annotation
+                expected = _question_revision(question_id, question_text)
         if expected != payload["question_revision"]:
             raise CandidatePromotionError("promoted question bytes changed")
         records.append((payload, line, question_text))

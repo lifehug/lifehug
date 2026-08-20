@@ -1,6 +1,7 @@
 # ADR 0019: Git-tree candidate promotion receipts
 
 Date: 2026-08-18
+Amended: 2026-08-20 (v187, issue #179)
 Status: proposed
 
 ## Context
@@ -36,6 +37,17 @@ a crash is completed after candidate/question validation. Conflicting bytes or
 revisions fail closed. Existing equal text without the structured marker is
 never adopted.
 
+Marker replay accepts both lifecycle-valid question rows: the original
+unchecked `- [ ] QID: text` insertion and the canonical checked
+`- [x] QID: text` row, including the answer annotation produced when an answer
+is filed. Replay checks the full checked text first, then may strip only a
+terminal, valid ISO `*(YYYY-MM-DD)*` answer annotation and check the revision
+again. Thus arbitrary italic suffixes remain question text, while the canonical
+checkbox and answer-date annotation are lifecycle metadata rather than question
+identity. Any other checkbox state, malformed date-like suffix, changed id, or
+changed text fails closed. This keeps an older answered promotion from
+invalidating the global marker scan for every later promotion.
+
 `system/exact_file_git.py` is the one public, reusable Git transaction/adoption
 adapter beneath promotion. It accepts a closed set of exact relative paths and
 immutable-snapshot decision/validation callbacks; the returned plan cannot add
@@ -61,6 +73,8 @@ because it cannot be made safe or auditable.
   supply their own closed domain validator; it cannot write undeclared paths.
 - `candidate-promote` is safely retryable. A crash after bank write,
   projection write, commit, or push converges on one question and one receipt.
+- Answering a promoted question preserves its receipt, so later promotions can
+  revalidate the entire bank after the canonical unchecked-to-checked change.
 - The stable `candidates-promotion-receipt ... --json` door requires the
   caller-held candidate/category/placement revisions and returns the canonical
   question id and commit SHA needed by downstream filing.

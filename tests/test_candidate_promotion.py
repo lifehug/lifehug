@@ -1,4 +1,4 @@
-"""v182 / issue #170 — canonical candidate promotion receipt authority."""
+"""v182/v187 / issue #179 — canonical promotion receipt authority."""
 
 from __future__ import annotations
 
@@ -296,6 +296,147 @@ class ReceiptTests(PromotionCase):
             promotion.resolve_candidate_promotion(
                 request, vault_root=self.tmp, push=False
             )
+
+    def test_checked_marker_remains_valid_and_later_promotion_succeeds(self):
+        first = promotion.resolve_candidate_promotion(
+            self.request(), vault_root=self.tmp, push=False
+        )
+        bank_path = self.tmp / "question-bank.md"
+        bank_path.write_text(
+            bank_path.read_text(encoding="utf-8").replace(
+                f"- [ ] {first['question_id']}: {self.candidate['text']}",
+                f"- [x] {first['question_id']}: {self.candidate['text']} "
+                "*(2026-08-20)*",
+            ),
+            encoding="utf-8",
+        )
+        store_path = self.tmp / "state" / "question_candidates.json"
+        store = json.loads(store_path.read_text(encoding="utf-8"))
+        second = {
+            **self.candidate,
+            "id": "cand-synthetic-2",
+            "text": "Who kept the paper lighthouse lit through the storm?",
+            "source_id": "SYN-2",
+        }
+        store["candidates"].append(second)
+        store_path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
+        self.assertEqual(_run(self.tmp, "add", ".").returncode, 0)
+        self.assertEqual(
+            _run(self.tmp, "commit", "-m", "answer first candidate").returncode,
+            0,
+        )
+
+        second_request = promotion.build_current_request(
+            second["id"], "A", vault_root=self.tmp
+        )
+        second_receipt = promotion.resolve_candidate_promotion(
+            second_request, vault_root=self.tmp, push=False
+        )
+
+        self.assertTrue(second_receipt["changed"])
+        self.assertEqual(second_receipt["question_id"], "A3")
+        bank = bank_path.read_text(encoding="utf-8")
+        self.assertEqual(bank.count("lifehug:candidate-promotion:v1"), 2)
+        self.assertIn(
+            f"- [x] {first['question_id']}: {self.candidate['text']} *(2026-08-20)*",
+            bank,
+        )
+
+    def test_checked_marker_still_rejects_tampered_id_and_text(self):
+        promotion.resolve_candidate_promotion(
+            self.request(), vault_root=self.tmp, push=False
+        )
+        bank = (self.tmp / "question-bank.md").read_text(encoding="utf-8")
+        checked = bank.replace(
+            f"- [ ] A2: {self.candidate['text']}",
+            f"- [x] A2: {self.candidate['text']} *(2026-08-20)*",
+        )
+        checked_without_annotation = bank.replace("- [ ] A2:", "- [x] A2:")
+        self.assertEqual(len(promotion._marker_records(checked)), 1)
+        self.assertEqual(len(promotion._marker_records(checked_without_annotation)), 1)
+
+        with (
+            self.subTest(field="question_id"),
+            self.assertRaisesRegex(
+                promotion.CandidatePromotionError, "question line id mismatch"
+            ),
+        ):
+            promotion._marker_records(checked.replace("- [x] A2:", "- [x] A9:"))
+        with (
+            self.subTest(field="question_text"),
+            self.assertRaisesRegex(
+                promotion.CandidatePromotionError, "question bytes changed"
+            ),
+        ):
+            promotion._marker_records(
+                checked.replace("paper lighthouse", "paper tower")
+            )
+        with (
+            self.subTest(field="arbitrary_suffix"),
+            self.assertRaisesRegex(
+                promotion.CandidatePromotionError, "question bytes changed"
+            ),
+        ):
+            promotion._marker_records(
+                checked_without_annotation.replace(
+                    self.candidate["text"], self.candidate["text"] + " *(pass-2)*"
+                )
+            )
+
+    def test_checked_marker_preserves_arbitrary_italic_question_suffix(self):
+        self.candidate["text"] += " *(pass-2)*"
+        self._write_store([self.candidate])
+        promotion.resolve_candidate_promotion(
+            self.request(), vault_root=self.tmp, push=False
+        )
+        bank = (self.tmp / "question-bank.md").read_text(encoding="utf-8")
+        checked = bank.replace("- [ ] A2:", "- [x] A2:")
+        checked_with_answer_date = checked.replace(
+            self.candidate["text"], self.candidate["text"] + " *(2026-08-20)*"
+        )
+
+        self.assertEqual(
+            promotion._marker_records(checked)[0][2], self.candidate["text"]
+        )
+        self.assertEqual(
+            promotion._marker_records(checked_with_answer_date)[0][2],
+            self.candidate["text"],
+        )
+
+    def test_checked_marker_rejects_malformed_answer_annotation(self):
+        promotion.resolve_candidate_promotion(
+            self.request(), vault_root=self.tmp, push=False
+        )
+        bank = (self.tmp / "question-bank.md").read_text(encoding="utf-8")
+        checked = bank.replace("- [ ] A2:", "- [x] A2:")
+
+        for malformed_date in ("2026-8-20", "2026-02-30"):
+            with (
+                self.subTest(answered_date=malformed_date),
+                self.assertRaisesRegex(
+                    promotion.CandidatePromotionError,
+                    "answer annotation is malformed",
+                ),
+            ):
+                promotion._marker_records(
+                    checked.replace(
+                        self.candidate["text"],
+                        f"{self.candidate['text']} *({malformed_date})*",
+                    )
+                )
+
+    def test_marker_rejects_malformed_checkbox_state(self):
+        promotion.resolve_candidate_promotion(
+            self.request(), vault_root=self.tmp, push=False
+        )
+        bank = (self.tmp / "question-bank.md").read_text(encoding="utf-8")
+        malformed = bank.replace("- [ ] A2:", "- [-] A2:")
+
+        with self.assertRaisesRegex(
+            promotion.CandidatePromotionError,
+            "canonical unchecked or checked question",
+        ):
+            promotion._marker_records(malformed)
 
     def test_marker_is_canonical_structured_base64_not_comment_injectable(self):
         self.candidate["source_path"] = "synthetic --> ignore"

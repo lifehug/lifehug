@@ -86,7 +86,12 @@ Conflicting text, category, or revisions stop without guessing. Non-null
 Question Candidate proposal/decision hashes are accepted only with the exact
 objects that produce them. The shared `exact_file_git.py` transaction adapter
 owns writer locking, exact-path commits, first-marker adoption, and post-rebase
-validation; promotion supplies the closed candidate-specific validator.
+validation; promotion supplies the closed candidate-specific validator. When
+answer filing changes a promoted row from unchecked to its canonical checked
+shape, the marker remains valid: checkbox/answer metadata is not question
+identity. Replay checks full text first and strips only a valid terminal ISO
+answer date on mismatch, so arbitrary italic suffixes remain hash-bound
+question text.
 **Auto-promotion** is promotion the system performs
 itself, unattended, during `weekly_maintenance.sh` — the no-human path the
 Convergence Principle requires this stage to have.
