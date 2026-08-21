@@ -19,6 +19,51 @@ FIXTURES_FILE = "fixtures.json"
 SAMPLE_PREDICTIONS_FILE = "sample_predictions.json"
 GATE_PREFIX = "placement_gates"
 
+# question-candidate-placement-aside (issue #181, Design §E): a second,
+# independent golden set — the ADR-0018 fixtures/predictions pair above
+# model `parse_question_candidate_output`'s frozen input/output shape
+# (Scope, "Out": that path stays untouched for the standalone CLI); the
+# placement aside/ask/settled behavior lives on the PARENT Conversation
+# turn contract instead (`conversation_delivery.parse_turn_output` +
+# `question_candidate.lint_placement_reply`/`validate_placement`), so it
+# gets its own fixture/prediction pair rather than overloading the frozen
+# one. Both pairs feed the SAME `placement_gates.*` gate prefix and the
+# SAME `check_gates` call — no scorer-checking change (Design §E).
+PLACEMENT_FIXTURES_FILE = "placement_fixtures.json"
+PLACEMENT_SAMPLE_PREDICTIONS_FILE = "placement_sample_predictions.json"
+REQUIRED_PLACEMENT_GOLDEN_IDS = frozenset({
+    "placement-assert-first-reply",
+    "placement-assert-never-repeated",
+    "placement-ask-once-no-category",
+    "placement-ask-unanswered-not-repeated",
+    "placement-user-disagrees-emits-move",
+    "placement-unprompted-later-turn-null",
+    "placement-unknown-letter-rejected",
+})
+#: The seven placement_gates.* classes (Design §E table), matching
+#: question_candidate.lint_placement_reply's finding ids minus the
+#: "placement." prefix.
+PLACEMENT_LINT_CLASSES = (
+    "aside_single_sentence",
+    "aside_not_a_question",
+    "ask_is_sole_question",
+    "never_repeated",
+    "no_roster_ids",
+    "no_gate_language",
+    "no_mechanism_talk",
+)
+#: Which lint classes apply on a turn of a given {placement_stage} — the
+#: stage-scoped three only fire on their own stage; the roster/gate/
+#: mechanism trio applies on every turn regardless of stage.
+_STAGE_SCOPED_PLACEMENT_LINTS = {
+    "assert": frozenset({"aside_single_sentence", "aside_not_a_question"}),
+    "ask": frozenset({"ask_is_sole_question"}),
+    "settled": frozenset({"never_repeated"}),
+}
+_ALWAYS_APPLICABLE_PLACEMENT_LINTS = frozenset(
+    {"no_roster_ids", "no_gate_language", "no_mechanism_talk"}
+)
+
 
 def _evals_dir(framework_root: str | Path | None = None) -> Path:
     if framework_root is None:
@@ -36,6 +81,138 @@ def load_sample_predictions(*, framework_root: str | Path | None = None) -> list
     path = _evals_dir(framework_root) / "goldens" / SAMPLE_PREDICTIONS_FILE
     value = json.loads(path.read_text(encoding="utf-8"))
     return value if isinstance(value, list) else []
+
+
+def load_placement_fixtures(*, framework_root: str | Path | None = None) -> list[dict]:
+    path = _evals_dir(framework_root) / "goldens" / PLACEMENT_FIXTURES_FILE
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return value if isinstance(value, list) else []
+
+
+def load_placement_sample_predictions(
+    *, framework_root: str | Path | None = None
+) -> list[dict]:
+    path = _evals_dir(framework_root) / "goldens" / PLACEMENT_SAMPLE_PREDICTIONS_FILE
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return value if isinstance(value, list) else []
+
+
+def validate_placement_fixture(entry: object) -> list[str]:
+    if not isinstance(entry, dict) or set(entry) != {"fixture_id", "roster", "turns"}:
+        return ["placement fixture must contain exact fixture_id/roster/turns keys"]
+    errors: list[str] = []
+    if not isinstance(entry["fixture_id"], str) or not entry["fixture_id"].strip():
+        errors.append("fixture_id must be non-empty")
+    try:
+        question_candidate.build_category_roster(entry["roster"])
+    except (TypeError, ValueError) as exc:
+        errors.append(f"roster invalid: {exc}")
+    turns = entry.get("turns")
+    if not isinstance(turns, list) or not turns:
+        errors.append("turns must be a non-empty list")
+        return errors
+    for index, turn in enumerate(turns):
+        if not isinstance(turn, dict) or set(turn) != {
+            "stage", "placement_question", "expected_placement"
+        }:
+            errors.append(f"turns[{index}] must contain exact stage/placement_question/expected_placement keys")
+            continue
+        if turn["stage"] not in question_candidate.VALID_PLACEMENT_STAGES:
+            errors.append(f"turns[{index}].stage is invalid")
+        expected = turn["expected_placement"]
+        if expected is not None and (
+            not isinstance(expected, dict) or set(expected) != {"category"}
+        ):
+            errors.append(f"turns[{index}].expected_placement is invalid")
+    return errors
+
+
+def validate_placement_fixtures(fixtures: object) -> list[str]:
+    if not isinstance(fixtures, list) or not fixtures:
+        return ["placement fixtures must be a non-empty list"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(fixtures):
+        if isinstance(entry, dict) and isinstance(entry.get("fixture_id"), str):
+            if entry["fixture_id"] in seen:
+                errors.append(f"placement fixture[{index}] duplicate fixture_id")
+            seen.add(entry["fixture_id"])
+        errors.extend(
+            f"placement fixture[{index}] {item}" for item in validate_placement_fixture(entry)
+        )
+    missing = REQUIRED_PLACEMENT_GOLDEN_IDS - seen
+    if missing:
+        errors.append(f"placement fixtures missing required golden ids: {sorted(missing)}")
+    return errors
+
+
+def score_placement_goldens(fixtures: list[dict], predictions: list[dict]) -> dict[str, dict]:
+    """Score the seven placement_gates.* classes over the placement goldens.
+
+    Each fixture is a small transcript (1-4 turns); each parallel prediction
+    supplies the reply text (and the raw, pre-roster-validation `placement`
+    value) a model produced for each of those turns. Per turn:
+    `question_candidate.lint_placement_reply` runs against the turn's
+    `{placement_stage}`, scored into whichever of the seven classes apply
+    at that stage (Design §E; the roster/gate/mechanism trio applies on
+    every turn, the other four are stage-scoped); the raw `placement` value
+    is passed through `question_candidate.validate_placement` (exercising
+    BOTH validation layers together, exactly as a real caller would) and
+    compared against the fixture's `expected_placement` — golden
+    ``placement-unknown-letter-rejected`` proves an unknown roster letter
+    normalizes to no placement without a scored lint failure.
+    """
+    by_id = {
+        entry["fixture_id"]: entry
+        for entry in predictions
+        if isinstance(entry, dict) and isinstance(entry.get("fixture_id"), str)
+    }
+    counts = {name: [0, 0] for name in PLACEMENT_LINT_CLASSES}
+    field_correct = 0
+    field_total = 0
+    unmatched: list[str] = []
+    for fixture in fixtures:
+        fixture_id = fixture["fixture_id"]
+        prediction = by_id.get(fixture_id)
+        if prediction is None:
+            unmatched.append(fixture_id)
+            continue
+        roster = question_candidate.build_category_roster(fixture["roster"])
+        pred_turns = prediction.get("turns") or []
+        for turn, pred_turn in zip(fixture["turns"], pred_turns):
+            stage = turn["stage"]
+            message = pred_turn.get("message", "")
+            findings = {
+                item["lint"].split(".", 1)[1]
+                for item in question_candidate.lint_placement_reply(
+                    message,
+                    stage=stage,
+                    roster=roster,
+                    placement_question=turn.get("placement_question"),
+                )
+            }
+            applicable = _ALWAYS_APPLICABLE_PLACEMENT_LINTS | _STAGE_SCOPED_PLACEMENT_LINTS.get(
+                stage, frozenset()
+            )
+            for lint_class in applicable:
+                counts[lint_class][1] += 1
+                counts[lint_class][0] += lint_class not in findings
+            validated = question_candidate.validate_placement(
+                pred_turn.get("placement"), roster=roster
+            )
+            applied = {"category": validated["category_id"]} if validated else None
+            field_total += 1
+            field_correct += applied == turn["expected_placement"]
+    scores = {
+        name: {"correct": values[0], "total": values[1], "compliance": _ratio(*values)}
+        for name, values in counts.items()
+    }
+    scores["_placement_field_accuracy"] = _ratio(field_correct, field_total)
+    scores["_unmatched_placement_fixtures"] = unmatched
+    scores["_missing_placement_fixtures"] = sorted(
+        {f["fixture_id"] for f in fixtures} - set(by_id)
+    )
+    return scores
 
 
 def load_gates(
@@ -309,12 +486,20 @@ def run() -> tuple[int, str]:
     report.append("Layer 0 (registry/composition audit): PASSED")
     fixtures = load_fixtures()
     fixture_errors = validate_fixtures(fixtures)
+    placement_fixtures = load_placement_fixtures()
+    fixture_errors = fixture_errors + validate_placement_fixtures(placement_fixtures)
     if fixture_errors:
         report.append(f"Layer 1 (synthetic fixtures): FAILED {len(fixture_errors)}")
         report.extend(f"  ✗ {error}" for error in fixture_errors)
         return 1, "\n".join(report)
-    report.append(f"Layer 1 (synthetic fixtures): PASSED {len(fixtures)}")
+    report.append(
+        f"Layer 1 (synthetic fixtures): PASSED {len(fixtures)} + "
+        f"{len(placement_fixtures)} placement"
+    )
     scores = score_predictions(fixtures, load_sample_predictions())
+    scores.update(
+        score_placement_goldens(placement_fixtures, load_placement_sample_predictions())
+    )
     failures = check_gates(scores, load_gates())
     if failures:
         report.append(f"Layer 2 (sample gates): FAILED {len(failures)}")

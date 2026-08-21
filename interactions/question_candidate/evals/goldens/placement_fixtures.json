@@ -1,0 +1,238 @@
+[
+  {
+    "fixture_id": "placement-assert-first-reply",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "assert",
+        "placement_question": null,
+        "expected_placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-assert-never-repeated",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "assert",
+        "placement_question": null,
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-ask-once-no-category",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "ask",
+        "placement_question": "Where does this belong — your childhood, or Boatworks?",
+        "expected_placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-ask-unanswered-not-repeated",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "ask",
+        "placement_question": "Where does this belong — your childhood, or Boatworks?",
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-user-disagrees-emits-move",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "assert",
+        "placement_question": null,
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": {"category": "W"}
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-unprompted-later-turn-null",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "assert",
+        "placement_question": null,
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": {"category": "W"}
+      },
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-unknown-letter-rejected",
+    "roster": [
+      {
+        "category_id": "P",
+        "label": "Places that shaped me",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-places",
+        "focus_label": "Places that shaped me"
+      },
+      {
+        "category_id": "W",
+        "label": "Boatworks",
+        "group": "synthetic",
+        "qualifier": null,
+        "focus_id": "focus-boatworks",
+        "focus_label": "Boatworks"
+      }
+    ],
+    "turns": [
+      {
+        "stage": "settled",
+        "placement_question": null,
+        "expected_placement": null
+      }
+    ]
+  }
+]
