@@ -7,7 +7,9 @@ question into a substantive, correctly placed answer without making the user
 operate repository structure first. **Play** begins the exchange immediately;
 category/focus association can resolve from the candidate or from conversation
 before, during, or after the answer. One natural placement question is allowed
-only when it is still needed and appropriate. Starting Play never promotes.
+only when it is still needed and appropriate. Play promotes in the background
+with the inferred category (platform ADR 0020); this Interaction states that
+placement once, as an aside, and accepts a correction as a move.
 
 This is deliberately separate from Conversation. Conversation supplies chat
 mechanics. Question Candidate owns the candidate anchor, placement timing,
@@ -24,8 +26,9 @@ of copying them. See [ADR 0018](../../docs/adr/0018-candidate-placement.md).
   model call.
 - **Defer** enters with `requested_outcome: defer` and resolves without a model
   call.
-- **Promote** does not enter this Interaction. PR B of issue #170 owns that
-  explicit idempotent write and receipt.
+- **Promote** does not enter this Interaction. PR B of issue #170 shipped that
+  explicit idempotent write and receipt (`system/candidate_promotion.py`,
+  v187); Play now triggers it in the background.
 
 ## How it is built
 
