@@ -1,7 +1,7 @@
 # ADR 0018: Question Candidate is a composed Interaction
 
 Date: 2026-08-18
-Status: proposed
+Status: amended 2026-08-21 by docs/pr-specs/question-candidate-placement-aside.md
 
 ## Context
 
@@ -136,4 +136,40 @@ PR A status or field claims that promotion occurred.
   and question, starts substantive exchange immediately, never promotes, and
   permits placement resolution before/during/after.
 
-🤖 Generated with GPT-5.6-Sol via Codex
+## Amendment (2026-08-21)
+
+Platform ADR 0020 (`lifehug-platform/docs/adr/0020-play-is-a-deep-link.md`)
+and platform contract review-loop/45 ("Play is a background promotion")
+retired the machine this decision was designed against: Play is a deep link
+that starts promotion immediately, in a background worker job, so the
+conversation never waits on the vault. `docs/pr-specs/question-candidate-
+placement-aside.md` (issue #181, v188) is the smallest reconciling change:
+exactly one new turn-output field (`placement: {category} | null`), no new
+lifecycle states, no placement model purpose, no new platform mechanism.
+Sentences this decision made that the amendment changes:
+
+| Location in this ADR | Change |
+|---|---|
+| Decision, "Play supplies lifecycle action `engage`. It may resolve placement silently or defer it… initial Play never requires a placement question." | Replaced: Play promotes in the background with the inferred category (platform ADR 0020); the first reply states that placement once as an aside, or asks once when there is no confident category. |
+| Decision, the three-bullet `resolved` / `defer` / `ask_now` block | Superseded for the Play path. One optional output field `placement: {category}` replaces the triple; `defer` is expressed as `placement: null`; `ask_now` becomes a first-reply-only property, not an action; `resolved`'s confidence number moves to the caller, which evaluates `target_category` against `knob.placement_confidence_threshold` before composing the turn. |
+| Decision, "Play alone remains engaged and has no promotion meaning." | Reversed: Play is approval; promotion starts immediately in the background. |
+| Decision, "An answered candidate becomes complete only when durable answer, revision-valid placement, and answered outcome are all resolved." | Placement is no longer a completion precondition (the question is already placed). Completion is durable answer + answered outcome. |
+| Consequences, "Category association can finish before, during, or after answer content. A partial durable answer is retained while placement remains unresolved." | Replaced: category association is settled at promotion time; a later correction is a move, not a resolution. There is no held answer (platform ADR 0020). |
+| Consequences, "Platform #469 must route Play directly to Home/Today… and persist progress only after revalidating runtime decisions." | Superseded by platform ADR 0020 + review-loop/45: Play is a deep link, promotion is a background worker job, and every message files through the ordinary capture path. |
+| Consequences, "v181 is an intermediate upstream release. The platform waits for PR B's final release…" | Historical; PR B shipped (`system/candidate_promotion.py`, v187). |
+| Pin-bump reconciliation surfaces, "closed stage, turn-kind, placement-action, status…" | `placement-action` leaves the vocabulary list; `placement` joins the turn-output shape row. |
+
+Unchanged by this amendment: the registry/composition mechanism, the closed
+category roster and its exact-match discipline, the candidate anchor/revision
+recipes, rule 8's "no lifecycle claims" doctrine, and ordinary Conversation's
+byte-for-byte v180 freeze. `parse_question_candidate_output` and
+`validate_question_candidate_decision` (the ADR-0018 `resolved|ask_now|defer`
+triple) stay live for the standalone `question-candidate-prompt` CLI path
+until a follow-up removes them — only the Play path's contract changes here.
+
+A `question-move` package verb (re-id + alias a promoted question between
+categories — a question's category is the first character of its id) is
+required to complete the after-promotion half of this design and is
+deliberately out of scope: filed as a follow-up OSS issue.
+
+🤖 Generated with Claude Sonnet via Claude Code

@@ -361,6 +361,60 @@ def _placement_revision(candidate_revision: str, category: dict) -> str:
     )
 
 
+def validate_placement(value: object, *, roster: dict) -> dict | None:
+    """Closed-roster layer of the additive ``placement`` field (Design §A.2,
+    question-candidate-placement-aside / issue #181).
+
+    ``value`` is the structural layer's own output —
+    ``{"category": "<UPPER>"} | None`` from
+    ``conversation_delivery._parse_placement`` — or any other untrusted
+    shape a caller hands in directly (this function re-checks shape itself
+    so it is safe to call standalone). Exact match against ``roster``
+    (``_category``) only: no fuzzy match, no case-fold, no label-to-id
+    derivation, no id invented from prose. An unknown letter, or any value
+    that isn't exactly ``{"category": "<id>"}``, returns ``None``.
+
+    Returns the roster entry itself (never just the id) so the caller can
+    render the **focus label** — never the roster id — and bind a
+    ``placement_revision`` with the existing recipe (``_placement_revision``
+    above).
+    """
+    if not isinstance(value, dict) or set(value) != {"category"}:
+        return None
+    category_id = value["category"]
+    if not isinstance(category_id, str) or not category_id:
+        return None
+    return _category(roster, category_id)
+
+
+def placement_stage_for_session(
+    session: dict, *, target_category: str | None, confidence: float | None
+) -> str:
+    """Derive ``{placement_stage}`` from the transcript alone (Design §D) —
+    no new session field, no new lifecycle status.
+
+    ``"settled"`` once the session already carries any assistant
+    (``role == "lifehug"``) turn — the first reply has already happened, so
+    every later turn only ever receives a correction. Before that:
+    ``"assert"`` when the candidate has a confident ``target_category``
+    (at or above ``knob.placement_confidence_threshold``), else ``"ask"``.
+    """
+    turns = session.get("turns") or []
+    if any(isinstance(turn, dict) and turn.get("role") == "lifehug" for turn in turns):
+        return "settled"
+    threshold = _manifest_number(
+        "knob.placement_confidence_threshold", PLACEMENT_CONFIDENCE_THRESHOLD
+    )
+    confident = (
+        isinstance(target_category, str)
+        and target_category != ""
+        and isinstance(confidence, (int, float))
+        and not isinstance(confidence, bool)
+        and confidence >= threshold
+    )
+    return "assert" if confident else "ask"
+
+
 def _completion(
     *, answer_status: str, placement_resolved: bool, candidate_outcome: str | None
 ) -> dict:
@@ -455,6 +509,137 @@ def _question_is_valid(question: str, *, reply: str) -> bool:
     if reply.count(question) != 1:
         return False
     return reply.count("?") == 1
+
+
+# --------------------------------------------------------------------------
+# Placement lints (Design §E, question-candidate-placement-aside / issue #181)
+# --------------------------------------------------------------------------
+
+VALID_PLACEMENT_STAGES = frozenset({"assert", "ask", "settled"})
+
+#: The canonical aside wording's invariant anchor — "By the way, I've put
+#: this with <focus label> — tell me if that's wrong." The model varies the
+#: connective tissue around it but not the move (contract C4/owner closeout
+#: item 1); this phrase is what every placement-sentence lint locates.
+_PLACEMENT_ASIDE_MARKER_RE = re.compile(r"\bput (?:it|this) with\b", re.IGNORECASE)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+#: placement.no_gate_language — silence is affirmation (ruling 3); asking
+#: for one is itself the lint failure.
+_GATE_LANGUAGE_PHRASES = (
+    "confirm",
+    "is that right?",
+    "let me know if that's okay",
+    "reply yes",
+)
+#: placement.no_mechanism_talk — the move is silent; narrating it is not.
+_MECHANISM_TALK_PHRASES = (
+    "i'll move it",
+    "updating the category",
+    "filed under",
+    "the system will",
+)
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENTENCE_SPLIT_RE.split(text.strip()) if s.strip()]
+
+
+def _span_of(text: str, needle: str) -> list[int]:
+    clean = needle.strip()
+    start = text.find(clean) if clean else -1
+    if start == -1:
+        return [0, len(text)]
+    return [start, start + len(clean)]
+
+
+def lint_placement_reply(
+    text: str,
+    *,
+    stage: str,
+    roster: dict | None = None,
+    placement_question: str | None = None,
+) -> list[dict]:
+    """Deterministic findings for the seven ``placement_gates.*`` classes
+    (Design §E). Pure — no model, no I/O. ``stage`` is the same
+    ``{placement_stage}`` value the turn-instructions leaf receives
+    (``"assert" | "ask" | "settled"``); an unrecognized stage is treated as
+    ``"settled"`` (fail toward the strictest rule: no placement talk at
+    all). Findings share ``conversation_lints.lint_turn``'s shape —
+    ``{"lint": "<id>", "detail": "...", "span": [start, end]}`` — so a
+    caller can merge them with ``lint_inherited_reply``'s output uniformly.
+    """
+    findings: list[dict] = []
+    sentences = _sentences(text)
+    placement_sentences = [s for s in sentences if _PLACEMENT_ASIDE_MARKER_RE.search(s)]
+
+    if stage == "assert":
+        if len(placement_sentences) != 1 or (
+            sentences and placement_sentences[-1] != sentences[-1]
+        ):
+            findings.append({
+                "lint": "placement.aside_single_sentence",
+                "detail": "the placement aside must appear exactly once, as the message's last sentence",
+                "span": [0, len(text)],
+            })
+        elif "?" in placement_sentences[0]:
+            findings.append({
+                "lint": "placement.aside_not_a_question",
+                "detail": "the placement aside must not be a question",
+                "span": _span_of(text, placement_sentences[0]),
+            })
+    elif stage == "ask":
+        valid = (
+            _question_is_valid(placement_question, reply=text)
+            if placement_question is not None
+            else text.count("?") == 1 and text.rstrip().endswith("?")
+        )
+        if not valid:
+            findings.append({
+                "lint": "placement.ask_is_sole_question",
+                "detail": "in 'ask', the reply must contain exactly one question mark, and it must terminate the placement question",
+                "span": [0, len(text)],
+            })
+    else:
+        if placement_sentences:
+            findings.append({
+                "lint": "placement.never_repeated",
+                "detail": "a settled turn must not restate placement at all",
+                "span": _span_of(text, placement_sentences[0]),
+            })
+
+    if roster:
+        for category in roster.get("categories", []):
+            category_id = category.get("category_id")
+            if category_id and re.search(rf"\b{re.escape(category_id)}\b", text):
+                findings.append({
+                    "lint": "placement.no_roster_ids",
+                    "detail": f"reply renders a roster id ({category_id!r}) instead of the focus label",
+                    "span": _span_of(text, category_id),
+                })
+                break
+
+    lowered = text.lower()
+    for phrase in _GATE_LANGUAGE_PHRASES:
+        idx = lowered.find(phrase)
+        if idx != -1:
+            findings.append({
+                "lint": "placement.no_gate_language",
+                "detail": f"gate language: {phrase!r} — silence is affirmation",
+                "span": [idx, idx + len(phrase)],
+            })
+            break
+
+    for phrase in _MECHANISM_TALK_PHRASES:
+        idx = lowered.find(phrase)
+        if idx != -1:
+            findings.append({
+                "lint": "placement.no_mechanism_talk",
+                "detail": f"mechanism talk: {phrase!r}",
+                "span": [idx, idx + len(phrase)],
+            })
+            break
+
+    return findings
 
 
 def parse_question_candidate_output(raw: object, *, payload: dict) -> dict:

@@ -849,5 +849,96 @@ class RetryTests(EngineTestCase):
         self.assertEqual(self.fallbacks, [])  # an operator retry never sends an ack
 
 
+class PlacementOutputContractTests(unittest.TestCase):
+    """question-candidate-placement-aside (issue #181), Design §C1.
+
+    ``_output_contract_block`` gains exactly one additive line + note, gated
+    on ``TurnShape.placement_stage``. Pure — no vault, no injected
+    collaborators needed.
+    """
+
+    def _shape(self, **overrides):
+        fields = dict(position="mid_arc", question_allowed=True, user_turns=2, target_exchanges=3)
+        fields.update(overrides)
+        return engine.TurnShape(**fields)
+
+    def test_output_contract_block_byte_identical_without_roster(self):
+        # ADR 0018's promise mechanized: a TurnShape with no placement_stage
+        # produces the exact pre-#181 appendix, byte for byte, regardless
+        # of the other fields' values.
+        for question_allowed in (True, False):
+            with self.subTest(question_allowed=question_allowed):
+                shape = self._shape(question_allowed=question_allowed)
+                self.assertIsNone(shape.placement_stage)
+                block = engine._output_contract_block(shape)
+                self.assertNotIn("placement", block)
+                self.assertEqual(
+                    block, engine._output_contract_block(self._shape(question_allowed=question_allowed))
+                )
+
+    def test_placement_line_and_note_present_when_staged(self):
+        for stage in ("assert", "ask", "settled"):
+            with self.subTest(stage=stage):
+                block = engine._output_contract_block(self._shape(placement_stage=stage))
+                self.assertIn(
+                    '"placement": {"category": "the exact roster letter"} | null,', block
+                )
+                self.assertIn("CATEGORY_ROSTER", block)
+
+
+class ParseTurnOutputPlacementTests(unittest.TestCase):
+    """question-candidate-placement-aside (issue #181), Design §A.1 —
+    structural parsing of the additive ``placement`` field. Pure."""
+
+    def _raw(self, **extra):
+        payload = {"message": "Diesel and cut hay.", "followup_question": None, "question_free": True}
+        payload.update(extra)
+        return json.dumps(payload)
+
+    def test_placement_absent_is_none(self):
+        self.assertIsNone(engine.parse_turn_output(self._raw())["placement"])
+
+    def test_placement_null_is_none(self):
+        self.assertIsNone(engine.parse_turn_output(self._raw(placement=None))["placement"])
+
+    def test_placement_absent_on_legacy_generation_is_none(self):
+        # A generation minted before #181 (or by an overlay that hasn't
+        # caught up) carries no "placement" key at all — same degradation
+        # as held_question_id's ADR 0016 precedent.
+        legacy = json.dumps({
+            "message": "Diesel and cut hay.",
+            "followup_question": None,
+            "question_free": True,
+            "held_question_id": None,
+        })
+        self.assertIsNone(engine.parse_turn_output(legacy)["placement"])
+
+    def test_placement_malformed_degrades(self):
+        malformed = [
+            "W",                              # bare string
+            ["W"],                            # list
+            {"category": "W", "extra": 1},    # extra key
+            {"category": ""},                 # empty string
+            {"category": "toolongidx"},       # 9 chars
+            {"category": 7},                  # non-string value
+            {},                                # missing category
+        ]
+        for value in malformed:
+            with self.subTest(value=value):
+                parsed = engine.parse_turn_output(self._raw(placement=value))
+                self.assertIsNotNone(parsed)  # never errors the turn
+                self.assertIsNone(parsed["placement"])
+
+    def test_placement_uppercased(self):
+        self.assertEqual(
+            engine.parse_turn_output(self._raw(placement={"category": "w"}))["placement"],
+            {"category": "W"},
+        )
+        self.assertEqual(
+            engine.parse_turn_output(self._raw(placement={"category": " w "}))["placement"],
+            {"category": "W"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

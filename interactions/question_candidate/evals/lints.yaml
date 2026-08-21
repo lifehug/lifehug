@@ -7,3 +7,15 @@ placement_gates.question.validity: 1.0
 placement_gates.timing.validity: 1.0
 placement_gates.completion.validity: 1.0
 placement_gates.stale_revision.rejection: 1.0
+# question-candidate-placement-aside (issue #181, Design §E) — seven
+# compliance classes over question_candidate.lint_placement_reply's
+# findings; all 1.0 (a placement-lint failure retries once without the
+# placement sentence before it degrades further, per §E — it is never
+# worth losing a reply over).
+placement_gates.aside_single_sentence.compliance: 1.0
+placement_gates.aside_not_a_question.compliance: 1.0
+placement_gates.ask_is_sole_question.compliance: 1.0
+placement_gates.never_repeated.compliance: 1.0
+placement_gates.no_roster_ids.compliance: 1.0
+placement_gates.no_gate_language.compliance: 1.0
+placement_gates.no_mechanism_talk.compliance: 1.0

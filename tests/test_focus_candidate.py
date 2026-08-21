@@ -211,7 +211,10 @@ class FocusCandidateTests(unittest.TestCase):
                 "107a26a9255eb86784f088dbb081184416da0a3edc12216cdd7ca6c62ff00ffd"
             ),
             "question_candidate": (
-                "c30c32fea390d8ecf166fda3a5db760ac36b355feec2b96735589ed9f84b2e64"
+                # issue #181 (v188): question-candidate-placement-aside
+                # intentionally changes this package's prompt/README/lint
+                # files — this digest tracks that content, not a freeze.
+                "deb584b26a443c8c5346d6effda4b8459ce3fff9d174d70a29add72d958e8aee"
             ),
         }
         for package, digest in expected.items():
@@ -587,7 +590,10 @@ class FocusCandidateTests(unittest.TestCase):
         }
         version = json.loads((ROOT / "system/version.json").read_text())
         self.assertEqual(shipped - set(version["framework_files"]), set())
-        self.assertEqual(version["version"], 187)
+        # >= not == (issue #181/v188 propagation): an exact pin here breaks
+        # on every subsequent version bump, unlike test_decisions_feed_loop.py
+        # / test_question_judgment.py's correct assertGreaterEqual pattern.
+        self.assertGreaterEqual(version["version"], 187)
 
     def test_runtime_has_one_completion_delegation_and_no_parallel_writer_or_approval(
         self,

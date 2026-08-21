@@ -1,0 +1,97 @@
+[
+  {
+    "fixture_id": "placement-assert-first-reply",
+    "turns": [
+      {
+        "message": "Counting the dark seconds with your dad made the waiting something you shared, not just endured. There's more I'd love to hear about what came after those crossings. By the way, I've put this with Places that shaped me — tell me if that's wrong.",
+        "placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-assert-never-repeated",
+    "turns": [
+      {
+        "message": "Counting the dark seconds with your dad made the waiting something you shared, not just endured. There's more I'd love to hear about what came after those crossings. By the way, I've put this with Places that shaped me — tell me if that's wrong.",
+        "placement": null
+      },
+      {
+        "message": "That's a lovely detail. What did those crossings turn into once you were older?",
+        "placement": null
+      },
+      {
+        "message": "That makes sense — a quiet kind of company out there.",
+        "placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-ask-once-no-category",
+    "turns": [
+      {
+        "message": "Counting the dark seconds with your dad made the waiting something you shared, not just endured. Where does this belong — your childhood, or Boatworks?",
+        "placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-ask-unanswered-not-repeated",
+    "turns": [
+      {
+        "message": "Counting the dark seconds with your dad made the waiting something you shared, not just endured. Where does this belong — your childhood, or Boatworks?",
+        "placement": null
+      },
+      {
+        "message": "That's alright — no rush. What else stands out from those nights?",
+        "placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-user-disagrees-emits-move",
+    "turns": [
+      {
+        "message": "Counting the dark seconds with your dad made the waiting something you shared, not just endured. There's more I'd love to hear about what came after those crossings. By the way, I've put this with Places that shaped me — tell me if that's wrong.",
+        "placement": null
+      },
+      {
+        "message": "That's a lovely detail. What did those crossings turn into once you were older?",
+        "placement": null
+      },
+      {
+        "message": "Boatworks it is — and the part about the relief boat is the piece I'd want more of.",
+        "placement": {"category": "W"}
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-unprompted-later-turn-null",
+    "turns": [
+      {
+        "message": "Counting the dark seconds with your dad made the waiting something you shared, not just endured. There's more I'd love to hear about what came after those crossings. By the way, I've put this with Places that shaped me — tell me if that's wrong.",
+        "placement": null
+      },
+      {
+        "message": "That's a lovely detail. What did those crossings turn into once you were older?",
+        "placement": null
+      },
+      {
+        "message": "Boatworks it is — and the part about the relief boat is the piece I'd want more of.",
+        "placement": {"category": "W"}
+      },
+      {
+        "message": "The relief boat sounds like its own kind of apprenticeship — learning the harbor by feel long before you ever had the wheel, the kind of thing nobody teaches you outright. What did those early runs teach you that the lighthouse never did?",
+        "placement": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "placement-unknown-letter-rejected",
+    "turns": [
+      {
+        "message": "Noted — I'll keep that in mind as we keep going.",
+        "placement": {"category": "Z"}
+      }
+    ]
+  }
+]

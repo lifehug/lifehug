@@ -497,5 +497,144 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
         self.assertEqual(actual, hashes)
 
 
+class ValidatePlacementTests(unittest.TestCase):
+    """question-candidate-placement-aside (issue #181), Design §A.2."""
+
+    def setUp(self):
+        self.roster = qc.build_category_roster(
+            [category("W", "Boatworks"), category("P", "Places that shaped me")]
+        )
+
+    def test_validate_placement_exact_roster_member(self):
+        entry = qc.validate_placement({"category": "W"}, roster=self.roster)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["category_id"], "W")
+        self.assertEqual(entry["label"], "Boatworks")
+        self.assertEqual(entry["focus_id"], "focus-w")
+        self.assertEqual(entry["focus_label"], "Focus Boatworks")
+        self.assertIn("category_revision", entry)
+
+    def test_validate_placement_rejects_unknown_letter(self):
+        self.assertIsNone(qc.validate_placement({"category": "Z"}, roster=self.roster))
+
+    def test_validate_placement_rejects_fuzzy_and_label_derived(self):
+        for value in (
+            {"category": "places"},        # lowercase label word, not an id
+            {"category": "P "},            # trailing whitespace, not exact
+            {"category": "p"},             # case-folded — "P" is present but "p" is not exact
+            {"category": "Places that shaped me"},  # the label itself
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(qc.validate_placement(value, roster=self.roster))
+
+    def test_validate_placement_rejects_malformed_shapes(self):
+        for value in (None, "W", ["W"], {"category": "W", "extra": 1}, {}):
+            with self.subTest(value=value):
+                self.assertIsNone(qc.validate_placement(value, roster=self.roster))
+
+
+class PlacementStageTests(unittest.TestCase):
+    """question-candidate-placement-aside (issue #181), Design §D — the
+    'asked once' fact needs no new state; it is read from the transcript."""
+
+    def test_placement_stage_derived_from_transcript(self):
+        empty = {"turns": []}
+        self.assertEqual(
+            qc.placement_stage_for_session(empty, target_category="W", confidence=0.95),
+            "assert",
+        )
+        self.assertEqual(
+            qc.placement_stage_for_session(empty, target_category=None, confidence=None),
+            "ask",
+        )
+        self.assertEqual(
+            qc.placement_stage_for_session(empty, target_category="W", confidence=0.5),
+            "ask",  # below knob.placement_confidence_threshold (0.8)
+        )
+        with_reply = {"turns": [
+            {"role": "user", "text": "The roof's framed in now."},
+            {"role": "lifehug", "text": "Good milestone."},
+        ]}
+        self.assertEqual(
+            qc.placement_stage_for_session(with_reply, target_category="W", confidence=0.95),
+            "settled",
+        )
+        self.assertEqual(
+            qc.placement_stage_for_session(with_reply, target_category=None, confidence=None),
+            "settled",
+        )
+        # A user turn alone (no assistant turn yet — e.g. the very first
+        # answer, before the first reply is composed) is still pre-first-
+        # reply: the confident category still yields "assert", not "settled".
+        user_only = {"turns": [{"role": "user", "text": "hi"}]}
+        self.assertEqual(
+            qc.placement_stage_for_session(user_only, target_category="W", confidence=0.95),
+            "assert",
+        )
+
+
+class PlacementLintTests(unittest.TestCase):
+    """question-candidate-placement-aside (issue #181), Design §E — one
+    passing and one failing reply per placement_gates.* row."""
+
+    def setUp(self):
+        self.roster = qc.build_category_roster(
+            [category("W", "Boatworks"), category("P", "Places that shaped me")]
+        )
+
+    def _findings(self, lint_id, text, **kwargs):
+        return [
+            f for f in qc.lint_placement_reply(text, roster=self.roster, **kwargs)
+            if f["lint"] == lint_id
+        ]
+
+    def test_placement_lint_aside_single_sentence(self):
+        passing = "The roof's framed in — good milestone. By the way, I put this with Boatworks — tell me if that's wrong."
+        failing = "By the way, I put this with Boatworks. One more thing about placement, it's staying there."
+        self.assertEqual(self._findings("placement.aside_single_sentence", passing, stage="assert"), [])
+        self.assertTrue(self._findings("placement.aside_single_sentence", failing, stage="assert"))
+
+    def test_placement_lint_aside_not_a_question(self):
+        passing = "Good milestone. By the way, I put this with Boatworks — tell me if that's wrong."
+        failing = "Good milestone. By the way, I put this with Boatworks — is that right?"
+        self.assertEqual(self._findings("placement.aside_not_a_question", passing, stage="assert"), [])
+        self.assertTrue(self._findings("placement.aside_not_a_question", failing, stage="assert"))
+
+    def test_placement_lint_ask_is_sole_question(self):
+        question = "Where does this belong — your childhood, or Boatworks?"
+        passing = f"Good milestone. {question}"
+        failing = f"Good milestone. {question} Also, how are you?"
+        self.assertEqual(
+            self._findings("placement.ask_is_sole_question", passing, stage="ask", placement_question=question), []
+        )
+        self.assertTrue(
+            self._findings("placement.ask_is_sole_question", failing, stage="ask", placement_question=question)
+        )
+
+    def test_placement_lint_never_repeated(self):
+        passing = "Good to hear. What was the weather like that day?"
+        failing = "Good to hear. By the way, I put this with Boatworks — tell me if that's wrong."
+        self.assertEqual(self._findings("placement.never_repeated", passing, stage="settled"), [])
+        self.assertTrue(self._findings("placement.never_repeated", failing, stage="settled"))
+
+    def test_placement_lint_no_roster_ids(self):
+        passing = "By the way, I put this with Boatworks — tell me if that's wrong."
+        failing = "By the way, I put this with W — tell me if that's wrong."
+        self.assertEqual(self._findings("placement.no_roster_ids", passing, stage="assert"), [])
+        self.assertTrue(self._findings("placement.no_roster_ids", failing, stage="assert"))
+
+    def test_placement_lint_no_gate_language(self):
+        passing = "By the way, I put this with Boatworks — tell me if that's wrong."
+        failing = "By the way, I put this with Boatworks. Please confirm."
+        self.assertEqual(self._findings("placement.no_gate_language", passing, stage="assert"), [])
+        self.assertTrue(self._findings("placement.no_gate_language", failing, stage="assert"))
+
+    def test_placement_lint_no_mechanism_talk(self):
+        passing = "Boatworks it is — the winter haul-out is the piece I'd want more of."
+        failing = "Boatworks it is — I'll move it to Boatworks now."
+        self.assertEqual(self._findings("placement.no_mechanism_talk", passing, stage="settled"), [])
+        self.assertTrue(self._findings("placement.no_mechanism_talk", failing, stage="settled"))
+
+
 if __name__ == "__main__":
     unittest.main()

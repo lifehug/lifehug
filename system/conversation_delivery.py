@@ -156,6 +156,14 @@ class TurnShape:
     question_allowed: bool
     user_turns: int
     target_exchanges: int
+    # question-candidate-placement-aside (issue #181): additive, default
+    # None. A caller composing a Play/candidate turn sets this to the
+    # {placement_stage} value ("assert" | "ask" | "settled" — Design §D)
+    # to have _output_contract_block() append the one optional "placement"
+    # output key; every other caller leaves it None and the appendix stays
+    # byte-identical to pre-#181 output (required test:
+    # test_output_contract_block_byte_identical_without_roster).
+    placement_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -313,6 +321,24 @@ def _output_contract_block(shape: TurnShape) -> str:
             "asking). Otherwise set \"followup_question\" to null and "
             "\"question_free\" to true."
         )
+    # question-candidate-placement-aside (issue #181, Design §C1): the one
+    # additive "placement" output key exists ONLY when the caller set
+    # shape.placement_stage; absent it, this whole block — line and note
+    # alike — stays out, so an ordinary turn's appendix is byte-identical
+    # to pre-#181 output.
+    placement_line = (
+        '  "placement": {"category": "the exact roster letter"} | null,\n'
+        if shape.placement_stage is not None
+        else ""
+    )
+    placement_note = (
+        '- "placement" is null on every turn except one where the USER named '
+        "where this belongs; then it is the exact roster letter from "
+        "CATEGORY_ROSTER and nothing else. Never invent a letter, never "
+        "guess, never fill it to look decisive.\n"
+        if shape.placement_stage is not None
+        else ""
+    )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
         "Reply with a single JSON object and nothing else:\n\n"
@@ -322,6 +348,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         '  "question_free": true | false,\n'
         '  "user_invited_question": true | false,\n'
         '  "held_question_id": "the [qid] you asked from ASKING_SUPPLY, or null",\n'
+        f"{placement_line}"
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
@@ -335,6 +362,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         '- "held_question_id" is the ASKING_SUPPLY qid of the question you '
         "asked, only when you actually asked one from that block; null "
         "otherwise. Never a qid that wasn't actually offered there.\n"
+        f"{placement_note}"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -398,10 +426,37 @@ def parse_turn_output(raw: object) -> dict | None:
         "question_free": bool(data.get("question_free", not followup_text)),
         "user_invited_question": bool(data.get("user_invited_question", False)),
         "held_question_id": held_question_id or None,
+        "placement": _parse_placement(data.get("placement")),
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
     }
+
+
+_PLACEMENT_CATEGORY_MAX_CHARS = 8
+
+
+def _parse_placement(raw: object) -> dict | None:
+    """Structural layer of the additive ``placement`` field (Design §A.1,
+    question-candidate-placement-aside / issue #181).
+
+    Accepts only an object with exactly the key ``category`` whose value is
+    a non-empty string of at most 8 characters after ``.strip()``;
+    uppercases it. Anything else — missing, ``null``, a bare string, extra
+    keys, wrong type — degrades to ``None``, exactly as ``held_question_id``
+    degrades above: never an error. This function owns no roster and
+    performs no membership check — closed-roster validation is
+    ``question_candidate.validate_placement``'s job.
+    """
+    if not isinstance(raw, dict) or set(raw) != {"category"}:
+        return None
+    category = raw["category"]
+    if not isinstance(category, str):
+        return None
+    category = category.strip()
+    if not category or len(category) > _PLACEMENT_CATEGORY_MAX_CHARS:
+        return None
+    return {"category": category.upper()}
 
 
 def parse_closing_output(raw: object) -> dict | None:
