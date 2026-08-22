@@ -206,4 +206,29 @@ after the first reply — only a user signal produces a value.
 Pin-bump reconciliation surfaces: `focus_setup` joins the turn-output shape
 row alongside `placement`.
 
+## Amendment (2026-08-22) — the additive-field discipline has a third instance
+
+Recorded by `docs/pr-specs/entity-identity-context.md` (v190). **No decision in
+this ADR changes.** Three instances is a pattern; this row is what stops a
+fourth from being re-derived.
+
+| | question candidates (v188) | focus candidates (v189) | entity candidates (v190) |
+|---|---|---|---|
+| output field | `placement: {category} \| null` | `focus_setup: {objective?, type?, relationship?, living?, label?} \| null` | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` |
+| gated on | `TurnShape.placement_stage` | `TurnShape.focus_stage` | `TurnShape.entity_stage` |
+| structural layer | `conversation_delivery._parse_placement` | `conversation_delivery._parse_focus_setup` | `conversation_delivery._parse_entity_setup` |
+| closed layer | `question_candidate.validate_placement` (category roster) | `focus_candidate.validate_focus_setup` (`roadmap.FOCUS_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`) | `entity_candidate.validate_entity_setup` (`entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`, the caller's own roster slugs) |
+| stage source | `placement_stage_for_session` (transcript) | `focus_stage_for_session` (transcript) | `entity_stage_for_session` (transcript) |
+| stages | `assert` \| `ask` \| `settled` | `establish` \| `settled` | `establish` \| `settled` |
+| lints | seven `placement_gates.*` | six `focus_setup_gates.*` | seven `entity_setup_gates.*` |
+
+The v190 instance adds one wrinkle worth naming, because a fourth instance will
+meet it too: `entity_setup.maps_to` is validated against a roster the PACKAGE
+does not load — the caller passes `roster_slugs`. The closed layer still owns
+the membership check; it just does not own the membership list. A slug nobody
+supplied drops the key rather than producing a dangling reference.
+
+Pin-bump reconciliation surfaces: `entity_setup` joins the turn-output shape
+row alongside `placement` and `focus_setup`.
+
 🤖 Generated with Claude Opus via Claude Code

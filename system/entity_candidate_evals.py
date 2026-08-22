@@ -13,6 +13,52 @@ from lifehug_core import INTERACTIONS_DIR, _parse_simple_yaml, load_config
 
 EVALS_DIR = INTERACTIONS_DIR / "entity_candidate" / "evals"
 
+# entity-identity-context (v190, Design §D): a SECOND, independent golden pair
+# beside the research one. The research fixtures/predictions model
+# `parse_entity_candidate_output`'s frozen input/output shape (still the
+# standalone CLI path's contract); the identity aside/question/offer/settled
+# behavior lives on the PARENT Conversation turn contract instead
+# (`conversation_delivery.parse_turn_output` +
+# `entity_candidate.lint_entity_setup_reply` / `validate_entity_setup`), so it
+# gets its own pair rather than overloading the frozen one. Both pairs feed
+# the SAME `check_gates` call — no scorer-checking change. Exactly the split
+# `question_candidate_evals` made for placement at v188 and
+# `focus_candidate_evals` made for onboarding at v189.
+IDENTITY_FIXTURES_FILE = "identity_fixtures.json"
+IDENTITY_SAMPLE_PREDICTIONS_FILE = "identity_sample_predictions.json"
+REQUIRED_IDENTITY_GOLDEN_IDS = frozenset({
+    "identity-establish-aside-and-one-question",
+    "identity-establish-duplicate-asks-same-as",
+    "identity-establish-answer-already-told-asks-nothing",
+    "identity-establish-offer-worthy-appends-offer",
+    "identity-settled-silent",
+    "identity-settled-user-signals-emits-setup",
+    "identity-settled-offer-not-repeated",
+    "identity-unknown-relationship-rejected",
+})
+#: The seven entity_setup_gates.* classes (Design §D table), matching
+#: entity_candidate.lint_entity_setup_reply's finding ids minus the
+#: "entity_setup." prefix.
+IDENTITY_LINT_CLASSES = (
+    "aside_single_sentence",
+    "aside_not_a_question",
+    "aside_never_repeated",
+    "one_identity_question",
+    "settled_silence",
+    "offer_at_most_once",
+    "no_mechanism_talk",
+)
+#: Which lint classes apply on a turn of a given {entity_stage}. The
+#: one-question, offer-cap and mechanism rules hold on every turn; the aside
+#: rules are stage-scoped.
+_STAGE_SCOPED_IDENTITY_LINTS = {
+    "establish": frozenset({"aside_single_sentence", "aside_not_a_question"}),
+    "settled": frozenset({"aside_never_repeated", "settled_silence"}),
+}
+_ALWAYS_APPLICABLE_IDENTITY_LINTS = frozenset(
+    {"one_identity_question", "offer_at_most_once", "no_mechanism_talk"}
+)
+
 
 def load_fixtures(*, framework_root: str | Path | None = None) -> list[dict]:
     root = (
@@ -47,11 +93,182 @@ def load_gates(*, framework_root: str | Path | None = None) -> dict[str, float]:
         else EVALS_DIR
     )
     raw = _parse_simple_yaml(root / "lints.yaml")
-    return {
-        key.removeprefix("research_gates."): float(value)
-        for key, value in raw.items()
-        if key.startswith("research_gates.")
+    gates: dict[str, float] = {}
+    for key, value in raw.items():
+        # Both gate prefixes, flattened into ONE dict for ONE `check_gates`
+        # call — `research_gates.*` (the standalone research path) and
+        # `entity_setup_gates.*` (the Play identity path, v190). The prefixes
+        # are stripped, and the two families' class names do not collide.
+        for prefix in ("research_gates.", "entity_setup_gates."):
+            if key.startswith(prefix):
+                gates[key.removeprefix(prefix)] = float(value)
+                break
+    return gates
+
+
+def load_identity_fixtures(*, framework_root: str | Path | None = None) -> list[dict]:
+    root = (
+        Path(framework_root) / "interactions/entity_candidate/evals"
+        if framework_root
+        else EVALS_DIR
+    )
+    value = json.loads(
+        (root / "goldens" / IDENTITY_FIXTURES_FILE).read_text(encoding="utf-8")
+    )
+    if not isinstance(value, list) or not value:
+        raise ValueError("entity identity fixtures must be a non-empty list")
+    return value
+
+
+def load_identity_sample_predictions(
+    *, framework_root: str | Path | None = None
+) -> list[dict]:
+    root = (
+        Path(framework_root) / "interactions/entity_candidate/evals"
+        if framework_root
+        else EVALS_DIR
+    )
+    value = json.loads(
+        (root / "goldens" / IDENTITY_SAMPLE_PREDICTIONS_FILE).read_text(encoding="utf-8")
+    )
+    if not isinstance(value, list):
+        raise TypeError("entity identity predictions must be a list")
+    return value
+
+
+def validate_identity_fixtures(fixtures: list[dict]) -> list[str]:
+    """Deterministic fixture-shape errors for the identity golden pair."""
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, row in enumerate(fixtures):
+        if not isinstance(row, dict) or set(row) != {"fixture_id", "entity", "turns"}:
+            errors.append(f"identity fixture[{index}] keys invalid")
+            continue
+        fixture_id = row["fixture_id"]
+        if not isinstance(fixture_id, str) or not fixture_id.strip():
+            errors.append(f"identity fixture[{index}] fixture_id invalid")
+        elif fixture_id in seen:
+            errors.append(f"identity fixture[{index}] duplicate id")
+        if isinstance(fixture_id, str):
+            seen.add(fixture_id)
+        entity = row["entity"]
+        if not isinstance(entity, dict) or set(entity) != {
+            "name", "type", "possible_duplicates", "roster_slugs"
+        }:
+            errors.append(f"identity fixture[{index}] entity keys invalid")
+            entity = {}
+        elif entity["type"] not in entity_candidate.entity_roster.ENTITY_TYPES:
+            errors.append(f"identity fixture[{index}] entity type invalid")
+        roster_slugs = entity.get("roster_slugs")
+        if not isinstance(roster_slugs, list) or any(
+            not isinstance(slug, str) for slug in roster_slugs
+        ):
+            errors.append(f"identity fixture[{index}] roster_slugs invalid")
+            roster_slugs = []
+        if not isinstance(entity.get("possible_duplicates", []), list):
+            errors.append(f"identity fixture[{index}] possible_duplicates invalid")
+        turns = row["turns"]
+        if not isinstance(turns, list) or not turns:
+            errors.append(f"identity fixture[{index}] turns must be non-empty")
+            continue
+        for position, turn in enumerate(turns):
+            if not isinstance(turn, dict) or set(turn) != {
+                "stage", "user_signaled", "offered_before", "expected_entity_setup"
+            }:
+                errors.append(
+                    f"identity fixture[{index}].turns[{position}] keys invalid"
+                )
+                continue
+            if turn["stage"] not in entity_candidate.VALID_ENTITY_STAGES:
+                errors.append(
+                    f"identity fixture[{index}].turns[{position}] stage invalid"
+                )
+            for flag in ("user_signaled", "offered_before"):
+                if type(turn[flag]) is not bool:
+                    errors.append(
+                        f"identity fixture[{index}].turns[{position}] {flag} invalid"
+                    )
+            expected = turn["expected_entity_setup"]
+            if expected is not None and (
+                not isinstance(expected, dict)
+                or entity_candidate.validate_entity_setup(
+                    expected, roster_slugs=roster_slugs
+                ) != expected
+            ):
+                errors.append(
+                    f"identity fixture[{index}].turns[{position}] "
+                    "expected_entity_setup invalid"
+                )
+    missing = REQUIRED_IDENTITY_GOLDEN_IDS - seen
+    if missing:
+        errors.append(f"identity fixtures missing required ids: {sorted(missing)}")
+    return errors
+
+
+def score_identity_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
+    """Score the seven entity_setup_gates.* classes over the identity goldens.
+
+    Each fixture is a short transcript; each parallel prediction supplies the
+    reply text and the raw, pre-validation `entity_setup` value a model
+    produced for each of those turns. Per turn:
+    `entity_candidate.lint_entity_setup_reply` runs against the turn's
+    `{entity_stage}` and the caller-owned `user_signaled` / `offered_before`
+    facts, scored into whichever classes apply at that stage; the raw
+    `entity_setup` is passed through `entity_candidate.validate_entity_setup`
+    (exercising BOTH validation layers together, as a real caller would) and
+    compared with the fixture's `expected_entity_setup` — golden
+    `identity-unknown-relationship-rejected` proves an off-vocabulary
+    relationship normalizes to no identity change without a scored lint
+    failure.
+    """
+    by_id = {
+        row["fixture_id"]: row
+        for row in predictions
+        if isinstance(row, dict) and isinstance(row.get("fixture_id"), str)
     }
+    counts = {name: [0, 0] for name in IDENTITY_LINT_CLASSES}
+    field_correct = 0
+    field_total = 0
+    unmatched: list[str] = []
+    for fixture in fixtures:
+        prediction = by_id.get(fixture["fixture_id"])
+        if prediction is None:
+            unmatched.append(fixture["fixture_id"])
+            continue
+        roster_slugs = fixture["entity"].get("roster_slugs") or []
+        for turn, pred_turn in zip(fixture["turns"], prediction.get("turns") or []):
+            stage = turn["stage"]
+            message = pred_turn.get("message", "")
+            findings = {
+                item["lint"].split(".", 1)[1]
+                for item in entity_candidate.lint_entity_setup_reply(
+                    message,
+                    stage=stage,
+                    user_signaled=turn["user_signaled"],
+                    offered_before=turn["offered_before"],
+                )
+            }
+            applicable = (
+                _ALWAYS_APPLICABLE_IDENTITY_LINTS
+                | _STAGE_SCOPED_IDENTITY_LINTS.get(stage, frozenset())
+            )
+            for lint_class in applicable:
+                counts[lint_class][1] += 1
+                counts[lint_class][0] += lint_class not in findings
+            validated = entity_candidate.validate_entity_setup(
+                pred_turn.get("entity_setup"), roster_slugs=roster_slugs
+            )
+            field_total += 1
+            field_correct += validated == turn["expected_entity_setup"]
+    scores: dict[str, object] = {
+        f"{name}.compliance": (values[0] / values[1] if values[1] else 0.0)
+        for name, values in counts.items()
+    }
+    scores["_entity_setup_field_accuracy"] = (
+        field_correct / field_total if field_total else 0.0
+    )
+    scores["_unmatched_identity_fixtures"] = unmatched
+    return scores
 
 
 def validate_fixtures(fixtures: list[dict]) -> list[str]:
@@ -238,7 +455,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     fixtures = load_fixtures()
-    fixture_errors = validate_fixtures(fixtures)
+    identity_fixtures = load_identity_fixtures()
+    fixture_errors = validate_fixtures(fixtures) + validate_identity_fixtures(
+        identity_fixtures
+    )
     skipped = None
     try:
         predictions = (
@@ -248,6 +468,14 @@ def main(argv: list[str] | None = None) -> int:
         predictions = []
         skipped = str(exc)
     scores = score_predictions(fixtures, predictions) if not skipped else {}
+    if not skipped:
+        # The identity pair is deterministic — recorded replies only, no
+        # provider seat — so it scores even on a --live run (Design §D).
+        scores.update(
+            score_identity_goldens(
+                identity_fixtures, load_identity_sample_predictions()
+            )
+        )
     failures = fixture_errors + ([] if skipped else check_gates(scores, load_gates()))
     result = {
         "interaction": "entity_candidate",

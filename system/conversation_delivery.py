@@ -172,6 +172,14 @@ class TurnShape:
     # byte-identical to pre-v189 output (required test:
     # test_output_contract_block_byte_identical_without_focus_stage).
     focus_stage: str | None = None
+    # entity-identity-context (v190, Design §B): additive, default None.
+    # A caller composing an entity-identity turn sets this to the
+    # {entity_stage} value ("establish" | "settled" — Design §C) to have
+    # _output_contract_block() append the one optional "entity_setup"
+    # output key; every other caller leaves it None and the appendix stays
+    # byte-identical to pre-v190 output (required test:
+    # test_output_contract_block_byte_identical_without_entity_stage).
+    entity_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -368,6 +376,29 @@ def _output_contract_block(shape: TurnShape) -> str:
         if shape.focus_stage is not None
         else ""
     )
+    # entity-identity-context (v190, Design §B): the one additive
+    # "entity_setup" output key exists ONLY when the caller set
+    # shape.entity_stage; absent it, line and note alike stay out, so an
+    # ordinary turn's appendix is byte-identical to pre-v190 output.
+    entity_setup_line = (
+        '  "entity_setup": {"aliases": ["other names they go by"], '
+        '"relationship": "how they are related to you", "living": true | '
+        'false, "type": "one of the entity types", "maps_to": "the slug of '
+        'the existing page this really is", "start_focus": true | false} '
+        "| null,\n"
+        if shape.entity_stage is not None
+        else ""
+    )
+    entity_setup_note = (
+        '- "entity_setup" is null on every turn except one where the USER '
+        "supplied or changed who this is — other names they go by, how they "
+        "are related to you, whether they are living, what kind of thing "
+        "this is, that this is really an existing page, or a yes to starting "
+        "a focus. Include only the keys they actually gave you. Never invent "
+        "a value, never fill it to look decisive.\n"
+        if shape.entity_stage is not None
+        else ""
+    )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
         "Reply with a single JSON object and nothing else:\n\n"
@@ -379,6 +410,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         '  "held_question_id": "the [qid] you asked from ASKING_SUPPLY, or null",\n'
         f"{placement_line}"
         f"{focus_setup_line}"
+        f"{entity_setup_line}"
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
@@ -394,6 +426,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         "otherwise. Never a qid that wasn't actually offered there.\n"
         f"{placement_note}"
         f"{focus_setup_note}"
+        f"{entity_setup_note}"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -459,6 +492,7 @@ def parse_turn_output(raw: object) -> dict | None:
         "held_question_id": held_question_id or None,
         "placement": _parse_placement(data.get("placement")),
         "focus_setup": _parse_focus_setup(data.get("focus_setup")),
+        "entity_setup": _parse_entity_setup(data.get("entity_setup")),
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
@@ -532,6 +566,70 @@ def _parse_focus_setup(raw: object) -> dict | None:
     living = raw.get("living")
     if isinstance(living, bool):
         parsed["living"] = living
+    return parsed or None
+
+
+#: entity-identity-context (v190, Design §B.1): the closed key set of the
+#: additive ``entity_setup`` object. The VALUES' vocabularies (the entity
+#: types, the relationship list, which slugs actually exist in the roster)
+#: are deliberately NOT known here — ``entity_candidate.validate_entity_setup``
+#: owns those, exactly as ``question_candidate.validate_placement`` owns the
+#: category roster and ``focus_candidate.validate_focus_setup`` owns the focus
+#: vocabularies.
+_ENTITY_SETUP_KEYS = frozenset(
+    {"aliases", "relationship", "living", "type", "maps_to", "start_focus"}
+)
+_ENTITY_SETUP_TEXT_MAX_CHARS = 500
+_ENTITY_SETUP_MAX_ALIASES = 32
+
+
+def _parse_entity_setup(raw: object) -> dict | None:
+    """Structural layer of the additive ``entity_setup`` field (Design §B.1,
+    entity-identity-context / v190).
+
+    Accepts only an object whose keys are a SUBSET of
+    ``{aliases, relationship, living, type, maps_to, start_focus}`` — all six
+    optional, because a turn carries only what the person actually supplied.
+    Each string value is stripped and must be non-empty and at most 500
+    characters; ``aliases`` must be a list whose non-empty trimmed string
+    entries survive (at most 32 of them, so a runaway generation cannot
+    balloon a turn record); ``living`` and ``start_focus`` must be real
+    ``bool``s (never ``0``/``1``/``"yes"``, which JSON makes easy to emit by
+    accident). An individually invalid value is dropped; a non-object, an
+    unknown key, or an object that ends up empty degrades to ``None`` — never
+    an error, exactly as ``held_question_id``, ``placement`` and
+    ``focus_setup`` degrade above.
+
+    This function owns no vocabulary and performs no membership check: closed
+    validation is ``entity_candidate.validate_entity_setup``'s job.
+    """
+    if not isinstance(raw, dict) or not set(raw) <= _ENTITY_SETUP_KEYS:
+        return None
+    parsed: dict[str, object] = {}
+    for key in ("relationship", "type", "maps_to"):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and len(value) <= _ENTITY_SETUP_TEXT_MAX_CHARS:
+            parsed[key] = value
+    aliases = raw.get("aliases")
+    if isinstance(aliases, list):
+        cleaned = [
+            item.strip()
+            for item in aliases
+            if isinstance(item, str)
+            and item.strip()
+            and len(item.strip()) <= _ENTITY_SETUP_TEXT_MAX_CHARS
+        ]
+        if cleaned:
+            parsed["aliases"] = cleaned[:_ENTITY_SETUP_MAX_ALIASES]
+    for flag in ("living", "start_focus"):
+        value = raw.get(flag)
+        if isinstance(value, bool):
+            parsed[flag] = value
     return parsed or None
 
 

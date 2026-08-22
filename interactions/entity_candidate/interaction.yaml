@@ -3,7 +3,7 @@ interaction: entity_candidate
 version: 1.0.0
 extends: conversation
 extends.version: 1.0.0
-modes: research
+modes: research|identity
 load_order: identity|behavior|examples|candidate|type_rubric|research_state|conversation|turn_instructions
 composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
 composition.leaf: prompt/turn-instructions.md|context/manifest.md
@@ -18,4 +18,4 @@ budget.candidate: 3200
 budget.type_rubric: 2200
 budget.research_state: 7200
 budget.conversation: 1600
-budget.turn_instructions: 1500
+budget.turn_instructions: 2800

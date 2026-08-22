@@ -8,16 +8,34 @@ nav_order: 5
 
 ## 1. What it does
 
-Entity Candidate researches one typed entity-roster candidate in ordinary conversation
-until a separate roster decision can later make a page eligible.
-Play starts with the candidate in view; there is no setup modal and no approval.
-Confirmed completion writes one immutable candidate-research source and leaves
-the roster pending.
+Entity Candidate is the conversation that adds someone — or somewhere, or
+something — to your story. Pressing Play graduates the roster candidate in the
+background (one roster mutation, one commit) and this Interaction is what opens
+immediately after. Its job is IDENTITY: who or what this is, well enough that
+the page which now exists finds its own material (v190,
+`docs/pr-specs/entity-identity-context.md`; platform ADR 0020 +
+review-loop/57, which reversed ADR 0022's "Play/start is read-only").
+
+You see one short line chosen for the entity's type. Your first answer gets an
+ordinary reply that receives what you said, adds exactly one sentence saying
+they were added and inviting a correction to the name or the person, and then
+asks at most one identity question — when the roster already holds a
+likely-same page, whether this is that same one (that question outranks every
+other); otherwise, for a person, how they're related to you or whether they're
+still living. If your answer already said, it asks nothing. After that first
+reply identity is settled and never raised again; it changes only when you
+raise a change.
+
+**No focus is ever created here.** The conversation may OFFER one — at most
+once per session, and only for a person, place, period or theme — and a yes is
+recorded, handed to the focus mechanics that already exist, and nothing more.
 
 This is registered as `entity_candidate` at
 `interactions/entity_candidate/`. It exact-composes Conversation 1.0.0 for chat
-mechanics, then adds candidate identity, evidence grounding, next-gap routing,
-readiness, confirmation, and completion coordination.
+mechanics, then adds the identity contract above and — for the standalone
+`entity-candidate-prompt` CLI path, which is unchanged and now superseded for
+Play — candidate identity, evidence grounding, next-gap routing, readiness,
+confirmation, and completion coordination.
 
 ## 2. The behavior authority
 
@@ -71,7 +89,31 @@ type-context references. Completion creates only candidate research; the roster
 remains pending until independent eligibility or an owner verdict acts.
 <!-- /embed -->
 
-## 3. Evidence, readiness, and completion
+## 3. The identity contract (the Play path)
+
+| Concern | Where |
+|---|---|
+| The opening line you see | `entity_candidate.opening_question(name, entity_type)` — one line, type-aware, with a generic fallback for an unknown type |
+| Which stage this turn is in | `entity_candidate.entity_stage_for_session(session)` → `establish` before the first assistant turn, `settled` after. Derived from the transcript; no new state |
+| The likely-same pages | `entity_candidate.possible_duplicates(entity_type, name, roster)` — reuses `entity_roster._entity_keys` (the roster's own alias/match-key logic) and `focus_dupes._token_subset_pairs` (the near-name shape). There is no second entity matcher |
+| Whether a focus may be offered | `entity_candidate.is_offer_worthy(entity_type, roster_entry)` — person/place/period/theme (`recommend_focuses.FOCUS_RECOMMENDATION_TYPES`), and never for a vetoed or already-mapped entity |
+| The prompt the caller replays verbatim | `interactions/entity_candidate/prompt/turn-instructions.md`, substituting `{entity_stage}`, `{entity_name}`, `{entity_type}`, `{possible_duplicates}` |
+| The one additive output field | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` — parsed structurally by `conversation_delivery._parse_entity_setup` (absent or malformed degrades to null, never an error), validated against closed vocabularies by `entity_candidate.validate_entity_setup` |
+| The vocabularies | `entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS` (the focus lane's list, imported not copied), and the caller's own roster slugs for `maps_to` |
+| The seven lints | `entity_candidate.lint_entity_setup_reply` → `entity_setup_gates.*`: the aside is one sentence, is not a question, and never returns; at most one question; silence on settled turns unless you signalled; at most one focus offer; no narrated mechanism |
+
+What you say reaches the roster in ONE call:
+`entity-verdict <type> <slug> graduate|never|clear [--alias A]... [--relationship R]
+[--living|--not-living] [--maps-to SLUG]`. It is idempotent, and `--maps-to`
+wins over `graduate` — a mapped entity already has a home, and when the target
+is another entity on the same roster the loser's names fold into the survivor's
+aliases, which is how this system has always expressed "this is really that
+page". `relationship` and `living` survive a roster refresh exactly as
+`keywords` and owner verdicts do. A yes to the focus offer goes through
+`focus-recommend-from-entity <type> <slug>`, which appends one pending
+recommendation row and creates no Focus.
+
+## 4. Evidence, readiness, and completion (the standalone research path)
 
 The model proposes literal user-turn slices and one next gap. Runtime verifies
 Unicode offsets, overlap, revisions, the closed dimension roster, and inherited
@@ -90,7 +132,7 @@ structured receipt. It never calls roster or verdict authority.
 
 After separate eligibility or a graduate verdict, the compiler may attach the research by typed subject identity. Completion alone compiles no page.
 
-## 4. Where it lives
+## 5. Where it lives
 
 | Concern | Location |
 |---|---|
@@ -98,17 +140,23 @@ After separate eligibility or a graduate verdict, the compiler may attach the re
 | Definition | `interactions/entity_candidate/` |
 | Runtime and completion adapter | `system/entity_candidate.py` |
 | Canonical source authority | `system/candidate_research.py` |
-| Read-only prompt | `lifehug.py entity-candidate-prompt --candidate-id ID` |
+| Standalone research prompt | `lifehug.py entity-candidate-prompt --candidate-id ID` |
+| Identity goldens | `interactions/entity_candidate/evals/goldens/identity_*.json` |
+| Graduation + identity, one call | `lifehug.py entity-verdict <type> <slug> graduate [--alias A]... [--relationship R] [--living\|--not-living] [--maps-to SLUG]` |
+| The entity → focus hand-off | `lifehug.py focus-recommend-from-entity <type> <slug>` |
 | Confirmed completion | `lifehug.py entity-candidate-complete --candidate-id ID --json` |
 | Independent evals | `lifehug.py entity-candidate-evals --json` |
-| Guard tests | `tests/test_entity_candidate.py`, `tests/test_entity_candidate_evals.py`, `tests/test_interaction_registry.py` |
+| Guard tests | `tests/test_entity_candidate.py`, `tests/test_entity_candidate_evals.py`, `tests/test_entity_identity_context.py`, `tests/test_entity_owner_verdicts.py`, `tests/test_interaction_registry.py` |
 
 The package declares role tiers but no default concrete seat. Recorded gates
-require zero readiness false positives, perfect grounding, identity safety,
-one-question and inherited-Conversation compliance, exact type-rubric
-precision/recall for every type, next-gap accuracy of at least 0.85, and
-readiness recall of at least 0.90. An unavailable live provider skips loudly;
-it never seats by default.
+cover both families in one `check_gates` call. `research_gates.*` require zero
+readiness false positives, perfect grounding, identity safety, one-question and
+inherited-Conversation compliance, exact type-rubric precision/recall for every
+type, next-gap accuracy of at least 0.85, and readiness recall of at least
+0.90. The seven `entity_setup_gates.*` compliance classes require perfect
+scores over eight identity goldens. An unavailable live provider skips loudly;
+it never seats by default, and the identity pair is deterministic so it scores
+with or without a seat.
 
-See [ADR 0022](../../adr/0022-entity-candidate-interaction.md) and
-[the Interaction Pattern](index.md).
+See [ADR 0022](../../adr/0022-entity-candidate-interaction.md) (amended
+2026-08-22) and [the Interaction Pattern](index.md).

@@ -364,7 +364,11 @@ def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
     an ambiguous outcome here is not auto-replayed, matching every other
     direct roster/vault mutator (focus-merge, focus-dismiss, ...)."""
     from entity_roster import ENTITY_TYPES  # noqa: PLC0415
-    _expect_payload(payload, required={"type", "slug", "verdict"})
+    _expect_payload(
+        payload,
+        required={"type", "slug", "verdict"},
+        optional={"aliases", "relationship", "living", "maps_to"},
+    )
     entity_type = _text(payload, "type", maximum=16)
     if entity_type not in ENTITY_TYPES:
         raise ValueError("invalid entity type")
@@ -372,7 +376,45 @@ def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
     verdict = _text(payload, "verdict", maximum=16)
     if verdict not in ("graduate", "never", "clear"):
         raise ValueError("invalid verdict")
-    return (_cli("entity-verdict", entity_type, slug, verdict),)
+    args = ["entity-verdict", entity_type, slug, verdict]
+    # entity-identity-context (v190): the identity half. Vocabulary checks
+    # belong to entity_verdict.py (which refuses BEFORE any write); this
+    # builder only shapes a safe argv, exactly as it does for the verdict.
+    aliases = payload.get("aliases")
+    if aliases is not None:
+        if not isinstance(aliases, list) or len(aliases) > 16:
+            raise ValueError("invalid aliases")
+        for alias in aliases:
+            if not isinstance(alias, str) or not alias.strip() or len(alias) > 80:
+                raise ValueError("invalid alias")
+            args += ["--alias", alias.strip()]
+    relationship = _optional_text(payload, "relationship", maximum=32)
+    if relationship:
+        args += ["--relationship", relationship]
+    living = payload.get("living")
+    if living is not None:
+        if not isinstance(living, bool):
+            raise ValueError("invalid living flag")
+        args.append("--living" if living else "--not-living")
+    if payload.get("maps_to") is not None:
+        args += ["--maps-to", _token(payload, "maps_to")]
+    return (_cli(*args),)
+
+
+def _build_focus_recommend_from_entity(payload: dict) -> tuple[Invocation, ...]:
+    """entity-identity-context (v190, Design §F): the entity -> focus hand-off.
+    Appends ONE pending recommendation row for a graduated roster entity and
+    creates no Focus — the existing approval path is what turns a row into a
+    Focus, and it is unchanged. Idempotent by recommendation id (a second run
+    writes nothing), but retry_safety stays "never" like every other roster/
+    state mutator."""
+    from entity_roster import ENTITY_TYPES  # noqa: PLC0415
+
+    _expect_payload(payload, required={"type", "slug"})
+    entity_type = _text(payload, "type", maximum=16)
+    if entity_type not in ENTITY_TYPES:
+        raise ValueError("invalid entity type")
+    return (_cli("focus-recommend-from-entity", entity_type, _token(payload, "slug")),)
 
 
 def _build_second_voice(payload: dict) -> tuple[Invocation, ...]:
@@ -712,6 +754,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "focus-approve": CommandSpec(_build_focus_approve, "never", timeout_seconds=1800),
     "focus-dismiss": CommandSpec(_build_focus_dismiss, "never"),
     "focus-merge": CommandSpec(_build_focus_merge, "never"),
+    "focus-recommend-from-entity": CommandSpec(_build_focus_recommend_from_entity, "never"),
     "monthly": CommandSpec(_build_schedule("monthly_research.sh"), "never", timeout_seconds=21600),
     "process-answer": CommandSpec(_build_process_answer, "never", timeout_seconds=1800),
     "reflect-source": CommandSpec(_build_reflect, "never"),
