@@ -23,7 +23,9 @@ once per session and only for an offer-worthy entity; a yes is recorded as
 `focus-recommend-from-entity`, which appends one pending recommendation row
 and nothing else.
 
-The Play path's surface:
+**Platform twin.** A host REPLAYs this package and reads exactly these —
+nothing else is a contract (the shared shape: `interactions/README.md`
+§ "The child-interaction paradigm"):
 
 | What | Where |
 |---|---|

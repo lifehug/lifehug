@@ -6,6 +6,49 @@ Lifehug is a lifelong AI oral-history system organized around **the Loop**: the 
 
 You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make a piece in the Studio.** Both become part of the same compounding memory system.
 
+## Two users, one Loop
+
+**If you do the minimum, it still works.** Answer one quick question a day —
+that is the whole obligation — and over time you get a full life story:
+answers become durable sources, sources compile into a private wiki, the wiki
+and the signals under it decide a better next question. Nothing in the system
+needs a decision from you to converge (ADR 0006, the Convergence Principle).
+
+**If you want more, there is more.** Answer several questions in a sitting,
+hold a longer conversation instead of a short one, and look at how your life
+is being built — the wiki graph, the Timeline, the Mirror. Anything you
+approve, dismiss, or correct is consumed as accelerator signal (ADR 0009),
+never as a dependency the floor needs.
+
+**Three loops run underneath both**, and they are the whole schedule
+(each transcribed step-by-step in [The three clocks](#the-three-clocks-scheduling)):
+
+| Loop | Entrypoint | For |
+|---|---|---|
+| **Daily** | `system/daily_question.sh` | deliver one question (free, no model call) and take the answer. |
+| **Weekly** | `system/weekly_maintenance.sh` | learn from the week and rebuild the queue: compile → source-lint → classify-story → quality-update → judgment-update → timeline-retire → wiki harvest → mirror-compile → candidates-auto-promote → planner-queue → arc-plan → report + notify. |
+| **Monthly** | `system/monthly_research.sh` | grow: research-expand gaps → recommend-focuses → focus-autopilot → entity-roster per type → compile → perennials → thread offers → resurfacing → report + notify. |
+
+Four surfaces, four jobs:
+
+| Surface | What it is |
+|---|---|
+| **Queue** | the cache of the most effective next questions — the planner's weekly queue, plus promoted candidates and the gaps Mirror and Timeline expose. |
+| **Foundation** | the approved question bank: every question that exists, by focus and category. |
+| **Review** | what the system grew on its own — question candidates, focus ideas, entities about to become pages, duplicate focuses — waiting for your eye. |
+| **Studio** | where you make things: pieces and projects, drafted from everything above. |
+
+**Play** on any of those rows means the same thing everywhere: it *approves*
+the row and *starts* the conversation about it, immediately — the approving
+write happens in the background (platform ADR 0020; OSS
+[ADR 0018](docs/adr/0018-candidate-placement.md),
+[0021](docs/adr/0021-focus-candidate-interaction.md),
+[0022](docs/adr/0022-entity-candidate-interaction.md) hold the three child
+Interactions that conduct it). See `interactions/README.md` §
+"The child-interaction paradigm".
+
+---
+
 ## Nomenclature
 
 The wiki is a **graph of your life**, and these are the standard terms used throughout:
@@ -22,10 +65,21 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 - **Studio** — the single workspace for making pieces and projects: grouped by Focus, project cards expand into a chapter table, piece cards keep their version/revision history, and a create form starts new pieces.
 - **Entity graduation / node graduation** — the wiki grows itself: entities mentioned across your answers are detected, **AI-curated** into a roster (`lifehug.py entity-roster --type <t>`), and graduated into node pages built from those mentions. Places and periods graduate on a low bar (a few mentions); **objects** graduate on AI-judged symbolic meaning (e.g. *The Cleats*), not frequency; people on score; **themes** via an AI-curated keyword roster (v97) — new themes like *Parenting* emerge from opinions, essays, and classifier extractions. Relationship edges use a dyadic path: Focus relationships can graduate from dedicated answers or enough cross-story mentions about the person. Rosters refresh monthly; compile graduates the current roster entries into pages — no manual work. You can also override any entity directly (v173, ADR 0013): `lifehug.py entity-verdict <type> <slug> graduate` fast-forwards one you already know matters, `... never` permanently vetoes a page for it (identity stays, only the page is suppressed), `... clear` returns it to automatic — both settled verdicts survive every future refresh. Since v190 the same verb also carries what you told the conversation: `--alias "Jo"` (repeatable), `--relationship parent`, `--living`/`--not-living`, and `--maps-to <slug>` when the entity is really an existing page (the mapping wins over `graduate` — a mapped entity already has a home — and the loser's names fold into the survivor's aliases so the surviving page finds their material). Relationship and living survive a refresh too. A yes to the conversation's optional "want me to start a focus?" goes through `lifehug.py focus-recommend-from-entity <type> <slug>`, which adds one pending Focus idea and creates no Focus.
 - **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source. When we ask whether a feature "works in the Loop," we mean this path.
+- **The three loops** — the whole schedule the Loop runs on: **Daily** (`system/daily_question.sh`) delivers one question and takes the answer, free and model-free; **Weekly** (`system/weekly_maintenance.sh`) learns from the week and rebuilds the queue (compile → source-lint → classify-story → quality-update → judgment-update → timeline-retire → wiki harvest → mirror-compile → candidates-auto-promote → planner-queue → arc-plan → report); **Monthly** (`system/monthly_research.sh`) grows (research-expand → recommend-focuses → focus-autopilot → entity-roster per type → compile → perennials → thread offers → resurfacing → report). Per-answer events run continuously and are not a fourth clock.
+- **Question queue** — the cache of the most effective next questions: `planner-queue`'s weekly output, expiring with the week. It is an **aggregation with a formula** (`question_planner.build_queue`, `system/question_planner.py:672`), not a hand-written list — pending bank questions weighted by dynamic Focus allocation and group caps (main 0.50 / project 0.35 / focus 0.25), least-covered category first, ×2.5 objective boost, 0.15 chapter-gap fraction, story-function caps (scene 0.45 … output_gap 0.20), rumination cooldown ×0.25, the escalation gate, and `--arc-max` 2. Questions enter the bank only by promotion; Timeline/Mirror gap findings feed arc cards and curation surfaces, not the bank.
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows without a human manually stitching it together, and whose output can affect future questions, wiki pages, relationship understanding, or artifacts.
 - **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
 - **Out of the Loop** — code or data that exists but is not called by scheduled/manual Loop entrypoints and is not read by downstream Loop state. Mission-critical work should not stay here; wire it in or document it as experimental.
-- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. The definition lives in the framework (`interactions/<name>/`); each runtime loads it; a model is "seated" in it only after passing its eval harness. Out-of-scope input is politely deflected. Three today: **conversation** (chats + longer sessions), **question judgment** (which follow-up candidates deserve to exist, and how urgently — ADR 0007), and **focus curation** (judging first-encounter Focus/idea duplicate name variants the deterministic layers can't resolve — ADR 0010).
+- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. The definition lives in the framework (`interactions/<name>/`); each runtime loads it; a model is "seated" in it only after passing its eval harness. Out-of-scope input is politely deflected. Six today: **conversation** (chats + longer sessions), **question judgment** (which follow-up candidates deserve to exist, and how urgently — ADR 0007), **focus curation** (judging first-encounter Focus/idea duplicate name variants the deterministic layers can't resolve — ADR 0010), and three *children* of conversation — **question candidate** (placement, ADR 0018), **focus candidate** (onboarding, ADR 0021), **entity candidate** (identity, ADR 0022).
+- **Child interaction** — an Interaction that `extends` Conversation by exact version and adds exactly ONE goal: a stage-keyed `prompt/turn-instructions.md` leaf the host substitutes into, ONE optional additive structured-output field gated on a `TurnShape` flag, its own lints/goldens/evals harness, and its own seat. Three exist (placement, onboarding, identity); arc walking is proposed. The paradigm is written once in `interactions/README.md`.
+- **Play** — one verb: it **approves** the thing and **starts** its conversation. The approving write (promote the candidate, scaffold the focus, graduate the entity) runs in the host's background job; the conversation opens immediately and never waits on it, so the model states the act once as an aside and takes a correction as a *move*. "Play is read-only" is retired vocabulary (platform ADR 0020).
+- **Play target** *(proposed — platform issue #570)* — what a Play is pointed at: `{kind, ref, goal, question_ids[], context}` for a candidate, focus, entity, question, chapter, book, or the whole queue. One endpoint, one tab renderer; the daily loop becomes a *scheduled* Play.
+- **Placement aside** — the question-candidate child's one goal: the first reply names, in one plain sentence, the focus the answered question was filed under, and accepts a different place as a move (`placement` output field, v188).
+- **Onboarding context** — the focus-candidate child's one goal: establishing what a just-started Focus covers and how far it reaches, so the questions seeded for it are worth asking (`focus_setup` output field, v189).
+- **Identity context** — the entity-candidate child's one goal: the names someone goes by, how they are related, whether they are living, and whether the roster already holds them under another name (`entity_setup` output field, v190).
+- **Episode / plan** *(proposed — platform issue #570 §3)* — the arc-walking child's nouns: a **plan** is the ordered set of open questions for a Play target plus bridging intents, recomputed at every Play (never persisted); an **episode** is one session walking a slice of it (~4–8 questions), closing warmly with what was covered and what waits. Never a checklist, never a streak.
+- **Current** — the version of a Piece you would hand someone today; the star the CLI still calls `final` (`artifact save --final`). An artifact is never *done*, so the UI word is "current" (platform issue #566 ruling).
+- **Foundation** — the approved question bank, browsable by focus and category: the questions that exist. **Review** is its counterpart — what the system grew on its own and is waiting for your eye. **Queue** is the cache of the most effective next questions.
 - **Chat** — the short exchange around the daily question: system-initiated, ~3 exchanges, arc-carded, graceful third-turn exit, closing takeaway.
 - **Conversation** — a long user-initiated session (a story, "something on your mind", or a thread the system offered); runs the full interviewer arc; closes with a narrative takeaway.
 - **Arc card** — the pre-planned skeleton for a chat/conversation: opening framing + 2–4 follow-up *intents* (not scripted text), planned by the loops, executed live per turn.
@@ -35,6 +89,7 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 
 ## Contents
 
+- [Two users, one Loop](#two-users-one-loop) — the minimum, the maximum, and the four surfaces
 - [The big picture](#the-big-picture) — how the whole thing fits together
 - [The daily loop](#the-daily-loop) — what happens every morning
 - [Core concepts](#core-concepts) — Focus, Roadmap, Wiki, Neighborhood, Candidate, Piece, Project, Pass
@@ -181,7 +236,7 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Piece** | The product payoff: a single versioned work — a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. Code/CLI term: **artifact**. | `outputs/`, `sources/artifacts/` |
 | **Project** | A composite piece built over time — today, the book: a Focus with a book-class deliverable whose categories are chapters. Virtual while planning; becomes a concrete piece once assembled. | `state/roadmap.json`, `outputs/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` embedded; `state/rotation.json` external |
-| **Interaction** | A role definition for the AI in one situation: behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. Three today: **conversation** (chats + conversations), **question judgment** (which follow-up candidates deserve to exist, and how urgently — ADR 0007), **focus curation** (first-encounter Focus/idea duplicate name variants — ADR 0010). | `interactions/` |
+| **Interaction** | A role definition for the AI in one situation: behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. Six today: **conversation** (chats + conversations), **question judgment** (ADR 0007), **focus curation** (ADR 0010), plus three *children* of conversation, each adding exactly one goal — **question candidate** (placement, ADR 0018), **focus candidate** (onboarding, ADR 0021), **entity candidate** (identity, ADR 0022). | `interactions/` |
 | **Chat** | The short exchange around the daily question: system-initiated, ~3 exchanges, arc-carded, graceful third-turn exit, closing takeaway. | `state/conversations/<session_id>.json` |
 | **Conversation** | A long user-initiated session (a story, "something on your mind", or a thread the system offered); runs the full interviewer arc; closes with a narrative takeaway. | `state/conversations/<session_id>.json` |
 | **Arc card** | The pre-planned skeleton for a chat/conversation: opening framing + 2–4 follow-up intents (not scripted text), planned weekly, executed live per turn. | `state/arc_cards.json` |
@@ -196,6 +251,26 @@ The key mental model: a **Focus** is the unit of intent. Everything — a person
 You almost never pick a question by hand. Once a week the **planner** (`question_planner.py`) writes a delivery queue of about 8 questions, matching the horizon before the queue expires, and `ask.py` serves one per day from it. If the queue expires or runs out, `ask.py` falls back to simple coverage-based rotation, so a missed week degrades gracefully.
 
 The planner's job is **balance**: pour attention into under-developed Focuses, ease off ones that are nearly done, and never let a single Focus eat your whole week.
+
+**The queue is an aggregation, not a list.** `question_planner.build_queue`
+(`system/question_planner.py:672`) samples pending bank questions under a
+stack of weights and caps, all verifiable in that file:
+
+| Rule | Value | Where |
+|---|---|---|
+| Dynamic Focus weight | `base(tier) × fill_factor × room`; `TIER_BASE` basic 0.8 / standard 1.0 / extreme 1.2; primary Focus `PRIMARY_BASE` 1.5 | `:377`, `:57`, `:58` |
+| Group caps | main 0.50 · project 0.35 · focus 0.25 of the week | `GROUP_CAPS`, `:78` |
+| Least-covered category first | pool sorted by objective, then `category_ratio` ascending | `:649–654`, `:333` |
+| Objective boost | ×2.5 on a question matching an active objective | `DEFAULT_LANE_POLICY`, `:73` (applied `:770`) |
+| Chapter-gap fraction | 0.15 of slots reserved for a nearly-READY chapter's top gap | `:72`, `:799` |
+| Story-function caps | scene 0.45 · foundation/relationship 0.35 · tension/turning_point/meaning 0.30 · contradiction/output_gap 0.20 · self_image/value/growth_edge 0.15 | `STORY_FUNCTION_CAPS`, `:101` |
+| Rumination cooldown | ×0.25 on a category the quality profile marks as ruminated (the only back-off) | `:607`, `:612` |
+| Escalation gate | late-arc relational questions wait for ≥2 answers in that focus | `:543`, `:544`, `:754` |
+| Queue size / arc cap / expiry | `--limit` 8 · `--arc-max` 2 · `--expires-days` 8 | `system/weekly_maintenance.sh:15–17` |
+
+Selection among the survivors is weighted-random, seeded per week (`_week_seed`, `:664`), so the sequence varies instead of marching. Research expansion is deliberately not a queue slot — it surfaces as an `expansion` urgency number for the monthly clock (`:827`).
+
+**What fills the pool.** New questions reach the bank only by promotion (`candidates-auto-promote`, weekly). Candidates come from story classification follow-ups, research neighborhoods (`system/research_expand.py`), conversation closes, the weekly wiki harvest (`question_candidates.harvest_wiki_questions`, cap 3/run — `system/question_candidates.py:659`), and perennial re-asks. Timeline/Mirror gap findings are a *different* lane: only `no_events`, `all_undated`, and `unplaced_events` are consumed, as arc-card intents (`system/arc_planner.py:92`); `no_chrono`, `thin_lineup`, `unplaced_entities`, and `date_contradiction` are display-only curation chores (`system/arc_planner.py:89–91`). They shape how a question is asked and what the viewer nudges you to fix — they never enter the bank themselves.
 
 ```mermaid
 flowchart LR

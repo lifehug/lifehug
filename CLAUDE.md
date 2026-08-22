@@ -1076,6 +1076,52 @@ The private wiki is a **graph of the author's life**. Standard terms:
 - **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
 - **Out of the Loop** — code or data that exists but is not called by scheduled/manual Loop entrypoints and is not read by downstream Loop state. If it matters to Lifehug's mission, wire it in or explicitly mark it experimental.
 
+## Interactions: the child paradigm (operating notes, v188–v191)
+
+- **Six Interactions exist, and three are CHILDREN of Conversation**, each
+  adding exactly ONE goal: `question_candidate` (placement, v188,
+  [ADR 0018](docs/adr/0018-candidate-placement.md)), `focus_candidate`
+  (onboarding, v189, ADR 0021), `entity_candidate` (identity, v190, ADR
+  0022). A fourth — arc walking — is PROPOSED, not built (platform issue
+  #570 §3). The paradigm is written once in `interactions/README.md`
+  § "The child-interaction paradigm": read that before adding or changing
+  a child; never re-derive it from one child's files.
+- **Play = approve + start.** Pressing Play approves the row (promote the
+  candidate / scaffold the focus / graduate the entity) in the host's
+  background job and opens the conversation immediately. The model
+  writes nothing, approves nothing, and claims nothing — it states the
+  act once as an aside and takes a correction as a *move*. "Play is
+  read-only" / "Play never promotes" is retired vocabulary (platform ADR
+  0020 amended ADRs 0018/0021/0022 in place). If you find that phrasing
+  anywhere, it is stale.
+- **Every output-contract field is ADDITIVE, and a host must thread it on
+  its own prompt stand-in.** Each child's one field is gated on a
+  `TurnShape` flag (`placement_stage` · `focus_stage` · `entity_stage`,
+  all default `None`) so `conversation_delivery._output_contract_block()`
+  stays byte-identical for every other caller — a required test per
+  child. **The landmine the hosted platform hit on every pin bump:** the
+  host does not call our `_output_contract_block()`, it REPLAYs a
+  vendored stand-in of the turn prompt, so a field that is not threaded
+  through that stand-in is silently absent in production while the whole
+  OSS suite is green. When a PR adds a field, name it in the
+  `system/version.json` changelog in those words, so the pin-bump agent
+  on the other side has a checklist item rather than a discovery.
+- **A message points at a place; a printer prints a command** (v191).
+  `book.format_chapter_offer` is a MESSAGE — the chapter-ready Telegram
+  nudge — and points at Studio ("open Studio → book → chapter → Draft
+  this chapter"); it must never build a CLI command into its text. The
+  CLI printers beside it (`progress.py`'s Ready-to-create block,
+  `book.print_book_offers`, `book.print_book_chapter`) keep printing
+  `artifact new`, because terminal output IS the local medium's own
+  instruction. Apply the same split to any future nudge.
+- **Handbook parity is enforced, not aspirational.**
+  `tests/test_handbook_parity.py` fails CI when a page's
+  `<!-- parity: module.CONST = value -->` annotation drifts from the live
+  constant, or when an interaction page's
+  `<!-- embed: interactions/<name>/prompt/behavior.md -->` block stops
+  byte-matching its source. Editing a `behavior.md` means editing its
+  handbook page in the same commit.
+
 ## Category Management
 
 ### Generic Starter Categories (A-E) — the life-story character arc

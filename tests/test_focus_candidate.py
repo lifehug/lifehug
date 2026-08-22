@@ -217,7 +217,9 @@ class FocusCandidateTests(unittest.TestCase):
                 # issue #181 (v188): question-candidate-placement-aside
                 # intentionally changes this package's prompt/README/lint
                 # files — this digest tracks that content, not a freeze.
-                "deb584b26a443c8c5346d6effda4b8459ce3fff9d174d70a29add72d958e8aee"
+                # v192 (docs pass): README.md gained the Platform-twin
+                # surface table; no prompt, eval, or manifest byte moved.
+                "f549af401b4765166cc8d3618439d2b367ab799f16f43f3a1a3c5dae764786f5"
             ),
         }
         for package, digest in expected.items():

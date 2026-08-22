@@ -56,6 +56,42 @@ A code change is not done until its paper trail ships **in the same pass**:
 "Done" = code + tests + docs + issue state — never code alone. The owner should
 never have to ask whether the docs match the code.
 
+## Current paradigms (v188–v191) — read before touching an interaction
+
+- **Six Interactions; three are CHILDREN of Conversation**, each adding
+  exactly ONE goal: `question_candidate` (placement, v188, ADR 0018),
+  `focus_candidate` (onboarding, v189, ADR 0021), `entity_candidate`
+  (identity, v190, ADR 0022). Arc walking is **proposed, not built**
+  (platform issue #570 §3). The paradigm — one goal, exact-version
+  composition, a stage-keyed `prompt/turn-instructions.md` leaf, ONE
+  additive output field, lints + goldens + an evals harness — is written
+  once in `interactions/README.md` § "The child-interaction paradigm".
+  Read it there; do not re-derive it from one child.
+- **Play = approve + start.** Play approves the row (promote / scaffold /
+  graduate) in the host's background job and opens the conversation
+  immediately. The model writes nothing and claims nothing; it states the
+  act once as an aside and takes a correction as a *move*. "Play is
+  read-only" / "Play never promotes" is retired vocabulary (platform ADR
+  0020 amended ADRs 0018/0021/0022 in place) — if you find it, it is stale.
+- **Every output-contract field is additive, and a host must thread it on
+  its prompt stand-in.** Fields are gated on `TurnShape` flags
+  (`placement_stage` · `focus_stage` · `entity_stage`, default `None`) so
+  `conversation_delivery._output_contract_block()` stays byte-identical
+  for every other caller — a required test per child. The landmine the
+  hosted platform hit on every pin: it REPLAYs a *vendored stand-in* of
+  the turn prompt rather than calling ours, so an unthreaded field is
+  silently absent in production while our suite is green. Name every new
+  field explicitly in the `system/version.json` changelog.
+- **A message points at a place; a printer prints a command** (v191).
+  `book.format_chapter_offer` (the chapter-ready Telegram nudge) points at
+  Studio and must never embed a CLI command; `progress.py`'s
+  Ready-to-create block and `book.print_book_offers` /
+  `print_book_chapter` keep printing `artifact new`, because terminal
+  output is the local medium's own instruction.
+- **Handbook parity is a CI gate.** `tests/test_handbook_parity.py`
+  fails on a drifted `<!-- parity: module.CONST = value -->` annotation or
+  a `<!-- embed: … behavior.md -->` block that no longer byte-matches its
+  source. Edit a `behavior.md`, edit its handbook page in the same commit.
 
 
 Then decide:

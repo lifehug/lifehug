@@ -24,6 +24,52 @@ contributor) wants to know "where does X plug in?" for any given
 mechanism — this page's diagram and clock tables are the map they check
 before diving into that mechanism's own dedicated page.
 
+## 1b. Two users, one Loop
+
+The same cycle serves two very different people, and the design target is
+that neither one is second-class:
+
+- **Passive.** One quick question a day, answered whenever they feel like
+  it. Nothing else. Over time that alone produces a full life story —
+  which is the [Convergence Principle](mission.md)'s floor claim
+  ([ADR 0006](https://github.com/lifehug/lifehug/blob/main/docs/adr/0006-convergence-principle.md))
+  stated as a product promise rather than an architectural one.
+- **Active.** Answers more in a sitting, holds longer conversations
+  instead of short chats, and *looks at how their life is being built* —
+  the wiki graph, the Timeline, the Mirror. Every approve, dismiss, or
+  correction they make is consumed as accelerator signal
+  ([ADR 0009](https://github.com/lifehug/lifehug/blob/main/docs/adr/0009-decisions-feed-the-loop.md)),
+  never as a dependency the passive path needs.
+
+**Three loops run underneath both of them**, and they are the whole
+schedule — §4 transcribes each one step by step from the script itself:
+
+| Loop | Entrypoint | What it is for |
+|---|---|---|
+| **Daily** | `system/daily_question.sh` | deliver one question (free, no model call) and take the answer. |
+| **Weekly** | `system/weekly_maintenance.sh` | learn from the week and rebuild the queue (keyless-capable, capped API use). |
+| **Monthly** | `system/monthly_research.sh` | grow: research gaps, refresh entity rosters, run focus autopilot (model-backed). |
+
+Four surfaces carry that, and each has exactly one job:
+
+| Surface | Job |
+|---|---|
+| **Queue** | the cache of the most effective next questions: the planner's weekly queue, plus promoted candidates and the gaps Mirror and Timeline expose. |
+| **Foundation** | the approved question bank — every question that exists, by focus and category. |
+| **Review** | what the system grew on its own (question candidates, focus ideas, entities about to graduate, duplicate focuses), waiting for a human eye. |
+| **Studio** | where pieces and projects get made from everything above. |
+
+**Play** means one thing on every one of those rows: it *approves* the row
+and *starts* the conversation about it immediately, with the approving
+write running in the background (platform ADR 0020). The conversation it
+opens is a **child Interaction** of Conversation adding exactly one goal —
+placement ([ADR 0018](https://github.com/lifehug/lifehug/blob/main/docs/adr/0018-candidate-placement.md)),
+onboarding ([ADR 0021](https://github.com/lifehug/lifehug/blob/main/docs/adr/0021-focus-candidate-interaction.md)),
+identity ([ADR 0022](https://github.com/lifehug/lifehug/blob/main/docs/adr/0022-entity-candidate-interaction.md));
+arc walking is proposed. The paradigm is written once in
+`interactions/README.md`, summarized on
+[The Interaction Pattern](interactions/).
+
 ## 2. The nouns
 
 The **Loop** itself is defined once in the [Glossary](glossary.md): the
@@ -218,6 +264,83 @@ decoupled and swept later by `compile_and_commit.sh`'s hourly
 for a Conversation). This is why README calls it "three clocks *plus*
 per-answer events" rather than a fourth clock: it's continuously live,
 not scheduled.
+
+## 4b. The weekly queue is an aggregation, with a formula
+
+The Queue is not a list someone writes — it is `planner-queue`'s output
+(weekly step 10 above), recomputed from the bank every week and expiring
+with it. `question_planner.build_queue` (`system/question_planner.py:672`)
+samples **pending bank questions** under a stack of weights and caps:
+
+- **Dynamic Focus weighting** — `focus_weight` (`:377`): `base(tier) ×
+  fill_factor × room`. `TIER_BASE` is `basic 0.8 / standard 1.0 /
+  extreme 1.2` (`:57`), and the primary Focus (your own life story)
+  carries `PRIMARY_BASE` 1.5 (`:58`).
+  <!-- parity: question_planner.PRIMARY_BASE = 1.5 -->
+  Saturated Focuses fade to maintenance weight; no single Focus may take
+  more than its cap (`DEFAULT_CAP`, or `FINISHING_CAP` while a Focus is
+  `finishing` — `:399`).
+- **Group caps** — `GROUP_CAPS` (`:78`): `main 0.50 · project 0.35 ·
+  focus 0.25` of the week's slots, enforced (not decorative) since the
+  group-cap fix.
+- **Least-covered category first** — `enriched_pending_questions`
+  (`:553`) sorts the pool by `(objective first, category_ratio ascending,
+  non-focus groups first, question id)` (`:649–654`), so within the same
+  objective status the thinnest category surfaces before a full one
+  (`category_ratio`, `:333`).
+- **Objective boost ×2.5** — `DEFAULT_LANE_POLICY["objective_boost"]`
+  (`:73`), applied at pick time in `weighted_pick` (`:770`) to any
+  question matching an active objective.
+- **Chapter-gap fraction 0.15** — `chapter_boost_fraction` (`:72`)
+  reserves ~1–2 slots for the top unanswered question in a book chapter
+  that is close to READY (`:799`).
+- **Story-function caps** — `STORY_FUNCTION_CAPS` (`:101`): `scene 0.45 ·
+  foundation 0.35 · relationship 0.35 · tension/turning_point/meaning
+  0.30 · contradiction 0.20 · output_gap 0.20 · self_image/value/
+  growth_edge 0.15`, so one narrative function can't eat the week.
+- **Rumination cooldown** — a question in a category the quality profile
+  marks as ruminated is damped to ×0.25 (`:607`). It is the only
+  back-off; drain is never negative (owner-set, `:612`).
+- **Escalation gate** — late-arc relational questions (tension, what I
+  want them to know, how they see me, perception by others — `:543`)
+  wait until that focus has at least `ESCALATION_MIN_ANSWERED` = 2
+  answers (`:544`, enforced at `:754`).
+  <!-- parity: question_planner.ESCALATION_MIN_ANSWERED = 2 -->
+- **Arc cap 2 per queue** — the weekly run passes `--arc-max`
+  (`LIFEHUG_WEEKLY_ARC_MAX`, default 2 —
+  `system/weekly_maintenance.sh:16`) alongside `--limit` (default 8,
+  `:15`; `question_planner.DEFAULT_DELIVERY_QUEUE_LIMIT` = 8) and
+  `--expires-days` (default 8, `:17`).
+  <!-- parity: question_planner.DEFAULT_DELIVERY_QUEUE_LIMIT = 8 -->
+
+Selection among the survivors is weighted-random, seeded per week
+(`_week_seed`, `:664`), so the daily sequence has variety rather than a
+deterministic march. Research expansion is deliberately **not** a queue
+slot — it surfaces as an `expansion` urgency number in the queue metadata
+for the monthly clock to act on (`:672` docstring, `:827`).
+
+**What fills the pool the queue samples from.** New questions reach the
+bank only by promotion (weekly step 9, `candidates-auto-promote`), and
+candidates come from: story classification follow-ups
+(`classify-story`), research neighborhoods (`system/research_expand.py`),
+conversation closes, the weekly wiki-question harvest
+(`question_candidates.harvest_wiki_questions`, capped at
+`WIKI_HARVEST_CAP` = 3 per run — `system/question_candidates.py:659`),
+and perennial re-asks.
+<!-- parity: question_candidates.WIKI_HARVEST_CAP = 3 -->
+
+**Timeline and Mirror gaps are a different lane, and it is worth not
+confusing them with candidates.** `arc_planner.compute_gaps` emits gap
+kinds, of which exactly three are consumed as arc-card intents —
+`no_events`, `all_undated`, `unplaced_events`
+(`arc_planner.CONSUMED_GAP_KINDS`, `system/arc_planner.py:92`). The rest
+(`no_chrono`, `thin_lineup`, `unplaced_entities`, `date_contradiction`)
+are **display-only**: they name a curation chore on the viewer's Timeline
+surface, not a question (`system/arc_planner.py:89–91`;
+`date_contradiction` originates in
+`system/timeline_corroboration.py:222`). Gap findings shape *how* a
+queued question is asked, and what the viewer nudges you to fix — they do
+not themselves enter the bank.
 
 ## 5. In the loop, adjacent, and out — worked examples
 

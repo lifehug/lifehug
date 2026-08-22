@@ -9,7 +9,8 @@ nav_order: 5
 
 ## 1. What it does & what it's for
 
-Three places in this system put a model into a role: talking with the
+Six roles in this system put a model into a seat; three of them are
+children of a fourth. The founding three: talking with the
 user (Chat/Conversation), judging whether a generated question deserves
 to exist (Question Judgment), and resolving whether two pending Focus
 ideas are actually the same person or theme under different names (Focus
@@ -41,10 +42,25 @@ An **Interaction** is defined once, precisely, in the
 situation — purpose, behavior contract, context recipe, scope, and evals,
 packaged as files any qualified model can execute. "Interaction" names
 the *definition*, not any one model's behavior, and not the code that
-runs it. Five exist today, each with its own handbook page:
+runs it. Six exist today, each with its own handbook page:
 [Conversation](conversation.md), [Question Judgment](question-judgment.md),
-[Focus Curation](focus-curation.md), [Question Candidate](question-candidate.md),
-and [Entity Candidate](entity-candidate.md).
+[Focus Curation](focus-curation.md), and Conversation's three **children**
+— [Question Candidate](question-candidate.md) (placement),
+[Focus Candidate](focus-candidate.md) (onboarding), and
+[Entity Candidate](entity-candidate.md) (identity).
+
+**The child-interaction paradigm.** Conversation is the parent; a child
+adds exactly ONE goal, a stage-keyed `prompt/turn-instructions.md` leaf
+the host substitutes into, ONE optional additive structured-output field
+gated on a `TurnShape` flag (absent or malformed degrades to ordinary
+Conversation and never errors a turn), and its own lints, goldens, evals
+harness, and seat. **Play** on the row that opens one of these means
+*approve and start*: the approving write — promote, scaffold, graduate —
+runs in the host's background job, so the model claims nothing and waits
+for nothing. A fourth child, arc walking, is proposed (platform issue
+#570). The paradigm is written once in `interactions/README.md`;
+`train the small interactions first, one model later` is its stated
+training path.
 
 The **three-way split** every interaction observes:
 
