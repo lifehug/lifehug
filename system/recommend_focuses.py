@@ -876,6 +876,133 @@ def dismiss_recommendation(rec_id: str, reason: str = "") -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# entity-identity-context (v190, Design §F) — the entity -> focus hand-off
+#
+# Owner ruling 4: entity Play NEVER creates a focus. The identity conversation
+# may OFFER one; a yes is recorded as `entity_setup.start_focus` and hands off
+# HERE — to one pending recommendation row, which the EXISTING focus mechanics
+# (approve_recommendation -> roadmap.focus_new) then consume unchanged. This
+# module creates no focus and calls nothing that does.
+# ---------------------------------------------------------------------------
+
+#: The exact key set of a recommendation row, as `recommend()` emits it. The
+#: single authority (recurring-defect doctrine): `recommendation_for_entity`
+#: builds against it, and test_recommendation_row_keys_match_the_recommend_literal
+#: reads `recommend()`'s own dict literal out of the AST and compares — so a
+#: key added to one and not the other fails the build rather than production.
+RECOMMENDATION_ROW_KEYS = (
+    "id",
+    "entity",
+    "type",
+    "score",
+    "evidence_strength",
+    "mention_count",
+    "unique_answers",
+    "cross_categories",
+    "emotional_weight",
+    "evidence",
+    "reason",
+    "status",
+    "created_at",
+    "ready_to_start",
+)
+
+#: Owner ruling 4's own words, verbatim and constant — the reason line on
+#: every row this seam produces. Never derived, never templated.
+ENTITY_ONBOARDING_REASON = "owner asked during entity onboarding"
+
+
+def recommendation_for_entity(roster_entry: dict, *, now: str | None = None) -> dict:
+    """One recommendation row for one graduated entity (Design §F).
+
+    Pure given a clock: no vault read, no write, no focus. `roster_entry` is a
+    roster record with its `type` injected by the caller (the roster file
+    carries the type at the top level, not per entry) — `entity_type` must be
+    one of FOCUS_RECOMMENDATION_TYPES, which is also exactly the set
+    `entity_candidate.is_offer_worthy` will offer for, so an `object` never
+    reaches here and raises loudly if it does.
+
+    `ready_to_start` is False and `evidence` is empty on purpose: this row
+    exists because the owner ASKED for it in conversation, not because the
+    detector found evidence for it, and it is about to be approved by the
+    hand-off rather than advertised as a suggestion.
+    """
+    entry = roster_entry if isinstance(roster_entry, dict) else {}
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        raise ValueError("recommendation_for_entity requires a roster entry with a name")
+    entity_type = str(entry.get("type") or "").strip()
+    if entity_type not in FOCUS_RECOMMENDATION_TYPES:
+        raise ValueError(
+            f"{entity_type!r} cannot become a Focus recommendation "
+            f"(known: {', '.join(FOCUS_RECOMMENDATION_TYPES)})")
+    score = round(float(entry.get("score") or 0.0), 2)
+    answers = int(entry.get("unique_answers") or 0)
+    row = {
+        "id": f"rec-{slugify(name)}",
+        "entity": name,
+        "type": entity_type,
+        "score": score,
+        "evidence_strength": _evidence_strength(score),
+        "mention_count": answers,
+        "unique_answers": answers,
+        "cross_categories": [],
+        "emotional_weight": 0.0,
+        "evidence": [],
+        "reason": ENTITY_ONBOARDING_REASON,
+        "status": "pending",
+        "created_at": now or now_utc(),
+        "ready_to_start": False,
+    }
+    assert set(row) == set(RECOMMENDATION_ROW_KEYS)  # noqa: S101 - shape pin
+    return row
+
+
+def append_entity_recommendation(entity_type: str, slug: str, *,
+                                 now: str | None = None) -> dict:
+    """Append `recommendation_for_entity`'s row to
+    state/focus_recommendations.json, idempotently. Creates NO focus.
+
+    An existing row with the same id short-circuits and writes NOTHING at all
+    — re-running the hand-off after a retry converges to the same file bytes.
+    A previously DISMISSED id is still appended: the owner just asked for it
+    out loud in the identity conversation, which outranks an earlier automatic
+    dismissal.
+
+    Returns `{"created": bool, "recommendation": row}`.
+    """
+    from entity_roster import ENTITY_TYPES, load_roster  # noqa: PLC0415
+
+    if entity_type not in ENTITY_TYPES:
+        raise ValueError(
+            f"unknown entity type: {entity_type!r} (known: {', '.join(ENTITY_TYPES)})")
+    roster = load_roster(entity_type)
+    entry = next(
+        (e for e in roster.get("entities", [])
+         if isinstance(e, dict) and e.get("slug") == slug),
+        None,
+    )
+    if entry is None:
+        raise ValueError(f"no such {entity_type} on the roster: {slug!r}")
+
+    row = recommendation_for_entity({**entry, "type": entity_type}, now=now)
+    existing = load_recommendation_state()
+    recs = existing.get("recommendations", [])
+    for rec in recs:
+        if isinstance(rec, dict) and rec.get("id") == row["id"]:
+            return {"created": False, "recommendation": rec}
+
+    recs = [*recs, row]
+    write_json(FOCUS_RECS_FILE, {
+        "version": existing.get("version", 1),
+        "generated_at": existing.get("generated_at", now_utc()),
+        "recommendations": recs,
+        "dismissed": existing.get("dismissed", []),
+    })
+    return {"created": True, "recommendation": row}
+
+
 def approve_recommendation(rec_id: str, *, tier: str = "standard",
                            deliverable: str = "chapter",
                            approved_by: str = MANUAL_APPROVED_BY) -> bool:
@@ -1197,8 +1324,28 @@ def main() -> None:
                         help="With --autopilot: fill to target in one run instead of the gentle "
                              f"{AUTOPILOT_MAX_PER_RUN}/run cap (manual CLI only)")
     parser.add_argument("--dry-run", action="store_true", help="With --autopilot: preview, write nothing")
+    parser.add_argument("--from-entity", nargs=2, metavar=("TYPE", "SLUG"), default=None,
+                        help="entity-identity-context (v190): append ONE pending "
+                             "recommendation row for a graduated roster entity — the "
+                             "entity -> focus hand-off seam. Creates no Focus.")
 
     args = parser.parse_args()
+
+    if args.from_entity:
+        import json
+        entity_type, slug = args.from_entity
+        try:
+            result = append_entity_recommendation(entity_type, slug)
+        except ValueError as exc:
+            print(f"✗ focus-recommend-from-entity: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            rec = result["recommendation"]
+            verb = "recommended" if result["created"] else "already recommended"
+            print(f"✓ {rec['entity']} {verb} as a Focus idea ({rec['id']}) — no Focus created")
+        return
 
     if args.dismiss:
         dismiss_recommendation(args.dismiss, args.reason)

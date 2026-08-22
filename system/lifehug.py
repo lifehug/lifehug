@@ -132,6 +132,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # never write) — same family as judgment-update.
     "focus-curate",
     "focus-dismiss", "focus-finish",
+    # entity-identity-context (v190): the entity -> focus hand-off appends one
+    # row to state/focus_recommendations.json — same single-file writer-lock
+    # family as focus-dismiss/recommend-focuses. It creates no Focus.
+    "focus-recommend-from-entity",
     # focus-merge (ADR 0012): the healing verb rewrites state/roadmap.json,
     # the question bank, entity rosters, the curation ledger and a wiki page
     # in ONE transaction — the widest single-command vault mutation in the
@@ -1549,9 +1553,30 @@ def cmd_entity_roster(args: argparse.Namespace) -> int:
 
 def cmd_entity_verdict(args: argparse.Namespace) -> int:
     flags = [args.type, args.slug, args.verdict]
+    # entity-identity-context (v190): graduation and the identity the Play
+    # conversation learned arrive in ONE call (Design §E).
+    for alias in args.alias or []:
+        flags.extend(["--alias", alias])
+    if args.relationship:
+        flags.extend(["--relationship", args.relationship])
+    if args.living is True:
+        flags.append("--living")
+    elif args.living is False:
+        flags.append("--not-living")
+    if args.maps_to:
+        flags.extend(["--maps-to", args.maps_to])
     if args.json:
         flags.append("--json")
     return run_python("entity_verdict.py", flags)
+
+
+def cmd_focus_recommend_from_entity(args: argparse.Namespace) -> int:
+    """entity-identity-context (v190, Design §F): the ONLY entity -> focus
+    hand-off seam. Appends one pending recommendation row; creates no Focus."""
+    flags = ["--from-entity", args.type, args.slug]
+    if args.json:
+        flags.append("--json")
+    return run_python("recommend_focuses.py", flags)
 
 
 def cmd_focus_action(args: argparse.Namespace) -> int:
@@ -2230,8 +2255,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("type", choices=["person", "place", "period", "object", "theme"])
     p.add_argument("slug", help="The roster entity's slug (state/entity_rosters/<type>.json)")
     p.add_argument("verdict", choices=["graduate", "never", "clear"])
+    p.add_argument("--alias", action="append", default=[], metavar="NAME",
+                   help="Another name this entity goes by (repeatable)")
+    p.add_argument("--relationship", metavar="R",
+                   help="How this person is related to the author")
+    _living = p.add_mutually_exclusive_group()
+    _living.add_argument("--living", dest="living", action="store_true", default=None,
+                         help="This person is still living")
+    _living.add_argument("--not-living", dest="living", action="store_false",
+                         help="This person is no longer living")
+    p.add_argument("--maps-to", dest="maps_to", metavar="SLUG",
+                   help="This entity is really that existing page — wins over graduate")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_entity_verdict)
+
+    p = sub.add_parser("focus-recommend-from-entity",
+                       help="Append ONE pending Focus recommendation for a graduated "
+                            "roster entity — the entity -> focus hand-off. Creates no Focus.")
+    p.add_argument("type", choices=["person", "place", "period", "object", "theme"])
+    p.add_argument("slug", help="The roster entity's slug")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_focus_recommend_from_entity)
 
     p = sub.add_parser("focus-approve", help="Approve a Focus recommendation")
     p.add_argument("approve", metavar="REC_ID")

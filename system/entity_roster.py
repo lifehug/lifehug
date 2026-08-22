@@ -327,6 +327,26 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
     return [dict(e) for e in previous_entities], True
 
 
+#: entity-identity-context (v190, Design §E): the settled facts a roster entry
+#: can carry that are NOT re-derivable from a refresh — an owner verdict
+#: (ADR 0013) and the two identity facts the owner supplies in the Play
+#: conversation (`entity-verdict --relationship/--living|--not-living`). An
+#: entry carrying any of them survives a refresh that drops or contradicts it,
+#: exactly as an owner_verdict alone did before v190. `maps_to_focus` is
+#: deliberately NOT here: a merge's durability lives on the SURVIVOR (the
+#: loser's names are unioned into the target's aliases, which
+#: `_entity_keys`/`apply_previous_decisions` then fold by forever), not on the
+#: loser's own row.
+_SETTLED_IDENTITY_FIELDS = ("relationship", "living")
+
+
+def _has_settled_identity(entry: dict) -> bool:
+    """True when this entry carries an owner decision a refresh must not lose."""
+    if entry.get("owner_verdict"):
+        return True
+    return any(entry.get(field) is not None for field in _SETTLED_IDENTITY_FIELDS)
+
+
 def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | None) -> tuple[list[dict], int]:
     """Safety net: fold raw AI output back onto the previous roster's settled
     identity decisions BEFORE normalize().
@@ -369,7 +389,7 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     if not raw_entities:
         # Nothing to fold onto, but a settled owner_verdict must still
         # survive an empty refresh (e.g. an empty/failed candidate pass).
-        survivors = [dict(p) for p in previous if p.get("owner_verdict")]
+        survivors = [dict(p) for p in previous if _has_settled_identity(p)]
         return survivors, len(survivors)
 
     key_to_prev: dict[str, dict] = {}
@@ -436,6 +456,12 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         # a refresh response drops them (harmless no-op for other types).
         if not slot.get("keywords") and prev.get("keywords"):
             slot["keywords"] = list(prev["keywords"])
+        # entity-identity-context (v190): the owner's identity facts are
+        # settled work too — carry them forward when a refresh response
+        # drops them (the exact `keywords` recipe one line above).
+        for field in _SETTLED_IDENTITY_FIELDS:
+            if slot.get(field) is None and prev.get(field) is not None:
+                slot[field] = prev[field]
         # An owner_verdict on the previous entry is a settled fact — it
         # always wins, whatever this refresh's raw entry carries or omits.
         if prev.get("owner_verdict"):
@@ -446,7 +472,7 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     # A previous entry carrying an owner_verdict must survive even when no
     # raw entry in THIS refresh matched it at all.
     for prev in previous:
-        if not prev.get("owner_verdict"):
+        if not _has_settled_identity(prev):
             continue
         prev_slug = prev.get("slug") or slugify(prev.get("name") or "")
         if prev_slug in slots:
@@ -636,6 +662,17 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
             "score": round(score, 2), "unique_answers": answers,
             "page_eligible": page_eligible,
         }
+        # entity-identity-context (v190, Design §E): identity facts the owner
+        # supplied through `entity-verdict` survive normalization. Validated
+        # here only for SHAPE — the closed relationship vocabulary belongs to
+        # `focus_candidate.FOCUS_RELATIONSHIPS` and is enforced by the verb
+        # before anything reaches the roster.
+        relationship = e.get("relationship")
+        if isinstance(relationship, str) and relationship.strip():
+            entry["relationship"] = relationship.strip()
+        living = e.get("living")
+        if isinstance(living, bool):
+            entry["living"] = living
         owner_verdict = e.get("owner_verdict")
         if owner_verdict in ("graduate", "never"):
             entry["owner_verdict"] = owner_verdict
