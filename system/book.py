@@ -477,23 +477,25 @@ def newly_ready_chapters(books: list[dict] | None = None) -> list[tuple[dict, di
 
 
 def format_chapter_offer(book: dict, chapter: dict) -> str:
-    """The one-line-plus-command Telegram message body for a chapter offer.
+    """The one-line Telegram message body for a chapter offer.
 
-    Keep it short: the point is "want to draft this?", not a report. The exact
-    artifact command is included so Dave can copy-paste it, or a future button
-    handler can capture it verbatim.
+    Keep it short: the point is "this chapter is ready", not a report. Both
+    mediums now have a Studio where the draft action actually lives (OSS
+    view_studio since v127; the hosted Studio equivalent) — the nudge points
+    there instead of printing a CLI command to copy-paste. The CLI path is
+    still how the local medium is documented (see `book-chapter` and the
+    Book Assembly views), this is just the message, not the manual.
     """
     label = book.get("label", "(untitled book)")
     cat = chapter["category_id"]
     name = chapter["category_name"]
     ratio = chapter["saturation"]
-    cmd = (f'python3 system/lifehug.py artifact new --format chapter '
-           f'--subject "{name}" --categories {cat}')
     return (
         f"📖 Book milestone — chapter READY\n"
         f"{label} → [{cat}] {name}\n"
         f"{chapter['answered']}/{chapter['total']} answered ({ratio:.0%})\n\n"
-        f"Want to draft it? Reply with the chapter letter, or run:\n{cmd}"
+        f"«{name}» is ready to draft — open Studio → {label} → {name} → "
+        f"Draft this chapter."
     )
 
 

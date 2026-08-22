@@ -187,8 +187,8 @@ def test_newly_ready_excludes_already_offered_and_drafted():
             f"already-offered chapter re-offered: {b['label']} [{ch['category_id']}]"
 
 
-def test_format_chapter_offer_contains_command():
-    """The offer message includes the exact artifact command."""
+def test_format_chapter_offer_points_at_studio():
+    """The offer message points at Studio's draft action, not a CLI command."""
     fake_book = {"id": "my-life", "label": "David James Taylor"}
     fake_chapter = {
         "category_id": "A", "category_name": "Origins",
@@ -196,10 +196,14 @@ def test_format_chapter_offer_contains_command():
     }
     msg = book.format_chapter_offer(fake_book, fake_chapter)
     assert "chapter" in msg.lower()
-    assert "lifehug.py artifact new" in msg
-    assert "--format chapter" in msg
-    assert "--categories A" in msg
+    assert "ready to draft" in msg.lower()
+    assert "Studio" in msg
+    assert "Draft this chapter" in msg
+    assert "David James Taylor" in msg
     assert "Origins" in msg
+    # The nudge is a message, not a manual — no CLI command to copy-paste.
+    assert "lifehug.py artifact new" not in msg
+    assert "--format chapter" not in msg
 
 
 def test_offer_key_and_marking_roundtrip():
