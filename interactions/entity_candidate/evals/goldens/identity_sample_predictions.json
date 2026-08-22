@@ -1,0 +1,90 @@
+[
+  {
+    "fixture_id": "identity-establish-aside-and-one-question",
+    "turns": [
+      {
+        "message": "Thirty-one years of second shifts leaves a mark on a family. I've added **Synthetic Ada** as a person in your story — tell me if that's the wrong name or the wrong person. Is she your mother, or someone you think of that way?",
+        "entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-establish-duplicate-asks-same-as",
+    "turns": [
+      {
+        "message": "A truck that never started twice in a row — that's a detail with a whole man behind it. I've added **Synthetic Jim** as a person in your story — tell me if that's the wrong name or the wrong person. Is this the same one as Synthetic Jim Reynolds, who you already told me about?",
+        "entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-establish-answer-already-told-asks-nothing",
+    "turns": [
+      {
+        "message": "Your mother, and gone eight years now — that's the shape of it. I've added **Synthetic Ada** as a person in your story — tell me if that's the wrong name or the wrong person.",
+        "entity_setup": {"relationship": "parent", "living": false}
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-establish-offer-worthy-appends-offer",
+    "turns": [
+      {
+        "message": "Waiting for the tide there is the kind of detail a whole place gets built out of. I've added **Synthetic Harbor Street** as a place in your story — tell me if that's the wrong name or the wrong person. If it's somewhere you want to build out, say so and I'll start a focus. What did the water sound like from the pier?",
+        "entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-settled-silent",
+    "turns": [
+      {
+        "message": "Thirty-one years of second shifts leaves a mark on a family. I've added **Synthetic Ada** as a person in your story — tell me if that's the wrong name or the wrong person. Is she your mother, or someone you think of that way?",
+        "entity_setup": null
+      },
+      {
+        "message": "Second shift meant you had the house to yourself after school. What did you do with those hours?",
+        "entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-settled-user-signals-emits-setup",
+    "turns": [
+      {
+        "message": "Thirty-one years of second shifts leaves a mark on a family. I've added **Synthetic Ada** as a person in your story — tell me if that's the wrong name or the wrong person. Is she your mother, or someone you think of that way?",
+        "entity_setup": null
+      },
+      {
+        "message": "Your mother, then, and the mill is where you knew her from. What did she come home smelling like?",
+        "entity_setup": null
+      },
+      {
+        "message": "Jo, then — that's how she'd have wanted it, and we'll build her out.",
+        "entity_setup": {"aliases": ["Jo"], "start_focus": true}
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-settled-offer-not-repeated",
+    "turns": [
+      {
+        "message": "Waiting for the tide there is the kind of detail a whole place gets built out of. I've added **Synthetic Harbor Street** as a place in your story — tell me if that's the wrong name or the wrong person. If it's somewhere you want to build out, say so and I'll start a focus. What did the water sound like from the pier?",
+        "entity_setup": null
+      },
+      {
+        "message": "Slack water and the ropes going quiet — that's a very particular kind of stillness. What did the two of you do while you waited?",
+        "entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-unknown-relationship-rejected",
+    "turns": [
+      {
+        "message": "The one who taught you to read a tide table — that stays with a person. I've added **Synthetic Ada** as a person in your story — tell me if that's the wrong name or the wrong person.",
+        "entity_setup": {"relationship": "grandmother-in-law"}
+      }
+    ]
+  }
+]

@@ -1,0 +1,162 @@
+[
+  {
+    "fixture_id": "identity-establish-aside-and-one-question",
+    "entity": {
+      "name": "Synthetic Ada",
+      "type": "person",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-establish-duplicate-asks-same-as",
+    "entity": {
+      "name": "Synthetic Jim",
+      "type": "person",
+      "possible_duplicates": ["Synthetic Jim Reynolds"],
+      "roster_slugs": ["synthetic-jim-reynolds"]
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-establish-answer-already-told-asks-nothing",
+    "entity": {
+      "name": "Synthetic Ada",
+      "type": "person",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": true,
+        "offered_before": false,
+        "expected_entity_setup": {"relationship": "parent", "living": false}
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-establish-offer-worthy-appends-offer",
+    "entity": {
+      "name": "Synthetic Harbor Street",
+      "type": "place",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-settled-silent",
+    "entity": {
+      "name": "Synthetic Ada",
+      "type": "person",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      },
+      {
+        "stage": "settled",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-settled-user-signals-emits-setup",
+    "entity": {
+      "name": "Synthetic Ada",
+      "type": "person",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      },
+      {
+        "stage": "settled",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      },
+      {
+        "stage": "settled",
+        "user_signaled": true,
+        "offered_before": false,
+        "expected_entity_setup": {"aliases": ["Jo"], "start_focus": true}
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-settled-offer-not-repeated",
+    "entity": {
+      "name": "Synthetic Harbor Street",
+      "type": "place",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": false,
+        "offered_before": false,
+        "expected_entity_setup": null
+      },
+      {
+        "stage": "settled",
+        "user_signaled": false,
+        "offered_before": true,
+        "expected_entity_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "identity-unknown-relationship-rejected",
+    "entity": {
+      "name": "Synthetic Ada",
+      "type": "person",
+      "possible_duplicates": [],
+      "roster_slugs": []
+    },
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": true,
+        "offered_before": false,
+        "expected_entity_setup": null
+      }
+    ]
+  }
+]

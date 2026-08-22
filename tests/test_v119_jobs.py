@@ -47,6 +47,7 @@ EXPECTED_COMMANDS = frozenset({
     "focus-approve",
     "focus-dismiss",
     "focus-merge",
+    "focus-recommend-from-entity",
     "monthly",
     "process-answer",
     "reflect-source",

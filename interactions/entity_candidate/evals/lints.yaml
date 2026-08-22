@@ -19,3 +19,12 @@ research_gates.type_specific.object.precision: 1.0
 research_gates.type_specific.object.recall: 1.0
 research_gates.type_specific.theme.precision: 1.0
 research_gates.type_specific.theme.recall: 1.0
+# entity-identity-context (v190, Design §D): the seven identity gate classes,
+# scored over the identity golden pair beside the research ones.
+entity_setup_gates.aside_single_sentence.compliance: 1.0
+entity_setup_gates.aside_not_a_question.compliance: 1.0
+entity_setup_gates.aside_never_repeated.compliance: 1.0
+entity_setup_gates.one_identity_question.compliance: 1.0
+entity_setup_gates.settled_silence.compliance: 1.0
+entity_setup_gates.offer_at_most_once.compliance: 1.0
+entity_setup_gates.no_mechanism_talk.compliance: 1.0
