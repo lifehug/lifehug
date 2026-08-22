@@ -2,7 +2,8 @@
 
 Date: 2026-08-18
 Status: amended 2026-08-21 by docs/pr-specs/question-candidate-placement-aside.md;
-amended 2026-08-22 by docs/pr-specs/focus-onboarding-context.md
+amended 2026-08-22 by docs/pr-specs/focus-onboarding-context.md;
+amended 2026-08-22 by docs/pr-specs/arc-walk-interaction.md
 
 ## Context
 
@@ -230,5 +231,38 @@ supplied drops the key rather than producing a dangling reference.
 
 Pin-bump reconciliation surfaces: `entity_setup` joins the turn-output shape
 row alongside `placement` and `focus_setup`.
+
+## Amendment (2026-08-22) — the additive-field discipline has a fourth instance
+
+Recorded by `docs/pr-specs/arc-walk-interaction.md` (v193). **No decision in
+this ADR changes.** The fourth instance is the one the third amendment
+predicted, and it lands on the pattern without bending it:
+
+| | arc walking (v193) |
+|---|---|
+| output field | `answered_question_id: "<qid>" \| null` |
+| gated on | `TurnShape.arc_stage` |
+| structural layer | `conversation_delivery._parse_answered_question_id` |
+| closed layer | `arc_walk.validate_answered_question_id` (exact membership in the episode's own plan) |
+| stage source | `arc_walk.arc_stage_for_session` (transcript, plus the caller's `user_leaving` signal) |
+| stages | `open` \| `walk` \| `close` |
+| lints | seven `arc_walk_gates.*` |
+
+Two things this instance clarifies for any fifth:
+
+- **The closed layer's roster can be a computed object, not a file.** v190
+  established that the caller may supply the membership list (`roster_slugs`);
+  v193 goes one step further — the list is the PLAN, recomputed at Play and
+  never stored. The discipline survives: exact membership, no case-fold, no
+  derivation from prose, drop rather than invent.
+- **The field's default is a fact the package already knows.** A null
+  `answered_question_id` is not "no information": it means "the one on the
+  table", which `arc_walk.question_on_the_table` computes. An additive field
+  may OVERRIDE a derivable default rather than being the only source of it.
+
+Pin-bump reconciliation surfaces: `answered_question_id` joins the turn-output
+shape row alongside `placement`, `focus_setup`, and `entity_setup`; the
+`TurnShape` gate list becomes `placement_stage · focus_stage · entity_stage ·
+arc_stage`.
 
 🤖 Generated with Claude Opus via Claude Code

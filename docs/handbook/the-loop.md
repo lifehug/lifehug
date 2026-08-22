@@ -41,6 +41,23 @@ that neither one is second-class:
   ([ADR 0009](https://github.com/lifehug/lifehug/blob/main/docs/adr/0009-decisions-feed-the-loop.md)),
   never as a dependency the passive path needs.
 
+**Play on a focus is an episode of an arc plan.** The active user's lever
+is Play, and pressing it on a *set* of questions — a focus, a chapter, a
+book, the week's queue — opens the
+[Arc Walk](interactions/arc-walk.md) interaction (v193,
+[ADR 0023](https://github.com/lifehug/lifehug/blob/main/docs/adr/0023-arc-walking.md)).
+It is not a second planner: `arc_walk.build_arc_plan` orders the target's
+open questions with **the same ranking the weekly queue uses**
+(`question_planner.enriched_pending_questions`, `build_queue`'s own weight
+expression, its `arc_max` streak cap), attaches this week's arc-card
+intents where they exist, and is recomputed from the bank at every Play
+rather than stored — so answered questions fall out on their own and
+resuming is a fresh episode. The passive path is untouched: the daily
+single question runs exactly as it does below, and the arc-walk output
+field is gated off (`TurnShape.arc_stage` is `None`) on every turn that
+is not an episode. Inspect a plan without touching anything with
+`lifehug.py arc-plan-target --focus <id> --json`.
+
 **Three loops run underneath both of them**, and they are the whole
 schedule — §4 transcribes each one step by step from the script itself:
 
