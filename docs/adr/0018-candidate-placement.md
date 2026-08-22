@@ -1,7 +1,8 @@
 # ADR 0018: Question Candidate is a composed Interaction
 
 Date: 2026-08-18
-Status: amended 2026-08-21 by docs/pr-specs/question-candidate-placement-aside.md
+Status: amended 2026-08-21 by docs/pr-specs/question-candidate-placement-aside.md;
+amended 2026-08-22 by docs/pr-specs/focus-onboarding-context.md
 
 ## Context
 
@@ -172,4 +173,37 @@ categories — a question's category is the first character of its id) is
 required to complete the after-promotion half of this design and is
 deliberately out of scope: filed as a follow-up OSS issue.
 
-🤖 Generated with Claude Sonnet via Claude Code
+## Amendment (2026-08-22) — the additive-field discipline has a second instance
+
+Recorded by `docs/pr-specs/focus-onboarding-context.md` (v189). **No decision
+in this ADR changes.** This amendment exists so the pattern is not re-derived
+a third time from scratch.
+
+The 2026-08-21 amendment replaced the `resolved|ask_now|defer` triple with one
+optional turn-output field, `placement`, split across two validation layers:
+structural in `conversation_delivery.parse_turn_output` (owns no vocabulary,
+degrades to `None`, never raises) and closed in
+`question_candidate.validate_placement` (exact roster membership only). v189
+adds the second instance of exactly that shape, for FOCUS candidates:
+
+| | question candidates (v188) | focus candidates (v189) |
+|---|---|---|
+| output field | `placement: {category} \| null` | `focus_setup: {objective?, type?, relationship?, living?, label?} \| null` |
+| gated on | `TurnShape.placement_stage` | `TurnShape.focus_stage` |
+| structural layer | `conversation_delivery._parse_placement` | `conversation_delivery._parse_focus_setup` |
+| closed layer | `question_candidate.validate_placement` (category roster) | `focus_candidate.validate_focus_setup` (`roadmap.FOCUS_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`) |
+| stage source | `placement_stage_for_session` (transcript) | `focus_stage_for_session` (transcript) |
+| stages | `assert` \| `ask` \| `settled` | `establish` \| `settled` |
+| lints | seven `placement_gates.*` | six `focus_setup_gates.*` |
+
+The invariants both instances share, and which any third instance inherits:
+the field is optional; absent or malformed degrades to the pre-existing
+behavior and never errors a turn; the appendix is byte-identical when the
+`TurnShape` gate is `None` (a required test on both); the stage is read from
+the transcript rather than stored; and the model never raises the topic itself
+after the first reply — only a user signal produces a value.
+
+Pin-bump reconciliation surfaces: `focus_setup` joins the turn-output shape
+row alongside `placement`.
+
+🤖 Generated with Claude Opus via Claude Code

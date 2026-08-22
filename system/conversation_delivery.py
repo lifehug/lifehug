@@ -164,6 +164,14 @@ class TurnShape:
     # byte-identical to pre-#181 output (required test:
     # test_output_contract_block_byte_identical_without_roster).
     placement_stage: str | None = None
+    # focus-onboarding-context (v189, Design §B): additive, default None.
+    # A caller composing a focus-onboarding turn sets this to the
+    # {focus_stage} value ("establish" | "settled" — Design §C) to have
+    # _output_contract_block() append the one optional "focus_setup"
+    # output key; every other caller leaves it None and the appendix stays
+    # byte-identical to pre-v189 output (required test:
+    # test_output_contract_block_byte_identical_without_focus_stage).
+    focus_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -339,6 +347,27 @@ def _output_contract_block(shape: TurnShape) -> str:
         if shape.placement_stage is not None
         else ""
     )
+    # focus-onboarding-context (v189, Design §B): the one additive
+    # "focus_setup" output key exists ONLY when the caller set
+    # shape.focus_stage; absent it, line and note alike stay out, so an
+    # ordinary turn's appendix is byte-identical to pre-v189 output.
+    focus_setup_line = (
+        '  "focus_setup": {"objective": "what this focus is for", "type": '
+        '"one of the focus types", "relationship": "how they are related to '
+        'you", "living": true | false, "label": "what to call this focus"} '
+        "| null,\n"
+        if shape.focus_stage is not None
+        else ""
+    )
+    focus_setup_note = (
+        '- "focus_setup" is null on every turn except one where the USER '
+        "supplied or changed what this focus is about — its purpose, its "
+        "type, how the person is related to you, whether they are living, "
+        "or what to call it. Include only the keys they actually gave you. "
+        "Never invent a value, never fill it to look decisive.\n"
+        if shape.focus_stage is not None
+        else ""
+    )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
         "Reply with a single JSON object and nothing else:\n\n"
@@ -349,6 +378,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         '  "user_invited_question": true | false,\n'
         '  "held_question_id": "the [qid] you asked from ASKING_SUPPLY, or null",\n'
         f"{placement_line}"
+        f"{focus_setup_line}"
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
@@ -363,6 +393,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         "asked, only when you actually asked one from that block; null "
         "otherwise. Never a qid that wasn't actually offered there.\n"
         f"{placement_note}"
+        f"{focus_setup_note}"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -427,6 +458,7 @@ def parse_turn_output(raw: object) -> dict | None:
         "user_invited_question": bool(data.get("user_invited_question", False)),
         "held_question_id": held_question_id or None,
         "placement": _parse_placement(data.get("placement")),
+        "focus_setup": _parse_focus_setup(data.get("focus_setup")),
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
@@ -457,6 +489,50 @@ def _parse_placement(raw: object) -> dict | None:
     if not category or len(category) > _PLACEMENT_CATEGORY_MAX_CHARS:
         return None
     return {"category": category.upper()}
+
+
+#: focus-onboarding-context (v189, Design §B.1): the closed key set of the
+#: additive ``focus_setup`` object. The VALUES' vocabularies (roadmap focus
+#: types, the relationship list) are deliberately NOT known here —
+#: ``focus_candidate.validate_focus_setup`` owns those, exactly as
+#: ``question_candidate.validate_placement`` owns the category roster.
+_FOCUS_SETUP_KEYS = frozenset({"objective", "type", "relationship", "living", "label"})
+_FOCUS_SETUP_TEXT_MAX_CHARS = 500
+
+
+def _parse_focus_setup(raw: object) -> dict | None:
+    """Structural layer of the additive ``focus_setup`` field (Design §B.1,
+    focus-onboarding-context / v189).
+
+    Accepts only an object whose keys are a SUBSET of
+    ``{objective, type, relationship, living, label}`` — all five optional,
+    because a turn carries only what the person actually supplied. Each
+    string value is stripped and must be non-empty and at most 500
+    characters; ``living`` must be a real ``bool`` (never ``0``/``1``/
+    ``"yes"``, which JSON makes easy to emit by accident). An individually
+    invalid value is dropped; a non-object, an unknown key, or an object
+    that ends up empty degrades to ``None`` — never an error, exactly as
+    ``held_question_id`` and ``placement`` degrade above.
+
+    This function owns no vocabulary and performs no membership check:
+    closed validation is ``focus_candidate.validate_focus_setup``'s job.
+    """
+    if not isinstance(raw, dict) or not set(raw) <= _FOCUS_SETUP_KEYS:
+        return None
+    parsed: dict[str, object] = {}
+    for key in ("objective", "type", "relationship", "label"):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and len(value) <= _FOCUS_SETUP_TEXT_MAX_CHARS:
+            parsed[key] = value
+    living = raw.get("living")
+    if isinstance(living, bool):
+        parsed["living"] = living
+    return parsed or None
 
 
 def parse_closing_output(raw: object) -> dict | None:

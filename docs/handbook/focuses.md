@@ -324,11 +324,18 @@ does not call `approve_recommendation()`, scaffold a category, or promote its
 generated seed questions; approval/autopilot remains the only creation door.
 
 The independently registered [Focus Candidate
-Interaction](interactions/focus-candidate.md) is the conversational collection
-surface for this source. Play is read-only; it gathers eight useful dimensions
-through exact user spans, asks the highest-value natural gap, and requires a
-distinct confirmation before delegating to the candidate-research authority.
-Its completion still leaves the recommendation pending.
+Interaction](interactions/focus-candidate.md) is the conversational surface
+here, and since v189 it has two paths. **Play approves**: pressing it scaffolds
+the Focus in the background and opens an onboarding conversation that
+establishes what the focus is about and how far it reaches — the first reply
+receives the answer, says once that the focus was started, and asks at most one
+onboarding question; the seeded questions are then grounded in what was said
+(`research-expand --context-file`). The **standalone research path**
+(`focus-candidate-prompt` / `focus-candidate-complete`) is unchanged and is
+read-only: it gathers eight useful dimensions through exact user spans, asks
+the highest-value natural gap, and requires a distinct confirmation before
+delegating to the candidate-research authority, leaving the recommendation
+pending.
 
 **How it self-improves:** the roster fold means idea extraction gets
 *more* accurate over time without any change to the extraction regexes

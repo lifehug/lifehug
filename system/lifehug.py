@@ -50,6 +50,8 @@ from question_candidates import VALID_STATUSES
 from question_planner import DEFAULT_DELIVERY_QUEUE_LIMIT
 from recommend_focuses import FOCUS_RECOMMENDATION_TYPES
 from research_expand import VALID_OUTPUT_TYPES, VALID_TOPIC_TYPES
+from focus_candidate import FOCUS_RELATIONSHIPS
+from roadmap import FOCUS_TYPES
 
 SYSTEM_DIR = Path(__file__).resolve().parent
 CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
@@ -878,10 +880,19 @@ def cmd_focus_add(args: argparse.Namespace) -> int:
 
 def cmd_focus_set(args: argparse.Namespace) -> int:
     flags = ["set", args.focus_id]
-    for name in ("tier", "phase", "objective", "deliverable"):
-        val = getattr(args, name)
+    for name in ("tier", "phase", "objective", "deliverable", "label", "relationship"):
+        val = getattr(args, name, None)
         if val is not None:
             flags.extend([f"--{name}", val])
+    # focus-onboarding-context (v189): --type is `focus_type` on this side to
+    # avoid colliding with argparse's own `type=`; --living/--not-living is a
+    # tri-state (None = leave it alone).
+    if getattr(args, "focus_type", None):
+        flags.extend(["--type", args.focus_type])
+    if getattr(args, "living", None) is True:
+        flags.append("--living")
+    elif getattr(args, "living", None) is False:
+        flags.append("--not-living")
     if args.target is not None:
         flags.extend(["--target", str(args.target)])
     if args.cap is not None:
@@ -902,6 +913,8 @@ def cmd_focus_new(args: argparse.Namespace) -> int:
         flags.extend(["--objective", args.objective])
     if args.no_generate:
         flags.append("--no-generate")
+    if getattr(args, "context_file", None):
+        flags.extend(["--context-file", args.context_file])
     return run_python("roadmap.py", flags)
 
 
@@ -1464,6 +1477,8 @@ def cmd_research_expand(args: argparse.Namespace) -> int:
         flags.extend(["--model", args.model])
     if args.from_response:
         flags.extend(["--from-response", args.from_response])
+    if getattr(args, "context_file", None):
+        flags.extend(["--context-file", args.context_file])
     if args.dry_run:
         flags.append("--dry-run")
     if args.force:
@@ -2164,6 +2179,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-response", metavar="PATH",
                    help="Deposit an agent-written questions JSON instead of calling a model")
     p.add_argument("--model", help="Override AI model")
+    p.add_argument("--context-file", metavar="PATH",
+                   help="Onboarding-context JSON to ground the generated questions (v189)")
     p.add_argument("--force", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_research_expand)
@@ -2402,12 +2419,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("focus-new", help="Create a Focus end-to-end: scaffold category, register, seed questions")
     p.add_argument("label")
-    p.add_argument("--type", default="theme",
-                   choices=["person", "place", "period", "project", "theme", "event", "lifes_work", "self", "relationship"])
+    p.add_argument("--type", default="theme", choices=list(FOCUS_TYPES))
     p.add_argument("--tier", default="standard", choices=["basic", "standard", "extreme"])
     p.add_argument("--objective", default="")
     p.add_argument("--deliverable", default="chapter")
     p.add_argument("--no-generate", action="store_true")
+    p.add_argument("--context-file", metavar="PATH",
+                   help="Onboarding-context JSON to ground the seeded questions (v189)")
     p.set_defaults(func=cmd_focus_new)
 
     p = sub.add_parser("focus-add", help="Add a Focus (objective + tier)")
@@ -2429,6 +2447,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--phase", choices=["active", "finishing", "maintenance"])
     p.add_argument("--objective")
     p.add_argument("--deliverable")
+    # focus-onboarding-context (v189, Design §E.4): what the onboarding
+    # conversation can change about a scaffolded focus.
+    p.add_argument("--label")
+    p.add_argument("--type", dest="focus_type", choices=list(FOCUS_TYPES))
+    p.add_argument("--relationship", choices=list(FOCUS_RELATIONSHIPS))
+    living = p.add_mutually_exclusive_group()
+    living.add_argument("--living", dest="living", action="store_true", default=None)
+    living.add_argument("--not-living", dest="living", action="store_false", default=None)
     p.add_argument("--category", action="append", default=[])
     p.set_defaults(func=cmd_focus_set)
 

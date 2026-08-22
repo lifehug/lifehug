@@ -886,6 +886,110 @@ class PlacementOutputContractTests(unittest.TestCase):
                 self.assertIn("CATEGORY_ROSTER", block)
 
 
+class OutputContractFocusStageTests(unittest.TestCase):
+    """focus-onboarding-context (v189), Design §B — ``_output_contract_block``
+    gains exactly one additive line + note, gated on ``TurnShape.focus_stage``.
+    Pure — no vault, no injected collaborators needed."""
+
+    def _shape(self, **overrides):
+        fields = dict(position="mid_arc", question_allowed=True, user_turns=2, target_exchanges=3)
+        fields.update(overrides)
+        return engine.TurnShape(**fields)
+
+    def test_output_contract_block_byte_identical_without_focus_stage(self):
+        # The v189 promise mechanized: a TurnShape with no focus_stage
+        # produces the exact pre-v189 appendix, byte for byte, whatever the
+        # other fields (including placement_stage) are doing.
+        for question_allowed in (True, False):
+            for placement_stage in (None, "assert"):
+                with self.subTest(question_allowed=question_allowed, placement=placement_stage):
+                    shape = self._shape(
+                        question_allowed=question_allowed, placement_stage=placement_stage
+                    )
+                    self.assertIsNone(shape.focus_stage)
+                    block = engine._output_contract_block(shape)
+                    self.assertNotIn("focus_setup", block)
+                    self.assertEqual(
+                        block,
+                        engine._output_contract_block(
+                            self._shape(
+                                question_allowed=question_allowed,
+                                placement_stage=placement_stage,
+                            )
+                        ),
+                    )
+
+    def test_focus_setup_line_and_note_present_when_staged(self):
+        for stage in ("establish", "settled"):
+            with self.subTest(stage=stage):
+                block = engine._output_contract_block(self._shape(focus_stage=stage))
+                self.assertIn('"focus_setup": {"objective"', block)
+                self.assertIn('"focus_setup" is null on every turn except one', block)
+
+    def test_both_additive_fields_coexist_without_disturbing_each_other(self):
+        block = engine._output_contract_block(
+            self._shape(placement_stage="assert", focus_stage="establish")
+        )
+        self.assertIn('"placement"', block)
+        self.assertIn('"focus_setup"', block)
+        # Order is stable: placement, then focus_setup, then rolling_summary.
+        self.assertLess(block.index('"placement"'), block.index('"focus_setup"'))
+        self.assertLess(block.index('"focus_setup"'), block.index('"rolling_summary"'))
+
+
+class ParseTurnOutputFocusSetupTests(unittest.TestCase):
+    """focus-onboarding-context (v189), Design §B.1 — structural parsing of
+    the additive ``focus_setup`` field. Pure."""
+
+    def _raw(self, **extra):
+        payload = {"message": "Diesel and cut hay.", "followup_question": None, "question_free": True}
+        payload.update(extra)
+        return json.dumps(payload)
+
+    def test_focus_setup_absent_is_none(self):
+        # No key at all, an explicit null, and a legacy (pre-v189) generation
+        # all mean the same thing: this turn changed nothing about the focus.
+        self.assertIsNone(engine.parse_turn_output(self._raw())["focus_setup"])
+        self.assertIsNone(engine.parse_turn_output(self._raw(focus_setup=None))["focus_setup"])
+
+    def test_focus_setup_malformed_degrades_never_raises(self):
+        for value in (
+            "person",
+            ["person"],
+            {},
+            {"unknown": "x"},
+            {"objective": ""},
+            {"objective": "   "},
+            {"objective": "x" * 501},
+            {"living": 1},
+            {"living": "yes"},
+            {"objective": 3},
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(
+                    engine.parse_turn_output(self._raw(focus_setup=value))["focus_setup"]
+                )
+
+    def test_focus_setup_partial_object_survives(self):
+        parsed = engine.parse_turn_output(self._raw(focus_setup={"living": False}))
+        self.assertEqual(parsed["focus_setup"], {"living": False})
+
+    def test_focus_setup_trims_and_drops_only_the_bad_key(self):
+        parsed = engine.parse_turn_output(
+            self._raw(focus_setup={"objective": "  the mill years  ", "living": "no"})
+        )
+        # `living: "no"` is not a bool, so it drops; the objective survives
+        # trimmed. Dropping one key never discards the rest.
+        self.assertEqual(parsed["focus_setup"], {"objective": "the mill years"})
+
+    def test_structural_layer_owns_no_vocabulary(self):
+        # An off-vocabulary type passes the STRUCTURAL layer untouched; only
+        # focus_candidate.validate_focus_setup knows the roadmap type list
+        # (the same split placement uses for the category roster).
+        parsed = engine.parse_turn_output(self._raw(focus_setup={"type": "spaceship"}))
+        self.assertEqual(parsed["focus_setup"], {"type": "spaceship"})
+
+
 class ParseTurnOutputPlacementTests(unittest.TestCase):
     """question-candidate-placement-aside (issue #181), Design §A.1 —
     structural parsing of the additive ``placement`` field. Pure."""

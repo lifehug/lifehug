@@ -3,7 +3,7 @@ interaction: focus_candidate
 version: 1.0.0
 extends: conversation
 extends.version: 1.0.0
-modes: research
+modes: research|onboarding
 load_order: identity|behavior|examples|candidate|research_state|conversation|turn_instructions
 composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
 composition.leaf: prompt/turn-instructions.md|context/manifest.md

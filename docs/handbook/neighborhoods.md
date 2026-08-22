@@ -122,7 +122,15 @@ doesn't repeat material the author already gave), builds an arc-aware
 prompt naming the topic's specific arc template (§4), calls the model (or
 accepts a keyless agent's `--from-response` file), and deposits every
 returned question as a **candidate** tagged with this neighborhood's id —
-never directly as an askable question. A neighborhood is idempotent by
+never directly as an askable question. When the caller passes
+`--context-file PATH` (v189), the prompt additionally opens with what the
+author said when they started this focus — objective, name, relationship,
+whether the person is living, and their verbatim first words — and, for a
+person, the `INTERVIEW_BANKS` bank that fits that relationship (the
+`remembering` bank whenever `living` is false). The flag is optional and
+defaults to off: with no context file the prompt is byte-identical to
+v188, so a focus started before the author has answered anything still
+seeds from the recommendation's own evidence. A neighborhood is idempotent by
 id (`nbhd-<slug>`): re-running `--expand`/`--topic` on an existing
 neighborhood refuses unless `--force` is passed, so accidental re-runs
 never silently duplicate a whole arc's worth of candidates.
@@ -317,7 +325,8 @@ as a dependency the daily loop needs to keep functioning.
 | Candidate deposit | `research_expand.add_candidates_from_ai()` |
 | Manual bulk promotion | `question_candidates.promote_neighborhood()` |
 | Interview packs (Tier 3, on-demand only) | `research_expand.INTERVIEW_BANKS`, `build_interview_pack()` — a separate, unrelated mechanism: questions the author asks *someone else* directly, ingested back via `ingest-story --witness` |
-| CLI | `research_expand.py --expand PATH \| --topic NAME --type T \| --gaps [--dry-run] [--prompt] [--from-response PATH] [--force]`, `lifehug.py candidates-promote-neighborhood` |
+| CLI | `research_expand.py --expand PATH \| --topic NAME --type T \| --gaps [--dry-run] [--prompt] [--from-response PATH] [--context-file PATH] [--force]`, `lifehug.py candidates-promote-neighborhood` |
+| Onboarding context (v189) | `--context-file PATH` holding `{objective?, type?, relationship?, living?, label?, first_answer?}`, normalized by `focus_candidate.normalize_onboarding_context` — see [Focus Candidate](interactions/focus-candidate.md) |
 | Monthly wiring | `monthly_research.sh` — gap detection → `select_gap_targets` (expansion-urgency gated) → per-topic `research_expand.py` calls → self-knowledge batch → `recommend-focuses` → `focus-autopilot` → entity-roster refresh → `compile` |
 | Guard tests | `tests/test_neighborhood_readiness.py` (repo-verify exact names before citing in a PR) |
 
