@@ -150,6 +150,77 @@ review. Question Candidate is the first composed Interaction; it inherits
 Conversation chat mechanics while keeping its own identity, lifecycle,
 context, evals, registration, version, and seat surface (ADR 0018).
 
+## The child-interaction paradigm
+
+**Conversation is the parent.** Every other conversational surface in the
+product is a CHILD of it that adds exactly ONE goal. Three are built
+(v188, v189, v190) and a fourth is proposed; the shape below is what they
+repeat. Deviating from it is a design defect, not a variant.
+
+1. **One goal, named.** Placement, onboarding, identity — proposed: arc
+   walking. A child that would carry two goals is two children.
+2. **Composition, never a fork.** `extends: conversation` plus an exact
+   `extends.version`; `prompt/identity.md`, `prompt/behavior.md`,
+   `prompt/examples.md` and `router/*` append parent-to-child, while
+   `prompt/turn-instructions.md` and `context/manifest.md` are leaf
+   (child authority). Ordinary Conversation stays byte-identical
+   ([ADR 0018](../docs/adr/0018-candidate-placement.md)).
+3. **A stage-keyed prompt leaf the host substitutes into.** The child's
+   `prompt/turn-instructions.md` is REPLAYed verbatim by the caller with
+   `{<goal>_stage}` and the target's own placeholders filled in. The
+   stage is derived from the transcript, never stored.
+4. **Exactly ONE additive structured-output field.** Optional; absent or
+   malformed degrades to ordinary Conversation behavior and never errors
+   a turn; gated on a `TurnShape` flag so the output-contract appendix is
+   byte-identical when the gate is `None` (a required test on every
+   child). Two validation layers: structural in
+   `system/conversation_delivery.py` (owns no vocabulary, returns `None`,
+   never raises) and closed in the child's own module (owns the roster —
+   though not always the roster's contents: `entity_setup.maps_to` is
+   checked against slugs the CALLER supplies).
+5. **Its own lints, goldens, and evals harness.** `<child>-evals` is the
+   seat gate; passing Conversation alone never seats a model in a child.
+6. **Its own version bump, ADR amendment row, and `framework_files`
+   entries**, in the same PR.
+
+### Play semantics: approve + start
+
+**Play is one verb: it APPROVES the thing and STARTS its conversation.**
+The approving write runs in the host's background job — promote the
+question candidate, scaffold the focus, graduate the entity — and the
+conversation opens immediately, never waiting on it. So the model writes
+nothing, approves nothing, and claims nothing: by the time it speaks the
+act is already done. Its job is to state that fact ONCE, as an aside on
+the first reply, and to accept a correction as a MOVE rather than a
+resolution. "Play is read-only" / "Play never promotes" is **retired
+vocabulary** — platform ADR 0020 (`lifehug-platform/docs/adr/0020-play-
+is-a-deep-link.md`) amended ADRs 0018, 0021, and 0022 in place.
+
+A **Play target** (proposed, platform issue #570) generalizes the verb:
+`{kind, ref, goal, question_ids[], context}` — candidate, focus, entity,
+question, chapter, book, or queue — so one endpoint and one tab renderer
+serve every Play, and the daily loop becomes a *scheduled* Play.
+
+### The four children
+
+| Child | The one goal | Additive output field | Stages | Stage source | Closed validator | Lints |
+|---|---|---|---|---|---|---|
+| `question_candidate` (v188) | **placement** — where the answered question belongs | `placement: {category} \| null` | `assert` · `ask` · `settled` | `question_candidate.placement_stage_for_session` | `question_candidate.validate_placement` (category roster) | seven `placement_gates.*` |
+| `focus_candidate` (v189) | **onboarding** — what the focus is about and how far it reaches | `focus_setup: {objective?, type?, relationship?, living?, label?} \| null` | `establish` · `settled` | `focus_candidate.focus_stage_for_session` | `focus_candidate.validate_focus_setup` (`roadmap.FOCUS_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`) | six `focus_setup_gates.*` |
+| `entity_candidate` (v190) | **identity** — names, relation, living, and whether the roster already holds them | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` | `establish` · `settled` | `entity_candidate.entity_stage_for_session` | `entity_candidate.validate_entity_setup` (`entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`, caller-supplied roster slugs) | seven `entity_setup_gates.*` |
+| `arc_walk` — **PROPOSED, not built** (platform issue #570 §3) | **arc walking** — work a set of open questions casually, in resumable episodes | `answered_question_id` (proposed) | TBD | TBD | TBD | TBD |
+
+The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
+`entity_stage`. Every one defaults to `None`.
+
+### Train the small interactions first, one model later
+
+Each goal is trained as its own child with its own goldens and harness,
+because a small, gated behavior is testable and a large vague one is not.
+The target a child works on is **data the model reads in the prompt**
+(goal, anchor, agenda) — not a different program — so a later single
+model can learn all four as one skill without any child being rewritten.
+
 ## Model-agnosticism rule
 
 The behavior contract lives in portable prompt and context files —

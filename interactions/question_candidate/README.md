@@ -43,6 +43,27 @@ model proposals. It is pure: it does not write candidate, answer, question
 bank, session, vault, projection, or Git state. A consuming coordinator alone
 attests that an answer is durable and revalidates revisions before transition.
 
+## The Play path's surface (the Platform twin)
+
+**Platform twin.** A host (the hosted platform, or any other runtime)
+REPLAYs this package and reads exactly these — nothing else is a contract:
+
+| What | Where |
+|---|---|
+| The tab's opening line | the candidate's own question text — this child has no `opening_question` helper |
+| The `{placement_stage}` this turn is in | `question_candidate.placement_stage_for_session(session)` |
+| The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["placement"]`, enabled by `TurnShape(placement_stage=…)` |
+| Closed validation of that field | `question_candidate.validate_placement(value, roster=…)` |
+| The seven placement lints | `question_candidate.lint_placement_reply(text, stage=…, roster=…, placement_question=…)` |
+| The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{placement_stage}` and `{focus_label}` |
+| The confidence knob the CALLER evaluates | `knob.placement_confidence_threshold: 0.8` (`interaction.yaml`) |
+| The promotion the host runs in the background | `system/candidate_promotion.py` (v187) |
+
+**Play approves and starts** (platform ADR 0020): the promotion is already
+running when the first reply is composed, so this Interaction never claims
+it, gates on it, or waits for it. The shared shape lives in
+`interactions/README.md` § "The child-interaction paradigm".
+
 ## Evaluation and seating
 
 `python3 system/lifehug.py question-candidate-evals` runs the independent

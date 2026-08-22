@@ -16,7 +16,9 @@ scope change only when the user signals a change. The model still writes
 nothing, approves nothing, and claims nothing — the platform has already
 scaffolded.
 
-The Play path's surface:
+**Platform twin.** A host REPLAYs this package and reads exactly these —
+nothing else is a contract (the shared shape: `interactions/README.md`
+§ "The child-interaction paradigm"):
 
 | What | Where |
 |---|---|
