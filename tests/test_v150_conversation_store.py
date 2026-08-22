@@ -647,6 +647,13 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             # ADR 0022: Entity Candidate is the typed entity-roster child;
             # runtime alone consumes the inherited lint authority.
             "entity_candidate.py",
+            # ADR 0023: Arc Walk is the arc-walking child. It imports
+            # conversation ONLY for the closed ARC_INTENT_KINDS vocabulary and
+            # the arc-card container reader — the same "read the definition
+            # through this module's helpers rather than re-deriving it"
+            # rationale arc_planner.py carries above. No session, delivery, or
+            # lint logic is copied into the child.
+            "arc_walk.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):
