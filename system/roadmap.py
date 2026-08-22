@@ -406,6 +406,20 @@ def rebuild_roadmap(write: bool = True) -> dict:
 
 # --- Category scaffolding + one-shot focus creation -------------------------
 
+#: The closed focus-type vocabulary — THE authority for this list
+#: (focus-onboarding-context / v189). It was previously written out inline
+#: in roadmap.py's own `new` subparser and again in lifehug.py's focus-new
+#: parser; `focus_candidate.validate_focus_setup` needed a third copy, which
+#: is exactly the recurring-defect shape AGENTS.md forbids. Every one of
+#: those sites now reads this tuple, and
+#: tests/test_focus_candidate.py::test_focus_types_match_roadmap_argparse_choices
+#: fails if a copy reappears.
+FOCUS_TYPES = (
+    "person", "place", "period", "project", "theme", "event",
+    "lifes_work", "self", "relationship",
+)
+
+
 # Focus type → which question-bank section a new category lands in.
 def _section_header_for(focus_type: str) -> str:
     return "## Project Categories" if focus_type in ("project", "lifes_work") else "## Focuses"
@@ -456,18 +470,25 @@ def scaffold_category(md_text: str, label: str, focus_type: str, tag: str | None
     return new_md, letter
 
 
-def _generate_and_promote(label: str, focus_type: str, deliverable: str, category: str) -> tuple[bool, int]:
+def _generate_and_promote(label: str, focus_type: str, deliverable: str, category: str,
+                          context_path: str | None = None) -> tuple[bool, int]:
     """Generate starter questions via research_expand (needs API) and promote
-    them into the new category. Returns (generation_ran, num_promoted)."""
+    them into the new category. Returns (generation_ran, num_promoted).
+
+    `context_path` (focus-onboarding-context, v189) is the onboarding-context
+    JSON the caller wrote out for this focus — what the person said when they
+    started it. `None` (the default, and what every pre-v189 call site passes)
+    produces the exact argv this function has always built: Play with no
+    answers still seeds from the recommendation's own evidence."""
     import subprocess
 
     rtype = RESEARCH_TYPE.get(focus_type, "theme")
     routput = RESEARCH_OUTPUT.get(deliverable, "chapter")
-    proc = subprocess.run(
-        [sys.executable, str(_SYSTEM_DIR / "research_expand.py"),
-         "--topic", label, "--type", rtype, "--output", routput, "--force"],
-        capture_output=True, text=True,
-    )
+    argv = [sys.executable, str(_SYSTEM_DIR / "research_expand.py"),
+            "--topic", label, "--type", rtype, "--output", routput, "--force"]
+    if context_path:
+        argv.extend(["--context-file", context_path])
+    proc = subprocess.run(argv, capture_output=True, text=True)
     if proc.returncode != 0:
         return False, 0
 
@@ -493,7 +514,8 @@ def _generate_and_promote(label: str, focus_type: str, deliverable: str, categor
 
 
 def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
-              deliverable: str = "chapter", generate: bool = True) -> dict:
+              deliverable: str = "chapter", generate: bool = True,
+              context_path: str | None = None) -> dict:
     """End-to-end: scaffold a category, register the Focus, and (optionally)
     generate + promote starter questions. Non-destructive to existing answers.
 
@@ -539,7 +561,8 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
     result = {"focus_id": fid, "category": letter, "type": focus_type,
               "tier": tier, "generated": 0, "generation_ran": False}
     if generate:
-        ran, n = _generate_and_promote(label, focus_type, deliverable, letter)
+        ran, n = _generate_and_promote(label, focus_type, deliverable, letter,
+                                       context_path=context_path)
         result["generation_ran"] = ran
         result["generated"] = n
         rebuild_roadmap(write=True)
@@ -594,6 +617,16 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--phase", choices=["active", "finishing", "maintenance"])
     p.add_argument("--objective")
     p.add_argument("--deliverable")
+    # focus-onboarding-context (v189, Design §E.4): the four _USER_FIELDS the
+    # onboarding conversation can change. --label sets the display label only;
+    # the focus id and its category letter are stable identifiers (a rename
+    # that re-ids is the expensive half, deliberately deferred).
+    p.add_argument("--label")
+    p.add_argument("--type", dest="focus_type", choices=list(FOCUS_TYPES))
+    p.add_argument("--relationship")
+    living = p.add_mutually_exclusive_group()
+    living.add_argument("--living", dest="living", action="store_true", default=None)
+    living.add_argument("--not-living", dest="living", action="store_false", default=None)
     p.add_argument("--category", action="append", default=[], help="Replace categories (repeatable)")
 
     p = sub.add_parser("finish", help="Flag a Focus as finishing (lifts its variety cap)")
@@ -601,12 +634,13 @@ def cli(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("new", help="Create a Focus end-to-end: scaffold category, register, seed questions")
     p.add_argument("label")
-    p.add_argument("--type", default="theme",
-                   choices=["person", "place", "period", "project", "theme", "event", "lifes_work", "self", "relationship"])
+    p.add_argument("--type", default="theme", choices=list(FOCUS_TYPES))
     p.add_argument("--tier", default="standard", choices=list(TIER_ORDER))
     p.add_argument("--objective", default="")
     p.add_argument("--deliverable", default="chapter")
     p.add_argument("--no-generate", action="store_true", help="Scaffold only; don't AI-generate starter questions")
+    p.add_argument("--context-file", metavar="PATH",
+                   help="Onboarding-context JSON to ground the seeded questions (v189)")
 
     args = parser.parse_args(argv)
 
@@ -631,7 +665,8 @@ def cli(argv: list[str] | None = None) -> int:
             print(f"↺ Focus '{slugify(args.label)}' exists with no question category — healing it.")
         try:
             res = focus_new(args.label, args.type, args.tier, args.objective,
-                            args.deliverable, generate=not args.no_generate)
+                            args.deliverable, generate=not args.no_generate,
+                            context_path=getattr(args, "context_file", None))
         except FocusKeyCollisionError as exc:
             print(f"✗ {exc}")
             return 1
@@ -707,6 +742,18 @@ def cli(argv: list[str] | None = None) -> int:
                 focus["objective"] = args.objective
             if args.deliverable is not None:
                 focus["deliverable"] = args.deliverable
+            if getattr(args, "label", None):
+                focus["label"] = args.label
+                focus["wiki_node"] = _wiki_node_for(
+                    focus.get("type", "theme"), args.label)
+            if getattr(args, "focus_type", None):
+                focus["type"] = args.focus_type
+                focus["wiki_node"] = _wiki_node_for(
+                    args.focus_type, focus.get("label", focus["id"]))
+            if getattr(args, "relationship", None):
+                focus["relationship"] = args.relationship
+            if getattr(args, "living", None) is not None:
+                focus["living"] = args.living
             if args.category:
                 focus["categories"] = [c.upper() for c in args.category]
         roadmap["generated_at"] = now_utc()

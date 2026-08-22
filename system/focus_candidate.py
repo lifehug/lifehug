@@ -14,6 +14,7 @@ import candidate_research
 import conversation_lints
 import interaction_registry
 from lifehug_core import REPO_DIR
+from roadmap import FOCUS_TYPES
 from vault_paths import read_vault_text, vault_data_path
 
 SCHEMA_VERSION = 1
@@ -41,6 +42,39 @@ ACTIONS = frozenset(
 )
 STATUSES = frozenset({"continue", "awaiting_confirmation", "complete", "invalid"})
 MAX_PROPOSAL_SPANS = 16
+#: focus-onboarding-context (v189, Design §B.2): the closed relationship
+#: vocabulary for `focus_setup.relationship` and roadmap.py's `relationship`
+#: user field (`_USER_FIELDS`, whose own comment names it "which interview
+#: bank fits (parent/spouse/child/...)"). Every entry maps to a real
+#: `research_expand.INTERVIEW_BANKS` bank (see FOCUS_RELATIONSHIP_BANK) so a
+#: validated value always selects a question bank rather than silently
+#: falling through to the generic one.
+FOCUS_RELATIONSHIPS = (
+    "parent",
+    "grandparent",
+    "child",
+    "sibling",
+    "spouse",
+    "partner",
+    "friend",
+    "colleague",
+    "mentor",
+    "other",
+)
+#: relationship -> the `research_expand.INTERVIEW_BANKS` key that fits it.
+#: Only the three that have no bank of their own are mapped; the rest are
+#: bank names already. `living is False` overrides all of this with the
+#: `remembering` bank (Design §E.2).
+FOCUS_RELATIONSHIP_BANK = {
+    "partner": "spouse",
+    "colleague": "cofounder",
+    "other": "friend",
+}
+MAX_FOCUS_OBJECTIVE_CHARS = 200
+MAX_FOCUS_LABEL_CHARS = 80
+MAX_FIRST_ANSWER_CHARS = 1_200
+#: The two `{focus_stage}` values the leaf is keyed on (Design §A.2/§C).
+VALID_FOCUS_STAGES = frozenset({"establish", "settled"})
 MAX_REPLY_CHARS = 2_200
 MAX_PREVIOUS_QUESTION_CHARS = 2_200
 _REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -287,6 +321,52 @@ def validate_focus_candidate_input(value: object, *, current_subject: dict) -> d
     }
 
 
+#: focus-onboarding-context (v189, Design §A.3): the RESEARCH-mode output
+#: contract, byte-for-byte as `prompt/turn-instructions.md` carried it
+#: through v188. It moved out of the leaf because the leaf is now REPLAYed
+#: by the platform and appended to an ordinary Conversation prompt that
+#: already declares its own OUTPUT FORMAT appendix — two competing "return
+#: exactly one JSON object with exactly these keys" contracts in one prompt
+#: is a defect, not a composition. This is the parent's own pattern, not an
+#: invention: `conversation_delivery._output_contract_block` exists for the
+#: same reason — the ENGINE appends the machine-readable shape, the leaf
+#: holds behavior. `parse_focus_candidate_output` and the standalone
+#: `focus-candidate-prompt` / `focus-candidate-complete` CLI path are
+#: unchanged; test_research_output_contract_survives_the_leaf_move pins it.
+_RESEARCH_OUTPUT_CONTRACT = """Return exactly one JSON object with exactly these keys and no prose or fence:
+
+```json
+{
+  "reply": "string",
+  "action": "ask_gap|offer_confirmation|accept_confirmation|continue",
+  "next_gap": "focus_identity|why_it_matters|scope_boundary|present_state_direction|relationships|grounded_evidence|tensions|open_questions|null",
+  "evidence_spans": [{"turn_id":"string","start":0,"end":1,"evidence_kind":"statement|concrete_event|concrete_observation"}],
+  "dimension_evidence": {
+    "focus_identity": [], "why_it_matters": [], "scope_boundary": [],
+    "present_state_direction": [], "relationships": [],
+    "grounded_evidence": [], "tensions": [], "open_questions": []
+  },
+  "seed_questions": ["string"],
+  "confirmation_span": null
+}
+```
+
+Offsets are Unicode code-point slices of exact user turns. Dimension arrays
+index only this output's evidence spans. Mark grounded evidence only for a
+concrete event or observation, and also connect that span to a substantive
+dimension. Ask at most one natural open question. Use `offer_confirmation`
+only when the supplied deterministic state is ready. Use
+`accept_confirmation` only for an explicit confirmation in the latest user
+turn and identify its exact span. Never claim a write, commit, approval, Focus,
+category, question, source, or receipt.
+"""
+
+
+def _research_output_contract_block() -> str:
+    """The standalone research path's structured-output appendix."""
+    return _RESEARCH_OUTPUT_CONTRACT
+
+
 def build_focus_candidate_prompt(value: dict, *, current_subject: dict) -> str:
     payload = validate_focus_candidate_input(value, current_subject=current_subject)
     assets = [
@@ -305,6 +385,8 @@ def build_focus_candidate_prompt(value: dict, *, current_subject: dict) -> str:
     }
     return (
         "\n".join(assets)
+        + "\n"
+        + _research_output_contract_block()
         + "\n<!-- runtime-boundary:untrusted-data -->\nUNTRUSTED_DATA\n"
         + json.dumps(untrusted, ensure_ascii=False, sort_keys=True, indent=2)
         + "\nEND_UNTRUSTED_DATA\n"
@@ -362,6 +444,290 @@ def lint_focus_candidate_reply(
                 "span": [0, len(text)],
             }
         )
+    return findings
+
+
+# --------------------------------------------------------------------------
+# Onboarding (focus-onboarding-context, v189) — the Play path
+#
+# Platform ADR 0020 + review-loop/54 retired this Interaction's original
+# premise: Play is no longer read-only research toward a later approval, it
+# IS the approval, and the conversation it opens exists to establish what the
+# focus is about well enough that the seeded questions are worth asking. The
+# research-mode machinery above is unchanged and still serves the standalone
+# `focus-candidate-prompt` / `focus-candidate-complete` CLI path; everything
+# below is the Play path, and it is deliberately the same shape
+# `question_candidate` took for placement at v188: one pure opener, one
+# transcript-derived stage, one closed validator, one lint family.
+# --------------------------------------------------------------------------
+
+#: The first thing the person sees when Play opens the tab — one short,
+#: natural line per focus type, with no machinery in it. `theme` is the
+#: fallback for an unknown or blank type, because "what should this focus be
+#: about?" is true of every focus.
+_OPENING_QUESTIONS = {
+    "person": "Tell me about {entity} — who are they to you?",
+    "relationship": "Tell me about {entity} — who are they to you?",
+    "place": "Tell me about {entity} — what happened there that makes it matter?",
+    "period": "Tell me about {entity} — what was that stretch of your life like?",
+    "event": "Tell me about {entity} — what happened, and what has it meant since?",
+    "project": "Tell me about {entity} — what are you making, and what is it for?",
+    "lifes_work": "Tell me about {entity} — what are you making, and what is it for?",
+    "self": "Tell me about {entity} — what do you want to understand about yourself here?",
+    "theme": "Tell me about {entity} — what should this focus be about?",
+}
+
+
+def opening_question(entity: str, focus_type: str | None = None) -> str:
+    """The onboarding opener for a focus Play session (Design §A.4).
+
+    Pure — no vault, no model, no I/O. The platform shows this as the tab's
+    framing line (review-loop/54 §A.2, `question_text`). A blank `entity`
+    raises: an opener with no subject is a caller bug, not something to
+    degrade around. An unknown or blank `focus_type` falls back to the
+    `theme` line rather than failing, because a focus whose type nobody
+    settled is exactly the one worth asking "what should this be about?".
+    """
+    subject = (entity or "").strip()
+    if not subject:
+        raise FocusCandidateError("opening_question requires a focus subject")
+    template = _OPENING_QUESTIONS.get(
+        (focus_type or "").strip(), _OPENING_QUESTIONS["theme"]
+    )
+    return template.format(entity=subject)
+
+
+def focus_stage_for_session(session: dict) -> str:
+    """Derive ``{focus_stage}`` from the transcript alone (Design §C) — no
+    new session field, no new lifecycle status.
+
+    ``"settled"`` once the session already carries any assistant
+    (``role == "lifehug"``) turn: the aside and the one onboarding question
+    both live on the FIRST reply, so "have we onboarded?" is exactly "does
+    this session have an assistant turn?". Before that, ``"establish"``.
+    Mirrors ``question_candidate.placement_stage_for_session`` exactly,
+    minus the confidence branch (a focus always has a label to name).
+    """
+    turns = session.get("turns") or []
+    if any(isinstance(turn, dict) and turn.get("role") == "lifehug" for turn in turns):
+        return "settled"
+    return "establish"
+
+
+#: The closed key set of the additive ``focus_setup`` object, mirrored from
+#: `conversation_delivery._FOCUS_SETUP_KEYS` — imported rather than
+#: re-listed would create an import cycle through the delivery engine, so
+#: the parity is pinned by a test instead
+#: (test_focus_setup_keys_match_the_structural_layer).
+_FOCUS_SETUP_KEYS = frozenset({"objective", "type", "relationship", "living", "label"})
+
+
+def _capped_text(value: object, *, maximum: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or len(text) > maximum:
+        return None
+    return text
+
+
+def validate_focus_setup(value: object) -> dict | None:
+    """Closed layer of the additive ``focus_setup`` field (Design §B.2).
+
+    ``value`` is the structural layer's own output — the
+    ``{objective?, type?, relationship?, living?, label?} | None`` that
+    ``conversation_delivery._parse_focus_setup`` produces — or any other
+    untrusted shape a caller hands in directly (this function re-checks
+    shape itself so it is safe to call standalone).
+
+    Exact membership only, in both closed vocabularies: ``type`` against
+    ``roadmap.FOCUS_TYPES`` and ``relationship`` against
+    ``FOCUS_RELATIONSHIPS`` — no fuzzy match, no case-fold, no derivation
+    from prose, exactly as ``question_candidate.validate_placement`` treats
+    the category roster. ``living`` must be a real ``bool``. ``objective``
+    and ``label`` are trimmed and length-capped.
+
+    An individually invalid value drops THAT key rather than the whole
+    object (a person who told us their relationship and mistyped the focus
+    type still told us their relationship); no valid key remaining returns
+    ``None``.
+    """
+    if not isinstance(value, dict) or not set(value) <= _FOCUS_SETUP_KEYS:
+        return None
+    validated: dict[str, object] = {}
+    objective = _capped_text(value.get("objective"), maximum=MAX_FOCUS_OBJECTIVE_CHARS)
+    if objective is not None:
+        validated["objective"] = objective
+    label = _capped_text(value.get("label"), maximum=MAX_FOCUS_LABEL_CHARS)
+    if label is not None:
+        validated["label"] = label
+    focus_type = value.get("type")
+    if isinstance(focus_type, str) and focus_type in FOCUS_TYPES:
+        validated["type"] = focus_type
+    relationship = value.get("relationship")
+    if isinstance(relationship, str) and relationship in FOCUS_RELATIONSHIPS:
+        validated["relationship"] = relationship
+    living = value.get("living")
+    if isinstance(living, bool):
+        validated["living"] = living
+    return validated or None
+
+
+def normalize_onboarding_context(value: object) -> dict:
+    """Normalize the `--context-file` payload for seed generation
+    (Design §E.1). Returns ``{}`` when nothing usable survives — an empty
+    context is NOT an error, because Play with no answers must still seed
+    from the recommendation's own evidence (owner ruling 6).
+
+    The five setup keys go through ``validate_focus_setup`` (one authority,
+    not a second copy of the vocabularies); ``first_answer`` is the user's
+    own first words about the focus, trimmed and capped so a long opening
+    story cannot crowd the rest of the seed prompt out.
+    """
+    if not isinstance(value, dict):
+        return {}
+    setup = {key: item for key, item in value.items() if key in _FOCUS_SETUP_KEYS}
+    context = dict(validate_focus_setup(setup) or {})
+    first_answer = value.get("first_answer")
+    if isinstance(first_answer, str) and first_answer.strip():
+        context["first_answer"] = first_answer.strip()[:MAX_FIRST_ANSWER_CHARS]
+    return context
+
+
+def interview_bank_key(relationship: str | None, *, living: object = None) -> str | None:
+    """Which ``research_expand.INTERVIEW_BANKS`` bank fits this person
+    (Design §E.2). ``living is False`` wins over everything — the
+    `remembering` bank exists for exactly the case `_USER_FIELDS`' own
+    comment names ("living: false on a person Focus = deceased … you can't
+    ask"). ``None`` when there is no relationship to go on.
+    """
+    if living is False:
+        return "remembering"
+    if not isinstance(relationship, str) or relationship not in FOCUS_RELATIONSHIPS:
+        return None
+    return FOCUS_RELATIONSHIP_BANK.get(relationship, relationship)
+
+
+# --------------------------------------------------------------------------
+# focus_setup lints (Design §D)
+# --------------------------------------------------------------------------
+
+#: The aside's invariant anchor — "I've started a **<label>** focus — tell me
+#: if the name or scope is off." The model varies the connective tissue
+#: around it but not the move (owner ruling 4); this phrase is what every
+#: aside lint locates.
+_FOCUS_ASIDE_MARKER_RE = re.compile(
+    r"\bstarted\s+(?:a|an|the)\b[^.!?]*\bfocus\b", re.IGNORECASE
+)
+_FOCUS_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+#: focus_setup.settled_silence — a settled turn re-opening the focus's name,
+#: type, or scope when the USER did not is the "re-litigating" failure ruling
+#: 4 forbids.
+_SETUP_TALK_PHRASES = (
+    "name or scope",
+    "rename this focus",
+    "rename the focus",
+    "call this focus",
+    "the scope of this focus",
+    "what this focus covers",
+    "what this focus should cover",
+    "change the focus name",
+)
+#: focus_setup.no_mechanism_talk — the scaffold is silent; narrating it is not.
+_FOCUS_MECHANISM_PHRASES = (
+    "i'll create",
+    "i will create",
+    "scaffold",
+    "setting up your focus",
+    "set up your focus",
+    "adding a category",
+    "seeding questions",
+    "seed questions",
+    "the system will",
+)
+def _focus_sentences(text: str) -> list[str]:
+    return [s.strip() for s in _FOCUS_SENTENCE_SPLIT_RE.split(text.strip()) if s.strip()]
+
+
+def _focus_span_of(text: str, needle: str) -> list[int]:
+    clean = needle.strip()
+    start = text.find(clean) if clean else -1
+    if start == -1:
+        return [0, len(text)]
+    return [start, start + len(clean)]
+
+
+def lint_focus_setup_reply(
+    text: str, *, stage: str, user_signaled: bool = False
+) -> list[dict]:
+    """Deterministic findings for the six ``focus_setup_gates.*`` classes
+    (Design §D). Pure — no model, no I/O. ``stage`` is the same
+    ``{focus_stage}`` value the turn-instructions leaf receives
+    (``"establish" | "settled"``); an unrecognized stage is treated as
+    ``"settled"`` (fail toward the strictest rule: no setup talk at all).
+    ``user_signaled`` is the caller's own fact — did THIS turn's user
+    message change the focus's name, type, or scope — and is the only thing
+    that licenses setup talk on a settled turn (owner ruling 4).
+
+    Findings share ``conversation_lints.lint_turn``'s shape —
+    ``{"lint": "<id>", "detail": "...", "span": [start, end]}`` — so a
+    caller can merge them with ``lint_focus_candidate_reply``'s output
+    uniformly.
+    """
+    findings: list[dict] = []
+    sentences = _focus_sentences(text)
+    aside_sentences = [s for s in sentences if _FOCUS_ASIDE_MARKER_RE.search(s)]
+
+    if stage == "establish":
+        if len(aside_sentences) != 1:
+            findings.append({
+                "lint": "focus_setup.aside_single_sentence",
+                "detail": "the focus aside must appear exactly once, as exactly one sentence",
+                "span": [0, len(text)],
+            })
+        elif "?" in aside_sentences[0]:
+            findings.append({
+                "lint": "focus_setup.aside_not_a_question",
+                "detail": "the focus aside must not be a question",
+                "span": _focus_span_of(text, aside_sentences[0]),
+            })
+    else:
+        if aside_sentences:
+            findings.append({
+                "lint": "focus_setup.aside_never_repeated",
+                "detail": "a settled turn must never restate that the focus was started",
+                "span": _focus_span_of(text, aside_sentences[0]),
+            })
+        if not user_signaled:
+            lowered_setup = text.lower()
+            for phrase in _SETUP_TALK_PHRASES:
+                idx = lowered_setup.find(phrase)
+                if idx != -1:
+                    findings.append({
+                        "lint": "focus_setup.settled_silence",
+                        "detail": f"setup talk on a settled turn the user did not signal: {phrase!r}",
+                        "span": [idx, idx + len(phrase)],
+                    })
+                    break
+
+    if text.count("?") > 1:
+        findings.append({
+            "lint": "focus_setup.one_setup_question",
+            "detail": "at most one question per reply — onboarding never interrogates",
+            "span": [0, len(text)],
+        })
+
+    lowered = text.lower()
+    for phrase in _FOCUS_MECHANISM_PHRASES:
+        idx = lowered.find(phrase)
+        if idx != -1:
+            findings.append({
+                "lint": "focus_setup.no_mechanism_talk",
+                "detail": f"mechanism talk: {phrase!r}",
+                "span": [idx, idx + len(phrase)],
+            })
+            break
+
     return findings
 
 

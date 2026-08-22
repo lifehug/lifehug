@@ -14,8 +14,11 @@ SYSTEM = ROOT / "system"
 sys.path.insert(0, str(SYSTEM))
 
 import candidate_research as research  # noqa: E402
+import conversation_delivery  # noqa: E402
 import focus_candidate as focus  # noqa: E402
+import interaction_registry  # noqa: E402
 import lifehug  # noqa: E402
+import roadmap  # noqa: E402
 
 
 class MemoryAuthority:
@@ -612,6 +615,291 @@ class FocusCandidateTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
+
+
+class FocusOnboardingTests(unittest.TestCase):
+    """focus-onboarding-context (v189) — the Play path. Every function under
+    test is pure: no vault, no model, no I/O."""
+
+    # --- Design §A.4: the opener -------------------------------------------
+
+    def test_opening_question_is_type_aware_and_one_line(self):
+        seen = set()
+        for focus_type in roadmap.FOCUS_TYPES:
+            with self.subTest(focus_type=focus_type):
+                line = focus.opening_question("Synthetic Ada", focus_type)
+                self.assertIn("Synthetic Ada", line)
+                self.assertEqual(line.count("\n"), 0)
+                self.assertTrue(line.endswith("?"))
+                self.assertEqual(line.count("?"), 1)
+                seen.add(line)
+        # Person/relationship and project/lifes_work share a line by design;
+        # the rest are distinct, so the type genuinely changes what is asked.
+        self.assertGreaterEqual(len(seen), 6)
+
+    def test_opening_question_unknown_type_falls_back_to_theme(self):
+        theme = focus.opening_question("Synthetic Harbor", "theme")
+        for focus_type in (None, "", "  ", "spaceship"):
+            with self.subTest(focus_type=focus_type):
+                self.assertEqual(focus.opening_question("Synthetic Harbor", focus_type), theme)
+
+    def test_opening_question_without_a_subject_is_a_caller_bug(self):
+        for entity in ("", "   ", None):
+            with self.subTest(entity=entity):
+                with self.assertRaises(focus.FocusCandidateError):
+                    focus.opening_question(entity, "person")
+
+    # --- Design §C: the stage comes from the transcript --------------------
+
+    def test_focus_stage_for_session_derived_from_transcript(self):
+        self.assertEqual(focus.focus_stage_for_session({"turns": []}), "establish")
+        self.assertEqual(focus.focus_stage_for_session({}), "establish")
+        self.assertEqual(
+            focus.focus_stage_for_session({"turns": [{"role": "user", "text": "hi"}]}),
+            "establish",
+        )
+        self.assertEqual(
+            focus.focus_stage_for_session(
+                {"turns": [{"role": "user"}, {"role": "lifehug"}]}
+            ),
+            "settled",
+        )
+
+    # --- Design §B.2: the closed layer -------------------------------------
+
+    def test_validate_focus_setup_closed_vocabularies(self):
+        value = {
+            "objective": "her working years at the synthetic mill",
+            "type": "person",
+            "relationship": "parent",
+            "living": False,
+            "label": "Ma",
+        }
+        self.assertEqual(focus.validate_focus_setup(value), value)
+
+    def test_validate_focus_setup_rejects_unknown_type_and_relationship(self):
+        # Exact membership only — no case-fold, no fuzzy, no prose derivation,
+        # exactly as question_candidate.validate_placement treats the roster.
+        for bad in ("Person", "PERSON", " person", "people", "spaceship"):
+            with self.subTest(focus_type=bad):
+                self.assertIsNone(focus.validate_focus_setup({"type": bad}))
+        for bad in ("Parent", "grandmother-in-law", "mother", "step-parent"):
+            with self.subTest(relationship=bad):
+                self.assertIsNone(focus.validate_focus_setup({"relationship": bad}))
+
+    def test_validate_focus_setup_drops_only_the_invalid_key(self):
+        # A person who told us their relationship and mistyped the focus type
+        # still told us their relationship.
+        self.assertEqual(
+            focus.validate_focus_setup({"type": "spaceship", "relationship": "parent"}),
+            {"relationship": "parent"},
+        )
+
+    def test_validate_focus_setup_caps_and_trims(self):
+        self.assertEqual(
+            focus.validate_focus_setup({"objective": "  the mill years  "}),
+            {"objective": "the mill years"},
+        )
+        self.assertIsNone(
+            focus.validate_focus_setup({"objective": "x" * (focus.MAX_FOCUS_OBJECTIVE_CHARS + 1)})
+        )
+        self.assertIsNone(
+            focus.validate_focus_setup({"label": "x" * (focus.MAX_FOCUS_LABEL_CHARS + 1)})
+        )
+
+    def test_validate_focus_setup_rejects_non_objects_and_unknown_keys(self):
+        for bad in (None, "person", ["person"], {}, {"nope": "x"}, {"type": "person", "nope": 1}):
+            with self.subTest(value=bad):
+                self.assertIsNone(focus.validate_focus_setup(bad))
+
+    def test_living_must_be_a_real_bool(self):
+        self.assertEqual(focus.validate_focus_setup({"living": True}), {"living": True})
+        for bad in (1, 0, "yes", "true", None):
+            with self.subTest(living=bad):
+                self.assertIsNone(focus.validate_focus_setup({"living": bad}))
+
+    def test_focus_setup_keys_match_the_structural_layer(self):
+        # The two layers list the same keys in two modules on purpose (an
+        # import of conversation_delivery here would be a cycle); this is the
+        # parity guard that fails if one drifts.
+        self.assertEqual(focus._FOCUS_SETUP_KEYS, conversation_delivery._FOCUS_SETUP_KEYS)
+
+    def test_focus_types_match_roadmap_argparse_choices(self):
+        # Recurring-defect doctrine: roadmap.FOCUS_TYPES is THE list, and both
+        # CLIs' --type choices read it rather than re-listing it. A re-inlined
+        # copy fails here.
+        source = (SYSTEM / "roadmap.py").read_text(encoding="utf-8")
+        lifehug_source = (SYSTEM / "lifehug.py").read_text(encoding="utf-8")
+        self.assertIn('choices=list(FOCUS_TYPES)', source)
+        self.assertIn('choices=list(FOCUS_TYPES)', lifehug_source)
+        for text in (source, lifehug_source):
+            self.assertNotIn(
+                'choices=["person", "place", "period", "project", "theme", "event", '
+                '"lifes_work", "self", "relationship"]',
+                text,
+            )
+        self.assertEqual(
+            roadmap.FOCUS_TYPES,
+            ("person", "place", "period", "project", "theme", "event",
+             "lifes_work", "self", "relationship"),
+        )
+
+    def test_every_relationship_selects_a_real_interview_bank(self):
+        import research_expand  # noqa: PLC0415
+
+        for relationship in focus.FOCUS_RELATIONSHIPS:
+            with self.subTest(relationship=relationship):
+                key = focus.interview_bank_key(relationship)
+                self.assertIn(key, research_expand.INTERVIEW_BANKS)
+
+    def test_not_living_always_wins_the_bank_choice(self):
+        self.assertEqual(focus.interview_bank_key("parent", living=False), "remembering")
+        self.assertEqual(focus.interview_bank_key(None, living=False), "remembering")
+        self.assertEqual(focus.interview_bank_key("parent", living=True), "parent")
+        self.assertIsNone(focus.interview_bank_key("grandmother-in-law"))
+
+    def test_normalize_onboarding_context_drops_invalid_and_caps_first_answer(self):
+        self.assertEqual(focus.normalize_onboarding_context({}), {})
+        self.assertEqual(focus.normalize_onboarding_context("nope"), {})
+        context = focus.normalize_onboarding_context({
+            "objective": " the mill years ",
+            "type": "spaceship",
+            "relationship": "parent",
+            "first_answer": "x" * (focus.MAX_FIRST_ANSWER_CHARS + 50),
+            "bogus": 1,
+        })
+        self.assertEqual(context["objective"], "the mill years")
+        self.assertEqual(context["relationship"], "parent")
+        self.assertNotIn("type", context)
+        self.assertEqual(len(context["first_answer"]), focus.MAX_FIRST_ANSWER_CHARS)
+
+    # --- Design §D: the six lints ------------------------------------------
+
+    ASIDE = "I've started a **Ma** focus — tell me if the name or scope is off."
+
+    def _ids(self, findings):
+        return {item["lint"] for item in findings}
+
+    def test_focus_setup_lint_aside_single_sentence(self):
+        good = f"The mill years, then. {self.ASIDE} Was she your mother?"
+        self.assertNotIn(
+            "focus_setup.aside_single_sentence",
+            self._ids(focus.lint_focus_setup_reply(good, stage="establish")),
+        )
+        for bad in (
+            "The mill years, then. Was she your mother?",          # no aside
+            f"{self.ASIDE} {self.ASIDE}",                           # said twice
+        ):
+            with self.subTest(bad=bad):
+                self.assertIn(
+                    "focus_setup.aside_single_sentence",
+                    self._ids(focus.lint_focus_setup_reply(bad, stage="establish")),
+                )
+
+    def test_focus_setup_lint_aside_not_a_question(self):
+        bad = "The mill years, then. I've started a **Ma** focus — is the name or scope off?"
+        self.assertIn(
+            "focus_setup.aside_not_a_question",
+            self._ids(focus.lint_focus_setup_reply(bad, stage="establish")),
+        )
+        self.assertNotIn(
+            "focus_setup.aside_not_a_question",
+            self._ids(
+                focus.lint_focus_setup_reply(f"The mill years. {self.ASIDE}", stage="establish")
+            ),
+        )
+
+    def test_focus_setup_lint_aside_never_repeated(self):
+        self.assertIn(
+            "focus_setup.aside_never_repeated",
+            self._ids(focus.lint_focus_setup_reply(f"Good. {self.ASIDE}", stage="settled")),
+        )
+        self.assertNotIn(
+            "focus_setup.aside_never_repeated",
+            self._ids(
+                focus.lint_focus_setup_reply(
+                    "Slack water and the ropes going quiet. What did you do while you waited?",
+                    stage="settled",
+                )
+            ),
+        )
+
+    def test_focus_setup_lint_one_setup_question(self):
+        bad = f"The mill years. {self.ASIDE} Was she your mother? Is she still living?"
+        self.assertIn(
+            "focus_setup.one_setup_question",
+            self._ids(focus.lint_focus_setup_reply(bad, stage="establish")),
+        )
+        good = f"The mill years. {self.ASIDE} Was she your mother?"
+        self.assertNotIn(
+            "focus_setup.one_setup_question",
+            self._ids(focus.lint_focus_setup_reply(good, stage="establish")),
+        )
+
+    def test_focus_setup_lint_settled_silence(self):
+        bad = "Just checking — should we change the focus name, or leave it?"
+        self.assertIn(
+            "focus_setup.settled_silence",
+            self._ids(focus.lint_focus_setup_reply(bad, stage="settled")),
+        )
+        # The same sentence is fine when the USER raised it (ruling 4).
+        self.assertNotIn(
+            "focus_setup.settled_silence",
+            self._ids(focus.lint_focus_setup_reply(bad, stage="settled", user_signaled=True)),
+        )
+
+    def test_focus_setup_lint_no_mechanism_talk(self):
+        bad = "Great — I'm setting up your focus now and seeding questions for it."
+        self.assertIn(
+            "focus_setup.no_mechanism_talk",
+            self._ids(focus.lint_focus_setup_reply(bad, stage="settled")),
+        )
+
+    def test_unknown_stage_fails_toward_the_strictest_rule(self):
+        # An unrecognized stage is treated as "settled" — no setup talk at all
+        # — rather than silently licensing the aside.
+        self.assertIn(
+            "focus_setup.aside_never_repeated",
+            self._ids(focus.lint_focus_setup_reply(self.ASIDE, stage="wat")),
+        )
+
+    def test_lint_findings_share_the_inherited_lint_shape(self):
+        for finding in focus.lint_focus_setup_reply(self.ASIDE, stage="settled"):
+            self.assertEqual(set(finding), {"lint", "detail", "span"})
+            self.assertIsInstance(finding["span"], list)
+            self.assertEqual(len(finding["span"]), 2)
+
+    # --- Design §A.2/§A.3: the leaf and the moved research contract ---------
+
+    def test_leaf_is_stage_keyed_and_placeholder_bearing(self):
+        leaf = interaction_registry.compose_interaction_asset(
+            "focus_candidate", "prompt/turn-instructions.md"
+        )
+        for placeholder in ("{focus_stage}", "{focus_label}", "{focus_type}"):
+            self.assertIn(placeholder, leaf)
+        self.assertIn("I've started a **{focus_label}** focus", leaf)
+        # The leaf is appended to an ordinary Conversation prompt on the Play
+        # path, so it must NOT declare a second output object.
+        self.assertNotIn("Return exactly one JSON object", leaf)
+
+    def test_research_output_contract_survives_the_leaf_move(self):
+        # v189 moved the research JSON contract out of the leaf and into the
+        # runtime. The standalone focus-candidate-prompt path must still get
+        # every key it got at v188 — this is the no-regression pin.
+        prompt = focus.build_focus_candidate_prompt(
+            FocusCandidateTests().payload(), current_subject=FocusCandidateTests().subject()
+        )
+        self.assertIn("Return exactly one JSON object with exactly these keys", prompt)
+        for key in sorted(focus._OUTPUT_KEYS):
+            self.assertIn(f'"{key}"', prompt)
+        self.assertLess(
+            prompt.index("interaction:focus_candidate asset:prompt/turn-instructions.md"),
+            prompt.index("Return exactly one JSON object"),
+        )
+        self.assertLess(
+            prompt.index("Return exactly one JSON object"),
+            prompt.index("runtime-boundary:untrusted-data"),
+        )
 
 
 if __name__ == "__main__":
