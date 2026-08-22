@@ -13,10 +13,24 @@ import focus_candidate_evals as evals  # noqa: E402
 
 
 class FocusCandidateEvalTests(unittest.TestCase):
+    def _all_scores(self) -> dict:
+        """Both golden pairs, scored the way `main()` scores them (v189):
+        the research pair and the onboarding pair feed ONE `check_gates`
+        call against ONE merged gate table."""
+        fixtures = evals.load_fixtures()
+        scores = evals.score_predictions(fixtures, evals.load_sample_predictions())
+        scores.update(
+            evals.score_onboarding_goldens(
+                evals.load_onboarding_fixtures(),
+                evals.load_onboarding_sample_predictions(),
+            )
+        )
+        return scores
+
     def test_recorded_fixture_contract_and_gates(self):
         fixtures = evals.load_fixtures()
         self.assertEqual(evals.validate_fixtures(fixtures), [])
-        scores = evals.score_predictions(fixtures, evals.load_sample_predictions())
+        scores = self._all_scores()
         self.assertEqual(evals.check_gates(scores, evals.load_gates()), [])
         self.assertEqual(scores["readiness.false_positive_rate"], 0.0)
         self.assertEqual(scores["grounding.compliance"], 1.0)
@@ -31,9 +45,9 @@ class FocusCandidateEvalTests(unittest.TestCase):
             "ready": True,
             "evidence_quotes": ["fabricated"],
         }
-        failures = evals.check_gates(
-            evals.score_predictions(fixtures, predictions), evals.load_gates()
-        )
+        scores = self._all_scores()
+        scores.update(evals.score_predictions(fixtures, predictions))
+        failures = evals.check_gates(scores, evals.load_gates())
         self.assertTrue(any("false_positive_rate" in item for item in failures))
         self.assertTrue(any("grounding.compliance" in item for item in failures))
 

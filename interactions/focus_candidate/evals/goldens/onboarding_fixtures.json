@@ -1,0 +1,66 @@
+[
+  {
+    "fixture_id": "onboarding-establish-aside-and-one-question",
+    "focus": {"label": "Synthetic Harbor", "type": "place"},
+    "turns": [
+      {"stage": "establish", "user_signaled": false, "expected_focus_setup": null}
+    ]
+  },
+  {
+    "fixture_id": "onboarding-establish-person-asks-relationship",
+    "focus": {"label": "Synthetic Ada", "type": "person"},
+    "turns": [
+      {"stage": "establish", "user_signaled": false, "expected_focus_setup": null}
+    ]
+  },
+  {
+    "fixture_id": "onboarding-establish-answer-already-told-asks-nothing",
+    "focus": {"label": "Synthetic Ada", "type": "person"},
+    "turns": [
+      {
+        "stage": "establish",
+        "user_signaled": true,
+        "expected_focus_setup": {"objective": "her working years at the synthetic mill"}
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-settled-silent",
+    "focus": {"label": "Synthetic Harbor", "type": "place"},
+    "turns": [
+      {"stage": "establish", "user_signaled": false, "expected_focus_setup": null},
+      {"stage": "settled", "user_signaled": false, "expected_focus_setup": null}
+    ]
+  },
+  {
+    "fixture_id": "onboarding-settled-user-renames-emits-setup",
+    "focus": {"label": "Synthetic Ada", "type": "person"},
+    "turns": [
+      {"stage": "establish", "user_signaled": false, "expected_focus_setup": null},
+      {"stage": "settled", "user_signaled": false, "expected_focus_setup": null},
+      {
+        "stage": "settled",
+        "user_signaled": true,
+        "expected_focus_setup": {
+          "label": "Ma",
+          "objective": "her working years at the synthetic mill",
+          "relationship": "parent"
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-settled-unprompted-null",
+    "focus": {"label": "Synthetic Harbor", "type": "place"},
+    "turns": [
+      {"stage": "settled", "user_signaled": false, "expected_focus_setup": null}
+    ]
+  },
+  {
+    "fixture_id": "onboarding-unknown-relationship-rejected",
+    "focus": {"label": "Synthetic Ada", "type": "person"},
+    "turns": [
+      {"stage": "settled", "user_signaled": true, "expected_focus_setup": null}
+    ]
+  }
+]

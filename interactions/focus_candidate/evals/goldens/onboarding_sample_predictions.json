@@ -1,0 +1,81 @@
+[
+  {
+    "fixture_id": "onboarding-establish-aside-and-one-question",
+    "turns": [
+      {
+        "message": "Waiting for the tide with her is the kind of detail a whole place gets built out of. I've started a Synthetic Harbor focus — tell me if the name or scope is off. Is this about the harbor itself, or about the summers you spent there with her?",
+        "focus_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-establish-person-asks-relationship",
+    "turns": [
+      {
+        "message": "Thirty-one years of second shifts leaves a mark on a family. I've started a Synthetic Ada focus — tell me if the name or scope is off. Is she your mother, or someone you think of that way?",
+        "focus_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-establish-answer-already-told-asks-nothing",
+    "turns": [
+      {
+        "message": "The working years, bounded on both ends — that's a focus with a shape to it. I've started a Synthetic Ada focus — tell me if the name or scope is off.",
+        "focus_setup": {"objective": "her working years at the synthetic mill"}
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-settled-silent",
+    "turns": [
+      {
+        "message": "Waiting for the tide with her is the kind of detail a whole place gets built out of. I've started a Synthetic Harbor focus — tell me if the name or scope is off. What did the water sound like from the pier?",
+        "focus_setup": null
+      },
+      {
+        "message": "Slack water and the ropes going quiet — that's a very particular kind of stillness. What did the two of you do while you waited?",
+        "focus_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-settled-user-renames-emits-setup",
+    "turns": [
+      {
+        "message": "Thirty-one years of second shifts leaves a mark on a family. I've started a Synthetic Ada focus — tell me if the name or scope is off. Is she your mother, or someone you think of that way?",
+        "focus_setup": null
+      },
+      {
+        "message": "Your mother, then, and the mill is where you knew her from. What did she come home smelling like?",
+        "focus_setup": null
+      },
+      {
+        "message": "Ma it is — and the work is where she shows up anyway. What was the shift change like when she walked out those gates?",
+        "focus_setup": {
+          "label": "Ma",
+          "objective": "her working years at the synthetic mill",
+          "relationship": "parent"
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-settled-unprompted-null",
+    "turns": [
+      {
+        "message": "The broken pier after the synthetic winter storm is the part I keep turning over — you went back alone and found it changed. That's the kind of return that tells you what a place was holding for you. What did you do once you'd seen it?",
+        "focus_setup": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "onboarding-unknown-relationship-rejected",
+    "turns": [
+      {
+        "message": "Family by marriage and by choice both count here — that's how she ends up in this story at all. What did she call you?",
+        "focus_setup": {"relationship": "grandmother-in-law"}
+      }
+    ]
+  }
+]
