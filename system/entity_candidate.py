@@ -12,8 +12,9 @@ from pathlib import Path
 
 import candidate_research
 import conversation_lints
+import entity_roster
 import interaction_registry
-from lifehug_core import REPO_DIR
+from lifehug_core import REPO_DIR, slugify
 from vault_paths import read_vault_text, vault_data_path
 
 SCHEMA_VERSION = 1
@@ -407,6 +408,52 @@ def validate_entity_candidate_input(value: object, *, current_subject: dict) -> 
     }
 
 
+#: entity-identity-context (v190, Design §A.3): the research-mode structured
+#: output contract, moved OUT of `prompt/turn-instructions.md` and into the
+#: runtime, byte-for-byte what the leaf carried at v189. The leaf is now the
+#: stage-keyed identity leaf the platform REPLAYs on top of an ordinary
+#: Conversation prompt, and two competing "return exactly one JSON object
+#: with exactly these keys" contracts in one prompt is a defect, not a
+#: composition. This is the parent's own pattern, not an invention:
+#: `conversation_delivery._output_contract_block` exists for the same reason —
+#: the ENGINE appends the machine-readable shape, the leaf holds behavior.
+#: `parse_entity_candidate_output` and the standalone
+#: `entity-candidate-prompt` / `entity-candidate-complete` CLI path are
+#: unchanged; test_research_output_contract_survives_the_leaf_move pins it.
+_RESEARCH_OUTPUT_CONTRACT = """Return exactly one JSON object with exactly these keys and no prose or fence:
+
+```json
+{
+  "reply": "string",
+  "action": "ask_gap|offer_confirmation|accept_confirmation|continue",
+  "next_gap": "identity_disambiguation|relationship_relevance_and_significance|timeline_context|connections|tension_or_open_question|type_specific_context|grounded_evidence|null",
+  "evidence_spans": [{"turn_id":"string","start":0,"end":1,"evidence_kind":"statement|concrete_event|concrete_observation"}],
+  "dimension_evidence": {
+    "identity_disambiguation": [], "relationship_relevance_and_significance": [], "timeline_context": [],
+    "connections": [], "tension_or_open_question": [],
+    "type_specific_context": [], "grounded_evidence": []
+  },
+  "seed_questions": ["string"],
+  "confirmation_span": null
+}
+```
+
+Offsets are Unicode code-point slices of exact user turns. Dimension arrays
+index only this output's evidence spans. Mark grounded evidence only for a
+concrete event or observation, and also connect that span to a substantive
+dimension. Ask at most one natural open question. Use `offer_confirmation`
+only when the supplied deterministic state is ready. Use
+`accept_confirmation` only for an explicit confirmation in the latest user
+turn and identify its exact span. Never claim a write, commit, approval,
+graduation, page, source, or receipt.
+"""
+
+
+def _research_output_contract_block() -> str:
+    """The standalone research path's structured-output appendix."""
+    return _RESEARCH_OUTPUT_CONTRACT
+
+
 def build_entity_candidate_prompt(value: dict, *, current_subject: dict) -> str:
     payload = validate_entity_candidate_input(value, current_subject=current_subject)
     assets = [
@@ -425,6 +472,8 @@ def build_entity_candidate_prompt(value: dict, *, current_subject: dict) -> str:
     }
     return (
         "\n".join(assets)
+        + "\n"
+        + _research_output_contract_block()
         + "\n<!-- runtime-boundary:untrusted-data -->\nUNTRUSTED_DATA\n"
         + json.dumps(untrusted, ensure_ascii=False, sort_keys=True, indent=2)
         + "\nEND_UNTRUSTED_DATA\n"
@@ -482,6 +531,393 @@ def lint_entity_candidate_reply(
                 "span": [0, len(text)],
             }
         )
+    return findings
+
+
+# --------------------------------------------------------------------------
+# entity-identity-context (v190) — the Play path
+#
+# Play graduates the entity in a background job and opens this conversation;
+# its job is IDENTITY (who/what this is), not scope. Everything below is the
+# same four-part shape `focus_candidate` took for onboarding at v189 and
+# `question_candidate` took for placement at v188: one pure opener, one
+# transcript-derived stage, one closed validator, one lint family — plus the
+# two facts an entity has that a focus does not (a duplicate list, and whether
+# offering a focus is even appropriate).
+# --------------------------------------------------------------------------
+
+#: The two `{entity_stage}` values the leaf is keyed on (Design §A.2/§C).
+VALID_ENTITY_STAGES = frozenset({"establish", "settled"})
+#: The closed key set of the additive ``entity_setup`` object, mirrored from
+#: `conversation_delivery._ENTITY_SETUP_KEYS` — importing it would create an
+#: import cycle through the delivery engine, so the parity is pinned by a test
+#: instead (test_entity_setup_keys_match_the_structural_layer).
+ENTITY_SETUP_KEYS = frozenset(
+    {"aliases", "relationship", "living", "type", "maps_to", "start_focus"}
+)
+MAX_ENTITY_ALIASES = 8
+MAX_ENTITY_ALIAS_CHARS = 80
+#: How many likely-same pages the leaf is allowed to carry. The question is
+#: "is this the same one as X?" — a list is already a worse question than a
+#: name, and an unbounded list would let the roster crowd the turn out.
+MAX_POSSIBLE_DUPLICATES = 5
+
+#: The first thing the person sees when Play opens the tab — one short,
+#: natural line per entity type, with no machinery in it. The generic line is
+#: the fallback for an unknown or blank type.
+_OPENING_QUESTIONS = {
+    "person": "Tell me about {name} — who are they to you?",
+    "place": "Tell me about {name} — what happened there that makes it matter?",
+    "period": "Tell me about {name} — what was that stretch of your life like?",
+    "object": "Tell me about {name} — what makes it worth keeping?",
+    "theme": "Tell me about {name} — where does that show up in your life?",
+}
+_GENERIC_OPENING_QUESTION = "Tell me about {name} — what should I know about it?"
+
+
+def opening_question(name: str, entity_type: str | None = None) -> str:
+    """The identity opener for an entity Play session (Design §A.4).
+
+    Pure — no vault, no model, no I/O. The platform shows this as the tab's
+    framing line (review-loop/57 §A, ``question_text``). A blank ``name``
+    raises: an opener with no subject is a caller bug, not something to
+    degrade around. An unknown or blank ``entity_type`` falls back to the
+    generic line rather than failing.
+    """
+    subject = (name or "").strip()
+    if not subject:
+        raise EntityCandidateError("opening_question requires an entity name")
+    template = _OPENING_QUESTIONS.get(
+        (entity_type or "").strip(), _GENERIC_OPENING_QUESTION
+    )
+    return template.format(name=subject)
+
+
+def entity_stage_for_session(session: dict) -> str:
+    """Derive ``{entity_stage}`` from the transcript alone (Design §C) — no
+    new session field, no new lifecycle status.
+
+    ``"settled"`` once the session already carries any assistant
+    (``role == "lifehug"``) turn: the aside and the one identity question both
+    live on the FIRST reply, so "have we onboarded?" is exactly "does this
+    session have an assistant turn?". Before that, ``"establish"``. The exact
+    twin of ``focus_candidate.focus_stage_for_session``.
+    """
+    turns = session.get("turns") or []
+    if any(isinstance(turn, dict) and turn.get("role") == "lifehug" for turn in turns):
+        return "settled"
+    return "establish"
+
+
+def possible_duplicates(entity_type: str, name: str, roster: dict) -> list[str]:
+    """Existing roster pages that might already BE this entity (Design §C).
+
+    Reuses the roster's own matchers and adds none (the recurring-defect
+    doctrine's whole point — a second entity matcher is how the four Jameses
+    happened):
+
+      - ``entity_roster._entity_keys`` — name + slug + aliases, normalized
+        through ``lifehug_core.normalized_focus_key`` (the ONE authoritative
+        normalization every Focus-creation door already shares). Any entry
+        whose key set intersects the subject's is a duplicate candidate.
+      - ``focus_dupes._token_subset_pairs`` — the repo's existing near-name
+        shape ("Jim" vs "Jim Reynolds"), which deliberately EXCLUDES exact
+        normalized collisions because the key-set layer above already has
+        those.
+
+    ``entity_type`` selects nothing here (the caller passes the roster it
+    already loaded for that type) but is part of the signature the platform
+    twin table names, and is used to keep the call honest about which roster
+    was read. Entries vetoed ``never`` and the subject's own row are excluded.
+    Result preserves roster order, then near-name order, capped at
+    ``MAX_POSSIBLE_DUPLICATES``.
+    """
+    from focus_dupes import _token_subset_pairs  # noqa: PLC0415
+
+    subject = (name or "").strip()
+    if not subject:
+        return []
+    entities = [
+        entity
+        for entity in ((roster or {}).get("entities") or [])
+        if isinstance(entity, dict) and str(entity.get("name") or "").strip()
+    ]
+    subject_slug = slugify(subject)
+    subject_keys = entity_roster._entity_keys(
+        {"name": subject, "slug": subject_slug, "aliases": []}
+    )
+
+    matches: list[str] = []
+    remaining: list[tuple[str, str]] = []
+    for entity in entities:
+        entity_name = str(entity["name"]).strip()
+        entity_slug = str(entity.get("slug") or slugify(entity_name))
+        if entity_slug == subject_slug:
+            continue  # the subject's own row
+        if entity.get("owner_verdict") == "never":
+            continue  # settled: never a page, so never a merge target
+        if subject_keys & entity_roster._entity_keys(entity):
+            if entity_name not in matches:
+                matches.append(entity_name)
+            continue
+        remaining.append((f"entity:{entity_slug}", entity_name))
+
+    subject_id = "__subject__"
+    for pair in _token_subset_pairs([(subject_id, subject), *remaining]):
+        if pair["shorter_id"] == subject_id:
+            other = pair["longer_label"]
+        elif pair["longer_id"] == subject_id:
+            other = pair["shorter_label"]
+        else:
+            continue
+        if other not in matches:
+            matches.append(other)
+    return matches[:MAX_POSSIBLE_DUPLICATES]
+
+
+def is_offer_worthy(entity_type: str, roster_entry: dict | None = None) -> bool:
+    """May the identity conversation OFFER to start a focus (owner ruling 4)?
+
+    True only for person/place/period/theme — read from
+    ``recommend_focuses.FOCUS_RECOMMENDATION_TYPES``, the one module that can
+    actually express a focus recommendation of a given type, rather than
+    re-typing ruling 4's list here — AND only when the entry is neither
+    owner-vetoed (``owner_verdict == "never"``) nor already mapped
+    (``maps_to_focus``): an entity that already has a focus does not need an
+    offer, and one the owner has permanently vetoed is not a growth program.
+
+    The package decides; the platform only reads the answer (ruling 5).
+    """
+    from recommend_focuses import FOCUS_RECOMMENDATION_TYPES  # noqa: PLC0415
+
+    if (entity_type or "").strip() not in FOCUS_RECOMMENDATION_TYPES:
+        return False
+    entry = roster_entry or {}
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("owner_verdict") == "never":
+        return False
+    return not entry.get("maps_to_focus")
+
+
+def _entity_alias_list(value: object) -> list[str]:
+    """Trim, drop blanks, dedupe case-insensitively (order preserved), cap."""
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        alias = item.strip()
+        if not alias or len(alias) > MAX_ENTITY_ALIAS_CHARS:
+            continue
+        if alias.lower() in seen:
+            continue
+        seen.add(alias.lower())
+        out.append(alias)
+        if len(out) == MAX_ENTITY_ALIASES:
+            break
+    return out
+
+
+def validate_entity_setup(value: object, *, roster_slugs: Sequence[str] = ()) -> dict | None:
+    """Closed layer of the additive ``entity_setup`` field (Design §B.2).
+
+    ``value`` is the structural layer's own output — the
+    ``{aliases?, relationship?, living?, type?, maps_to?, start_focus?} | None``
+    that ``conversation_delivery._parse_entity_setup`` produces — or any other
+    untrusted shape a caller hands in directly (this function re-checks shape
+    itself so it is safe to call standalone).
+
+    Exact membership only, in both closed vocabularies: ``type`` against
+    ``entity_roster.ENTITY_TYPES`` and ``relationship`` against
+    ``focus_candidate.FOCUS_RELATIONSHIPS`` (imported, never re-listed — the
+    focus lane and the entity lane ask the same question and must not drift).
+    ``living`` and ``start_focus`` must be real ``bool``s. ``maps_to`` must be
+    a member of the caller-supplied ``roster_slugs``: the package refuses to
+    invent a merge target, so a slug nobody has heard of drops the key rather
+    than producing a dangling map.
+
+    An individually invalid value drops THAT key rather than the whole object
+    (a person who told us their aliases and mistyped the type still told us
+    their aliases); no valid key remaining returns ``None``.
+    """
+    from focus_candidate import FOCUS_RELATIONSHIPS  # noqa: PLC0415
+
+    if not isinstance(value, dict) or not set(value) <= ENTITY_SETUP_KEYS:
+        return None
+    validated: dict[str, object] = {}
+    aliases = _entity_alias_list(value.get("aliases"))
+    if aliases:
+        validated["aliases"] = aliases
+    relationship = value.get("relationship")
+    if isinstance(relationship, str) and relationship in FOCUS_RELATIONSHIPS:
+        validated["relationship"] = relationship
+    entity_type = value.get("type")
+    if isinstance(entity_type, str) and entity_type in entity_roster.ENTITY_TYPES:
+        validated["type"] = entity_type
+    maps_to = value.get("maps_to")
+    if isinstance(maps_to, str) and maps_to.strip() in set(roster_slugs or ()):
+        validated["maps_to"] = maps_to.strip()
+    for flag in ("living", "start_focus"):
+        candidate = value.get(flag)
+        if isinstance(candidate, bool):
+            validated[flag] = candidate
+    return validated or None
+
+
+# --------------------------------------------------------------------------
+# entity_setup lints (Design §D)
+# --------------------------------------------------------------------------
+
+#: The aside's invariant anchor — "I've added **<name>** as a <type> in your
+#: story — tell me if that's the wrong name or the wrong person." The model
+#: varies the connective tissue around it but not the move (owner ruling 3);
+#: this phrase is what every aside lint locates.
+_ENTITY_ASIDE_MARKER_RE = re.compile(
+    r"\badded\b[^.!?]*\bin your story\b", re.IGNORECASE
+)
+#: The OFFER's anchor: a conditional AND "start a focus" in one sentence.
+#: Deliberately narrower than "mentions a focus" — a reply that merely
+#: RECORDS a yes ("Jo, then.") is not an offer, and a reply that CLAIMS a
+#: focus was started is caught by no_mechanism_talk instead.
+_ENTITY_OFFER_RE = re.compile(
+    r"\b(?:if|want|wanted|would you)\b[^.!?]*\bstart(?:ing)?\s+a\s+focus\b",
+    re.IGNORECASE,
+)
+_ENTITY_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+#: entity_setup.settled_silence — a settled turn re-opening who this is when
+#: the USER did not is the "re-litigating" failure ruling 3 forbids.
+_IDENTITY_TALK_PHRASES = (
+    "the wrong name",
+    "the wrong person",
+    "is this the same as",
+    "is this the same one as",
+    "are these the same",
+    "the same person as",
+    "what should i call them",
+    "what do you call them",
+)
+#: entity_setup.no_mechanism_talk — graduation is silent; narrating it is not.
+#: "graduate"/"graduating" are deliberately NOT here: in a life-story
+#: conversation "when did you graduate?" is an ordinary, legitimate question.
+_ENTITY_MECHANISM_PHRASES = (
+    "i'll create",
+    "i will create",
+    "wiki page",
+    "the roster",
+    "entity roster",
+    "the system will",
+    "i've started a focus",
+    "i started a focus",
+    "adding a page",
+    "page_eligible",
+)
+
+
+def _entity_sentences(text: str) -> list[str]:
+    return [
+        s.strip() for s in _ENTITY_SENTENCE_SPLIT_RE.split(text.strip()) if s.strip()
+    ]
+
+
+def _entity_span_of(text: str, needle: str) -> list[int]:
+    clean = needle.strip()
+    start = text.find(clean) if clean else -1
+    if start == -1:
+        return [0, len(text)]
+    return [start, start + len(clean)]
+
+
+def lint_entity_setup_reply(
+    text: str,
+    *,
+    stage: str,
+    user_signaled: bool = False,
+    offered_before: bool = False,
+) -> list[dict]:
+    """Deterministic findings for the seven ``entity_setup_gates.*`` classes
+    (Design §D). Pure — no model, no I/O. ``stage`` is the same
+    ``{entity_stage}`` value the turn-instructions leaf receives
+    (``"establish" | "settled"``); an unrecognized stage is treated as
+    ``"settled"`` (fail toward the strictest rule: no identity talk at all).
+    ``user_signaled`` and ``offered_before`` are the caller's own facts — did
+    THIS turn's user message change an identity fact, and has the focus offer
+    already been made in this session — and are the only things that license
+    identity talk on a settled turn and forbid a second offer (owner rulings
+    3 and 4).
+
+    Findings share ``conversation_lints.lint_turn``'s shape —
+    ``{"lint": "<id>", "detail": "...", "span": [start, end]}`` — so a caller
+    can merge them with ``lint_entity_candidate_reply``'s output uniformly.
+    """
+    findings: list[dict] = []
+    sentences = _entity_sentences(text)
+    aside_sentences = [s for s in sentences if _ENTITY_ASIDE_MARKER_RE.search(s)]
+
+    if stage == "establish":
+        if len(aside_sentences) != 1:
+            findings.append({
+                "lint": "entity_setup.aside_single_sentence",
+                "detail": "the identity aside must appear exactly once, as exactly one sentence",
+                "span": [0, len(text)],
+            })
+        elif "?" in aside_sentences[0]:
+            findings.append({
+                "lint": "entity_setup.aside_not_a_question",
+                "detail": "the identity aside must not be a question",
+                "span": _entity_span_of(text, aside_sentences[0]),
+            })
+    else:
+        if aside_sentences:
+            findings.append({
+                "lint": "entity_setup.aside_never_repeated",
+                "detail": "a settled turn must never restate that the entity was added",
+                "span": _entity_span_of(text, aside_sentences[0]),
+            })
+        if not user_signaled:
+            lowered_identity = text.lower()
+            for phrase in _IDENTITY_TALK_PHRASES:
+                idx = lowered_identity.find(phrase)
+                if idx != -1:
+                    findings.append({
+                        "lint": "entity_setup.settled_silence",
+                        "detail": f"identity talk on a settled turn the user did not signal: {phrase!r}",
+                        "span": [idx, idx + len(phrase)],
+                    })
+                    break
+
+    if text.count("?") > 1:
+        findings.append({
+            "lint": "entity_setup.one_identity_question",
+            "detail": "at most one question per reply — identity onboarding never interrogates",
+            "span": [0, len(text)],
+        })
+
+    if offered_before:
+        offer = next(
+            (s for s in sentences if _ENTITY_OFFER_RE.search(s)),
+            None,
+        )
+        if offer is not None:
+            findings.append({
+                "lint": "entity_setup.offer_at_most_once",
+                "detail": "the focus offer is made at most once per session",
+                "span": _entity_span_of(text, offer),
+            })
+
+    lowered = text.lower()
+    for phrase in _ENTITY_MECHANISM_PHRASES:
+        idx = lowered.find(phrase)
+        if idx != -1:
+            findings.append({
+                "lint": "entity_setup.no_mechanism_talk",
+                "detail": f"mechanism talk: {phrase!r}",
+                "span": [idx, idx + len(phrase)],
+            })
+            break
+
     return findings
 
 
