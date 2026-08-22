@@ -1,0 +1,91 @@
+[
+  {
+    "fixture_id": "arc-open-announces-agenda-once",
+    "turns": [
+      {
+        "message": "Today I'd love to hear about Synthetic Harbor — a few things, and we'll take them slowly. What made you keep going back there?",
+        "answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-bridges-to-next-question",
+    "turns": [
+      {
+        "message": "Today I'd love to hear about Synthetic Harbor — a few things, and we'll take them slowly. What made you keep going back there?",
+        "answered_question_id": null
+      },
+      {
+        "message": "A boat you rebuilt twice is its own kind of answer. Who was standing on the dock the first time it ran?",
+        "answered_question_id": "H14"
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-user-tangent-keeps-plan",
+    "turns": [
+      {
+        "message": "Your father's hands doing that work is the part I want. What did he say while he did it?",
+        "answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-decline-skips",
+    "turns": [
+      {
+        "message": "Understood — we'll leave that one alone. The harbor in winter, though: what did it sound like when nobody was out?",
+        "answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-close-summarizes-without-counters",
+    "turns": [
+      {
+        "message": "We got the harbor, the boat, and what your father made of both — that's a good stretch. The rest will keep for whenever you like.",
+        "answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-two-questions-in-one-answer-files-primary",
+    "turns": [
+      {
+        "message": "The dock and the winter in one breath — that's the whole shape of it. What did you do with the boat once the season turned?",
+        "answered_question_id": "H15"
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-passive-single-question-is-byte-identical",
+    "turns": [
+      {
+        "message": "Second shift meant you had the house to yourself after school. What did you do with those hours?",
+        "answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-close-user-signals-leaving",
+    "turns": [
+      {
+        "message": "A truck that never started twice in a row has a whole man behind it. What did he do the mornings it wouldn't?",
+        "answered_question_id": null
+      },
+      {
+        "message": "Of course — we covered the harbor and the boat today, and that's plenty. The rest will keep for whenever you like.",
+        "answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-unknown-question-id-rejected",
+    "turns": [
+      {
+        "message": "Two winters in one story, and the second one is the one you remember. What changed between them?",
+        "answered_question_id": "Z99"
+      }
+    ]
+  }
+]

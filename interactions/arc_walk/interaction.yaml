@@ -1,0 +1,26 @@
+# interactions/arc_walk/interaction.yaml — flat scalar subset only
+interaction: arc_walk
+version: 1.0.0
+extends: conversation
+extends.version: 1.0.0
+modes: walk
+load_order: identity|behavior|examples|plan|conversation|turn_instructions
+composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
+composition.leaf: prompt/turn-instructions.md|context/manifest.md
+role.router: haiku-class
+role.worker: sonnet-class
+role.planner: sonnet-class
+# arc-walk-interaction (v193, Design §B.3): episode size by focus tier —
+# owner ruling 3, "episodes, not marathons". These are the tunable surface;
+# system/arc_walk.py carries the same three numbers as constants and
+# test_episode_manifest_knobs_match_the_module_constants pins them equal,
+# so tuning the knob and tuning the constant are one edit.
+knob.episode_size_basic: 4
+knob.episode_size_standard: 6
+knob.episode_size_extreme: 8
+budget.identity: 800
+budget.behavior: 2000
+budget.examples: 1400
+budget.plan: 1600
+budget.conversation: 1600
+budget.turn_instructions: 1400

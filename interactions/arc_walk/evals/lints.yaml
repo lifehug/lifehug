@@ -1,0 +1,11 @@
+# Arc Walk eval gates — flat scalar subset only
+cap.reply_chars: 2200
+# arc-walk-interaction (v193, Design §D): the seven arc-walking gate classes,
+# scored over the arc golden pair.
+arc_walk_gates.agenda_announced_once.compliance: 1.0
+arc_walk_gates.agenda_never_repeated.compliance: 1.0
+arc_walk_gates.one_question_per_reply.compliance: 1.0
+arc_walk_gates.no_counters.compliance: 1.0
+arc_walk_gates.no_mechanism_talk.compliance: 1.0
+arc_walk_gates.close_summarizes.compliance: 1.0
+arc_walk_gates.no_pressure.compliance: 1.0
