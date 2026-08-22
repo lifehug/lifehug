@@ -1,0 +1,149 @@
+[
+  {
+    "fixture_id": "arc-open-announces-agenda-once",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "open",
+        "agenda_announced": false,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-bridges-to-next-question",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "open",
+        "agenda_announced": false,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      },
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": "H14"
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-user-tangent-keeps-plan",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-decline-skips",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-close-summarizes-without-counters",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "close",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-two-questions-in-one-answer-files-primary",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": "H15"
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-passive-single-question-is-byte-identical",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-close-user-signals-leaving",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      },
+      {
+        "stage": "close",
+        "agenda_announced": true,
+        "user_leaving": true,
+        "expected_answered_question_id": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "arc-walk-unknown-question-id-rejected",
+    "target": {
+      "label": "Synthetic Harbor",
+      "plan_question_ids": ["H12", "H14", "H15"]
+    },
+    "turns": [
+      {
+        "stage": "walk",
+        "agenda_announced": true,
+        "user_leaving": false,
+        "expected_answered_question_id": null
+      }
+    ]
+  }
+]

@@ -70,6 +70,10 @@ READ_ONLY_COMMANDS = frozenset({
     # it must never take the writer lock, because daily_question.sh calls it
     # between picking and sending.
     "arc-card",
+    # arc-walk-interaction (v193, Design §E): arc-plan-target recomputes an
+    # episode plan from the bank and prints it — pure reads, no writer lock,
+    # exactly like arc-card above.
+    "arc-plan-target", "arc-walk-evals",
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
@@ -1398,6 +1402,28 @@ def cmd_entity_candidate_evals(args: argparse.Namespace) -> int:
     return run_python("entity_candidate_evals.py", flags)
 
 
+def cmd_arc_walk_evals(args: argparse.Namespace) -> int:
+    flags = ["--json"] if args.json else []
+    if args.live:
+        flags.append("--live")
+    return run_python("arc_walk_evals.py", flags)
+
+
+def cmd_arc_plan_target(args: argparse.Namespace) -> int:
+    flags: list[str] = []
+    for name in ("focus", "category", "chapter", "book"):
+        value = getattr(args, name, None)
+        if value:
+            flags.extend([f"--{name}", str(value)])
+    if getattr(args, "queue", False):
+        flags.append("--queue")
+    if args.episode_size is not None:
+        flags.extend(["--episode-size", str(args.episode_size)])
+    if args.json:
+        flags.append("--json")
+    return run_python("arc_walk.py", flags)
+
+
 def cmd_daily_dry_run(_args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["LIFEHUG_DAILY_DRY_RUN"] = "1"
@@ -2687,6 +2713,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_entity_candidate_evals)
+
+    p = sub.add_parser("arc-walk-evals", help="Run Arc Walk evals")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_arc_walk_evals)
+
+    p = sub.add_parser(
+        "arc-plan-target",
+        help="Plan an arc-walk episode for a Play target (read-only, no writes)",
+    )
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--focus", help="focus id or label")
+    group.add_argument("--category", help="bank category letter")
+    group.add_argument("--chapter", help="bank category letter (a book chapter)")
+    group.add_argument("--book", help="focus id or label of a book focus")
+    group.add_argument("--queue", action="store_true", help="this week's queue")
+    p.add_argument("--episode-size", type=int, default=None)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_arc_plan_target)
 
     p = sub.add_parser(
         "route",

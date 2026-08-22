@@ -180,6 +180,16 @@ class TurnShape:
     # byte-identical to pre-v190 output (required test:
     # test_output_contract_block_byte_identical_without_entity_stage).
     entity_stage: str | None = None
+    # arc-walk-interaction (v193, Design §C): additive, default None. A
+    # caller composing an arc-walk turn sets this to the {arc_stage} value
+    # ("open" | "walk" | "close" — Design §B.4) to have
+    # _output_contract_block() append the one optional
+    # "answered_question_id" output key; every other caller leaves it None
+    # and the appendix stays byte-identical to pre-v193 output (required
+    # test: test_output_contract_block_byte_identical_without_arc_stage —
+    # owner ruling 6's mechanical form: the passive daily question's prompt
+    # does not move by one byte).
+    arc_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -399,6 +409,26 @@ def _output_contract_block(shape: TurnShape) -> str:
         if shape.entity_stage is not None
         else ""
     )
+    # arc-walk-interaction (v193, Design §C): the one additive
+    # "answered_question_id" output key exists ONLY when the caller set
+    # shape.arc_stage; absent it, line and note alike stay out, so an
+    # ordinary turn's appendix is byte-identical to pre-v193 output.
+    answered_question_line = (
+        '  "answered_question_id": "the agenda question id this answer '
+        'addressed" | null,\n'
+        if shape.arc_stage is not None
+        else ""
+    )
+    answered_question_note = (
+        '- "answered_question_id" is null on every turn except one where the '
+        "USER's answer addressed a DIFFERENT question from the agenda than "
+        "the one on the table; then it is that question's exact id from the "
+        "agenda and nothing else. When an answer covers two, name the primary "
+        "one only. Never invent an id, never name one that isn't on the "
+        "agenda.\n"
+        if shape.arc_stage is not None
+        else ""
+    )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
         "Reply with a single JSON object and nothing else:\n\n"
@@ -411,6 +441,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         f"{placement_line}"
         f"{focus_setup_line}"
         f"{entity_setup_line}"
+        f"{answered_question_line}"
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
@@ -427,6 +458,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         f"{placement_note}"
         f"{focus_setup_note}"
         f"{entity_setup_note}"
+        f"{answered_question_note}"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -493,6 +525,9 @@ def parse_turn_output(raw: object) -> dict | None:
         "placement": _parse_placement(data.get("placement")),
         "focus_setup": _parse_focus_setup(data.get("focus_setup")),
         "entity_setup": _parse_entity_setup(data.get("entity_setup")),
+        "answered_question_id": _parse_answered_question_id(
+            data.get("answered_question_id")
+        ),
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
@@ -631,6 +666,35 @@ def _parse_entity_setup(raw: object) -> dict | None:
         if isinstance(value, bool):
             parsed[flag] = value
     return parsed or None
+
+
+#: arc-walk-interaction (v193, Design §C.1): the additive
+#: ``answered_question_id`` field is a bank question id — ``A14``, ``G5c`` —
+#: so the structural cap is short. WHICH ids are legitimate is deliberately
+#: NOT known here: ``arc_walk.validate_answered_question_id`` owns exact
+#: membership in the episode's own plan, exactly as
+#: ``question_candidate.validate_placement`` owns the category roster.
+_ANSWERED_QUESTION_ID_MAX_CHARS = 16
+
+
+def _parse_answered_question_id(raw: object) -> str | None:
+    """Structural layer of the additive ``answered_question_id`` field
+    (Design §C.1, arc-walk-interaction / v193).
+
+    Accepts only a non-empty string of at most 16 characters after
+    ``.strip()``. Anything else — missing, ``null``, a number, an object, a
+    list, a 17-character value — degrades to ``None``, exactly as
+    ``held_question_id``, ``placement``, ``focus_setup`` and ``entity_setup``
+    degrade above: never an error.
+
+    This function owns no plan and performs no membership check.
+    """
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not value or len(value) > _ANSWERED_QUESTION_ID_MAX_CHARS:
+        return None
+    return value
 
 
 def parse_closing_output(raw: object) -> dict | None:
