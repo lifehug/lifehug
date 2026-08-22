@@ -657,6 +657,60 @@ def load_classified_self_signals(limit: int = 12) -> list[str]:
     return signals[-limit:]  # most recent classifications last → keep the freshest
 
 
+def _onboarding_context_lines(
+    context: dict | None, *, topic_type: str
+) -> list[str]:
+    """Render the FOCUS ONBOARDING CONTEXT block (Design §E.2).
+
+    Returns ``[]`` for a missing or empty context, so the caller can extend
+    unconditionally and the prompt stays byte-identical to v188.
+    """
+    if not context:
+        return []
+    import focus_candidate  # noqa: PLC0415 — avoids an import cycle at module load
+
+    lines = [
+        "## FOCUS ONBOARDING CONTEXT",
+        "The author just started this focus in conversation. This is what they said it",
+        "is for — ground every question in it, and prefer it over generic arc coverage",
+        "wherever the two pull apart.",
+    ]
+    if context.get("objective"):
+        lines.append(f"  Objective: {context['objective']}")
+    if context.get("label"):
+        lines.append(f"  Focus name: {context['label']}")
+    if context.get("type"):
+        lines.append(f"  Focus type: {context['type']}")
+    if context.get("relationship"):
+        lines.append(f"  Relationship to the author: {context['relationship']}")
+    if context.get("living") is True:
+        lines.append("  Living: yes.")
+    elif context.get("living") is False:
+        lines.append(
+            "  Living: no — write questions that REMEMBER them; never write a "
+            "question that asks them something directly."
+        )
+    if context.get("first_answer"):
+        lines.append("Their first words about this focus, verbatim:")
+        lines.append(f'  "{context["first_answer"]}"')
+    lines.append("")
+
+    if topic_type in ("person", "relationship"):
+        bank_key = focus_candidate.interview_bank_key(
+            context.get("relationship"), living=context.get("living")
+        )
+        bank = INTERVIEW_BANKS.get(bank_key or "")
+        if bank:
+            lines.append(f"## INTERVIEW BANK FOR THIS RELATIONSHIP ({bank_key})")
+            lines.append(
+                "Proven openers for this exact relationship. Adapt them; do not copy "
+                "them verbatim. Let them set the register for your own questions."
+            )
+            lines.extend(f"  - {question}" for question in bank)
+            lines.append("")
+    return lines
+
+
 def build_expansion_prompt(
     *,
     topic: str,
@@ -669,8 +723,17 @@ def build_expansion_prompt(
     research_notes: str = "",
     decision_context: str = "",
     self_signals: list[str] | None = None,
+    onboarding_context: dict | None = None,
 ) -> str:
-    """Build the full AI prompt for neighborhood expansion."""
+    """Build the full AI prompt for neighborhood expansion.
+
+    ``onboarding_context`` (focus-onboarding-context, v189, Design §E.2) is
+    what the person just said when they started this focus, normalized by
+    ``focus_candidate.normalize_onboarding_context``. ``None`` — the default,
+    and what every pre-v189 call site passes — produces a byte-identical
+    prompt to v188, because Play with no answers must still seed from the
+    recommendation's own evidence (owner ruling 6).
+    """
     output_guidance = {
         "chapter": (
             "a memoir chapter (3-8 pages). The questions should collectively surface "
@@ -712,6 +775,12 @@ def build_expansion_prompt(
     lines.append("answer them over 1-2 weeks and emerge with enough raw material to produce")
     lines.append(f"the target output: {target_output}.")
     lines.append("")
+
+    # focus-onboarding-context (v189, Design §E.2): what the author said when
+    # they started this focus, placed high so it frames the whole generation.
+    # Absent (the default) this whole section stays out and the prompt is
+    # byte-identical to v188.
+    lines.extend(_onboarding_context_lines(onboarding_context, topic_type=topic_type))
 
     arc = arc_for(topic_type)
     lines.append("## ARC STRUCTURE")
@@ -1124,6 +1193,7 @@ def _run_expansion(
     prompt_only = getattr(args, "prompt", False)
     from_response = getattr(args, "from_response", None)
     force = getattr(args, "force", False)
+    context_file = getattr(args, "context_file", None)
 
     model_cfg = load_config().get("research_model", DEFAULT_MODEL)
     model = getattr(args, "model", None) or model_cfg
@@ -1137,6 +1207,35 @@ def _run_expansion(
         print(f"⚠️  Neighborhood already exists: {nbhd_id}")
         print("   Use --force to regenerate questions and update it.")
         return 1
+
+    # focus-onboarding-context (v189, Design §E.1): the onboarding context
+    # the caller wrote out for this focus. A missing or unparseable file is
+    # a hard error — the caller asked for it explicitly. A file that
+    # normalizes to nothing is NOT an error: generation proceeds exactly as
+    # it does today (owner ruling 6).
+    onboarding_context: dict = {}
+    # isinstance, not truthiness: `args` is a Namespace here but a Mock in
+    # several suites, and a Mock attribute is truthy for every name asked of
+    # it — `Path(Mock())` then raises where the flag was never passed at all.
+    if isinstance(context_file, str) and context_file:
+        import focus_candidate  # noqa: PLC0415
+
+        context_path = Path(context_file)
+        try:
+            raw_context = json.loads(context_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            # Metadata only, never the exception text — this module is on the
+            # model-callsite redaction guard's list
+            # (tests/test_v123_local_ai_provider.py).
+            print(
+                "Error: could not read onboarding context "
+                + failure_metadata(
+                    "research-expand-context-file", exc, provider="local"
+                ),
+                file=sys.stderr,
+            )
+            return 1
+        onboarding_context = focus_candidate.normalize_onboarding_context(raw_context)
 
     # Load context
     mission = load_mission()
@@ -1173,6 +1272,7 @@ def _run_expansion(
         research_notes=research_notes,
         decision_context=decision_context,
         self_signals=load_classified_self_signals() if topic_type == "self" else None,
+        onboarding_context=onboarding_context or None,
     )
 
     if prompt_only:
@@ -1406,6 +1506,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Deposit questions from an agent-written response file instead of calling the API "
              "(keyless desktop path: pair with --prompt). File holds the questions JSON "
              "(optionally in a ```json fence).",
+    )
+    parser.add_argument(
+        "--context-file",
+        metavar="PATH",
+        help="JSON file of onboarding context for this focus "
+             "{objective?, type?, relationship?, living?, label?, first_answer?} — "
+             "what the author said when they started it, used to ground the seed "
+             "questions (focus-onboarding-context, v189).",
     )
     parser.add_argument(
         "--dry-run",
