@@ -779,7 +779,7 @@ def places_without_stories(landmarks: object, event_places: object = ()) -> tupl
 
     * ``span`` — the person's OWN span, rendered the way they would recognise
       it (`chronology.display_date`, basis clause suppressed). It is what makes
-      the arc-card line concrete ("you lived in Costa Mesa around 1990–1993"),
+      the arc-card line concrete ("they lived in Costa Mesa, 1990–1993"),
       and it is a REPORT of what they said, never a date proposed for
       agreement (`timeline_interaction.proposes_a_date`, go-deep.md §4.3).
     * ``landmark`` — ``{"domain": "residences", "label": ...}``, the reference
