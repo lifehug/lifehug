@@ -53,10 +53,12 @@ class FixtureContractTests(unittest.TestCase):
                        if p["fixture_id"] == row["fixture_id"])["turns"][0]["message"]
         self.assertIn("keep both", message.lower())
 
-    def test_the_defer_golden_files_a_deferral_and_asks_nothing(self):
+    def test_the_defer_golden_files_nothing_and_asks_nothing(self):
+        """v196: "I'll find out" is an ordinary answer. It is still received
+        without a question — and it files nothing at all."""
         row = next(r for r in self.fixtures
-                   if r["fixture_id"] == "timeline-defer-is-accepted")
-        self.assertEqual(row["turns"][-1]["expected_placed"], {"deferred": True})
+                   if r["fixture_id"] == "timeline-ill-find-out-is-accepted")
+        self.assertIsNone(row["turns"][-1]["expected_placed"])
         message = next(p for p in te.load_sample_predictions()
                        if p["fixture_id"] == row["fixture_id"])["turns"][-1]["message"]
         self.assertNotIn("?", message)
@@ -121,7 +123,7 @@ class ScoringTests(unittest.TestCase):
 
     def test_a_missing_prediction_is_reported_not_silently_passed(self):
         scores = te.score_goldens(self.fixtures, self.predictions[:-1])
-        self.assertEqual(scores["_unmatched_fixtures"], ["timeline-skeleton-episode"])
+        self.assertEqual(scores["_unmatched_fixtures"], ["timeline-whisper-partial-range"])
 
 
 class CliTests(unittest.TestCase):

@@ -62,6 +62,7 @@ from pathlib import Path
 
 from lifehug_core import (
     INTERACTIONS_DIR,
+    QUESTION_JUDGMENT_ARC_LEARNED_FILE,
     QUESTION_JUDGMENT_LEARNED_FILE,
     QUESTION_JUDGMENT_STATE_DIR,
     REPO_DIR,
@@ -89,6 +90,21 @@ LEGACY_RESEARCH_CHAR_LIMIT = 3000
 # framework files (contract's Scope 7 / Implementation notes).
 LEARNED_FILE = QUESTION_JUDGMENT_LEARNED_FILE
 CURSOR_FILE = QUESTION_JUDGMENT_STATE_DIR / "last_edit.json"
+
+# v196 (timeline-whispers-and-keystones, ruling 6): the loop learns about ARCS
+# the way it learns about questions. Same weekly step, same ADR 0009 mechanism
+# (cursor / no-op / compaction), same contracted directory — a second learned
+# file, because arc guidance belongs in the arc-plan prompt and never in the
+# question rubric.
+#
+# It is a VAULT file, not an edit to `plan/arc-templates.md`: framework files
+# are overwritten by update.py on every upgrade and pinned by
+# test_exact_file_git.py, so an in-place amendment there would be erased and
+# would break the integrity gate. `arc_planner.build_plan_prompt` composes
+# this file after the verbatim template, exactly as `load_judgment_rubric`
+# composes learned.md after the framework rubric.
+ARC_LEARNED_FILE = QUESTION_JUDGMENT_ARC_LEARNED_FILE
+ARC_SIGNALS_HEADING = "## Arc judgment signals"
 
 # role.planner: high capability tier (ADR 0007c) — mirrors the other
 # high-tier defaults (research_model/wiki_model) in config.yaml.example.
@@ -287,6 +303,118 @@ def _safe_manifest(*, framework_root: str | Path | None = None) -> dict:
 # of the Convergence Principle (ADR 0006) for this interaction (ADR 0007c).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Arc yield (v196) — what the week's arc-card intents actually paid out,
+# derived from vault data that already exists: the session documents.
+# ---------------------------------------------------------------------------
+
+
+def _session_docs(*, vault_root: str | Path | None = None) -> list[dict]:
+    try:
+        import conversation  # noqa: PLC0415
+
+        docs = []
+        for summary in conversation.list_sessions(vault_root=vault_root):
+            sid = summary.get("session_id")
+            if not sid:
+                continue
+            try:
+                docs.append(conversation.load_session(sid, vault_root=vault_root))
+            except (OSError, ValueError):
+                continue
+        return docs
+    except Exception:  # noqa: BLE001 — no sessions is a silent, honest zero
+        return []
+
+
+def _answer_exists(question_id: str) -> bool:
+    from lifehug_core import ANSWERS_DIR  # noqa: PLC0415
+
+    try:
+        return (ANSWERS_DIR / f"{question_id}.md").exists()
+    except OSError:
+        return False
+
+
+def arc_yield(*, vault_root: str | Path | None = None,
+              sessions: list[dict] | None = None) -> dict:
+    """`{intent_kind: {...}}` — what each arc-card intent kind yielded.
+
+    NO new ledger and no new state: every number here is read off session
+    documents that already exist. Per kind, over the sessions whose arc card
+    carried it: `sessions`, `filed_answers` (the session's own question ids
+    that have an answer on disk), `placements` (turns carrying a `placed`
+    record) and `new_entities` (the session's extracted entities).
+
+    Co-attribution is deliberate and stated in the block: a session with
+    three intents counts toward all three. The number is a SIGNAL for a
+    weekly rubric edit, not a measurement anyone should treat as causal.
+    """
+    docs = sessions if sessions is not None else _session_docs(vault_root=vault_root)
+    rows: dict[str, dict] = {}
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        arc = doc.get("arc") if isinstance(doc.get("arc"), dict) else {}
+        kinds = sorted({str(intent.get("kind")) for intent in (arc.get("intents") or [])
+                        if isinstance(intent, dict) and intent.get("kind")})
+        if not kinds:
+            continue
+        turns = [t for t in (doc.get("turns") or []) if isinstance(t, dict)]
+        question_ids = {str(t.get("question_id")) for t in turns if t.get("question_id")}
+        filed = sum(1 for qid in sorted(question_ids) if _answer_exists(qid))
+        placements = sum(1 for t in turns if t.get("placed"))
+        extracted = doc.get("extracted") if isinstance(doc.get("extracted"), dict) else {}
+        entities = len(extracted.get("entities") or [])
+        for kind in kinds:
+            row = rows.setdefault(kind, {"sessions": 0, "filed_answers": 0,
+                                         "placements": 0, "new_entities": 0})
+            row["sessions"] += 1
+            row["filed_answers"] += filed
+            row["placements"] += placements
+            row["new_entities"] += entities
+    for row in rows.values():
+        total = row["filed_answers"] + row["placements"] + row["new_entities"]
+        row["yield_per_session"] = round(total / row["sessions"], 2) if row["sessions"] else 0.0
+    return rows
+
+
+def format_arc_yield(rows: dict) -> str:
+    """The `{arc_yield_summary}` block — deterministic, ordered, honest."""
+    if not rows:
+        return ("Arc yield: no conversation carried an arc card since the last "
+                "edit — nothing to learn about arcs this week.")
+    lines = ["Arc yield by intent kind (a session with several intents counts "
+             "toward each of them):"]
+    for kind in sorted(rows, key=lambda k: (-rows[k]["yield_per_session"], k)):
+        row = rows[kind]
+        lines.append(
+            f"{kind}: {row['sessions']} session(s); {row['filed_answers']} filed "
+            f"answer(s), {row['placements']} placement(s), "
+            f"{row['new_entities']} new entity mention(s) "
+            f"— {row['yield_per_session']} per session"
+        )
+    return "\n".join(lines)
+
+
+def load_arc_signals(*, vault_root: str | Path | None = None) -> str:
+    """The learned arc block, ready to compose after `plan/arc-templates.md`.
+
+    Empty string when nothing has been learned yet — the arc-plan prompt is
+    then byte-identical to v195's.
+    """
+    try:
+        path = ARC_LEARNED_FILE
+        if vault_root is not None:
+            path = Path(vault_root) / "state" / "question_judgment" / "arc_learned.md"
+        body = read_text(path).strip()
+    except (FileNotFoundError, OSError):
+        return ""
+    if not body:
+        return ""
+    return f"{ARC_SIGNALS_HEADING}\n\n{body}"
+
+
 def _load_cursor(*, path: Path | None = None) -> dict:
     data = read_json(path or CURSOR_FILE, default=None)
     if not isinstance(data, dict):
@@ -295,6 +423,7 @@ def _load_cursor(*, path: Path | None = None) -> dict:
     data.setdefault("last_edit_at", None)
     data.setdefault("last_run_at", None)
     data.setdefault("last_seen_at", None)
+    data.setdefault("arc_last_edit_at", None)
     data.setdefault("counts", {})
     data.setdefault("quality_profile_snapshot", {})
     return data
@@ -436,6 +565,8 @@ def _build_rubric_edit_prompt(
     distilled_prior_amendments: str,
     current_learned_file: str,
     *,
+    arc_yield_summary: str = "",
+    current_arc_learned_file: str = "",
     framework_root: str | Path | None = None,
 ) -> str:
     """Assemble the RUBRIC-EDIT call: identity -> behavior -> examples ->
@@ -455,6 +586,8 @@ def _build_rubric_edit_prompt(
         .replace("{week_delta_summary}", week_delta_summary or "(none)")
         .replace("{distilled_prior_amendments}", distilled_prior_amendments or "(none)")
         .replace("{current_learned_file}", current_learned_file or "(empty)")
+        .replace("{arc_yield_summary}", arc_yield_summary or "(none)")
+        .replace("{current_arc_learned_file}", current_arc_learned_file or "(empty)")
     )
     parts = [identity.strip(), behavior.strip()]
     if examples.strip():
@@ -471,6 +604,8 @@ def _write_task(
     distilled_prior_amendments: str,
     current_learned_file: str,
     recalibrate: bool,
+    arc_yield_summary: str = "",
+    current_arc_learned_file: str = "",
 ) -> None:
     """Keyless emit-task convention (same shape as system/entity_roster.py's
     --emit-task): prompt + context + a response_format hint."""
@@ -481,9 +616,45 @@ def _write_task(
         "week_delta_summary": week_delta_summary,
         "distilled_prior_amendments": distilled_prior_amendments,
         "current_learned_file": current_learned_file,
-        "response_format": {"amendment": None, "evidence": None, "char_count": None},
+        "arc_yield_summary": arc_yield_summary,
+        "current_arc_learned_file": current_arc_learned_file,
+        "response_format": {"amendment": None, "evidence": None, "char_count": None,
+                            "arc_amendment": None, "arc_evidence": None},
     }
     write_text(Path(path), json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _apply_arc_amendment(data: dict, *, max_edit_chars: int, max_file_chars: int,
+                         arc_learned_path: Path | None = None) -> dict:
+    """The arc half of one RUBRIC-EDIT response (v196).
+
+    Same budget, same evidence requirement, same compaction as the question
+    half — and the same expectation that most weeks it is `null`. Declining
+    is not a failure, and a malformed arc half never costs the question half
+    its amendment.
+    """
+    amendment = data.get("arc_amendment")
+    if amendment is None or (isinstance(amendment, str) and not amendment.strip()):
+        return {"arc_status": "no_change", "arc_amended": False}
+    text = str(amendment).strip()
+    evidence = str(data.get("arc_evidence", "")).strip()
+    if not evidence:
+        return {"arc_status": "invalid", "arc_amended": False,
+                "arc_error": "arc amendment with no evidence line"}
+    if len(text) > max_edit_chars:
+        return {"arc_status": "invalid", "arc_amended": False,
+                "arc_error": f"arc amendment exceeds the edit budget ({len(text)} chars)"}
+    date = now_utc()[:10]
+    path = arc_learned_path or ARC_LEARNED_FILE
+    try:
+        existing = read_text(path)
+    except FileNotFoundError:
+        existing = ""
+    separator = "\n" if existing.strip() else ""
+    entry = f"{separator}## {date}\n\n{text}\n\nEvidence: {evidence}\n"
+    write_text(path, _compact_learned(existing + entry, max_file_chars))
+    return {"arc_status": "amended", "arc_amended": True, "arc_amendment": text,
+            "arc_evidence": evidence}
 
 
 def _apply_response(
@@ -492,6 +663,7 @@ def _apply_response(
     max_edit_chars: int,
     max_file_chars: int,
     learned_path: Path | None = None,
+    arc_learned_path: Path | None = None,
 ) -> dict:
     """Parse + apply one RUBRIC-EDIT response. Raises ValueError on any
     malformed/over-budget response — the caller must never silently
@@ -499,10 +671,14 @@ def _apply_response(
     from research_expand import parse_ai_json  # noqa: PLC0415 — avoid the classify_story/research_expand import cycle
 
     data = parse_ai_json(raw_response)
+    arc = _apply_arc_amendment(data, max_edit_chars=max_edit_chars,
+                               max_file_chars=max_file_chars,
+                               arc_learned_path=arc_learned_path)
     amendment = data.get("amendment")
     if amendment is None or (isinstance(amendment, str) and not amendment.strip()):
         reason = str(data.get("reason", "")).strip()
-        return {"status": "no_change", "amended": False, "reason": reason or "model declined to amend"}
+        return {"status": "no_change", "amended": False,
+                "reason": reason or "model declined to amend", **arc}
 
     amendment_text = str(amendment).strip()
     evidence = str(data.get("evidence", "")).strip()
@@ -524,7 +700,8 @@ def _apply_response(
     entry = f"{separator}## {date}\n\n{amendment_text}\n\nEvidence: {evidence}\n"
     updated = _compact_learned(existing + entry, max_file_chars)
     write_text(path, updated)
-    return {"status": "amended", "amended": True, "date": date, "amendment": amendment_text, "evidence": evidence}
+    return {"status": "amended", "amended": True, "date": date,
+            "amendment": amendment_text, "evidence": evidence, **arc}
 
 
 def _advance_cursor(
@@ -534,6 +711,7 @@ def _advance_cursor(
     quality_profile: dict | None,
     amended: bool,
     path: Path | None = None,
+    arc_amended: bool = False,
 ) -> dict:
     now = now_utc()
     counts = dict(cursor.get("counts") or {})
@@ -541,8 +719,11 @@ def _advance_cursor(
     counts["decisions_seen"] = int(counts.get("decisions_seen", 0)) + len(decisions)
     if amended:
         counts["amendments"] = int(counts.get("amendments", 0)) + 1
+    if arc_amended:
+        counts["arc_amendments"] = int(counts.get("arc_amendments", 0)) + 1
     new_cursor = {
         "version": 1,
+        "arc_last_edit_at": now if arc_amended else cursor.get("arc_last_edit_at"),
         "last_edit_at": now if amended else cursor.get("last_edit_at"),
         "last_run_at": now,
         "last_seen_at": now,
@@ -570,6 +751,7 @@ def run_weekly_edit(
     candidates_path: Path | None = None,
     cursor_path: Path | None = None,
     learned_path: Path | None = None,
+    arc_learned_path: Path | None = None,
     max_edit_chars: int | None = None,
     max_file_chars: int | None = None,
     framework_root: str | Path | None = None,
@@ -608,9 +790,19 @@ def run_weekly_edit(
     except FileNotFoundError:
         current_learned = ""
     distilled = _distill_prior_amendments(current_learned)
+    try:
+        current_arc_learned = read_text(arc_learned_path or ARC_LEARNED_FILE)
+    except FileNotFoundError:
+        current_arc_learned = ""
+    # v196: the arc half of the same weekly edit. Read from vault data that
+    # already exists; a vault with no arc-carrying sessions simply says so.
+    arc_rows = arc_yield()
+    arc_summary = format_arc_yield(arc_rows)
 
     prompt = _build_rubric_edit_prompt(
-        week_delta_summary, distilled, current_learned, framework_root=framework_root,
+        week_delta_summary, distilled, current_learned,
+        arc_yield_summary=arc_summary, current_arc_learned_file=current_arc_learned,
+        framework_root=framework_root,
     )
 
     result: dict = {
@@ -618,13 +810,15 @@ def run_weekly_edit(
         "delta": week_delta_summary,
         "distilled_prior_amendments": distilled,
         "decisions_count": len(decisions),
+        "arc_yield": arc_rows,
+        "arc_yield_summary": arc_summary,
     }
 
     if dry_run:
         result.update({"status": "dry_run", "prompt": prompt})
         return result
 
-    is_empty_delta = not recalibrate and not decisions and not bucket_moves
+    is_empty_delta = not recalibrate and not decisions and not bucket_moves and not arc_rows
     if is_empty_delta:
         cursor = _advance_cursor(cursor, decisions=decisions, quality_profile=quality_profile,
                                  amended=False, path=cursor_path)
@@ -639,7 +833,8 @@ def run_weekly_edit(
         _write_task(
             Path(emit_task), prompt=prompt, week_delta_summary=week_delta_summary,
             distilled_prior_amendments=distilled, current_learned_file=current_learned,
-            recalibrate=recalibrate,
+            recalibrate=recalibrate, arc_yield_summary=arc_summary,
+            current_arc_learned_file=current_arc_learned,
         )
         result.update({"status": "emitted_task", "task_path": str(emit_task), "prompt": prompt})
         return result
@@ -659,7 +854,7 @@ def run_weekly_edit(
     try:
         applied = _apply_response(
             raw_response, max_edit_chars=max_edit_chars, max_file_chars=max_file_chars,
-            learned_path=learned_path,
+            learned_path=learned_path, arc_learned_path=arc_learned_path,
         )
     except Exception as exc:  # noqa: BLE001
         result.update({"status": "invalid_response", "error": str(exc)[:500]})
@@ -668,6 +863,7 @@ def run_weekly_edit(
     cursor = _advance_cursor(
         cursor, decisions=decisions, quality_profile=quality_profile,
         amended=applied.get("amended", False), path=cursor_path,
+        arc_amended=applied.get("arc_amended", False),
     )
     result.update(applied)
     result["cursor"] = cursor

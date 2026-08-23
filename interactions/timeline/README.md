@@ -28,10 +28,12 @@ person has not supplied one; the rung actually chosen for an unknown is
 `timeline_interaction.choose_probe`'s output and it is substituted into the
 leaf as `{probe}`.
 
-**"I'll find out" is a real state.** A deferral is neither a decline nor a
-debt: `state/timeline_deferred.json` records it, the unknown goes quiet for
-`DEFERRED_QUIET_DAYS`, it keeps its star and its leverage, and it is never
-counted as outstanding (owner ruling 5).
+**"I'll find out" is an ordinary answer** (v196). It files nothing and is
+remembered nowhere: the unknown simply stays outstanding, keeps its star and
+its leverage, and is offered again whenever the ordering says it is worth
+offering. The courtesy survives as the ladder's last rung and as the
+`timeline_gates.accepts_defer` lint — a person who says they will find out is
+received, never pressed.
 
 **Both accounts survive a contradiction.** Oral history treats the
 disagreement itself as data (Portelli). `chronology.reconcile` scores claims
@@ -58,10 +60,12 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | `{precision_so_far}` | `timeline_interaction.precision_so_far(session)` |
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["placed"]`, enabled by `TurnShape(timeline_stage=…)` |
 | Closed validation of that field | `timeline_interaction.validate_placed(value, anchors=…)` |
-| The five timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES` |
+| The six timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES` |
 | Filing an accepted placement | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…)` |
 | The unknowns to Play | `timeline.unknowns(data)`, `timeline.UNKNOWN_KINDS`, `timeline.keystones(data)`, `timeline.KEYSTONE_CAP` |
-| The deferred memory | `timeline.defer_unknown`, `timeline.is_deferred`, `timeline.DEFERRED_QUIET_DAYS` |
+| The two ways a keystone is asked | `timeline_interaction.whisper_from_keystone`, `timeline_interaction.mint_keystone_question` / `insert_keystone_question` / `timeline_probe_index` |
+| This turn's timeline item | `timeline_interaction.timeline_item_for_session`, `timeline_interaction.timeline_asks_so_far`, `conversation_delivery.timeline_item_for_turn` |
+| The reply to a timeline ask | `timeline_interaction.answer_timeline_probe(entry, reply, anchors=…)` |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{timeline_stage}`, `{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --timeline [--era <slug>] [--json]` |
 | The write verb | `lifehug.py timeline-place <source> --period <slug> [--date <edtf>] [--basis <basis>] [--anchor <key>]…` |

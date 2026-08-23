@@ -300,6 +300,37 @@ system's current "no reason capture" posture across both interactions is
 consistent with that direction, not a contradiction of it: nothing here
 builds a reason-text field that would need to be un-built later.
 
+## 6b. The loop learns about arcs too (v196)
+
+The same weekly step, the same mechanism, a second subject. Questions
+learn from the owner's **decisions**; arcs learn from what they actually
+**yielded** — and that yield is read off data the vault already has, so
+nothing new is written down to make it computable. For every arc-card
+intent kind (`scene_slot`, `timeline_gap`, `sit_with`,
+`neighborhood_sibling`, `studio_slot`,
+`demonstrated_knowledge_summary`), `question_judgment.arc_yield()` walks
+the session documents in `state/conversations/` and counts the sessions
+whose card carried that kind, the filed answers those sessions produced,
+the timeline placements, and the new entity mentions. A session carrying
+three kinds counts toward all three — co-attribution is stated in the
+block, because a difference between kinds is a *signal*, not a
+measurement.
+
+The rubric-edit call may then return an `arc_amendment` with its own
+`arc_evidence`, under the same character budget and the same expectation
+that most weeks the honest answer is `null`. It is appended, dated, to
+`state/question_judgment/arc_learned.md` and compacted by the same
+function, and `arc_planner.build_plan_prompt` composes it after the
+verbatim `plan/arc-templates.md` as `## Arc judgment signals` — exactly
+how `load_judgment_rubric` composes `learned.md` after the framework
+rubric. The learned text never touches the framework file itself:
+`update.py` would overwrite it on the next upgrade and
+`tests/test_exact_file_git.py` pins its bytes.
+
+One rule is written into the template rather than left to judgment: **a
+whisper is never penalized.** Raising the timeline where it fits is not
+a cost to be traded off.
+
 ## 7. Where it lives
 
 | Concern | Location |
@@ -309,6 +340,8 @@ builds a reason-text field that would need to be un-built later.
 | The weekly rubric-edit runtime | `question_judgment.run_weekly_edit()` |
 | Cursor state | `state/question_judgment/last_edit.json` |
 | Learned-amendments file | `state/question_judgment/learned.md` (vault data, registered as `question_judgment_learned` in `system/vault_contract.json` — never a framework file) |
+| Arc-yield pass (v196) | `question_judgment.arc_yield()`, `format_arc_yield()`, `_apply_arc_amendment()` |
+| Learned ARC amendments | `state/question_judgment/arc_learned.md`, composed into the weekly arc-plan prompt as `## Arc judgment signals` by `arc_planner.arc_judgment_signals()` |
 | RUBRIC-EDIT turn template | `interactions/question_judgment/prompt/turn-instructions.md` (`## Mode: RUBRIC-EDIT`) |
 | CLI | `lifehug.py judgment-update [--dry-run \| --emit-task PATH \| --from-response PATH \| --recalibrate \| --model NAME]` |
 | Weekly wiring | `weekly_maintenance.sh` — `judgment_update`, immediately after `quality_update` and before `auto_promote` (see [The Loop](the-loop.md) §4) |

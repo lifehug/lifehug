@@ -144,7 +144,15 @@ def timeline_payload(*, unplaced_events: int = 0, no_events_period: str | None =
             by_period.setdefault(gap["period"], []).append(gap)
         else:
             global_gaps.append(gap)
-    return {"gaps_by_period": by_period, "global_gaps": global_gaps}
+    payload = {"gaps_by_period": by_period, "global_gaps": global_gaps,
+               "periods": periods, "event_lineup": event_lineup,
+               "entity_lineup": entity_lineup, "unplaced_events": unplaced,
+               "anchors": {}}
+    # v196: the assembled payload carries its own keystones, and the whisper
+    # lane reads them (identity + probe + anchors) rather than re-deriving.
+    payload["unknowns"] = timeline.unknowns(payload)
+    payload["keystones"] = timeline.keystones(payload)
+    return payload
 
 
 class BaseVaultTest(unittest.TestCase):
@@ -290,6 +298,38 @@ class ConvergencePropertyTests(BaseVaultTest):
         blob = json.dumps(self.container()).lower()
         self.assertNotIn(arc_planner.BANNED_PHRASE, blob)
         self.assertTrue(any("landmark" in intent["note"] for intent in gap_intents))
+
+    def test_a_whisper_carries_the_probe_the_identity_and_the_anchors(self):
+        """v196: the intent is not the word `timeline_gap` any more — it is a
+        real question the conversation can ask, matched by exact id."""
+        self.plan(timeline_payload=timeline_payload(unplaced_events=3,
+                                                    all_undated_period="ghana-years"))
+        whispers = [i for i in self.all_intents() if i["kind"] == "timeline_gap"]
+        self.assertTrue(whispers)
+        for whisper in whispers:
+            self.assertTrue(whisper["probe"], whisper)
+            self.assertNotIn("?", whisper["probe"][:-1])
+            self.assertIn("anchors", whisper)
+            self.assertIn("leverage", whisper)
+            if whisper.get("question_id"):
+                self.assertTrue(whisper["question_id"].startswith("tl:"))
+
+    def test_whispers_are_ranked_by_leverage_with_era_affinity_as_the_tiebreak(self):
+        payload = timeline_payload(unplaced_events=2,
+                                   no_events_period="denver-years",
+                                   all_undated_period="ghana-years")
+        gaps = arc_planner.collect_timeline_gaps(payload=payload)
+        self.assertTrue(gaps)
+        for gap in gaps:
+            self.assertIn("leverage", gap)
+        # The ranking function is the ordering the lane actually uses.
+        used = {"gaps": 0, "gap_max": 1, "gap_keys": set()}
+        material = {"timeline_gaps": sorted(gaps, key=lambda g: g.get("kind") or "")}
+        chosen = arc_planner._timeline_gap_intent(  # noqa: SLF001
+            {"question_id": "A1", "category": "A", "focus": None}, material, used)
+        self.assertTrue(chosen)
+        best = max(int(g.get("leverage") or 0) for g in gaps)
+        self.assertEqual(int(chosen[0].get("leverage") or 0), best)
 
     def test_timeline_gap_capped_per_card_and_per_week(self):
         self.plan(timeline_payload=timeline_payload(unplaced_events=2,

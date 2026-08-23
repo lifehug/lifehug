@@ -263,7 +263,53 @@ def collect_timeline_gaps(*, payload: dict | None = None) -> list[dict]:
     global_gaps = payload.get("global_gaps")
     if isinstance(global_gaps, list):
         gaps.extend(row for row in global_gaps if isinstance(row, dict))
-    return [gap for gap in gaps if str(gap.get("kind")) in CONSUMED_GAP_KINDS]
+    consumed = [gap for gap in gaps if str(gap.get("kind")) in CONSUMED_GAP_KINDS]
+    # v196: each consumed gap carries the LEVERAGE of the best anchor that
+    # would resolve it, and the keystone row behind that anchor when there is
+    # one. This is what makes whispers leverage-ranked instead of
+    # era-affinity-ranked — the same number `build_timeline_plan` computes,
+    # read from the assembled payload so the two can never disagree.
+    return _with_leverage(consumed, payload)
+
+
+def _with_leverage(gaps: list[dict], payload: dict) -> list[dict]:
+    """Stamp `leverage` and the resolving `keystone` row on each gap."""
+    try:
+        import timeline  # noqa: PLC0415
+
+        index = timeline.dependency_index(payload)
+        keystones = {str(row.get("anchor")): row
+                     for row in (payload.get("keystones") or []) if isinstance(row, dict)}
+    except Exception:  # noqa: BLE001 — a timeline problem is a silent no-op
+        return gaps
+    best: dict[str, tuple[int, str]] = {}
+    for anchor_key, resolved in index.items():
+        for unknown_key in resolved or ():
+            current = best.get(unknown_key)
+            if current is None or len(resolved) > current[0]:
+                best[unknown_key] = (len(resolved), anchor_key)
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        anchors = timeline_interaction.anchor_rows_for_prompt(payload.get("anchors") or ())
+    except Exception:  # noqa: BLE001
+        anchors = []
+    stamped = []
+    for gap in gaps:
+        row = dict(gap)
+        row["anchors"] = anchors
+        try:
+            key = timeline.unknown_key(gap)
+        except Exception:  # noqa: BLE001
+            key = ""
+        leverage, anchor_key = best.get(key, (0, ""))
+        row["unknown_key"] = key
+        row["leverage"] = int(leverage)
+        row["anchor"] = anchor_key
+        if anchor_key in keystones:
+            row["keystone"] = keystones[anchor_key]
+        stamped.append(row)
+    return stamped
 
 
 def collect_sit_with(*, vault_root: str | Path | None = None) -> list[str]:
@@ -543,10 +589,15 @@ def _gap_note(gap: dict) -> str:
 
 
 def _timeline_gap_intent(item: dict, material: dict, used: dict) -> list[dict]:
-    """At most one timeline_gap intent per card, capped across the week.
+    """At most one timeline whisper per card, capped across the week.
 
-    Period-scoped gaps prefer the item's own era (its focus/category slug
-    appearing in the period slug); global ``unplaced_events`` apply to anyone.
+    v196: ordered by LEVERAGE first — the gap whose answer would place the
+    most — with the item's own era as the TIEBREAK between equally leveraged
+    gaps, then the playbook's own preference for a global gap over someone
+    else's era. A whisper carries the real probe, the person's own anchors,
+    and the identity (`tl:<anchor-slug>`) both the conversation and the host
+    match on, so "the star means this exact question" is true by construction
+    (lifehug/lifehug-platform#586).
     """
     if used["gaps"] >= used["gap_max"]:
         return []
@@ -560,18 +611,65 @@ def _timeline_gap_intent(item: dict, material: dict, used: dict) -> list[dict]:
         period = str(gap.get("period") or "").lower()
         return bool(period) and any(hint and hint in period for hint in era_hints)
 
-    ordered = ([gap for gap in gaps if era_match(gap)]
-               + [gap for gap in gaps if gap.get("period") is None]
-               + [gap for gap in gaps if not era_match(gap) and gap.get("period")])
-    for gap in ordered:
+    def rank(gap: dict) -> tuple:
+        return (
+            -int(gap.get("leverage") or 0),
+            0 if era_match(gap) else (1 if gap.get("period") is None else 2),
+            str(gap.get("kind") or ""),
+            str(gap.get("period") or ""),
+        )
+
+    for gap in sorted(gaps, key=rank):
         key = (str(gap.get("kind")), str(gap.get("period") or ""))
         if key in used["gap_keys"]:
             continue
         used["gap_keys"].add(key)
         used["gaps"] += 1
-        return [{"kind": "timeline_gap", "gap_kind": str(gap.get("kind")),
-                 "period": gap.get("period"), "note": _gap_note(gap)}]
+        return [_whisper_intent(gap)]
     return []
+
+
+def _whisper_intent(gap: dict) -> dict:
+    """One gap -> the arc card's timeline intent (the whisper payload).
+
+    The probe and the anchors come from the interaction's own authority
+    (`timeline_interaction.whisper_from_keystone` / `choose_probe`), never
+    from a second phrasing here.
+    """
+    intent = {"kind": "timeline_gap", "gap_kind": str(gap.get("kind")),
+              "period": gap.get("period"), "note": _gap_note(gap),
+              "leverage": int(gap.get("leverage") or 0),
+              "unknown_keys": [gap.get("unknown_key")] if gap.get("unknown_key") else []}
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        keystone = gap.get("keystone")
+        if isinstance(keystone, dict):
+            whisper = timeline_interaction.whisper_from_keystone(keystone, gap=gap)
+            if whisper:
+                # The keystone's identity and probe WIN; the gap's own note and
+                # kind survive underneath, so nothing that reads a v195 intent
+                # loses a field.
+                intent.update(whisper)
+                return intent
+        probe = gap.get("probe")
+        if not isinstance(probe, dict):
+            probe = timeline_interaction.choose_probe(
+                {"kind": gap.get("kind"), "label": gap.get("message") or gap.get("period") or ""},
+                anchors=gap.get("anchors") or (),
+            )
+        anchor = str(gap.get("anchor") or "")
+        intent.update({
+            "anchor": anchor,
+            "question_id": timeline_interaction.keystone_question_id(anchor) if anchor else "",
+            "probe": str(probe.get("text") or ""),
+            "probe_step": str(probe.get("step") or ""),
+            "anchors": list(gap.get("anchors") or []),
+            "label": str(gap.get("message") or gap.get("period") or "this stretch"),
+        })
+    except Exception:  # noqa: BLE001 — a whisper without a probe is v195's intent
+        return intent
+    return intent
 
 
 def _neighborhood_sibling_intents(item: dict, material: dict) -> list[dict]:
@@ -887,11 +985,27 @@ def _record_summary(item: dict, material: dict) -> str:
     return "\n".join(lines) or "  (nothing on record in this category yet — cold start)"
 
 
+def arc_judgment_signals(*, vault_root: str | Path | None = None) -> str:
+    """The learned `## Arc judgment signals` block, or "" — GUARDED."""
+    try:
+        import question_judgment  # noqa: PLC0415
+
+        return question_judgment.load_arc_signals(vault_root=vault_root)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def build_plan_prompt(items: list[dict], material: dict, deterministic: list[dict]) -> str:
     """The definition file verbatim + a runtime INPUT block (the shape
     ``conversation.build_arc_prompt`` established), extended from one question
     to the whole week's queue."""
     template = conversation.read_conversation_definition("plan", "arc-templates.md")
+    # v196 (ruling 6): what the loop has LEARNED about arcs, composed after the
+    # framework template exactly as `load_judgment_rubric` composes
+    # state/question_judgment/learned.md after the question rubric. Empty until
+    # the weekly judgment step writes one, so the prompt is byte-identical to
+    # v195's until there is something to say.
+    template = f"{template}\n\n{arc_judgment_signals()}".rstrip()
     by_id = {card["question_id"]: card for card in deterministic}
     blocks: list[str] = []
     for item in items:

@@ -211,7 +211,8 @@ class FocusCandidateTests(unittest.TestCase):
     def test_preexisting_interaction_assets_remain_byte_identical(self):
         expected = {
             "conversation": (
-                "107a26a9255eb86784f088dbb081184416da0a3edc12216cdd7ca6c62ff00ffd"
+                # v196: prompt/turn-instructions.md carries the whisper direction.
+                "9e201849154a49d698aabc48cd856f5358a0f9e3e31bea85ad0690075b4b1970"
             ),
             "question_candidate": (
                 # issue #181 (v188): question-candidate-placement-aside

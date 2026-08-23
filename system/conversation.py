@@ -847,6 +847,42 @@ def _intent_label(intent: object) -> str:
     return str(intent)
 
 
+def timeline_whisper(session: object) -> dict | None:
+    """This session's unraised timeline whisper, or None (v196).
+
+    The whisper is the week's arc-card timeline item. It is offered to the
+    prompt ONLY while this conversation has not raised the timeline yet —
+    "at most one per conversation" is structural here, and
+    `timeline_gates.one_per_conversation` is the belt to that braces. Guarded:
+    a timeline problem never costs a turn its prompt.
+    """
+    doc = session if isinstance(session, dict) else {}
+    arc = doc.get("arc") if isinstance(doc.get("arc"), dict) else {}
+    intents = [i for i in (arc.get("intents") or [])
+               if isinstance(i, dict) and str(i.get("kind")) == "timeline_gap"
+               and str(i.get("probe") or "").strip()]
+    if not intents:
+        return None
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        if timeline_interaction.timeline_asks_so_far(doc) >= 1:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return intents[0]
+
+
+def render_timeline_whisper(intent: object) -> str:
+    """The whisper's one rendering (`timeline_interaction.render_whisper`)."""
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        return timeline_interaction.render_whisper(intent)
+    except Exception:  # noqa: BLE001
+        return _intent_label(intent)
+
+
 def _assemble_session_block(session: dict) -> str:
     parts: list[str] = []
     arc = session.get("arc")
@@ -855,6 +891,13 @@ def _assemble_session_block(session: dict) -> str:
         intents = arc.get("intents") or []
         labels = ", ".join(_intent_label(intent) for intent in intents)
         parts.append(f"Arc card: {opening} (intents: {labels})")
+        # v196 (whispers): the timeline item is the one intent that carries a
+        # real question, so it is the one intent rendered in full — the probe
+        # and the person's own landmarks. Every other kind renders exactly as
+        # it did before, byte for byte (test_intent_labels_are_byte_identical).
+        whisper = timeline_whisper(session)
+        if whisper is not None:
+            parts.append(f"Timeline whisper: {render_timeline_whisper(whisper)}")
     summary = session.get("rolling_summary")
     if summary:
         parts.append(f"Rolling summary: {summary}")
@@ -949,6 +992,20 @@ def _turn_position(session: dict, manifest: dict) -> str:
     return "mid-arc"
 
 
+def _current_intent_label(session: dict, intents: list) -> str:
+    """What `{arc_card_current_intent}` says this turn.
+
+    v196: an unraised timeline whisper wins the slot — it is the only intent
+    that carries an actual question, and turn-instructions.md's direction for
+    it ("only where it fits, once, any precision, never press") is attached
+    right here. Without one, this is v195's expression, unchanged.
+    """
+    whisper = timeline_whisper(session)
+    if whisper is not None:
+        return render_timeline_whisper(whisper)
+    return _intent_label(intents[0]) if intents else "(no arc card)"
+
+
 def build_turn_prompt(payload: dict) -> str:
     """Assemble the context + filled turn-instructions.md for this turn."""
     session = payload["session"]
@@ -964,7 +1021,7 @@ def build_turn_prompt(payload: dict) -> str:
     filled = (
         template
         .replace("{mode}", str(session.get("mode", "")))
-        .replace("{arc_card_current_intent}", _intent_label(intents[0]) if intents else "(no arc card)")
+        .replace("{arc_card_current_intent}", _current_intent_label(session, intents))
         .replace("{turn_position}", position)
         .replace("{previous_turn_summary}", (turns[-1]["text"][:200] if turns else "(none — this is the opening)"))
         .replace("{applicable_rule_hints}", _rule_hints_for_position(position))

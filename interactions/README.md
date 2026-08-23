@@ -20,6 +20,31 @@ This is the ratified nomenclature (owner-approved design, 2026-08-11). Use
 it precisely: "interaction" names the *definition*, not any one model's
 behavior, and not the code that runs it.
 
+## Whispers
+
+A **whisper** is information woven into a conversation that fits naturally,
+drawn from an arc that has developed, and serving a **second agenda beyond the
+conversation's primary one** (owner-set, 2026-08-23). It is not a second
+interaction and not a new stage: it rides the week's arc card into an ordinary
+Conversation turn, and the interaction's own judgment decides whether it fits
+here at all.
+
+Three rules bind every whisper, whatever its agenda:
+
+1. **Only where it fits.** After the thought the person is in has closed, in
+   their own words — never as a change of subject.
+2. **At most one per conversation.** Structurally (a session that has raised
+   one carries no whisper on the next turn) and as a scored lint.
+3. **Never penalized.** A whisper that lands is a gift, not a cost the loop
+   trades off — the weekly arc-yield pass is told so explicitly.
+
+The first kind is the **timeline whisper** (v196): the same move applied to
+placing moments in time. The card carries a timeline keystone's real probe,
+its identity (`tl:<anchor-slug>`) and the person's own landmarks; any
+precision is accepted, a calendar year is never demanded, and the answer files
+through `timeline-place`. Later kinds name their own agenda and inherit the
+three rules above.
+
 ## The three-way split
 
 Every interaction separates three things that are easy to accidentally
@@ -218,7 +243,7 @@ conversation side runs.
 | `focus_candidate` (v189) | **onboarding** — what the focus is about and how far it reaches | `focus_setup: {objective?, type?, relationship?, living?, label?} \| null` | `establish` · `settled` | `focus_candidate.focus_stage_for_session` | `focus_candidate.validate_focus_setup` (`roadmap.FOCUS_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`) | six `focus_setup_gates.*` |
 | `entity_candidate` (v190) | **identity** — names, relation, living, and whether the roster already holds them | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` | `establish` · `settled` | `entity_candidate.entity_stage_for_session` | `entity_candidate.validate_entity_setup` (`entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`, caller-supplied roster slugs) | seven `entity_setup_gates.*` |
 | `arc_walk` (v193) | **arc walking** — work a target's open questions casually, in resumable episodes | `answered_question_id: "<qid>" \| null` | `open` · `walk` · `close` | `arc_walk.arc_stage_for_session` | `arc_walk.validate_answered_question_id` (exact membership in the episode's recomputed plan) | seven `arc_walk_gates.*` |
-| `timeline` (v195) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| {"deferred": true} \| null` | `open` · `place` · `close` | `timeline_interaction.timeline_stage_for_session` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | five `timeline_gates.*` |
+| `timeline` (v195, amended v196) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| null` (a range with a basis is first-class; there is no deferral shape) | `open` · `place` · `close` | `timeline_interaction.timeline_stage_for_session` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | six `timeline_gates.*` |
 
 The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
 `entity_stage` · `arc_stage` · `timeline_stage`. Every one defaults to

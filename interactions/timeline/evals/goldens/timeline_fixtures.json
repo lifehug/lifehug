@@ -270,7 +270,7 @@
     ]
   },
   {
-    "fixture_id": "timeline-defer-is-accepted",
+    "fixture_id": "timeline-ill-find-out-is-accepted",
     "unknown": {
       "kind": "unplaced_events",
       "label": "the christening photograph",
@@ -295,9 +295,7 @@
       {
         "stage": "close",
         "probe_step": "defer",
-        "expected_placed": {
-          "deferred": true
-        }
+        "expected_placed": null
       }
     ]
   },
@@ -387,6 +385,157 @@
         "stage": "close",
         "probe_step": "convergence",
         "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-whisper-fits-and-files",
+    "context": "An ordinary conversation carrying the week's timeline whisper: the person finishes their thought, the whisper is raised once, and their answer files.",
+    "unknown": {
+      "kind": "all_undated",
+      "label": "the move to Mesa",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": null,
+        "expected_placed": null,
+        "timeline_asks_so_far": 0,
+        "expected_raised": false
+      },
+      {
+        "stage": "place",
+        "probe_step": "residence",
+        "expected_placed": null,
+        "timeline_asks_so_far": 0,
+        "expected_raised": true
+      },
+      {
+        "stage": "close",
+        "probe_step": "convergence",
+        "expected_placed": {
+          "best": "1984/1990",
+          "earliest": "1984",
+          "latest": "1990",
+          "granularity": "range",
+          "confidence": "inferred",
+          "basis": "anchor",
+          "anchors": [
+            "mesa"
+          ],
+          "provenance": []
+        },
+        "timeline_asks_so_far": 1,
+        "expected_raised": false
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-whisper-does-not-fit",
+    "context": "The same whisper in a conversation where it never fits: heavy material first, and later a turn where the timeline has already been raised once.",
+    "unknown": {
+      "kind": "thin_lineup",
+      "label": "the Denver stretch",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": null,
+        "expected_placed": null,
+        "timeline_asks_so_far": 0,
+        "expected_raised": false
+      },
+      {
+        "stage": "place",
+        "probe_step": "residence",
+        "expected_placed": null,
+        "timeline_asks_so_far": 1,
+        "expected_raised": false
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-whisper-partial-range",
+    "context": "The answer is a range, and a range is a placement: 'about preschool, three to five'.",
+    "unknown": {
+      "kind": "unplaced_events",
+      "label": "the dog that followed you home",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "bounds",
+        "expected_placed": {
+          "best": "1982/1984",
+          "earliest": "1982",
+          "latest": "1984",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "age",
+          "anchors": [
+            "birth"
+          ],
+          "provenance": []
+        },
+        "timeline_asks_so_far": 0,
+        "expected_raised": true
       }
     ]
   }

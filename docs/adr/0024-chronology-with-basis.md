@@ -97,20 +97,20 @@ Split the doctrine: **asking stays anchor-first; storage gains real dates.**
    the probe is the playbook's cheapest question; `era_gap` is the one new
    kind (a dated hole between dated eras — impossible to compute before this
    ADR). `dependency_index`/`leverage`/`keystones` score what a single anchor
-   would resolve, capped at **two** starred keystones, and `leverage_boost`
-   (1.2) lifts keystone-adjacent questions in the weekly queue through a
-   guarded read that can never break the planner.
-7. **A deferral is a real state that never nags.** `state/timeline_deferred.json`
-   records "I'll find out"; the unknown goes quiet for `DEFERRED_QUIET_DAYS`
-   (45), keeps its star and its leverage, and is never counted as
-   outstanding. It is neither a decline nor a debt.
+   would resolve, capped at **two** starred keystones. *(The
+   `leverage_boost` adjacency nudge this decision introduced is REPLACED by
+   the v196 amendment below: a keystone is asked as itself.)*
+7. **A deferral is a real state that never nags.** *(REVERSED by the v196
+   amendment below — "I'll find out" is an ordinary answer and no state is
+   kept.)*
 8. **The elicitation is a child interaction.** `timeline`
    (`interactions/timeline/`, `system/timeline_interaction.py`) is the fifth
    child of Conversation, following the paradigm exactly: stages
    `open|place|close` derived from the transcript plus two caller facts,
-   ONE additive output field `placed` (a date record, `{"deferred": true}`,
-   or null) gated on `TurnShape.timeline_stage`, two validation layers, five
-   `timeline_gates.*` lints, ten goldens, and its own seat gate.
+   ONE additive output field `placed` (a date record or null — the deferral
+   shape is removed by the v196 amendment) gated on
+   `TurnShape.timeline_stage`, two validation layers,
+   `timeline_gates.*` lints, goldens, and its own seat gate.
 9. **Passive users are untouched.** With `TurnShape.timeline_stage` `None`
    the output-contract appendix is byte-identical to v194, pinned by a
    required test. The daily single question does not move by one byte.
@@ -130,8 +130,7 @@ Split the doctrine: **asking stays anchor-first; storage gains real dates.**
   source.
 - **Forecloses.** A single scalar year on an event; silent contradiction
   resolution; a model-emitted computed year; a third "when did this happen"
-  field; more than two starred keystones; and re-asking a deferred unknown
-  inside its window.
+  field; and more than two starred keystones.
 - **Deliberately deferred.** The timeline PAGE (era/chapter → place → event
   cards, date chips, Unknowns with Play, persisted expand state, the
   walkthrough) is P1 and lands on the host after the pin; drag-into-era and
@@ -141,3 +140,52 @@ Split the doctrine: **asking stays anchor-first; storage gains real dates.**
   "the model never invents a year" stays, but the elicitation child stops
   being the only writer and this ADR should be revisited rather than quietly
   outgrown.
+
+## Amendment (2026-08-23, owner-ruled — v196, `timeline-whispers-and-keystones`)
+
+Owner rulings on lifehug/lifehug-platform#586, after the hosted Today ★
+appeared on an ordinary reflective question that never asks for a date.
+
+1. **Decision 7 is REVERSED. There is no deferral state.** "I'll find out" is
+   an ordinary answer: it files nothing, it is remembered nowhere, and the
+   unknown simply stays outstanding with its star, its leverage and its Play.
+   `state/timeline_deferred.json`, `DEFERRED_QUIET_DAYS`, `defer_unknown`,
+   `is_deferred`, `load_deferred` and the `deferred` field on unknowns are
+   deleted, and a remnant guard keeps them deleted. The courtesy survives
+   where it always belonged — the ladder's `defer` rung and the
+   `timeline_gates.accepts_defer` lint. The consequence "re-asking a deferred
+   unknown inside its window" is likewise foreclosed no longer: there is no
+   window to be inside.
+2. **Decision 6's `leverage_boost` is REPLACED, not tuned.** Lifting a bank
+   question because its focus *resembled* a keystone slug is adjacency, and
+   adjacency is what starred a question that never asks for a date. A keystone
+   is asked **as itself**, matched by its own identity `tl:<anchor-slug>`, in
+   exactly two ways: a **whisper** on the week's arc card (the real probe plus
+   the person's own anchors, raised only where it fits, at most one per
+   conversation, any precision accepted, never pressed), and a **keystone
+   question** minted as an ordinary bank row in the new `timeline` group.
+   One dial governs both: `timeline_leverage_per_story` (6) is the exchange
+   rate between timeline unknowns and one ordinary story answer — below it
+   nothing is minted, above it the minted question's weight is
+   `leverage / per_story` in the queue's own objective currency. The group cap
+   (1) bounds the week.
+3. **Decision 8's additive field loses its deferral shape.** `placed` is a
+   date record or null. A RANGE WITH A BASIS is first-class and is the
+   expected good outcome, not a degraded one: "about preschool, three to five"
+   files as an interval. Any accepted `placed` files through `timeline-place`
+   on the answer path (`conversation_delivery.run_post_answer_turn`), and the
+   next compile re-derives the timeline — nothing else has to move.
+4. **A sixth lint class**, `timeline_gates.one_per_conversation`, joins the
+   five: the timeline is raised once per conversation, where it fits. The
+   caller counts the asks (`timeline_asks_so_far`, the same posture as
+   `no_new_bound_streak`); the rule is also structural — a session that has
+   raised it carries no item on the next turn.
+5. **The loop learns about arcs.** The weekly `judgment-update` step gains an
+   arc-yield pass over data the vault already holds (session documents: filed
+   answers, placements, new entities, per arc-card intent kind) and may make
+   one bounded, evidence-cited amendment to
+   `state/question_judgment/arc_learned.md`, composed into the arc-plan prompt
+   as `## Arc judgment signals` — the same ADR 0009 mechanism, and the same
+   composition split `load_judgment_rubric` uses. It is a vault file, never an
+   edit to the framework's `plan/arc-templates.md`, which `update.py` would
+   overwrite and `test_exact_file_git.py` pins.

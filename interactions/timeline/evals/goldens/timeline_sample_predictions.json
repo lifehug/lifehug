@@ -100,7 +100,7 @@
     ]
   },
   {
-    "fixture_id": "timeline-defer-is-accepted",
+    "fixture_id": "timeline-ill-find-out-is-accepted",
     "turns": [
       {
         "message": "Was that before or after your sister was born?",
@@ -108,9 +108,7 @@
       },
       {
         "message": "Then let's leave it with her — it'll keep as long as you like.",
-        "placed": {
-          "deferred": true
-        }
+        "placed": null
       }
     ]
   },
@@ -161,6 +159,73 @@
       {
         "message": "That's the spine — birthday, then the houses in order. Everything else will hang off it now.",
         "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-whisper-fits-and-files",
+    "turns": [
+      {
+        "message": "That last part — standing in the doorway not knowing whether to go in — that's the whole thing, isn't it.",
+        "placed": null,
+        "raised": false
+      },
+      {
+        "message": "I want to put that where it belongs. Where were you living when it happened?",
+        "placed": null,
+        "raised": true
+      },
+      {
+        "message": "The Mesa house it is, then — I'll keep it in that stretch.",
+        "placed": {
+          "best": "1984/1990",
+          "earliest": "1984",
+          "latest": "1990",
+          "granularity": "range",
+          "confidence": "inferred",
+          "basis": "anchor",
+          "anchors": [
+            "mesa"
+          ],
+          "provenance": []
+        },
+        "raised": false
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-whisper-does-not-fit",
+    "turns": [
+      {
+        "message": "You were carrying that on your own the whole time. That's a lot to have held.",
+        "placed": null,
+        "raised": false
+      },
+      {
+        "message": "I've got the Mesa house already — that's enough to be going on with. Tell me what she said next.",
+        "placed": null,
+        "raised": false
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-whisper-partial-range",
+    "turns": [
+      {
+        "message": "Preschool-ish, then — somewhere in a couple of years rather than one day, or is it tighter than that?",
+        "placed": {
+          "best": "1982/1984",
+          "earliest": "1982",
+          "latest": "1984",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "age",
+          "anchors": [
+            "birth"
+          ],
+          "provenance": []
+        },
+        "raised": true
       }
     ]
   }
