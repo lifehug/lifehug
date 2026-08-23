@@ -74,6 +74,10 @@ READ_ONLY_COMMANDS = frozenset({
     # episode plan from the bank and prints it — pure reads, no writer lock,
     # exactly like arc-card above.
     "arc-plan-target", "arc-walk-evals",
+    # timeline-chronology (v195, Design §D/§E): both are pure reads —
+    # the seat gate scores committed goldens, and the timeline plan
+    # recomputes unknowns from the vault and prints them.
+    "timeline-evals",
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
@@ -1435,6 +1439,13 @@ def cmd_arc_walk_evals(args: argparse.Namespace) -> int:
     return run_python("arc_walk_evals.py", flags)
 
 
+def cmd_timeline_evals(args: argparse.Namespace) -> int:
+    flags = ["--json"] if args.json else []
+    if args.live:
+        flags.append("--live")
+    return run_python("timeline_evals.py", flags)
+
+
 def cmd_arc_plan_target(args: argparse.Namespace) -> int:
     # v195 (ADR 0024): `--timeline` plans over timeline UNKNOWNS, not bank
     # questions, so it dispatches to the timeline plan builder rather than
@@ -2761,6 +2772,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_arc_walk_evals)
+
+    p = sub.add_parser("timeline-evals", help="Run Timeline Interaction evals")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_timeline_evals)
 
     p = sub.add_parser(
         "arc-plan-target",

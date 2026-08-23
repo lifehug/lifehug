@@ -7,6 +7,7 @@
     {"id": "question_candidate", "package": "question_candidate"},
     {"id": "focus_candidate", "package": "focus_candidate"},
     {"id": "entity_candidate", "package": "entity_candidate"},
-    {"id": "arc_walk", "package": "arc_walk"}
+    {"id": "arc_walk", "package": "arc_walk"},
+    {"id": "timeline", "package": "timeline"}
   ]
 }
