@@ -44,8 +44,8 @@ errors retain bounded metadata only.
 
 ## 2. How People Write Life Stories
 
-### 2a. Structure: hybrid thematic-chronological (unchanged from v1)
-Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. **[shipped v75/v76: book-status chapter map with readiness verdicts (scene-slot data), gap questions, milestone offers, planner chapter-gap boost]**
+### 2a. Structure: hybrid thematic-chronological (sourced v194)
+Pure chronology reads like a résumé; pure theme lacks drive. Chronological backbone, thematic chapters. Each chapter needs: a central scene, a tension, a turning point, a reflection. Craft testimony confirms the hybrid from the other direction: Hermione Lee, who organized her Woolf by theme rather than straight sequence, is explicit that the chronology still has to exist underneath — "you have to have chronology, or your readers will be totally confused" (Lee, *The Art of Biography No. 4*, Paris Review — see `system/research/chronology.md` §1, §5). **[shipped v75/v76: book-status chapter map with readiness verdicts (scene-slot data), gap questions, milestone offers, planner chapter-gap boost]**
 
 ### 2b. McAdams — narrative identity (Life Story Interview II)
 - **Life chapters exercise**: "think of your life as a book — 2–7 chapters, give each a title, and say how we get from one to the next." The transition clause forces boundary articulation. **[shipped v71: `lifehug.py chapters-exercise`, re-run yearly]**
@@ -102,8 +102,56 @@ The synthesized **period arc** (each stage maps to question types):
 ### Memory science for capture
 - **Cues**: odor > music > photos > words. Odor-cued memories peak at ages 6–10 — route smell/taste prompts at thin early-childhood coverage. Photo/song reply prompts are the deployable stand-ins. **[shipped v70: prompt families; media ingestion itself is v72+]**
 - **Reminiscence bump**: authors over ~40 disproportionately recall ages 10–30 — weight there, but pair each life-script milestone with the off-script probe ("which milestone did NOT go the way the script says?").
-- **Dating memories**: never ask "what year?" Landmark anchors ("before or after the move to X? was [child] born yet?") raise correct dating from ~42% to ~68% (Zwartz 2013). Belli's event-history calendar (parallel residence/work/relationship timelines) cross-cues chronology. Store relative order as a first-class relation; flag inferred dates low-confidence (telescoping). **[shipped v71: classifier extracts `events` with `when_hint`+`anchor` (never years); wiki/timeline.md compiles from them. Full EHC onboarding survey deferred — see follow-up issue]**
+- **Dating memories** (corrected v194): never ask "what year?" Reviews of calendar-style instruments show they generally outperform conventional questionnaires, but the *landmark* component alone produces only weak positive effects on accuracy — the large gains come from the whole life-history-calendar instrument, not the landmark prompt in isolation (Glasner & van der Vaart 2009; van der Vaart & Glasner 2011 — corrects a prior "42%→68%" figure attributed to "Zwartz 2013" that could not be located in the primary literature). Landmark anchors ("before or after the move to X? was [child] born yet?") still work best when personal, important, and domain-related. Belli's event-history calendar (parallel residence/work/relationship timelines) cross-cues chronology. Store relative order as a first-class relation; flag inferred dates low-confidence (telescoping). Full playbook: `system/research/chronology.md` §6. **[shipped v71: classifier extracts `events` with `when_hint`+`anchor` (never years); wiki/timeline.md compiles from them. Full EHC onboarding survey deferred — see follow-up issue]**
 - **Anti-fossilization**: biased retelling biases the memory itself (Tversky & Marsh); confidence ≠ accuracy (flashbulb studies). Freeze the first telling (immutable sources — **[shipped, core architecture]**), flag high-retell memories, mine new angles on depth passes (§1.10).
+
+---
+
+## 4a. Chronology — dating memories and building a timeline (v194)
+
+A literature review of how historians, biographers, archivists, and memory
+scientists actually build chronologies, added to the research corpus in
+full at `system/research/chronology.md` (research queue:
+`system/research/QUEUE.md`). Six findings, sourced:
+
+1. **Historians bound before they pin.** *Terminus post/ante quem* — an
+   earliest- and latest-possible date — yields a relative interval, and the
+   interval is a finding, not a failure. Archivists date undated documents
+   the same way (handwriting, watermark, a reference to a datable event)
+   and mark inferred dates **conjectural**, visibly distinct from asserted
+   ones. Biographers build the timeline before the narrative; Lee's craft
+   testimony sources §2a's hybrid claim from the writing-craft side.
+2. **The life history calendar (LHC), not the landmark alone, is the
+   validated instrument.** Freedman et al. (1988) validated the
+   grid-by-domain design against contemporaneous reports with high
+   agreement. Belli (1998) explains why: the calendar affords **sequential**
+   (within-domain) and **parallel** (cross-domain) retrieval cues. This is
+   the corrected grounding for §4's "Dating memories" bullet.
+3. **Dating is inference, not readout.** Friedman (1993) and Brown, Rips &
+   Shevell (1985) show people reconstruct dates from context; Loftus &
+   Marburger (1983) and Huttenlocher, Hedges & Bradburn (1990) show the
+   inference telescopes forward and coarsens with distance. Conway &
+   Pleydell-Pearce's (2000) *lifetime period → general event →
+   event-specific knowledge* hierarchy is the ontology Lifehug's eras
+   already mirror; the living-in-history effect explains when a public
+   event is a legitimate anchor (personal disruption, not fame).
+4. **Disagreement is data, not a defect.** Historians corroborate across
+   independent sources; Portelli argues oral-history discrepancies are
+   themselves meaningful. This is the sourced form of Lifehug's own
+   principle — memory is never silently overwritten; a contradiction adds
+   a second dated, provenanced claim rather than replacing the first.
+5. **Chronology is how people already understand their own lives.**
+   McAdams & McLean's narrative identity and the Life Story Interview's
+   life-chapters exercise (§2b) both index self-understanding by sequence
+   and transition, not by list.
+6. **An eleven-step elicitation playbook** for an AI placing memories on a
+   timeline: never open with "what year," anchor to residence/role,
+   bound before pinning, prefer personal landmarks, cue sequentially and
+   in parallel, climb a precision ladder only while cheap, distinguish
+   span from point, always record confidence and provenance, and stop on
+   any distress signal. Full text: `system/research/chronology.md` §6 —
+   the seed for a future `timeline` child interaction (see
+   `interactions/README.md`); no interaction files exist yet.
 
 ---
 
@@ -282,10 +330,11 @@ provider imports must never terminate the process.
 
 ## 9. Key References
 
-**Narrative identity & memoir**: McAdams, *Life Story Interview II* (Foley Center); McAdams & McLean 2013; McAdams et al. 2001 (redemption/contamination, PSPB); Karr, *The Art of Memoir*; Gornick, *The Situation and the Story*; Birren, Guided Autobiography (nine themes).
+**Narrative identity & memoir**: McAdams, *Life Story Interview II* (Foley Center); McAdams & McLean 2013; McAdams et al. 2001 (redemption/contamination, PSPB); Karr, *The Art of Memoir*; Gornick, *The Situation and the Story*; Birren, Guided Autobiography (nine themes); Lee, *The Art of Biography No. 4* (Paris Review — chronology under thematic organization, v194).
 **Introspection science**: Pennebaker & Chung (expressive writing protocol); Frattaroli 2006 meta-analysis; Campbell & Pennebaker 2003 (pronoun flexibility); Kross & Ayduk 2011 (self-distancing); Nolen-Hoeksema (rumination); Treynor (brooding vs reflection); Eurich (what-not-why).
 **Transitions & life review**: Levinson, *Seasons of a Man's Life* (life structure — lens, not template); Bridges, *Transitions* (endings → neutral zone → beginnings); Butler/Westerhof 2019 (life review); Cochrane 2018 (reminiscence).
-**Memory science**: Tversky & Marsh 2000 (retelling bias); Talarico & Rubin 2003 (flashbulb confidence); Roediger & Karpicke 2006 (testing effect); Willander & Larsson (odor cues); Janata (music-evoked memories); Zwartz 2013 (landmark dating); Belli (event history calendar); Koppel & Rubin (reminiscence bump).
+**Memory science**: Tversky & Marsh 2000 (retelling bias); Talarico & Rubin 2003 (flashbulb confidence); Roediger & Karpicke 2006 (testing effect); Willander & Larsson (odor cues); Janata (music-evoked memories); Glasner & van der Vaart 2009 and van der Vaart & Glasner 2011 (landmark/calendar dating effect sizes — corrects a prior, unlocatable "Zwartz 2013" citation, v194); Belli (event history calendar); Koppel & Rubin (reminiscence bump).
+**Chronology & historical method** (v194, full review `system/research/chronology.md`): Sapiens Methodology (historical method, source criticism); *terminus post/ante quem* (relative dating); *Guide to Documentary Editing* chs. 3 & 5 (conjectural dating apparatus); Freedman et al. 1988 (life history calendar); Belli 1998 (sequential/parallel retrieval); Friedman 1993 and Brown, Rips & Shevell 1985 (dating as reconstructive inference); Huttenlocher, Hedges & Bradburn 1990 (telescoping, rounding); Conway & Pleydell-Pearce 2000 (autobiographical knowledge hierarchy); living-in-history effect studies 2009–2021; Portelli (oral-history discrepancy as data); History Making / consilience (corroboration).
 **Relationships**: Aron et al. 1997 (36 Questions, PSPB); Gottman (love maps); StoryCorps Great Questions; Neimeyer (continuing bonds); Baines (ethical wills).
 **Oral history practice**: Smithsonian Interviewing Guide; Moyer, Step-by-Step Guide; Morrissey (two-sentence rule); Oral History Association best practices.
 **Structure reference memoirs** (unchanged from v1): *Educated*, *Open*, *Kitchen Confidential*, *Born a Crime*, *The Glass Castle*, *Shoe Dog*, *The Hard Thing About Hard Things*.

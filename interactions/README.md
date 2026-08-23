@@ -239,6 +239,15 @@ v193 is the proof of that claim: `arc_walk`'s agenda is literally text
 substituted into a leaf, and the only code it needed was an ordering, a
 stage, and one validator.
 
+### Proposed, not built
+
+Future children the paradigm anticipates, with no files under
+`interactions/` yet:
+
+- `timeline` — placing, dating, and reconciling memories on a timeline;
+  seeded by the elicitation playbook in `system/research/chronology.md`
+  §6 (v194).
+
 ## Model-agnosticism rule
 
 The behavior contract lives in portable prompt and context files —
