@@ -97,6 +97,12 @@ MAX_INTENTS = 4          # … 2–4 intents per card
 
 #: The timeline whispers (the wiki-harvest precedent): at most one timeline_gap
 #: intent per card, and this many across the whole week.
+#:
+#: v200: `place_no_stories` is counted within this SAME number and takes the
+#: same one-slot-per-card. There is deliberately no second dial — the two kinds
+#: are the only intents that carry a real ask, they compete for the same turn,
+#: and the whole point of the cap is "how often may a conversation be asked to
+#: carry a second agenda", which is one question, not two.
 DEFAULT_GAP_MAX = 3
 
 #: Monthly conversation-thread offers, and how long an offered neighborhood
@@ -312,6 +318,30 @@ def _with_leverage(gaps: list[dict], payload: dict) -> list[dict]:
     return stamped
 
 
+def collect_places_without_stories(*, payload: dict | None = None) -> list[dict]:
+    """The places the person named that have nothing in them (v200).
+
+    Read off the SAME assembled `timeline.timeline_data()` payload
+    `collect_timeline_gaps` reads, at `payload["place_no_stories"]`, so the
+    planner and the Timeline surface can never disagree about what a place with
+    no stories is. `timeline_data()` already computes the rows guarded (a
+    landmark problem degrades to `[]`), and this read is guarded again for the
+    injected-payload path.
+    """
+    if payload is None:
+        try:
+            import timeline  # noqa: PLC0415
+            payload = timeline.timeline_data()
+        except Exception:  # noqa: BLE001 — no timeline is a silent no-op
+            return []
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("place_no_stories")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict) and str(row.get("label") or "").strip()]
+
+
 def collect_sit_with(*, vault_root: str | Path | None = None) -> list[str]:
     """The Mirror's "## Sit with" lines (exactly 3 by mirror.py's contract)."""
     root = _resolve_root(vault_root)
@@ -465,9 +495,19 @@ def collect_material(items: list[dict], *, vault_root: str | Path | None = None,
                      timeline_payload: dict | None = None,
                      readiness_cards: list[dict] | None = None) -> dict:
     """Everything the deterministic pass and the model prompt plan against."""
+    # v200: two consumers now read the assembled timeline, so assemble it ONCE
+    # here rather than letting each collector re-derive it (the payload stays
+    # injectable for tests exactly as before).
+    if timeline_payload is None:
+        try:
+            import timeline  # noqa: PLC0415
+            timeline_payload = timeline.timeline_data()
+        except Exception:  # noqa: BLE001 — no timeline is a silent no-op
+            timeline_payload = {}
     return {
         "scene_slots": collect_scene_slots(vault_root=vault_root),
         "timeline_gaps": collect_timeline_gaps(payload=timeline_payload),
+        "places_without_stories": collect_places_without_stories(payload=timeline_payload),
         "sit_with": collect_sit_with(vault_root=vault_root),
         "neighborhoods": collect_neighborhoods(vault_root=vault_root),
         "answers": collect_answers(vault_root=vault_root),
@@ -672,6 +712,65 @@ def _whisper_intent(gap: dict) -> dict:
     return intent
 
 
+def _place_no_stories_intent(item: dict, material: dict, used: dict) -> list[dict]:
+    """At most one place-with-no-stories aside per card, RANKED AFTER the
+    timeline whisper and counted within the same `DEFAULT_GAP_MAX` (v200).
+
+    Three rules, all of them the whisper's rules applied to the second kind:
+
+    * **Ranked after `timeline_gap`.** A card that already took a whisper takes
+      no aside — the two are the only intents that carry a real ask, and two of
+      them on one card would compete for the same turn.
+    * **≤1 per card**, and never the same place twice in one week's plan.
+    * **Counted within `DEFAULT_GAP_MAX`.** The cap answers "how often may a
+      conversation be asked to carry a second agenda"; that is one budget.
+
+    Order is the residence chain's own, which is the person's own chronology.
+    There is deliberately no score: v196's `leverage` counts what a DATE would
+    place, and a story gap places nothing — inventing a number here would be
+    inventing a fact. (`item` is unused for exactly that reason; the signature
+    matches `_timeline_gap_intent`'s so the two read as the pair they are.)
+    """
+    del item  # see the docstring: no per-question ranking, by design
+    if used["gaps"] >= used["gap_max"]:
+        return []
+    for row in material.get("places_without_stories") or []:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or row.get("label") or "")
+        if not key or key in used["place_keys"]:
+            continue
+        used["place_keys"].add(key)
+        used["gaps"] += 1
+        return [_place_no_stories_intent_from_row(row)]
+    return []
+
+
+def _place_no_stories_intent_from_row(row: dict) -> dict:
+    """One `place_no_stories` row -> the arc card's intent.
+
+    The probe, the span and the witnesses come from the landmark interaction's
+    own authority (`landmarks_interaction.places_without_stories`), never from
+    a second phrasing here.
+    """
+    import landmarks_interaction  # noqa: PLC0415
+
+    probe = row.get("probe")
+    probe_text = probe.get("text") if isinstance(probe, dict) else probe
+    return {
+        "kind": landmarks_interaction.PLACE_NO_STORIES_KIND,
+        "place": str(row.get("label") or ""),
+        "span": str(row.get("span") or ""),
+        "landmark": row.get("landmark"),
+        "anchor": str(row.get("anchor") or ""),
+        "witnesses": row.get("witnesses"),
+        "probe": str(probe_text or ""),
+        "unknown_keys": [row["key"]] if row.get("key") else [],
+        "note": "a place they named with nothing in it — ask what happened "
+                "there, never when",
+    }
+
+
 def _neighborhood_sibling_intents(item: dict, material: dict) -> list[dict]:
     """Pending siblings in the same neighborhood arc — the research
     neighborhood's conversation entry point (it had none before this)."""
@@ -781,14 +880,20 @@ def plan_deterministic(items: list[dict], material: dict, *,
     """One card per queued item — the always-computed floor."""
     planned_at = now or now_utc()
     profile = material.get("quality") or {}
-    used = {"gaps": 0, "gap_max": max(0, int(gap_max)), "gap_keys": set()}
+    used = {"gaps": 0, "gap_max": max(0, int(gap_max)), "gap_keys": set(),
+            "place_keys": set()}
     cards: list[dict] = []
     for item in items:
         # Hard intents first: they are the reason the question is worth asking
         # and behavioral bias may never drop them.
+        # v200: the whisper is tried first and the place aside only fills the
+        # card's ONE gap slot when the whisper left it empty — "ranked after
+        # timeline_gap", applied here rather than by a flag passed downward.
+        whisper = _timeline_gap_intent(item, material, used)
+        aside = [] if whisper else _place_no_stories_intent(item, material, used)
         hard = (_scene_slot_intents(item, material)
                 + _sit_with_intent(item, material)
-                + _timeline_gap_intent(item, material, used))
+                + whisper + aside)
         optional = _neighborhood_sibling_intents(item, material) + _studio_slot_intents(item, material)
         if _multiplier_for(item, profile) < 1.0:
             optional.reverse()  # weak signal: try the other optional lane first
@@ -1022,11 +1127,21 @@ def build_plan_prompt(items: list[dict], material: dict, deterministic: list[dic
         )
     gaps = json.dumps(material.get("timeline_gaps") or [], indent=2)
     sit_with = "\n".join(f"  - {line}" for line in material.get("sit_with") or []) or "  (none)"
+    # v200: emitted ONLY when there is at least one, so a vault with no such
+    # place produces a byte-identical prompt to v199's
+    # (test_place_no_stories_arcs.ByteIdentityTests).
+    places = material.get("places_without_stories") or []
+    places_block = (
+        "PLACES WITH NO STORIES (a place they named that has nothing in it — "
+        "a STORY gap, never a dating one; ask what happened there, never "
+        f"when):\n{json.dumps(places, indent=2)}\n\n"
+    ) if places else ""
     return (
         f"{template}\n\n"
         "## INPUT (assembled at runtime — plan this week's arc cards)\n\n"
         f"{chr(10).join(blocks)}\n\n"
         f"TIMELINE GAPS (consumed kinds only):\n{gaps}\n\n"
+        f"{places_block}"
         f"MIRROR — Sit with (quote one verbatim, self-arc questions only):\n{sit_with}\n\n"
         "## CRAFT RULES (hard)\n\n"
         "1. Two-sentence rule: `opening` is ONE context sentence drawn from the "
@@ -1483,7 +1598,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("plan", help="Plan this week's arc cards")
     p.add_argument("--limit", type=int, default=None, help="Plan at most N queued questions")
     p.add_argument("--gap-max", type=int, default=int(os.environ.get("LIFEHUG_WEEKLY_ARC_GAP_MAX", DEFAULT_GAP_MAX)),
-                   help="Max timeline_gap intents across the week (default 3)")
+                   help="Max gap intents (timeline_gap + place_no_stories, one budget) across the week (default 3)")
     p.add_argument("--model", default=None, help="AI model override")
     p.add_argument("--dry-run", action="store_true", help="Print the plan; write nothing")
     p.add_argument("--emit-tasks", metavar="DIR", default=None,

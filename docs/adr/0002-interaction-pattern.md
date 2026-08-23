@@ -95,9 +95,10 @@ The vault-contract addition above ((c), landed in #115) reserved
 amendment ratifies the DATA contract everything downstream inherits, so
 there is one findable answer rather than a second ADR.
 
-- **The intent vocabulary is CLOSED** — exactly six kinds: `scene_slot`,
-  `neighborhood_sibling`, `timeline_gap`, `studio_slot`, `sit_with`,
-  `demonstrated_knowledge_summary`. `conversation.ARC_INTENT_KINDS` is the
+- **The intent vocabulary is CLOSED** — exactly seven kinds (six until
+  v200): `scene_slot`, `neighborhood_sibling`, `timeline_gap`,
+  `studio_slot`, `sit_with`, `demonstrated_knowledge_summary`,
+  `place_no_stories`. `conversation.ARC_INTENT_KINDS` is the
   single definition; the turn engine, the evals, and the platform's
   transport all read it from there. Adding a kind is a schema bump, not an
   additive change (per the recurring-defect doctrine: one importable
@@ -126,3 +127,25 @@ there is one findable answer rather than a second ADR.
   --daily-text`) that prints the assembled message or nothing at all, so
   the daily loop's AI-free property is enforced by the seam's SHAPE, not
   by convention.
+
+## Amendment (2026-08-23, v200): the seventh kind, `place_no_stories`
+
+The bump is taken deliberately, with its rationale recorded here so a later
+reader does not have to reconstruct it. v199's landmark set is the first
+thing that can tell us about a place *nothing in the vault happened in* — "I
+lived in Costa Mesa" with a known span and no moments attached. The owner's
+ruling (lifehug/lifehug-platform#590) is that this is new information the
+system could not see before the landmark, and therefore a gap the loop
+should ask about.
+
+It has no other lane. It is not a `timeline.UNKNOWN_KINDS` member — it asks
+WHAT, not WHEN, and the dating ledger must not count it — and it is never
+minted as a bank question, because an open landmark is a resting state, not
+a debt. Reusing `timeline_gap` was rejected: one kind meaning two different
+asks would make `question_judgment.arc_yield()` unable to tell the two
+apart, which is precisely the signal the weekly rubric edit reads.
+
+Two bounds keep it from becoming a second machine: it takes the SAME
+`arc_planner.DEFAULT_GAP_MAX` budget as the timeline whisper (no second
+dial), and it is ranked after `timeline_gap` for the card's single gap slot
+— a conversation carries at most one second agenda.

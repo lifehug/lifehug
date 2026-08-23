@@ -82,6 +82,16 @@ asks you for a year.
 - **Keystone question** — the same probe minted as an ordinary bank question
   in the `timeline` group, asked as the day's question. Answered once, never
   re-asked, by the bank's own mechanism.
+- **Place aside** (v200) — the whisper's sibling for a **place with no
+  stories**: a residence the landmark set named, with a known span and no
+  moments attached. A **story** gap, not a dating one — it asks what life was
+  like there, never when it was. It rides an arc card exactly as a whisper
+  does, ranked after the whisper, at most one per card, counted within the
+  same weekly `arc_planner.DEFAULT_GAP_MAX`, and it is never minted as a bank
+  question. `timeline.timeline_data()["place_no_stories"]` →
+  `arc_planner.collect_places_without_stories` →
+  `landmarks_interaction.render_place_no_stories`.
+  <!-- parity: arc_planner.DEFAULT_GAP_MAX = 3 -->
 - **"I'll find out"** — an ordinary answer. Nothing is filed, nothing is
   remembered, the unknown simply stays outstanding and keeps its star. (v196
   deleted the deferral side-state v195 had introduced.)
@@ -189,6 +199,12 @@ Playing an unknown writes through the path that already existed —
 `timeline-place` files a dated correction source into the archive and saves
 the display pin — so a placement teaches the loop exactly as it always did,
 on demand instead of at three whispers a week.
+
+Weekly too, `arc-plan` reads `place_no_stories` off the same assembled
+payload and plans a **place aside** onto a card whose gap slot the whisper
+left empty (v200). Nothing is written: a place stops being a gap the moment a
+moment lands in it, which is the recomputation `timeline_data()` already does
+on every read.
 
 ## 6. Where it lives
 

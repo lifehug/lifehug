@@ -1,0 +1,46 @@
+{
+  "golden_id": "chat-costa-mesa-place-no-stories-01",
+  "mode": "chat",
+  "register": "neutral",
+  "arc": {
+    "question_id": "W4",
+    "opening": "How did the Ramirez job end up going?",
+    "topics": ["ramirez job", "costa mesa"],
+    "intents": [
+      {"kind": "scene_slot", "slot": "what_it_says_about_me"},
+      {
+        "kind": "place_no_stories",
+        "place": "Costa Mesa",
+        "span": "1990–1993",
+        "landmark": {"domain": "residences", "label": "Costa Mesa"},
+        "anchor": "residences-costa-mesa",
+        "witnesses": "my sister Ana",
+        "probe": "Costa Mesa — you lived there and there's nothing here from it. What happened there?",
+        "unknown_keys": ["place_no_stories:residences-costa-mesa"],
+        "note": "a place they named with nothing in it — ask what happened there, never when"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "role": "lifehug",
+      "text": "How did the Ramirez job end up going?",
+      "annotations": {"kind": "opener", "topic": "ramirez job", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "Honestly, that job ate two years of my life. Up the 55 every morning before it was light, home again after dark."
+    },
+    {
+      "role": "lifehug",
+      "text": "You put it as \"ate two years of my life\", and dark at both ends of the drive. You've told me you were living in Costa Mesa across those years, and there's nothing here from that house yet. What was life like there?",
+      "annotations": {
+        "kind": "receipt_payout",
+        "topic": "costa mesa",
+        "quoted_span": "ate two years of my life",
+        "seam_ok": false,
+        "properties": ["receipt_quotes_user", "place_no_stories_asked_openly"]
+      }
+    }
+  ]
+}

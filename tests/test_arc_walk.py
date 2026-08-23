@@ -621,7 +621,9 @@ class PackageTests(unittest.TestCase):
         expected = {
             "conversation": (
                 # v196: prompt/turn-instructions.md carries the whisper direction.
-                "9e201849154a49d698aabc48cd856f5358a0f9e3e31bea85ad0690075b4b1970"
+                # v200: plan/arc-templates.md names the seventh intent kind and
+                # evals/goldens/ gains chat-costa-mesa-place-no-stories.json.
+                "85bfad65fb9145d9f4fe7db1be977e84385dee0856a2613614ab7cd7c0328138"
             ),
             "question_candidate": (
                 "f549af401b4765166cc8d3618439d2b367ab799f16f43f3a1a3c5dae764786f5"

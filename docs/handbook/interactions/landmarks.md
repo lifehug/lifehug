@@ -205,6 +205,7 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The store | `timeline.load_landmarks`, `timeline.save_landmark`, `timeline.landmark_birth_date` |
 | The ledger a host renders | `timeline.timeline_data()["landmarks"]`, `timeline.landmark_rows_for` |
 | The gap it reveals | `timeline.timeline_data()["place_no_stories"]` |
+| Who asks about it (v200) | `arc_planner.collect_places_without_stories` → the `place_no_stories` arc-card intent → `landmarks_interaction.render_place_no_stories` |
 | The additive output field | `conversation_delivery.TurnShape.landmark_stage`, `_parse_landmark` |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
 | Tests | `tests/test_landmarks.py` |
@@ -221,6 +222,12 @@ ask, you bound, you do the arithmetic. They supply what they know.
 - **`place_no_stories` is not a `timeline.UNKNOWN_KINDS` member.** v196's
   `place_span` owns *when*; this owns *what happened*. Folding a story gap
   into the dating kinds would put it on the wrong ladder.
+- **It is asked as an arc-card intent, never as a bank question** (v200,
+  [ADR 0002's v200 amendment](../../adr/0002-interaction-pattern.md)). The
+  seventh member of `conversation.ARC_INTENT_KINDS`, ranked after the
+  timeline whisper, at most one per card, counted within the same weekly
+  `arc_planner.DEFAULT_GAP_MAX`. Minting it into the bank would make an open
+  landmark a debt, which is exactly what ruling 2 forbids.
 - **The birth date lives in the landmark store**, not `profile.yaml` — one
   writer, one read path.
 - Contract: `docs/pr-specs/landmarks.md`. Research:

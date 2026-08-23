@@ -308,7 +308,8 @@ learn from the owner's **decisions**; arcs learn from what they actually
 nothing new is written down to make it computable. For every arc-card
 intent kind (`scene_slot`, `timeline_gap`, `sit_with`,
 `neighborhood_sibling`, `studio_slot`,
-`demonstrated_knowledge_summary`), `question_judgment.arc_yield()` walks
+`demonstrated_knowledge_summary`, and `place_no_stories` since
+v200), `question_judgment.arc_yield()` walks
 the session documents in `state/conversations/` and counts the sessions
 whose card carried that kind, the filed answers those sessions produced,
 the timeline placements, and the new entity mentions. A session carrying

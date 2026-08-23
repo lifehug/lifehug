@@ -150,6 +150,9 @@ PROPERTY_IDS = frozenset({
     "invitation_hatch_honored",
     "empty_supply_honest_reply",
     "coverage_not_volunteered",
+    # v200 (place-no-stories arcs): ONE new property id — also FLAGGED for the
+    # platform's closed-vocabulary reconciliation at the next pin bump.
+    "place_no_stories_asked_openly",
 })
 
 #: The seven-persona suite (filenames under evals/personas/, contract order).
@@ -600,6 +603,20 @@ def validate_golden_schema(golden: object) -> list[str]:
                 "invitation_hatch_honored, or no_uninvited_question_past_target "
                 "is declared"
             )
+    # v200 (place-no-stories arcs): the aside is only meaningful against the
+    # intent that carried it, so the golden must declare the arc-card intent
+    # with the place on it.
+    if "place_no_stories_asked_openly" in declared_properties:
+        intents = [i for i in (arc.get("intents") or [])
+                   if isinstance(i, dict) and str(i.get("kind")) == "place_no_stories"
+                   and str(i.get("place") or "").strip()]
+        if not intents:
+            errors.append(
+                f"{label}: arc.intents must carry a place_no_stories intent "
+                "with a non-empty `place` when place_no_stories_asked_openly "
+                "is declared"
+            )
+
     if "empty_supply_honest_reply" in declared_properties:
         supply = arc.get("asking_supply")
         if supply not in (None, []):
@@ -946,6 +963,60 @@ def _check_coverage_not_volunteered(golden: dict) -> list[str]:
     return errors
 
 
+def _place_no_stories_intents(golden: dict) -> list[dict]:
+    arc = golden.get("arc") if isinstance(golden.get("arc"), dict) else {}
+    return [i for i in (arc.get("intents") or [])
+            if isinstance(i, dict) and str(i.get("kind")) == "place_no_stories"]
+
+
+def _check_place_no_stories_asked_openly(golden: dict) -> list[str]:
+    """v200: the place the landmark named is asked about by NAME, openly, and
+    without ever proposing a date.
+
+    Three assertions, each of them a rule this kind exists to keep:
+
+    1. The turn names the place — an aside that doesn't say *Costa Mesa* isn't
+       the aside, it's a generic prompt.
+    2. It asks WHAT, not WHEN: no year demand (`conversation_lints`'
+       `year_question_detector` already runs over every golden turn in Layer 1,
+       so this checker asserts the complementary half) and no date proposed for
+       agreement — `timeline_interaction.proposes_a_date`, the ONE definition
+       shared with the timeline and landmarks lanes (go-deep.md §4.3).
+    3. Exactly one question, since the aside is an ask, not an interrogation.
+    """
+    errors = []
+    intents = _place_no_stories_intents(golden)
+    places = [str(i.get("place") or "").strip() for i in intents]
+    places = [p for p in places if p]
+    for index, turn in _turns_with_property(golden, "place_no_stories_asked_openly"):
+        text = turn.get("text") or ""
+        if not any(place.lower() in text.lower() for place in places):
+            errors.append(
+                f"turns[{index}]: place_no_stories_asked_openly requires the "
+                f"turn to name the place from arc.intents ({places or '(none)'})"
+            )
+        try:
+            import timeline_interaction  # noqa: PLC0415
+
+            proposal = timeline_interaction.proposes_a_date(text)
+        except Exception:  # noqa: BLE001
+            proposal = None
+        if proposal is not None:
+            errors.append(
+                f"turns[{index}]: place_no_stories_asked_openly forbids "
+                f"proposing a date for agreement ({proposal.group(0)!r})"
+            )
+        stripped = conversation_lints._strip_echoed_questions(text)  # noqa: SLF001
+        sentences = [s for s in conversation_lints._split_sentences(stripped) if s.strip()]  # noqa: SLF001
+        questions = [s for s in sentences if conversation_lints._is_question(s)]  # noqa: SLF001
+        if len(questions) != 1:
+            errors.append(
+                f"turns[{index}]: place_no_stories_asked_openly requires "
+                f"exactly one question in the turn, found {len(questions)}"
+            )
+    return errors
+
+
 PROPERTY_CHECKERS: dict[str, Callable[[dict], list[str]]] = {
     "receipt_quotes_user": _check_receipt_quotes_user,
     "no_new_topic_mid_arc": _check_no_new_topic_mid_arc,
@@ -959,6 +1030,7 @@ PROPERTY_CHECKERS: dict[str, Callable[[dict], list[str]]] = {
     "invitation_hatch_honored": _check_invitation_hatch_honored,
     "empty_supply_honest_reply": _check_empty_supply_honest_reply,
     "coverage_not_volunteered": _check_coverage_not_volunteered,
+    "place_no_stories_asked_openly": _check_place_no_stories_asked_openly,
 }
 
 

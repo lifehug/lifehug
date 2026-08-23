@@ -491,7 +491,9 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
             "context/manifest.md": "8e6724a6d262282701742adbbad923caaedc1fcb85372c442636b2063c2763d9",
             "router/deflection.md": "7e5804812e99affac6e71aa19a01e2c039ab38392e7e5697e9759e85fa9a38f1",
             "router/router.md": "35153bdd414b0d262912bed9bd81c3e5d0ecff1eeccf880c76cfe1c939639a0c",
-            "plan/arc-templates.md": "fb8298407e88c7bff87b038350e0620b4ea185177e62f57e705aad2b37c35216",
+            # v200 (place-no-stories arcs): the definition file names the
+            # seventh intent kind, so the model can plan it.
+            "plan/arc-templates.md": "65757fd47d4aeaa77b77a8d2dfb25a8657e1f548afabadc937b5364e4317305d",
         }
         actual = {
             relative: hashlib.sha256(
