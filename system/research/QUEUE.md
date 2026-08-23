@@ -28,6 +28,116 @@ stays legible per topic.
 
 Status: queued, none ingested yet (v194).
 
+## Landmarks (from `system/research/landmarks.md`, v198)
+
+The owner's 2026-08-23 question — "is there a primary set of dating questions
+that always sits under the timeline, that a person can Play, and that makes
+everything else placeable by arithmetic?" — is answered in
+`system/research/landmarks.md`. That review also closes the "Full EHC
+onboarding survey deferred" note in `system/research.md` §4a: the answer is
+not a large upfront survey, it is a fifteen-question anchor set of which seven
+are asked at onboarding (landmarks.md §5).
+
+**Ingested (fetched, quoted, and cited in landmarks.md):**
+
+1. **Freedman et al. 1988** — DONE. Full text obtained; the domain list, the
+   administration order, the verbatim residence opener, and the 1980-vs-1985
+   reliability numbers are all quoted in landmarks.md §1.1 and §2.4. This
+   also discharges Chronology queue item 2.
+2. **Add Health, Wave III Data Documentation** — DONE (§1.4). The persistent,
+   editable, age-annotated calendar; Appendix D's pre-loaded public events.
+3. **NLSY97 Codebook Supplement, Appendix 6** — DONE (§1.3). Five event-history
+   arrays, per-domain grain, the age-14 origin.
+4. **Quality principles of retrospective LHC data, 2022 (PMC9612623)** — DONE
+   (§2.2, §2.3). Residence and education as the highest-accuracy domains;
+   the quarterly-grid/academic-year conflict.
+5. **Allen 1983, CACM 26(11)** — DONE (§3.6). The correct formal name for what
+   the owner called "a binary tree": constraint propagation over interval
+   relations, with "reference intervals" as the coarse containers.
+6. **NCES kindergarten entrance requirements, 2018** — DONE (§2.3). The
+   grade↔age↔year arithmetic and its ±1 band.
+7. **SHARELIFE (SHARE wave 3) Methodology volume** — DONE (§1.5). The only
+   source that states its module-order rationale outright ("ordered according
+   to what is usually most important to the respondent and thus remembered
+   most accurately"), the five-row calendar with the age axis, the
+   six-month residence threshold, and the decade-midpoint fallback.
+8. **ELSA wave 3 Life History user guide** — DONE (§1.5). The *lifegrid*,
+   its module order, and per-domain grain.
+9. **NEPS SC6 Data Manual + IAB FDZ-Methodenreport 05/2010 (ALWA)** — DONE
+   (§1.6). Modularized collection, residences first and complete since birth,
+   and the stated cost (whole-life chronology is lost) with its fix (replay
+   earlier answers into later question text) — which is our `{anchors}` block.
+10. **UCL CLS: NCDS age 42 and BCS70 age 42 questionnaires** — DONE (§1.7).
+    Current-state-then-backwards, and the mid-season month convention
+    (Winter=Feb, Spring=May, Summer=Aug, Autumn=Nov).
+11. **Oral-history and genealogy intake instruments** — DONE (§1.8). LOC
+    Veterans History Project Biographical Data Form, the North Dakota VHP
+    question guide, the Smithsonian interviewing guide, the Montana State
+    Library data sheet (sent home in advance — homework, already standard
+    practice), StoryCorps *Great Questions* and Baylor's manual as the
+    deliberate counter-tradition.
+12. **Shum 1998, Allen 1983, Giroux 2003 (BCG), the AIA glossary** — DONE
+    (§4.1, §3.2, §3.6, §2.8).
+
+**Still queued, in priority order:**
+
+13. **PSID Event History Calendar documentation** (`psidonline.isr.umich.edu`,
+   Technical Series Papers 2007-02 and 2017-03) — the landmark-events-first
+   domain hierarchy and the respondent-uncertainty findings. The PDFs sit
+   behind a bot challenge; landmarks.md §1.2 cites them at indexed-text level
+   only. Obtain properly.
+14. **Belli, *Event History Calendar*, Encyclopedia of Survey Research
+   Methods** — the "query the most easily remembered domains first" rule is
+   quoted from the publisher's indexed abstract; the full entry is paywalled.
+   Get the real text before this rule is treated as settled.
+15. **Glasner, van der Vaart & Belli 2012** — cited at abstract level only
+   (landmarks.md §5.2). The actual landmark categories and their
+   Dutch-vs-American distributions are what the edge-case list needs.
+   Supersedes Chronology queue item 7's second half.
+16. **Next Steps and the Millennium Cohort Study** (UCL CLS) and the
+    **NEPS SC6 chapter** (Drasch, Kleinert, Matthes & Ruland, *Why Do We
+    Collect Data on Educational Histories Over the Life Course the Way We
+    Do?*, paywalled — abstract only). The remaining instruments; also the
+    only place a *causal* statement about residences-first is likely to be
+    written down.
+17. **Genealogical intake forms proper** — FamilySearch, Ancestry, NGS,
+    StoryWorth. Not obtained; §1.8 covers the archival and oral-history
+    side only.
+18. **Huttenlocher, Hedges & Bradburn 1990** (Chronology queue item 3, still
+    open) — landmarks.md §5.1 leans on the rounding result for "a coarse
+    answer is the honest one." Ingest before the precision ladder's bin
+    boundaries are fixed in code.
+
+**Follow-ups this review opens (design, not reading):**
+
+- **`profile.yaml` has no birth date, and no caller passes `birth_date`.**
+  `chronology.from_age` is unreachable in production (landmarks.md §3.7).
+  This is a live defect, not a research gap.
+- **`PLAYBOOK_STEPS` rungs 5 and 6 are unreachable** for the same reason —
+  they are marked `needs_anchor` and the anchor index is nearly always empty.
+- **Reconcile with issue #69** ("Incremental EHC"), whose contract says to
+  *replace* a large upfront chronology survey and requires an owner decision.
+  landmarks.md §6.5 argues the two are compatible; the owner still decides.
+- **Naming.** landmarks.md §4 recommends **Anchors** as the product word,
+  sitting beside the existing *keystone* and *whisper*. Ratify or replace
+  before any surface ships the word.
+- **The grade↔year rule needs a suppression condition**, not just a ±1 band
+  (landmarks.md §5.2, non-linear schooling).
+- **Specificity ladders per landmark** (landmarks.md §5.3, owner ruling): a
+  landmark answered vaguely is *answered*, and stays open only because more
+  would unlock more. Needs a data shape, not a boolean.
+- **A new gap kind, `place_no_stories`** (landmarks.md §5.3): v196 made
+  unknowns concrete and `place_span` already asks *when* you lived somewhere.
+  Nothing yet expresses a place whose span is known and which has **no stories
+  in it** — a story gap, not a dating gap, and one that only exists once a
+  landmark set has named the place. Needs its own kind, `KIND_OPENERS` entry,
+  and a line into the arc planner and the Mirror's gap finders.
+- **Adopt the fielded coarse-answer conventions**: SHARELIFE's "ask for the
+  decade and enter the mid year" and the CLS mid-season month mapping
+  (landmarks.md §5.1) — both already expressible in `DateRecord`.
+
+Status: items 1–12 ingested (v198); 13–18 queued.
+
 ## Go Deep (from `system/research/go-deep.md`, v197)
 
 Priority order within this topic. Nothing here is implemented; ingestion means
