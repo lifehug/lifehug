@@ -272,6 +272,7 @@ class BaseConnector:
         with tl_mod.vault_roots(
             CLASSIFICATIONS_DIR=state / "classifications",
             CONNECTORS_STATE_DIR=state / "connectors",
+            DEFERRED_FILE=state / "timeline_deferred.json",
             ENTITY_ROSTERS_DIR=state / "entity_rosters",
             MANUAL_SOURCES_DIR=self.repo_dir / "sources" / "manual",
             PLACEMENTS_FILE=state / "timeline_placements.json",

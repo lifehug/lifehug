@@ -106,6 +106,13 @@ DEFAULT_THREAD_OFFERS = 1
 THREAD_OFFER_QUIET_DAYS = 92
 
 #: research.md §4, hard: landmark anchors, never a demand for a calendar year.
+#:
+#: v195 (ADR 0024) widened STORAGE — the timeline now holds real dates as
+#: intervals with a basis — and deliberately did NOT widen ASKING. This ban
+#: stays exactly as it was, and the `timeline` child interaction's
+#: `timeline_gates.no_year_opener` lint enforces the same rule inside the
+#: conversation. `test_the_year_demand_patterns_cover_the_planners_banned_
+#: phrase` pins the two together, so they can never become two rules.
 BANNED_PHRASE = "what year"
 
 DEFAULT_MODEL_FALLBACK = "claude-sonnet-5"  # classify_story.DEFAULT_MODEL, resolved lazily

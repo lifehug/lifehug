@@ -1,0 +1,393 @@
+[
+  {
+    "fixture_id": "timeline-open-anchors-not-years",
+    "unknown": {
+      "kind": "era_gap",
+      "label": "1991–2001 — nothing placed here yet",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "open",
+        "probe_step": "content",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-residence-anchor",
+    "unknown": {
+      "kind": "all_undated",
+      "label": "the bike with no brakes",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "open",
+        "probe_step": "residence",
+        "expected_placed": null
+      },
+      {
+        "stage": "place",
+        "probe_step": "sequence",
+        "expected_placed": {
+          "best": "1984/1990",
+          "earliest": "1984",
+          "latest": "1990",
+          "granularity": "range",
+          "confidence": "inferred",
+          "basis": "anchor",
+          "anchors": [
+            "mesa"
+          ],
+          "provenance": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-age-arithmetic",
+    "unknown": {
+      "kind": "unplaced_events",
+      "label": "Grandpa's two-page letter",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1983",
+        "1984",
+        "1986",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "landmark",
+        "expected_placed": {
+          "best": "1984~",
+          "earliest": "1983",
+          "latest": "1986",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "age",
+          "anchors": [
+            "birth"
+          ],
+          "provenance": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-offers-bounds",
+    "unknown": {
+      "kind": "all_undated",
+      "label": "the night the power went out",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "the-coast",
+          "label": "the move to the coast",
+          "kind": "residence",
+          "date": "1998/2004"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1997",
+        "1998",
+        "1999",
+        "2004"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "bounds",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-sequence-cue",
+    "unknown": {
+      "kind": "no_chrono",
+      "label": "the two jobs, in some order",
+      "anchors": [
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        },
+        {
+          "key": "the-coast",
+          "label": "the move to the coast",
+          "kind": "residence",
+          "date": "1998/2004"
+        }
+      ],
+      "known_years": [
+        "1984",
+        "1990",
+        "1998",
+        "2004"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "sequence",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-parallel-domain",
+    "unknown": {
+      "kind": "no_events",
+      "label": "The Lost Years",
+      "anchors": [
+        {
+          "key": "mesa",
+          "label": "the Mesa house",
+          "kind": "residence",
+          "date": "1984/1990"
+        },
+        {
+          "key": "the-coast",
+          "label": "the move to the coast",
+          "kind": "residence",
+          "date": "1998/2004"
+        }
+      ],
+      "known_years": [
+        "1984",
+        "1990",
+        "1998",
+        "2004"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "parallel_domain",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-close-convergence",
+    "unknown": {
+      "kind": "all_undated",
+      "label": "the night the power went out",
+      "anchors": [
+        {
+          "key": "the-coast",
+          "label": "the move to the coast",
+          "kind": "residence",
+          "date": "1998/2004"
+        }
+      ],
+      "known_years": [
+        "1997",
+        "1998",
+        "1999",
+        "2004"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "close",
+        "probe_step": "convergence",
+        "expected_placed": {
+          "best": "1998-21",
+          "earliest": "1998-03",
+          "latest": "1998-05",
+          "granularity": "season",
+          "confidence": "approximate",
+          "basis": "anchor",
+          "anchors": [
+            "the-coast"
+          ],
+          "provenance": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-defer-is-accepted",
+    "unknown": {
+      "kind": "unplaced_events",
+      "label": "the christening photograph",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        }
+      ],
+      "known_years": [
+        "1979"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "landmark",
+        "expected_placed": null
+      },
+      {
+        "stage": "close",
+        "probe_step": "defer",
+        "expected_placed": {
+          "deferred": true
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-contradiction-keeps-both",
+    "unknown": {
+      "kind": "date_contradiction",
+      "label": "the wedding weekend",
+      "anchors": [
+        {
+          "key": "the-coast",
+          "label": "the move to the coast",
+          "kind": "residence",
+          "date": "1998/2004"
+        }
+      ],
+      "known_years": [
+        "1996",
+        "1998",
+        "2004"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "place",
+        "probe_step": "convergence",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-skeleton-episode",
+    "unknown": {
+      "kind": "no_chrono",
+      "label": "the places you've lived",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1990"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "open",
+        "probe_step": "content",
+        "expected_placed": null
+      },
+      {
+        "stage": "place",
+        "probe_step": "residence",
+        "expected_placed": {
+          "best": "1979-04-12",
+          "earliest": "1979-04-12",
+          "latest": "1979-04-12",
+          "granularity": "day",
+          "confidence": "certain",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        }
+      },
+      {
+        "stage": "place",
+        "probe_step": "landmark",
+        "expected_placed": {
+          "best": "1984/1990",
+          "earliest": "1984",
+          "latest": "1990",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "age",
+          "anchors": [
+            "birth"
+          ],
+          "provenance": []
+        }
+      },
+      {
+        "stage": "close",
+        "probe_step": "convergence",
+        "expected_placed": null
+      }
+    ]
+  }
+]

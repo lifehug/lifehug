@@ -19,12 +19,13 @@ planned:
 | [Focuses & the Autopilot](focuses.md) | ideas, scoring, keep-N-in-development, dedupe, merge |
 | [The Mission & the Convergence Principle](mission.md) | the three purposes; floor and accelerator |
 | [The Loop](the-loop.md) | the canonical cycle, the three clocks, In/adjacent/Out taxonomy |
-| [The Interaction Pattern](interactions/) | the pattern; [Conversation](interactions/conversation.md), [Question Judgment](interactions/question-judgment.md), [Focus Curation](interactions/focus-curation.md) |
+| [The Interaction Pattern](interactions/) | the pattern; [Conversation](interactions/conversation.md), [Question Judgment](interactions/question-judgment.md), [Focus Curation](interactions/focus-curation.md), [Timeline](interactions/timeline.md) |
 | [Quality & Engagement Profile](quality-profile.md) | answer richness, multipliers, rumination |
 | [Neighborhoods](neighborhoods.md) | the question-supply unit and its arcs |
 | [Entities & Graduation](entities.md) | rosters, thresholds, wiki pages |
 | [Conversations & the Day Model](conversations.md) | chats, sessions, the daily reset |
 | [Decisions & Learning](decisions-and-learning.md) | the weekly rubric edit; how owner decisions teach the system |
+| [The Timeline & Chronology](timeline.md) | dates as intervals with a basis, bands, unknowns, keystones |
 
 Until a page exists, its territory is covered by the
 [README](https://github.com/lifehug/lifehug#readme) and the

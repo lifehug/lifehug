@@ -1,0 +1,28 @@
+# interactions/timeline/interaction.yaml — flat scalar subset only
+interaction: timeline
+version: 1.0.0
+extends: conversation
+extends.version: 1.0.0
+modes: place
+load_order: identity|behavior|examples|anchors|conversation|turn_instructions
+composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
+composition.leaf: prompt/turn-instructions.md|context/manifest.md
+role.router: haiku-class
+role.worker: sonnet-class
+role.planner: sonnet-class
+# timeline-chronology (v195, Design §D): the playbook's stop rules — "stop
+# when two probes in a row return no new bound" (research/chronology.md
+# §6.10) and an absolute ceiling so a placement never becomes an
+# interrogation. system/timeline_interaction.py carries the same two numbers
+# as constants and test_stop_rule_knobs_match_the_module_constants pins them
+# equal, so tuning the knob and tuning the constant are one edit.
+knob.stop_after_unproductive_probes: 2
+knob.max_probes: 4
+# How many of the person's own landmarks the {anchors} block may carry.
+knob.anchor_display_limit: 8
+budget.identity: 800
+budget.behavior: 2000
+budget.examples: 1400
+budget.anchors: 900
+budget.conversation: 1600
+budget.turn_instructions: 1400

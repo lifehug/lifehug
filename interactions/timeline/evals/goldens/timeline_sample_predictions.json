@@ -1,0 +1,167 @@
+[
+  {
+    "fixture_id": "timeline-open-anchors-not-years",
+    "turns": [
+      {
+        "message": "There's a stretch of your life I don't have anything for yet, somewhere after the Mesa house. What were you doing for work back then?",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-residence-anchor",
+    "turns": [
+      {
+        "message": "I'd love to place the bike with no brakes properly. Where were you living when that happened?",
+        "placed": null
+      },
+      {
+        "message": "The Mesa house puts it somewhere in that stretch. Was it before or after your brother arrived?",
+        "placed": {
+          "best": "1984/1990",
+          "earliest": "1984",
+          "latest": "1990",
+          "granularity": "range",
+          "confidence": "inferred",
+          "basis": "anchor",
+          "anchors": [
+            "mesa"
+          ],
+          "provenance": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-age-arithmetic",
+    "turns": [
+      {
+        "message": "About five puts that somewhere around 1984, give or take a year — does that feel right?",
+        "placed": {
+          "best": "1984~",
+          "earliest": "1983",
+          "latest": "1986",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "age",
+          "anchors": [
+            "birth"
+          ],
+          "provenance": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-offers-bounds",
+    "turns": [
+      {
+        "message": "Spring of 98, or is somewhere between 97 and 99 more honest?",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-sequence-cue",
+    "turns": [
+      {
+        "message": "Which of those two came first — the print shop, or the one out by the airport?",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-place-parallel-domain",
+    "turns": [
+      {
+        "message": "Work's gone quiet on that stretch, so let's try the other side of it — who was around the house then?",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-close-convergence",
+    "turns": [
+      {
+        "message": "Spring of 1998, then, right before the move — that's a good place to leave it.",
+        "placed": {
+          "best": "1998-21",
+          "earliest": "1998-03",
+          "latest": "1998-05",
+          "granularity": "season",
+          "confidence": "approximate",
+          "basis": "anchor",
+          "anchors": [
+            "the-coast"
+          ],
+          "provenance": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-defer-is-accepted",
+    "turns": [
+      {
+        "message": "Was that before or after your sister was born?",
+        "placed": null
+      },
+      {
+        "message": "Then let's leave it with her — it'll keep as long as you like.",
+        "placed": {
+          "deferred": true
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-contradiction-keeps-both",
+    "turns": [
+      {
+        "message": "Your timeline has that as 1998 and you're saying 1996 — I'd rather keep both than pick one. Which feels closer when you sit with it?",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-skeleton-episode",
+    "turns": [
+      {
+        "message": "I want to build the spine of your timeline with you, and it starts in one place. When's your birthday?",
+        "placed": null
+      },
+      {
+        "message": "Good — that anchors everything else. What's the first place you remember living?",
+        "placed": {
+          "best": "1979-04-12",
+          "earliest": "1979-04-12",
+          "latest": "1979-04-12",
+          "granularity": "day",
+          "confidence": "certain",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        }
+      },
+      {
+        "message": "Five to eleven in that house puts it at 1984 to 1990 — where did you go after it?",
+        "placed": {
+          "best": "1984/1990",
+          "earliest": "1984",
+          "latest": "1990",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "age",
+          "anchors": [
+            "birth"
+          ],
+          "provenance": []
+        }
+      },
+      {
+        "message": "That's the spine — birthday, then the houses in order. Everything else will hang off it now.",
+        "placed": null
+      }
+    ]
+  }
+]

@@ -1,0 +1,12 @@
+# Timeline eval gates — flat scalar subset only
+cap.reply_chars: 2200
+# timeline-chronology (v195, Design §D): the five timeline gate classes,
+# scored over the ten timeline goldens. "Never pressure" is deliberately NOT
+# here: the parent Conversation contract and arc_walk's no_pressure already
+# own that rule, and a second definition is the defect the recurring-defect
+# doctrine forbids.
+timeline_gates.no_year_opener.compliance: 1.0
+timeline_gates.one_question_per_reply.compliance: 1.0
+timeline_gates.offers_bounds.compliance: 1.0
+timeline_gates.accepts_defer.compliance: 1.0
+timeline_gates.never_invents_a_date.compliance: 1.0

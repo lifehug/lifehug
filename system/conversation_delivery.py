@@ -190,6 +190,16 @@ class TurnShape:
     # owner ruling 6's mechanical form: the passive daily question's prompt
     # does not move by one byte).
     arc_stage: str | None = None
+    # timeline-chronology (v195, Design §D): additive, default None. A caller
+    # composing a timeline-placement turn sets this to the {timeline_stage}
+    # value ("open" | "place" | "close") to have _output_contract_block()
+    # append the one optional "placed" output key; every other caller leaves
+    # it None and the appendix stays byte-identical to pre-v195 output
+    # (required test:
+    # test_output_contract_block_byte_identical_without_timeline_stage —
+    # owner ruling 7's mechanical form: the passive daily question's prompt
+    # does not move by one byte).
+    timeline_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -429,6 +439,31 @@ def _output_contract_block(shape: TurnShape) -> str:
         if shape.arc_stage is not None
         else ""
     )
+    # timeline-chronology (v195, Design §D): the one additive "placed" output
+    # key exists ONLY when the caller set shape.timeline_stage; absent it,
+    # line and note alike stay out, so an ordinary turn's appendix is
+    # byte-identical to pre-v195 output.
+    placed_line = (
+        '  "placed": {"best": "the EDTF date", "earliest": "the earliest it '
+        'could be", "latest": "the latest it could be", "granularity": "day | '
+        'month | season | year | range | era", "confidence": "certain | '
+        'approximate | inferred | conjectural", "basis": "stated | age | '
+        'anchor | order | public_event | connector", "anchors": ["the landmark '
+        'keys you used"]} | {"deferred": true} | null,\n'
+        if shape.timeline_stage is not None
+        else ""
+    )
+    placed_note = (
+        '- "placed" is null on every turn except one where the USER gave you '
+        "something that actually dates the moment. Record ONLY what they said "
+        "— a date, an age, or a before/after against a landmark from ANCHORS — "
+        "and never a year they did not supply. An interval is a finding, not a "
+        'failure: bounds you are sure of beat a point you are not. When they '
+        'say they will find out, it is {"deferred": true} and nothing else. '
+        "Never invent an anchor key that is not in ANCHORS.\n"
+        if shape.timeline_stage is not None
+        else ""
+    )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
         "Reply with a single JSON object and nothing else:\n\n"
@@ -442,6 +477,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         f"{focus_setup_line}"
         f"{entity_setup_line}"
         f"{answered_question_line}"
+        f"{placed_line}"
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
@@ -459,6 +495,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         f"{focus_setup_note}"
         f"{entity_setup_note}"
         f"{answered_question_note}"
+        f"{placed_note}"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -528,6 +565,7 @@ def parse_turn_output(raw: object) -> dict | None:
         "answered_question_id": _parse_answered_question_id(
             data.get("answered_question_id")
         ),
+        "placed": _parse_placed(data.get("placed")),
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
@@ -695,6 +733,64 @@ def _parse_answered_question_id(raw: object) -> str | None:
     if not value or len(value) > _ANSWERED_QUESTION_ID_MAX_CHARS:
         return None
     return value
+
+
+#: timeline-chronology (v195, Design §D): the additive ``placed`` field is a
+#: date record or a deferral. The keys and their lengths are structural facts;
+#: WHICH granularity/confidence/basis values are legitimate, whether the EDTF
+#: parses, and whether the anchors were ever offered are deliberately NOT
+#: known here — ``timeline_interaction.validate_placed`` owns all of that,
+#: exactly as ``arc_walk.validate_answered_question_id`` owns plan membership.
+_PLACED_KEYS = frozenset({
+    "best", "earliest", "latest", "granularity", "confidence", "basis",
+    "anchors", "provenance",
+})
+_PLACED_TEXT_MAX_CHARS = 32
+_PLACED_MAX_ANCHORS = 6
+_PLACED_ANCHOR_MAX_CHARS = 64
+
+
+def _parse_placed(raw: object) -> dict | None:
+    """Structural layer of the additive ``placed`` field.
+
+    Accepts either exactly ``{"deferred": true}`` or an object whose keys are
+    a non-empty subset of :data:`_PLACED_KEYS` with short string values and a
+    bounded anchor list. Anything else — missing, ``null``, a bare string, an
+    extra key, a 33-character granularity — degrades to ``None``, exactly as
+    ``held_question_id``, ``placement``, ``focus_setup``, ``entity_setup`` and
+    ``answered_question_id`` degrade above: never an error.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    if set(raw) == {"deferred"}:
+        return {"deferred": True} if raw["deferred"] is True else None
+    if not set(raw) <= _PLACED_KEYS:
+        return None
+    parsed: dict = {}
+    for key in ("best", "earliest", "latest", "granularity", "confidence", "basis"):
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        if not value or len(value) > _PLACED_TEXT_MAX_CHARS:
+            return None
+        parsed[key] = value
+    anchors = raw.get("anchors")
+    if anchors is not None:
+        if isinstance(anchors, str):
+            anchors = [anchors]
+        if not isinstance(anchors, list):
+            return None
+        cleaned = [item.strip() for item in anchors
+                   if isinstance(item, str) and item.strip()
+                   and len(item.strip()) <= _PLACED_ANCHOR_MAX_CHARS]
+        if cleaned:
+            parsed["anchors"] = cleaned[:_PLACED_MAX_ANCHORS]
+    if not any(parsed.get(key) for key in ("best", "earliest", "latest")):
+        return None
+    return parsed
 
 
 def parse_closing_output(raw: object) -> dict | None:

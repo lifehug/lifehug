@@ -81,6 +81,7 @@ EXPECTED_DATA_PATHS = {
     "sources",
     "state",
     "synthesis",
+    "timeline_deferred",
     "timeline_placements",
     "wiki",
     "wiki_synthesis_cache",

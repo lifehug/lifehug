@@ -601,7 +601,7 @@ def _build_timeline_place(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(
         payload,
         required={"source", "description", "period"},
-        optional={"when_hint", "note"},
+        optional={"when_hint", "note", "date", "basis", "anchors"},
     )
     source_payload = {"ref": payload["source"]}
     source = _source_ref(source_payload)
@@ -615,6 +615,35 @@ def _build_timeline_place(payload: dict) -> tuple[Invocation, ...]:
         args += ["--when-hint", when_hint]
     if note:
         args += ["--note", note]
+    # v195 (ADR 0024): the optional date record, validated exactly as `period`
+    # is — an unreadable EDTF string or an off-vocabulary basis is a rejected
+    # payload, never a silently dropped date.
+    date_text = _optional_text(payload, "date", maximum=64)
+    if date_text:
+        import chronology  # noqa: PLC0415
+
+        if chronology.parse_edtf(date_text) is None:
+            raise ValueError("invalid date")
+        args += ["--date", date_text]
+    basis = _optional_text(payload, "basis", maximum=32)
+    if basis:
+        import chronology  # noqa: PLC0415
+
+        if basis not in chronology.BASES:
+            raise ValueError("invalid basis")
+        args += ["--basis", basis]
+    anchors = payload.get("anchors") or ()
+    if isinstance(anchors, str):
+        anchors = [anchors]
+    if not isinstance(anchors, (list, tuple)):
+        raise ValueError("invalid anchors")
+    for anchor in anchors:
+        key = str(anchor or "").strip()
+        if not key:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", key):
+            raise ValueError("invalid anchor")
+        args += ["--anchor", key]
     return (_cli(*args, stdin_text=_text(payload, "description", maximum=100_000)),)
 
 

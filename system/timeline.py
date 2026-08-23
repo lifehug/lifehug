@@ -15,6 +15,16 @@ and tells the owner how to correct them (`lifehug.py fix`, or just answering
 the gap questions). Unplaceable items land in an explicit "unplaced" bucket
 rather than being forced somewhere.
 
+v195 (ADR 0024): the timeline holds DATES. Every event, period, chapter and
+place can carry a `chronology.DateRecord` — an interval with a granularity, a
+confidence, a basis, its anchors and its provenance — and `chrono` is DERIVED
+from those dates when they exist (the monthly roster ordinal stays as the
+fallback). `bands` is the one render shape: the person's own life chapter is
+the band wherever one covers the stretch, the system's period fills the rest,
+places lived nest inside, and events sit under the place. Gaps become Play-able
+`unknowns` with a probe, a leverage score, and a deferred memory that never
+nags.
+
 v110: connector date evidence (state/connectors/*_date_evidence.json) lines up
 against periods and events as corroboration badges, and evidence clustering
 against the story's own dates surfaces as date_contradiction gaps — surfaced,
@@ -34,6 +44,7 @@ _SYSTEM_DIR = Path(__file__).resolve().parent
 if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
+import chronology as chrono  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
 from lifehug_core import (  # noqa: E402
@@ -42,10 +53,13 @@ from lifehug_core import (  # noqa: E402
     ENTITY_ROSTERS_DIR,
     MANUAL_SOURCES_DIR,
     STATE_DIR,
+    TIMELINE_DEFERRED_FILE,
     TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
+    now_utc,
     read_json,
     slugify,
+    write_json,
 )
 
 # ---------------------------------------------------------------------------
@@ -66,6 +80,7 @@ from lifehug_core import (  # noqa: E402
 VAULT_ROOT_NAMES = (
     "CLASSIFICATIONS_DIR",
     "CONNECTORS_STATE_DIR",
+    "DEFERRED_FILE",
     "ENTITY_ROSTERS_DIR",
     "MANUAL_SOURCES_DIR",
     "PLACEMENTS_FILE",
@@ -153,9 +168,11 @@ def load_periods() -> list[dict]:
             "name": ent.get("name", slug),
             "aliases": [str(a) for a in (ent.get("aliases") or []) if str(a).strip()],
             "chrono": ent.get("chrono"),
+            "chrono_source": "roster" if ent.get("chrono") is not None else None,
             "sources": set(),
             "page": None,
             "approximate_dates": str(ent.get("approximate_dates") or ""),
+            "date": chrono.parse_edtf(ent.get("date")),
         }
 
     periods_dir = WIKI_DIR / "periods"
@@ -170,21 +187,84 @@ def load_periods() -> list[dict]:
                 "name": _frontmatter_value(text, "title", slug.replace("-", " ").title()),
                 "aliases": [],
                 "chrono": None,
+                "chrono_source": None,
                 "sources": set(),
                 "page": None,
                 "approximate_dates": "",
+                "date": None,
             })
             entry["page"] = page.relative_to(WIKI_DIR.parent).as_posix()
             entry["sources"] = _page_sources(text)
             if entry["chrono"] is None:
                 raw = _frontmatter_value(text, "chrono")
                 entry["chrono"] = int(raw) if raw.isdigit() else None
+                if entry["chrono"] is not None:
+                    entry["chrono_source"] = "page"
             if not entry["approximate_dates"]:
                 entry["approximate_dates"] = _frontmatter_value(text, "approximate_dates")
+            if entry.get("date") is None:
+                entry["date"] = chrono.parse_edtf(_frontmatter_value(text, "date"))
 
     periods = list(by_slug.values())
-    periods.sort(key=lambda p: (p["chrono"] is None, p["chrono"] or 0, p["slug"]))
-    return periods
+    for entry in periods:
+        # `approximate_dates` had no writer before v195 (the contract's hole 2).
+        # It stays as the DERIVED display alias of the real record, so every
+        # existing reader keeps working and the string finally has a source.
+        if entry.get("date") is None and entry.get("approximate_dates"):
+            entry["date"] = chrono.parse_edtf(entry["approximate_dates"])
+        if entry.get("date") is not None:
+            entry["approximate_dates"] = chrono.display_date(entry["date"], with_basis=False)
+    return derive_chrono(periods)
+
+
+def derive_chrono(periods: list[dict]) -> list[dict]:
+    """Order the spine by DATES where they exist; the LLM ordinal is the floor.
+
+    `chrono` was a monthly roster-model opinion and the sole spine order — so a
+    period the owner had DATED still sorted by a guess (ADR 0024). The derived
+    rule, in five deterministic steps:
+
+      1. take the pre-v195 order (`chrono`, None last, slug tiebreak) as the
+         fallback sequence — with nothing dated this function is a no-op and
+         the spine is byte-identical to v194;
+      2. anchor every dated period at its `date.earliest` year;
+      3. estimate a year for each undated period by linear interpolation
+         between its nearest dated neighbours in that fallback sequence
+         (±1 per step beyond the ends);
+      4. sort by (estimated year, fallback index, slug);
+      5. dense-rank into `chrono`, recording `chrono_source` per period.
+
+    Mutates and returns the same list objects (callers hold references).
+    """
+    ordered = sorted(periods, key=lambda p: (p.get("chrono") is None, p.get("chrono") or 0, p["slug"]))
+    anchors = [(index, chrono.year_of(period.get("date")))
+               for index, period in enumerate(ordered)
+               if chrono.year_of(period.get("date")) is not None]
+    if not anchors:
+        return ordered
+    estimates: list[float] = []
+    for index, period in enumerate(ordered):
+        year = chrono.year_of(period.get("date"))
+        if year is not None:
+            estimates.append(float(year))
+            period["chrono_source"] = "date"
+            continue
+        before = [a for a in anchors if a[0] < index]
+        after = [a for a in anchors if a[0] > index]
+        if before and after:
+            (li, ly), (ri, ry) = before[-1], after[0]
+            estimates.append(ly + (ry - ly) * ((index - li) / (ri - li)))
+        elif before:
+            li, ly = before[-1]
+            estimates.append(float(ly + (index - li)))
+        else:
+            ri, ry = after[0]
+            estimates.append(float(ry - (ri - index)))
+    ranked = sorted(range(len(ordered)), key=lambda i: (estimates[i], i, ordered[i]["slug"]))
+    result = [ordered[i] for i in ranked]
+    for rank, period in enumerate(result, start=1):
+        period["chrono"] = rank
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -211,14 +291,56 @@ def load_chapters() -> list[dict]:
     for i, m in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[m.end():end].strip()
-        chapters.append({
+        chapter = {
             "number": int(m.group(1)),
             "title": m.group(2).strip(),
             "body": body,
             "source": candidates[-1].name,
-        })
+        }
+        chapter["date"] = chapter_date(chapter)
+        chapters.append(chapter)
     chapters.sort(key=lambda c: c["number"])
     return chapters
+
+
+#: The chapters exercise asks for the transition statements ("It ends when…",
+#: "from X to Y"), and those statements are where a chapter's span lives.
+_CHAPTER_SPAN_RES = (
+    re.compile(r"\b(\d{4})\s*(?:[-–—]|to|through|until|till)\s*(\d{4})\b", re.IGNORECASE),
+    re.compile(r"\bfrom\s+(\d{4})\s+(?:to|until|through)\s+(\d{4})\b", re.IGNORECASE),
+)
+_CHAPTER_YEAR_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
+
+
+def chapter_date(chapter: dict) -> object:
+    """A life chapter's span, read from the exercise's own words (ADR 0024).
+
+    The owner's hierarchy is Chapter → Places → Events, so a chapter needs a
+    span before it can be a band. Explicit ranges win; two or more bare years
+    in the chapter text give their outer bounds as an INFERRED interval (an
+    interval is a finding, never a guessed point); a single year gives that
+    year, conjecturally. No years at all is honestly `None` — an undated
+    chapter simply is not a band.
+    """
+    text = f"{chapter.get('title', '')} {chapter.get('body', '')}"
+    for pattern in _CHAPTER_SPAN_RES:
+        match = pattern.search(text)
+        if match:
+            record = chrono.parse_edtf(f"{match.group(1)}/{match.group(2)}", basis="stated")
+            if record:
+                return record
+    years = sorted({int(y) for y in _CHAPTER_YEAR_RE.findall(text)})
+    if len(years) >= 2:
+        return chrono.DateRecord(
+            best=f"{years[0]}/{years[-1]}", earliest=str(years[0]), latest=str(years[-1]),
+            granularity="range", confidence="inferred", basis="order",
+        )
+    if len(years) == 1:
+        return chrono.DateRecord(
+            best=f"{years[0]}?", earliest=str(years[0]), latest=str(years[0]),
+            granularity="year", confidence="conjectural", basis="order",
+        )
+    return None
 
 
 def align_chapters(chapters: list[dict], periods: list[dict],
@@ -233,12 +355,38 @@ def align_chapters(chapters: list[dict], periods: list[dict],
     for chapter in chapters:
         body_lower = f"{chapter['title']} {chapter['body']}".lower()
         match_slug = None
-        for slug, name in period_names.items():
-            if name in body_lower:
-                match_slug = slug
-                break
+        # v195: DATE CONTAINMENT first when both sides carry spans — the
+        # chapter and the period are then talking about the same stretch of
+        # time and no keyword has to be trusted. The conservative name match
+        # below stays as the fallback for undated chapters (unchanged), and
+        # neither path ever guesses: an unaligned chapter stacks on its own.
+        chapter_span = chapter.get("date")
+        if chapter_span is not None:
+            overlapping = [p for p in periods
+                           if p.get("date") is not None and _spans_overlap(chapter_span, p["date"])]
+            if overlapping:
+                match_slug = min(
+                    overlapping,
+                    key=lambda p: (chrono.year_of(p["date"]) or 0, p["slug"]),
+                )["slug"]
+        if match_slug is None:
+            for slug, name in period_names.items():
+                if name in body_lower:
+                    match_slug = slug
+                    break
         aligned.append({**chapter, "aligned_period": match_slug})
     return aligned
+
+
+def _spans_overlap(left: object, right: object) -> bool:
+    """Do two date records share any year? (Open bounds extend forever.)"""
+    lo_a, hi_a = chrono.year_of(left), chrono.year_of(left, end=True)
+    lo_b, hi_b = chrono.year_of(right), chrono.year_of(right, end=True)
+    lo_a = lo_a if lo_a is not None else -9999
+    hi_a = hi_a if hi_a is not None else 9999
+    lo_b = lo_b if lo_b is not None else -9999
+    hi_b = hi_b if hi_b is not None else 9999
+    return lo_a <= hi_b and lo_b <= hi_a
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +410,12 @@ def load_entities() -> list[dict]:
                 "type": type_label,
                 "page": page.relative_to(WIKI_DIR.parent).as_posix(),
                 "sources": _page_sources(text),
+                # v195: a PLACE with a span is a residence — the life-history
+                # calendar's own index (Conway & Pleydell-Pearce), and the
+                # second level of the owner's Chapter -> Places -> Events
+                # hierarchy. Written by the skeleton episode through
+                # `timeline-place`; absent until then.
+                "date": chrono.parse_edtf(_frontmatter_value(text, "date")),
             })
     return out
 
@@ -321,15 +475,71 @@ def load_events() -> list[dict]:
             desc = str(event.get("description", "")).strip()
             if not desc:
                 continue
-            out.append({
+            claim = chrono.possible_date_claim(event.get("date"))
+            row = {
                 "description": desc,
+                # v195 (ruling 2): the classifier's noun phrase — the thing,
+                # not the telling. `event_title` is the ONE fallback so no
+                # caller invents a second one.
+                "title": str(event.get("title") or "").strip(),
                 "when_hint": str(event.get("when_hint") or "").strip(),
                 "anchor": str(event.get("anchor") or "").strip(),
                 "source": source,
                 "source_short": _short_source(source),
                 "eras": eras,
-            })
+                # The raw claim survives beside the resolved record: the claim
+                # is what the AUTHOR said, the record is what the system
+                # worked out from it, and a later anchor can re-resolve the
+                # claim without re-reading the classification.
+                "date_claim": claim,
+                # Resolved here with NO anchors — stated dates only.
+                # `resolve_event_dates` upgrades age/anchor claims once
+                # `timeline_data` has assembled the anchor index.
+                "date": chrono.record_from_claim(claim) if claim else None,
+            }
+            row["title"] = row["title"] or event_title(row)
+            out.append(row)
     return out
+
+
+#: Ruling 2: a noun phrase of at most seven words. When the classifier has not
+#: supplied one (every pre-v195 classification), the fallback is the
+#: description's first clause, trimmed to the same length — deterministic, and
+#: never invented content.
+EVENT_TITLE_MAX_WORDS = 7
+
+
+def event_title(event: dict) -> str:
+    """The event's title, with the single authoritative fallback."""
+    title = str((event or {}).get("title") or "").strip()
+    if title:
+        return " ".join(title.split()[:EVENT_TITLE_MAX_WORDS])
+    description = str((event or {}).get("description") or "").strip()
+    if not description:
+        return ""
+    clause = re.split(r"[,;:.!?]| — | – ", description, maxsplit=1)[0].strip()
+    words = (clause or description).split()
+    return " ".join(words[:EVENT_TITLE_MAX_WORDS])
+
+
+def resolve_event_dates(events: list[dict], anchors: dict | None = None,
+                        birth_date: object = None) -> list[dict]:
+    """Re-resolve every event's date claim against the assembled anchors.
+
+    This is where "I was about five" becomes `1984~` and "before the move to
+    Mesa" becomes `../1984`: the arithmetic is `chronology`'s, the anchors are
+    the person's own landmarks, and an event whose claim cannot be resolved
+    keeps whatever stated-only record `load_events` already gave it. Mutates
+    and returns the same rows.
+    """
+    for event in events:
+        claim = event.get("date_claim")
+        if not claim:
+            continue
+        resolved = chrono.record_from_claim(claim, birth_date=birth_date, anchors=anchors)
+        if resolved is not None:
+            event["date"] = resolved
+    return events
 
 
 # Era keywords per period slug, for placing events whose classification names
@@ -429,23 +639,31 @@ def load_placements() -> dict:
 
 
 def save_placement(key: str, source: str, description: str, period: str,
-                   when_hint: str = "", note: str = "", correction: str = "") -> dict:
+                   when_hint: str = "", note: str = "", correction: str = "",
+                   date: object = None) -> dict:
     """Add or replace the manual placement for one event. `correction` links
     the pin to the correction source the placement filed (v103) — the pin is
-    the display overlay, the correction is the information."""
-    from lifehug_core import now_utc, write_json  # noqa: PLC0415
+    the display overlay, the correction is the information.
+
+    v195: `date` is a `chronology.DateRecord` (or its serialized form) — the
+    placement's own dated claim, stored beside the pin so the timeline can
+    render a chip without waiting for reclassification. Absent `date` the
+    record is byte-identical to v194's.
+    """
     data = load_placements()
     data["placements"] = [p for p in data["placements"] if p.get("key") != key]
     record = {"key": key, "source": source, "description": description,
               "period": period, "when_hint": when_hint, "note": note,
               "correction": correction, "placed_at": now_utc()}
+    parsed = chrono.from_dict(date) if date is not None else None
+    if parsed is not None:
+        record["date"] = parsed.to_dict()
     data["placements"].append(record)
     write_json(PLACEMENTS_FILE, data)
     return record
 
 
 def remove_placement(key: str) -> bool:
-    from lifehug_core import write_json  # noqa: PLC0415
     data = load_placements()
     before = len(data["placements"])
     data["placements"] = [p for p in data["placements"] if p.get("key") != key]
@@ -524,6 +742,10 @@ def place_events(events: list[dict], periods: list[dict],
                 event["placement_redundant"] = redundant
                 if manual.get("when_hint"):
                     event["when_hint"] = manual["when_hint"]
+                if manual.get("date"):
+                    pinned = chrono.from_dict(manual["date"])
+                    if pinned is not None:
+                        event["date"] = pinned
                 if manual.get("note"):
                     event["placement_note"] = manual["note"]
                 placed[manual["period"]].append(event)
@@ -534,7 +756,11 @@ def place_events(events: list[dict], periods: list[dict],
         else:
             placed[slot].append(event)
     for rows in placed.values():
-        rows.sort(key=lambda e: (not e["when_hint"], e["source_short"]))
+        # Dated moments lead, in date order; everything after is v194's exact
+        # key, so a period with no dated events sorts byte-identically.
+        rows.sort(key=lambda e: (e.get("date") is None,
+                                 chrono.year_of(e.get("date")) or 0,
+                                 not e["when_hint"], e["source_short"]))
     return placed, unplaced
 
 
@@ -548,7 +774,6 @@ def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
     provenance survives; the filed date assertion is untouched. Orphaned pins
     (event rewritten, period page gone) never retire here — they surface as
     stale notices instead. Returns the retired records."""
-    from lifehug_core import now_utc, write_json  # noqa: PLC0415
     data = load_placements()
     if not data["placements"]:
         return []
@@ -609,18 +834,421 @@ def compute_gaps(periods: list[dict],
     if unplaced_entities:
         gaps.append({"kind": "unplaced_entities", "period": None,
                      "message": f"{len(unplaced_entities)} page(s) share no sources with any period."})
+    gaps.extend(era_gaps(periods, event_lineup))
     return gaps
+
+
+#: An era gap has to be a real hole, not two eras that touch.
+MIN_ERA_GAP_YEARS = 1
+
+
+def era_gaps(periods: list[dict], event_lineup: dict[str, list[dict]]) -> list[dict]:
+    """Dated holes BETWEEN dated eras — "2000–2006 · nothing placed here yet".
+
+    The one genuinely new gap kind (ADR 0024). It can only exist once eras
+    carry dates, which is why it could not exist before v195: with no dates
+    there is no measurable hole, only an unordered list. Emitted when two
+    ADJACENT eras are both dated, the hole between them is at least
+    :data:`MIN_ERA_GAP_YEARS` wide, and no dated moment sits inside it.
+    """
+    dated = [p for p in periods if chrono.year_of(p.get("date")) is not None]
+    out: list[dict] = []
+    for previous, following in zip(dated, dated[1:]):
+        last = chrono.year_of(previous.get("date"), end=True)
+        first = chrono.year_of(following.get("date"))
+        if last is None or first is None:
+            continue
+        start, end = last + 1, first - 1
+        if end - start + 1 < MIN_ERA_GAP_YEARS:
+            continue
+        occupied = any(
+            start <= (chrono.year_of(event.get("date")) or -9999) <= end
+            for rows in event_lineup.values() for event in rows
+        )
+        if occupied:
+            continue
+        span = f"{start}" if start == end else f"{start}–{end}"
+        out.append({
+            "kind": "era_gap",
+            "period": None,
+            "between": [previous["slug"], following["slug"]],
+            "years": [start, end],
+            "message": f"{span} — nothing placed here yet, between "
+                       f"{previous['name']} and {following['name']}.",
+            "hint": "Anchor it against something already dated — where were you "
+                    "living, what work were you doing — never a calendar year first.",
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Bands — Chapter → Places → Events (owner ruling 2, amended).
+#
+# The person's OWN life chapter (the McAdams exercise) is the band wherever one
+# covers the stretch; the places lived sit inside it; events sit under each
+# place; the system's era/period is the band ONLY where no chapter covers that
+# stretch. `bands` is the one shape a renderer needs — every other key here is
+# a convenience view over it.
+# ---------------------------------------------------------------------------
+
+BAND_KINDS = ("chapter", "period")
+
+
+def build_bands(periods: list[dict], chapters: list[dict],
+                entity_lineup: dict[str, list[dict]],
+                event_lineup: dict[str, list[dict]]) -> list[dict]:
+    """`[{kind, ref, label, date, places: [{slug,label,date,events}], unplaced_events}]`."""
+    dated_chapters = [c for c in chapters if c.get("date") is not None]
+    covered: dict[str, dict] = {}
+    bands: list[dict] = []
+    for chapter in sorted(dated_chapters, key=lambda c: (chrono.year_of(c["date"]) or 0, c["number"])):
+        members = [p for p in periods
+                   if p.get("date") is not None
+                   and p["slug"] not in covered
+                   and _spans_overlap(chapter["date"], p["date"])]
+        if not members:
+            continue
+        band = {"kind": "chapter", "ref": str(chapter["number"]),
+                "label": chapter["title"], "date": chapter["date"],
+                "periods": [p["slug"] for p in members],
+                "places": [], "unplaced_events": []}
+        for member in members:
+            covered[member["slug"]] = band
+        bands.append(band)
+    for period in periods:
+        if period["slug"] in covered:
+            continue
+        bands.append({"kind": "period", "ref": period["slug"], "label": period["name"],
+                      "date": period.get("date"), "periods": [period["slug"]],
+                      "places": [], "unplaced_events": []})
+    order = {p["slug"]: index for index, p in enumerate(periods)}
+    bands.sort(key=lambda b: (min(order.get(slug, 0) for slug in b["periods"]), b["ref"]))
+    for band in bands:
+        _fill_band(band, entity_lineup, event_lineup)
+    return bands
+
+
+def _fill_band(band: dict, entity_lineup: dict[str, list[dict]],
+               event_lineup: dict[str, list[dict]]) -> None:
+    places: dict[str, dict] = {}
+    for slug in band["periods"]:
+        for row in entity_lineup.get(slug, []):
+            if row.get("type") != "place":
+                continue
+            place = places.setdefault(row["slug"], {
+                "slug": row["slug"], "label": row.get("title") or row["slug"],
+                "date": row.get("date"), "page": row.get("page"),
+                "sources": set(), "events": [],
+            })
+            place["sources"] |= set(row.get("sources") or ())
+    events = [event for slug in band["periods"] for event in event_lineup.get(slug, [])]
+    for event in events:
+        home = _place_for_event(event, places)
+        (home["events"] if home is not None else band["unplaced_events"]).append(event)
+    for place in places.values():
+        if place.get("date") is None:
+            place["date"] = _place_span(place["events"])
+        place.pop("sources", None)
+    band["places"] = sorted(
+        places.values(),
+        key=lambda pl: (chrono.year_of(pl.get("date")) if pl.get("date") is not None else 9999,
+                        pl["slug"]),
+    )
+
+
+def _place_for_event(event: dict, places: dict[str, dict]) -> dict | None:
+    """The place whose OWN sources cite this event's source — the same provable
+    source-overlap discipline the entity lineup uses, never keyword-fuzzy.
+    Ties go to the more specific place (the smaller source set)."""
+    matches = [place for place in places.values() if event.get("source") in place["sources"]]
+    if not matches:
+        return None
+    return min(matches, key=lambda pl: (len(pl["sources"]), pl["slug"]))
+
+
+def _place_span(events: list[dict]) -> object:
+    """A residence's span inferred from the dated moments that happened there."""
+    years = [y for y in (chrono.year_of(e.get("date")) for e in events) if y is not None]
+    ends = [y for y in (chrono.year_of(e.get("date"), end=True) for e in events) if y is not None]
+    if not years:
+        return None
+    first, last = min(years), max(ends or years)
+    if first == last:
+        return chrono.DateRecord(best=f"{first}?", earliest=str(first), latest=str(first),
+                                 granularity="year", confidence="conjectural", basis="order")
+    return chrono.DateRecord(best=f"{first}/{last}", earliest=str(first), latest=str(last),
+                             granularity="range", confidence="inferred", basis="order")
+
+
+# ---------------------------------------------------------------------------
+# Unknowns, leverage, keystones (owner rulings 4 and 5).
+# ---------------------------------------------------------------------------
+
+#: Every gap kind is Play-able. `era_gap` is v195's addition; the other seven
+#: are `compute_gaps`'s existing vocabulary, unchanged.
+UNKNOWN_KINDS = (
+    "era_gap", "no_chrono", "no_events", "all_undated", "thin_lineup",
+    "unplaced_events", "unplaced_entities", "date_contradiction",
+)
+
+#: Owner's cap: at most two starred keystones, ever.
+KEYSTONE_CAP = 2
+
+
+def unknown_key(gap: dict) -> str:
+    """A stable, content-derived key for one unknown."""
+    kind = str(gap.get("kind") or "unknown")
+    if kind == "era_gap":
+        return f"era_gap:{':'.join(str(x) for x in (gap.get('between') or []))}"
+    scope = str(gap.get("period") or "")
+    return f"{kind}:{scope}" if scope else kind
+
+
+def unknowns(data: dict) -> list[dict]:
+    """Every gap as a Play-able record `{kind, key, label, probe, ...}`.
+
+    Ruling 4: a gap is not prose to read, it is a thing that can be answered
+    right now. The gap's own `message`/`hint` survive on the record so nothing
+    that reads gaps today changes; `probe` is the elicitation playbook's
+    CHEAPEST question for that kind (`system/research/chronology.md` §6), and
+    `deferred` marks the ones the person said they would find out.
+    """
+    import timeline_interaction  # noqa: PLC0415  (probe vocabulary lives with the interaction)
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    gaps = list(data.get("global_gaps") or [])
+    for period_gaps in (data.get("gaps_by_period") or {}).values():
+        gaps.extend(period_gaps)
+    anchors = data.get("anchors") or ()
+    for gap in gaps:
+        key = unknown_key(gap)
+        if key in seen:
+            continue
+        seen.add(key)
+        unknown = {
+            "kind": str(gap.get("kind") or "unknown"),
+            "key": key,
+            "label": str(gap.get("message") or key),
+            "period": gap.get("period"),
+            "between": gap.get("between"),
+            "years": gap.get("years"),
+            "hint": gap.get("hint", ""),
+            "deferred": is_deferred(key),
+        }
+        unknown["probe"] = timeline_interaction.choose_probe(unknown, anchors=anchors)
+        rows.append(unknown)
+    return rows
+
+
+def dependency_index(data: dict) -> dict[str, set[str]]:
+    """`{anchor_key: {unknown_key, ...}}` — what one answer would put in place.
+
+    The anchor candidates are exactly the three ruling 5 names: a period's
+    start/end, a landmark (dated) event, and an entity's arrival. An anchor
+    resolves an unknown when placing the anchor would place the unknown:
+
+    * a PERIOD anchor resolves that period's own unknowns, every `era_gap`
+      touching it, and every undated moment or entity lined up inside it;
+    * a LANDMARK EVENT anchor resolves the undated moments sharing its period
+      or its source (the neighbours it would bound);
+    * an ENTITY ARRIVAL anchor resolves that entity's own unknowns and the
+      undated moments sharing its sources.
+    """
+    index: dict[str, set[str]] = {}
+    rows = unknowns(data)
+    by_period: dict[str, set[str]] = {}
+    global_keys: set[str] = set()
+    for row in rows:
+        if row.get("period"):
+            by_period.setdefault(row["period"], set()).add(row["key"])
+        else:
+            global_keys.add(row["key"])
+    era_touch: dict[str, set[str]] = {}
+    for row in rows:
+        for slug in (row.get("between") or []):
+            era_touch.setdefault(str(slug), set()).add(row["key"])
+
+    event_lineup = data.get("event_lineup") or {}
+    entity_lineup = data.get("entity_lineup") or {}
+    for period in data.get("periods") or []:
+        slug = period["slug"]
+        keys = set(by_period.get(slug, set())) | set(era_touch.get(slug, set()))
+        undated = [e for e in event_lineup.get(slug, []) if e.get("date") is None]
+        if undated:
+            keys |= {k for k in global_keys if k.startswith("unplaced_events")}
+            keys |= {f"moment:{slug}:{event['source_short']}" for event in undated}
+        if not entity_lineup.get(slug):
+            keys |= {k for k in by_period.get(slug, set())}
+        index[f"period:{slug}"] = keys
+
+    for slug, rows_here in event_lineup.items():
+        for event in rows_here:
+            if event.get("date") is None:
+                continue
+            key = f"event:{slug}:{event['source_short']}"
+            neighbours = {f"moment:{slug}:{other['source_short']}"
+                          for other in rows_here if other.get("date") is None}
+            index[key] = neighbours | set(era_touch.get(slug, set()))
+
+    for slug, rows_here in entity_lineup.items():
+        for row in rows_here:
+            if row.get("type") not in ("person", "place"):
+                continue
+            key = f"entity:{row['slug']}"
+            shared = {f"moment:{slug}:{event['source_short']}"
+                      for event in event_lineup.get(slug, [])
+                      if event.get("date") is None
+                      and event.get("source") in set(row.get("sources") or ())}
+            index[key] = index.get(key, set()) | shared | set(by_period.get(slug, set()))
+    return index
+
+
+def leverage(anchor_key: str, index: dict[str, set[str]]) -> int:
+    """How many unknowns one anchor would resolve (ruling 5)."""
+    return len(index.get(anchor_key) or ())
+
+
+def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
+    """The top `n` anchors by leverage — "one answer would place 14 moments".
+
+    Ordered by leverage descending, then by how CHEAP the playbook says the
+    probe is (a high-leverage anchor that needs an expensive probe loses to an
+    equally leveraged one that needs a cheap one), then by key. Deferred
+    unknowns still count toward leverage: the person deferring an answer does
+    not make the anchor less pivotal, it only means we do not ask again yet
+    (ruling 5, "never nags").
+    """
+    import timeline_interaction  # noqa: PLC0415
+
+    index = dependency_index(data)
+    labels = {f"period:{p['slug']}": p["name"] for p in (data.get("periods") or [])}
+    anchors = data.get("anchors") or ()
+    scored = []
+    for key, resolved in index.items():
+        if not resolved:
+            continue
+        probe = timeline_interaction.choose_probe(
+            {"kind": "no_chrono" if key.startswith("period:") else "all_undated",
+             "key": key, "label": labels.get(key, key.split(":", 1)[-1])},
+            anchors=anchors,
+        )
+        scored.append({
+            "anchor": key,
+            "label": labels.get(key, key.split(":", 1)[-1].replace("-", " ")),
+            "leverage": len(resolved),
+            "resolves": sorted(resolved),
+            "probe": probe,
+        })
+    scored.sort(key=lambda row: (-row["leverage"], row["probe"].get("cost", 99), row["anchor"]))
+    return scored[:max(int(n), 0)]
+
+
+def keystone_slugs(data: dict | None = None) -> tuple[str, ...]:
+    """The slugs behind the current keystones — the planner's `leverage_boost`
+    input. Guarded by its caller: a timeline problem must never break the
+    weekly queue."""
+    payload = data if data is not None else timeline_data()
+    return tuple(row["anchor"].split(":", 1)[-1] for row in keystones(payload))
+
+
+# ---------------------------------------------------------------------------
+# The deferred memory (owner ruling 5 — "I'll find out", and it never nags).
+# ---------------------------------------------------------------------------
+
+DEFERRED_FILE = TIMELINE_DEFERRED_FILE
+
+#: How long a deferred unknown stays quiet. Long enough to actually call your
+#: mother; short enough that the thread is not lost. It is a QUIET window, not
+#: a decline: the unknown keeps its star, its leverage, and its place.
+DEFERRED_QUIET_DAYS = 45
+
+
+def load_deferred() -> dict:
+    data = read_json(DEFERRED_FILE, default=None) or {"version": 1, "deferred": []}
+    data.setdefault("deferred", [])
+    return data
+
+
+def defer_unknown(key: str) -> dict:
+    """Record "I'll find out" for one unknown. Idempotent; refreshes the clock."""
+    data = load_deferred()
+    data["deferred"] = [row for row in data["deferred"] if row.get("key") != key]
+    record = {"key": key, "deferred_at": now_utc()}
+    data["deferred"].append(record)
+    write_json(DEFERRED_FILE, data)
+    return record
+
+
+def is_deferred(key: str, *, now: object = None) -> bool:
+    """Is this unknown inside its quiet window? Never raises on a bad clock."""
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    for row in load_deferred().get("deferred", []):
+        if row.get("key") != key:
+            continue
+        stamp = str(row.get("deferred_at") or "")
+        try:
+            when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        reference = now if isinstance(now, datetime) else datetime.now(timezone.utc)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
+        return reference - when < timedelta(days=DEFERRED_QUIET_DAYS)
+    return False
 
 
 # ---------------------------------------------------------------------------
 # The assembled payload.
 # ---------------------------------------------------------------------------
 
-def timeline_data(evidence: list[dict] | None = None) -> dict:
+def anchor_index(periods: list[dict], entities: list[dict], events: list[dict],
+                 birth_date: object = None) -> dict:
+    """`{key: {label, date, kind}}` — the person's own dated landmarks.
+
+    This is the life-history calendar as data (Freedman et al. 1988): the
+    birthday, the residences with spans, the eras with spans, and the dated
+    landmark moments. Every later probe is cheap because this exists, and
+    every `anchor`-basis date record resolves through it.
+    """
+    index: dict[str, dict] = {}
+    birth = chrono.from_dict(birth_date) if birth_date is not None else None
+    if birth is not None:
+        index["birth"] = {"label": "when you were born", "date": birth, "kind": "birth"}
+    for entity in entities:
+        if entity.get("type") != "place" or entity.get("date") is None:
+            continue
+        index[entity["slug"]] = {"label": entity.get("title") or entity["slug"],
+                                 "date": entity["date"], "kind": "residence"}
+    for period in periods:
+        if period.get("date") is None:
+            continue
+        index[period["slug"]] = {"label": period["name"], "date": period["date"],
+                                 "kind": "period"}
+    for event in events:
+        if event.get("date") is None:
+            continue
+        key = f"moment-{event['source_short']}-{slugify(event_title(event))[:32]}"
+        index.setdefault(key, {"label": event_title(event), "date": event["date"],
+                               "kind": "landmark"})
+    return index
+
+
+def timeline_data(evidence: list[dict] | None = None,
+                  birth_date: object = None) -> dict:
     periods = load_periods()
     entities = load_entities()
     entity_lineup, unplaced_entities = line_up_entities(entities, periods)
     events = load_events()
+    # v195: two passes. The first resolves stated dates only (load_events);
+    # the anchor index is then built from whatever IS dated, and the second
+    # pass turns "about five" and "before the move" into real intervals.
+    anchors = anchor_index(periods, entities, events, birth_date=birth_date)
+    resolve_event_dates(events, anchors=anchors, birth_date=birth_date)
+    anchors = anchor_index(periods, entities, events, birth_date=birth_date)
     placements = load_placements()
     event_lineup, unplaced_events = place_events(events, periods, placements)
 
@@ -675,7 +1303,13 @@ def timeline_data(evidence: list[dict] | None = None) -> dict:
         else:
             global_gaps.append(gap)
 
-    return {
+    bands = build_bands(periods, chapters, entity_lineup, event_lineup)
+    places_by_chapter = {band["ref"]: band["places"]
+                         for band in bands if band["kind"] == "chapter"}
+    places_by_period = {band["ref"]: band["places"]
+                        for band in bands if band["kind"] == "period"}
+
+    data = {
         "periods": periods,
         "chapters": chapters,
         "chapters_by_period": chapters_by_period,
@@ -687,11 +1321,22 @@ def timeline_data(evidence: list[dict] | None = None) -> dict:
         "gaps_by_period": gaps_by_period,
         "global_gaps": global_gaps,
         "corroboration": corroboration,
+        # v195 (ADR 0024) — additive, every one of them.
+        "anchors": anchors,
+        "bands": bands,
+        "places_by_chapter": places_by_chapter,
+        "places_by_period": places_by_period,
         "counts": {
             "periods": len(periods),
             "entities_placed": sum(len(v) for v in entity_lineup.values()),
             "entities_unplaced": len(unplaced_entities),
             "events_placed": sum(len(v) for v in event_lineup.values()),
             "events_unplaced": len(unplaced_events),
+            "events_dated": sum(1 for rows in event_lineup.values()
+                                for event in rows if event.get("date") is not None),
         },
     }
+    data["unknowns"] = unknowns(data)
+    data["keystones"] = keystones(data)
+    data["counts"]["unknowns"] = len(data["unknowns"])
+    return data

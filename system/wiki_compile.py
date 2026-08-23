@@ -37,6 +37,7 @@ from lifehug_core import (
     SOURCES_DIR,
     STATE_DIR,
     SYNTHESIS_DIR,
+    TIMELINE_DEFERRED_FILE,
     TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
     WIKI_SYNTHESIS_CACHE_FILE,
@@ -352,7 +353,8 @@ def _is_retracted(item: dict, slug: str) -> bool:
 
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
                 synthesized: bool = True, origin: str = "focus", section: str = "",
-                chrono: int | None = None, sensitivity: str = "private") -> str:
+                chrono: int | None = None, sensitivity: str = "private",
+                date_edtf: str = "") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -371,6 +373,11 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
     if chrono is not None:
         # Chronological rank (1 = earliest in life); periods sort by this in the index.
         lines.append(f"chrono: {chrono}")
+    if date_edtf:
+        # v195 (ADR 0024): the period's own span, in EDTF. `timeline.load_periods`
+        # reads it back, so the span survives a recompile and finally gives
+        # `approximate_dates` a writer.
+        lines.append(f"date: {date_edtf}")
     if section:
         lines.append(f'section: "{section}"')
     lines += [
@@ -508,7 +515,8 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
-                seed_related=None, origin="focus", section="", chrono=None):
+                seed_related=None, origin="focus", section="", chrono=None,
+                date_edtf=""):
     if _RETRACTIONS:
         cited_items = [i for i in cited_items if not _is_retracted(i, slug)]
         supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
@@ -524,6 +532,7 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "supporting_items": supporting_items,
         "summary": summary,
         "chrono": chrono,
+        "date_edtf": date_edtf,
         "open_questions": open_questions,
         "open_questions_header": open_questions_header,
         "seed_related": seed_related or [],
@@ -768,8 +777,18 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
             ],
             origin="mention",
             chrono=chrono if isinstance(chrono, int) else None,
+            date_edtf=(_period_date_edtf(ent) if entity_type == "period" else ""),
         ))
     return descs
+
+
+def _period_date_edtf(entity: dict) -> str:
+    """A period roster entry's span as EDTF, from `date` or `approximate_dates`."""
+    import chronology as chrono  # noqa: PLC0415
+
+    record = chrono.parse_edtf(entity.get("date")) or chrono.parse_edtf(
+        entity.get("approximate_dates"))
+    return chrono.to_edtf(record) or ""
 
 
 def plan_projects(categories, questions, answers, manual_sources):
@@ -1279,7 +1298,7 @@ def render_page(desc, synth, related, backlinks, slug_title):
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
                     synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus"),
                     section=desc.get("section", ""), chrono=desc.get("chrono"),
-                    sensitivity=floor),
+                    sensitivity=floor, date_edtf=desc.get("date_edtf", "")),
         "",
         f"# {desc['title']}",
         "",
@@ -1374,9 +1393,17 @@ def compile_timeline(dry_run: bool = False) -> bool:
     viewer's Timeline view (v102). Everything derives from
     timeline.timeline_data() — periods as headers with their placed events
     (the owner's manual 📌 placements honored), then the explicit unplaced
-    bucket — so the export can never contradict the curated view. Dating is
-    by the author's own words and landmark anchors; absolute years are
-    deliberately NOT inferred (they telescope). Skipped when no events exist."""
+    bucket — so the export can never contradict the curated view.
+
+    v195 (ADR 0024) amends the dating doctrine that used to sit here. It read:
+    "absolute years are deliberately NOT inferred (they telescope)". That was
+    right about ASKING and wrong about STORAGE. We still never ask for a year
+    first and never invent one the author did not supply — but a date the
+    system can DERIVE from what they did say (a birthday plus an age, a
+    landmark plus a before/after) is recorded as an interval with its basis and
+    its confidence, and rendered as a chip. An interval is a finding, not a
+    failure. Skipped when no events exist."""
+    import chronology as chrono  # noqa: PLC0415
     import timeline as tl_mod  # noqa: PLC0415
     import timeline_corroboration as tcorr  # noqa: PLC0415
 
@@ -1386,6 +1413,7 @@ def compile_timeline(dry_run: bool = False) -> bool:
     with tl_mod.vault_roots(
         CLASSIFICATIONS_DIR=CLASSIFICATIONS_DIR,
         CONNECTORS_STATE_DIR=CONNECTORS_STATE_DIR,
+        DEFERRED_FILE=TIMELINE_DEFERRED_FILE,
         ENTITY_ROSTERS_DIR=ENTITY_ROSTERS_DIR,
         MANUAL_SOURCES_DIR=MANUAL_SOURCES_DIR,
         PLACEMENTS_FILE=TIMELINE_PLACEMENTS_FILE,
@@ -1399,12 +1427,21 @@ def compile_timeline(dry_run: bool = False) -> bool:
         return False
 
     def event_line(e: dict) -> str:
-        when = e["when_hint"] or "(undated)"
+        # v195: the chip is the DATE RECORD when there is one — rendered at the
+        # granularity the author gave — and the author's own time words when
+        # there is not. The title leads; the sentence follows.
+        record = e.get("date")
+        chip = chrono.display_date(record, with_basis=False) if record is not None else ""
+        when = chip or e["when_hint"] or "(undated)"
+        title = tl_mod.event_title(e)
         anchor_part = f" · anchor: {e['anchor']}" if e["anchor"] else ""
         pin = " · 📌 placed by you" if e.get("placement") == "manual" else ""
         badge = (f" · ✉ {tcorr.badge_text(e['corroboration'])}"
                  if e.get("corroboration") else "")
-        return f"- **{when}** — {e['description']}{anchor_part}{pin}{badge}  \n  _source: {e['source']}_"
+        head = f"- **{when}** — **{title}**{anchor_part}{pin}{badge}"
+        if title.rstrip(".") == e["description"].rstrip("."):
+            return f"{head}  \n  _source: {e['source']}_"
+        return f"{head}  \n  {e['description']}  \n  _source: {e['source']}_"
 
     lines = [
         "---",
@@ -1418,7 +1455,9 @@ def compile_timeline(dry_run: bool = False) -> bool:
         "Generated export of the viewer's Timeline view (/views/timeline).",
         "Datable moments from classified sources, placed into periods by shared",
         "sources, the author's own time words, and the owner's manual placements",
-        "(📌). Absolute years are deliberately NOT inferred (they telescope).",
+        "(📌). Dates are intervals with a basis: derived only from what the author",
+        "actually said (a birthday and an age, a landmark and a before/after) and",
+        "never invented for tidiness.",
         "",
     ]
     for period in data["periods"]:
@@ -1426,9 +1465,13 @@ def compile_timeline(dry_run: bool = False) -> bool:
         if not events:
             continue
         header = f"## {period['name']}"
+        dated = period.get("date") is not None
+        if dated:
+            header += f" — {chrono.display_date(period['date'], with_basis=False)}"
         if period.get("corroboration"):
             # v110: same connector-evidence badge as the viewer's period row.
-            header += f" — ✉ {tcorr.badge_text(period['corroboration'])}"
+            # The separator is a middot once a span already claimed the dash.
+            header += f"{' ·' if dated else ' —'} ✉ {tcorr.badge_text(period['corroboration'])}"
         lines.append(header)
         lines.append("")
         lines.extend(event_line(e) for e in events)
