@@ -467,10 +467,20 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
                 "pending_question_id": None,
             }
         )
-        self.assertEqual(len(turn), 15_881)
+        # v201 (lifehug#206) — 15,881 -> 27,909. This pin is the MEASURE of
+        # the defect it moves past: identity/behavior/examples were being cut
+        # at their budgets, so the model had been receiving the behavior
+        # contract truncated INSIDE the heading of rule 8 (rules 8-13,
+        # including rule 13's mid-thread back-off, never arrived at all). The
+        # +12,028 characters here are that lost content, not new prose: not
+        # one byte of the three definition files changed in this PR — only
+        # interaction.yaml's budgets, so what was written finally reaches the
+        # model. The cost is real (~3k more tokens on every turn) and
+        # deliberate; the rule set is the product.
+        self.assertEqual(len(turn), 28_443)
         self.assertEqual(
             hashlib.sha256(turn.encode()).hexdigest(),
-            "b6e8f90c1f5c3c1f44db83d0eb0c5d27bb1ce543c3ff3536729a5dc452ea0f7c",
+            "582bb53a6f80c0f506aa3119dc5f21e27c2e82a8b5b10b13761fe2b7db27da39",
         )
         self.assertEqual(len(router), 9_673)
         self.assertEqual(
@@ -487,8 +497,13 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
             "prompt/behavior.md": "c2e8dbfb2a26d12cc75a4c0420fe714d3836b67ebb105bc6e85db4831d8e9aad",
             "prompt/examples.md": "f24be4c0ff2bde524d1c2ecfb667ac1ef613f80d8ba36aee6f6e55bc52e4fda6",
             # v196 (whispers): the one amended file.
-            "prompt/turn-instructions.md": "1c1632685709aba3974d17c6602b9a8879bd52256f8bf3a095f6108123c99b26",
-            "context/manifest.md": "8e6724a6d262282701742adbbad923caaedc1fcb85372c442636b2063c2763d9",
+            # v201 (lifehug#206): the file gains the ELISION direction — `[…]`
+            # means the system removed content to fit, never that the
+            # person trailed off.
+            "prompt/turn-instructions.md": "95f62c5a1682a1c2b12a06423e5694e2bed459557971348d4ad598d3a6cfb95a",
+            # v201 (lifehug#206): the recipe now states that a trim is never a
+            # bare cut and that the `session` block is budgeted BY TURN.
+            "context/manifest.md": "fa37a528b152a0ed02dbb5a8cecaa39fd22c533e52f4dd51789d09d4efd9aff6",
             "router/deflection.md": "7e5804812e99affac6e71aa19a01e2c039ab38392e7e5697e9759e85fa9a38f1",
             "router/router.md": "35153bdd414b0d262912bed9bd81c3e5d0ecff1eeccf880c76cfe1c939639a0c",
             # v200 (place-no-stories arcs): the definition file names the

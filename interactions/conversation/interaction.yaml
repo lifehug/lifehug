@@ -43,9 +43,23 @@ knob.router_roster_max: 6
 knob.asking_supply_top_k: 3
 # per-block context budgets (tokens, approximate; top-K small,
 # whole-corpus never loaded)
-budget.identity: 600
-budget.behavior: 1200
-budget.examples: 900
+# v201 (lifehug#206) — THE AUTHORITY BLOCKS MUST FIT WHOLE.
+# These three were sized before the files they budget were finished, and
+# assemble_context enforced them with a character cut. The measured result,
+# found while investigating the arc-walk repetition incident: behavior.md
+# (12,965 chars) was delivered to the model cut off at char 4,800, INSIDE
+# the heading of rule 8 — so rules 8 through 13 (closings, scope, voice
+# preservation, session honesty, no fabricated autobiography, and rule 13
+# MID-THREAD BACK-OFF, the rule that exists to stop exactly the loop the
+# incident produced) had never once reached the model, in any conversation,
+# on any medium. identity.md and examples.md were cut mid-word too.
+# A budget below the file it governs is not a budget, it is silent data
+# loss; tests/test_transcript_budget.py now fails the build when any
+# framework prompt file outgrows its own allowance, so growing one of these
+# files is a decision someone makes rather than a rule that disappears.
+budget.identity: 900
+budget.behavior: 4000
+budget.examples: 2400
 budget.profile: 400
 budget.record: 1800
 budget.asking_supply: 400

@@ -93,6 +93,31 @@ lint.closing_markdown_leak: on
 # flags "what year"-form questions (behavior.md rule 3)
 lint.year_question_detector: on
 
+# no_repetition (v201, lifehug#206): behavior.md rule 13's mid-thread
+# back-off made structural. A reply may not re-ask what this same voice
+# already asked in its last `repetition.lookback` turns. BLOCKING at
+# runtime (conversation_delivery.RUNTIME_BLOCKING_LINTS) — a repeat is
+# never worth sending, and the existing degrade/retry path is exactly the
+# right place for it to land.
+#
+# The incident: an arc-walk episode on chapter "B: Becoming" in which the
+# assistant asked the same question three turns running, once directly
+# after the person typed "You're repeating". The ROOT cause was a prompt
+# defect (assemble_context cut the joined transcript at budget.session, so
+# every turn past the cut was invisible and the model's view of the
+# conversation froze mid-sentence — fixed in system/conversation.py). This
+# lint is the floor under that fix: the product should not be able to emit
+# a self-repeating turn even when something upstream goes wrong again.
+# Golden: goldens/chat-becoming-repetition-loop-bad-01.json.
+lint.no_repetition: on
+# how many of this voice's own preceding turns a new ask is compared
+# against. Small on purpose: returning to a question much later in a long
+# conversation is a callback, not a loop.
+repetition.lookback: 2
+# SequenceMatcher ratio at or above which two normalized asks are "the
+# same question". False-positive-strict, per this engine's own doctrine.
+repetition.similarity: 0.86
+
 # router_gates.* (issue #120, eval harness): per-class precision/recall
 # thresholds for the five-intent router, flat dotted keys only (this
 # file's format subset forbids a nested `router_gates:` mapping — see the

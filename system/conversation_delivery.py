@@ -45,6 +45,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -104,7 +105,13 @@ FALLBACK_SKIP_REASONS = frozenset({"no_unattended_provider", "provider_unavailab
 #: engine reports (question grammar, year questions, receipt-before-question)
 #: is advisory — counted in the ledger, never a send-blocker, because a
 #: false positive there would silently downgrade a good turn to the ack.
-RUNTIME_BLOCKING_LINTS = ("one_question_per_turn", "banned_phrases", "length_caps")
+#: v201 (lifehug#206): "no_repetition" joins the blocking set. A turn that
+#: re-asks what this same voice asked two turns ago is never worth
+#: sending, and the degrade/retry path this set feeds is exactly where
+#: such a turn should land.
+RUNTIME_BLOCKING_LINTS = (
+    "one_question_per_turn", "banned_phrases", "length_caps", "no_repetition",
+)
 
 #: ADR 0015 (issue #167, content-first close): close reasons that fire ONLY
 #: from a sweep/janitor/day-rollover context — no person is necessarily
@@ -967,12 +974,27 @@ def _question_sentences(text: str) -> list[str]:
     return [s for s in conversation_lints._split_sentences(stripped) if conversation_lints._is_question(s)]
 
 
+def session_prior_asks(session: dict) -> list[list[str]]:
+    """Every earlier lifehug turn's asks, oldest first (v201, lifehug#206).
+
+    The input `lint_outgoing`'s repetition check wants. Derived from the
+    session's own turns through `conversation_lints.asks_in`, never
+    re-implemented here.
+    """
+    return [
+        conversation_lints.asks_in(str(turn.get("text") or ""))
+        for turn in (session.get("turns") or [])
+        if isinstance(turn, dict) and turn.get("role") == "lifehug"
+    ]
+
+
 def lint_outgoing(
     message: str,
     *,
     question_allowed: bool,
     is_reply_to_substantive: bool = True,
     is_closing: bool = False,
+    prior_asks: Sequence[Sequence[str]] = (),
     config: dict | None = None,
 ) -> tuple[list[str], int]:
     """Return (blocking lint ids, advisory finding count) for one message.
@@ -1002,6 +1024,15 @@ def lint_outgoing(
     if is_closing:
         blocking.extend(
             f["lint"] for f in conversation_lints.lint_closing_phrases(message, config=config)
+        )
+    # v201 (lifehug#206) — behavior.md rule 13's structural floor. Skipped
+    # on closing turns, which ask nothing at all, and a no-op whenever the
+    # caller passes no prior asks (every pre-v201 call site, byte-identical).
+    if prior_asks and not is_closing:
+        blocking.extend(
+            f["lint"] for f in conversation_lints.lint_repetition(
+                message, prior_asks, config=config
+            )
         )
     return blocking, advisory
 
@@ -1823,6 +1854,7 @@ def run_post_answer_turn(
     blocking, advisory = lint_outgoing(
         message,
         question_allowed=question_allowed,
+        prior_asks=session_prior_asks(session),
         config=_lints_config(),
     )
     if blocking:
@@ -2160,7 +2192,8 @@ def run_story_conversation_turn(
     message = parsed["message"]
     question_allowed = shape.question_allowed and not parsed["question_free"]
     blocking, advisory = lint_outgoing(
-        message, question_allowed=question_allowed, config=_lints_config()
+        message, question_allowed=question_allowed,
+        prior_asks=session_prior_asks(session), config=_lints_config(),
     )
     if blocking:
         _ledger(STATUS_FAILED, "malformed_generation", tuple(blocking))
@@ -2737,7 +2770,10 @@ def _deliver_starvation_fallback_turn(
     if parsed is None:
         return False
     message = parsed["message"]
-    blocking, _advisory = lint_outgoing(message, question_allowed=False, config=_lints_config())
+    blocking, _advisory = lint_outgoing(
+        message, question_allowed=False,
+        prior_asks=session_prior_asks(session), config=_lints_config(),
+    )
     if blocking:
         return False
     send_result = (telegram_send or send_telegram_result)(message)

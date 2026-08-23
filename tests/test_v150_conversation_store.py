@@ -298,7 +298,11 @@ class AssemblyDeterminismTests(unittest.TestCase):
         load_order = manifest["load_order"].split("|")
         self.assertEqual(load_order, [*conversation.ASSEMBLE_CONTEXT_BLOCK_ORDER, "turn_instructions"])
 
-    def test_oversized_block_is_truncated_to_its_budget(self):
+    def test_oversized_block_is_elided_within_its_budget(self):
+        """v201 (lifehug#206): a block over budget is still shortened to fit,
+        but it is shortened at a boundary and MARKED as shortened — never a
+        bare character cut. The old assertion pinned exactly `budget_chars`
+        of the payload, which is the same thing as pinning a mid-word cut."""
         session = self._sample_session()
         oversized = "x" * 50_000
         blocks = {"profile": oversized, "record": ""}
@@ -306,8 +310,10 @@ class AssemblyDeterminismTests(unittest.TestCase):
         self.assertNotIn(oversized, context)
         manifest = conversation.load_interaction_manifest()
         budget_chars = manifest["budget.profile"] * conversation.CHARS_PER_TOKEN
-        self.assertIn("x" * budget_chars, context)
-        self.assertNotIn("x" * (budget_chars + 1), context)
+        profile = context.split("## PROFILE\n\n", 1)[1].split("\n\n## ", 1)[0]
+        self.assertLessEqual(len(profile), budget_chars)
+        self.assertTrue(profile.endswith(conversation.ELISION_MARKER))
+        self.assertGreater(profile.count("x"), budget_chars // 2)
 
 
 class BuilderTests(unittest.TestCase):
