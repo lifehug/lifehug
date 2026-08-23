@@ -161,6 +161,16 @@ def from_dict(value: object) -> DateRecord | None:
     if isinstance(value, str):
         return parse_edtf(value)
     if not isinstance(value, dict):
+        # A record produced by ANOTHER copy of this module — a vendored
+        # platform runtime, or a test that loaded a private module object —
+        # is still a date record. Duck-type it through its own serializer
+        # rather than failing an identity check nobody meant to make.
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict) and hasattr(value, "granularity"):
+            try:
+                return from_dict(to_dict())
+            except (TypeError, ValueError):
+                return None
         return None
     try:
         return DateRecord(

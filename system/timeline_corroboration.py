@@ -132,6 +132,26 @@ def _stated_range(text) -> tuple[int, int] | None:
     return (years[0], years[-1]) if years else None
 
 
+def _period_range(period: dict) -> tuple[int, int] | None:
+    """A period's memory window: the DATE RECORD first (v195, ADR 0024), then
+    the legacy `approximate_dates` string.
+
+    Before v195 `approximate_dates` had no writer, so this window was almost
+    always absent and every badge fell back to "context-only". A period that
+    now carries a real `chronology.DateRecord` gets the window it always
+    should have had; everything else behaves exactly as it did.
+    """
+    import chronology as chrono  # noqa: PLC0415
+
+    record = chrono.from_dict(period.get("date")) if period.get("date") is not None else None
+    if record is not None:
+        first = chrono.year_of(record)
+        last = chrono.year_of(record, end=True)
+        if first is not None and last is not None:
+            return (first, last)
+    return _stated_range(period.get("approximate_dates"))
+
+
 def _span_text(first: int, last: int) -> str:
     return f"{first}–{last}" if first != last else str(first)
 
@@ -271,8 +291,7 @@ def corroborate(periods: list[dict],
     for item in items:
         groups.setdefault(frozenset(item["entity_tokens"]), []).append(item)
 
-    stated_ranges = {p["slug"]: _stated_range(p.get("approximate_dates"))
-                     for p in periods}
+    stated_ranges = {p["slug"]: _period_range(p) for p in periods}
     period_names = {p["slug"]: p["name"] for p in periods}
     contradictions: list[dict] = summary["contradictions"]
 

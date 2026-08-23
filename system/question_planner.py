@@ -71,6 +71,12 @@ DEFAULT_LANE_POLICY = {
     "self_floor_fraction": 0.08,   # ~1 self-knowledge slot per 12-question week
     "chapter_boost_fraction": 0.15,  # v76: ~1-2 book chapter-gap slots per week
     "objective_boost": 2.5,        # multiplier on a question matching an objective
+    # v195 (ADR 0024): keystone leverage as a planner weight — a question whose
+    # focus or category sits on a timeline KEYSTONE (the anchor that would
+    # resolve the most unknowns) gets a modest lift, so the highest-leverage
+    # answer rises into the week on its own. Deliberately small: leverage is a
+    # nudge, never a takeover, and the queue's shape is still the focus model's.
+    "leverage_boost": 1.2,
     "expansion_floor": 0.02,       # research-expansion residual when there's room
     "expansion_onset": 0.60,       # global fullness where expansion urgency starts
 }
@@ -670,7 +676,7 @@ def _week_seed(generated_at: str) -> int:
 
 
 def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: dict | None = None,
-                seed: int | None = None) -> dict:
+                seed: int | None = None, keystone_slugs: object = None) -> dict:
     """Build the weekly queue by dynamic Focus-weighted sampling.
 
     Each Focus gets weight = base(tier) × fill_factor × room; saturated Focuses
@@ -697,6 +703,22 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
 
     pending = enriched_pending_questions(
         questions, categories, coverage, planner_state.get("active_objectives", []), findex)
+
+    # v195: mark the pending questions a timeline keystone would help. The
+    # slugs are supplied by the CALLER (the CLI reads them through a guarded
+    # `timeline.keystone_slugs()`), never read here — the weekly queue must
+    # never be able to break on a timeline problem.
+    keystones = {str(slug).strip().lower() for slug in (keystone_slugs or ()) if str(slug).strip()}
+    keystone_hits = 0
+    if keystones:
+        for question in pending:
+            haystack = {str(question.get("focus") or "").lower(),
+                        str(question.get("category") or "").lower(),
+                        str(question.get("group") or "").lower()}
+            haystack.discard("")
+            if any(slug in haystack or any(slug in item for item in haystack) for slug in keystones):
+                question["keystone"] = True
+                keystone_hits += 1
 
     # Per-Focus item caps (max share of the week any one Focus may take).
     focus_max = {
@@ -769,7 +791,9 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
 
     def weighted_pick(pool: list[dict]) -> dict:
         weights = [
-            max(q.get("weight", 1.0), 0.0001) * (policy["objective_boost"] if q.get("objective") else 1.0)
+            max(q.get("weight", 1.0), 0.0001)
+            * (policy["objective_boost"] if q.get("objective") else 1.0)
+            * (policy.get("leverage_boost", 1.0) if q.get("keystone") else 1.0)
             for q in pool
         ]
         return rng.choices(pool, weights=weights, k=1)[0]
@@ -855,6 +879,8 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
             ],
             "self_floor": self_floor,
             "chapter_boost": {"cap": chapter_boost_max, "taken": chapter_boost_taken},
+            "leverage": {"keystones": sorted(keystones), "matched": keystone_hits,
+                         "boost": policy.get("leverage_boost", 1.0)},
             "expansion": {
                 "urgency": round(urgency, 3),
                 "recommended": urgency >= 0.5,
@@ -866,6 +892,22 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         "candidate_recommendations": accepted_candidate_recommendations(candidates),
         "queue": queue,
     }
+
+
+def current_keystone_slugs() -> tuple[str, ...]:
+    """The timeline's current keystone slugs, or `()` — GUARDED.
+
+    `leverage_boost` is a nudge, and a nudge must never be able to break the
+    weekly queue. Every failure mode of the timeline read (no wiki, a corrupt
+    roster, a missing module) degrades to "no keystones", which is exactly
+    v194's behavior.
+    """
+    try:
+        import timeline  # noqa: PLC0415
+
+        return timeline.keystone_slugs()
+    except Exception:  # noqa: BLE001 — a timeline problem is never a queue problem
+        return ()
 
 
 def queue_is_stale(queue_data: dict) -> bool:
@@ -1041,6 +1083,7 @@ def report(limit: int = 10) -> int:
         int(planner_state.get("queue", {}).get("arc_max", 2)),
         int(planner_state.get("queue", {}).get("expires_after_days", 7)),
         planner_state,
+        keystone_slugs=current_keystone_slugs(),
     )
     print()
     print("Recommended next queue preview (read-only):")
@@ -1173,7 +1216,8 @@ def main() -> int:
 
     if args.write_queue:
         state = load_planner_state(write_default=True)
-        data = build_queue(args.limit, args.arc_max, args.expires_days, state)
+        data = build_queue(args.limit, args.arc_max, args.expires_days, state,
+                           keystone_slugs=current_keystone_slugs())
         write_json(QUESTION_QUEUE_FILE, data)
         print(f"✓ Wrote planned queue: {len(data['queue'])} item(s), expires {data['expires_at']}")
         return 0

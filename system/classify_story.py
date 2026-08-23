@@ -359,7 +359,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   }},
   "situation_vs_story": "situation_rich_story_empty|story_rich_situation_thin|balanced|neither",
   "events": [
-    {{ "description": "string — one datable moment", "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)" }}
+    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the author's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|during|null" }} }}
   ],
   "candidate_questions": [
     {{
@@ -386,7 +386,19 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   success) told without the protected specifics.
 - `scene_slots`: which of McAdams' five scene slots this story already fills — what happened / when & where / who was there / what the author thought & felt / what it says about them
 - `situation_vs_story` (Gornick): situation = what happened; story = the insight, the thing the author has come to say. Tag which this source has.
-- `events`: every datable moment. NEVER convert to a year — record the author's own time words (`when_hint`) and the nearest landmark event (`anchor`). Relative anchors beat guessed dates.
+- `events`: every datable moment. **Do not invent; do record what was said.** NEVER
+  convert, infer, or guess a year the author did not say — record their own time
+  words (`when_hint`) and the nearest landmark event (`anchor`); relative anchors
+  beat guessed dates. Fill `date` ONLY from what the author explicitly stated: a
+  date or year they actually said (`stated`), their age at the time in their own
+  words (`age`), or the landmark plus the before/after/during relation they gave
+  (`anchor_ref` + `relation`). Leave any key null when they did not say it, and
+  leave `date` itself null when they said none of it. The system does the
+  arithmetic from there — an age against a birthday, a relation against a dated
+  landmark — so a guessed year is worse than no year at all.
+- `events[].title`: a noun phrase of at most seven words naming the thing, not the
+  telling: "Grandpa's two-page letter", not "the time Grandpa wrote to me about the
+  farm". No verbs of narration, no dates in the title.
 - `candidate_questions`: generate 3–8 high-quality follow-up questions. **Craft rules (violations get parked, so follow them):**
   - **Two-sentence rule**: one sentence of context quoting or referencing the author's own words, then ONE open question. One question mark per candidate.
   - **Target the empty scene_slots.** "What does it say about you?" is the highest-value follow-up when that slot is empty.

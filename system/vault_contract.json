@@ -4,7 +4,7 @@
     "framework": "lifehug/lifehug",
     "framework_version": 169,
     "revision": "vault-contract-v6",
-    "content_digest": "sha256:0ee4af73521e9ca74803470ef088f5781b7276eb2c335dcf137671357cd48b6f"
+    "content_digest": "sha256:9a4ee71a590f678b3dbe10699b127847271c51a5a2e9a4a687568aed621f869e"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -116,6 +116,7 @@
     "second_voice_offers": {"path": "state/second_voice_offers.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "book_offers": {"path": "state/book_offers.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "timeline_placements": {"path": "state/timeline_placements.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
+    "timeline_deferred": {"path": "state/timeline_deferred.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "perennials": {"path": "state/perennials.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "wiki_synthesis_cache": {"path": "state/wiki_synthesis_cache.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": null, "supported": []}},
     "synthesis": {"path": "state/synthesis", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": null, "supported": []}},

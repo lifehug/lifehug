@@ -2474,6 +2474,7 @@ def view_timeline():
     rendered as first-class amber cards. Everything is a validation surface —
     wrong placements are feedback, not failures."""
     try:
+        import chronology as chrono  # noqa: PLC0415
         import timeline as tl_mod  # noqa: PLC0415
         import timeline_corroboration as tcorr  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
@@ -2517,6 +2518,9 @@ def view_timeline():
             f"<span class='tl-chapterband'>Ch.{c['number']} “{html.escape(c['title'])}”</span>"
             for c in data["chapters_by_period"].get(slug, []))
         chrono_note = "" if period["chrono"] is not None else             " (no chronological order yet)"
+        span = (f" <span class='tl-evidence'>{html.escape(chrono.display_date(period['date'], with_basis=False))}</span>"
+                if period.get("date") is not None else "")
+        title_html = f"{title_html}{span}"
 
         # Collapsed-row counts — the period stays informative while folded.
         rows = data["entity_lineup"].get(slug, [])
@@ -2554,9 +2558,16 @@ def view_timeline():
         # Event dots — dated first (the loader sorts undated last); beyond a
         # visible cap the rest collapse so a rich period stays scannable.
         def _event_html(event):
-            undated = "" if event["when_hint"] else " undated"
-            when = (f"<strong>{html.escape(event['when_hint'])}</strong> — "
-                    if event["when_hint"] else "<em>(undated)</em> — ")
+            # v195 (ADR 0024): the chip is the date RECORD at the granularity
+            # the author gave; the author's own time words are the fallback,
+            # and "(undated)" is the honest last resort.
+            chip = (chrono.display_date(event["date"], with_basis=False)
+                    if event.get("date") is not None else "")
+            undated = "" if (chip or event["when_hint"]) else " undated"
+            label = chip or event["when_hint"]
+            when = (f"<strong>{html.escape(label)}</strong> — "
+                    if label else "<em>(undated)</em> — ")
+            title = tl_mod.event_title(event)
             anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
                       if event["anchor"] else "")
             email_badge = ""
@@ -2577,7 +2588,11 @@ def view_timeline():
                 caught_up = (" · the loop caught up — this now places itself; the pin retires on the next weekly pass"
                              if event.get("placement_redundant") else "")
                 pin = f" <span class='tl-evidence'>📌 placed by you{assertion}{caught_up} · {unplace}</span>"
-            return (f"<div class='tl-dot{undated}'>{when}{html.escape(event['description'])}{anchor}{email_badge}{pin}"
+            headline = f"<strong>{html.escape(title)}</strong>" if title else ""
+            body = ("" if title.rstrip(".") == event["description"].rstrip(".")
+                    else f"<div>{html.escape(event['description'])}</div>")
+            return (f"<div class='tl-dot{undated}'>{when}{headline}{anchor}{email_badge}{pin}"
+                    f"{body}"
                     f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
 
         visible, overflow = events_here[:10], events_here[10:]
@@ -3556,13 +3571,19 @@ def act_timeline_place(form):
     if not (source and description and period):
         return ("/views/timeline", "✗ pick a period for the moment first", None)
     when_hint = _f(form, "when_hint")
-    job = _start_job("timeline-place", {
+    payload = {
         "source": source,
         "description": description,
         "period": period,
         "when_hint": when_hint,
         "note": _f(form, "note"),
-    })
+    }
+    # v195: the viewer may carry a date record for the moment being placed.
+    for field in ("date", "basis"):
+        value = _f(form, field)
+        if value:
+            payload[field] = value
+    job = _start_job("timeline-place", payload)
     return ("/views/timeline", "queued placement and its durable date assertion", job["id"])
 
 

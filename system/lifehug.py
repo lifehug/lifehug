@@ -697,6 +697,7 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
     """File the owner's date assertion, then persist its display placement."""
     import re as _re
 
+    import chronology  # noqa: PLC0415
     import timeline  # noqa: PLC0415
 
     description = sys.stdin.read().strip()
@@ -707,7 +708,30 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
         (period["name"] for period in timeline.load_periods() if period["slug"] == args.period),
         args.period.replace("-", " ").title(),
     )
+    # v195 (ADR 0024): the placement can carry a real date record. The filed
+    # correction — the DURABLE half; the pin is only display — says the date in
+    # words, so the archive reads "happened around 1984 (you said you were about
+    # five)" rather than only naming an era.
+    record = None
+    if getattr(args, "date", None):
+        record = chronology.parse_edtf(args.date, basis=(args.basis or "stated"))
+        if record is None:
+            print(f"Error: --date is not a date I can read: {args.date!r}", file=sys.stderr)
+            return 1
+        basis = args.basis or record.basis
+        if basis not in chronology.BASES:
+            print(f"Error: --basis must be one of {', '.join(chronology.BASES)}",
+                  file=sys.stderr)
+            return 1
+        from dataclasses import replace as _replace  # noqa: PLC0415
+
+        record = _replace(record, basis=basis,
+                          anchors=tuple(getattr(args, "anchor", None) or ()))
     assertion = f"“{description[:120]}” happened during {period_label}"
+    if record is not None:
+        assertion += f", {chronology.display_date(record, with_basis=False)}"
+        if record.anchors:
+            assertion += f" (anchored on {', '.join(record.anchors)})"
     if args.when_hint:
         assertion += f", {args.when_hint}"
     result = subprocess.run(
@@ -732,8 +756,10 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
         when_hint=args.when_hint or "",
         note=args.note or "",
         correction=match.group(1) if match else "",
+        date=record,
     )
-    print(f"✓ Placed {key} in {period_label}; durable assertion filed")
+    dated = f" ({chronology.display_date(record, with_basis=False)})" if record is not None else ""
+    print(f"✓ Placed {key} in {period_label}{dated}; durable assertion filed")
     return 0
 
 
@@ -1410,6 +1436,18 @@ def cmd_arc_walk_evals(args: argparse.Namespace) -> int:
 
 
 def cmd_arc_plan_target(args: argparse.Namespace) -> int:
+    # v195 (ADR 0024): `--timeline` plans over timeline UNKNOWNS, not bank
+    # questions, so it dispatches to the timeline plan builder rather than
+    # widening `arc_walk.ARC_TARGET_KINDS` (contract deviation 3).
+    if getattr(args, "timeline", False):
+        flags = []
+        if getattr(args, "era", None):
+            flags.extend(["--era", str(args.era)])
+        if args.episode_size is not None:
+            flags.extend(["--limit", str(args.episode_size)])
+        if args.json:
+            flags.append("--json")
+        return run_python("timeline_interaction.py", flags)
     flags: list[str] = []
     for name in ("focus", "category", "chapter", "book"):
         value = getattr(args, name, None)
@@ -2456,6 +2494,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--period", required=True, help="Timeline period slug")
     p.add_argument("--when-hint")
     p.add_argument("--note")
+    p.add_argument("--date", help="EDTF date for this moment (1984~, 198X, 2001-21, 1984/..)")
+    p.add_argument("--basis", help="How the date was arrived at: "
+                                   "stated|age|anchor|order|public_event|connector")
+    p.add_argument("--anchor", action="append", default=[],
+                   help="Landmark key the date leans on (repeatable)")
     p.set_defaults(func=cmd_timeline_place)
 
     p = sub.add_parser("timeline-unplace",
@@ -2729,6 +2772,9 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--chapter", help="bank category letter (a book chapter)")
     group.add_argument("--book", help="focus id or label of a book focus")
     group.add_argument("--queue", action="store_true", help="this week's queue")
+    group.add_argument("--timeline", action="store_true",
+                       help="this vault's timeline unknowns, by leverage")
+    p.add_argument("--era", help="with --timeline: scope to one period slug")
     p.add_argument("--episode-size", type=int, default=None)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_arc_plan_target)

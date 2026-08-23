@@ -54,6 +54,7 @@ def timeline_roots(root: Path) -> dict[str, Path]:
     roots = {
         "CLASSIFICATIONS_DIR": state / "classifications",
         "CONNECTORS_STATE_DIR": state / "connectors",
+        "DEFERRED_FILE": state / "timeline_deferred.json",
         "ENTITY_ROSTERS_DIR": state / "entity_rosters",
         "MANUAL_SOURCES_DIR": root / "sources" / "manual",
         "PLACEMENTS_FILE": state / "timeline_placements.json",
@@ -67,7 +68,8 @@ def timeline_roots(root: Path) -> dict[str, Path]:
 
 # wiki_compile forwards its OWN roots into the timeline for the export, under
 # lifehug_core's names (the placements file is TIMELINE_PLACEMENTS_FILE there).
-_WIKI_COMPILE_NAMES = {"PLACEMENTS_FILE": "TIMELINE_PLACEMENTS_FILE"}
+_WIKI_COMPILE_NAMES = {"PLACEMENTS_FILE": "TIMELINE_PLACEMENTS_FILE",
+                       "DEFERRED_FILE": "TIMELINE_DEFERRED_FILE"}
 
 
 @contextlib.contextmanager
@@ -318,7 +320,7 @@ class RenderTests(CorroborationFixture):
         with wiki_compile_vault(wc, self.root):
             self.assertTrue(wc.compile_timeline())
         text = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
-        self.assertIn("## College — ✉ asu ×4 · 2010–2013", text)
+        self.assertIn("## College — 2010–2013 · ✉ asu ×4 · 2010–2013", text)
         self.assertIn("Moved into the ASU dorms", text)
         self.assertIn("· ✉ asu ×2 · 2011", text)
 
