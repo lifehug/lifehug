@@ -763,16 +763,31 @@ PLACE_NO_STORIES_OPENER = (
 def places_without_stories(landmarks: object, event_places: object = ()) -> tuple[dict, ...]:
     """Every residence with a known span and no moments attached.
 
-    Returns unknown-shaped rows ``{kind, key, label, probe, household}`` so the
-    arc planner and the Mirror's gap finders consume them exactly like every
-    other unknown.
+    Returns unknown-shaped rows ``{kind, key, label, span, landmark, anchor,
+    witnesses, probe}`` so the arc planner and the Mirror's gap finders consume
+    them exactly like every other unknown.
 
-    ``household`` carries the **witnesses** — a witness being a living person
-    who was there (`system/research/go-deep.md` §7; the term is law's and oral
-    history's, "warm, honest, and free of collisions"). It comes from the
-    residence ladder's own `household` rung, so no new state exists: the
+    ``witnesses`` carries the people who were there — a witness being a living
+    person who was there (`system/research/go-deep.md` §7; the term is law's
+    and oral history's, "warm, honest, and free of collisions"). It comes from
+    the residence ladder's own `household` rung, so no new state exists: the
     person already told us who was in the house, and those are exactly the
     people who can answer about it when they cannot.
+
+    v200 adds three ADDITIVE fields so a consumer never re-derives what this
+    function already knows (recurring-defect doctrine):
+
+    * ``span`` — the person's OWN span, rendered the way they would recognise
+      it (`chronology.display_date`, basis clause suppressed). It is what makes
+      the arc-card line concrete ("you lived in Costa Mesa around 1990–1993"),
+      and it is a REPORT of what they said, never a date proposed for
+      agreement (`timeline_interaction.proposes_a_date`, go-deep.md §4.3).
+    * ``landmark`` — ``{"domain": "residences", "label": ...}``, the reference
+      back to the landmark entry this gap came from. `save_landmark` merges by
+      label, so (domain, label) IS a landmark's identity.
+    * ``anchor`` — the key `anchors_from_landmarks` mints for the same
+      residence, so the story gap and the dating anchor can be joined without a
+      second slug implementation anywhere.
     """
     filed = landmarks if isinstance(landmarks, dict) else {}
     seen = {str(p).strip().lower() for p in (event_places or ()) if str(p).strip()}
@@ -783,19 +798,60 @@ def places_without_stories(landmarks: object, event_places: object = ()) -> tupl
         label = str(entry.get("label") or "").strip()
         if not label or label.lower() in seen:
             continue
-        if _entry_date(entry) is None:
+        record = _entry_date(entry)
+        if record is None:
             continue  # its span is the dating gap v196 already asks about
-        key = f"{PLACE_NO_STORIES_KIND}:{_anchor_key('residences', label, position)}"
+        anchor = _anchor_key("residences", label, position)
         household = str(entry.get("household") or "").strip()
         rows.append({
             "kind": PLACE_NO_STORIES_KIND,
-            "key": key,
+            "key": f"{PLACE_NO_STORIES_KIND}:{anchor}",
             "label": label,
+            "span": chrono.display_date(record, with_basis=False),
+            "landmark": {"domain": "residences", "label": label},
+            "anchor": anchor,
             "witnesses": household or None,
             "probe": {"step": "content", "cost": 1,
                       "text": PLACE_NO_STORIES_OPENER.format(label=label)},
         })
     return tuple(rows)
+
+
+#: How a place-with-no-stories reads in a prompt. The sibling of
+#: `timeline_interaction.render_whisper`, and deliberately the same shape: it
+#: states what we know, names the gap, and hands the ask over as an
+#: invitation — "if it fits" — rather than a script. The span is REPORTED
+#: (the person's own words, back to them, showing the working); nothing here
+#: names a date and invites agreement.
+PLACE_NO_STORIES_LINE = (
+    "{kind} — they lived in {label}{span} and there are no stories from "
+    "there yet; if it fits, ask what life was like there"
+)
+
+
+def render_place_no_stories(item: object) -> str:
+    """The place-with-no-stories intent's ONE rendering (v200).
+
+    Degrades to the bare kind name when the intent carries no probe, exactly
+    as `render_whisper` does — which is what keeps a bare
+    ``{"kind": "place_no_stories"}`` intent rendering byte-for-byte like every
+    other kind in `conversation._assemble_session_block`.
+    """
+    row = item if isinstance(item, dict) else {}
+    probe = row.get("probe")
+    probe_text = probe.get("text") if isinstance(probe, dict) else probe
+    label = str(row.get("place") or row.get("label") or "").strip()
+    if not str(probe_text or "").strip() or not label:
+        return PLACE_NO_STORIES_KIND
+    span = str(row.get("span") or "").strip()
+    line = PLACE_NO_STORIES_LINE.format(
+        kind=PLACE_NO_STORIES_KIND, label=label,
+        span=f", {span}," if span else "",
+    )
+    witnesses = str(row.get("witnesses") or "").strip()
+    if witnesses:
+        line = f"{line} — someone who was there: {witnesses}"
+    return line
 
 
 # --------------------------------------------------------------------------

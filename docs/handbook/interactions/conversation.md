@@ -50,12 +50,21 @@ page is the interaction that runs both modes (`interaction.yaml`'s
 framing plus 2–4 follow-up *intents* (not scripted text), planned ahead of
 time by the weekly/monthly loops (see [The Loop](../the-loop.md) §4) and
 executed live, per turn, by this interaction's seated model. The intent
-vocabulary is **closed** — exactly six kinds, per [ADR 0002's
+vocabulary is **closed** — exactly seven kinds, per [ADR 0002's
 arc-card amendment](https://github.com/lifehug/lifehug/blob/main/docs/adr/0002-interaction-pattern.md#amendment-2026-08-11-issue-118-the-arc-card-contract):
 `scene_slot`, `neighborhood_sibling`, `timeline_gap`, `studio_slot`,
-`sit_with`, `demonstrated_knowledge_summary`. A card is intents, never
-scripted follow-up text — the turn engine phrases them live, against
-whatever the user actually said.
+`sit_with`, `demonstrated_knowledge_summary`, `place_no_stories`. A card is
+intents, never scripted follow-up text — the turn engine phrases them live,
+against whatever the user actually said.
+
+Two of the seven carry a real ask rather than a direction, and they share
+one slot. `timeline_gap` is the **timeline whisper** (v196) and
+`place_no_stories` is the **place aside** (v200) — a place the person named
+as a landmark with nothing in the vault that happened there. A card gets at
+most one of the two, the whisper ranked first, and the weekly total of both
+together is `arc_planner.DEFAULT_GAP_MAX` (3): a conversation carries at
+most one second agenda.
+<!-- parity: arc_planner.DEFAULT_GAP_MAX = 3 -->
 
 **Session** — one bounded run: open → turns → close; the durable record
 is the session document (`state/conversations/<session_id>.json`). A

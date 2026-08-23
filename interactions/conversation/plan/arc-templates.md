@@ -33,6 +33,12 @@ each question queued that week, plan one arc card:
   - timeline gaps touching that era — this is the
     `timeline.compute_gaps()` consumer, and the first non-display consumer
     of that function,
+  - a **place with no stories** — a place they NAMED as a landmark, with a
+    known span and nothing in the vault that happened there. A story gap,
+    never a dating one: ask what life was like there, never when it was.
+    Ranked after the timeline gap, at most one per card, and counted within
+    the same weekly cap — a conversation carries at most one second agenda,
+    and the two kinds share that one slot,
   - studio format slots the eventual answer could fill,
   - a "sit with" tension, if the question belongs to the self-arc,
   - a `demonstrated_knowledge_summary` intent, for threads that already

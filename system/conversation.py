@@ -827,9 +827,22 @@ def _assemble_asking_supply_block(session: dict, root: Path) -> str:
     return "\n".join(lines)
 
 
-#: The closed six-kind arc-card intent vocabulary (mid-flight audit amendment
-#: M10) — arc.intents holds typed objects shaped like {"kind": <one of
-#: these>, ...}, never plain strings.
+#: The closed SEVEN-kind arc-card intent vocabulary (mid-flight audit amendment
+#: M10; widened to seven by v200) — arc.intents holds typed objects shaped like
+#: {"kind": <one of these>, ...}, never plain strings.
+#:
+#: v200 adds `place_no_stories` DELIBERATELY, as the schema bump ADR 0002's
+#: arc-card amendment requires rather than an additive change. The rationale:
+#: v199's landmark set is the first thing that can tell us about a place
+#: NOTHING in the vault happened in — "I lived in Costa Mesa" with no moments
+#: attached is new information the system could not see before, and the owner's
+#: ruling (lifehug/lifehug-platform#590) is that it is a gap the loop should
+#: ask about. It has no other way in: it is not a `timeline.UNKNOWN_KINDS`
+#: member (it asks WHAT, not WHEN, so the dating ledger must not count it) and
+#: it is never minted as a bank question (an open landmark is a resting state,
+#: not a debt). An arc-card intent is the only lane that fits, and reusing
+#: `timeline_gap` would have made one kind mean two different asks and made
+#: `question_judgment.arc_yield` unable to tell them apart.
 ARC_INTENT_KINDS = frozenset({
     "scene_slot",
     "neighborhood_sibling",
@@ -837,6 +850,7 @@ ARC_INTENT_KINDS = frozenset({
     "studio_slot",
     "sit_with",
     "demonstrated_knowledge_summary",
+    "place_no_stories",
 })
 
 
@@ -883,6 +897,44 @@ def render_timeline_whisper(intent: object) -> str:
         return _intent_label(intent)
 
 
+def place_no_stories_aside(session: object) -> dict | None:
+    """This session's place-with-no-stories aside, or None (v200).
+
+    The whisper's sibling, and deliberately simpler. A whisper has a raised/
+    unraised state because the timeline may be asked at most once per
+    conversation and a probe can be answered mid-session; a place aside has NO
+    counter to consult, because it leaves no side state behind at all — the
+    once-per-card cap is structural, applied by `arc_planner` when it plans the
+    card (at most one, ranked after `timeline_gap`, counted within the same
+    `DEFAULT_GAP_MAX`).
+
+    Like the whisper, an intent qualifies only when it carries a real probe, so
+    a bare ``{"kind": "place_no_stories"}`` renders exactly like every other
+    kind and nothing that reads a pre-v200 card changes shape.
+    """
+    doc = session if isinstance(session, dict) else {}
+    arc = doc.get("arc") if isinstance(doc.get("arc"), dict) else {}
+    for intent in arc.get("intents") or []:
+        if not isinstance(intent, dict) or str(intent.get("kind")) != "place_no_stories":
+            continue
+        probe = intent.get("probe")
+        text = probe.get("text") if isinstance(probe, dict) else probe
+        if str(text or "").strip():
+            return intent
+    return None
+
+
+def render_place_no_stories_aside(intent: object) -> str:
+    """The aside's one rendering
+    (`landmarks_interaction.render_place_no_stories`)."""
+    try:
+        import landmarks_interaction  # noqa: PLC0415
+
+        return landmarks_interaction.render_place_no_stories(intent)
+    except Exception:  # noqa: BLE001
+        return _intent_label(intent)
+
+
 def _assemble_session_block(session: dict) -> str:
     parts: list[str] = []
     arc = session.get("arc")
@@ -898,6 +950,12 @@ def _assemble_session_block(session: dict) -> str:
         whisper = timeline_whisper(session)
         if whisper is not None:
             parts.append(f"Timeline whisper: {render_timeline_whisper(whisper)}")
+        # v200: the second intent that carries a real ask. Same treatment, same
+        # gate (a probe must be present), and it never displaces the whisper —
+        # the planner already guarantees a card carries at most one of the two.
+        aside = place_no_stories_aside(session)
+        if aside is not None:
+            parts.append(f"Place with no stories: {render_place_no_stories_aside(aside)}")
     summary = session.get("rolling_summary")
     if summary:
         parts.append(f"Rolling summary: {summary}")
@@ -998,11 +1056,17 @@ def _current_intent_label(session: dict, intents: list) -> str:
     v196: an unraised timeline whisper wins the slot — it is the only intent
     that carries an actual question, and turn-instructions.md's direction for
     it ("only where it fits, once, any precision, never press") is attached
-    right here. Without one, this is v195's expression, unchanged.
+    right here. v200: a place-with-no-stories aside is the second such intent
+    and takes the slot when there is no whisper. Without either, this is v195's
+    expression, unchanged.
     """
     whisper = timeline_whisper(session)
     if whisper is not None:
         return render_timeline_whisper(whisper)
+    # v200: ranked after the whisper, exactly as the planner ranks them.
+    aside = place_no_stories_aside(session)
+    if aside is not None:
+        return render_place_no_stories_aside(aside)
     return _intent_label(intents[0]) if intents else "(no arc card)"
 
 

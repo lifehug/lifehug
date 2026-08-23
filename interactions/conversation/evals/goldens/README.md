@@ -65,6 +65,19 @@ platform's closed-vocabulary reconciliation at the next pin bump.
 long final user message (the incident's own shape — a several-hundred-word
 memory) that the closing turn visibly engages.
 
+**v200 (place-no-stories arcs) amendment**:
+`place_no_stories_asked_openly` is a NEW property id — the seventh arc-card
+intent kind, `place_no_stories`, is a place the person NAMED as a landmark
+with nothing in the vault that happened there, and a turn asserting this
+property must name that place, ask exactly one question, and never propose
+a date for agreement (`timeline_interaction.proposes_a_date`, the one
+definition shared with the timeline and landmarks lanes). A golden
+declaring it must carry the `place_no_stories` intent, with its `place`, in
+`arc.intents`. FLAGGED for the platform's closed-vocabulary reconciliation
+at the next pin bump. `chat-costa-mesa-place-no-stories.json` is the
+committed PASS example — the receipt lands first, then the place is asked
+about by name, with WHAT rather than WHEN.
+
 One exception to "every committed golden must pass every Layer-1 lint":
 `closing-scaffold-leak-bad-01.json` is a deliberately-broken fixture
 reproducing issue #163's leaked-scaffolding SHAPE (labeled hook field,

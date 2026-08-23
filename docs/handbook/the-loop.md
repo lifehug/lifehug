@@ -359,6 +359,29 @@ per conversation, and never penalized — a whisper that lands is a gift, not a
 cost. Whispers are general; each kind names its own agenda, and the
 **timeline whisper** is the first.
 
+**The place aside (v200) is the second.** v199's landmark set is the only
+thing that can reveal a place *nothing in the vault happened in* — you told
+us you lived in Costa Mesa from 1990 to 1993, and there is not one moment
+filed there. That is new information the landmark produced, and it is a
+**story** gap, never a dating one: the ask is what life was like there, never
+when it was. The weekly planner turns each such row
+(`timeline.timeline_data()["place_no_stories"]`) into a `place_no_stories`
+arc-card intent — the seventh member of `conversation.ARC_INTENT_KINDS` — and
+it rides an ordinary conversation exactly as the whisper does. It is never
+minted as a bank question and it never nags: an open landmark is a resting
+state, not a debt.
+
+**The two asks share one slot and one budget.** `timeline_gap` and
+`place_no_stories` are the only intents that carry a real question, so a card
+takes at most one of them, the whisper ranked first, and the week's total of
+both together is `arc_planner.DEFAULT_GAP_MAX` (3) — the same number, not a
+second dial. The question it answers is "how often may a conversation be
+asked to carry a second agenda", and that is one question, not two. Places
+are offered in the residence chain's own order (the person's own chronology);
+there is deliberately no score, because v196's `leverage` counts what a DATE
+would place and a story gap places nothing.
+<!-- parity: arc_planner.DEFAULT_GAP_MAX = 3 -->
+
 **The timeline gets asked two ways, and neither is a candidate.** The timeline
 whisper is the week's arc card carrying a keystone's real probe and the
 person's own landmarks into an ordinary conversation — raised only where it
@@ -385,7 +408,10 @@ surface, not a question (`system/arc_planner.py:89–91`;
 `date_contradiction` originates in
 `system/timeline_corroboration.py:222`). Gap findings shape *how* a
 queued question is asked, and what the viewer nudges you to fix — they do
-not themselves enter the bank.
+not themselves enter the bank. The same is true of the place aside: v200
+added a second consumer of the assembled timeline payload
+(`arc_planner.collect_places_without_stories`), and it too shapes how a
+queued question is asked rather than becoming a question of its own.
 
 ## 5. In the loop, adjacent, and out — worked examples
 

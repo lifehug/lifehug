@@ -209,7 +209,9 @@ class EntityCandidateTests(unittest.TestCase):
         expected = {
             "conversation": (
                 # v196: prompt/turn-instructions.md carries the whisper direction.
-                "9e201849154a49d698aabc48cd856f5358a0f9e3e31bea85ad0690075b4b1970"
+                # v200: plan/arc-templates.md names the seventh intent kind and
+                # evals/goldens/ gains chat-costa-mesa-place-no-stories.json.
+                "85bfad65fb9145d9f4fe7db1be977e84385dee0856a2613614ab7cd7c0328138"
             ),
             "question_candidate": (
                 # issue #181 (v188): question-candidate-placement-aside
