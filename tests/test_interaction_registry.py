@@ -30,6 +30,7 @@ class RegistryContractTests(unittest.TestCase):
                 ("entity_candidate", "entity_candidate"),
                 ("arc_walk", "arc_walk"),
                 ("timeline", "timeline"),
+                ("landmarks", "landmarks"),
             ],
         )
         for entry in value["interactions"]:

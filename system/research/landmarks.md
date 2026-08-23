@@ -778,7 +778,32 @@ nautical, a keystone architectural, a whisper human.
 
 Keep **landmark** as the research word (it is what the citations say) and
 **anchor** as the product and code word. This document's title uses the
-research word deliberately; the shipped surface should say Anchors.
+research word deliberately.
+
+### 4.4 The ruling: **Landmarks** (owner-set, 2026-08-23)
+
+The owner decided the other way, and the decision is better than the
+recommendation above. **Landmarks** is the product and user-facing word — and
+also the package, module and CLI name, so there is exactly one name from the
+surface down to the file on disk. **`anchor` keeps the meaning it already had
+in code**: the *derived* index a landmark's date becomes once it can bound
+something (`timeline.anchor_index`, `basis: "anchor"`,
+`chronology.from_anchor`, `timeline_interaction.anchors_for_person`).
+
+The split §4.3 missed is that these are two different things, not two names
+for one. **A landmark is the question and the answer; an anchor is what the
+answer turns into.** "Where did you live?" is a landmark; `1984/1990` sitting
+in the index and bounding nine other memories is an anchor. Collapsing them
+would have given one identifier two meanings — the defect the
+recurring-defect doctrine forbids — which is the very argument §4.3 used *for*
+collapsing them, pointed the wrong way.
+
+The sentence therefore reads: *"Your **landmarks** become the **anchors** that
+hold the timeline. The **keystone** is the landmark you haven't given yet. A
+**whisper** is how we ask for it."*
+
+The join in code is `landmarks_interaction.anchors_from_landmarks`. Shipped in
+v199 (`docs/pr-specs/landmarks.md`).
 
 ---
 

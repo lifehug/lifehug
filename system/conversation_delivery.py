@@ -202,6 +202,14 @@ class TurnShape:
     # owner ruling 7's mechanical form: the passive daily question's prompt
     # does not move by one byte).
     timeline_stage: str | None = None
+    # landmarks (v197, Design §D): additive, default None. A caller composing
+    # a landmark-collection turn sets this to the {landmark_stage} value
+    # ("open" | "ask" | "close") to have _output_contract_block() append the
+    # one optional "landmark" output key; every other caller leaves it None
+    # and the appendix stays byte-identical to pre-v197 output (required
+    # test: test_output_contract_block_byte_identical_without_landmark_stage
+    # — the passive daily question's prompt does not move by one byte).
+    landmark_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -468,6 +476,32 @@ def _output_contract_block(shape: TurnShape) -> str:
         if shape.timeline_stage is not None
         else ""
     )
+    # landmarks (v197, Design §D): the one additive "landmark" output key
+    # exists ONLY when the caller set shape.landmark_stage; absent it, line
+    # and note alike stay out, so an ordinary turn's appendix is
+    # byte-identical to pre-v197 output.
+    landmark_line = (
+        '  "landmark": {"domain": "the landmark domain you asked about", '
+        '"label": "what it is called", "date": {"best": "the EDTF date", '
+        '"granularity": "day | month | season | year | range | era", '
+        '"confidence": "certain | approximate | inferred | conjectural", '
+        '"basis": "stated | age | anchor | order | public_event | connector"}, '
+        '"span": {"start": {…}, "end": {…}}, "skipped": true | false} | null,\n'
+        if shape.landmark_stage is not None
+        else ""
+    )
+    landmark_note = (
+        '- "landmark" is null on every turn except one where the USER actually '
+        "gave you a landmark. Use the domain you were asking about and put "
+        "what they said in that rung's own key — the town in \"city\", the "
+        "street in \"address\", the school or the place in \"label\". A date "
+        "or a span only when they supplied one. A coarse answer is an answer: "
+        '"the eighties" is a real span, not a miss. When they skip, it is '
+        '{"domain": "<the domain>", "skipped": true}. Never invent a place, a '
+        "date, a name, or a domain you were not given.\n"
+        if shape.landmark_stage is not None
+        else ""
+    )
     return (
         "\n\n## OUTPUT FORMAT (runtime contract — reply with JSON only)\n\n"
         "Reply with a single JSON object and nothing else:\n\n"
@@ -482,6 +516,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         f"{entity_setup_line}"
         f"{answered_question_line}"
         f"{placed_line}"
+        f"{landmark_line}"
         '  "rolling_summary": "a short running summary of this session",\n'
         '  "insight_receipts": 0,\n'
         '  "extracted": {"facts": [], "entities": [], "candidate_ideas": [], '
@@ -500,6 +535,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         f"{entity_setup_note}"
         f"{answered_question_note}"
         f"{placed_note}"
+        f"{landmark_note}"
         '- "insight_receipts" counts the contributions in this message that '
         "cite a provenance id from the record block.\n"
         "- Everything in \"message\" is sent to the user verbatim; nothing else is.\n"
@@ -570,6 +606,7 @@ def parse_turn_output(raw: object) -> dict | None:
             data.get("answered_question_id")
         ),
         "placed": _parse_placed(data.get("placed")),
+        "landmark": _parse_landmark(data.get("landmark")),
         "rolling_summary": summary.strip() if isinstance(summary, str) else None,
         "insight_receipts": int(receipts) if isinstance(receipts, int) else 0,
         "extracted": extracted if isinstance(extracted, dict) else {},
@@ -792,6 +829,94 @@ def _parse_placed(raw: object) -> dict | None:
         if cleaned:
             parsed["anchors"] = cleaned[:_PLACED_MAX_ANCHORS]
     if not any(parsed.get(key) for key in ("best", "earliest", "latest")):
+        return None
+    return parsed
+
+
+#: landmarks (v197, Design §D): the structural layer of the additive
+#: ``landmark`` field. Keys are the union of the ladder rung names across the
+#: question set plus the record's own fields — deliberately a CLOSED set here
+#: and a second time in `landmarks_interaction.validate_landmark`, which
+#: checks the domain against the question set the structural layer cannot see.
+_LANDMARK_KEYS = frozenset({
+    "domain", "label", "place", "subject", "date", "span", "skipped",
+    "chain_complete",
+    # ladder rungs
+    "year", "month", "day", "city", "address", "household",
+    "name", "grades", "happened", "who", "what", "where", "branch",
+})
+_LANDMARK_TEXT_MAX_CHARS = 160
+_LANDMARK_DATE_KEYS = frozenset({
+    "best", "earliest", "latest", "granularity", "confidence", "basis",
+    "anchors", "provenance",
+})
+
+
+def _parse_landmark_date(raw: object) -> dict | None:
+    if not isinstance(raw, dict) or not raw or not set(raw) <= _LANDMARK_DATE_KEYS:
+        return None
+    parsed: dict = {}
+    for key in ("best", "earliest", "latest", "granularity", "confidence", "basis"):
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        if not value or len(value) > _PLACED_TEXT_MAX_CHARS:
+            return None
+        parsed[key] = value
+    if not any(parsed.get(key) for key in ("best", "earliest", "latest")):
+        return None
+    return parsed
+
+
+def _parse_landmark(raw: object) -> dict | None:
+    """Structural layer of the additive ``landmark`` field.
+
+    Accepts an object whose keys are a non-empty subset of
+    :data:`_LANDMARK_KEYS`, with short string values, an optional date, and an
+    optional ``{"start", "end"}`` span. Anything else — missing, ``null``, a
+    bare string, an extra key, an over-long label — degrades to ``None``,
+    exactly as every other additive field degrades: never an error. The
+    DOMAIN is not checked here; that is
+    `landmarks_interaction.validate_landmark`'s job, because only the question
+    set knows the closed domain list.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    if not set(raw) <= _LANDMARK_KEYS:
+        return None
+    parsed: dict = {}
+    for key, value in raw.items():
+        if key in ("date", "span", "skipped", "chain_complete"):
+            continue
+        if value is True:
+            parsed[key] = True
+            continue
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text or len(text) > _LANDMARK_TEXT_MAX_CHARS:
+            return None
+        parsed[key] = text
+    date = _parse_landmark_date(raw.get("date"))
+    if date is not None:
+        parsed["date"] = date
+    span = raw.get("span")
+    if isinstance(span, dict) and set(span) <= {"start", "end"}:
+        bounds = {}
+        for bound in ("start", "end"):
+            value = _parse_landmark_date(span.get(bound))
+            if value is not None:
+                bounds[bound] = value
+        if bounds:
+            parsed["span"] = bounds
+    if raw.get("skipped") is True:
+        parsed["skipped"] = True
+    if raw.get("chain_complete") is True:
+        parsed["chain_complete"] = True
+    if not parsed.get("domain"):
         return None
     return parsed
 

@@ -184,7 +184,8 @@ def _anchor_rows(anchors: object) -> list[dict]:
 
 
 def anchors_for_person(*, birth_date: object = None, periods: object = (),
-                       places: object = (), events: object = ()) -> tuple[dict, ...]:
+                       places: object = (), events: object = (),
+                       landmarks: object = None) -> tuple[dict, ...]:
     """The person's own dated landmarks, ordered — the life-history calendar.
 
     Birthday first (it dates everything else by arithmetic), then residences
@@ -192,8 +193,31 @@ def anchors_for_person(*, birth_date: object = None, periods: object = (),
     and role are the natural index of lifetime periods (Conway &
     Pleydell-Pearce 2000), which is why "when we lived in X" outperforms "what
     year".
+
+    v197: `landmarks` is the filed answer set from the Landmarks Interaction
+    (`landmarks_interaction.anchors_from_landmarks`'s output, or the raw store
+    it takes). It enters FIRST, so a landmark the person stated outright wins
+    over anything derived from a page, and it is what finally makes this
+    function return a non-empty set for most people
+    (`system/research/landmarks.md` §3.7).
     """
     rows: dict[str, dict] = {}
+    filed = landmarks
+    if isinstance(filed, dict) and any(
+        isinstance(v, list) for v in filed.values()
+    ):
+        import landmarks_interaction as _li  # noqa: PLC0415
+
+        filed = _li.anchors_from_landmarks(filed)
+    for key, row in (filed or {}).items():
+        if not isinstance(row, dict):
+            continue
+        record = chrono.from_dict(row.get("date"))
+        if record is None:
+            continue
+        rows[str(key)] = {"label": str(row.get("label") or key),
+                          "date": record,
+                          "kind": str(row.get("kind") or "landmark")}
     birth = chrono.from_dict(birth_date) if birth_date is not None else None
     if birth is not None:
         rows["birth"] = {"label": "when you were born", "date": birth, "kind": "birth"}
@@ -788,7 +812,48 @@ TIMELINE_LINT_CLASSES = (
     # is the one rule a single reply cannot see on its own — the caller
     # counts, exactly as it counts `no_new_bound_streak`.
     "one_per_conversation",
+    # v198 (go-deep.md §4.3, Lindsay et al. 2004): a session NEVER proposes a
+    # date and asks for agreement. True photographs plus suggestive
+    # interviewing produced false memories in 65-66% of participants — "the
+    # highest rate in any previously published study" — and a dating probe
+    # backed by the person's own evidence is precisely that configuration. The
+    # system elicits readings and does the arithmetic; the person supplies
+    # evidence, never confirmations. Shared verbatim with the landmarks lane
+    # (`landmarks_interaction.LANDMARK_LINT_CLASSES`) — one definition, two
+    # callers (recurring-defect doctrine).
+    "never_proposes_a_date",
 )
+
+#: The banned move: naming a date the person did not name and inviting a yes.
+#: Reporting back a date the ARITHMETIC produced is different and allowed —
+#: "you were twelve, so that puts it around 1986" states a derivation and
+#: shows its working; "was it 1986?" asks for a confirmation.
+PROPOSES_A_DATE_RES = (
+    re.compile(r"\b(?:was|were|is|would)\s+(?:it|that|this|they|you)\s+"
+               r"(?:in\s+)?(?:around\s+|about\s+|maybe\s+)?"
+               r"(?:1[89]\d{2}|20\d{2})\b", re.IGNORECASE),
+    re.compile(r"\b(?:sound|seem)s?\s+(?:about\s+)?right\s*\?"
+               r"|\bdoes\s+(?:1[89]\d{2}|20\d{2})\s+sound\b", re.IGNORECASE),
+    re.compile(r"\b(?:shall\s+we|let'?s|I'?ll)\s+(?:say|put\s+it\s+(?:at|down\s+as))\s+"
+               r"(?:around\s+|about\s+)?(?:1[89]\d{2}|20\d{2})\b", re.IGNORECASE),
+    re.compile(r"\bcan\s+I\s+put\s+(?:it\s+)?(?:down\s+)?(?:as|at)\s+"
+               r"(?:1[89]\d{2}|20\d{2})\b", re.IGNORECASE),
+)
+
+
+def proposes_a_date(text: object) -> object:
+    """The first span where a reply names a date and invites agreement.
+
+    One definition, two callers: the timeline lane and the landmarks lane both
+    run it, because "was it 1984?" is the same defect in both
+    (`system/research/go-deep.md` §4.3).
+    """
+    body = text if isinstance(text, str) else ""
+    for pattern in PROPOSES_A_DATE_RES:
+        match = pattern.search(body)
+        if match:
+            return match
+    return None
 
 #: `arc_planner.BANNED_PHRASE` is "what year", and that phrase must be a
 #: SUBSTRING of the first pattern here — `test_the_year_demand_patterns_cover_
@@ -907,6 +972,16 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
             "detail": "the timeline is raised once per conversation, where it "
                       "fits — a second ask is an interrogation",
             "span": [0, min(len(body), _SPAN_LIMIT)],
+        })
+
+    proposal = proposes_a_date(body)
+    if proposal is not None:
+        findings.append({
+            "lint": "timeline_gates.never_proposes_a_date",
+            "detail": "never name a date and ask them to agree — elicit the "
+                      "evidence and do the arithmetic (go-deep.md §4.3, "
+                      "Lindsay et al. 2004)",
+            "span": [proposal.start(), proposal.end()],
         })
 
     allowed = {str(year) for year in (known_years or ())}

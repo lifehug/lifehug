@@ -8,6 +8,7 @@
     {"id": "focus_candidate", "package": "focus_candidate"},
     {"id": "entity_candidate", "package": "entity_candidate"},
     {"id": "arc_walk", "package": "arc_walk"},
-    {"id": "timeline", "package": "timeline"}
+    {"id": "timeline", "package": "timeline"},
+    {"id": "landmarks", "package": "landmarks"}
   ]
 }

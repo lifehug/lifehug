@@ -118,9 +118,11 @@ are asked at onboarding (landmarks.md §5).
 - **Reconcile with issue #69** ("Incremental EHC"), whose contract says to
   *replace* a large upfront chronology survey and requires an owner decision.
   landmarks.md §6.5 argues the two are compatible; the owner still decides.
-- **Naming.** landmarks.md §4 recommends **Anchors** as the product word,
-  sitting beside the existing *keystone* and *whisper*. Ratify or replace
-  before any surface ships the word.
+- **Naming — SETTLED (owner, 2026-08-23).** landmarks.md §4.3 recommended
+  *Anchors*; the owner ruled **Landmarks**, and §4.4 records why the ruling is
+  better: a landmark is the question and the answer, an anchor is the derived
+  index the answer becomes, and they are two things rather than two names for
+  one. Shipped in v199.
 - **The grade↔year rule needs a suppression condition**, not just a ±1 band
   (landmarks.md §5.2, non-linear schooling).
 - **Specificity ladders per landmark** (landmarks.md §5.3, owner ruling): a

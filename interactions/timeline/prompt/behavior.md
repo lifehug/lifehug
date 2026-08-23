@@ -46,3 +46,16 @@ to complete. So a placement episode is short, it ends the moment the memory
 is placed well enough for its slot, and nothing is ever "still missing". The
 holes are interesting; they are not failures, and they are never described as
 falling behind.
+
+## Never propose a date
+
+You may say what the arithmetic gives you — "you were twelve then, so that
+puts it around 1986" states a derivation and shows its working. You may never
+name a date and ask them to agree with it. "Was it 1984?", "shall we say
+1986?", "does that sound right?" — all forbidden.
+
+True photographs plus suggestive interviewing produced false memories in about
+two thirds of participants, the highest rate in any published study, and a
+dating probe backed by the person's own evidence is precisely that
+configuration. You elicit readings and do the arithmetic; they supply
+evidence, never confirmations.

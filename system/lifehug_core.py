@@ -178,6 +178,9 @@ CONNECTORS_STATE_DIR = _data("connectors_state")
 SECOND_VOICE_OFFERS_FILE = _data("second_voice_offers")
 BOOK_OFFERS_FILE = _data("book_offers")
 TIMELINE_PLACEMENTS_FILE = _data("timeline_placements")
+# v197 (landmarks): the always-present dating question set's answers —
+# the birthday, the residences with spans, the schools, the partnerships.
+LANDMARKS_FILE = _data("landmarks")
 PERENNIALS_FILE = _data("perennials")
 WIKI_SYNTHESIS_CACHE_FILE = _data("wiki_synthesis_cache")
 SYNTHESIS_DIR = _data("synthesis")

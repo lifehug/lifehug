@@ -1,0 +1,29 @@
+# interactions/landmarks/interaction.yaml — flat scalar subset only
+interaction: landmarks
+version: 1.0.0
+extends: conversation
+extends.version: 1.0.0
+modes: collect
+load_order: identity|behavior|examples|landmarks|conversation|turn_instructions
+composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
+composition.leaf: prompt/turn-instructions.md|context/manifest.md
+role.router: haiku-class
+role.worker: sonnet-class
+role.planner: sonnet-class
+# landmarks (v197, Design §E): the stop rules. A landmark pass is never an
+# interrogation — the person is doing us a favour. system/
+# landmarks_interaction.py carries the same two numbers as constants and
+# test_stop_rule_knobs_match_the_module_constants pins them equal, so tuning
+# the knob and tuning the constant are one edit.
+knob.max_asks: 4
+knob.stop_after_skips: 2
+# How many landmark rows the {landmarks} block may carry.
+knob.landmark_display_limit: 8
+# How many open landmarks one Play offers.
+knob.plan_size: 6
+budget.identity: 800
+budget.behavior: 2000
+budget.examples: 1400
+budget.landmarks: 900
+budget.conversation: 1600
+budget.turn_instructions: 1400
