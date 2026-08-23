@@ -244,9 +244,10 @@ conversation side runs.
 | `entity_candidate` (v190) | **identity** — names, relation, living, and whether the roster already holds them | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` | `establish` · `settled` | `entity_candidate.entity_stage_for_session` | `entity_candidate.validate_entity_setup` (`entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`, caller-supplied roster slugs) | seven `entity_setup_gates.*` |
 | `arc_walk` (v193) | **arc walking** — work a target's open questions casually, in resumable episodes | `answered_question_id: "<qid>" \| null` | `open` · `walk` · `close` | `arc_walk.arc_stage_for_session` | `arc_walk.validate_answered_question_id` (exact membership in the episode's recomputed plan) | seven `arc_walk_gates.*` |
 | `timeline` (v195, amended v196) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| null` (a range with a basis is first-class; there is no deferral shape) | `open` · `place` · `close` | `timeline_interaction.timeline_stage_for_session` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | six `timeline_gates.*` |
+| `landmarks` (v197) | **the always-present dating question set** — the handful of dated facts every other memory hangs on | `landmark: {domain, label, rung values, date?, span?, skipped?} \| null` (a vague answer is an answer) | `open` · `ask` · `close` | `landmarks_interaction.landmark_stage_for_session` | `landmarks_interaction.validate_landmark` (closed domain set from `questions.yaml`, ladder rungs only, every date normalized through `chronology.parse_edtf`) | five `landmark_gates.*` |
 
 The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
-`entity_stage` · `arc_stage` · `timeline_stage`. Every one defaults to
+`entity_stage` · `arc_stage` · `timeline_stage` · `landmark_stage`. Every one defaults to
 `None`.
 
 `arc_walk` is the one child whose "roster" is computed rather than read:
@@ -270,9 +271,8 @@ stage, and one validator.
 ### Proposed, not built
 
 Future children the paradigm anticipates, with no files under
-`interactions/` yet: none today. The last entry here — `timeline`, seeded
-by the elicitation playbook in `system/research/chronology.md` §6 — shipped
-in v195.
+`interactions/` yet: none today. The last entry here — `landmarks`, seeded
+by `system/research/landmarks.md` — shipped in v197.
 
 ## Model-agnosticism rule
 

@@ -39,6 +39,9 @@ REQUIRED_GOLDEN_IDS = frozenset({
 _ALWAYS_APPLICABLE_LINTS = frozenset({
     "one_question_per_reply",
     "never_invents_a_date",
+    # v198 (go-deep.md §4.3): unconditional. There is no rung, and no stage,
+    # where naming a date and inviting agreement is correct.
+    "never_proposes_a_date",
 })
 _EARLY_RUNGS = frozenset({"content", "residence", "role"})
 

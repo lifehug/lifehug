@@ -60,7 +60,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | `{precision_so_far}` | `timeline_interaction.precision_so_far(session)` |
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["placed"]`, enabled by `TurnShape(timeline_stage=…)` |
 | Closed validation of that field | `timeline_interaction.validate_placed(value, anchors=…)` |
-| The six timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES` |
+| The seven timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES`. The seventh, `never_proposes_a_date`, is SHARED with the landmarks lane from one definition (`timeline_interaction.proposes_a_date`) |
 | Filing an accepted placement | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…)` |
 | The unknowns to Play | `timeline.unknowns(data)`, `timeline.UNKNOWN_KINDS`, `timeline.keystones(data)`, `timeline.KEYSTONE_CAP` |
 | The two ways a keystone is asked | `timeline_interaction.whisper_from_keystone`, `timeline_interaction.mint_keystone_question` / `insert_keystone_question` / `timeline_probe_index` |

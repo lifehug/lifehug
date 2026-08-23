@@ -1,0 +1,203 @@
+[
+ {
+  "fixture_id": "landmarks-open-birthday",
+  "turns": [
+   {
+    "message": "Before we go anywhere else — what's your birthday? It's the one date that does a lot of work later on.",
+    "landmark": null
+   },
+   {
+    "message": "1978. Good — every time you tell me you were about five, I can turn that into a year now.",
+    "landmark": {
+     "domain": "birth",
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": null,
+      "latest": null,
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-residence-chain",
+  "turns": [
+   {
+    "message": "Do you remember where you lived when you started school? Even just the town is plenty.",
+    "landmark": {
+     "domain": "residences",
+     "label": "Dayton",
+     "city": "Dayton"
+    }
+   },
+   {
+    "message": "Dayton it is. Do you remember the street?",
+    "landmark": {
+     "domain": "residences",
+     "label": "Bell Avenue",
+     "address": "Bell Avenue"
+    }
+   },
+   {
+    "message": "When did you move onto Bell Avenue, and when did you leave?",
+    "landmark": {
+     "domain": "residences",
+     "label": "Bell Avenue",
+     "span": {
+      "start": {
+       "best": "1984",
+       "earliest": null,
+       "latest": null,
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "1990",
+       "earliest": null,
+       "latest": null,
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-vague-is-an-answer",
+  "turns": [
+   {
+    "message": "Outside Dayton in the eighties — that already puts a lot of things in order. Was it the same house the whole time?",
+    "landmark": {
+     "domain": "residences",
+     "label": "outside Dayton",
+     "city": "outside Dayton"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-skip-is-final",
+  "turns": [
+   {
+    "message": "That's fine — we can leave the work side alone.",
+    "landmark": {
+     "domain": "work",
+     "skipped": true
+    }
+   },
+   {
+    "message": "Thanks for these. They'll make everything else easier to place.",
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-school-grades-not-years",
+  "turns": [
+   {
+    "message": "Which schools did you go to?",
+    "landmark": {
+     "domain": "schools",
+     "label": "Lincoln High",
+     "name": "Lincoln High"
+    }
+   },
+   {
+    "message": "Which grades were you at Lincoln High?",
+    "landmark": {
+     "domain": "schools",
+     "label": "Lincoln High",
+     "grades": "9 through 12"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-losses-offered-never-pressed",
+  "turns": [
+   {
+    "message": "If there's someone you've lost who belongs on this, we can put them in — only if you want to.",
+    "landmark": null
+   },
+   {
+    "message": "We'll leave it there.",
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-one-domain-per-turn",
+  "turns": [
+   {
+    "message": "Do you have children?",
+    "landmark": {
+     "domain": "children",
+     "happened": "yes"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-never-invents-a-domain",
+  "turns": [
+   {
+    "message": "Did you serve?",
+    "landmark": {
+     "domain": "pets",
+     "label": "Rufus"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-reports-the-arithmetic-never-asks-agreement",
+  "turns": [
+   {
+    "message": "When did you move onto Bell Avenue, and when did you leave?",
+    "landmark": {
+     "domain": "residences",
+     "label": "Bell Avenue",
+     "span": {
+      "start": {
+       "best": "1984",
+       "earliest": "1984",
+       "latest": "1984",
+       "granularity": "year",
+       "confidence": "certain",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "1990",
+       "earliest": "1990",
+       "latest": "1990",
+       "granularity": "year",
+       "confidence": "certain",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    }
+   },
+   {
+    "message": "Good — so anything you tell me that happened at the Bell house lands between '84 and '90 now, without either of us having to work it out.",
+    "landmark": null
+   }
+  ]
+ }
+]

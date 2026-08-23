@@ -14,3 +14,9 @@ timeline_gates.never_invents_a_date.compliance: 1.0
 # fits. The caller counts the asks; this class scores the reply that ignores
 # the count.
 timeline_gates.one_per_conversation.compliance: 1.0
+# v198 (go-deep.md §4.3, Lindsay et al. 2004): true photographs plus
+# suggestive interviewing produced false memories in 65-66% of
+# participants. A dating probe backed by the person's own evidence is
+# that configuration exactly, so the session never proposes a date and
+# asks for agreement. Shared verbatim with the landmarks lane.
+timeline_gates.never_proposes_a_date.compliance: 1.0

@@ -1,0 +1,326 @@
+[
+ {
+  "fixture_id": "landmarks-open-birthday",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "open",
+    "domain": "birth",
+    "rung": "year",
+    "sensitive": false,
+    "expected_landmark": null
+   },
+   {
+    "stage": "ask",
+    "domain": "birth",
+    "rung": "year",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "birth",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     },
+     "year": "1978"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-residence-chain",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "month": "04",
+     "day": "12",
+     "date": {
+      "best": "1978-04-12",
+      "earliest": null,
+      "latest": null,
+      "granularity": "day",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "city",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "residences",
+     "label": "Dayton",
+     "city": "Dayton"
+    }
+   },
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "address",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "residences",
+     "label": "Bell Avenue",
+     "address": "Bell Avenue"
+    }
+   },
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "span",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "residences",
+     "label": "Bell Avenue",
+     "span": {
+      "start": {
+       "best": "1984",
+       "earliest": "1984",
+       "latest": "1984",
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "1990",
+       "earliest": "1990",
+       "latest": "1990",
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-vague-is-an-answer",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "city",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "residences",
+     "label": "outside Dayton",
+     "city": "outside Dayton"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-skip-is-final",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "work",
+    "rung": "what",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "work",
+     "skipped": true
+    }
+   },
+   {
+    "stage": "close",
+    "domain": "work",
+    "rung": null,
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-school-grades-not-years",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": null,
+      "latest": null,
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "schools",
+    "rung": "name",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "schools",
+     "label": "Lincoln High",
+     "name": "Lincoln High"
+    }
+   },
+   {
+    "stage": "ask",
+    "domain": "schools",
+    "rung": "grades",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "schools",
+     "label": "Lincoln High",
+     "grades": "9 through 12"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-losses-offered-never-pressed",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "losses",
+    "rung": "happened",
+    "sensitive": true,
+    "expected_landmark": null
+   },
+   {
+    "stage": "close",
+    "domain": "losses",
+    "rung": null,
+    "sensitive": true,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-one-domain-per-turn",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": null,
+      "latest": null,
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "children",
+    "rung": "happened",
+    "sensitive": false,
+    "domains_named": [
+     "children"
+    ],
+    "expected_landmark": {
+     "domain": "children",
+     "happened": "yes"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-never-invents-a-domain",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "military",
+    "rung": "happened",
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-reports-the-arithmetic-never-asks-agreement",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "span",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "residences",
+     "label": "Bell Avenue",
+     "span": {
+      "start": {
+       "best": "1984",
+       "earliest": "1984",
+       "latest": "1984",
+       "granularity": "year",
+       "confidence": "certain",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "1990",
+       "earliest": "1990",
+       "latest": "1990",
+       "granularity": "year",
+       "confidence": "certain",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    }
+   },
+   {
+    "stage": "close",
+    "domain": "residences",
+    "rung": null,
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
+ }
+]

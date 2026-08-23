@@ -78,6 +78,10 @@ READ_ONLY_COMMANDS = frozenset({
     # the seat gate scores committed goldens, and the timeline plan
     # recomputes unknowns from the vault and prints them.
     "timeline-evals",
+    # landmarks (v197, Design §E): both are pure reads — the seat gate
+    # scores committed goldens, and the landmarks plan recomputes the
+    # open landmark rows from the vault and prints them.
+    "landmarks-evals",
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
@@ -165,6 +169,7 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # state index that points at them — a vault mutator, so it takes the
     # writer lock like the rest of the source-repair family.
     "source-filenames-repair",
+    "landmark-record",
     "source-lint", "source-manifest", "timeline-place", "timeline-retire",
     "timeline-unplace", "unretract",
 })
@@ -1446,10 +1451,77 @@ def cmd_timeline_evals(args: argparse.Namespace) -> int:
     return run_python("timeline_evals.py", flags)
 
 
+def cmd_landmarks_evals(args: argparse.Namespace) -> int:
+    flags = ["--json"] if args.json else []
+    if args.live:
+        flags.append("--live")
+    return run_python("landmarks_evals.py", flags)
+
+
+def cmd_landmark_record(args: argparse.Namespace) -> int:
+    """File one landmark answer (v197). The only writer for the landmark set."""
+    import chronology as _chrono  # noqa: PLC0415
+    import landmarks_interaction as _li  # noqa: PLC0415
+    import timeline as _timeline  # noqa: PLC0415
+
+    try:
+        row = _li.domain_row(args.domain)
+    except _li.LandmarkInteractionError as exc:
+        print(f"error: {exc}")
+        return 1
+    record: dict = {"domain": row["domain"]}
+    if args.label:
+        record["label"] = args.label
+    for field in ("place", "subject"):
+        value = getattr(args, field, None)
+        if value:
+            record[field] = value
+    for rung in row["ladder"]:
+        value = getattr(args, rung.replace("-", "_"), None)
+        if value:
+            record[rung] = value
+    if args.date:
+        parsed = _chrono.parse_edtf(args.date, basis="stated")
+        if parsed is None:
+            print(f"error: unreadable date {args.date!r}")
+            return 1
+        record["date"] = parsed.to_dict()
+    span = {}
+    for bound, flag in (("start", args.start), ("end", args.end)):
+        if not flag:
+            continue
+        parsed = _chrono.parse_edtf(flag, basis="stated")
+        if parsed is None:
+            print(f"error: unreadable {bound} {flag!r}")
+            return 1
+        span[bound] = parsed.to_dict()
+    if span:
+        record["span"] = span
+    if args.complete:
+        record["chain_complete"] = True
+    validated = _li.validate_landmark(record)
+    if validated is None:
+        print("error: nothing to record")
+        return 1
+    saved = _timeline.save_landmark(validated["domain"], validated)
+    print(f"recorded {validated['domain']}: "
+          f"{saved.get('label') or _li.rung_reached(saved, row) or 'noted'}")
+    return 0
+
+
 def cmd_arc_plan_target(args: argparse.Namespace) -> int:
     # v195 (ADR 0024): `--timeline` plans over timeline UNKNOWNS, not bank
     # questions, so it dispatches to the timeline plan builder rather than
     # widening `arc_walk.ARC_TARGET_KINDS` (contract deviation 3).
+    # v197 (landmarks): `--landmarks` walks the OPEN landmark rows as an
+    # episode — the same dispatch shape `--timeline` uses.
+    if getattr(args, "landmarks", False):
+        flags = []
+        if args.episode_size is not None:
+            flags.extend(["--limit", str(args.episode_size)])
+        if args.json:
+            flags.append("--json")
+        return run_python("landmarks_interaction.py", flags)
     if getattr(args, "timeline", False):
         flags = []
         if getattr(args, "era", None):
@@ -2778,6 +2850,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_timeline_evals)
 
+    p = sub.add_parser("landmarks-evals", help="Run Landmarks Interaction evals")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_landmarks_evals)
+
+    p = sub.add_parser("landmark-record",
+                       help="File one landmark answer (the always-present dating set)")
+    p.add_argument("domain", help="landmark domain (birth, residences, schools, …)")
+    p.add_argument("--label", default="", help="what this landmark is called")
+    p.add_argument("--place", default="")
+    p.add_argument("--subject", default="")
+    p.add_argument("--date", default="", help="EDTF date for a point landmark")
+    p.add_argument("--start", default="", help="EDTF start of a span")
+    p.add_argument("--end", default="", help="EDTF end of a span")
+    p.add_argument("--complete", action="store_true",
+                   help="the chain is finished — stop offering more of this domain")
+    for rung in ("year", "month", "day", "city", "address", "household",
+                 "name", "grades", "happened", "who", "what", "where", "branch"):
+        p.add_argument(f"--{rung}", default="", help=f"ladder rung: {rung}")
+    p.set_defaults(func=cmd_landmark_record)
+
     p = sub.add_parser(
         "arc-plan-target",
         help="Plan an arc-walk episode for a Play target (read-only, no writes)",
@@ -2790,6 +2883,8 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--queue", action="store_true", help="this week's queue")
     group.add_argument("--timeline", action="store_true",
                        help="this vault's timeline unknowns, by leverage")
+    group.add_argument("--landmarks", action="store_true",
+                       help="this vault's OPEN landmarks, by ladder cost")
     p.add_argument("--era", help="with --timeline: scope to one period slug")
     p.add_argument("--episode-size", type=int, default=None)
     p.add_argument("--json", action="store_true")

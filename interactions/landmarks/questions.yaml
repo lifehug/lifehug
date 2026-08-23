@@ -1,0 +1,113 @@
+# interactions/landmarks/questions.yaml — the always-present dating question
+# set, as DATA. Flat scalar subset only (lifehug_core._parse_simple_yaml),
+# same convention as interaction.yaml.
+#
+# Research: system/research/landmarks.md. Every ordering and precision choice
+# below is sourced there; the short form is in each domain's `why`.
+#
+# Per domain:
+#   order        the position in the set (1 = first)
+#   onboarding   asked at onboarding, in GENERALITIES (owner ruling 1)
+#   ask          the general onboarding question — never "what year" except
+#                `birth`, the one legitimate date opener (landmarks.md §2.1)
+#   ladder       the specificity ladder, coarse -> fine, pipe-separated
+#                (owner ruling 3: a vague answer is ANSWERED; it stays open
+#                only because more would unlock more)
+#   complete_at  the rung at which the domain stops being offered
+#   precision    the grain we expect and store — asking finer manufactures
+#                false precision (landmarks.md §2.4)
+#   unlocks      the arithmetic this landmark makes possible
+#   chain        true when the answer is a LIST walked to the present
+#   sensitive    true when the domain is offered, never asked
+#   why          the one-line sourced reason this domain is here
+
+version: 1
+domains: birth|residences|schools|partnerships|children|work|military|losses
+
+birth.order: 1
+birth.onboarding: true
+birth.ask: What's your birthday?
+birth.ladder: year|month|day
+birth.complete_at: day
+birth.precision: day
+birth.unlocks: age_arithmetic|grade_arithmetic
+birth.chain: false
+birth.sensitive: false
+birth.why: The axis. Every age statement becomes a year; the one legitimate date opener.
+
+residences.order: 2
+residences.onboarding: true
+residences.ask: Do you remember where you lived? Where was that?
+residences.ladder: city|address|span|household
+residences.complete_at: span
+residences.precision: year
+residences.unlocks: span_containment|parallel_cue|reference_intervals
+residences.chain: true
+residences.sensitive: false
+residences.why: A closed list that tiles the whole timeline; the LHC's first row.
+
+schools.order: 3
+schools.onboarding: true
+schools.ask: Which schools did you go to?
+schools.ladder: name|place|grades|span
+schools.complete_at: span
+schools.precision: academic_year
+schools.unlocks: grade_arithmetic|birth_year_corroboration
+schools.chain: true
+schools.sensitive: false
+schools.why: The second closed list, and the only domain with an external calendar grid.
+
+partnerships.order: 4
+partnerships.onboarding: true
+partnerships.ask: Have you ever been married, or had a long partnership?
+partnerships.ladder: happened|who|year|month
+partnerships.complete_at: month
+partnerships.precision: month
+partnerships.unlocks: span_containment|entity_date
+partnerships.chain: false
+partnerships.sensitive: false
+partnerships.why: Reported to the exact month in the LHC's validation data (26 of 28).
+
+children.order: 5
+children.onboarding: true
+children.ask: Do you have children?
+children.ladder: happened|who|year|month
+children.complete_at: month
+children.precision: month
+children.unlocks: span_containment|entity_date
+children.chain: false
+children.sensitive: false
+children.why: Month-exact in validation (9 of 10), and dates another person's whole page.
+
+work.order: 6
+work.onboarding: false
+work.ask: What work have you done?
+work.ladder: what|where|span
+work.complete_at: span
+work.precision: year
+work.unlocks: parallel_cue
+work.chain: true
+work.sensitive: false
+work.why: Dense but churny — 72% agreement across the full spectrum; year grain only.
+
+military.order: 7
+military.onboarding: false
+military.ask: Did you serve?
+military.ladder: happened|branch|span
+military.complete_at: span
+military.precision: month
+military.unlocks: span_containment
+military.chain: false
+military.sensitive: false
+military.why: Sharply bounded and institutionally dated.
+
+losses.order: 8
+losses.onboarding: false
+losses.ask: Is there someone you have lost that belongs on this?
+losses.ladder: happened|who|year
+losses.complete_at: year
+losses.precision: year
+losses.unlocks: terminus_ante_quem
+losses.chain: false
+losses.sensitive: true
+losses.why: A common terminus ante quem — offered, never asked, never at onboarding.

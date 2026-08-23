@@ -49,7 +49,8 @@ runs it. Eight exist today, each with its own handbook page:
 [Focus Candidate](focus-candidate.md) (onboarding),
 [Entity Candidate](entity-candidate.md) (identity),
 [Arc Walk](arc-walk.md) (arc walking), and
-[Timeline](timeline.md) (placing a memory in time).
+[Timeline](timeline.md) (placing a memory in time), and
+[Landmarks](landmarks.md) (the always-present dating question set).
 
 **The child-interaction paradigm.** Conversation is the parent; a child
 adds exactly ONE goal, a stage-keyed `prompt/turn-instructions.md` leaf
@@ -246,10 +247,10 @@ roster-fold dedupe layers beneath it are already the floor (see [Focuses
 |---|---|
 | The pattern's own definition | `interactions/README.md` |
 | Closed package registry | `interactions/registry.json` |
-| Eight shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/`, `interactions/focus_candidate/`, `interactions/entity_candidate/`, `interactions/arc_walk/`, `interactions/timeline/` |
+| Nine shipped interactions | `interactions/conversation/`, `interactions/question_judgment/`, `interactions/focus_curation/`, `interactions/question_candidate/`, `interactions/focus_candidate/`, `interactions/entity_candidate/`, `interactions/arc_walk/`, `interactions/timeline/`, `interactions/landmarks/` |
 | Registry, composition, and package audit | `system/interaction_registry.py` |
 | The flat-YAML parser every `interaction.yaml` depends on | `system/lifehug_core.py:557`, `_parse_simple_yaml` |
-| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals`, `lifehug.py focus-candidate-evals --json`, `lifehug.py entity-candidate-evals --json`, `lifehug.py arc-walk-evals --json`, `lifehug.py timeline-evals --json` |
+| Eval CLIs | `lifehug.py conversation-evals`, `lifehug.py question-candidate-evals`, `lifehug.py focus-candidate-evals --json`, `lifehug.py entity-candidate-evals --json`, `lifehug.py arc-walk-evals --json`, `lifehug.py timeline-evals --json`, `lifehug.py landmarks-evals --json` |
 | New-interaction checklist | `interactions/README.md`'s "The new-interaction checklist" section (12 steps: README → `interaction.yaml` → `prompt/` → `router/` if needed → `context/manifest.md` → `overlays/` → `evals/` → `plan/` if needed → vault-contract registration → `framework_files` registration → an ADR → no default seat until evals pass) |
 | Guard tests | `tests/test_interaction_evals.py`, `tests/test_conversation_router.py`, `tests/test_question_judgment.py`, `tests/test_focus_duplicate_curation.py` (repo-verify exact names before citing in a PR) |
 

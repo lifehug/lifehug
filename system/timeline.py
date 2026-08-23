@@ -46,12 +46,14 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
+import landmarks_interaction  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
 from lifehug_core import (  # noqa: E402
     CLASSIFICATIONS_DIR,
     CONNECTORS_STATE_DIR,
     ENTITY_ROSTERS_DIR,
+    LANDMARKS_FILE,
     MANUAL_SOURCES_DIR,
     STATE_DIR,
     TIMELINE_PLACEMENTS_FILE,
@@ -622,6 +624,7 @@ def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str,
 # ---------------------------------------------------------------------------
 
 PLACEMENTS_FILE = TIMELINE_PLACEMENTS_FILE
+LANDMARKS_STORE = LANDMARKS_FILE
 
 
 def placement_key(event: dict) -> str:
@@ -670,6 +673,79 @@ def remove_placement(key: str) -> bool:
         return False
     write_json(PLACEMENTS_FILE, data)
     return True
+
+
+# ---------------------------------------------------------------------------
+# The landmark store (v197) — the answers to the always-present question set.
+# ---------------------------------------------------------------------------
+
+LANDMARKS_SCHEMA_VERSION = 1
+
+
+def load_landmarks() -> dict:
+    """``{domain: [entry, ...]}`` — every landmark the person has given.
+
+    Degrades to an empty set rather than raising: a hand-edited or
+    half-written store must never take the timeline down.
+    """
+    data = read_json(LANDMARKS_STORE, default=None)
+    if not isinstance(data, dict):
+        return {}
+    domains = data.get("domains")
+    if not isinstance(domains, dict):
+        return {}
+    return {str(key): [e for e in (value or []) if isinstance(e, dict)]
+            for key, value in domains.items() if isinstance(value, list)}
+
+
+def save_landmark(domain: str, record: object) -> dict:
+    """Add or replace one landmark entry, keyed by its label within a domain.
+
+    Replacement is by ``label`` because the ladder revisits the same subject —
+    a city today, an address next week, a span after that — and each pass adds
+    rungs to the SAME entry rather than making a second one.
+    """
+    if not isinstance(record, dict):
+        raise ValueError("a landmark record must be an object")
+    key = str(domain or "").strip()
+    if not key:
+        raise ValueError("a landmark needs a domain")
+    data = read_json(LANDMARKS_STORE, default=None)
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("version", LANDMARKS_SCHEMA_VERSION)
+    domains = data.setdefault("domains", {})
+    if not isinstance(domains, dict):
+        domains = data["domains"] = {}
+    entries = [e for e in (domains.get(key) or []) if isinstance(e, dict)]
+    label = str(record.get("label") or "").strip()
+    merged = dict(record)
+    for existing in entries:
+        if str(existing.get("label") or "").strip() == label:
+            merged = {**existing, **record}
+            break
+    entries = [e for e in entries
+               if str(e.get("label") or "").strip() != label] + [merged]
+    domains[key] = entries
+    write_json(LANDMARKS_STORE, data)
+    return merged
+
+
+def landmark_birth_date(landmarks: object = None) -> object:
+    """The person's birthday as a `chronology.DateRecord`, or None.
+
+    This is the function that makes `chronology.from_age` reachable in
+    production (`system/research/landmarks.md` §3.7): before v197 `birth_date`
+    was a parameter nothing ever supplied.
+    """
+    filed = landmarks if isinstance(landmarks, dict) else load_landmarks()
+    for entry in filed.get("birth") or ():
+        if not isinstance(entry, dict):
+            continue
+        record = chrono.from_dict(entry.get("date"))
+        if record is not None:
+            return record
+    return None
 
 
 def _keyword_slot(haystack: str, periods: list[dict]) -> str | None:
@@ -1236,11 +1312,36 @@ def leverage(anchor_key: str, index: dict[str, set[str]]) -> int:
 
 
 def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
-    """The top `n` anchors by leverage — "one answer would place 14 moments".
+    """A GREEDY PLAN over the residual graph — not a top-`n` leverage list.
 
-    Ordered by leverage descending, then by how CHEAP the playbook says the
-    probe is (a high-leverage anchor that needs an expensive probe loses to an
-    equally leveraged one that needs a cheap one), then by key.
+    v198 (`system/research/go-deep.md` §8.2/§8.3): ordering independently by
+    leverage double-counts. On real vault data one star's resolve set was a
+    strict SUBSET of the other's, so the second star's marginal gain was
+    **zero** — two questions that place exactly what one question places.
+
+    So the list is built the way a plan is: take the anchor with the largest
+    gain against what is *still* unknown, remove what it covers, repeat.
+
+    ```
+    S ← ∅
+    for i in 1..n:
+        aᵢ    ← argmax_a |R(a) minus S|   # marginal gain, not leverage
+        gainᵢ ← |R(aᵢ) minus S|
+        S     ← S ∪ R(aᵢ)
+    ```
+
+    The coverage objective is monotone submodular, so greedy is within
+    `(1 − 1/e) ≈ 63%` of optimal ([Nemhauser, Wolsey & Fisher, 1978](https://doi.org/10.1007/BF01588971));
+    at `n = 2` nothing better is worth building.
+
+    Each row keeps `leverage` — its TOTAL resolve set, which is the number the
+    person is shown ("one answer would place 14 moments") — and gains `gain`,
+    the marginal contribution that earned it its place in the plan. An anchor
+    whose marginal gain is zero is never starred, however large its leverage.
+
+    Ties break by how CHEAP the playbook says the probe is (a high-gain anchor
+    that needs an expensive probe loses to an equally gaining one that needs a
+    cheap one), then by key.
 
     v196: every row carries the IDENTITY it is asked under —
     `question_id` (`tl:<anchor-slug>`), the `unknown_keys` one answer would
@@ -1287,8 +1388,27 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
             "probe": probe,
             "anchors": [dict(row) for row in anchor_rows],
         })
-    scored.sort(key=lambda row: (-row["leverage"], row["probe"].get("cost", 99), row["anchor"]))
-    return scored[:max(int(n), 0)]
+    # The greedy plan over the residual graph (go-deep.md §8.3).
+    plan: list[dict] = []
+    covered: set[str] = set()
+    remaining = list(scored)
+    for _ in range(max(int(n), 0)):
+        best = None
+        best_key = None
+        for row in remaining:
+            gain = len(set(row["unknown_keys"]) - covered)
+            if gain <= 0:
+                continue
+            key = (-gain, row["probe"].get("cost", 99), row["anchor"])
+            if best_key is None or key < best_key:
+                best, best_key = row, key
+        if best is None:
+            break  # nothing left adds anything — a shorter plan is the honest one
+        best["gain"] = -best_key[0]
+        plan.append(best)
+        covered |= set(best["unknown_keys"])
+        remaining = [row for row in remaining if row is not best]
+    return plan
 
 
 # ---------------------------------------------------------------------------
@@ -1296,7 +1416,7 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def anchor_index(periods: list[dict], entities: list[dict], events: list[dict],
-                 birth_date: object = None) -> dict:
+                 birth_date: object = None, landmarks: object = None) -> dict:
     """`{key: {label, date, kind}}` — the person's own dated landmarks.
 
     This is the life-history calendar as data (Freedman et al. 1988): the
@@ -1308,6 +1428,13 @@ def anchor_index(periods: list[dict], entities: list[dict], events: list[dict],
     birth = chrono.from_dict(birth_date) if birth_date is not None else None
     if birth is not None:
         index["birth"] = {"label": "when you were born", "date": birth, "kind": "birth"}
+    # v197 (landmarks): the always-present question set's own answers enter
+    # FIRST, so a landmark the person stated outright wins over anything the
+    # compiler happened to derive from a page. `landmarks` is passed by
+    # `timeline_data`; a caller that does not pass it gets the pre-v197 index.
+    for key, row in (landmarks or {}).items():
+        if isinstance(row, dict) and row.get("date") is not None:
+            index.setdefault(key, dict(row))
     for entity in entities:
         if entity.get("type") != "place" or entity.get("date") is None:
             continue
@@ -1329,6 +1456,22 @@ def anchor_index(periods: list[dict], entities: list[dict], events: list[dict],
 
 def timeline_data(evidence: list[dict] | None = None,
                   birth_date: object = None) -> dict:
+    # v197 (landmarks): the store is read ONCE here and threaded through, and
+    # `birth_date` finally has a source. Before v197 it was a parameter no
+    # production caller ever passed, which made `chronology.from_age`
+    # unreachable in production (`system/research/landmarks.md` §3.7).
+    # Guarded: a landmark problem must never take the timeline down — the same
+    # discipline v196 applies to the keystone read.
+    try:
+        filed_landmarks = load_landmarks()
+        landmark_anchors = landmarks_interaction.anchors_from_landmarks(filed_landmarks)
+    except Exception:  # noqa: BLE001
+        filed_landmarks, landmark_anchors = {}, {}
+    if birth_date is None:
+        try:
+            birth_date = landmark_birth_date(filed_landmarks)
+        except Exception:  # noqa: BLE001
+            birth_date = None
     periods = load_periods()
     entities = load_entities()
     entity_lineup, unplaced_entities = line_up_entities(entities, periods)
@@ -1336,9 +1479,11 @@ def timeline_data(evidence: list[dict] | None = None,
     # v195: two passes. The first resolves stated dates only (load_events);
     # the anchor index is then built from whatever IS dated, and the second
     # pass turns "about five" and "before the move" into real intervals.
-    anchors = anchor_index(periods, entities, events, birth_date=birth_date)
+    anchors = anchor_index(periods, entities, events, birth_date=birth_date,
+                           landmarks=landmark_anchors)
     resolve_event_dates(events, anchors=anchors, birth_date=birth_date)
-    anchors = anchor_index(periods, entities, events, birth_date=birth_date)
+    anchors = anchor_index(periods, entities, events, birth_date=birth_date,
+                           landmarks=landmark_anchors)
     placements = load_placements()
     event_lineup, unplaced_events = place_events(events, periods, placements)
 
@@ -1434,4 +1579,77 @@ def timeline_data(evidence: list[dict] | None = None,
     data["keystones"] = keystones(data)
     data["counts"]["unknowns"] = len(all_unknowns)
     data["counts"]["unknowns_offered"] = len(data["unknowns"])
+    # v197 (landmarks, owner rulings 2 and 4): every landmark domain with its
+    # status and its next question, so a host can render ONLY the open ones —
+    # and the gap a landmark set is the only thing that can reveal: a place
+    # the person told us about that has nothing in it.
+    try:
+        data["landmarks"] = list(landmark_rows_for(data, landmarks=filed_landmarks))
+        data["place_no_stories"] = list(
+            landmarks_interaction.places_without_stories(
+                filed_landmarks, event_places=_event_place_labels(data)
+            )
+        )
+    except Exception:  # noqa: BLE001
+        data["landmarks"], data["place_no_stories"] = [], []
+    data["counts"]["landmarks_open"] = sum(
+        1 for row in data["landmarks"] if row.get("status") != "complete"
+    )
     return data
+
+
+def landmark_rows_for(data: dict, *, landmarks: object = None) -> tuple[dict, ...]:
+    """`landmarks_interaction.landmark_rows` with the keystone star applied.
+
+    Owner ruling 5: the ★ moves with the leverage. `keystones()` ranks
+    *derived* anchors — `period:<slug>`, `event:…`, `entity:<slug>` — so the
+    star is placed by mapping the current keystone back to the landmark domain
+    whose next answer would supply it:
+
+    * **No birth date filed → ★ `birth`.** Unarguable and independent of the
+      keystones: with no axis `chronology.from_age` cannot fire at all, so a
+      birthday is the highest-leverage single answer this vault can receive.
+    * **A `period:` or a place `entity:` keystone → ★ `residences`.** Both are
+      answered by the residence chain — an era's bounds and a place's span are
+      the same question in the sourced playbook ("where were you living
+      then?", rung 2).
+    * Otherwise no star. The set is never starred for the sake of it.
+    """
+    filed = landmarks if isinstance(landmarks, dict) else load_landmarks()
+    if landmark_birth_date(filed) is None:
+        return landmarks_interaction.landmark_rows(filed,
+                                                   keystone_domains=("birth",))
+    place_slugs = {
+        str(row.get("slug"))
+        for rows in (data.get("entity_lineup") or {}).values()
+        for row in rows or ()
+        if isinstance(row, dict) and row.get("type") == "place"
+    }
+    starred: set[str] = set()
+    for row in data.get("keystones") or ():
+        if not isinstance(row, dict):
+            continue
+        anchor = str(row.get("anchor") or "")
+        if anchor.startswith("period:"):
+            starred.add("residences")
+        elif anchor.startswith("entity:") and anchor.split(":", 1)[1] in place_slugs:
+            starred.add("residences")
+    return landmarks_interaction.landmark_rows(filed, keystone_domains=starred)
+
+
+def _event_place_labels(data: dict) -> tuple[str, ...]:
+    """Every place label a placed moment already sits in — the set a
+    `place_no_stories` gap is checked against."""
+    labels: set[str] = set()
+    for band in data.get("bands") or ():
+        for place in (band or {}).get("places") or ():
+            title = str((place or {}).get("title") or "").strip()
+            if title:
+                labels.add(title)
+    for rows in (data.get("entity_lineup") or {}).values():
+        for entity in rows or ():
+            if isinstance(entity, dict) and entity.get("type") == "place":
+                title = str(entity.get("title") or "").strip()
+                if title:
+                    labels.add(title)
+    return tuple(sorted(labels))
