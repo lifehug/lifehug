@@ -122,6 +122,10 @@ CHARS_PER_TOKEN = 4  # contract-pinned approximation for budget truncation
 #: prompt's own transcript allowance (`budget.session`, ADR 0015).
 DEFAULT_CLOSING_TRANSCRIPT_BUDGET = 1200
 
+#: Default `budget.session` (tokens) when the manifest is absent or the
+#: knob isn't an int — the turn prompt's own transcript allowance.
+DEFAULT_SESSION_BUDGET = 1200
+
 #: Default `knob.asking_supply_top_k` (ADR 0016) when the manifest is
 #: absent or the knob isn't an int.
 DEFAULT_ASKING_SUPPLY_TOP_K = 3
@@ -661,11 +665,59 @@ def _read_framework_text(*parts: str) -> str:
     return read_conversation_definition(*parts)
 
 
-def _truncate(text: str, budget_tokens: object) -> str:
+#: The marker appended to any block this module had to shorten, and the
+#: marker that stands in for whole turns dropped out of a transcript
+#: (v201, lifehug#206). It exists because a BARE cut is indistinguishable
+#: from a person who stopped mid-sentence: the incident that produced this
+#: constant was a model that read a budget cut as an interrupted speaker
+#: and spent three consecutive turns asking the person to finish a sentence
+#: they had already finished. A marker the prompt explains is elision is
+#: the difference between "there is more I cannot see" and "you trailed
+#: off".
+ELISION_MARKER = "[…]"
+
+#: The transcript-level form, on its own line — whole turns were dropped,
+#: not characters shaved.
+TRANSCRIPT_ELISION_LINE = "[… earlier turns in this conversation elided for length …]"
+
+#: How many characters of slack `_elide` will walk backward looking for a
+#: clean boundary before it gives up and accepts a word break. Bounded so a
+#: block with no whitespace at all still gets shortened.
+_ELISION_LOOKBACK = 400
+
+
+def _elide(text: str, budget_tokens: object) -> str:
+    """Shorten ``text`` to its budget WITHOUT ever cutting mid-word.
+
+    v201 (lifehug#206). The previous implementation was ``text[:limit]`` — a
+    bare character cut that routinely landed inside a word, and, on the
+    SESSION block, inside the person's own most recent sentence. A model
+    reading that cannot tell a budget from a speaker who trailed off.
+
+    So: walk back to the nearest paragraph break, then sentence end, then
+    word break, and append `ELISION_MARKER` so the reader is TOLD the block
+    was shortened. Never a bare cut, never mid-word.
+    """
     if not isinstance(budget_tokens, int):
         return text
     limit = budget_tokens * CHARS_PER_TOKEN
-    return text if len(text) <= limit else text[:limit]
+    if len(text) <= limit:
+        return text
+    room = max(limit - len(ELISION_MARKER) - 1, 0)
+    head = text[:room]
+    floor = max(len(head) - _ELISION_LOOKBACK, 0)
+    for boundary in ("\n\n", ". ", ".\n", "? ", "! ", "\n", " "):
+        cut = head.rfind(boundary, floor)
+        if cut > 0:
+            head = head[: cut + (len(boundary) if boundary.strip() else 0)]
+            break
+    return f"{head.rstrip()} {ELISION_MARKER}"
+
+
+def _truncate(text: str, budget_tokens: object) -> str:
+    """Back-compat alias for `_elide` — kept because callers and tests
+    outside this module reference the older name."""
+    return _elide(text, budget_tokens)
 
 
 def _assemble_profile_block(root: Path) -> str:
@@ -935,7 +987,52 @@ def render_place_no_stories_aside(intent: object) -> str:
         return _intent_label(intent)
 
 
-def _assemble_session_block(session: dict) -> str:
+def _session_transcript_lines(turns: list, char_budget: int) -> list[str]:
+    """The transcript lines for the turn prompt, budgeted BY TURN.
+
+    v201 (lifehug#206) — the same doctrine ADR 0015 already applied to the
+    CLOSING prompt (`_closing_transcript_lines`), finally applied to the
+    turn prompt, which is where every ordinary reply is actually written:
+
+    * the FINAL turn is verbatim and unbudgeted — it is the reason a reply
+      is owed, and a person's own last sentence is the single worst thing
+      in the whole prompt to cut in half;
+    * older turns yield OLDEST-FIRST and WHOLE — a turn is either in the
+      transcript or it is not, never half of one;
+    * when anything was dropped, `TRANSCRIPT_ELISION_LINE` says so, so the
+      model reads a gap as a gap rather than as an interrupted speaker.
+
+    The bug this replaces: `_assemble_session_block` rendered every turn and
+    the caller cut the JOINED STRING at `budget.session`. Because turns are
+    append-only, once a session crossed the budget the visible prefix FROZE
+    — every later turn, including the person saying "you're repeating",
+    landed past the cut and never reached the model at all. The model saw
+    the same transcript, ending mid-sentence, on every subsequent turn, and
+    loyally answered it again. See tests/test_transcript_budget.py.
+    """
+    lines = [f"{turn.get('role')}: {turn.get('text')}"
+             for turn in turns if isinstance(turn, dict)]
+    if not lines:
+        return []
+    final = lines[-1]
+    kept_reversed: list[str] = []
+    used = len(final) + 1
+    for line in reversed(lines[:-1]):
+        length = len(line) + 1
+        if used + length > char_budget:
+            break
+        kept_reversed.append(line)
+        used += length
+    kept = list(reversed(kept_reversed))
+    if len(kept) < len(lines) - 1:
+        kept.insert(0, TRANSCRIPT_ELISION_LINE)
+    return [*kept, final]
+
+
+def _assemble_session_block(session: dict, *, char_budget: int | None = None) -> str:
+    """The SESSION block. ``char_budget`` (v201, lifehug#206) budgets the
+    transcript BY TURN; ``None`` renders every turn (the shape every
+    non-prompt reader — tests, whisper/aside checks — already relies on)."""
     parts: list[str] = []
     arc = session.get("arc")
     if arc:
@@ -959,8 +1056,13 @@ def _assemble_session_block(session: dict) -> str:
     summary = session.get("rolling_summary")
     if summary:
         parts.append(f"Rolling summary: {summary}")
-    for turn in session.get("turns") or []:
-        parts.append(f"{turn.get('role')}: {turn.get('text')}")
+    turns = session.get("turns") or []
+    if char_budget is None:
+        parts.extend(f"{turn.get('role')}: {turn.get('text')}" for turn in turns)
+    else:
+        header = "\n".join(parts)
+        remaining = char_budget - (len(header) + 1 if header else 0)
+        parts.extend(_session_transcript_lines(turns, remaining))
     return "\n".join(parts)
 
 
@@ -987,14 +1089,26 @@ def assemble_context(
         # vault-local question_planner producer below.
         "asking_supply": blocks.get("asking_supply") if "asking_supply" in blocks
         else _assemble_asking_supply_block(session, root),
-        "session": _assemble_session_block(session),
+        # v201 (lifehug#206): the SESSION block budgets ITSELF, by turn —
+        # never by a character cut across a joined transcript. It is the one
+        # block whose content is a person's own words arriving in order, so
+        # it is the one block a bare `_elide` must never touch.
+        "session": _assemble_session_block(session, char_budget=_session_char_budget(manifest)),
     }
     rendered = []
     for name in ASSEMBLE_CONTEXT_BLOCK_ORDER:
-        budget = manifest.get(f"budget.{name}")
-        text = _truncate(content[name], budget)
+        text = content[name] if name == "session" else _elide(content[name], manifest.get(f"budget.{name}"))
         rendered.append(f"## {name.upper()}\n\n{text}")
     return "\n\n".join(rendered)
+
+
+def _session_char_budget(manifest: dict) -> int:
+    """`budget.session` in characters — the allowance the SESSION block's own
+    turn-wise windowing spends (v201, lifehug#206)."""
+    budget = manifest.get("budget.session")
+    if not isinstance(budget, int):
+        budget = DEFAULT_SESSION_BUDGET
+    return budget * CHARS_PER_TOKEN
 
 
 # --------------------------------------------------------------------------
@@ -1087,13 +1201,34 @@ def build_turn_prompt(payload: dict) -> str:
         .replace("{mode}", str(session.get("mode", "")))
         .replace("{arc_card_current_intent}", _current_intent_label(session, intents))
         .replace("{turn_position}", position)
-        .replace("{previous_turn_summary}", (turns[-1]["text"][:200] if turns else "(none — this is the opening)"))
+        .replace("{previous_turn_summary}", _previous_turn_summary(turns))
         .replace("{applicable_rule_hints}", _rule_hints_for_position(position))
     )
     return (
         f"{context}\n\n## TURN_INSTRUCTIONS\n\n{filled}\n\n"
         f"Hard length cap for this message: {length_cap} characters."
     )
+
+
+#: `{previous_turn_summary}`'s allowance, in characters. A one-line hint,
+#: not a transcript — the SESSION block above carries the real thing.
+PREVIOUS_TURN_SUMMARY_CHARS = 200
+
+
+def _previous_turn_summary(turns: list) -> str:
+    """One line describing the turn just before this one.
+
+    v201 (lifehug#206): this used to be `turns[-1]["text"][:200]` — a bare
+    character cut of the person's NEWEST message, the second mid-word cut in
+    the same prompt. A 215-character message arrived here as 200 characters
+    ending inside a word. Now it stops at a boundary and says it stopped.
+    """
+    if not turns:
+        return "(none — this is the opening)"
+    text = " ".join(str(turns[-1].get("text") or "").split())
+    if not text:
+        return "(none — this is the opening)"
+    return _elide(text, PREVIOUS_TURN_SUMMARY_CHARS // CHARS_PER_TOKEN)
 
 
 def _rule_hints_for_position(position: str) -> str:

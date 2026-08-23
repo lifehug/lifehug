@@ -59,6 +59,18 @@ diverge.
    the recent turns verbatim (not summarized — the model needs the exact
    words just exchanged).
 
+   **A turn is never cut in half (v201, lifehug#206).** This block is
+   budgeted BY TURN, never by cutting the joined transcript: the FINAL
+   turn is verbatim and unbudgeted (it is the reason a reply is owed),
+   older turns yield oldest-first and WHOLE, and when any were dropped the
+   line `[… earlier turns in this conversation elided for length …]` marks
+   the gap. The defect this rule exists to prevent: cutting the joined
+   string meant the visible prefix FROZE once a session outgrew the budget
+   — every later turn landed past the cut and never reached the model,
+   which then read the same mid-sentence transcript on every turn and
+   answered it again. Producer:
+   `conversation._session_transcript_lines`.
+
 `[last]`
 
 8. **`turn_instructions`** — `prompt/turn-instructions.md` with its
@@ -71,7 +83,11 @@ diverge.
   `budget.profile`, `budget.record`, `budget.asking_supply`,
   `budget.session`, `budget.turn_instructions`). A runtime that assembles a
   block over its budget must trim that block, not silently ignore the
-  budget. `budget.asking_supply`'s 400 tokens caps the BLOCK SIZE only
+  budget — but a trim is never a bare character cut (v201, lifehug#206).
+  Text blocks stop at a paragraph, sentence or word boundary and end with
+  the elision marker `[…]`; the `session` block is budgeted BY TURN
+  instead (see rule below). `budget.asking_supply`'s 400 tokens caps the
+  BLOCK SIZE only
   (Top-K small, "whisper, not flood") — it says nothing about how many of
   those questions may be asked across a session; that is quality-governed,
   not counter-governed (`prompt/behavior.md`'s Defaults).

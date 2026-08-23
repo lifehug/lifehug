@@ -211,7 +211,12 @@ class EntityCandidateTests(unittest.TestCase):
                 # v196: prompt/turn-instructions.md carries the whisper direction.
                 # v200: plan/arc-templates.md names the seventh intent kind and
                 # evals/goldens/ gains chat-costa-mesa-place-no-stories.json.
-                "85bfad65fb9145d9f4fe7db1be977e84385dee0856a2613614ab7cd7c0328138"
+                # v201 (lifehug#206): interaction.yaml raises the three
+                # authority-block budgets so behavior/identity/examples stop
+                # being cut off mid-file, evals/lints.yaml gains the
+                # no_repetition lint, and evals/goldens/ gains the
+                # deliberately-broken chat-becoming-repetition-loop-bad-01.json.
+                "8410820a79477dc1ddfe8bf4e3d0610974af35021430024e72afecb70273beb4"
             ),
             "question_candidate": (
                 # issue #181 (v188): question-candidate-placement-aside

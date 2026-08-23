@@ -106,6 +106,12 @@ ROUTER_SAMPLE_PREDICTIONS_FILE = "router_sample_predictions.json"
 #: rather than required to pass check_golden like every other committed
 #: golden.
 CLOSING_SCAFFOLD_LEAK_FIXTURE_FILE = "closing-scaffold-leak-bad-01.json"
+#: v201 (lifehug#206): the second deliberately-broken fixture, same
+#: contract as the one above — it reproduces the arc-walk repetition loop
+#: so lint.no_repetition is proven against the real shape
+#: (tests/test_transcript_budget.py loads it directly). NOT a correct
+#: reference transcript, so it is excluded from load_goldens()'s sweep.
+REPETITION_LOOP_FIXTURE_FILE = "chat-becoming-repetition-loop-bad-01.json"
 #: Golden-transcript filenames living in goldens/ that are NOT golden
 #: transcripts (router fixture/prediction data + the format doc, plus the
 #: intentionally-broken lint fixture above) — excluded from load_goldens()'s
@@ -114,6 +120,7 @@ NON_GOLDEN_FILENAMES = frozenset({
     ROUTER_FIXTURES_FILE,
     ROUTER_SAMPLE_PREDICTIONS_FILE,
     CLOSING_SCAFFOLD_LEAK_FIXTURE_FILE,
+    REPETITION_LOOP_FIXTURE_FILE,
 })
 
 VALID_ROUTER_INTENTS = frozenset(

@@ -1,0 +1,42 @@
+{
+  "golden_id": "chat-becoming-repetition-loop-bad-01",
+  "mode": "chat",
+  "register": "hard",
+  "not_a_reference_transcript": true,
+  "why": "A DELIBERATELY BROKEN transcript (like closing-scaffold-leak-bad-01.json) that reproduces the v201 repetition loop, so lint.no_repetition is proven to trip on the real shape rather than on a toy. Reconstructed from a live arc-walk episode on a chapter called 'Becoming' (names synthetic): the assistant asked the same question three turns running, the third time directly after the person typed 'You're repeating'. The ROOT cause was a prompt defect, not a model whim — assemble_context cut the joined transcript at budget.session, so once the session crossed 4800 characters the visible prefix froze mid-sentence and every later turn, including the person's complaint, never reached the model at all. Fixed in system/conversation.py (_session_transcript_lines); this golden guards the floor under that fix.",
+  "arc": {
+    "question_id": "B3",
+    "opening": "Chapter B: Becoming — the years the ground moved.",
+    "intents": [{"kind": "sit_with"}],
+    "topics": ["bankruptcy", "marriage"]
+  },
+  "turns": [
+    {
+      "role": "user",
+      "text": "My marriage, when I think about it now — I think I was saying, simply the strength of my marriage today was and is in part directly related to Rae and I overcoming bad and unhealthy moments like that one together."
+    },
+    {
+      "role": "lifehug",
+      "text": "You started to say \"My marriage, wh\" and then it got cut off. What were you about to say?",
+      "annotations": {"kind": "receipt", "topic": "marriage", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "I said it already. The strength of my marriage today comes partly from the two of us getting through the bad stretches together."
+    },
+    {
+      "role": "lifehug",
+      "text": "You started to say \"My marriage, wh\" and got cut off there. So what were you about to say?",
+      "annotations": {"kind": "receipt", "topic": "marriage", "seam_ok": false, "properties": []}
+    },
+    {
+      "role": "user",
+      "text": "You're repeating"
+    },
+    {
+      "role": "lifehug",
+      "text": "It looks like you got cut off mid-sentence. What were you about to say?",
+      "annotations": {"kind": "receipt", "topic": "marriage", "seam_ok": false, "properties": []}
+    }
+  ]
+}

@@ -30,6 +30,7 @@ Public surface:
     load_lints_config(*, framework_root=None) -> dict
     lint_turn(text, *, is_reply_to_substantive=False, seam_ok=False, config=None) -> list[dict]
     lint_closing_phrases(text, *, config=None) -> list[dict]
+    lint_repetition(text, prior_asks, *, config=None) -> list[dict]
     lint_transcript(turns, *, config=None) -> list[dict]
 
 **ADR 0014 (issue #163, structured close)**: ``lint_closing_phrases`` was
@@ -48,7 +49,9 @@ Implemented lint ids (exactly matching lints.yaml and behavior.md rule
 numbers): ``one_question_per_turn`` (rule 1), ``banned_phrases`` (rules
 4/5/12 + the do-not-use list), ``question_grammar_audit`` (rule 3),
 ``length_caps``, ``receipt_before_question`` (rule 2, structural),
-``year_question_detector`` (rule 3).
+``year_question_detector`` (rule 3), ``no_repetition`` (v201,
+lifehug#206 — rule 13's back-off doctrine made structural: a reply may
+not re-ask what this same voice already asked in its last few turns).
 
 **Eval-harness amendment (issue #120, consistency-audit)**: the grammar
 classifier's baseline tags (``ted``/``cued``/``closed``/``option_posing``/
@@ -69,9 +72,11 @@ other lint stays enforced regardless of ``seam_ok``.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from lifehug_core import INTERACTIONS_DIR, _parse_simple_yaml
@@ -133,7 +138,8 @@ def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
     doctrine's own banned-phrase list, checked only against closing turns),
     and — ADR 0014, issue #163 — closing_label.N / closing_meta.N /
     closing_future.N (the structured-close scaffolding-leak checks, also
-    closing-only; closing_meta.N values are matched as case-insensitive
+    closing-only), and repetition.* (v201, lifehug#206 — the no_repetition
+    lint's lookback/similarity; closing_meta.N values are matched as case-insensitive
     regex, since the meta-commentary class needs alternation)."""
     path = _conversation_evals_path("lints.yaml", framework_root=framework_root)
     raw = _parse_simple_yaml(path, validate_ai_routing=False)
@@ -159,6 +165,13 @@ def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
             closing_meta.append(value)
         elif key.startswith("closing_future."):
             closing_future.append(value)
+        elif key.startswith("repetition."):
+            # v201 (lifehug#206): lookback is an int, similarity a float —
+            # cast here so the engine never sees these as strings.
+            try:
+                config[key] = int(value) if key.endswith(".lookback") else float(value)
+            except ValueError:
+                config[key] = value
         elif key.startswith("banned."):
             banned.append(value)
         else:
@@ -169,6 +182,12 @@ def load_lints_config(*, framework_root: str | Path | None = None) -> dict:
     config["closing_meta_commentary_patterns"] = closing_meta
     config["closing_future_turn_phrases"] = closing_future
     return config
+
+
+#: Punctuation dropped before two asks are compared (v201, lifehug#206) —
+#: quotes, dashes and terminal marks differ freely between two renderings
+#: of the same question.
+_ASK_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 
 
 def _strip_echoed_questions(text: str) -> str:
@@ -417,6 +436,107 @@ def lint_closing_phrases(text: str, *, config: dict | None = None) -> list[dict]
     return findings
 
 
+#: Defaults for the `no_repetition` lint (v201, lifehug#206) when
+#: lints.yaml is absent or holds a non-numeric value.
+DEFAULT_REPETITION_LOOKBACK = 2
+DEFAULT_REPETITION_SIMILARITY = 0.86
+
+#: Openers that carry no content of their own — stripped before two asks are
+#: compared so "So what were you about to say?" and "What were you about to
+#: say?" are recognised as the same ask, which is how a person hears them.
+_ASK_PREFIXES = (
+    "so ", "and ", "but ", "ok ", "okay ", "well ", "then ", "now ",
+)
+
+
+def _normalize_ask(sentence: str) -> str:
+    """One question sentence reduced to what it actually asks."""
+    text = _ASK_PUNCT_RE.sub(" ", sentence.lower())
+    text = " ".join(text.split())
+    changed = True
+    while changed:
+        changed = False
+        for prefix in _ASK_PREFIXES:
+            if text.startswith(prefix):
+                text = text[len(prefix):]
+                changed = True
+    return text
+
+
+def asks_in(text: str) -> list[str]:
+    """The normalized question sentences this turn asks — the user's own
+    echoed questions stripped first, exactly like every other lint here."""
+    stripped = _strip_echoed_questions(text)
+    return [
+        _normalize_ask(s) for s in _split_sentences(stripped) if _is_question(s)
+    ]
+
+
+def _near_duplicate(left: str, right: str, threshold: float) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    if left in right or right in left:
+        # A strict containment is a repeat with padding, not a new ask.
+        shorter, longer = sorted((left, right), key=len)
+        if len(shorter) >= 12 and len(shorter) / len(longer) >= 0.5:
+            return True
+    return difflib.SequenceMatcher(None, left, right).ratio() >= threshold
+
+
+def lint_repetition(
+    text: str, prior_asks: Sequence[Sequence[str]], *, config: dict | None = None
+) -> list[dict]:
+    """Findings for a reply that re-asks what this same voice just asked.
+
+    v201 (lifehug#206). behavior.md rule 13 (mid-thread back-off) already
+    forbids this in prose, but prose is not a gate, and the incident that
+    produced this lint was a model asking the SAME question three turns
+    running — including once directly after the person typed "you're
+    repeating". The root cause was a prompt defect (a frozen, mid-sentence
+    transcript; see `conversation._session_transcript_lines`), and that is
+    fixed at the root — but a conversation product should not be able to
+    ship a turn that repeats itself just because some future prompt bug
+    makes the model blind. This is the structural floor under rule 13.
+
+    ``prior_asks`` is this session's earlier lifehug turns' asks, oldest
+    first, as produced by `asks_in` — only the last ``repetition.lookback``
+    TURNS are compared (turns that asked nothing included, and spending
+    the budget), because a question legitimately returned to later in a
+    long conversation is a callback, not a loop.
+    """
+    config = config if config is not None else load_lints_config()
+    if not config.get("lint.no_repetition", True):
+        return []
+    lookback = config.get("repetition.lookback", DEFAULT_REPETITION_LOOKBACK)
+    lookback = lookback if isinstance(lookback, int) and lookback > 0 else DEFAULT_REPETITION_LOOKBACK
+    threshold = config.get("repetition.similarity", DEFAULT_REPETITION_SIMILARITY)
+    threshold = float(threshold) if isinstance(threshold, (int, float)) else DEFAULT_REPETITION_SIMILARITY
+
+    # Lookback counts TURNS, not asking turns: a question returned to after
+    # a few turns of pure listening is a callback, not a loop.
+    recent = [asks for asks in list(prior_asks)[-lookback:] if asks]
+    if not recent:
+        return []
+    findings: list[dict] = []
+    stripped = _strip_echoed_questions(text)
+    for sentence in _split_sentences(stripped):
+        if not _is_question(sentence):
+            continue
+        normalized = _normalize_ask(sentence)
+        for asks in recent:
+            if any(_near_duplicate(normalized, prior, threshold) for prior in asks):
+                findings.append({
+                    "lint": "no_repetition",
+                    "detail": f"re-asks a question from one of the last {lookback} "
+                              f"turns: {sentence.strip()!r}",
+                    "span": _span_of(text, sentence),
+                })
+                break
+    return findings
+
+
 def lint_transcript(turns: list[dict], *, config: dict | None = None) -> list[dict]:
     """Map lint_turn over lifehug-role turns.
 
@@ -428,6 +548,7 @@ def lint_transcript(turns: list[dict], *, config: dict | None = None) -> list[di
     config = config if config is not None else load_lints_config()
     findings: list[dict] = []
     previous_user_text = ""
+    prior_asks: list[list[str]] = []
     for index, turn in enumerate(turns):
         role = turn.get("role")
         text = turn.get("text") or ""
@@ -443,6 +564,12 @@ def lint_transcript(turns: list[dict], *, config: dict | None = None) -> list[di
             text, is_reply_to_substantive=is_reply, seam_ok=seam_ok, config=config
         ):
             findings.append({**finding, "turn_index": index})
+        # v201 (lifehug#206): the repetition check is the one lint that needs
+        # more than this turn's own text, so it runs here where the earlier
+        # turns are in hand rather than inside lint_turn.
+        for finding in lint_repetition(text, prior_asks, config=config):
+            findings.append({**finding, "turn_index": index})
+        prior_asks.append(asks_in(text))
     return findings
 
 

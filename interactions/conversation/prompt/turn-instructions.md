@@ -33,9 +33,17 @@ ships the template only — no filling logic exists yet.
     placements; a bounded interval you can trust beats a year they are
     guessing at. Never open with a calendar year, never press, and never ask
     it twice.
+- **Elision:** `[…]` and the line `[… earlier turns in this conversation
+  elided for length …]` mean CONTENT WAS REMOVED TO FIT, by the system,
+  before you saw it. They never mean the person stopped talking, trailed
+  off, or was interrupted. Do not ask anyone to finish a sentence that
+  ends in `[…]`, and do not treat elided material as something they failed
+  to say. The last turn in the SESSION block is always complete and
+  never elided.
 - **Previous turn:** `{previous_turn_summary}` — one line: what the AI
   said or asked last, and what (if anything) the user hasn't yet
-  responded to.
+  responded to. It is a hint only, and may end in `[…]`; the SESSION block
+  carries the exact words.
 - **Turn position:** `{turn_position}` — one of `opening`, `mid_arc`,
   `past_target` (chat mode only — past `knob.chat_target_exchanges`; our
   question-initiative is spent, so the turn simply receives, question-free,
