@@ -149,9 +149,13 @@ full at `system/research/chronology.md` (research queue:
    bound before pinning, prefer personal landmarks, cue sequentially and
    in parallel, climb a precision ladder only while cheap, distinguish
    span from point, always record confidence and provenance, and stop on
-   any distress signal. Full text: `system/research/chronology.md` §6 —
-   the seed for a future `timeline` child interaction (see
-   `interactions/README.md`); no interaction files exist yet.
+   any distress signal. Full text: `system/research/chronology.md` §6.
+   **[shipped v195, ADR 0024: the `timeline` child interaction
+   (`interactions/timeline/`, `system/timeline_interaction.py`) implements
+   the playbook as `PLAYBOOK_STEPS`; dates are stored as intervals with a
+   basis (`system/chronology.py`, EDTF/ISO 8601-2); "never ask what year"
+   survives as BOTH `arc_planner.BANNED_PHRASE` and the
+   `timeline_gates.no_year_opener` lint, pinned against each other.]**
 
 ---
 

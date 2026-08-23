@@ -463,7 +463,7 @@ stage, probe_step=None)`):
 | `timeline_gates.one_question_per_reply` | at most one `?` (ruling 6) |
 | `timeline_gates.offers_bounds` | at the `bounds` rung the reply offers an interval or a choice, never demands a point |
 | `timeline_gates.accepts_defer` | "I'll find out" is received and closed, never re-asked or argued with (ruling 5) |
-| `timeline_gates.never_invents_a_date` | the reply never asserts a year the person did not say (a year in the reply must appear in `{anchors}` or in the user's own words) |
+| `timeline_gates.never_invents_a_date` | the reply never asserts a year the person did not say (a year in the reply must appear in `known_years` — the years the anchors and the user's own words supply, passed in by the caller) |
 
 "Never pressure" is inherited: the parent Conversation contract and
 `arc_walk`'s `no_pressure` phrasing already own it, and duplicating it here
@@ -607,7 +607,10 @@ contract.
 | The next question to ask | `timeline_interaction.choose_probe(unknown, anchors=…, precision_so_far=…)`; `timeline_interaction.PLAYBOOK_STEPS` |
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["placed"]`, enabled by `TurnShape(timeline_stage=…)` |
 | Closed validation of that field | `timeline_interaction.validate_placed(value, anchors=…)` |
-| The five timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES` |
+| `{precision_so_far}` | `timeline_interaction.precision_so_far(session)` |
+| The five timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES` |
+| Filing an accepted placement (the bridge) | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…)` |
+| The timeline plan | `timeline_interaction.build_timeline_plan(data, era=…, limit=…)` |
 | The leaf the caller REPLAYs verbatim | `interactions/timeline/prompt/turn-instructions.md`, substituting `{timeline_stage}`, `{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}` |
 | The write verb (extended) | `lifehug.py timeline-place <source> --period <slug> [--date <edtf>] [--basis <basis>] [--anchor <key>]…` |
 | The read-only plan verb | `lifehug.py arc-plan-target --timeline [--era <slug>] [--json]` |
@@ -643,6 +646,18 @@ host writes it through `timeline-place`.
    not six: re-defining a rule the parent contract and `arc_walk` already own
    would be exactly the second definition the recurring-defect doctrine
    forbids.
+5. **`lint_timeline_reply` takes a fourth keyword.** `never_invents_a_date`
+   cannot be decided from the reply alone — it needs the years the person and
+   their anchors actually supplied — so the signature is
+   `lint_timeline_reply(text, *, stage, probe_step=None, known_years=())`.
+   The caller owns that set, exactly as it owns `arc_walk`'s
+   `agenda_announced`.
+6. **The handbook's `<!-- parity: -->` grammar is scalar-only.** Its value
+   pattern is `[^\s]+` and it coerces with `type(live)(quoted)`, so a tuple or
+   a dict written as an annotation would LOOK like a guard and check nothing.
+   The three closed vocabularies and the EDTF table are therefore pinned by a
+   real test class (`ChronologyHandbookParityTests` in
+   `tests/test_handbook_parity.py`) rather than by a decorative comment.
 
 ## Acceptance checklist
 

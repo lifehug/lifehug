@@ -153,12 +153,13 @@ context, evals, registration, version, and seat surface (ADR 0018).
 ## The child-interaction paradigm
 
 **Conversation is the parent.** Every other conversational surface in the
-product is a CHILD of it that adds exactly ONE goal. Four are built
-(v188, v189, v190, v193); the shape below is what they repeat. Deviating
+product is a CHILD of it that adds exactly ONE goal. Five are built
+(v188, v189, v190, v193, v195); the shape below is what they repeat. Deviating
 from it is a design defect, not a variant.
 
-1. **One goal, named.** Placement, onboarding, identity, arc walking. A
-   child that would carry two goals is two children.
+1. **One goal, named.** Placement, onboarding, identity, arc walking,
+   placing a memory in time. A child that would carry two goals is two
+   children.
 2. **Composition, never a fork.** `extends: conversation` plus an exact
    `extends.version`; `prompt/identity.md`, `prompt/behavior.md`,
    `prompt/examples.md` and `router/*` append parent-to-child, while
@@ -209,7 +210,7 @@ Play on a Foundation row does NOT approve anything — the questions already
 exist — so the "approve + start" half is a no-op there and only the
 conversation side runs.
 
-### The four children
+### The five children
 
 | Child | The one goal | Additive output field | Stages | Stage source | Closed validator | Lints |
 |---|---|---|---|---|---|---|
@@ -217,9 +218,11 @@ conversation side runs.
 | `focus_candidate` (v189) | **onboarding** — what the focus is about and how far it reaches | `focus_setup: {objective?, type?, relationship?, living?, label?} \| null` | `establish` · `settled` | `focus_candidate.focus_stage_for_session` | `focus_candidate.validate_focus_setup` (`roadmap.FOCUS_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`) | six `focus_setup_gates.*` |
 | `entity_candidate` (v190) | **identity** — names, relation, living, and whether the roster already holds them | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` | `establish` · `settled` | `entity_candidate.entity_stage_for_session` | `entity_candidate.validate_entity_setup` (`entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`, caller-supplied roster slugs) | seven `entity_setup_gates.*` |
 | `arc_walk` (v193) | **arc walking** — work a target's open questions casually, in resumable episodes | `answered_question_id: "<qid>" \| null` | `open` · `walk` · `close` | `arc_walk.arc_stage_for_session` | `arc_walk.validate_answered_question_id` (exact membership in the episode's recomputed plan) | seven `arc_walk_gates.*` |
+| `timeline` (v195) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| {"deferred": true} \| null` | `open` · `place` · `close` | `timeline_interaction.timeline_stage_for_session` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | five `timeline_gates.*` |
 
 The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
-`entity_stage` · `arc_stage`. Every one defaults to `None`.
+`entity_stage` · `arc_stage` · `timeline_stage`. Every one defaults to
+`None`.
 
 `arc_walk` is the one child whose "roster" is computed rather than read:
 its plan is rebuilt from the bank at every Play and never persisted
@@ -242,11 +245,9 @@ stage, and one validator.
 ### Proposed, not built
 
 Future children the paradigm anticipates, with no files under
-`interactions/` yet:
-
-- `timeline` — placing, dating, and reconciling memories on a timeline;
-  seeded by the elicitation playbook in `system/research/chronology.md`
-  §6 (v194).
+`interactions/` yet: none today. The last entry here — `timeline`, seeded
+by the elicitation playbook in `system/research/chronology.md` §6 — shipped
+in v195.
 
 ## Model-agnosticism rule
 

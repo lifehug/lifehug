@@ -67,8 +67,13 @@ Ordered; stop as soon as the precision is adequate for the timeline slot.
 10. **Stop rules**: stop when bounds are tight enough to place the item in its era and order it against neighbors; stop when two probes in a row return no new bound; stop on any distress signal — dating is never worth the relationship.
 11. **Record provenance per claim** — session, answer id, anchor, timestamp — so the wiki can show *why* the timeline believes a date, and a later contradiction adds rather than replaces (§4; OHA's "document their preparation and methods").
 
-This playbook is the seed for a future `timeline` child interaction (see
-`interactions/README.md`); no interaction files exist yet.
+This playbook is implemented as the `timeline` child interaction
+(`interactions/timeline/`, `system/timeline_interaction.py`, v195 —
+[ADR 0024](../../docs/adr/0024-chronology-with-basis.md)). Rungs 1–10 are
+`timeline_interaction.PLAYBOOK_STEPS`; rule 1 is the `timeline_gates.
+no_year_opener` lint AND `arc_planner.BANNED_PHRASE`; rules 3 and 9 are the
+`chronology.DateRecord`'s bounds and its `basis`/`confidence`; rule 10's stop
+rules are `knob.stop_after_unproductive_probes` and `knob.max_probes`.
 
 ---
 

@@ -105,6 +105,46 @@ class CandidateResearchHandbookParityTests(unittest.TestCase):
         )
 
 
+class ChronologyHandbookParityTests(unittest.TestCase):
+    """v195 / ADR 0024 — the timeline page quotes three CLOSED VOCABULARIES and
+    one knob. The `<!-- parity: -->` annotation grammar coerces scalars only
+    (`type(live)(quoted)`), so a tuple or a dict written as an annotation would
+    LOOK like a guard and check nothing. These are the real guards for them."""
+
+    def setUp(self):
+        if str(SYSTEM) not in sys.path:
+            sys.path.insert(0, str(SYSTEM))
+        self.page = (DOCS / "handbook" / "timeline.md").read_text(encoding="utf-8")
+
+    def test_the_three_vocabularies_match_the_live_tuples(self):
+        import chronology
+
+        self.assertIn(
+            "day, month, season, year, range,\n  era.", self.page)
+        self.assertEqual(chronology.GRANULARITIES,
+                         ("day", "month", "season", "year", "range", "era"))
+        self.assertIn("certain, approximate, inferred, conjectural", self.page)
+        self.assertEqual(chronology.CONFIDENCES,
+                         ("certain", "approximate", "inferred", "conjectural"))
+        for basis in chronology.BASES:
+            self.assertIn(f"`{basis}`", self.page)
+
+    def test_the_leverage_boost_quoted_on_the_page_is_the_live_knob(self):
+        import question_planner
+
+        self.assertIn("`leverage_boost` (1.2)", self.page)
+        self.assertEqual(question_planner.DEFAULT_LANE_POLICY["leverage_boost"], 1.2)
+
+    def test_every_edtf_form_the_page_advertises_round_trips(self):
+        import chronology
+
+        for form in ("1984", "1984~", "198X", "1998-06", "2001-21",
+                     "1984/1990", "1984/..", "../1984"):
+            with self.subTest(form=form):
+                self.assertIn(f"`{form}`", self.page)
+                self.assertEqual(chronology.to_edtf(chronology.parse_edtf(form)), form)
+
+
 HANDBOOK_INTERACTIONS = DOCS / "handbook" / "interactions"
 
 _EMBED = re.compile(
