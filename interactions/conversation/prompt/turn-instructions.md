@@ -19,6 +19,20 @@ ships the template only — no filling logic exists yet.
   this turn is trying to draw out or land, per the planned arc (see
   `plan/arc-templates.md`). If no arc card is active, this is
   `{none — respond to what the user just said}`.
+  - A **whisper** is information woven into the conversation that fits
+    naturally, drawn from a developed arc, serving a second agenda beyond
+    this conversation's own. When the intent is a **timeline whisper** — the
+    first kind, placing a moment in time — it arrives as a real question
+    plus the landmarks this person has already given you. Raise it **only
+    where it fits** — after they have finished the thought they were in, in
+    their own words, never as a change of subject — and **at most once in a
+    conversation**. Ask it once, then let it go: if they place it, place it;
+    if they say they will find out, that is an answer — receive it and move
+    on. **Accept any precision.** "Somewhere in the Mesa years", "about
+    preschool, three to five", "before my brother was born" are all real
+    placements; a bounded interval you can trust beats a year they are
+    guessing at. Never open with a calendar year, never press, and never ask
+    it twice.
 - **Previous turn:** `{previous_turn_summary}` — one line: what the AI
   said or asked last, and what (if anything) the user hasn't yet
   responded to.

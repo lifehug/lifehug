@@ -24,9 +24,15 @@ REQUIRED_GOLDEN_IDS = frozenset({
     "timeline-place-sequence-cue",
     "timeline-place-parallel-domain",
     "timeline-close-convergence",
-    "timeline-defer-is-accepted",
+    "timeline-ill-find-out-is-accepted",
     "timeline-contradiction-keeps-both",
     "timeline-skeleton-episode",
+    # v196 (whispers): the lane's first goldens — the whisper that fits and
+    # files, the one that never fits (and the turn that must not ask twice),
+    # and the partial range that is a placement, not a miss.
+    "timeline-whisper-fits-and-files",
+    "timeline-whisper-does-not-fit",
+    "timeline-whisper-partial-range",
 })
 #: The one-question and never-invent rules hold on every turn; the others are
 #: scoped to the stage or the playbook rung the turn is actually on.
@@ -37,7 +43,8 @@ _ALWAYS_APPLICABLE_LINTS = frozenset({
 _EARLY_RUNGS = frozenset({"content", "residence", "role"})
 
 
-def _applicable(stage: str, probe_step: str | None) -> frozenset[str]:
+def _applicable(stage: str, probe_step: str | None,
+                timeline_asks_so_far: int = 0) -> frozenset[str]:
     applicable = set(_ALWAYS_APPLICABLE_LINTS)
     if stage == "open" or probe_step in _EARLY_RUNGS or probe_step is None:
         applicable.add("no_year_opener")
@@ -45,6 +52,9 @@ def _applicable(stage: str, probe_step: str | None) -> frozenset[str]:
         applicable.add("offers_bounds")
     if probe_step == "defer" or stage == "close":
         applicable.add("accepts_defer")
+    # v196: only a turn that could ask again can be judged on asking again.
+    if int(timeline_asks_so_far or 0) >= 1 and probe_step not in (None, "convergence", "defer"):
+        applicable.add("one_per_conversation")
     return frozenset(applicable)
 
 
@@ -91,7 +101,10 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
     errors: list[str] = []
     seen: set[str] = set()
     for index, row in enumerate(fixtures):
-        if not isinstance(row, dict) or set(row) != {"fixture_id", "unknown", "turns"}:
+        # v196: `context` is optional prose about the conversation a whisper
+        # golden lives in — additive, so every v195 fixture stays valid.
+        if not isinstance(row, dict) or not {"fixture_id", "unknown", "turns"} <= set(row) \
+                or not set(row) <= {"fixture_id", "unknown", "turns", "context"}:
             errors.append(f"fixture[{index}] keys invalid")
             continue
         fixture_id = row["fixture_id"]
@@ -123,8 +136,11 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
             errors.append(f"fixture[{index}] turns must be non-empty")
             continue
         for position, turn in enumerate(turns):
-            if not isinstance(turn, dict) or set(turn) != {
+            if not isinstance(turn, dict) or not {
                 "stage", "probe_step", "expected_placed",
+            } <= set(turn) or not set(turn) <= {
+                "stage", "probe_step", "expected_placed",
+                "timeline_asks_so_far", "expected_raised",
             }:
                 errors.append(f"fixture[{index}].turns[{position}] keys invalid")
                 continue
@@ -168,6 +184,8 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
     counts = {name: [0, 0] for name in timeline_interaction.TIMELINE_LINT_CLASSES}
     field_correct = 0
     field_total = 0
+    raised_correct = 0
+    raised_total = 0
     unmatched: list[str] = []
     for fixture in fixtures:
         prediction = by_id.get(fixture["fixture_id"])
@@ -178,6 +196,7 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
         for turn, pred_turn in zip(fixture["turns"], prediction.get("turns") or []):
             stage = turn["stage"]
             step = turn["probe_step"]
+            asks = int(turn.get("timeline_asks_so_far", 0) or 0)
             findings = {
                 item["lint"].split(".", 1)[1]
                 for item in timeline_interaction.lint_timeline_reply(
@@ -185,11 +204,15 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
                     stage=stage,
                     probe_step=step,
                     known_years=unknown["known_years"],
+                    timeline_asks_so_far=asks,
                 )
             }
-            for lint_class in _applicable(stage, step):
+            for lint_class in _applicable(stage, step, asks):
                 counts[lint_class][1] += 1
                 counts[lint_class][0] += lint_class not in findings
+            if turn.get("expected_raised") is not None:
+                raised_total += 1
+                raised_correct += bool(pred_turn.get("raised")) == bool(turn["expected_raised"])
             structural = conversation_delivery._parse_placed(  # noqa: SLF001
                 pred_turn.get("placed")
             )
@@ -203,6 +226,7 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
         for name, values in counts.items()
     }
     scores["_placed_accuracy"] = field_correct / field_total if field_total else 0.0
+    scores["_raised_accuracy"] = raised_correct / raised_total if raised_total else 1.0
     scores["_unmatched_fixtures"] = unmatched
     return scores
 

@@ -4,7 +4,7 @@
     "framework": "lifehug/lifehug",
     "framework_version": 169,
     "revision": "vault-contract-v6",
-    "content_digest": "sha256:9a4ee71a590f678b3dbe10699b127847271c51a5a2e9a4a687568aed621f869e"
+    "content_digest": "sha256:59912a7f2b93884f32cc95c04eec06deaadc06c611b5655244a5439d7603e92e"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -116,7 +116,6 @@
     "second_voice_offers": {"path": "state/second_voice_offers.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "book_offers": {"path": "state/book_offers.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "timeline_placements": {"path": "state/timeline_placements.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
-    "timeline_deferred": {"path": "state/timeline_deferred.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "perennials": {"path": "state/perennials.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": "version", "supported": [1]}},
     "wiki_synthesis_cache": {"path": "state/wiki_synthesis_cache.json", "kind": "file", "required": false, "tracked": true, "schema": {"format": "json", "version_field": null, "supported": []}},
     "synthesis": {"path": "state/synthesis", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": null, "supported": []}},
@@ -154,6 +153,13 @@
     },
     "question_judgment_learned": {
       "path": "state/question_judgment/learned.md",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "markdown", "version_field": null, "supported": []}
+    },
+    "question_judgment_arc_learned": {
+      "path": "state/question_judgment/arc_learned.md",
       "kind": "file",
       "required": false,
       "tracked": true,

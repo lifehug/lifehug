@@ -22,8 +22,9 @@ from those dates when they exist (the monthly roster ordinal stays as the
 fallback). `bands` is the one render shape: the person's own life chapter is
 the band wherever one covers the stretch, the system's period fills the rest,
 places lived nest inside, and events sit under the place. Gaps become Play-able
-`unknowns` with a probe, a leverage score, and a deferred memory that never
-nags.
+`unknowns` with a probe and a leverage score; the highest-leverage anchors are
+keystones, and a keystone carries the identity a whisper or a minted keystone
+question is asked under (v196).
 
 v110: connector date evidence (state/connectors/*_date_evidence.json) lines up
 against periods and events as corroboration badges, and evidence clustering
@@ -53,7 +54,6 @@ from lifehug_core import (  # noqa: E402
     ENTITY_ROSTERS_DIR,
     MANUAL_SOURCES_DIR,
     STATE_DIR,
-    TIMELINE_DEFERRED_FILE,
     TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
     now_utc,
@@ -80,7 +80,6 @@ from lifehug_core import (  # noqa: E402
 VAULT_ROOT_NAMES = (
     "CLASSIFICATIONS_DIR",
     "CONNECTORS_STATE_DIR",
-    "DEFERRED_FILE",
     "ENTITY_ROSTERS_DIR",
     "MANUAL_SOURCES_DIR",
     "PLACEMENTS_FILE",
@@ -984,61 +983,193 @@ def _place_span(events: list[dict]) -> object:
 # Unknowns, leverage, keystones (owner rulings 4 and 5).
 # ---------------------------------------------------------------------------
 
-#: Every gap kind is Play-able. `era_gap` is v195's addition; the other seven
-#: are `compute_gaps`'s existing vocabulary, unchanged.
+#: v196 (owner ruling, "Unknowns are concrete"): an unknown is ONE SUBJECT the
+#: person can actually answer about — a specific moment, a specific era's
+#: missing bounds, a specific place's span, a dated hole between two named
+#: eras, a specific contradiction. The v195 aggregate kinds
+#: (`unplaced_events`, `no_chrono`, `no_events`, `all_undated`, `thin_lineup`,
+#: `unplaced_entities`) are COUNTS, not questions: "116 moment(s) I can't place
+#: in any period" is a number on a ledger, and the owner is right that it is
+#: unanswerable as a question. They live on in `compute_gaps` (the page's own
+#: gap notes) and in `unknown_ledger`; they never become an unknown.
 UNKNOWN_KINDS = (
-    "era_gap", "no_chrono", "no_events", "all_undated", "thin_lineup",
-    "unplaced_events", "unplaced_entities", "date_contradiction",
+    "moment",
+    "period_bound",
+    "place_span",
+    "era_gap",
+    "date_contradiction",
+)
+
+#: The aggregate gap kinds that are counted rather than asked.
+LEDGER_GAP_KINDS = (
+    "no_chrono", "no_events", "all_undated", "thin_lineup",
+    "unplaced_events", "unplaced_entities",
 )
 
 #: Owner's cap: at most two starred keystones, ever.
 KEYSTONE_CAP = 2
 
+#: How many unknowns a page offers at once, leverage-ordered. The rest are not
+#: hidden — `unknown_ledger` carries every total — but a list of 116 rows is
+#: not a thing anyone answers.
+UNKNOWNS_PAGE_CAP = 30
+
 
 def unknown_key(gap: dict) -> str:
-    """A stable, content-derived key for one unknown."""
+    """A stable, content-derived key for one unknown or gap row."""
     kind = str(gap.get("kind") or "unknown")
     if kind == "era_gap":
         return f"era_gap:{':'.join(str(x) for x in (gap.get('between') or []))}"
+    if kind == "moment":
+        return f"moment:{gap.get('period') or ''}:{gap.get('source_short') or ''}"
+    if kind in ("period_bound", "place_span"):
+        return f"{kind}:{gap.get('slug') or gap.get('period') or ''}"
     scope = str(gap.get("period") or "")
     return f"{kind}:{scope}" if scope else kind
 
 
-def unknowns(data: dict) -> list[dict]:
-    """Every gap as a Play-able record `{kind, key, label, probe, ...}`.
+def moment_unknown(event: dict, period: str | None) -> dict:
+    """One undated moment, named by its own title — the commonest unknown."""
+    label = str(event.get("title") or event.get("description") or "this moment").strip()
+    row = {
+        "kind": "moment",
+        "period": period,
+        "source_short": event.get("source_short"),
+        "source": event.get("source"),
+        "label": label,
+        "hint": "Anchor it against something already dated — never a guessed year.",
+    }
+    row["key"] = unknown_key(row)
+    return row
 
-    Ruling 4: a gap is not prose to read, it is a thing that can be answered
-    right now. The gap's own `message`/`hint` survive on the record so nothing
-    that reads gaps today changes; `probe` is the elicitation playbook's
-    CHEAPEST question for that kind (`system/research/chronology.md` §6), and
-    `deferred` marks the ones the person said they would find out.
+
+def unknowns(data: dict) -> list[dict]:
+    """Every ANSWERABLE unknown as `{kind, key, label, probe, ...}`.
+
+    One subject per row (v196). An unknown is something a person can picture:
+    *the dog that followed you home*, *when the Yucaipa years ended*, *the
+    stretch between two dated eras*. Never a count.
+
+    "I'll find out" is an ordinary answer — there is no `deferred` flag and no
+    quiet window; an unknown the person could not date simply stays
+    outstanding, keeps its leverage, and is asked again when the ordering says
+    it is worth asking.
     """
     import timeline_interaction  # noqa: PLC0415  (probe vocabulary lives with the interaction)
 
     rows: list[dict] = []
     seen: set[str] = set()
+    anchors = data.get("anchors") or ()
+
+    def add(row: dict) -> None:
+        if row["key"] in seen:
+            return
+        seen.add(row["key"])
+        rows.append(row)
+
+    # 1. Specific undated moments — placed ones first (they carry an era), then
+    #    the ones that belong to no period at all.
+    for slug, events_here in (data.get("event_lineup") or {}).items():
+        for event in events_here:
+            if event.get("date") is None:
+                add(moment_unknown(event, slug))
+    for event in data.get("unplaced_events") or []:
+        add(moment_unknown(event, None))
+
+    # 2. A specific era's missing bounds.
+    for period in data.get("periods") or []:
+        if period.get("date") is None:
+            row = {
+                "kind": "period_bound",
+                "period": period["slug"],
+                "slug": period["slug"],
+                "label": str(period.get("name") or period["slug"]),
+                "hint": "Bound it against a move, a job, a birth — the ends are "
+                        "usually easier to name than the middle.",
+            }
+            row["key"] = unknown_key(row)
+            add(row)
+
+    # 3. A specific place with no span.
+    for band in data.get("bands") or []:
+        for place in band.get("places") or []:
+            if place.get("date") is not None or place.get("span") is not None:
+                continue
+            slug = str(place.get("slug") or place.get("ref") or "").strip()
+            if not slug:
+                continue
+            row = {
+                "kind": "place_span",
+                "period": band.get("ref"),
+                "slug": slug,
+                "label": str(place.get("title") or place.get("label") or slug),
+                "hint": "When you moved in and when you left is usually a clearer "
+                        "memory than a year.",
+            }
+            row["key"] = unknown_key(row)
+            add(row)
+
+    # 4. The dated holes and the contradictions — already one subject each.
     gaps = list(data.get("global_gaps") or [])
     for period_gaps in (data.get("gaps_by_period") or {}).values():
         gaps.extend(period_gaps)
-    anchors = data.get("anchors") or ()
     for gap in gaps:
-        key = unknown_key(gap)
-        if key in seen:
+        kind = str(gap.get("kind") or "")
+        if kind not in ("era_gap", "date_contradiction"):
             continue
-        seen.add(key)
-        unknown = {
-            "kind": str(gap.get("kind") or "unknown"),
-            "key": key,
-            "label": str(gap.get("message") or key),
+        row = {
+            "kind": kind,
+            "key": unknown_key(gap),
+            "label": str(gap.get("message") or unknown_key(gap)),
             "period": gap.get("period"),
             "between": gap.get("between"),
             "years": gap.get("years"),
             "hint": gap.get("hint", ""),
-            "deferred": is_deferred(key),
         }
-        unknown["probe"] = timeline_interaction.choose_probe(unknown, anchors=anchors)
-        rows.append(unknown)
+        add(row)
+
+    for row in rows:
+        row["probe"] = timeline_interaction.choose_probe(row, anchors=anchors)
     return rows
+
+
+def unknown_ledger(data: dict) -> dict:
+    """The counts the page shows INSTEAD of unanswerable aggregate rows."""
+    gaps = list(data.get("global_gaps") or [])
+    for period_gaps in (data.get("gaps_by_period") or {}).values():
+        gaps.extend(period_gaps)
+    counts = {kind: 0 for kind in LEDGER_GAP_KINDS}
+    for gap in gaps:
+        kind = str(gap.get("kind") or "")
+        if kind in counts:
+            counts[kind] += 1
+    return {
+        "unplaced_moments": len(data.get("unplaced_events") or []),
+        "unplaced_pages": len(data.get("unplaced_entities") or []),
+        "gap_notes": counts,
+    }
+
+
+def offered_unknowns(rows: list[dict], index: dict[str, set[str]],
+                     limit: int = UNKNOWNS_PAGE_CAP) -> list[dict]:
+    """The unknowns a page offers: leverage first, then the cheapest probe.
+
+    Every row keeps its own `leverage` (how many other unknowns the best
+    anchor for it would also place), so the ordering is visible rather than
+    mysterious.
+    """
+    resolved_by: dict[str, int] = {}
+    for keys in index.values():
+        for key in keys:
+            resolved_by[key] = max(resolved_by.get(key, 0), len(keys))
+    for row in rows:
+        row["leverage"] = resolved_by.get(row["key"], 0)
+    ordered = sorted(rows, key=lambda row: (
+        -int(row.get("leverage") or 0),
+        int((row.get("probe") or {}).get("cost") or 99),
+        str(row.get("key")),
+    ))
+    return ordered[:max(int(limit), 0)]
 
 
 def dependency_index(data: dict) -> dict[str, set[str]]:
@@ -1048,58 +1179,53 @@ def dependency_index(data: dict) -> dict[str, set[str]]:
     start/end, a landmark (dated) event, and an entity's arrival. An anchor
     resolves an unknown when placing the anchor would place the unknown:
 
-    * a PERIOD anchor resolves that period's own unknowns, every `era_gap`
-      touching it, and every undated moment or entity lined up inside it;
+    * a PERIOD anchor resolves that era's own bounds, every undated moment and
+      place inside it, and every `era_gap` touching it;
     * a LANDMARK EVENT anchor resolves the undated moments sharing its period
-      or its source (the neighbours it would bound);
-    * an ENTITY ARRIVAL anchor resolves that entity's own unknowns and the
-      undated moments sharing its sources.
+      (the neighbours it would bound);
+    * an ENTITY ARRIVAL anchor resolves the undated moments sharing its
+      sources, and that era's own bounds.
+
+    v196: the keys on both sides are the CONCRETE unknown keys `unknowns()`
+    emits, so leverage counts real answerable things rather than aggregate
+    rows.
     """
     index: dict[str, set[str]] = {}
     rows = unknowns(data)
     by_period: dict[str, set[str]] = {}
-    global_keys: set[str] = set()
+    era_touch: dict[str, set[str]] = {}
+    by_source: dict[str, set[str]] = {}
     for row in rows:
         if row.get("period"):
-            by_period.setdefault(row["period"], set()).add(row["key"])
-        else:
-            global_keys.add(row["key"])
-    era_touch: dict[str, set[str]] = {}
-    for row in rows:
+            by_period.setdefault(str(row["period"]), set()).add(row["key"])
         for slug in (row.get("between") or []):
             era_touch.setdefault(str(slug), set()).add(row["key"])
+        if row.get("source"):
+            by_source.setdefault(str(row["source"]), set()).add(row["key"])
 
     event_lineup = data.get("event_lineup") or {}
     entity_lineup = data.get("entity_lineup") or {}
     for period in data.get("periods") or []:
         slug = period["slug"]
-        keys = set(by_period.get(slug, set())) | set(era_touch.get(slug, set()))
-        undated = [e for e in event_lineup.get(slug, []) if e.get("date") is None]
-        if undated:
-            keys |= {k for k in global_keys if k.startswith("unplaced_events")}
-            keys |= {f"moment:{slug}:{event['source_short']}" for event in undated}
-        if not entity_lineup.get(slug):
-            keys |= {k for k in by_period.get(slug, set())}
-        index[f"period:{slug}"] = keys
+        index[f"period:{slug}"] = set(by_period.get(slug, set())) | set(era_touch.get(slug, set()))
 
     for slug, rows_here in event_lineup.items():
         for event in rows_here:
             if event.get("date") is None:
                 continue
-            key = f"event:{slug}:{event['source_short']}"
-            neighbours = {f"moment:{slug}:{other['source_short']}"
+            key = f"event:{slug}:{event.get('source_short') or ''}"
+            neighbours = {f"moment:{slug}:{other.get('source_short') or ''}"
                           for other in rows_here if other.get("date") is None}
-            index[key] = neighbours | set(era_touch.get(slug, set()))
+            index[key] = (neighbours & {row["key"] for row in rows}) | set(era_touch.get(slug, set()))
 
     for slug, rows_here in entity_lineup.items():
         for row in rows_here:
             if row.get("type") not in ("person", "place"):
                 continue
             key = f"entity:{row['slug']}"
-            shared = {f"moment:{slug}:{event['source_short']}"
-                      for event in event_lineup.get(slug, [])
-                      if event.get("date") is None
-                      and event.get("source") in set(row.get("sources") or ())}
+            shared: set[str] = set()
+            for source in (row.get("sources") or ()):
+                shared |= by_source.get(str(source), set())
             index[key] = index.get(key, set()) | shared | set(by_period.get(slug, set()))
     return index
 
@@ -1114,91 +1240,55 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
 
     Ordered by leverage descending, then by how CHEAP the playbook says the
     probe is (a high-leverage anchor that needs an expensive probe loses to an
-    equally leveraged one that needs a cheap one), then by key. Deferred
-    unknowns still count toward leverage: the person deferring an answer does
-    not make the anchor less pivotal, it only means we do not ask again yet
-    (ruling 5, "never nags").
+    equally leveraged one that needs a cheap one), then by key.
+
+    v196: every row carries the IDENTITY it is asked under —
+    `question_id` (`tl:<anchor-slug>`), the `unknown_keys` one answer would
+    place, and the person's own `anchors` so a placement can be validated
+    against landmarks this episode actually showed. A whisper
+    (`arc_planner._timeline_gap_intent`) and a minted keystone question
+    (`timeline_interaction.mint_keystone_question`) are the two ways the row
+    becomes a question, and both match by `question_id`, never by adjacency.
     """
     import timeline_interaction  # noqa: PLC0415
 
     index = dependency_index(data)
     labels = {f"period:{p['slug']}": p["name"] for p in (data.get("periods") or [])}
+    for slug, rows_here in (data.get("entity_lineup") or {}).items():  # noqa: B007
+        for row in rows_here:
+            if row.get("slug"):
+                labels.setdefault(f"entity:{row['slug']}",
+                                  str(row.get("title") or row["slug"]))
+    for slug, rows_here in (data.get("event_lineup") or {}).items():
+        for event in rows_here:
+            labels.setdefault(f"event:{slug}:{event.get('source_short') or ''}",
+                              str(event.get("title") or event.get("description") or ""))
     anchors = data.get("anchors") or ()
+    anchor_rows = timeline_interaction.anchor_rows_for_prompt(anchors)
     scored = []
     for key, resolved in index.items():
         if not resolved:
             continue
-        probe = timeline_interaction.choose_probe(
-            {"kind": "no_chrono" if key.startswith("period:") else "all_undated",
-             "key": key, "label": labels.get(key, key.split(":", 1)[-1])},
-            anchors=anchors,
-        )
+        # v196: the star's own question. "Childhood — one answer would place 23
+        # more things" is not a question anyone can answer; the probe names the
+        # anchor and asks about it.
+        probe = timeline_interaction.keystone_probe(
+            key, label=labels.get(key, key.split(":", 1)[-1].replace("-", " ")),
+            anchors=anchors)
         scored.append({
             "anchor": key,
+            "question_id": timeline_interaction.keystone_question_id(key),
             "label": labels.get(key, key.split(":", 1)[-1].replace("-", " ")),
             "leverage": len(resolved),
+            "unknown_keys": sorted(resolved),
+            # `resolves` is v195's name for the same list, kept so nothing that
+            # reads a keystone row today has to change.
             "resolves": sorted(resolved),
             "probe": probe,
+            "anchors": [dict(row) for row in anchor_rows],
         })
     scored.sort(key=lambda row: (-row["leverage"], row["probe"].get("cost", 99), row["anchor"]))
     return scored[:max(int(n), 0)]
-
-
-def keystone_slugs(data: dict | None = None) -> tuple[str, ...]:
-    """The slugs behind the current keystones — the planner's `leverage_boost`
-    input. Guarded by its caller: a timeline problem must never break the
-    weekly queue."""
-    payload = data if data is not None else timeline_data()
-    return tuple(row["anchor"].split(":", 1)[-1] for row in keystones(payload))
-
-
-# ---------------------------------------------------------------------------
-# The deferred memory (owner ruling 5 — "I'll find out", and it never nags).
-# ---------------------------------------------------------------------------
-
-DEFERRED_FILE = TIMELINE_DEFERRED_FILE
-
-#: How long a deferred unknown stays quiet. Long enough to actually call your
-#: mother; short enough that the thread is not lost. It is a QUIET window, not
-#: a decline: the unknown keeps its star, its leverage, and its place.
-DEFERRED_QUIET_DAYS = 45
-
-
-def load_deferred() -> dict:
-    data = read_json(DEFERRED_FILE, default=None) or {"version": 1, "deferred": []}
-    data.setdefault("deferred", [])
-    return data
-
-
-def defer_unknown(key: str) -> dict:
-    """Record "I'll find out" for one unknown. Idempotent; refreshes the clock."""
-    data = load_deferred()
-    data["deferred"] = [row for row in data["deferred"] if row.get("key") != key]
-    record = {"key": key, "deferred_at": now_utc()}
-    data["deferred"].append(record)
-    write_json(DEFERRED_FILE, data)
-    return record
-
-
-def is_deferred(key: str, *, now: object = None) -> bool:
-    """Is this unknown inside its quiet window? Never raises on a bad clock."""
-    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
-
-    for row in load_deferred().get("deferred", []):
-        if row.get("key") != key:
-            continue
-        stamp = str(row.get("deferred_at") or "")
-        try:
-            when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        except ValueError:
-            return True
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        reference = now if isinstance(now, datetime) else datetime.now(timezone.utc)
-        if reference.tzinfo is None:
-            reference = reference.replace(tzinfo=timezone.utc)
-        return reference - when < timedelta(days=DEFERRED_QUIET_DAYS)
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1336,7 +1426,12 @@ def timeline_data(evidence: list[dict] | None = None,
                                 for event in rows if event.get("date") is not None),
         },
     }
-    data["unknowns"] = unknowns(data)
+    # v196: concrete unknowns, leverage-ordered and capped for a page; the
+    # aggregate counts live on the ledger where they belong.
+    all_unknowns = unknowns(data)
+    data["unknown_ledger"] = unknown_ledger(data)
+    data["unknowns"] = offered_unknowns(all_unknowns, dependency_index(data))
     data["keystones"] = keystones(data)
-    data["counts"]["unknowns"] = len(data["unknowns"])
+    data["counts"]["unknowns"] = len(all_unknowns)
+    data["counts"]["unknowns_offered"] = len(data["unknowns"])
     return data

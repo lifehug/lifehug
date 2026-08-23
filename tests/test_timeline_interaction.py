@@ -110,7 +110,13 @@ class OutputContractTests(unittest.TestCase):
     def test_the_placed_key_appears_only_when_the_gate_is_set(self):
         block = cd._output_contract_block(shape(timeline_stage="place"))  # noqa: SLF001
         self.assertIn('"placed"', block)
-        self.assertIn('{"deferred": true}', block)
+
+    def test_the_contract_no_longer_offers_a_deferral_shape(self):
+        """v196: "I'll find out" is an ordinary answer — there is nothing to
+        emit for it, and an interval is still a first-class placement."""
+        block = cd._output_contract_block(shape(timeline_stage="place"))  # noqa: SLF001
+        self.assertNotIn("deferred", block)
+        self.assertIn("An interval is a finding", block)
 
     def test_the_gate_defaults_to_none_like_every_other_child(self):
         self.assertIsNone(shape().timeline_stage)
@@ -123,8 +129,9 @@ class StructuralParseTests(unittest.TestCase):
             {"best": "1984~", "anchors": ["birth"]},
         )
 
-    def test_the_deferral_shape_survives(self):
-        self.assertEqual(cd._parse_placed({"deferred": True}), {"deferred": True})  # noqa: SLF001
+    def test_the_deferral_shape_is_gone(self):
+        """v196: the structural layer no longer knows the word."""
+        self.assertIsNone(cd._parse_placed({"deferred": True}))  # noqa: SLF001
 
     def test_every_malformed_shape_degrades_to_none_and_never_raises(self):
         for value in (None, "1984", [], {}, {"deferred": "yes"},
@@ -221,20 +228,35 @@ class AnchorTests(unittest.TestCase):
 
 
 class ProbeTests(unittest.TestCase):
-    def test_the_ladder_starts_at_content_never_at_a_year(self):
-        probe = ti.choose_probe({"kind": "era_gap", "label": "the gap"})
-        self.assertEqual(probe["step"], "content")
-        self.assertNotIn("year", probe["text"].lower())
+    def test_the_ladder_starts_concretely_and_never_at_a_year(self):
+        """v196 (owner-set): every probe NAMES its subject. An era gap opens on
+        the stretch it is actually about, not on "tell me what happened"."""
+        probe = ti.choose_probe({"kind": "era_gap", "label": "the gap",
+                                 "between": ["yucaipa-years", "san-diego"]})
+        self.assertEqual(probe["step"], "parallel_domain")
+        self.assertIn("yucaipa years", probe["text"])
+        self.assertNotIn("year?", probe["text"].lower())
+
+    def test_the_bare_content_probe_survives_only_for_an_unanchored_moment(self):
+        moment = {"kind": "moment", "label": "the dog that followed you home"}
+        self.assertEqual(ti.choose_probe(moment)["step"], "content")
+        self.assertIn("the dog that followed you home", ti.choose_probe(moment)["text"])
+        anchored = ti.choose_probe(moment, anchors=[MESA])
+        self.assertEqual(anchored["step"], "sequence")
+        self.assertIn("the Mesa house", anchored["text"])
 
     def test_the_ladder_ascends_in_the_playbooks_order(self):
+        """The rungs are unchanged; the kind's own opener leads, and the ladder
+        takes over from the second probe on."""
         asked = []
         steps = []
         for _ in range(4):
-            probe = ti.choose_probe({"kind": "era_gap", "label": "x"},
+            probe = ti.choose_probe({"kind": "era_gap", "label": "x",
+                                     "between": ["a", "b"]},
                                     anchors=[MESA], asked_steps=asked)
             steps.append(probe["step"])
             asked.append(probe["step"])
-        self.assertEqual(steps, ["content", "residence", "role", "parallel_domain"])
+        self.assertEqual(steps, ["parallel_domain", "residence", "role", "sequence"])
 
     def test_rungs_that_need_a_landmark_are_skipped_without_one(self):
         asked = ["content", "residence", "role", "parallel_domain"]
@@ -262,16 +284,25 @@ class ProbeTests(unittest.TestCase):
 
     def test_a_coarser_slot_stops_at_a_coarser_rung(self):
         self.assertEqual(
-            ti.choose_probe({"kind": "thin_lineup", "label": "x"},
+            ti.choose_probe({"kind": "place_span", "label": "x"},
                             precision_so_far="era")["step"], "convergence")
         self.assertNotEqual(
             ti.choose_probe({"kind": "era_gap", "label": "x"},
                             precision_so_far="era")["step"], "convergence")
 
-    def test_a_deferred_unknown_gets_the_defer_line_and_is_never_pushed(self):
-        probe = ti.choose_probe({"kind": "era_gap", "label": "x", "deferred": True})
+    def test_the_defer_rung_survives_as_the_ladders_last_line(self):
+        """v196 deleted the deferral STATE, not the courtesy: the gentlest
+        rung is still reachable and still asks nothing."""
+        probe = ti.choose_probe({"kind": "era_gap", "label": "x"},
+                                asked_steps=ti.PLAYBOOK_ORDER)
         self.assertEqual(probe["step"], "defer")
         self.assertNotIn("?", probe["text"])
+
+    def test_a_deferred_flag_is_no_longer_consulted(self):
+        self.assertEqual(
+            ti.choose_probe({"kind": "era_gap", "label": "x", "deferred": True}),
+            ti.choose_probe({"kind": "era_gap", "label": "x"}),
+        )
 
     def test_a_probe_is_always_returned(self):
         probe = ti.choose_probe({}, asked_steps=ti.PLAYBOOK_ORDER)
@@ -305,9 +336,23 @@ class ValidatePlacedTests(unittest.TestCase):
         self.assertIsNone(ti.validate_placed(
             {**self.GOOD, "earliest": "whenever"}, anchors=[BIRTH]))
 
-    def test_the_deferral_form_survives_exactly(self):
-        self.assertEqual(ti.validate_placed({"deferred": True}), {"deferred": True})
+    def test_the_deferral_form_is_rejected(self):
+        self.assertIsNone(ti.validate_placed({"deferred": True}))
         self.assertIsNone(ti.validate_placed({"deferred": False}))
+
+    def test_a_range_with_a_basis_is_first_class(self):
+        """"About preschool, three to five" files as an interval (v196)."""
+        placed = ti.validate_placed(
+            {"earliest": "1983", "latest": "1985", "best": "1983/1985",
+             "granularity": "range", "confidence": "approximate", "basis": "age",
+             "anchors": ["birth"]},
+            anchors=[BIRTH])
+        self.assertIsNotNone(placed)
+        self.assertEqual(placed["granularity"], "range")
+        self.assertEqual(placed["basis"], "age")
+        argv = ti.place_invocation(placed, source="answers/A1.md",
+                                   description="preschool", period="childhood")
+        self.assertEqual(argv[argv.index("--date") + 1], "1983/1985")
 
     def test_every_other_shape_is_none(self):
         for value in (None, "1984", [], {}, 5, {"anchors": ["birth"]}):
@@ -328,7 +373,7 @@ class PlaceInvocationTests(unittest.TestCase):
         self.assertEqual(args[args.index("--basis") + 1], "age")
         self.assertEqual(args[args.index("--anchor") + 1], "birth")
 
-    def test_a_deferral_files_nothing(self):
+    def test_a_deferral_object_files_nothing(self):
         self.assertIsNone(ti.place_invocation({"deferred": True}, source="s",
                                               description="d", period="p"))
 

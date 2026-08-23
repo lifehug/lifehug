@@ -71,6 +71,15 @@ in the week's deltas — not on a fixed schedule regardless of signal.
   already made, so this pass doesn't repeat or contradict one.
 - `{current_learned_file}` — the current contents of
   `state/question_judgment/learned.md` verbatim (empty string if none yet).
+- `{arc_yield_summary}` — what the CONVERSATION arcs yielded, per arc-card
+  intent kind, derived from the vault itself: how many sessions carried the
+  kind, and how many filed answers, timeline placements and new entities
+  came out of them. A session carrying three intent kinds counts toward all
+  three (co-attribution — treat a difference between kinds as a signal, not
+  a measurement).
+- `{current_arc_learned_file}` — the current contents of
+  `state/question_judgment/arc_learned.md` verbatim, the learned block that
+  is composed into the weekly arc-plan prompt after `plan/arc-templates.md`.
 
 **Task:** Decide whether a bounded amendment is justified this week. If
 not, output `{"amendment": null, "reason": "..."}` — declining to edit is a
@@ -80,7 +89,9 @@ valid, expected outcome most weeks. If yes, output:
 {
   "amendment": "the exact markdown text to append to state/question_judgment/learned.md",
   "evidence": "what pattern, with which candidate ids/dates, justified this edit",
-  "char_count": 0
+  "char_count": 0,
+  "arc_amendment": "the exact markdown text to append to state/question_judgment/arc_learned.md, or null",
+  "arc_evidence": "which kinds, with which counts, justified the arc edit"
 }
 ```
 
@@ -94,6 +105,12 @@ valid, expected outcome most weeks. If yes, output:
 - `evidence` is required whenever `amendment` is non-null — an amendment
   with no cited evidence is not a valid output (see `prompt/examples.md`'s
   rubric-edit example).
+- `arc_amendment` is the same bounded, evidence-cited edit for ARCS — how
+  the week's intent kinds actually paid out, written as guidance the arc
+  planner can act on ("lead with the timeline whisper in eras with no dated
+  events; it placed 4 things in 2 sessions"). It obeys the same budget and
+  the same rule that most weeks the honest answer is `null`. Never write a
+  penalty for a whisper: raising the timeline where it fits is not a cost.
 - The quarterly full-ledger recalibration (`knob.recalibration_cadence`)
   is out of this template's scope — it is a distinct, larger review pass
   the follow-up PR defines when it wires the runtime.

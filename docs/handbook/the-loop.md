@@ -220,7 +220,10 @@ pass-completion prompts too.
    emits classification agent tasks instead)
 4. `quality-update` — the quality/engagement profile aggregation
 5. `judgment-update` — the question-judgment weekly RUBRIC-EDIT, **at
-   most one** bounded amendment ([Decisions & Learning](decisions-and-learning.md))
+   most one** bounded amendment ([Decisions & Learning](decisions-and-learning.md)),
+   plus (v196) the **arc-yield** half: what each arc-card intent kind paid
+   out, read off the session documents that already exist, and at most one
+   bounded amendment to `state/question_judgment/arc_learned.md`
 6. `timeline-retire` — pins the classifier's fresh extractions have
    superseded
 7. Wiki-question harvest (`harvest_wiki_questions()`, capped at 3/week)
@@ -228,7 +231,8 @@ pass-completion prompts too.
    synthesis task)
 9. `candidates-auto-promote` — the dynamic-cap promotion pass ([Question
    Candidates](question-candidates.md) §3)
-10. `planner-queue` — builds next week's delivery queue
+10. `planner-queue` — mints any earned **keystone question** (v196), then
+    builds next week's delivery queue
 11. `arc-plan` — plans this week's arc cards, directly after the queue so
     cards expire with it
 12. `research_expand.py --gaps --dry-run` (a preview only — no
@@ -297,7 +301,8 @@ samples **pending bank questions** under a stack of weights and caps:
   Saturated Focuses fade to maintenance weight; no single Focus may take
   more than its cap (`DEFAULT_CAP`, or `FINISHING_CAP` while a Focus is
   `finishing` — `:399`).
-- **Group caps** — `GROUP_CAPS` (`:78`): `main 0.50 · project 0.35 ·
+- **Group caps** — `GROUP_CAPS` (`:78`): `timeline 0.01 (one a week) ·
+  main 0.50 · project 0.35 ·
   focus 0.25` of the week's slots, enforced (not decorative) since the
   group-cap fix.
 - **Least-covered category first** — `enriched_pending_questions`
@@ -345,6 +350,29 @@ conversation closes, the weekly wiki-question harvest
 `WIKI_HARVEST_CAP` = 3 per run — `system/question_candidates.py:659`),
 and perennial re-asks.
 <!-- parity: question_candidates.WIKI_HARVEST_CAP = 3 -->
+
+**Whispers (v196).** A **whisper** is information woven into a conversation
+that fits naturally, drawn from an arc that has developed, and serving a
+*second agenda beyond the conversation's primary one* (owner-set,
+2026-08-23). Three rules bind every whisper: only where it fits, at most one
+per conversation, and never penalized — a whisper that lands is a gift, not a
+cost. Whispers are general; each kind names its own agenda, and the
+**timeline whisper** is the first.
+
+**The timeline gets asked two ways, and neither is a candidate.** The timeline
+whisper is the week's arc card carrying a keystone's real probe and the
+person's own landmarks into an ordinary conversation — raised only where it
+fits, at most once per conversation, any precision accepted (a range places
+things), never pressed, never opening with a year. A **keystone question** is
+that same probe minted as an ordinary bank row in the `timeline` group and
+asked as the day's question; it is minted only when its leverage clears
+`timeline_leverage_per_story` (6) — the one dial, an exchange rate saying how
+many unknowns one answer must place to be worth one ordinary story answer —
+and the group cap keeps it to one a week. Either way the answer files through
+`timeline-place` and the next compile re-derives the Timeline, and either way
+"I'll find out" is just an answer: nothing files, nothing is remembered, the
+unknown keeps its star.
+<!-- parity: question_planner.DEFAULT_LANE_POLICY["timeline_leverage_per_story"] = 6 -->
 
 **Timeline and Mirror gaps are a different lane, and it is worth not
 confusing them with candidates.** `arc_planner.compute_gaps` emits gap

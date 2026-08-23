@@ -654,6 +654,12 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             # rationale arc_planner.py carries above. No session, delivery, or
             # lint logic is copied into the child.
             "arc_walk.py",
+            # v196 (ruling 6, arc learning): the weekly judgment step reads
+            # SESSION DOCUMENTS to compute what each arc-card intent kind
+            # yielded — through this module's own list_sessions/load_session
+            # helpers rather than re-deriving the store, the same rationale
+            # arc_planner.py carries above. It writes nothing here.
+            "question_judgment.py",
         }
         offenders = []
         for path in sorted(SYSTEM.glob("*.py")):

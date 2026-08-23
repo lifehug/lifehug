@@ -36,8 +36,11 @@ from lifehug_core import (
     parse_categories,
     parse_questions,
     read_json,
+    read_text,
+    record_learning_failure,
     slugify,
     write_json,
+    write_text,
 )
 from neighborhoods import apply_readiness
 from roadmap import (
@@ -71,12 +74,24 @@ DEFAULT_LANE_POLICY = {
     "self_floor_fraction": 0.08,   # ~1 self-knowledge slot per 12-question week
     "chapter_boost_fraction": 0.15,  # v76: ~1-2 book chapter-gap slots per week
     "objective_boost": 2.5,        # multiplier on a question matching an objective
-    # v195 (ADR 0024): keystone leverage as a planner weight — a question whose
-    # focus or category sits on a timeline KEYSTONE (the anchor that would
-    # resolve the most unknowns) gets a modest lift, so the highest-leverage
-    # answer rises into the week on its own. Deliberately small: leverage is a
-    # nudge, never a takeover, and the queue's shape is still the focus model's.
-    "leverage_boost": 1.2,
+    # v196 (timeline-whispers-and-keystones): the ONE timeline dial. It is an
+    # EXCHANGE RATE, not a nudge — how many timeline unknowns one answer must
+    # place to be worth one ordinary story answer. It does two jobs with one
+    # number: below it a keystone is not minted at all, and above it the
+    # minted question's weight is `leverage / timeline_leverage_per_story` in
+    # exactly the currency `objective_boost` (2.5) is quoted in.
+    #
+    # 6, conservatively: a week is ~8 questions, so a keystone ties an
+    # ordinary question at 6 unknowns and only reaches the strongest lane in
+    # the queue at 15. With KEYSTONE_CAP (2) and GROUP_CAPS["timeline"] (1 a
+    # week) a vault can never spend more than one slot on the timeline no
+    # matter how leveraged its anchors are.
+    #
+    # v195's `leverage_boost` is DELETED with the adjacency it expressed: a
+    # bank question whose focus merely resembled a keystone slug was lifted
+    # and starred while never asking for a date — the defect in
+    # lifehug/lifehug-platform#586. A keystone is asked as itself now.
+    "timeline_leverage_per_story": 6,
     "expansion_floor": 0.02,       # research-expansion residual when there's room
     "expansion_onset": 0.60,       # global fullness where expansion urgency starts
 }
@@ -85,6 +100,10 @@ GROUP_CAPS = {
     "main": 0.50,
     "project": 0.35,
     "focus": 0.25,
+    # v196: minted keystone questions live in their own group, and the cap is
+    # the volume control — max_counts floors every group at 1, so ANY weekly
+    # limit yields exactly one timeline question per week.
+    "timeline": 0.01,
 }
 
 STORY_FUNCTIONS = (
@@ -676,7 +695,7 @@ def _week_seed(generated_at: str) -> int:
 
 
 def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: dict | None = None,
-                seed: int | None = None, keystone_slugs: object = None) -> dict:
+                seed: int | None = None, timeline_probes: object = None) -> dict:
     """Build the weekly queue by dynamic Focus-weighted sampling.
 
     Each Focus gets weight = base(tier) × fill_factor × room; saturated Focuses
@@ -704,21 +723,27 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
     pending = enriched_pending_questions(
         questions, categories, coverage, planner_state.get("active_objectives", []), findex)
 
-    # v195: mark the pending questions a timeline keystone would help. The
-    # slugs are supplied by the CALLER (the CLI reads them through a guarded
-    # `timeline.keystone_slugs()`), never read here — the weekly queue must
-    # never be able to break on a timeline problem.
-    keystones = {str(slug).strip().lower() for slug in (keystone_slugs or ()) if str(slug).strip()}
-    keystone_hits = 0
-    if keystones:
-        for question in pending:
-            haystack = {str(question.get("focus") or "").lower(),
-                        str(question.get("category") or "").lower(),
-                        str(question.get("group") or "").lower()}
-            haystack.discard("")
-            if any(slug in haystack or any(slug in item for item in haystack) for slug in keystones):
-                question["keystone"] = True
-                keystone_hits += 1
+    # v196: a MINTED keystone question is an ordinary pending bank question
+    # that happens to carry a leverage number. The index is supplied by the
+    # CALLER (the CLI reads it through a guarded `current_timeline_probes()`),
+    # never read here — the weekly queue must never be able to break on a
+    # timeline problem. There is no adjacency: a question is a keystone
+    # question because it IS the minted probe, by exact id, or it is not one.
+    probes = timeline_probes if isinstance(timeline_probes, dict) else {}
+    per_story = float(policy.get("timeline_leverage_per_story",
+                                 DEFAULT_LANE_POLICY["timeline_leverage_per_story"]) or 0)
+    queued_probes: list[dict] = []
+    for question in pending:
+        probe = probes.get(str(question.get("id")))
+        if not isinstance(probe, dict):
+            continue
+        leverage = int(probe.get("leverage") or 0)
+        question["timeline_probe"] = {
+            "question_id": probe.get("question_id"),
+            "anchor": probe.get("anchor"),
+            "leverage": leverage,
+        }
+        question["timeline_boost"] = (leverage / per_story) if per_story > 0 else 0.0
 
     # Per-Focus item caps (max share of the week any one Focus may take).
     focus_max = {
@@ -793,7 +818,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         weights = [
             max(q.get("weight", 1.0), 0.0001)
             * (policy["objective_boost"] if q.get("objective") else 1.0)
-            * (policy.get("leverage_boost", 1.0) if q.get("keystone") else 1.0)
+            * (q.get("timeline_boost", 1.0) if q.get("timeline_probe") else 1.0)
             for q in pool
         ]
         return rng.choices(pool, weights=weights, k=1)[0]
@@ -879,8 +904,16 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
             ],
             "self_floor": self_floor,
             "chapter_boost": {"cap": chapter_boost_max, "taken": chapter_boost_taken},
-            "leverage": {"keystones": sorted(keystones), "matched": keystone_hits,
-                         "boost": policy.get("leverage_boost", 1.0)},
+            "leverage": {
+                "per_story": per_story,
+                "minted": sorted(
+                    str(q.get("id")) for q in pending if q.get("timeline_probe")
+                ),
+                "queued": sorted(
+                    str(item["question_id"]) for item in queue
+                    if str(item.get("group")) == "timeline"
+                ),
+            },
             "expansion": {
                 "urgency": round(urgency, 3),
                 "recommended": urgency >= 0.5,
@@ -894,20 +927,64 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
     }
 
 
-def current_keystone_slugs() -> tuple[str, ...]:
-    """The timeline's current keystone slugs, or `()` — GUARDED.
+def current_timeline_probes() -> dict:
+    """The minted keystone questions in this vault's bank, or `{}` — GUARDED.
 
-    `leverage_boost` is a nudge, and a nudge must never be able to break the
-    weekly queue. Every failure mode of the timeline read (no wiki, a corrupt
-    roster, a missing module) degrades to "no keystones", which is exactly
-    v194's behavior.
+    A timeline problem must never be able to break the weekly queue, so every
+    failure mode (an unreadable bank, an older package, a missing module)
+    degrades to "no timeline questions", which is exactly v194's behavior.
+    """
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        return timeline_interaction.timeline_probe_index(read_text(QUESTIONS_FILE))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def mint_keystone_questions(*, dry_run: bool = False) -> list[dict]:
+    """Mint this vault's earned keystones into the bank — GUARDED.
+
+    Runs at `planner-queue` time ONLY, before the queue is built, so a minted
+    question is an ordinary pending question by the time anything scores it.
+    A keystone is minted when its leverage clears `timeline_leverage_per_story`
+    and it has no live (unanswered) row already: asked once, answered once,
+    never re-asked — the bank's own mechanism, not a second one.
     """
     try:
         import timeline  # noqa: PLC0415
+        import timeline_interaction  # noqa: PLC0415
+        from question_candidates import next_question_id  # noqa: PLC0415
 
-        return timeline.keystone_slugs()
-    except Exception:  # noqa: BLE001 — a timeline problem is never a queue problem
-        return ()
+        policy = {**DEFAULT_LANE_POLICY, **load_planner_state().get("lane_policy", {})}
+        per_story = float(policy.get("timeline_leverage_per_story", 0) or 0)
+        if per_story <= 0:
+            return []
+        keystones = timeline.keystones(timeline.timeline_data())
+        if not keystones:
+            return []
+        text = read_text(QUESTIONS_FILE)
+        live = {row["question_id"] for row in timeline_interaction.timeline_probe_index(text).values()
+                if not row.get("answered")}
+        minted: list[dict] = []
+        for keystone in keystones:
+            if int(keystone.get("leverage") or 0) < per_story:
+                continue
+            if str(keystone.get("question_id") or "") in live:
+                continue
+            row = timeline_interaction.mint_keystone_question(
+                keystone, next_question_id=lambda category: next_question_id(text, category))
+            if not row:
+                continue
+            text = timeline_interaction.insert_keystone_question(text, row)
+            live.add(row["question_id"])
+            minted.append(row)
+        if minted and not dry_run:
+            write_text(QUESTIONS_FILE, text)
+        return minted
+    except Exception as exc:  # noqa: BLE001
+        record_learning_failure("question_planner", "mint_keystone_questions", exc)
+        return []
 
 
 def queue_is_stale(queue_data: dict) -> bool:
@@ -1083,7 +1160,7 @@ def report(limit: int = 10) -> int:
         int(planner_state.get("queue", {}).get("arc_max", 2)),
         int(planner_state.get("queue", {}).get("expires_after_days", 7)),
         planner_state,
-        keystone_slugs=current_keystone_slugs(),
+        timeline_probes=current_timeline_probes(),
     )
     print()
     print("Recommended next queue preview (read-only):")
@@ -1216,8 +1293,9 @@ def main() -> int:
 
     if args.write_queue:
         state = load_planner_state(write_default=True)
+        mint_keystone_questions()
         data = build_queue(args.limit, args.arc_max, args.expires_days, state,
-                           keystone_slugs=current_keystone_slugs())
+                           timeline_probes=current_timeline_probes())
         write_json(QUESTION_QUEUE_FILE, data)
         print(f"✓ Wrote planned queue: {len(data['queue'])} item(s), expires {data['expires_at']}")
         return 0

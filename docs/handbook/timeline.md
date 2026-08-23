@@ -49,23 +49,47 @@ asks you for a year.
 - **Basis** — *how* the system came to believe it: `stated` (they said it),
   `age` (their age against their birthday), `anchor` (a landmark plus a
   before/after), `order` (sequence only), `public_event`, `connector`.
-- **Anchor** — a landmark of the person's own that other dates hang off: their
+- **Landmarks** — the **universal** set of dating questions everyone gets:
+  birth, the places lived, schooling, partnerships, children, jobs. Same for
+  every person, and the skeleton that makes everything else placeable by
+  arithmetic. Some are answered at onboarding; the rest sit here with Play and
+  surface later. (`system/research/landmarks.md` is the authority for the set
+  and its wording.)
+- **Anchor** — a landmark of the person's own *once it is dated*: their
   birthday, a residence with a span, an era with a span, a dated moment.
   Collectively they are the life-history calendar, and every probe above the
-  second rung is cheap because they exist.
+  second rung is cheap because they exist. Landmarks are the questions;
+  anchors are what the answers become.
 - **Band** — a row of the timeline. The person's own life **chapter** is the
   band wherever a dated chapter covers the stretch; the system's **period** is
   the band everywhere else. Inside a band, the **places** lived nest, and the
   **events** sit under their place.
-- **Unknown** — a gap made answerable: `{kind, key, label, probe}`, where the
-  probe is the cheapest question the playbook has for that kind.
-  `era_gap` — a dated hole between two dated eras — is the kind that could not
-  exist before dates did.
+- **Unknown** — ONE concrete thing the person can answer about:
+  `{kind, key, label, probe}`, where the label names the subject and the probe
+  is a real question about it. Five kinds: a specific undated **moment**, an
+  era's missing **bounds**, a **place**'s span, an **era gap** (a dated hole
+  between two dated bands — the kind that could not exist before dates did),
+  and a **date contradiction**. Never a count: "116 moments I can't place" is
+  a number, and a number is not a question (owner-set, 2026-08-23). The counts
+  live on the **ledger** (`unknown_ledger`), and the page offers the top
+  `UNKNOWNS_PAGE_CAP` unknowns by leverage.
+  <!-- parity: timeline.UNKNOWNS_PAGE_CAP = 30 -->
 - **Leverage** — how many unknowns one anchor would resolve. **Keystones** are
   the top two, starred. <!-- parity: timeline.KEYSTONE_CAP = 2 -->
-- **Deferred** — "I'll find out". A real state beside declined: quiet for
-  `DEFERRED_QUIET_DAYS`, still starred, never counted as outstanding, never
-  re-asked. <!-- parity: timeline.DEFERRED_QUIET_DAYS = 45 -->
+- **Whisper** — the week's arc card carrying a keystone's real probe and the
+  person's own landmarks into an ordinary conversation. Raised only where it
+  fits, at most once, any precision accepted, never pressed.
+- **Keystone question** — the same probe minted as an ordinary bank question
+  in the `timeline` group, asked as the day's question. Answered once, never
+  re-asked, by the bank's own mechanism.
+- **"I'll find out"** — an ordinary answer. Nothing is filed, nothing is
+  remembered, the unknown simply stays outstanding and keeps its star. (v196
+  deleted the deferral side-state v195 had introduced.)
+
+**How the three timeline words relate.** Landmarks are the universal
+skeleton; **keystones** are the per-person gaps that skeleton leaves — the one
+date that would place the most moments, computed from the dependency graph;
+and **whispers** and **keystone questions** are the two ways the loop asks.
 
 ## 3. How it works
 
@@ -90,13 +114,16 @@ undated eras are interpolated between their nearest dated neighbours in the
 old order; the result is dense-ranked into `chrono`. With nothing dated, the
 order is exactly what it was before v195.
 
-**How a hole becomes a question.** Every gap the timeline computes becomes an
-unknown with a probe. Press Play on one and the `timeline` interaction opens:
-it asks about the moment, then where you were living, then what work you were
-doing — climbing the ladder only while it stays cheap, offering bounds rather
-than demanding points, and stopping the moment the answer is good enough for
-that unknown's slot. If you say you will find out, it says the unknown will
-keep, and means it.
+**How a hole becomes a question.** Every hole the timeline computes becomes an
+unknown ABOUT SOMETHING — *the dog that followed you home*, *when the Yucaipa
+years ended*, *the stretch between two dated eras* — and its probe names that
+subject and hangs it on a landmark you already gave: "Dad lost the truck keys
+while camping — was that before or after the move to San Diego?" Press Play and
+the `timeline` interaction opens on that question, then climbs the ladder only
+while it stays cheap, offering bounds rather than demanding points, and
+stopping the moment the answer is good enough for that unknown's slot. If you
+say you will find out, that is simply your answer: nothing is filed, nothing is
+remembered, and the unknown keeps its place.
 
 ## 4. The algorithm
 
@@ -127,9 +154,16 @@ event, and an entity's arrival. A period anchor resolves that period's own
 unknowns, every `era_gap` touching it, and every undated moment or entity in
 it; a landmark event resolves the undated moments it would bound; an entity
 arrival resolves the moments sharing its sources. Leverage is the size of that
-set, keystones are the top two by leverage then by how cheap their probe is,
-and `leverage_boost` (1.2) lifts keystone-adjacent questions in the weekly
-queue.
+set, and keystones are the top two by leverage then by how cheap their probe
+is. A keystone becomes a QUESTION in exactly two ways, both matched by its own
+identity `tl:<anchor-slug>` — the week's whisper on an arc card, and a minted
+bank question when its leverage clears `timeline_leverage_per_story` (6), the
+one dial. That number is an exchange rate: how many unknowns one answer must
+place to be worth one ordinary story answer, and it sets both the mint cutoff
+and the minted question's weight in the queue's own objective currency.
+<!-- parity: question_planner.DEFAULT_LANE_POLICY["timeline_leverage_per_story"] = 6 -->
+Adjacency is gone: a bank question whose focus merely resembled a keystone is
+not a keystone and is never starred.
 
 **A worked example.** Your birthday is 12 April 1979. You say a letter arrived
 when you were "about five". `parse_age` reads `(5, 5, hedged)`; the hedge
@@ -148,8 +182,9 @@ Per answer, classification records any explicit date claim and the event's
 title. The timeline is recomputed on every read and written to
 `wiki/timeline.md` on every compile, so a new answer's dates appear
 immediately. Weekly, `timeline-retire` retires display pins the classifier has
-caught up with, and `planner-queue` applies `leverage_boost` through a guarded
-read that degrades to "no keystones" rather than ever breaking the queue.
+caught up with, and `planner-queue` mints the earned keystones through a
+guarded read that degrades to "no keystone questions" rather than ever
+breaking the queue.
 Playing an unknown writes through the path that already existed —
 `timeline-place` files a dated correction source into the archive and saves
 the display pin — so a placement teaches the loop exactly as it always did,
@@ -160,7 +195,7 @@ on demand instead of at three whispers a week.
 | Concern | Location |
 |---|---|
 | The date primitive | `system/chronology.py` |
-| The model, bands, unknowns, leverage, deferred | `system/timeline.py` |
+| The model, bands, unknowns, leverage, keystones | `system/timeline.py` |
 | Corroboration windows | `system/timeline_corroboration.py` |
 | The elicitation | `interactions/timeline/`, `system/timeline_interaction.py` |
 | The classifier's claim | `system/classify_story.py` (`events[].title`, `events[].date`) |
@@ -168,12 +203,12 @@ on demand instead of at three whispers a week.
 | The viewer | `system/serve_wiki.py` (`view_timeline`) |
 | The write path | `lifehug.py timeline-place ... [--date] [--basis] [--anchor]`, `system/jobs.py` |
 | Plan a timeline Play | `lifehug.py arc-plan-target --timeline [--era <slug>]` |
-| Durable state | `state/timeline_placements.json`, `state/timeline_deferred.json` |
+| Durable state | `state/timeline_placements.json` |
 | Research basis | `system/research/chronology.md`, `system/research.md` §4a |
 | Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py` |
 
 ## 7. Decisions
 
-- [ADR 0024 — Chronology with basis](../adr/0024-chronology-with-basis.md) — dates as intervals, asking anchor-first, contradictions that keep both claims, derived order, keystones, the deferred memory, and the fifth child interaction.
+- [ADR 0024 — Chronology with basis](../adr/0024-chronology-with-basis.md) — dates as intervals, asking anchor-first, contradictions that keep both claims, derived order, keystones, and the fifth child interaction (amended v196: the deferral state is deleted, and a keystone is asked as a whisper or a minted question).
 - [The Timeline Interaction](interactions/timeline.md) — the conversation that places a memory.
 - [ADR 0023](../adr/0023-arc-walking.md) — the sibling child whose stage and caller-fact shape this one copies.

@@ -129,11 +129,13 @@ class ChronologyHandbookParityTests(unittest.TestCase):
         for basis in chronology.BASES:
             self.assertIn(f"`{basis}`", self.page)
 
-    def test_the_leverage_boost_quoted_on_the_page_is_the_live_knob(self):
+    def test_the_one_timeline_dial_quoted_on_the_page_is_the_live_knob(self):
         import question_planner
 
-        self.assertIn("`leverage_boost` (1.2)", self.page)
-        self.assertEqual(question_planner.DEFAULT_LANE_POLICY["leverage_boost"], 1.2)
+        self.assertIn("`timeline_leverage_per_story` (6)", self.page)
+        self.assertEqual(
+            question_planner.DEFAULT_LANE_POLICY["timeline_leverage_per_story"], 6)
+        self.assertNotIn("leverage_boost", self.page)
 
     def test_every_edtf_form_the_page_advertises_round_trips(self):
         import chronology

@@ -178,7 +178,6 @@ CONNECTORS_STATE_DIR = _data("connectors_state")
 SECOND_VOICE_OFFERS_FILE = _data("second_voice_offers")
 BOOK_OFFERS_FILE = _data("book_offers")
 TIMELINE_PLACEMENTS_FILE = _data("timeline_placements")
-TIMELINE_DEFERRED_FILE = _data("timeline_deferred")
 PERENNIALS_FILE = _data("perennials")
 WIKI_SYNTHESIS_CACHE_FILE = _data("wiki_synthesis_cache")
 SYNTHESIS_DIR = _data("synthesis")
@@ -191,6 +190,8 @@ CONVERSATIONS_DIR = _data("conversations")
 MIRROR_RESPONSES_FILE = _data("mirror_responses")
 CONVERSATION_DELIVERIES_FILE = _data("conversation_deliveries")
 QUESTION_JUDGMENT_LEARNED_FILE = _data("question_judgment_learned")
+# v196: the arc half of the same weekly learning step (ADR 0024 amendment).
+QUESTION_JUDGMENT_ARC_LEARNED_FILE = _data("question_judgment_arc_learned")
 QUESTION_JUDGMENT_STATE_DIR = _data("question_judgment_state")
 FOCUS_CURATION_STATE_DIR = _data("focus_curation_state")
 FOCUS_MERGES_FILE = _data("focus_merges")
@@ -644,7 +645,7 @@ def normalize_group(group: str | None) -> str:
 
 def category_group(cat_id: str, section_group: str | None = None) -> str:
     section_group = normalize_group(section_group)
-    if section_group in {"main", "project", "focus"}:
+    if section_group in {"main", "project", "focus", "timeline"}:
         return section_group
     if cat_id >= "K":
         return "focus"
@@ -664,6 +665,12 @@ def parse_categories(md_text: str) -> dict[str, dict[str, str]]:
             continue
         if stripped.startswith("## project"):
             group = "project"
+            continue
+        # v196: the fourth group. A `## Timeline` section is where minted
+        # keystone questions live — one category, and the planner's group cap
+        # is what keeps it to one question a week.
+        if stripped.startswith("## timeline"):
+            group = "timeline"
             continue
 
         match = CATEGORY_HEADER_RE.match(line)

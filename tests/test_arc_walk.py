@@ -620,7 +620,8 @@ class PackageTests(unittest.TestCase):
         placement/onboarding contracts pinned."""
         expected = {
             "conversation": (
-                "107a26a9255eb86784f088dbb081184416da0a3edc12216cdd7ca6c62ff00ffd"
+                # v196: prompt/turn-instructions.md carries the whisper direction.
+                "9e201849154a49d698aabc48cd856f5358a0f9e3e31bea85ad0690075b4b1970"
             ),
             "question_candidate": (
                 "f549af401b4765166cc8d3618439d2b367ab799f16f43f3a1a3c5dae764786f5"

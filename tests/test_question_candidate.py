@@ -440,7 +440,11 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
         self.assertIn("question-candidate-prompt", lifehug.READ_ONLY_COMMANDS)
         self.assertNotIn("question-candidate-prompt", lifehug.DIRECT_MUTATION_COMMANDS)
 
-    def test_ordinary_conversation_prompt_bytes_match_v180(self):
+    def test_ordinary_conversation_prompt_bytes_match_v196(self):
+        """v196 amended ONE definition file — prompt/turn-instructions.md, the
+        timeline-whisper direction (raise it where it fits, once, any
+        precision, never press). Every other conversation definition is
+        byte-identical to v180's, pinned below."""
         turn = conversation.build_turn_prompt(
             {
                 "session": {
@@ -463,10 +467,10 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
                 "pending_question_id": None,
             }
         )
-        self.assertEqual(len(turn), 14_900)
+        self.assertEqual(len(turn), 15_881)
         self.assertEqual(
             hashlib.sha256(turn.encode()).hexdigest(),
-            "483325f32768beefff111fcb1e6b357ab9c36b739748be12fe60a5b22fb31a4f",
+            "b6e8f90c1f5c3c1f44db83d0eb0c5d27bb1ce543c3ff3536729a5dc452ea0f7c",
         )
         self.assertEqual(len(router), 9_673)
         self.assertEqual(
@@ -474,7 +478,7 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
             "f24b88b9f0b5562ffe2f313dcb771ad04082ed2f75603f70262d4a467c6447c7",
         )
 
-    def test_ordinary_conversation_definition_files_match_v180(self):
+    def test_ordinary_conversation_definition_files_match_v196(self):
         manifest = conversation.load_interaction_manifest()
         self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["modes"], "chat|conversation")
@@ -482,7 +486,8 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
         hashes = {
             "prompt/behavior.md": "c2e8dbfb2a26d12cc75a4c0420fe714d3836b67ebb105bc6e85db4831d8e9aad",
             "prompt/examples.md": "f24be4c0ff2bde524d1c2ecfb667ac1ef613f80d8ba36aee6f6e55bc52e4fda6",
-            "prompt/turn-instructions.md": "1f60bc704f15fe083df00b3c90804ccb45708b40b796b0dd0557da56d71241e7",
+            # v196 (whispers): the one amended file.
+            "prompt/turn-instructions.md": "1c1632685709aba3974d17c6602b9a8879bd52256f8bf3a095f6108123c99b26",
             "context/manifest.md": "8e6724a6d262282701742adbbad923caaedc1fcb85372c442636b2063c2763d9",
             "router/deflection.md": "7e5804812e99affac6e71aa19a01e2c039ab38392e7e5697e9759e85fa9a38f1",
             "router/router.md": "35153bdd414b0d262912bed9bd81c3e5d0ecff1eeccf880c76cfe1c939639a0c",

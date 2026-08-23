@@ -44,7 +44,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -62,6 +63,7 @@ from ai_provider import (
 from lifehug_core import (
     ANSWER_SCORES_FILE,
     CONVERSATION_DELIVERIES_FILE,
+    SYSTEM_DIR,
     TelegramSendResult,
     load_config,
     now_utc,
@@ -449,7 +451,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         'month | season | year | range | era", "confidence": "certain | '
         'approximate | inferred | conjectural", "basis": "stated | age | '
         'anchor | order | public_event | connector", "anchors": ["the landmark '
-        'keys you used"]} | {"deferred": true} | null,\n'
+        'keys you used"]} | null,\n'
         if shape.timeline_stage is not None
         else ""
     )
@@ -458,8 +460,10 @@ def _output_contract_block(shape: TurnShape) -> str:
         "something that actually dates the moment. Record ONLY what they said "
         "— a date, an age, or a before/after against a landmark from ANCHORS — "
         "and never a year they did not supply. An interval is a finding, not a "
-        'failure: bounds you are sure of beat a point you are not. When they '
-        'say they will find out, it is {"deferred": true} and nothing else. '
+        'failure: bounds you are sure of beat a point you are not — "about '
+        'preschool, three to five" is a real placement, not a miss. When they '
+        "say they will find out, that is an ordinary answer: receive it, ask "
+        'nothing more, and leave "placed" null. '
         "Never invent an anchor key that is not in ANCHORS.\n"
         if shape.timeline_stage is not None
         else ""
@@ -753,17 +757,16 @@ _PLACED_ANCHOR_MAX_CHARS = 64
 def _parse_placed(raw: object) -> dict | None:
     """Structural layer of the additive ``placed`` field.
 
-    Accepts either exactly ``{"deferred": true}`` or an object whose keys are
-    a non-empty subset of :data:`_PLACED_KEYS` with short string values and a
-    bounded anchor list. Anything else — missing, ``null``, a bare string, an
-    extra key, a 33-character granularity — degrades to ``None``, exactly as
+    Accepts an object whose keys are a non-empty subset of
+    :data:`_PLACED_KEYS` with short string values and a bounded anchor list.
+    Anything else — missing, ``null``, a bare string, an extra key, a
+    33-character granularity, and (since v196) ``{"deferred": true}`` —
+    degrades to ``None``, exactly as
     ``held_question_id``, ``placement``, ``focus_setup``, ``entity_setup`` and
     ``answered_question_id`` degrade above: never an error.
     """
     if not isinstance(raw, dict) or not raw:
         return None
-    if set(raw) == {"deferred"}:
-        return {"deferred": True} if raw["deferred"] is True else None
     if not set(raw) <= _PLACED_KEYS:
         return None
     parsed: dict = {}
@@ -1429,6 +1432,85 @@ def _default_fallback(
         _diagnostic("fallback_followup", "internal_error", source_id)
 
 
+# --------------------------------------------------------------------------
+# The timeline seam on the answer path (v196, timeline-whispers-and-keystones)
+# --------------------------------------------------------------------------
+
+
+def _question_bank_text(vault_root: str | Path | None) -> str:
+    """The bank as text, or "" — a bank we cannot read is simply a vault with
+    no minted keystone questions, never an error on the answer path."""
+    try:
+        from vault_paths import read_vault_text, vault_data_path  # noqa: PLC0415
+        root = Path(vault_root) if vault_root is not None else VAULT_ROOT
+        return read_vault_text(
+            vault_data_path("question_bank", vault_root=root, framework_system_dir=SYSTEM_DIR),
+            vault_root=root,
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def timeline_item_for_turn(session: dict, question_id: str, *,
+                           vault_root: str | Path | None = None) -> dict | None:
+    """The timeline item this turn carries, or None — guarded.
+
+    ONE lookup for both ways a keystone becomes a question: the day's question
+    IS a minted keystone question (an exact `timeline_probe_index` hit), or the
+    session's arc card carries a whisper. Gated on the one-per-conversation
+    budget: once a turn in this session has raised the timeline, the next turn
+    carries no item, so the rule holds structurally and the lint is the belt to
+    that braces (`timeline_gates.one_per_conversation`).
+    """
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        if timeline_interaction.timeline_asks_so_far(session) >= 1:
+            return None
+        index = timeline_interaction.timeline_probe_index(_question_bank_text(vault_root))
+        return timeline_interaction.timeline_item_for_session(
+            session, question_id=question_id, probe_index=index,
+        )
+    except Exception:  # noqa: BLE001 — a timeline problem never costs a turn
+        return None
+
+
+def _file_placement(item: dict, placed: dict, *, session_id: str,
+                    question_id: str, question_text: str,
+                    vault_root: str | Path | None = None) -> bool:
+    """Run the package's own `timeline-place` for an accepted placement.
+
+    The package NAMES the date, the host WRITES it (ADR 0018/0023/0024) — and
+    on this path the host is the package's own CLI, invoked exactly as the
+    Review lane invokes it. Never raises: the message is already delivered.
+    """
+    try:
+        import subprocess  # noqa: PLC0415
+
+        import timeline_interaction  # noqa: PLC0415
+
+        argv = timeline_interaction.place_invocation(
+            placed,
+            source=str(item.get("source") or f"answers/{question_id}.md"),
+            description=str(item.get("label") or question_text or question_id)[:200],
+            period=str(item.get("period") or timeline_interaction.anchor_slug(item.get("anchor"))),
+        )
+        if not argv:
+            return False
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, str(SYSTEM_DIR / "lifehug.py"), *argv],
+            capture_output=True, text=True, timeout=120,
+            cwd=str(Path(vault_root) if vault_root is not None else VAULT_ROOT),
+        )
+        if result.returncode != 0:
+            _diagnostic("timeline_place", "place_failed", session_id)
+            return False
+        return True
+    except Exception:  # noqa: BLE001
+        _diagnostic("timeline_place", "place_failed", session_id)
+        return False
+
+
 def run_post_answer_turn(
     *,
     source_id: str,
@@ -1569,6 +1651,18 @@ def run_post_answer_turn(
         return _degrade(STATUS_SKIPPED, reason)
 
     shape = decide_turn_shape(session, manifest=manifest, planned_question=planned_question)
+    # v196: the timeline seam. An item — a minted keystone question being
+    # answered, or the week's whisper riding this session's arc card — is the
+    # ONLY thing that puts the `placed` key in the output contract, so an
+    # ordinary answer's prompt does not move by one byte.
+    timeline_item = timeline_item_for_turn(session, question_id, vault_root=vault_root)
+    if timeline_item is not None:
+        import timeline_interaction as _ti  # noqa: PLC0415
+
+        shape = replace(
+            shape,
+            timeline_stage=_ti.timeline_stage_for_session(session),
+        )
     builder = prompt_builder or conversation.build_turn_prompt
     try:
         prompt = builder({"session": session}) + _output_contract_block(shape)
@@ -1686,6 +1780,21 @@ def run_post_answer_turn(
     }
     if asked_from_supply:
         lifehug_turn["asked_from_supply"] = True
+    # v196: the placement rides the turn it was named on — `placed` is what
+    # `timeline_interaction.precision_so_far` reads, and `timeline_probe_id`
+    # is what makes "at most one timeline ask per conversation" checkable
+    # without a new state file.
+    placed_record = None
+    if timeline_item is not None:
+        lifehug_turn["timeline_probe_id"] = str(timeline_item.get("question_id") or "")
+        try:
+            import timeline_interaction as _ti  # noqa: PLC0415
+
+            placed_record = _ti.answer_timeline_probe(timeline_item, parsed["placed"])
+        except Exception:  # noqa: BLE001 — never costs a delivered turn
+            placed_record = None
+        if placed_record:
+            lifehug_turn["placed"] = placed_record
     try:
         _append_turn_resilient(
             session_id, lifehug_turn, expected_turns=turn_index, vault_root=vault_root
@@ -1712,6 +1821,12 @@ def run_post_answer_turn(
     )
     if parsed["insight_receipts"]:
         _record_insight_receipts(state_path, key, parsed["insight_receipts"])
+    if placed_record and timeline_item is not None:
+        _file_placement(
+            timeline_item, placed_record, session_id=session_id,
+            question_id=question_id, question_text=question_text,
+            vault_root=vault_root,
+        )
     return TurnOutcome(
         session_id,
         turn_index,
