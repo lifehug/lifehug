@@ -2704,7 +2704,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("arc-plan", help="Plan one arc card per queued question (weekly)")
     p.add_argument("--limit", type=int, default=None, help="Plan at most N queued questions")
     p.add_argument("--gap-max", type=int, default=None,
-                   help="Max timeline_gap intents across the week (default 3)")
+                   help="Max gap intents (timeline_gap + place_no_stories, one budget) across the week (default 3)")
     p.add_argument("--model", help="AI model override (config arc_plan_model → classify_model)")
     p.add_argument("--dry-run", action="store_true", help="Print the plan; write nothing")
     p.add_argument("--emit-tasks", metavar="DIR",

@@ -1598,7 +1598,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("plan", help="Plan this week's arc cards")
     p.add_argument("--limit", type=int, default=None, help="Plan at most N queued questions")
     p.add_argument("--gap-max", type=int, default=int(os.environ.get("LIFEHUG_WEEKLY_ARC_GAP_MAX", DEFAULT_GAP_MAX)),
-                   help="Max timeline_gap intents across the week (default 3)")
+                   help="Max gap intents (timeline_gap + place_no_stories, one budget) across the week (default 3)")
     p.add_argument("--model", default=None, help="AI model override")
     p.add_argument("--dry-run", action="store_true", help="Print the plan; write nothing")
     p.add_argument("--emit-tasks", metavar="DIR", default=None,

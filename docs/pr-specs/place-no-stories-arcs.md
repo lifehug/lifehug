@@ -196,7 +196,7 @@ Golden: `interactions/conversation/evals/goldens/chat-costa-mesa-place-no-storie
 Not required — this PR does not touch `serve_wiki.py`'s visible surface. The
 planner path is provable from the CLI:
 
-    python3 system/lifehug.py arc-plan --dry-run --json
+    python3 system/lifehug.py arc-plan --dry-run
 
 ## Definition of done
 
