@@ -758,3 +758,45 @@ class TimelineStaysUpTests(unittest.TestCase):
         self.assertTrue(data["landmarks"])
         self.assertTrue(all(row["status"] == "open" for row in data["landmarks"]))
         self.assertEqual(data["place_no_stories"], [])
+
+
+class DateGrainRungTests(unittest.TestCase):
+    """lifehug#207: a DateRecord satisfies the date-grain rungs it resolves.
+
+    `rung_reached` counted a rung only under that rung's own key, with a single
+    `date` fallback for `span`. But the package's own CLI and turn writers
+    produce ONE `date` record and no per-grain keys, so a day-precision
+    birthday left `birth` `partial` with `next = year` forever — found live on
+    the platform (lifehug-platform#613, which ships a read-side normalizer as a
+    stopgap; remove it at the pin that carries this).
+    """
+
+    def test_a_day_precision_birthday_completes_the_birth_ladder(self):
+        row = li.domain_row("birth")
+        entry = {"date": _date("1978-04-12")}
+        self.assertEqual(li.rung_reached(entry, row), "day")
+        self.assertEqual(li.status_for_domain([entry], row), "complete")
+
+    def test_a_year_only_date_stops_at_year(self):
+        row = li.domain_row("birth")
+        self.assertEqual(li.rung_reached({"date": _date("1978")}, row), "year")
+        self.assertEqual(li.next_rung([{"date": _date("1978")}], row)["rung"], "month")
+
+    def test_a_coarse_date_is_an_answer_that_claims_no_month(self):
+        row = li.domain_row("birth")
+        self.assertIsNone(li.rung_reached({"date": _date("1978/1982")}, row))
+
+    def test_the_same_fix_reaches_children_and_partnerships(self):
+        for domain in ("children", "partnerships"):
+            with self.subTest(domain=domain):
+                row = li.domain_row(domain)
+                entry = {"label": "Ana", "happened": "yes", "who": "Ana",
+                         "date": _date("2004-06")}
+                self.assertEqual(li.rung_reached(entry, row), "month")
+
+    def test_an_explicit_rung_key_still_wins(self):
+        """The fallback only fires when the rung has no key of its own."""
+        row = li.domain_row("birth")
+        self.assertEqual(
+            li.rung_reached({"year": "1978", "date": _date("1978-04-12")}, row),
+            "day")

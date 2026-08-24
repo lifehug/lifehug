@@ -182,6 +182,29 @@ LADDER_COST = {"city": 1, "name": 1, "what": 1, "happened": 1, "year": 1,
                "span": 4, "household": 5}
 DEFAULT_RUNG_COST = 3
 
+#: lifehug#207: the rungs a DateRecord satisfies on its own, and the grain each
+#: one needs. The package's own CLI and turn writers produce ONE ``date``
+#: record with no per-grain keys, so before this table a day-precision birthday
+#: left the domain ``partial`` with ``next = year`` forever (found live on the
+#: platform, lifehug-platform#613). ``span`` already had this fallback; the
+#: date-grain rungs now have it too.
+_DATE_GRAIN_RUNGS = {"year": 1, "month": 2, "day": 3}
+
+#: How far up ``_DATE_GRAIN_RUNGS`` a granularity actually reaches. Season,
+#: range and era rank 0 and fill nothing — a coarse date is still an ANSWER
+#: (owner ruling 3), it just does not claim a month.
+_GRAIN_RANK = {"year": 1, "month": 2, "day": 3}
+
+
+def _date_grain_reaches(entry: dict, rung: str) -> bool:
+    """True when this entry's own ``date`` record resolves ``rung``'s grain."""
+    record = entry.get("date")
+    if not isinstance(record, dict):
+        return False
+    grain = str(record.get("granularity") or "").strip().lower()
+    return _GRAIN_RANK.get(grain, 0) >= _DATE_GRAIN_RUNGS[rung]
+
+
 
 def rung_reached(entry: object, row: object) -> str | None:
     """The finest ladder rung this entry actually satisfies, or None.
@@ -190,6 +213,10 @@ def rung_reached(entry: object, row: object) -> str | None:
     rung's key. Rungs are checked in ladder order and the walk STOPS at the
     first unsatisfied one — a person who gave a span but no address is at
     ``address``'s predecessor, because the ladder is a ladder.
+
+    Two rungs are also satisfied by the entry's own date record rather than a
+    key of their own: ``span``, since v199, and — since lifehug#207 — every
+    rung in :data:`_DATE_GRAIN_RUNGS`, at the grain the record resolves.
     """
     if not isinstance(entry, dict) or not isinstance(row, dict):
         return None
@@ -198,6 +225,9 @@ def rung_reached(entry: object, row: object) -> str | None:
         value = entry.get(rung)
         if rung == "span":
             value = entry.get("span") or entry.get("date")
+        elif rung in _DATE_GRAIN_RUNGS and value in (None, "", (), [], {}) \
+                and _date_grain_reaches(entry, rung):
+            value = True
         if value in (None, "", (), [], {}):
             break
         reached = rung
