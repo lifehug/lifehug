@@ -58,6 +58,42 @@ repair.
   counts leverage with — is computed by the same matching helpers the pass
   itself uses. A number this module cannot deliver is a number it does not
   promise.
+
+**v207 — the same idea one level up (ADR 0026 amendment, design D2).** The
+founder filed his birth and *"Childhood"* still read `undated`, because
+``build_bands``/``chapter_date`` read only a band's OWN ``date``. So
+:func:`date_bands` walks every undated period with a second, smaller ladder
+(:data:`BAND_RULES`) and gives it a span:
+
+1. **residence** — the union of the spans of the PLACES that line up with the
+   era (their own page span, or the residence landmark whose label they name).
+   Where you were living is the person's own fact, and it bounds the era that
+   contains it.
+2. **moments** — the envelope of the era's already-dated moments, exactly the
+   discipline :func:`span_from_dated` has always applied to a residence
+   (``timeline._place_span`` now delegates to it). Bounds from what is dated
+   inside, never a manufactured point.
+3. **age_label** — an era the roster NAMED after an age (*"My 20s"*) plus the
+   birthday, which is a definitional join and inherits the birthday's own
+   confidence.
+
+The order is deliberately NOT :data:`RULES`' order. A definitional join is the
+strongest thing a MOMENT can have, because the marker is the person's own
+sentence; an age label is a name a roster model wrote, so it is ranked under
+the two rules grounded in what the person actually did. A miss is still fine
+and a wrong join is still not.
+
+Because a band's span is what CONTAINMENT reads, the pass runs the moment
+ladder, then the band ladder, then the moment ladder again — the second moment
+pass is what places the moments the newly dated eras now bound. It is the same
+idempotent pass twice, not two mechanisms, and a moment already dated is
+skipped both times.
+
+**v207 — the filing beat.** :func:`gain_sentence_for_record` answers, at the
+moment a landmark or a placement is filed, the only question the person
+actually has: *what did that just do?* It runs THIS pass over copies of the
+current payload with the new record folded in and counts what dates — the same
+promise-equals-delivery discipline, applied to a sentence instead of a star.
 """
 
 from __future__ import annotations
@@ -90,6 +126,31 @@ JOINS = (
 #: counts one origin per derivation and a reader can tell a derived claim from
 #: a stated one without guessing.
 PROVENANCE_SOURCE = "cross-dating"
+
+#: Strongest first. The order IS the ladder :func:`band_span` walks — and it is
+#: deliberately NOT :data:`RULES`' order. For a MOMENT a definitional join is
+#: the strongest thing there is, because the marker is the person's own
+#: sentence. For a BAND the "definitional" rung is an age the ROSTER MODEL put
+#: in a name ("My 20s"), so it is ranked under the two rungs grounded in what
+#: the person actually did: where they lived, and what is already dated inside.
+BAND_RULES = ("residence", "moments", "age_label")
+
+#: Which band identity a derivation leaned on. One per rule, so far.
+BAND_JOINS = ("residence_span", "moment_envelope", "age_label")
+
+#: Which band rules produce a span that BOUNDS the era on both sides — the only
+#: kind a moment inside it may then take as containment bounds.
+#:
+#: This is the sharpest line in the amendment. A residence union and a moment
+#: envelope say *"this era at least covers that"* — they are a floor on its
+#: extent, not a ceiling — so they are honest to DISPLAY as the era's span, to
+#: order the spine by, and to measure a hole between eras with, and they are
+#: dishonest to push back down onto the era's other moments: one dated moment
+#: would otherwise pin forty-seven undated ones to its own year. An age label
+#: is different in kind: *"My 20s"* IS the decade from the twentieth birthday,
+#: closed at both ends, so it bounds what is inside it exactly as an explicitly
+#: dated era does.
+BAND_RULES_THAT_BOUND = ("age_label",)
 
 #: Anchor-index kinds that can carry a residence span.
 RESIDENCE_KINDS = ("residence",)
@@ -470,6 +531,272 @@ def containment(span: object, *, anchor: str, label: str, join: str) -> Derivati
 
 
 # ---------------------------------------------------------------------------
+# 4. Bands — the same three ideas one level up (v207, ADR 0026 amendment).
+# ---------------------------------------------------------------------------
+
+
+def _stamp_band(record: chrono.DateRecord, *, keys: tuple = (), source: str = "band",
+                basis: str, confidence: str, provenance: str) -> chrono.DateRecord:
+    """A band's derived span, badged with every anchor it leaned on.
+
+    A band can rest on SEVERAL anchors at once — the union of three residence
+    spans is one interval warranted by three landmarks — so unlike
+    :func:`_stamp` this keeps the whole tuple, and `Derivation.anchor` names
+    the first (the one the provenance sentence is about). ``keys`` is empty
+    where the warrant is not an anchor at all: the moment envelope leans on
+    what is already dated inside the era, and naming a fake anchor key for it
+    would put a claim in `anchors` that no index could resolve.
+    """
+    keys = tuple(dict.fromkeys(str(key) for key in keys if str(key).strip()))
+    return replace(
+        record,
+        basis=basis,
+        confidence=confidence,
+        anchors=keys,
+        provenance=({"claim": provenance, "basis": basis,
+                     "source": f"{PROVENANCE_SOURCE}:{keys[0] if keys else source}"},),
+    )
+
+
+def span_from_dated(events: object) -> chrono.DateRecord | None:
+    """A span inferred from the dated things inside it — the ONE definition.
+
+    `timeline._place_span` has derived a residence's span from the moments that
+    happened there since v195; v207 needs exactly that arithmetic for an ERA
+    too, so the definition moved here and `_place_span` delegates (the
+    recurring-defect doctrine: one importable definition, never a second copy).
+
+    A single year is `conjectural` and says so with EDTF's own `?`; two or more
+    give their outer bounds as an `inferred` interval. An interval is a
+    finding, not a failure — and it is never a point the person did not give.
+    """
+    rows = [row for row in (events or ()) if isinstance(row, dict)]
+    starts = [year for year in (chrono.year_of(row.get("date")) for row in rows)
+              if year is not None]
+    ends = [year for year in (chrono.year_of(row.get("date"), end=True) for row in rows)
+            if year is not None]
+    if not starts:
+        return None
+    first, last = min(starts), max(ends or starts)
+    if first == last:
+        return chrono.DateRecord(best=f"{first}?", earliest=str(first), latest=str(first),
+                                 granularity="year", confidence="conjectural", basis="order")
+    return chrono.DateRecord(best=f"{first}/{last}", earliest=str(first), latest=str(last),
+                             granularity="range", confidence="inferred", basis="order")
+
+
+def _residence_landmark(label: str, anchors: object) -> tuple[str, object] | None:
+    """The residence landmark a place page IS, matched on the whole label.
+
+    Exact (case-insensitive) equality, not the substring test `_names` runs on
+    prose: a place page called "Mesa" is the `residences-mesa` landmark; a page
+    called "Mesa Community College" is not.
+    """
+    wanted = " ".join(str(label or "").split()).casefold()
+    if not wanted:
+        return None
+    for key, row in _anchor_rows(anchors).items():
+        if not isinstance(row, dict) or row.get("date") is None:
+            continue
+        key_text = str(key)
+        if not key_text.startswith(RESIDENCE_PREFIX) and str(row.get("kind") or "") not in RESIDENCE_KINDS:
+            continue
+        if " ".join(_label_of(row).split()).casefold() == wanted:
+            return key_text, row["date"]
+    return None
+
+
+def band_places(entity_lineup: object, slug: object, anchors: object = None) -> list[dict]:
+    """`[{key, label, date}]` — the SPANNED places that line up with this era.
+
+    A place's span is its own page date where it has one, and otherwise the
+    residence landmark it names exactly. Both are the person's own statement of
+    where they were living; neither is guessed.
+    """
+    rows = (entity_lineup or {}).get(str(slug)) if isinstance(entity_lineup, dict) else None
+    found: list[dict] = []
+    for row in rows or ():
+        if not isinstance(row, dict) or row.get("type") != "place":
+            continue
+        label = str(row.get("title") or row.get("label") or row.get("slug") or "").strip()
+        key = f"entity:{row.get('slug')}"
+        record = chrono.from_dict(row.get("date")) if row.get("date") is not None else None
+        if record is None:
+            landmark = _residence_landmark(label, anchors)
+            if landmark is not None:
+                key, record = landmark[0], chrono.from_dict(landmark[1])
+        if record is None or not (record.earliest and record.latest):
+            continue
+        found.append({"key": key, "label": label, "date": record})
+    return found
+
+
+def residence_span(places: object) -> Derivation | None:
+    """Band rule 1 — the union of the spans of the places lived in this era.
+
+    Containment read outwards: an era that CONTAINS a residence starts no later
+    than that residence began and ends no earlier than it ended. Several
+    residences union into one interval; the confidence is `inferred`, the
+    documentary mark for a bound the system worked out from something stated.
+    """
+    rows = [row for row in (places or ()) if isinstance(row, dict) and row.get("date") is not None]
+    if not rows:
+        return None
+    starts = [year for year in (chrono.year_of(row["date"]) for row in rows) if year is not None]
+    ends = [year for year in (chrono.year_of(row["date"], end=True) for row in rows)
+            if year is not None]
+    if not starts:
+        return None
+    first, last = min(starts), max(ends or starts)
+    ordered = sorted(rows, key=lambda row: (chrono.year_of(row["date"]) or 0, str(row["key"])))
+    if len(ordered) == 1:
+        provenance = f"from your years at {ordered[0]['label']}"
+    else:
+        provenance = "from where you were living then"
+    if first == last:
+        record = chrono.DateRecord(best=str(first), earliest=str(first), latest=str(first),
+                                   granularity="year")
+    else:
+        record = chrono.DateRecord(best=f"{first}/{last}", earliest=str(first),
+                                   latest=str(last), granularity="range")
+    return Derivation(
+        record=_stamp_band(record, keys=tuple(row["key"] for row in ordered),
+                           basis="anchor", confidence="inferred", provenance=provenance),
+        rule="residence", join="residence_span", anchor=str(ordered[0]["key"]),
+        label=str(ordered[0]["label"]), provenance=provenance)
+
+
+def moment_envelope(events: object) -> Derivation | None:
+    """Band rule 2 — the envelope of the moments already dated inside it.
+
+    This is why the pass runs the moment ladder FIRST: a birth landmark dates
+    "Born in Redlands", and the era that moment sits in is then bounded by it.
+    There is no circularity — a moment can only take an era's span by
+    containment once that era HAS one, and an era with no span contributes
+    nothing to date the moments this rule then reads.
+    """
+    record = span_from_dated(events)
+    if record is None:
+        return None
+    provenance = "from the moments you have already dated"
+    return Derivation(
+        record=_stamp_band(record, source="moments", basis="order",
+                           confidence=record.confidence, provenance=provenance),
+        rule="moments", join="moment_envelope", anchor="moments",
+        label="", provenance=provenance)
+
+
+#: The age-named eras a roster actually mints, and the ages each one means.
+#: `my` is REQUIRED — "the 80s" is a decade of the century and "his 40s" is
+#: somebody else's life, and neither of them is this person's era.
+AGE_BAND_AGES = {
+    "teens": (13, 20), "teenage years": (13, 20),
+    "twenties": (20, 30), "20s": (20, 30),
+    "thirties": (30, 40), "30s": (30, 40),
+    "forties": (40, 50), "40s": (40, 50),
+    "fifties": (50, 60), "50s": (50, 60),
+    "sixties": (60, 70), "60s": (60, 70),
+    "seventies": (70, 80), "70s": (70, 80),
+    "eighties": (80, 90), "80s": (80, 90),
+    "nineties": (90, 100), "90s": (90, 100),
+}
+
+_AGE_BAND_RE = re.compile(
+    r"\bmy\s+(" + "|".join(sorted((re.escape(k) for k in AGE_BAND_AGES), key=len, reverse=True))
+    + r")\b", re.IGNORECASE)
+
+
+def age_band_label(name: object) -> str | None:
+    """The age-label an era's NAME states, or ``None``."""
+    match = _AGE_BAND_RE.search(" ".join(str(name or "").split()))
+    return match.group(1).lower() if match else None
+
+
+def age_band_span(name: object, birth_date: object) -> Derivation | None:
+    """Band rule 3 — an age-named era plus the birthday, as an interval.
+
+    A DEFINITIONAL join in ADR 0026's sense: *"My 20s"* IS the decade that
+    starts on the twentieth birthday, so the span inherits the birthday's own
+    confidence (§3's inheritance rule) rather than being floored at `inferred`.
+    The bounds are calendar years, which is the honest granularity for an era —
+    never a point, and never a day the person did not give.
+    """
+    label = age_band_label(name)
+    if label is None:
+        return None
+    birth = chrono.year_of(birth_date)
+    if birth is None:
+        return None
+    low, high = AGE_BAND_AGES[label]
+    first, last = birth + low, birth + high
+    record = chrono.DateRecord(best=f"{first}/{last}", earliest=str(first),
+                               latest=str(last), granularity="range")
+    provenance = "from your birthday"
+    return Derivation(
+        record=_stamp_band(record, keys=(BIRTH_KEY,), basis="anchor",
+                           confidence=_inherited_confidence(birth_date),
+                           provenance=provenance),
+        rule="age_label", join="age_label", anchor=BIRTH_KEY,
+        label="your birthday", provenance=provenance)
+
+
+def band_span(period: object, *, places: object = (), moments: object = (),
+              birth_date: object = None) -> Derivation | None:
+    """The one derivation for one undated band, :data:`BAND_RULES` in order."""
+    if not isinstance(period, dict) or period.get("date") is not None:
+        return None
+    found = residence_span(places)
+    if found is not None:
+        return found
+    found = moment_envelope(moments)
+    if found is not None:
+        return found
+    return age_band_span(period.get("name") or period.get("label") or period.get("slug"),
+                         birth_date)
+
+
+def date_bands(*, periods: object = (), event_lineup: object = None,
+               entity_lineup: object = None, anchors: object = None,
+               birth_date: object = None) -> dict:
+    """Give every UNDATED period a span. Returns a report; mutates the rows.
+
+    A dated band gains ``date`` (a `chronology.DateRecord`), ``date_derived``
+    (the `Derivation.to_dict()`, the only marker of a derived band date) and
+    the ``approximate_dates`` display alias `timeline.load_periods` maintains
+    for every other reader. An explicit date — a `timeline-place` correction, a
+    page's own frontmatter, a roster span — is never touched.
+
+    Nothing is written anywhere: like the moment pass this is recomputed on
+    every read, so a corrected landmark un-dates the era it used to bound.
+    """
+    lineup = event_lineup if isinstance(event_lineup, dict) else {}
+    report = {"derived": 0, "by_rule": {rule: 0 for rule in BAND_RULES},
+              "by_join": {join: 0 for join in BAND_JOINS}, "bands": []}
+    for period in periods or ():
+        if not isinstance(period, dict) or period.get("date") is not None:
+            continue
+        slug = str(period.get("slug") or "")
+        found = band_span(period,
+                          places=band_places(entity_lineup, slug, anchors),
+                          moments=lineup.get(slug) or (),
+                          birth_date=birth_date)
+        if found is None:
+            continue
+        period["date"] = found.record
+        period["date_derived"] = found.to_dict()
+        period["approximate_dates"] = chrono.display_date(found.record, with_basis=False)
+        report["derived"] += 1
+        report["by_rule"][found.rule] = report["by_rule"].get(found.rule, 0) + 1
+        report["by_join"][found.join] = report["by_join"].get(found.join, 0) + 1
+        report["bands"].append({
+            "slug": slug,
+            "label": str(period.get("name") or period.get("label") or slug),
+            "rule": found.rule, "join": found.join, "anchor": found.anchor,
+        })
+    return report
+
+
+# ---------------------------------------------------------------------------
 # The ladder.
 # ---------------------------------------------------------------------------
 
@@ -518,8 +845,16 @@ def cross_date(*, event_lineup: object, unplaced_events: object = (),
     ONLY marker of a derived date and the only thing a renderer needs to show
     the landmark provenance in place of the classifier's free-text anchor.
 
+    **Three phases (v207).** Moments, then bands, then the moments the newly
+    dated bands now bound. The third phase is the SAME idempotent pass as the
+    first — a moment that already carries a date is skipped in both — and it
+    exists because containment reads a band's span, which phase two is what
+    supplies. A band derived here is reported under ``bands``; nothing else
+    about the report's shape moved.
+
     Nothing is written anywhere. The report is
-    ``{"derived": n, "by_rule": {...}, "by_join": {...}, "moments": [...]}``.
+    ``{"derived": n, "by_rule": {...}, "by_join": {...}, "moments": [...],
+    "bands": {...}}``.
     """
     lineup = event_lineup if isinstance(event_lineup, dict) else {}
     period_by_slug = {str(p.get("slug")): p for p in (periods or ())
@@ -547,12 +882,42 @@ def cross_date(*, event_lineup: object, unplaced_events: object = (),
             "rule": found.rule, "join": found.join, "anchor": found.anchor,
         })
 
-    for slug, rows in lineup.items():
-        for event in rows or ():
-            run(event, slug)
-    for event in unplaced_events or ():
-        run(event, None)
+    def sweep() -> None:
+        for slug, rows in lineup.items():
+            for event in rows or ():
+                run(event, slug)
+        for event in unplaced_events or ():
+            run(event, None)
+
+    sweep()
+    report["bands"] = date_bands(periods=periods, event_lineup=lineup,
+                                 entity_lineup=entity_lineup, anchors=anchors,
+                                 birth_date=birth_date)
+    if report["bands"]["derived"]:
+        # Only a span that bounds the era on BOTH sides may bound what is
+        # inside it (:data:`BAND_RULES_THAT_BOUND`); a floor-only span is
+        # hidden from the second sweep rather than pinning its own moments.
+        period_by_slug = containment_periods(periods)
+        sweep()
     return report
+
+
+def containment_periods(periods: object) -> dict:
+    """`{slug: period}` for the containment rule, with floor-only spans hidden.
+
+    Never mutates: a period whose span is a derived FLOOR is substituted by a
+    shallow copy carrying ``date: None``, so the row a renderer holds keeps the
+    span it should display while the pass declines to reason from it.
+    """
+    lookup: dict[str, dict] = {}
+    for period in periods or ():
+        if not isinstance(period, dict) or not period.get("slug"):
+            continue
+        derived = period.get("date_derived") or {}
+        if derived and str(derived.get("rule") or "") not in BAND_RULES_THAT_BOUND:
+            period = {**period, "date": None}
+        lookup[str(period["slug"])] = period
+    return lookup
 
 
 def _places_by_source(entity_lineup: object) -> dict[str, dict]:
@@ -615,3 +980,178 @@ def derivable_moments(*, event_lineup: object, unplaced_events: object = (),
     for event in unplaced_events or ():
         consider(event, None)
     return reach
+
+
+# ---------------------------------------------------------------------------
+# The filing beat — what an answer JUST placed, said in the conversation
+# (v207, design T3). The page catches up in about two minutes; the sentence
+# does not have to wait for it.
+# ---------------------------------------------------------------------------
+
+#: Small counts read as words, exactly as the Reading Room has always said
+#: them. Beyond twelve the digits are clearer than the word.
+NUMBER_WORDS_SPOKEN = ("no", "one", "two", "three", "four", "five", "six",
+                       "seven", "eight", "nine", "ten", "eleven", "twelve")
+
+
+def spoken_count(count: object) -> str:
+    """`9` → ``"nine"``; `40` → ``"40"``. One definition, three callers."""
+    try:
+        value = max(int(count), 0)
+    except (TypeError, ValueError):
+        return "no"
+    return NUMBER_WORDS_SPOKEN[value] if value < len(NUMBER_WORDS_SPOKEN) else str(value)
+
+
+def moment_clause(count: object) -> str:
+    """``"dates nine moments"`` — the ONE clause every gain sentence is built
+    from, so `reading_room.placement_gain_sentence` and the landmark/timeline
+    filing beat can never drift into two ways of saying the same true thing."""
+    try:
+        value = max(int(count), 0)
+    except (TypeError, ValueError):
+        value = 0
+    return f"dates {spoken_count(value)} {'moment' if value == 1 else 'moments'}"
+
+
+def band_clause(labels: object) -> str:
+    """``"your Childhood years"`` — the band half of the sentence.
+
+    A leading article is dropped ("your Yucaipa Years", not "your The Yucaipa
+    Years") and a label that already says "years" is not given a second pair,
+    and past one band the eras are counted rather than listed: the sentence is
+    a gift, not a report.
+    """
+    names = [_band_name(label) for label in (labels or ()) if str(label).strip()]
+    names = [name for name in names if name]
+    if not names:
+        return ""
+    if len(names) > 1:
+        return f"{spoken_count(len(names))} of your eras"
+    return f"your {names[0]}" if "year" in names[0].casefold() else f"your {names[0]} years"
+
+
+def _band_name(label: object) -> str:
+    name = " ".join(str(label or "").split())
+    return name[4:].strip() if name[:4].casefold() == "the " else name
+
+
+def gain_sentence(moments: object = 0, bands: object = ()) -> str:
+    """*"Got it — that dates nine moments and your Childhood years."*
+
+    The whole sentence, or ``""`` when an answer placed nothing beyond itself —
+    and ``""`` is the right answer far more often than not. A count of what
+    REMAINS is never said here (`reading_room.placement_gain_sentence`'s own
+    rule, and the owner's).
+    """
+    try:
+        count = max(int(moments or 0), 0)
+    except (TypeError, ValueError):
+        count = 0
+    eras = band_clause(bands)
+    if not count and not eras:
+        return ""
+    if count and eras:
+        return f"Got it — that {moment_clause(count)} and {eras}."
+    if count:
+        return f"Got it — that {moment_clause(count)}."
+    return f"Got it — that dates {eras}."
+
+
+def record_gain(record: object, timeline_payload: object) -> dict:
+    """`{"moments": n, "bands": [label, ...]}` — what filing THIS just placed.
+
+    Pure. It runs the pass itself over COPIES of the payload's own rows with
+    the new record folded in, and counts what dates that did not date before.
+    That is the promise-equals-delivery discipline of ADR 0026 §5 applied to a
+    sentence: the conversation can only claim what the next derivation will
+    actually deliver, because the same code computed both.
+
+    `record` is either a LANDMARK record (it carries a `domain`, and enters as
+    anchors through `landmarks_interaction.anchors_from_landmarks`) or a
+    PLACEMENT (a `chronology` record with the `source` of the moment it dates).
+    Anything else places nothing, which is also the honest answer.
+    """
+    payload = timeline_payload if isinstance(timeline_payload, dict) else {}
+    lineup = {str(slug): [dict(row) for row in rows or () if isinstance(row, dict)]
+              for slug, rows in (payload.get("event_lineup") or {}).items()}
+    unplaced = [dict(row) for row in payload.get("unplaced_events") or ()
+                if isinstance(row, dict)]
+    periods = [dict(row) for row in payload.get("periods") or () if isinstance(row, dict)]
+    anchors = dict(_anchor_rows(payload.get("anchors")))
+    for key, row in _landmark_anchors(record).items():
+        anchors.setdefault(key, row)
+    _apply_placement(record, lineup, unplaced)
+    report = cross_date(event_lineup=lineup, unplaced_events=unplaced,
+                        periods=periods, entity_lineup=payload.get("entity_lineup"),
+                        anchors=anchors,
+                        birth_date=(anchors.get(BIRTH_KEY) or {}).get("date"))
+    return {"moments": int(report["derived"]),
+            "bands": [str(row["label"]) for row in report["bands"]["bands"]]}
+
+
+def gain_sentence_for_record(record: object, timeline_payload: object) -> str:
+    """The filing beat's sentence for one just-filed record, or ``""``."""
+    gain = record_gain(record, timeline_payload)
+    return gain_sentence(gain["moments"], gain["bands"])
+
+
+def _landmark_anchors(record: object) -> dict:
+    """The anchor rows a landmark record supplies, through the one function
+    that mints them. A placement supplies none."""
+    if not isinstance(record, dict):
+        return {}
+    domain = str(record.get("domain") or "").strip()
+    if not domain:
+        return {}
+    import landmarks_interaction as _li  # noqa: PLC0415  (avoids an import cycle)
+
+    try:
+        return _li.anchors_from_landmarks({domain: [record]})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _apply_placement(record: object, lineup: dict, unplaced: list) -> None:
+    """Date the moment a `timeline-place` record is about, in the copies.
+
+    The moment's own date is what the person just said, so it is never counted
+    as a gain — but it is exactly what a band's envelope then reads.
+    """
+    if not isinstance(record, dict) or record.get("domain"):
+        return
+    parsed = chrono.from_dict(record.get("date") if "date" in record else record)
+    if parsed is None:
+        return
+    source = str(record.get("source") or "").strip()
+    short = str(record.get("source_short") or "").strip()
+    if not source and not short:
+        return
+    for rows in [*lineup.values(), unplaced]:
+        for row in rows:
+            if row.get("date") is not None:
+                continue
+            if (source and str(row.get("source") or "") == source) or \
+               (short and str(row.get("source_short") or "") == short):
+                row["date"] = parsed
+
+
+#: The direction the landmark and timeline leaves carry for `{filing_gain}`.
+#: It is rendered TOGETHER with the sentence, so a turn with nothing to report
+#: substitutes the empty string and the prompt is byte-identical to v205's.
+FILING_GAIN_DIRECTION = (
+    "**What their answer just placed.** Weave this into your reply, in your "
+    "own words, once, and then let it go: {sentence} Say it as the plain good "
+    "news it is — and, only if it fits, that the pages catch up in a minute "
+    "or two. Never read it as a list, never say what is left, never promise "
+    "to remind them of anything."
+)
+
+
+def render_filing_gain(sentence: object) -> str:
+    """The `{filing_gain}` substitution: ``""``, or the direction and its
+    sentence as a paragraph of their own."""
+    text = " ".join(str(sentence or "").split())
+    if not text:
+        return ""
+    return "\n\n" + FILING_GAIN_DIRECTION.format(sentence=text)

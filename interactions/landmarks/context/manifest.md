@@ -10,7 +10,15 @@ The caller assembles, in this order:
    `landmarks_interaction.open_landmarks(rows)`, which is
    `landmarks_interaction.next_rung`'s output for that domain.
 4. `LANDMARK_STAGE` — `landmarks_interaction.landmark_stage_for_session(...)`.
+5. `{filing_gain}` (v207) — `cross_dating.render_filing_gain(sentence)` over
+   `cross_dating.gain_sentence_for_record(record, timeline_payload)`: what the
+   landmark this turn just FILED actually unlocked ("Got it — that dates nine
+   moments and your Childhood years."), said in the conversation instead of
+   appearing on a page two minutes later. It is the empty string on every turn
+   that filed nothing, and the filled leaf is then byte-identical to v205's —
+   the direction that tells the model what to do with the sentence is rendered
+   WITH the sentence, so an absent gain adds no instruction either.
 
 Nothing else is added. The person's answers, the vault, and the timeline are
 all reached through the ordinary Conversation context; this Interaction adds
-exactly the three substitutions above.
+exactly the four substitutions above.

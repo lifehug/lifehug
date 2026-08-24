@@ -214,3 +214,128 @@ chip — which is the exact contradiction the owner reported.
 - `system/research/chronology.md` §1 (bounding before pinning, conjectural
   marking), §6 (the elicitation playbook), and `system/research/go-deep.md` §7
   (genealogy's apparatus — the discipline this pass mechanizes).
+
+---
+
+## Amendment (2026-08-24 — v207, `band-dating` · design D2/D3/T3)
+
+Companion to `lifehug-platform` `docs/design/dating-dataflow.md`, the audit the
+owner asked for after this ADR's own incident ("a quick fix isn't going to
+work; a complete audit of how the system should work"). The audit found the
+original decision correct and **half-applied**: v205 taught a resolved anchor
+to place its dependent MOMENTS, and the founder's case was still only half
+fixed. His birth is filed. *"Born in Redlands"* is dated to the day. The era it
+sits in — **"Childhood"** — still read `undated`, because `build_bands` and
+`chapter_date` have only ever read a band's OWN `date` (audit finding **D2**),
+and until a band is dated nothing re-derives the spine's order from it (**D3**).
+And nothing ever told him, in the conversation, what his answer had just done
+(**T3**).
+
+### 1. Bands date themselves, from a ladder of their own
+
+`cross_dating.date_bands` walks every UNDATED period and gives it a span:
+
+| Rule | Join | The span it takes |
+|---|---|---|
+| `residence` | `residence_span` | the union of the spans of the PLACES that line up with the era — each place's own page span, or the residence landmark whose label the page names **exactly** |
+| `moments` | `moment_envelope` | the envelope of the moments already dated inside it — the same arithmetic `timeline._place_span` has applied to a residence since v195 |
+| `age_label` | `age_label` | an era the roster NAMED after an age (*"My 20s"*) joined to the birthday |
+
+**The order is deliberately not [§1](#1-the-ladder)'s.** For a MOMENT, the
+definitional marker is the person's own sentence, so it leads. For a BAND, the
+"definitional" rung is an age sitting in a name a **roster model** wrote, so it
+ranks under the two rungs grounded in what the person actually did — where they
+lived, and what is already dated inside. In a real vault this is also simply
+tighter: an era holding moments dated 2003–2008 is better described by them
+than by the decade its label implies. `my` is REQUIRED on the label — *"the
+80s"* is a decade of the century and *"his 40s"* is somebody else's life, and
+neither of them is this person's era.
+
+Everything §2 binds still binds. An explicit band date — a page's frontmatter,
+a roster span, a `timeline-place` correction — is never overwritten. A derived
+band carries `date_derived` (the only marker), the `approximate_dates` display
+alias every other reader already uses, and a provenance sentence the viewer and
+the compiled export now print beside the span:
+`## Childhood — around 1981 · from the moments you have already dated`.
+Nothing is stored.
+
+### 2. A floor is not a ceiling
+
+This is the sharpest line in the amendment. A residence union and a moment
+envelope say *"this era at least covers that"* — they bound its extent from
+**inside**, and they are honest to display, to order the spine by, and to
+measure a hole between eras with. They are **dishonest pushed back down onto
+the era's other moments**, where one dated moment would pin forty-seven undated
+ones to its own year — a manufactured precision of exactly the kind §2 forbids.
+
+`BAND_RULES_THAT_BOUND` names the only rule whose span is closed at both ends
+(`age_label`: *"My 20s"* IS the decade from the twentieth birthday), and
+`cross_dating.containment_periods` hides every floor-only span from the
+containment rung without touching the row a renderer holds. An **explicitly**
+dated era bounds its moments exactly as it did in v205.
+
+### 3. The pass is three phases, not two mechanisms
+
+Moments → bands → the moments the newly dated bands now bound. The third phase
+is the SAME idempotent sweep as the first (a moment already carrying a date is
+skipped in both); it exists because containment reads a band's span, which
+phase two is what supplies. `timeline_data` then re-runs `derive_chrono` when a
+band was derived, which is **D3, for free**: a filed landmark improves the
+spine's ORDER on the same read it improves the dates.
+
+The unknown and gap accounting updates with no extra wiring, exactly as §6
+predicted one level down: a derived era leaves the `period_bound` set because
+`unknowns()` reads `period["date"]` off the payload the pass just wrote, and
+`era_gaps` measures holes against derived spans. `counts.periods_cross_dated`
+is additive beside `counts.events_cross_dated`.
+
+### 4. The filing beat — the conversation says what the answer placed
+
+`cross_dating.gain_sentence_for_record(record, timeline_payload)` answers, at
+the moment a landmark or a placement is filed, the only question the person
+actually has: *what did that just do?* It is pure, and it computes the answer
+by running **this pass** over copies of the current payload with the new record
+folded in. That is §5's promise-equals-delivery discipline applied to a sentence
+instead of a star: the conversation can only claim what the next derivation
+will actually deliver, because the same code computed both.
+
+> Got it — that dates nine moments and your Childhood years.
+
+The moment clause is `cross_dating.moment_clause`, which
+`reading_room.placement_gain_sentence` now also says — one definition, so the
+Reading Room and the two filing lanes can never drift into two wordings of the
+same true thing. Past one era the eras are counted rather than listed; a count
+of what REMAINS is still forbidden everywhere.
+
+The landmark and timeline leaves gained a `{filing_gain}` slot rendered by
+`cross_dating.render_filing_gain`. The **direction is rendered together with
+the sentence**, so a turn that filed nothing substitutes the empty string and
+the filled prompt is byte-identical to v205's — no blank line, no dangling
+instruction. The honest latency lives in the direction, not in the sentence:
+the pages catch up in a minute or two, and the person hears the good news now.
+
+### 5. Consequences this amendment adds
+
+- **Binds:** a new band rule goes in `cross_dating.BAND_RULES` behind an
+  explicit marker set and a golden, and must declare whether it BOUNDS. A rule
+  that yields a floor and is added to `BAND_RULES_THAT_BOUND` is the
+  manufactured precision this section exists to prevent.
+- **Binds:** the envelope has ONE definition, `cross_dating.span_from_dated`.
+  `timeline._place_span` delegates to it; a third copy is the recurring-defect
+  doctrine's exact failure case.
+- **Forecloses:** a stored band date, a "re-derive the spine" job, and a second
+  writer of `period["date"]` — for the same reasons §2 forecloses them for
+  moments.
+- **Open, deliberately:** chapters still date only from the chapters exercise's
+  own words (`timeline.chapter_date`). Deriving a chapter's span from the
+  periods inside it would fight `align_chapters`, which already aligns by date
+  containment when both sides carry spans; if chapters should date from
+  landmarks too, that is its own change with its own goldens.
+
+## Platform twin — additions
+
+| What | Platform action |
+|---|---|
+| `period["date_derived"]` on band rows | none to render correctly; **optional** to render *well* — take the provenance line beside the span, the same way the moment rows already do |
+| `counts.periods_cross_dated`, `cross_dating.bands` in the report | none — additive keys |
+| `{filing_gain}` on the landmark and timeline leaves | the engine fills the kwarg **after** it files the turn's record, from the timeline payload it already holds, with `cross_dating.gain_sentence_for_record` → `render_filing_gain`; `""` (or omitting it) on every other turn keeps the prompt byte-identical. Additive — nothing else about the REPLAY moves. |
