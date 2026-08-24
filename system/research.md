@@ -157,6 +157,18 @@ full at `system/research/chronology.md` (research queue:
    survives as BOTH `arc_planner.BANNED_PHRASE` and the
    `timeline_gates.no_year_opener` lint, pinned against each other.]**
 
+**How that chronology is DISPLAYED** is a separate literature and has its own
+corpus: `system/research/chronology-vis.md` (v206). Its four headline findings:
+the "answer one thing and watch the rest tighten" picture is a solved *static*
+plot (OxCal draws the unmodelled interval in outline with the modelled one
+overlain, so both states stay on the page); a single summed density curve
+*provably* cannot distinguish a smeared date from a placed one (Crema's
+summation problem), so the unplaced and the placed must be two visible things;
+a bounded interval is read as a fact and blurring its ends measurably does not
+fix that; and a completeness meter is an *improper* scoring rule — maximized by
+writing anything down — whereas a score built on interval WIDTH is not. Nothing
+in it is implemented.
+
 ---
 
 ## 5. Relationships & Connection
