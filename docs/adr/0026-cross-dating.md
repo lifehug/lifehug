@@ -101,16 +101,26 @@ never keyword matching — and is preferred over the era because it is tighter.
 
 ### 3. Confidence is graded by how tight the join is
 
-A definitional join and a place containment are `inferred`; an era containment
-is `conjectural` — the documentary editors' mark for a date the system worked
-out rather than one the person asserted. `claim_score` therefore ranks a
-place-bounded moment above an era-bounded one for free, and any stated claim
-above both.
+**A definitional join INHERITS the landmark record's own confidence**
+(owner ruling, 2026-08-24). The marker sets are deliberately exact-match, and a
+definitional identity — *this moment IS your birth*, *this moment IS that
+residence span's start* — is not an estimate. So a certain birthday dates the
+birth moment `certain`, and the owner's chip reads **"11 July 1981"**, not
+"around 11 July 1981". Inheritance, not promotion: a hedged birthday (`1981~`)
+yields an `approximate` moment.
 
-A consequence worth naming, because it looks like a bug and is not: the
-owner's birth moment renders as **"around 11 July 1981"**, not "11 July 1981".
-The birthday is certain; the *join* — "this moment IS your birth" — is an
-inference, and the record says so.
+`chronology.from_anchor` floors its result at `inferred`. That floor is right
+for a RELATION — "before the move" genuinely is an inference over a span — and
+wrong for an identity, so `cross_dating._inherited_confidence` lifts it, and
+**only for the definitional rule**. An **age** join keeps whatever `from_age`
+earned (the hedge, not the landmark); **containment** is `inferred` for a place
+and `conjectural` for an era — the documentary editors' mark for a date the
+system worked out rather than one the person asserted.
+
+Inheriting the confidence never inherits the *warrant*: the basis stays
+`anchor` (4.0) against `stated` (6.0), so `claim_score` keeps every stated
+claim above every derived one, and ranks a place-bounded moment above an
+era-bounded one, for free.
 
 ### 4. The displayed anchor becomes the landmark provenance
 

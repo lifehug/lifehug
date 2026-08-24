@@ -105,9 +105,11 @@ asks you for a year.
 - **Derived date** — a date this pass worked out rather than one the person
   stated, marked by `date_derived` on the moment row and by nothing else. It
   carries the landmark it leaned on (`anchors`), the sentence the page shows
-  ("from your birthday"), and a confidence graded by how tight the join was —
-  `inferred` for a definitional join or a place, `conjectural` for an era. An
-  explicit record is never overwritten.
+  ("from your birthday"), and a confidence graded by how tight the join was: a
+  **definitional** join inherits the landmark's own confidence (an identity is
+  not an estimate — a certain birthday gives a certain date), an **age** join
+  keeps the hedge the person gave, and **containment** is `inferred` for a
+  place, `conjectural` for an era. An explicit record is never overwritten.
 - **Whisper** — the week's arc card carrying a keystone's real probe and the
   person's own landmarks into an ordinary conversation. Raised only where it
   fits, at most once, any precision accepted, never pressed.

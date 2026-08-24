@@ -45,9 +45,14 @@ repair.
   person actually gave, and it says so: ``basis`` is ``anchor`` or ``age``,
   ``anchors`` names the landmark it leaned on, and ``provenance`` carries the
   human sentence the page shows ("from your birthday").
-* Confidence is graded by how tight the join is — a definitional join is
-  ``inferred``, era containment is ``conjectural`` (the documentary editors'
-  mark for a date the system worked out rather than one the person asserted).
+* Confidence is graded by how tight the join is. A **definitional** join
+  INHERITS the landmark record's own confidence — the marker sets are
+  exact-match and an identity is not an estimate, so a certain birthday dates
+  the birth moment ``certain`` (owner ruling, 2026-08-24). An **age** join
+  keeps whatever :func:`chronology.from_age` earned, and **containment** is
+  ``inferred`` for a place and ``conjectural`` for an era — the documentary
+  editors' mark for a date the system worked out rather than one the person
+  asserted.
 * **The promise and the delivery come from the same join.**
   :func:`derivable_moments` — which is what ``timeline.dependency_index``
   counts leverage with — is computed by the same matching helpers the pass
@@ -286,7 +291,8 @@ def definitional(event: object, anchors: object) -> Derivation | None:
         if record is not None:
             return Derivation(
                 record=_stamp(record, anchor=BIRTH_KEY, basis="anchor",
-                              confidence="inferred", provenance="from your birthday"),
+                              confidence=_inherited_confidence(birth["date"]),
+                              provenance="from your birthday"),
                 rule="definitional", join="birth", anchor=BIRTH_KEY,
                 label=_label_of(birth) or "your birthday",
                 provenance="from your birthday")
@@ -310,7 +316,8 @@ def definitional(event: object, anchors: object) -> Derivation | None:
         provenance = phrase.format(label=label)
         return Derivation(
             record=_stamp(record, anchor=key, basis="anchor",
-                          confidence="inferred", provenance=provenance),
+                          confidence=_inherited_confidence(row["date"]),
+                          provenance=provenance),
             rule="definitional", join=join, anchor=key, label=label,
             provenance=provenance)
 
@@ -325,7 +332,8 @@ def definitional(event: object, anchors: object) -> Derivation | None:
                 provenance = f"from when {label} ended"
                 return Derivation(
                     record=_stamp(record, anchor=key, basis="anchor",
-                                  confidence="inferred", provenance=provenance),
+                                  confidence=_inherited_confidence(row["date"]),
+                                  provenance=provenance),
                     rule="definitional", join="graduation", anchor=key,
                     label=label, provenance=provenance)
 
@@ -352,7 +360,7 @@ def _named_anchor(event: object, anchors: dict) -> Derivation | None:
     provenance = f"from {label}"
     return Derivation(
         record=_stamp(record, anchor=key, basis="anchor",
-                      confidence="inferred", provenance=provenance),
+                      confidence=_inherited_confidence(anchor), provenance=provenance),
         rule="definitional", join="named_anchor", anchor=key, label=label,
         provenance=provenance)
 
@@ -360,6 +368,22 @@ def _named_anchor(event: object, anchors: dict) -> Derivation | None:
 def _grain_of(record: object) -> str:
     parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
     return parsed.granularity if parsed is not None else "range"
+
+
+def _inherited_confidence(record: object) -> str:
+    """A DEFINITIONAL join inherits the landmark record's OWN confidence.
+
+    Owner ruling (2026-08-24): the marker sets are deliberately exact-match, so
+    a definitional identity — *this moment IS your birth*, *this moment IS that
+    residence span's start* — is not an estimate. A certain birthday therefore
+    dates the birth moment `certain`, and the chip reads "11 July 1981" rather
+    than "around 11 July 1981". `chronology.from_anchor` floors its result at
+    `inferred`, which is right for a RELATION ("before the move") and wrong for
+    an identity; this is where that floor is lifted, and only here — age and
+    containment joins keep their inferred/conjectural grading.
+    """
+    parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+    return parsed.confidence if parsed is not None else "inferred"
 
 
 # ---------------------------------------------------------------------------

@@ -129,11 +129,28 @@ class DefinitionalBirthTests(unittest.TestCase):
         self.assertEqual([p["claim"] for p in found.record.provenance],
                          ["from your birthday"])
 
-    def test_a_derived_date_is_never_stated(self):
-        """Documentary-editing convention: an inferred date is marked as one."""
+    def test_a_definitional_join_inherits_the_landmarks_own_confidence(self):
+        """Owner ruling, 2026-08-24: the marker sets are deliberately
+        exact-match, so a definitional identity — *this moment IS your birth* —
+        is not an estimate. `chronology.from_anchor` floors a RELATION at
+        `inferred`, which is right for "before the move" and wrong here."""
         found = xd.derive(dict(self.MOMENT), anchors=_anchors(self.LANDMARKS))
-        self.assertEqual(found.record.confidence, "inferred")
-        self.assertNotEqual(found.record.confidence, "certain")
+        self.assertEqual(found.record.confidence, "certain")
+        self.assertEqual(chrono.from_dict(BIRTHDAY).confidence, "certain")
+
+    def test_an_uncertain_landmark_is_inherited_just_as_faithfully(self):
+        """Inheritance, not promotion: a hedged birthday stays hedged."""
+        hedged = {"birth": [{"label": "birth", "date": _date("1981~")}]}
+        found = xd.derive(dict(self.MOMENT), anchors=_anchors(hedged))
+        self.assertEqual(found.record.confidence, "approximate")
+
+    def test_a_derived_date_is_still_never_STATED(self):
+        """Inheriting the confidence never inherits the warrant: the basis
+        stays `anchor`, so `claim_score` keeps every stated claim above it."""
+        found = xd.derive(dict(self.MOMENT), anchors=_anchors(self.LANDMARKS))
+        self.assertEqual(found.record.basis, "anchor")
+        stated = chrono.parse_edtf("1979", basis="stated")
+        self.assertGreater(chrono.claim_score(stated), chrono.claim_score(found.record))
 
     def test_with_no_birthday_filed_nothing_is_derived(self):
         self.assertIsNone(xd.derive(dict(self.MOMENT), anchors={}))
@@ -276,6 +293,27 @@ class ResidenceBoundsTests(unittest.TestCase):
         """Containment needs BOTH termini; one is not an interval."""
         self.assertIsNone(xd.containment(chrono.parse_edtf("1984/.."),
                                          anchor="period:x", label="X", join="era"))
+
+    def test_only_the_definitional_rule_inherits(self):
+        """The ruling is scoped: age and containment keep their own grading."""
+        age = xd.derive({"title": "", "description": "when I was about five",
+                         "when_hint": "", "anchor": "", "date": None},
+                        anchors={}, birth_date=BIRTHDAY)
+        self.assertEqual(age.record.confidence, "approximate")  # the hedge, not the landmark
+        place = xd.derive({"title": "", "description": "I rode a bike.",
+                           "when_hint": "", "anchor": "", "date": None},
+                          anchors={},
+                          place={"slug": "mesa", "title": "Mesa",
+                                 "date": chrono.parse_edtf("1984/1990")})
+        era = xd.derive({"title": "", "description": "I rode a bike.",
+                         "when_hint": "", "anchor": "", "date": None},
+                        anchors={},
+                        period={"slug": "childhood", "name": "Childhood",
+                                "date": chrono.parse_edtf("1984/1990")})
+        # Both spans are `certain`; containment does NOT inherit that.
+        self.assertEqual(chrono.parse_edtf("1984/1990").confidence, "certain")
+        self.assertEqual(place.record.confidence, "inferred")
+        self.assertEqual(era.record.confidence, "conjectural")
 
     def test_the_ladder_prefers_the_tightest_join_available(self):
         moment = {"title": "The move to Mesa", "description": "We moved to Mesa.",
@@ -434,10 +472,10 @@ class OwnerCaseTests(VaultFixture):
         moments = self.moments(self.data())
         born = moments["Born in Redlands"]
         self.assertEqual(born["date"].best, "1981-07-11")
-        # Rendered as the inference it is: the join ("this moment IS your
-        # birth") is inferred even though the birthday itself is certain.
+        # Owner ruling: a DEFINITIONAL join is an identity, not an estimate,
+        # so the certain birthday reads as the certain date it is.
         self.assertEqual(chrono.display_date(born["date"], with_basis=False),
-                         "around 11 July 1981")
+                         "11 July 1981")
 
     def test_the_stale_free_text_anchor_is_demoted_not_displayed(self):
         moments = self.moments(self.data())
