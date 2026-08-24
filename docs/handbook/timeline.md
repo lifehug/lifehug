@@ -102,8 +102,31 @@ asks you for a year.
   recomputed on every read. Before v205 nothing propagated a resolved anchor at
   all, so a filed birthday left "Born in Redlands" undated and the leverage
   number promised what no pass delivered.
+- **Band dating** (v207) — the same pass, one level up. An **undated** era
+  takes a span from the places lived in it (their own span, or the residence
+  landmark the page names exactly), else from the envelope of the moments
+  already dated inside it, else — when the roster NAMED it after an age, "My
+  20s" — from the birthday. The order is deliberately not the moment ladder's:
+  an age label is a name a model wrote, so it ranks under the two rungs
+  grounded in what the person actually did. Before v207 the founder's birth was
+  filed, "Born in Redlands" was dated to the day, and "Childhood" still read
+  `undated`.
+- **A floor is not a ceiling** (v207) — a residence union and a moment envelope
+  bound an era from *inside*: they say it at least covers that. Honest to
+  display, to order the spine by, and to measure a gap between eras with; never
+  pushed back down onto the era's other moments, where one dated moment would
+  pin every undated one to its own year. Only a span closed at both ends — an
+  age label, or an explicitly dated era — bounds what is inside it
+  (`cross_dating.BAND_RULES_THAT_BOUND`).
+- **The filing beat** (v207) — when a landmark or a placement is filed, the
+  reply says what it just unlocked: *"Got it — that dates nine moments and your
+  Childhood years."* The count is computed by running the pass itself over the
+  current payload with the new record folded in, so the conversation can only
+  claim what the next derivation will deliver. The pages catch up about two
+  minutes later; the person hears it now.
 - **Derived date** — a date this pass worked out rather than one the person
-  stated, marked by `date_derived` on the moment row and by nothing else. It
+  stated, marked by `date_derived` on the row — a moment's or, since v207, a
+  band's — and by nothing else. It
   carries the landmark it leaned on (`anchors`), the sentence the page shows
   ("from your birthday"), and a confidence graded by how tight the join was: a
   **definitional** join inherits the landmark's own confidence (an identity is
@@ -248,6 +271,17 @@ and the minted question's weight in the queue's own objective currency.
 <!-- parity: question_planner.DEFAULT_LANE_POLICY["timeline_leverage_per_story"] = 6 -->
 Adjacency is gone: a bank question whose focus merely resembled a keystone is
 not a keystone and is never starred.
+
+**The cross-dating pass, in three phases** (v207). Moments, then bands, then
+the moments the newly dated bands now bound. The third phase is the *same*
+idempotent sweep as the first — a moment already carrying a date is skipped in
+both — and it exists because containment reads a band's span, which phase two
+is what supplies. `timeline_data` then re-runs `derive_chrono` whenever a band
+was derived, so a filed landmark improves the spine's **order** on the same read
+it improves the dates. The accounting follows with no extra wiring: a derived
+era leaves the `period_bound` unknowns because `unknowns()` reads the payload
+the pass just wrote, and `era_gaps` measures holes against derived spans. The
+band ladder's own order is `cross_dating.BAND_RULES`.
 
 **A worked example.** Your birthday is 12 April 1979. You say a letter arrived
 when you were "about five". `parse_age` reads `(5, 5, hedged)`; the hedge

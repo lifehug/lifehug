@@ -7,8 +7,8 @@ provenance. This context recipe and turn instructions are child leaf authority.
 Per turn, assemble composed identity, behavior, and examples; bounded
 Conversation context (profile, record, session) exactly as the parent
 specifies; this package's turn instructions, substituting `{timeline_stage}`,
-`{unknown_label}`, `{probe}`, `{anchors}`, and `{precision_so_far}`; then one
-final `UNTRUSTED_DATA` JSON block. The structured output is the parent's, plus
+`{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}` and
+`{filing_gain}`; then one final `UNTRUSTED_DATA` JSON block. The structured output is the parent's, plus
 the one optional `placed` field.
 
 The `{anchors}` block is the ONLY set of dates the model may lean on or repeat,
@@ -17,6 +17,14 @@ and it is rendered by `timeline_interaction.render_anchors` from
 their eras with spans, and their dated landmark moments, capped at
 `knob.anchor_display_limit`. It is the life-history calendar as text; every
 probe above rung two is cheap because it exists.
+
+`{filing_gain}` (v207) is `cross_dating.render_filing_gain(sentence)` over
+`cross_dating.gain_sentence_for_record(record, timeline_payload)` — what the
+placement this turn just FILED actually unlocked, said once in the reply
+instead of appearing on a page two minutes later. It is the empty string on
+every turn that filed nothing, and the filled leaf is then byte-identical to
+v205's; the direction that tells the model what to do with the sentence is
+rendered WITH the sentence, so an absent gain adds no instruction either.
 
 `{probe}` is `timeline_interaction.choose_probe`'s output for this unknown —
 the cheapest rung of the playbook still worth asking. `{precision_so_far}` is

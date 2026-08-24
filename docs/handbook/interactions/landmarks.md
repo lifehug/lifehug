@@ -85,8 +85,13 @@ The question set is **data**, not prose: `interactions/landmarks/questions.yaml`
 read by `landmarks_interaction.load_questions()`. A host asks
 `landmark_rows(landmarks, keystone_domains=…)` for every domain's status and
 its next question, renders only the rows that are not `complete`, and REPLAYs
-`prompt/turn-instructions.md` with three substitutions: `{landmark_stage}`,
-`{landmarks}`, `{next_question}`.
+`prompt/turn-instructions.md` with four substitutions: `{landmark_stage}`,
+`{landmarks}`, `{next_question}`, and — v207 — `{filing_gain}`: on the turn
+that actually FILED a landmark, what it just placed, said once
+(`cross_dating.gain_sentence_for_record` → `render_filing_gain`). The count is
+the cross-dating pass run over the current payload with the new record folded
+in, so the reply can only claim what the next derivation delivers; on every
+other turn it is the empty string and the prompt is byte-identical to v205's.
 
 An answer comes back as one additive turn-output field, `landmark`, through
 two validation layers — `conversation_delivery._parse_landmark` (structural,

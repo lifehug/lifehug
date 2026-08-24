@@ -45,4 +45,4 @@ heard, treat it as a skip. And if they say no to the domain but tell you
 something adjacent in the same breath — *"not the military, but I did serve a
 mission abroad"* — the `none` still stands for the domain you asked about;
 the rest is just what they said, and belongs in your reply, not in a landmark
-for a domain they never mentioned.
+for a domain they never mentioned.{filing_gain}

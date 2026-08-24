@@ -661,6 +661,514 @@ class FoundersScaleTests(VaultFixture):
                 self.assertEqual(row["date"].basis, "anchor")
 
 
+# ---------------------------------------------------------------------------
+# v207 — bands date themselves (ADR 0026 amendment, design D2/D3).
+# ---------------------------------------------------------------------------
+
+
+class BandLadderTests(unittest.TestCase):
+    """The pure band ladder, one rung at a time."""
+
+    def _period(self, name="Childhood", slug="childhood"):
+        return {"slug": slug, "name": name, "date": None}
+
+    # -- rule 1: residences ------------------------------------------------
+
+    def test_a_bands_places_union_into_its_span(self):
+        found = xd.band_span(self._period(), places=[
+            {"key": "entity:mesa", "label": "Mesa", "date": chrono.parse_edtf("1984/1988")},
+            {"key": "entity:yucaipa", "label": "Yucaipa", "date": chrono.parse_edtf("1988/1990")},
+        ])
+        self.assertEqual(found.rule, "residence")
+        self.assertEqual(found.join, "residence_span")
+        self.assertEqual(found.record.best, "1984/1990")
+        self.assertEqual(found.record.confidence, "inferred")
+        self.assertEqual(found.provenance, "from where you were living then")
+        self.assertEqual(found.record.anchors, ("entity:mesa", "entity:yucaipa"))
+
+    def test_one_place_is_named_in_the_provenance(self):
+        found = xd.band_span(self._period(), places=[
+            {"key": "residences-mesa", "label": "Mesa",
+             "date": chrono.parse_edtf("1984/1990")}])
+        self.assertEqual(found.provenance, "from your years at Mesa")
+        self.assertEqual(chrono.display_date(found.record, with_basis=False), "1984\u20131990")
+
+    def test_a_place_takes_its_span_from_the_residence_landmark_it_names(self):
+        """The join the design asked for: the era is dated by the LANDMARK,
+        through the place page that names it exactly."""
+        anchors = li.anchors_from_landmarks(
+            {"residences": [{"label": "Mesa", "span": {"start": {"best": "1984"},
+                                                       "end": {"best": "1990"}}}]})
+        places = xd.band_places({"childhood": [
+            {"slug": "mesa", "title": "Mesa", "type": "place", "date": None},
+            {"slug": "mom", "title": "Mom", "type": "person", "date": None},
+        ]}, "childhood", anchors)
+        self.assertEqual([row["key"] for row in places], ["residences-mesa"])
+        self.assertEqual(places[0]["date"].best, "1984/1990")
+
+    def test_a_place_page_that_names_no_landmark_and_has_no_span_contributes_nothing(self):
+        anchors = li.anchors_from_landmarks(
+            {"residences": [{"label": "Mesa", "span": {"start": {"best": "1984"},
+                                                       "end": {"best": "1990"}}}]})
+        self.assertEqual(xd.band_places({"childhood": [
+            {"slug": "alder-street", "title": "Alder Street", "type": "place",
+             "date": None}]}, "childhood", anchors), [])
+
+    # -- rule 2: the envelope ---------------------------------------------
+
+    def test_a_band_is_bounded_by_the_moments_already_dated_inside_it(self):
+        found = xd.band_span(self._period(), moments=[
+            {"date": chrono.parse_edtf("1984")},
+            {"date": None},
+            {"date": chrono.parse_edtf("1989")},
+        ])
+        self.assertEqual(found.rule, "moments")
+        self.assertEqual(found.record.best, "1984/1989")
+        self.assertEqual(found.record.confidence, "inferred")
+        self.assertEqual(found.provenance, "from the moments you have already dated")
+
+    def test_one_dated_moment_gives_a_conjectural_year_and_says_so(self):
+        found = xd.band_span(self._period(), moments=[
+            {"date": chrono.parse_edtf("1981-07-11")}])
+        self.assertEqual(found.record.best, "1981?")
+        self.assertEqual(found.record.confidence, "conjectural")
+        self.assertEqual(chrono.display_date(found.record, with_basis=False), "around 1981")
+
+    def test_the_envelope_is_the_one_definition_a_place_span_also_uses(self):
+        """Recurring-defect doctrine: `timeline._place_span` delegates here."""
+        events = [{"date": chrono.parse_edtf("1984")}, {"date": chrono.parse_edtf("1990")}]
+        self.assertEqual(tl._place_span(events), xd.span_from_dated(events))  # noqa: SLF001
+
+    def test_nothing_dated_inside_bounds_nothing(self):
+        self.assertIsNone(xd.band_span(self._period(), moments=[{"date": None}]))
+
+    # -- rule 3: the age label --------------------------------------------
+
+    def test_an_age_named_era_joins_the_birthday_definitionally(self):
+        found = xd.band_span(self._period(name="My 20s"), birth_date=BIRTHDAY)
+        self.assertEqual(found.rule, "age_label")
+        self.assertEqual(found.join, "age_label")
+        self.assertEqual(found.record.best, "2001/2011")
+        self.assertEqual(found.provenance, "from your birthday")
+
+    def test_the_age_label_inherits_the_birthdays_confidence(self):
+        certain = xd.band_span(self._period(name="My Twenties"), birth_date=BIRTHDAY)
+        hedged = xd.band_span(self._period(name="My Twenties"), birth_date=_date("1981~"))
+        self.assertEqual(certain.record.confidence, "certain")
+        self.assertEqual(hedged.record.confidence, "approximate")
+
+    def test_the_labels_the_detector_accepts_and_the_ones_it_refuses(self):
+        for name in ("My 20s", "my twenties", "In my thirties", "My teenage years"):
+            with self.subTest(name=name):
+                self.assertIsNotNone(xd.age_band_label(name))
+        for name in ("The 1980s", "The Eighties", "his 40s", "Childhood",
+                     "The Mesa Years", "Twenties"):
+            with self.subTest(name=name):
+                self.assertIsNone(xd.age_band_label(name))
+
+    def test_without_a_birthday_an_age_label_places_nothing(self):
+        self.assertIsNone(xd.band_span(self._period(name="My 20s"), birth_date=None))
+
+    # -- the ladder --------------------------------------------------------
+
+    def test_the_band_ladder_runs_in_its_own_declared_order(self):
+        """Deliberately NOT `RULES`' order — an age LABEL is a name a roster
+        model wrote, so it ranks under the two rungs grounded in what the
+        person actually did."""
+        found = xd.band_span(
+            self._period(name="My 20s"),
+            places=[{"key": "entity:mesa", "label": "Mesa",
+                     "date": chrono.parse_edtf("2003/2008")}],
+            moments=[{"date": chrono.parse_edtf("2005")}],
+            birth_date=BIRTHDAY)
+        self.assertEqual(found.rule, "residence")
+        self.assertEqual(xd.BAND_RULES, ("residence", "moments", "age_label"))
+
+    def test_an_explicit_band_date_is_never_overwritten(self):
+        stated = chrono.parse_edtf("1975/1979", basis="stated")
+        period = {"slug": "childhood", "name": "Childhood", "date": stated}
+        self.assertIsNone(xd.band_span(period, moments=[
+            {"date": chrono.parse_edtf("1984")}]))
+        report = xd.date_bands(periods=[period],
+                               event_lineup={"childhood": [{"date": chrono.parse_edtf("1984")}]})
+        self.assertEqual(report["derived"], 0)
+        self.assertIs(period["date"], stated)
+        self.assertNotIn("date_derived", period)
+
+    def test_only_a_two_sided_span_may_bound_what_is_inside_it(self):
+        """The sharpest line in the amendment: a floor is not a ceiling. One
+        dated moment must never pin its era's other moments to its own year."""
+        floor = {"slug": "childhood", "name": "Childhood",
+                 "date": chrono.parse_edtf("1984"),
+                 "date_derived": {"rule": "moments"}}
+        closed = {"slug": "twenties", "name": "My 20s",
+                  "date": chrono.parse_edtf("2001/2011"),
+                  "date_derived": {"rule": "age_label"}}
+        lookup = xd.containment_periods([floor, closed])
+        self.assertIsNone(lookup["childhood"]["date"])
+        self.assertIsNotNone(lookup["twenties"]["date"])
+        # And the row a renderer holds still carries its span.
+        self.assertIsNotNone(floor["date"])
+        self.assertEqual(xd.BAND_RULES_THAT_BOUND, ("age_label",))
+
+
+class FounderBandTests(VaultFixture):
+    """The design's D2, as the owner will see it: the birth is filed, and
+    "Childhood" stops reading `undated`."""
+
+    LANDMARKS = {"version": 1, "domains": {"birth": [{"label": "birth", "date": BIRTHDAY}]}}
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "wiki" / "places" / "mesa.md").unlink()
+        refs = self.write_one_per_source([
+            {"title": "Born in Redlands",
+             "description": "Born in Redlands while the family lived in the area.",
+             "when_hint": "", "anchor": "dad attending ASU", "date": None},
+            {"title": "The bike with no brakes",
+             "description": "I rode a bike with no brakes down the hill.",
+             "when_hint": "", "anchor": None, "date": None},
+        ])
+        self.write_period_page(refs, dated=False)
+        self.write_roster(dated=False)
+
+    def write_roster(self, *, dated: bool):
+        entity = {"name": "Childhood", "slug": "childhood", "chrono": 1,
+                  "page_eligible": True}
+        if dated:
+            entity["date"] = "1984/1990"
+        (self.root / "state" / "entity_rosters" / "period.json").write_text(
+            json.dumps({"version": 1, "type": "period", "entities": [entity]}),
+            encoding="utf-8")
+
+    def test_childhood_is_dated_by_the_birth_the_owner_filed(self):
+        data = self.data()
+        childhood = data["periods"][0]
+        self.assertEqual(childhood["slug"], "childhood")
+        self.assertEqual(childhood["date"].best, "1981?")
+        self.assertEqual(childhood["date_derived"]["rule"], "moments")
+        self.assertEqual(childhood["date_derived"]["provenance"],
+                         "from the moments you have already dated")
+        self.assertEqual(data["counts"]["periods_cross_dated"], 1)
+
+    def test_the_chip_the_owner_reads_on_the_era(self):
+        childhood = self.data()["periods"][0]
+        self.assertEqual(chrono.display_date(childhood["date"], with_basis=False),
+                         "around 1981")
+        self.assertEqual(childhood["approximate_dates"], "around 1981")
+
+    def test_the_viewer_names_the_span_and_where_it_came_from(self):
+        sw = load("serve_wiki")
+        with timeline_module(), mock.patch.object(tl, "LANDMARKS_STORE", self.store):
+            _title, body, _wide = sw.view_timeline()
+        self.assertIn("around 1981", body)
+        self.assertIn("· from the moments you have already dated", body)
+
+    def test_the_compiled_export_carries_the_same_line(self):
+        wc = load("wiki_compile")
+        bindings = {
+            "CLASSIFICATIONS_DIR": self.root / "state" / "classifications",
+            "CONNECTORS_STATE_DIR": self.root / "state" / "connectors",
+            "ENTITY_ROSTERS_DIR": self.root / "state" / "entity_rosters",
+            "MANUAL_SOURCES_DIR": self.root / "sources" / "manual",
+            "TIMELINE_PLACEMENTS_FILE": self.root / "state" / "timeline_placements.json",
+            "STATE_DIR": self.root / "state",
+            "WIKI_DIR": self.root / "wiki",
+        }
+        saved = {name: getattr(wc, name) for name in bindings}
+        try:
+            for name, value in bindings.items():
+                setattr(wc, name, value)
+            with timeline_module(), mock.patch.object(tl, "LANDMARKS_STORE", self.store):
+                self.assertTrue(wc.compile_timeline())
+        finally:
+            for name, value in saved.items():
+                setattr(wc, name, value)
+        text = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
+        self.assertIn("## Childhood — around 1981 · from the moments you have "
+                      "already dated", text)
+
+    def test_the_era_leaves_the_undated_unknowns(self):
+        """Honest accounting: the era is no longer an outstanding `period_bound`."""
+        data = self.data()
+        keys = {row["key"] for row in tl.unknowns(data)}
+        self.assertNotIn("period_bound:childhood", keys)
+
+    def test_derive_chrono_consumes_the_derived_span(self):
+        """Design D3, and it falls out: the spine's order is re-derived from
+        the date the pass just supplied, on the same read."""
+        self.assertEqual(self.data()["periods"][0]["chrono_source"], "date")
+
+    def test_a_floor_span_never_pins_the_eras_other_moments(self):
+        """The bike is not from 1981 just because the birth is."""
+        moments = self.moments(self.data())
+        self.assertEqual(moments["Born in Redlands"]["date"].best, "1981-07-11")
+        self.assertIsNone(moments["The bike with no brakes"]["date"])
+
+    def test_an_explicit_span_still_wins_and_still_bounds(self):
+        self.write_roster(dated=True)
+        data = self.data()
+        childhood = data["periods"][0]
+        self.assertEqual(childhood["date"].best, "1984/1990")
+        self.assertNotIn("date_derived", childhood)
+        # …and an explicitly dated era DOES bound its moments, exactly as v205.
+        self.assertEqual(self.moments(data)["The bike with no brakes"]["date"].best,
+                         "1984/1990")
+
+    def test_nothing_about_the_band_derivation_is_stored(self):
+        self.data()
+        self.assertEqual(list(self.root.glob("state/cross_dating*")), [])
+        self.assertEqual(list(self.root.glob("state/band*")), [])
+
+
+class AgeBandVaultTests(FounderBandTests):
+    """The same vault, with the era NAMED after an age — a closed interval,
+    so it bounds its moments the way an explicit span does."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "wiki" / "periods" / "childhood.md").unlink()
+        # Nothing inside is dated, so the envelope rung above this one has
+        # nothing to say and the age label is what the era has. (When an era
+        # DOES carry dated moments they are the tighter, better-grounded claim,
+        # which is exactly why they rank above the label — see BAND_RULES.)
+        refs = self.write_one_per_source([
+            {"title": "The bike with no brakes",
+             "description": "I rode a bike with no brakes down the hill.",
+             "when_hint": "", "anchor": None, "date": None},
+            {"title": "The corner apartment",
+             "description": "We rented the corner apartment for a while.",
+             "when_hint": "", "anchor": None, "date": None},
+        ])
+        (self.root / "wiki" / "periods" / "my-20s.md").write_text(
+            PAGE.format(title="My 20s", page_type="period", chrono=1, extra="",
+                        sources=_sources(refs)),
+            encoding="utf-8")
+        (self.root / "state" / "entity_rosters" / "period.json").write_text(json.dumps({
+            "version": 1, "type": "period", "entities": [
+                {"name": "My 20s", "slug": "my-20s", "chrono": 1, "page_eligible": True},
+            ]}), encoding="utf-8")
+
+    def test_the_decade_join_dates_the_era_and_bounds_what_is_in_it(self):
+        data = self.data()
+        era = data["periods"][0]
+        self.assertEqual(era["slug"], "my-20s")
+        self.assertEqual(era["date"].best, "2001/2011")
+        self.assertEqual(era["date_derived"]["join"], "age_label")
+        self.assertEqual(era["date"].confidence, "certain")
+        bike = self.moments(data)["The bike with no brakes"]
+        self.assertEqual(bike["date"].best, "2001/2011")
+        self.assertEqual(bike["date_derived"]["join"], "era")
+
+    # The inherited founder assertions are about the envelope rung and do not
+    # apply to a vault whose era carries an age label.
+    test_childhood_is_dated_by_the_birth_the_owner_filed = None
+    test_the_chip_the_owner_reads_on_the_era = None
+    test_the_viewer_names_the_span_and_where_it_came_from = None
+    test_the_compiled_export_carries_the_same_line = None
+    test_a_floor_span_never_pins_the_eras_other_moments = None
+    test_an_explicit_span_still_wins_and_still_bounds = None
+    test_the_era_leaves_the_undated_unknowns = None
+    test_derive_chrono_consumes_the_derived_span = None
+
+
+class ResidenceBandVaultTests(FounderBandTests):
+    """A residence landmark bounds the era that contains the place page."""
+
+    LANDMARKS = {
+        "version": 1,
+        "domains": {
+            "birth": [{"label": "birth", "date": BIRTHDAY}],
+            "residences": [{"label": "Mesa", "span": {"start": {"best": "1984"},
+                                                      "end": {"best": "1990"}}}],
+        },
+    }
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "wiki" / "places" / "mesa.md").write_text(
+            PAGE.format(title="Mesa", page_type="place", chrono=0, extra="",
+                        sources=_sources(["A1", "A2"])),
+            encoding="utf-8")
+
+    def test_the_residence_landmark_dates_the_era_it_sits_in(self):
+        era = self.data()["periods"][0]
+        self.assertEqual(era["date"].best, "1984/1990")
+        self.assertEqual(era["date_derived"]["join"], "residence_span")
+        self.assertEqual(era["date_derived"]["provenance"], "from your years at Mesa")
+
+    test_childhood_is_dated_by_the_birth_the_owner_filed = None
+    test_the_chip_the_owner_reads_on_the_era = None
+    test_the_viewer_names_the_span_and_where_it_came_from = None
+    test_the_compiled_export_carries_the_same_line = None
+    test_a_floor_span_never_pins_the_eras_other_moments = None
+    test_an_explicit_span_still_wins_and_still_bounds = None
+    test_derive_chrono_consumes_the_derived_span = None
+
+
+# ---------------------------------------------------------------------------
+# v207 — the filing beat (design T3).
+# ---------------------------------------------------------------------------
+
+
+class GainSentenceTests(unittest.TestCase):
+    """Exact composition. The sentence is short, warm, and never a report."""
+
+    def test_the_four_shapes(self):
+        self.assertEqual(xd.gain_sentence(1), "Got it — that dates one moment.")
+        self.assertEqual(xd.gain_sentence(9), "Got it — that dates nine moments.")
+        self.assertEqual(xd.gain_sentence(9, ["Childhood"]),
+                         "Got it — that dates nine moments and your Childhood years.")
+        self.assertEqual(xd.gain_sentence(0), "")
+
+    def test_a_band_alone_is_still_worth_saying(self):
+        self.assertEqual(xd.gain_sentence(0, ["Childhood"]),
+                         "Got it — that dates your Childhood years.")
+
+    def test_past_one_era_they_are_counted_not_listed(self):
+        self.assertEqual(xd.gain_sentence(3, ["Childhood", "High School"]),
+                         "Got it — that dates three moments and two of your eras.")
+
+    def test_a_label_that_already_says_years_is_not_given_a_second_pair(self):
+        self.assertEqual(xd.gain_sentence(0, ["The Yucaipa Years"]),
+                         "Got it — that dates your Yucaipa Years.")
+
+    def test_big_counts_read_as_digits(self):
+        self.assertEqual(xd.gain_sentence(40), "Got it — that dates 40 moments.")
+
+    def test_the_moment_clause_is_the_reading_rooms_own(self):
+        """One definition: the Reading Room's sentence and the filing beat's
+        can never drift into two wordings of the same true thing."""
+        rr = load("reading_room")
+        self.assertEqual(rr.placement_gain_sentence({"remaining": 14}, {"remaining": 5}),
+                         "That dates nine moments.")
+        self.assertIn(xd.moment_clause(9),
+                      rr.placement_gain_sentence({"remaining": 14}, {"remaining": 5}))
+        self.assertIn(xd.moment_clause(9), xd.gain_sentence(9))
+
+    def test_nonsense_places_nothing_rather_than_raising(self):
+        self.assertEqual(xd.gain_sentence(None), "")
+        self.assertEqual(xd.gain_sentence("nine"), "")
+        self.assertEqual(xd.gain_sentence(0, [""]), "")
+
+
+class FilingGainSlotTests(unittest.TestCase):
+    """The leaf slot, in both lanes that file."""
+
+    LEAVES = ("interactions/timeline/prompt/turn-instructions.md",
+              "interactions/landmarks/prompt/turn-instructions.md")
+
+    def test_both_filing_lanes_carry_the_slot(self):
+        for path in self.LEAVES:
+            with self.subTest(path=path):
+                self.assertIn("{filing_gain}", (ROOT / path).read_text(encoding="utf-8"))
+
+    def test_an_absent_gain_leaves_the_prompt_byte_identical(self):
+        """The whole direction is rendered WITH the sentence, so a turn that
+        filed nothing substitutes the empty string and the leaf reads exactly
+        as it did in v205 — no blank line, no dangling instruction."""
+        for path in self.LEAVES:
+            with self.subTest(path=path):
+                leaf = (ROOT / path).read_text(encoding="utf-8")
+                filled = leaf.replace("{filing_gain}", xd.render_filing_gain(""))
+                self.assertEqual(filled, leaf.replace("{filing_gain}", ""))
+                self.assertFalse(filled.endswith("\n\n"))
+        self.assertEqual(xd.render_filing_gain(None), "")
+        self.assertEqual(xd.render_filing_gain("   "), "")
+
+    def test_a_present_gain_arrives_as_its_own_paragraph(self):
+        rendered = xd.render_filing_gain("Got it — that dates nine moments.")
+        self.assertTrue(rendered.startswith("\n\n**What their answer just placed.**"))
+        self.assertIn("Got it — that dates nine moments.", rendered)
+        for path in self.LEAVES:
+            with self.subTest(path=path):
+                leaf = (ROOT / path).read_text(encoding="utf-8")
+                filled = leaf.replace("{filing_gain}", rendered)
+                self.assertNotIn("{filing_gain}", filled)
+                self.assertIn("What their answer just placed", filled)
+
+
+class RecordGainTests(VaultFixture):
+    """The count comes from the pass itself — promise equals delivery, said in
+    a sentence instead of on a star."""
+
+    LANDMARKS = {"version": 1, "domains": {}}
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "wiki" / "places" / "mesa.md").unlink()
+        refs = self.write_one_per_source([
+            {"title": "Born in Redlands",
+             "description": "Born in Redlands while the family lived in the area.",
+             "when_hint": "", "anchor": "dad attending ASU", "date": None},
+            {"title": "Grandpa's letter", "description": "Grandpa sent a letter.",
+             "when_hint": "when I was about five", "anchor": None, "date": None},
+            {"title": "The bike with no brakes",
+             "description": "I rode a bike with no brakes down the hill.",
+             "when_hint": "", "anchor": None, "date": None},
+        ])
+        self.write_period_page(refs, dated=False)
+        (self.root / "state" / "entity_rosters" / "period.json").write_text(json.dumps({
+            "version": 1, "type": "period", "entities": [
+                {"name": "Childhood", "slug": "childhood", "chrono": 1,
+                 "page_eligible": True},
+            ]}), encoding="utf-8")
+
+    def test_filing_the_birthday_says_exactly_what_it_placed(self):
+        data = self.data()
+        record = {"domain": "birth", "label": "birth", "date": BIRTHDAY}
+        self.assertEqual(xd.record_gain(record, data),
+                         {"moments": 2, "bands": ["Childhood"]})
+        self.assertEqual(xd.gain_sentence_for_record(record, data),
+                         "Got it — that dates two moments and your Childhood years.")
+
+    def test_the_sentence_is_what_the_next_derivation_actually_delivers(self):
+        """The reconciliation, in the shape the person hears it."""
+        before = self.data()
+        gain = xd.record_gain({"domain": "birth", "label": "birth", "date": BIRTHDAY},
+                              before)
+        self.store.write_text(json.dumps({
+            "version": 1, "domains": {"birth": [{"label": "birth", "date": BIRTHDAY}]},
+        }), encoding="utf-8")
+        after = self.data()
+        self.assertEqual(after["cross_dating"]["derived"], gain["moments"])
+        self.assertEqual([row["label"] for row in after["cross_dating"]["bands"]["bands"]],
+                         gain["bands"])
+
+    def test_a_record_that_places_nothing_says_nothing(self):
+        data = self.data()
+        self.assertEqual(
+            xd.gain_sentence_for_record({"domain": "schools", "label": "Mesa High"}, data), "")
+        self.assertEqual(xd.gain_sentence_for_record(None, data), "")
+        self.assertEqual(xd.gain_sentence_for_record({}, {}), "")
+
+    def test_a_timeline_placement_reports_the_band_it_just_bounded(self):
+        data = self.data()
+        placed = {"source": "answers/A3.md",
+                  "date": chrono.parse_edtf("1990", basis="stated").to_dict()}
+        self.assertEqual(xd.gain_sentence_for_record(placed, data),
+                         "Got it — that dates your Childhood years.")
+
+    def test_filing_a_residence_span_dates_the_era_that_holds_the_place(self):
+        """The landmark shape the band ladder's first rung is built for — and
+        the one `validate_landmark` actually emits, `span: {start, end}`."""
+        (self.root / "wiki" / "places" / "mesa.md").write_text(
+            PAGE.format(title="Mesa", page_type="place", chrono=0, extra="",
+                        sources=_sources(["A1", "A2", "A3"])),
+            encoding="utf-8")
+        record = {"domain": "residences", "label": "Mesa",
+                  "span": {"start": {"best": "1984"}, "end": {"best": "1990"}}}
+        self.assertEqual(xd.gain_sentence_for_record(record, self.data()),
+                         "Got it — that dates your Childhood years.")
+
+    def test_computing_the_gain_never_touches_the_payload(self):
+        data = self.data()
+        snapshot = json.dumps(data, sort_keys=True, default=str)
+        xd.gain_sentence_for_record({"domain": "birth", "label": "birth",
+                                     "date": BIRTHDAY}, data)
+        self.assertEqual(json.dumps(data, sort_keys=True, default=str), snapshot)
+
+
 class ManifestTests(unittest.TestCase):
     def test_every_new_file_ships_in_framework_files(self):
         manifest = set(json.loads((SYSTEM / "version.json").read_text())["framework_files"])
@@ -671,7 +1179,7 @@ class ManifestTests(unittest.TestCase):
 
     def test_the_version_is_the_one_this_pass_shipped_in(self):
         version = json.loads((SYSTEM / "version.json").read_text())
-        self.assertGreaterEqual(int(version["version"]), 205)
+        self.assertGreaterEqual(int(version["version"]), 207)
 
 
 if __name__ == "__main__":

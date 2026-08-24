@@ -1539,6 +1539,11 @@ def compile_timeline(dry_run: bool = False) -> bool:
         dated = period.get("date") is not None
         if dated:
             header += f" — {chrono.display_date(period['date'], with_basis=False)}"
+            # v207: where the span was DERIVED, the export names the landmark
+            # it came from, the same way a derived moment's line does.
+            band_derived = period.get("date_derived") or {}
+            if band_derived.get("provenance"):
+                header += f" · {band_derived['provenance']}"
         if period.get("corroboration"):
             # v110: same connector-evidence badge as the viewer's period row.
             # The separator is a middot once a span already claimed the dash.

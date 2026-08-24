@@ -2520,6 +2520,12 @@ def view_timeline():
         chrono_note = "" if period["chrono"] is not None else             " (no chronological order yet)"
         span = (f" <span class='tl-evidence'>{html.escape(chrono.display_date(period['date'], with_basis=False))}</span>"
                 if period.get("date") is not None else "")
+        # v207 (ADR 0026 amendment): an era the cross-dating pass dated says
+        # which landmark it leaned on, exactly as a derived moment does.
+        band_derived = period.get("date_derived") or {}
+        if band_derived:
+            span += (f" <span class='tl-evidence'>· "
+                     f"{html.escape(str(band_derived.get('provenance') or ''))}</span>")
         title_html = f"{title_html}{span}"
 
         # Collapsed-row counts — the period stays informative while folded.

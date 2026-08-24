@@ -1055,17 +1055,14 @@ def _place_for_event(event: dict, places: dict[str, dict]) -> dict | None:
 
 
 def _place_span(events: list[dict]) -> object:
-    """A residence's span inferred from the dated moments that happened there."""
-    years = [y for y in (chrono.year_of(e.get("date")) for e in events) if y is not None]
-    ends = [y for y in (chrono.year_of(e.get("date"), end=True) for e in events) if y is not None]
-    if not years:
-        return None
-    first, last = min(years), max(ends or years)
-    if first == last:
-        return chrono.DateRecord(best=f"{first}?", earliest=str(first), latest=str(first),
-                                 granularity="year", confidence="conjectural", basis="order")
-    return chrono.DateRecord(best=f"{first}/{last}", earliest=str(first), latest=str(last),
-                             granularity="range", confidence="inferred", basis="order")
+    """A residence's span inferred from the dated moments that happened there.
+
+    v207: the arithmetic moved to `cross_dating.span_from_dated`, because a
+    BAND needs exactly the same envelope one level up and the recurring-defect
+    doctrine forbids the second copy. This name stays as the residence's own
+    reading of it.
+    """
+    return cross_dating.span_from_dated(events)
 
 
 # ---------------------------------------------------------------------------
@@ -2287,6 +2284,12 @@ def timeline_data(evidence: list[dict] | None = None,
     # landmark improves the whole timeline instantly — and it NEVER overwrites
     # an explicit record. Guarded like every other derived block here: a
     # cross-dating problem must not take the timeline down.
+    #
+    # v207 (design D2): the same call now also dates undated PERIODS from the
+    # landmarks — the founder filed his birth and "Childhood" still read
+    # `undated`, because `build_bands` reads only a band's own `date`. The pass
+    # runs moments → bands → moments, so an era dated by its own first moment
+    # immediately bounds the rest of them.
     try:
         cross_dating_report = cross_dating.cross_date(
             event_lineup=event_lineup,
@@ -2296,9 +2299,17 @@ def timeline_data(evidence: list[dict] | None = None,
             anchors=anchors,
             birth_date=birth_date,
         )
+        # v207 (ADR 0026 amendment, design D3): a band the pass just dated is
+        # a new anchor for the spine's order, so the ordering improves on the
+        # same read the date arrives on — `derive_chrono` is a no-op when
+        # nothing was derived, and re-ranking it twice is idempotent.
+        if cross_dating_report["bands"]["derived"]:
+            periods = derive_chrono(periods)
     except Exception:  # noqa: BLE001
         cross_dating_report = {"derived": 0, "by_rule": {}, "by_join": {},
-                               "moments": []}
+                               "moments": [],
+                               "bands": {"derived": 0, "by_rule": {},
+                                         "by_join": {}, "bands": []}}
     for rows_here in event_lineup.values():
         sort_period_events(rows_here)
 
@@ -2387,6 +2398,9 @@ def timeline_data(evidence: list[dict] | None = None,
             "events_dated": sum(1 for rows in event_lineup.values()
                                 for event in rows if event.get("date") is not None),
             "events_cross_dated": int(cross_dating_report.get("derived") or 0),
+            # v207: eras that were undated until the pass gave them a span.
+            "periods_cross_dated": int(
+                (cross_dating_report.get("bands") or {}).get("derived") or 0),
         },
     }
     # v196: concrete unknowns, leverage-ordered and capped for a page; the

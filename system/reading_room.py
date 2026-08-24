@@ -207,24 +207,25 @@ def recompute_plan(data: dict, *, roster: object = None, k: int = PLAN_SIZE,
     return plan
 
 
-_NUMBER_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven",
-                 "eight", "nine", "ten", "eleven", "twelve")
-
-
 def placement_gain_sentence(before: object, after: object) -> str:
     """"That dates nine moments." — the only progress feedback that belongs here.
 
     Counts of what REMAINS are forbidden; a count of what an answer just
     UNLOCKED is the whole point (§8.3, and the owner's own sentence).
+
+    v207: the clause itself is `cross_dating.moment_clause` — the landmark and
+    timeline lanes say the same true thing at their own filing beat, and one
+    definition is how the two can never drift into two wordings.
     """
+    import cross_dating as _xd  # noqa: PLC0415  (avoids an import cycle)
+
     try:
         gap = int((before or {}).get("remaining", 0)) - int((after or {}).get("remaining", 0))
     except (TypeError, ValueError, AttributeError):
         return ""
     if gap <= 0:
         return ""
-    word = _NUMBER_WORDS[gap] if gap < len(_NUMBER_WORDS) else str(gap)
-    return f"That dates {word} {'moment' if gap == 1 else 'moments'}."
+    return f"That {_xd.moment_clause(gap)}."
 
 
 # ---------------------------------------------------------------------------
