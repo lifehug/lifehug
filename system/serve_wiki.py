@@ -2568,8 +2568,21 @@ def view_timeline():
             when = (f"<strong>{html.escape(label)}</strong> — "
                     if label else "<em>(undated)</em> — ")
             title = tl_mod.event_title(event)
-            anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
-                      if event["anchor"] else "")
+            # v205 (ADR 0026): where cross-dating derived the date, the
+            # displayed anchor is the LANDMARK provenance ("from your
+            # birthday"), and the classifier's free-text anchor — the field the
+            # owner caught reading "dad attending ASU" on a moment dated by his
+            # birthday — is demoted to the detail line, never destroyed.
+            derived = event.get("date_derived") or {}
+            demoted = ""
+            if derived:
+                anchor = (f" <span class='tl-evidence'>· "
+                          f"{html.escape(str(derived.get('provenance') or ''))}</span>")
+                if event["anchor"]:
+                    demoted = f" · classified anchor: {event['anchor']}"
+            else:
+                anchor = (f" <span class='tl-evidence'>· anchor: {html.escape(event['anchor'])}</span>"
+                          if event["anchor"] else "")
             email_badge = ""
             if event.get("corroboration"):
                 # v110: matched connector records, count + span (contradiction
@@ -2593,7 +2606,8 @@ def view_timeline():
                     else f"<div>{html.escape(event['description'])}</div>")
             return (f"<div class='tl-dot{undated}'>{when}{headline}{anchor}{email_badge}{pin}"
                     f"{body}"
-                    f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}</div></div>")
+                    f"<div class='tl-evidence'>source: {html.escape(event['source_short'])}"
+                    f"{html.escape(demoted)}</div></div>")
 
         visible, overflow = events_here[:10], events_here[10:]
         parts.extend(_event_html(e) for e in visible)

@@ -75,6 +75,17 @@ no_year_opener` lint AND `arc_planner.BANNED_PHRASE`; rules 3 and 9 are the
 `chronology.DateRecord`'s bounds and its `basis`/`confidence`; rule 10's stop
 rules are `knob.stop_after_unproductive_probes` and `knob.max_probes`.
 
+§1's *bounding before pinning* and the life-history calendar's own claim —
+that most of a life is dated by INFERENCE from residence and role (Freedman et
+al. 1988; Belli 1998) — are implemented as the **cross-dating pass**
+(`system/cross_dating.py`, v205 — [ADR 0026](../../docs/adr/0026-cross-dating.md)).
+It is the step that spends the landmarks: definitional joins first (the moment
+IS a landmark fact), then age arithmetic, then containment, which reads a known
+span as a *terminus post quem* / *terminus ante quem* pair rather than a point.
+§4's "never silently overwritten" is a hard precondition there — an explicit
+record is skipped before a marker is even read — and §1's conjectural marking
+is the confidence an era-contained moment gets.
+
 ---
 
 ## Sources

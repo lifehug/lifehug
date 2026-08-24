@@ -46,6 +46,7 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
+import cross_dating  # noqa: E402
 import landmarks_interaction  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
@@ -834,12 +835,21 @@ def place_events(events: list[dict], periods: list[dict],
         else:
             placed[slot].append(event)
     for rows in placed.values():
-        # Dated moments lead, in date order; everything after is v194's exact
-        # key, so a period with no dated events sorts byte-identically.
-        rows.sort(key=lambda e: (e.get("date") is None,
-                                 chrono.year_of(e.get("date")) or 0,
-                                 not e["when_hint"], e["source_short"]))
+        sort_period_events(rows)
     return placed, unplaced
+
+
+def sort_period_events(rows: list[dict]) -> list[dict]:
+    """Dated moments lead, in date order; everything after is v194's exact key,
+    so a period with no dated events sorts byte-identically.
+
+    v205: ONE definition, because `timeline_data` re-sorts after the
+    cross-dating pass has dated moments `place_events` saw as undated.
+    """
+    rows.sort(key=lambda e: (e.get("date") is None,
+                             chrono.year_of(e.get("date")) or 0,
+                             not e["when_hint"], e["source_short"]))
+    return rows
 
 
 def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
@@ -1285,57 +1295,94 @@ def dependency_index(data: dict) -> dict[str, set[str]]:
     """`{anchor_key: {unknown_key, ...}}` — what one answer would put in place.
 
     The anchor candidates are exactly the three ruling 5 names: a period's
-    start/end, a landmark (dated) event, and an entity's arrival. An anchor
-    resolves an unknown when placing the anchor would place the unknown:
+    start/end, a landmark (dated) event, and an entity's arrival.
 
-    * a PERIOD anchor resolves that era's own bounds, every undated moment and
-      place inside it, and every `era_gap` touching it;
-    * a LANDMARK EVENT anchor resolves the undated moments sharing its period
-      (the neighbours it would bound);
-    * an ENTITY ARRIVAL anchor resolves the undated moments sharing its
-      sources, and that era's own bounds.
+    **v205 (ADR 0026) — the promise and the delivery are the same join.**
+    Before v205 this function counted what an anchor *touched*, and the package
+    had no pass that turned a resolved anchor into a dated moment at all: the
+    star said "one answer would place 53 more things" and answering it placed
+    nothing. Now the MOMENT half of every resolve set is computed by
+    `cross_dating.derivable_moments` — the cross-dating pass's own containment
+    rule read backwards — so the number on the star is the number that dates on
+    the next read. Two claims went away with it, both of them fictions:
+
+    * a dated **event** no longer claims its undated neighbours (a point is not
+      a span; nothing has ever derived a date from an adjacent moment), and
+    * a **person** entity no longer claims the moments that share its sources
+      (an arrival bounds nothing).
+
+    Each keeps the claims that ARE definitional: an era's own bounds, the
+    `era_gap`s an era or a dated moment inside it would close, the `place_span`
+    rows that fall out of a dated era's moments (`_place_span` derives a
+    residence's span from the moments that happened there), and a place's own
+    span.
 
     v196: the keys on both sides are the CONCRETE unknown keys `unknowns()`
-    emits, so leverage counts real answerable things rather than aggregate
-    rows.
+    emits, so leverage counts real answerable things rather than aggregate rows.
     """
     index: dict[str, set[str]] = {}
     rows = unknowns(data)
+    live = {row["key"] for row in rows}
     by_period: dict[str, set[str]] = {}
     era_touch: dict[str, set[str]] = {}
-    by_source: dict[str, set[str]] = {}
     for row in rows:
         if row.get("period"):
             by_period.setdefault(str(row["period"]), set()).add(row["key"])
         for slug in (row.get("between") or []):
             era_touch.setdefault(str(slug), set()).add(row["key"])
-        if row.get("source"):
-            by_source.setdefault(str(row["source"]), set()).add(row["key"])
 
     event_lineup = data.get("event_lineup") or {}
     entity_lineup = data.get("entity_lineup") or {}
-    for period in data.get("periods") or []:
+    periods = data.get("periods") or []
+
+    # The one join that both promises and delivers.
+    reach = cross_dating.derivable_moments(
+        event_lineup=event_lineup,
+        unplaced_events=data.get("unplaced_events") or [],
+        periods=periods,
+        entity_lineup=entity_lineup,
+    )
+    derivable: dict[str, set[str]] = {}
+    for anchor, pairs in reach.items():
+        keys = {unknown_key(moment_unknown(event, period)) for period, event in pairs}
+        derivable[anchor] = keys & live
+
+    for period in periods:
         slug = period["slug"]
-        index[f"period:{slug}"] = set(by_period.get(slug, set())) | set(era_touch.get(slug, set()))
+        key = f"period:{slug}"
+        # The era's own non-moment unknowns are definitional; its moments are
+        # exactly what containment would bound.
+        definitional = {row for row in by_period.get(slug, set())
+                        if not row.startswith("moment:")}
+        index[key] = definitional | derivable.get(key, set()) | set(era_touch.get(slug, set()))
 
     for slug, rows_here in event_lineup.items():
         for event in rows_here:
             if event.get("date") is None:
                 continue
             key = f"event:{slug}:{event.get('source_short') or ''}"
-            neighbours = {f"moment:{slug}:{other.get('source_short') or ''}"
-                          for other in rows_here if other.get("date") is None}
-            index[key] = (neighbours & {row["key"] for row in rows}) | set(era_touch.get(slug, set()))
+            # v205: a dated moment bounds no other moment. What pinning it
+            # DOWN can still do is occupy — and so close — a hole between two
+            # dated eras (`era_gaps` skips an occupied hole).
+            index[key] = set(era_touch.get(slug, set()))
 
-    for slug, rows_here in entity_lineup.items():
+    place_slugs = {
+        str(row.get("slug"))
+        for rows_here in entity_lineup.values()
+        for row in rows_here or ()
+        if isinstance(row, dict) and row.get("type") == "place"
+    }
+    for rows_here in entity_lineup.values():
         for row in rows_here:
             if row.get("type") not in ("person", "place"):
                 continue
             key = f"entity:{row['slug']}"
-            shared: set[str] = set()
-            for source in (row.get("sources") or ()):
-                shared |= by_source.get(str(source), set())
-            index[key] = index.get(key, set()) | shared | set(by_period.get(slug, set()))
+            claims = set(derivable.get(key, set()))
+            if str(row.get("slug")) in place_slugs:
+                own_span = f"place_span:{row['slug']}"
+                if own_span in live:
+                    claims.add(own_span)
+            index[key] = index.get(key, set()) | claims
     return index
 
 
@@ -2230,6 +2277,31 @@ def timeline_data(evidence: list[dict] | None = None,
     placements = load_placements()
     event_lineup, unplaced_events = place_events(events, periods, placements)
 
+    # v205 (ADR 0026): CROSS-DATING. `keystones` has promised leverage since
+    # v196 and nothing ever delivered it — a filed birthday left "Born in
+    # Redlands" undated because dates only ever arrived through the
+    # classifier's own claim or an explicit `timeline-place`. This pass walks
+    # every still-undated moment and derives a date from the anchors the
+    # person already gave: definitional joins first, then age statements, then
+    # containment bounds. Pure, stateless, recomputed on every read — a better
+    # landmark improves the whole timeline instantly — and it NEVER overwrites
+    # an explicit record. Guarded like every other derived block here: a
+    # cross-dating problem must not take the timeline down.
+    try:
+        cross_dating_report = cross_dating.cross_date(
+            event_lineup=event_lineup,
+            unplaced_events=unplaced_events,
+            periods=periods,
+            entity_lineup=entity_lineup,
+            anchors=anchors,
+            birth_date=birth_date,
+        )
+    except Exception:  # noqa: BLE001
+        cross_dating_report = {"derived": 0, "by_rule": {}, "by_join": {},
+                               "moments": []}
+    for rows_here in event_lineup.values():
+        sort_period_events(rows_here)
+
     # v110: connector date-evidence corroboration — attaches badges to matched
     # periods/events and returns date_contradiction records (read-only; the
     # connector excavation turns the contradictions into question candidates).
@@ -2301,6 +2373,8 @@ def timeline_data(evidence: list[dict] | None = None,
         "corroboration": corroboration,
         # v195 (ADR 0024) — additive, every one of them.
         "anchors": anchors,
+        # v205 (ADR 0026): what the cross-dating pass derived on THIS read.
+        "cross_dating": cross_dating_report,
         "bands": bands,
         "places_by_chapter": places_by_chapter,
         "places_by_period": places_by_period,
@@ -2312,6 +2386,7 @@ def timeline_data(evidence: list[dict] | None = None,
             "events_unplaced": len(unplaced_events),
             "events_dated": sum(1 for rows in event_lineup.values()
                                 for event in rows if event.get("date") is not None),
+            "events_cross_dated": int(cross_dating_report.get("derived") or 0),
         },
     }
     # v196: concrete unknowns, leverage-ordered and capped for a page; the

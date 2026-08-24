@@ -94,6 +94,20 @@ asks you for a year.
   <!-- parity: timeline.UNKNOWNS_PAGE_CAP = 30 -->
 - **Leverage** — how many unknowns one anchor would resolve. **Keystones** are
   the top two, starred. <!-- parity: timeline.KEYSTONE_CAP = 2 -->
+- **Cross-dating** (v205) — the pass that spends the landmarks. For every
+  still-undated moment it tries one derivation, strongest join first:
+  **definitional** (the moment IS a landmark fact — a birth, a move, a
+  graduation), then an **age statement**, then **containment** (a place or an
+  era whose span is known bounds what happened inside it). Pure, stateless and
+  recomputed on every read. Before v205 nothing propagated a resolved anchor at
+  all, so a filed birthday left "Born in Redlands" undated and the leverage
+  number promised what no pass delivered.
+- **Derived date** — a date this pass worked out rather than one the person
+  stated, marked by `date_derived` on the moment row and by nothing else. It
+  carries the landmark it leaned on (`anchors`), the sentence the page shows
+  ("from your birthday"), and a confidence graded by how tight the join was —
+  `inferred` for a definitional join or a place, `conjectural` for an era. An
+  explicit record is never overwritten.
 - **Whisper** — the week's arc card carrying a keystone's real probe and the
   person's own landmarks into an ordinary conversation. Raised only where it
   fits, at most once, any precision accepted, never pressed.
@@ -129,6 +143,40 @@ said"*. Then `chronology` does the arithmetic: `from_age` turns a birthday and
 "about five" into `1984~` with basis `age`; `from_anchor` turns "before we
 moved" into `../1984`; `intersect` combines several claims into the tightest
 interval they all allow.
+
+**How moments get dates** (v205, [ADR 0026](../adr/0026-cross-dating.md)).
+Until v205 a date reached a moment through exactly two doors: the classifier's
+own claim, and an explicit `timeline-place`. So you could file your birthday —
+the highest-leverage answer the system knows how to ask for — and the moment
+*"Born in Redlands while the family lived in the area"* would still read
+**undated**, still carrying whatever the classifier had written in its free-text
+`anchor` field. The star said *"one answer would place 53 more things"* and
+answering it placed none.
+
+**Cross-dating** is the third door, and it runs on every read. For each
+still-undated moment it tries one derivation and stops at the first that fires:
+
+| Order | Rule | What it needs | What it gives |
+|---|---|---|---|
+| 1 | **definitional** | the moment IS a landmark fact — an explicit birth/move/graduation marker naming a landmark you filed, or an `anchor` field that resolves to one exactly | that landmark's own date |
+| 2 | **age** | an explicit age in your own words, plus your birthday | `from_age`'s interval |
+| 3 | **containment** | a place or an era whose span is known | that span, as **bounds** |
+
+Four rules keep it honest. **An explicit record is never overwritten** — a
+stated date that contradicts a landmark survives untouched and the two are
+reconciled the usual way. **Nothing is invented**: every interval is arithmetic
+over dates you actually gave, so a moment no anchor reaches stays honestly
+undated. **Everything shows its work** — a derived date names the landmark it
+leaned on and renders the reason where the classifier's anchor used to sit
+("from your birthday"), with the model's own note demoted to the detail line
+rather than deleted. And **nothing is stored**: derived dates live only in the
+derived payload, so correcting a landmark instantly re-derives everything that
+leaned on it, and there is no repair job because there is no state to repair.
+
+The join is deliberately narrow. Markers are small, explicit pattern sets — a
+sibling's birth in the same sentence vetoes the birth join outright, and a
+free-text anchor that names nothing in your landmark index derives nothing at
+all. **A miss is fine; a wrong join is not.**
 
 **What happens when accounts disagree.** Nothing is overwritten.
 `chronology.reconcile` scores every claim by its basis, its confidence, and
@@ -177,13 +225,19 @@ the unknown's target: a year for an era gap, an era for a thin lineup. It also
 stops after two probes that add no new bound, and at a hard ceiling of four
 probes — dating is never worth the relationship.
 
-**Leverage.** Anchor candidates are a period's start/end, a dated landmark
-event, and an entity's arrival. A period anchor resolves that period's own
-unknowns, every `era_gap` touching it, and every undated moment or entity in
-it; a landmark event resolves the undated moments it would bound; an entity
-arrival resolves the moments sharing its sources. Leverage is the size of that
-set, and keystones are the top two by leverage then by how cheap their probe
-is. A keystone becomes a QUESTION in exactly two ways, both matched by its own
+**Leverage — the promise and the delivery are the same join** (v205). Anchor
+candidates are a period's start/end, a dated landmark event, and an entity's
+arrival. A period anchor resolves that period's own bounds, every `era_gap`
+touching it, and — through cross-dating's containment rule — every undated
+moment inside it; a place resolves its own span and the moments its sources
+cite. Two pre-v205 claims are gone because they were fictions: a **dated
+event** no longer claims its undated neighbours (a point is not a span), and a
+**person** no longer claims the moments sharing its sources (an arrival bounds
+nothing). The MOMENT half of every resolve set is now computed by
+`cross_dating.derivable_moments` — the pass's own rule read backwards — so the
+number on the star is the number that dates on the next read. Leverage is the
+size of that set, and keystones are the top two by leverage then by how cheap
+their probe is. A keystone becomes a QUESTION in exactly two ways, both matched by its own
 identity `tl:<anchor-slug>` — the week's whisper on an arc card, and a minted
 bank question when its leverage clears `timeline_leverage_per_story` (6), the
 one dial. That number is an exchange rate: how many unknowns one answer must
@@ -209,7 +263,10 @@ thrown away.
 Per answer, classification records any explicit date claim and the event's
 title. The timeline is recomputed on every read and written to
 `wiki/timeline.md` on every compile, so a new answer's dates appear
-immediately. Weekly, `timeline-retire` retires display pins the classifier has
+immediately. Since v205 the **cross-dating pass runs inside that same
+recomputation**, which is why answering one landmark question visibly moves
+dozens of moments on the next page load and why nothing has to be re-run,
+migrated, or repaired when a landmark is corrected. Weekly, `timeline-retire` retires display pins the classifier has
 caught up with, and `planner-queue` mints the earned keystones through a
 guarded read that degrades to "no keystone questions" rather than ever
 breaking the queue.
@@ -229,6 +286,7 @@ on every read.
 | Concern | Location |
 |---|---|
 | The date primitive | `system/chronology.py` |
+| The cross-dating pass | `system/cross_dating.py` (`derive`, `cross_date`, `derivable_moments`) |
 | The model, bands, unknowns, leverage, keystones | `system/timeline.py` |
 | Corroboration windows | `system/timeline_corroboration.py` |
 | The elicitation | `interactions/timeline/`, `system/timeline_interaction.py` |
@@ -239,10 +297,11 @@ on every read.
 | Plan a timeline Play | `lifehug.py arc-plan-target --timeline [--era <slug>]` |
 | Durable state | `state/timeline_placements.json` |
 | Research basis | `system/research/chronology.md`, `system/research.md` §4a |
-| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py` |
+| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py` |
 
 ## 7. Decisions
 
 - [ADR 0024 — Chronology with basis](../adr/0024-chronology-with-basis.md) — dates as intervals, asking anchor-first, contradictions that keep both claims, derived order, keystones, and the fifth child interaction (amended v196: the deferral state is deleted, and a keystone is asked as a whisper or a minted question).
+- [ADR 0026 — Cross-dating](../adr/0026-cross-dating.md) — a resolved anchor places its dependent moments; leverage counts only what the pass can actually derive.
 - [The Timeline Interaction](interactions/timeline.md) — the conversation that places a memory.
 - [ADR 0023](../adr/0023-arc-walking.md) — the sibling child whose stage and caller-fact shape this one copies.

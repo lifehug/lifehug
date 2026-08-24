@@ -612,7 +612,9 @@ def _as_record(value: object) -> DateRecord | None:
 # The arithmetic (owner ruling 1 — "the system does the arithmetic")
 # --------------------------------------------------------------------------
 
-_NUMBER_WORDS = {
+#: Public: `cross_dating` builds its age-statement patterns from these very
+#: words, so the two readers can never drift apart (recurring-defect doctrine).
+NUMBER_WORDS = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
     "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
     "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
@@ -620,6 +622,7 @@ _NUMBER_WORDS = {
     "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
     "eighty": 80, "ninety": 90,
 }
+_NUMBER_WORDS = NUMBER_WORDS
 _HEDGES = ("about", "around", "roughly", "approximately", "maybe", "or so",
            "something like", "somewhere around", "ish", "give or take")
 _AGE_TOKEN_RE = re.compile(r"\d{1,3}|[a-z]+", re.IGNORECASE)
@@ -950,9 +953,9 @@ def record_from_claim(claim: object, *, birth_date: object = None,
     anchor_ref = normalized.get("anchor_ref")
     relation = normalized.get("relation") or "during"
     if anchor_ref and anchors:
-        anchor = _lookup_anchor(anchor_ref, anchors)
+        anchor = lookup_anchor(anchor_ref, anchors)
         if anchor is not None:
-            record = from_anchor(anchor, relation, key=_anchor_key(anchor_ref, anchors))
+            record = from_anchor(anchor, relation, key=anchor_key(anchor_ref, anchors))
             if record:
                 parts.append(replace(
                     record,
@@ -966,7 +969,13 @@ def record_from_claim(claim: object, *, birth_date: object = None,
     return reconcile(parts)["best_supported"]
 
 
-def _anchor_key(reference: str, anchors: dict) -> str | None:
+def anchor_key(reference: str, anchors: dict) -> str | None:
+    """The anchor-index key `reference` names — by key, then by label.
+
+    Exact, case-insensitive, never fuzzy: a free-text anchor that names
+    nothing in the index resolves to ``None`` and the caller derives
+    nothing from it. That is the whole guard against a wrong join.
+    """
     lowered = reference.strip().lower()
     for key in anchors:
         if str(key).strip().lower() == lowered:
@@ -978,11 +987,17 @@ def _anchor_key(reference: str, anchors: dict) -> str | None:
     return None
 
 
-def _lookup_anchor(reference: str, anchors: dict) -> DateRecord | None:
-    key = _anchor_key(reference, anchors)
+def lookup_anchor(reference: str, anchors: dict) -> DateRecord | None:
+    """The `DateRecord` behind :func:`anchor_key`, or ``None``."""
+    key = anchor_key(reference, anchors)
     if key is None:
         return None
     value = anchors[key]
     if isinstance(value, dict) and "date" in value:
         return _as_record(value["date"])
     return _as_record(value)
+
+
+#: Pre-v205 private names, kept so nothing that imported them breaks.
+_anchor_key = anchor_key
+_lookup_anchor = lookup_anchor
