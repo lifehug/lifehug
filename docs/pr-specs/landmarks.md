@@ -78,7 +78,12 @@ This contract fills the index.
 (`lifehug_core._parse_simple_yaml`), same convention as `interaction.yaml`.
 
 Eight domains, in order: **birth · residences · schools · partnerships ·
-children · work · military · losses.** Birth is first because it is the axis
+children · work · military · losses.**
+
+> **Amended by `docs/pr-specs/family-landmark.md` (v202):** a ninth domain,
+> **family**, was inserted at order 2 and every later domain's order shifted by
+> one. The set is now **birth · family · residences · schools · partnerships ·
+> children · work · military · losses.** Birth is first because it is the axis
 (every fielded instrument takes it first — SHARELIFE ST006/ST007, NLSY97's
 "month the respondent turned 14"). Residences and schools follow because they
 are the two **closed lists**: enumerable, finite, tiling, verifiable,

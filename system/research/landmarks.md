@@ -314,6 +314,7 @@ Pooling §1.1–1.8, the domains that appear in essentially every instrument:
 |---|--------|-----------|-----------------|
 | 1 | Birth (date + place) | all; the origin of NLSY97's month scheme; genealogy's first vital record | turns every age statement into a year |
 | 2 | Residences, with moves | LHC row 1; PSID; NEPS module 21 ("all places… since birth"); SHARELIFE AC; ELSA RA; BCS70 housing; Smithsonian "Where have you lived?" | bounded spans, high recall, cross-cues everything, and they tile |
+| 2b | **Family constellation** (siblings, parents, grandparents) | Montana's data sheet (mother → father → grandparents → siblings, before schools or jobs); ND VHP Segment 1 items 3–4 (parents, straight after the narrator's own birth); BCS70's `family` module; Smithsonian's *Family Folklore* block | it is asked immediately after the subject's own birth, and it is the only domain whose answers are *people* (§2.9) |
 | 3 | Partnerships (marriage/cohabitation, separations) | LHC rows 2–3; NLSY97 array 2; Add Health column 3; SHARELIFE RP; ELSA RP; NCDS "past relationships" | dated to the month in validation data |
 | 4 | Children (births) | LHC "fertility"; NLSY97; SHARELIFE RC (**first module**); ELSA RC | dated to the month; also dates *other* people |
 | 5 | Schooling, with start/end | LHC row 5; NLSY97 array 4; NEPS module 24; SHARELIFE RE002; the quality-principles study | grade↔age↔year arithmetic (§3.2) |
@@ -343,8 +344,11 @@ telescoped guess (Friedman 1993; Huttenlocher et al. 1990, both in
 chronology.md §3). A birth date is not recalled by reconstruction; it is
 overlearned semantic knowledge, and it is the datum the fielded instruments
 themselves use as the axis (NLSY97's "month the respondent turned 14," Add
-Health's display of "the respondent's age at the time"). **Birth date is the
-legitimate and only exception to the no-year-opener rule.**
+Health's display of "the respondent's age at the time"). **A birth date is the legitimate
+exception to the no-year-opener rule** — and the exception is about the *kind*
+of fact, not about whose fact it is. §2.9 draws out the consequence the v198
+pass missed: a *sibling's* birth year is overlearned semantic knowledge in
+exactly the same way, and may be asked outright for exactly the same reason.
 
 ### 2.2 Residences are the primary chain
 
@@ -538,6 +542,111 @@ events that makes everything else easier" is: yes, and they would call it
 establishing a few absolute dates and then dating everything else relatively
 against them. The one correction to the owner's framing is the shape — see
 §3.6, it is not a binary tree.
+
+### 2.9 The family constellation
+
+**Ruling (owner-set, 2026-08-24): the family you came from is a landmark
+domain.** v198 kept the set to *self-facts* and left relationship facts to the
+entity roster. That split was defensible — a roster is the right home for who
+someone is — but it dropped a dating instrument on the floor, and it left the
+ask-the-living thread with no source of witnesses. Both are fixed by asking
+the constellation, filing the dates as landmarks, and sending the *people* to
+the roster where they already belonged (contract:
+`docs/pr-specs/family-landmark.md` §D).
+
+**Practitioner intake asks the constellation, and asks it early.** The
+citations are already in §1.8; what follows is the reading §1.8 did not draw
+out. Montana's Oral History Biographical Data Sheet — sent home to be answered
+"several days before the scheduled interview" — runs, in this order: *Name at
+birth · Date of birth · Place of birth · **Mother's name, place and date of
+birth & death** · **Father's name, place and date of birth & death** ·
+**Maternal grandparents' names, places and dates of birth & death** ·
+**Paternal grandparents' names, places and dates of birth & death** · **Your
+siblings' names, dates and place of birth. Please indicate if they are alive or
+deceased** · Your spouse's name · Year and location of your wedding · Names,
+birth dates, and birth places of your children · Grade School · High School ·
+College · jobs*
+([Montana State Library, *Oral History Biographical Data Sheet*](https://docs.msl.mt.gov/mmpweb/Oralhistory/Oral-History-biographical-data.pdf)).
+Three things in that single form:
+
+1. **The constellation sits between the subject's own birth and everything
+   else** — before schooling, before work, before the marriage.
+2. **Sibling birth dates are asked outright**, in the same breath as the
+   subject's own, on a form filled from memory and family papers.
+3. **"Please indicate if they are alive or deceased"** is asked as an ordinary
+   intake field, of siblings and of children. The *living* flag is not a
+   delicate special case in the field's own practice; it is a column.
+
+The North Dakota State Archives' VHP question guide independently puts parents
+at items **3 and 4** of "Basic Biographical Information: (key points every
+interview should cover)" — "1. Full name… 2. When/where born 3. Parents' names
+and occupations 4. Where/when were parents born…" — with the rationale §1.8
+already quotes: personal biographical questions "provide a smooth start and
+necessary information"
+([North Dakota State Archives](https://www.history.nd.gov/archives/vetQuestions.pdf)).
+The Smithsonian's guide gives *Family Folklore* its own question block
+immediately after *Biographical Questions* — "What stories have come down to
+you about your parents and grandparents? More distant ancestors?"
+([Smithsonian CFCH, *Folklife and Oral History Interviewing Guide*](https://www.nativeoralhistory.org/system/files/atoms/file/InterviewingGuide.pdf)).
+And BCS70's age-42 contents run *relationship history / children / household →
+**family** → housing → employment → learning → health* (§1.7), putting family
+ahead of housing in a fielded instrument.
+
+**Calibration.** What is *documented* is that these instruments ask the
+constellation, ask it early, and ask sibling birth dates and living status
+directly. What is **not** measured anywhere we have found is the claim that
+sibling birth years are recalled *more* accurately than other landmarks — no
+validation study we located reports datedness by kin. The datedness ranking in
+§2.4 covers the subject's own events, not their relatives'. Treat "siblings are
+strong anchors" as resting on two safe legs and one premise:
+
+* *safe* — a sibling's birth is a **vital record** (§1.8: birth, marriage,
+  death are the three events societies wrote down with a date), and vital
+  records are the best-dated class in the whole set;
+* *safe* — it is **overlearned semantic knowledge**, not a reconstruction: the
+  §2.1 argument for the subject's own birthday is an argument about the kind of
+  fact, and it transfers without modification;
+* *premise* — that it lands in **childhood**, where §3.1's `from_age`
+  arithmetic has the least to work with. That is the owner's observation and
+  it is structurally obvious (siblings are born near you in time), but it is
+  not a measured finding.
+
+**Consequence for the no-year-opener rule.** §2.1's carve-out extends to any
+person's birth *year*, asked as a fact about that person rather than as the
+date of a memory being placed: "What year was Jackie born?" is legitimate;
+"What year was that trip?" is not. This is not a loosening of chronology.md §6
+rule 1 — that rule forbids demanding a year for a *reconstructed* memory, and
+a birth year is not one. Nothing here touches the separate, unconditional rule
+that **no date is ever proposed for agreement** (§`go-deep.md` 4.3; Lindsay et
+al. 2004), which applies to a sibling's birth year exactly as to everything
+else.
+
+**A third closed list — of people.** §2.7 argues that residences and schools
+are special because they are *closed lists*: enumerable, finite, ordered,
+verifiable, and **finishable**. Siblings satisfy every one of those, and
+parents and grandparents satisfy them by biology. So the family constellation
+is a third closed list, and §2.7's three consequences apply with one
+substitution each:
+
+1. *They tile* — siblings do not tile the timeline the way residences do, but
+   they **bracket childhood**, which is the stretch the residence chain covers
+   worst (a child does not remember the year of a move; they remember who was
+   already born).
+2. *A second person can supply them* — and here the domain is not merely
+   supplied by a witness, **it identifies the witnesses.** §2.7's depleting
+   resource is exactly this list.
+3. *Verifiable without us* — the same vital records, from the same registries.
+
+The one way it differs, and it matters for implementation: this list is made of
+**people**, so its members belong in the entity roster as PERSON entities with
+relationship facts, not in a parallel family store. The landmark set files the
+*dates*; the roster holds the *people*. `family_roster_invocations` is the
+join, and `entity_verdict`'s existing `--relationship` / `--living` identity
+facts (ADR 0013, v190) are the verbs — no new store, and no second
+relationship vocabulary: `relation` is closed against
+`focus_candidate.FOCUS_RELATIONSHIPS`.
+
+---
 
 ---
 
