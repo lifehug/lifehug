@@ -190,3 +190,57 @@ adding the raw or excerpted source under `system/research/<topic>/`.
     than interpretive (`go-deep.md` §5.1).
 
 Status: queued, none ingested yet (v197).
+
+## Chronological certainty, visualized (from `system/research/chronology-vis.md`, v206)
+
+Priority order within this topic. Nothing here is implemented; ingestion means
+adding the raw or excerpted source under `system/research/<topic>/`.
+
+1. **Gschwandtner, Bögl, Federico & Miksch 2016, *TVCG* 22(1):539–548** —
+   "Visual Encodings of Temporal Uncertainty: A Comparative User Study." The
+   single most on-topic empirical paper for the whole design and the ONLY one
+   that compares temporal-uncertainty glyphs head to head. Closed access; no OA
+   copy found in the v206 session ([doi](https://doi.org/10.1109/TVCG.2015.2467752)).
+   **Acquire first, through a library if necessary** — every ranking in
+   `chronology-vis.md` §3.4 is currently argued from adjacent literature.
+2. **Tversky, Morrison & Bétrancourt 2002, *IJHCS* 57(4)** — "Animation: can it
+   facilitate?" The field's principal negative result on animation, quoted in
+   §5 only through Heer & Robertson's verbatim secondary. The design consequence
+   that the settle animation is presentation and not analysis rests on it.
+3. **Bayliss 2015, *World Archaeology* 47(4):677–700** — "Quality in Bayesian
+   chronological models in archaeology." Cited by Hamilton & Krus as the field's
+   quality survey; the best single source for §1.5's pitfalls. Unreachable in
+   the v206 session. Historic England's *Radiocarbon Dating and Chronological
+   Modelling: Guidelines and Best Practice* is the practitioner twin and was
+   likewise unreachable.
+4. **Dye 2016, *JAS* 71:1–9** — the tempo plot's own paper. §1.4 cites Philippe
+   & Vibet's formalisation instead, which is the safer source for the
+   mathematics but not for the *argument* about what the plot is for.
+5. **Ratcliffe 2002, *J. Quantitative Criminology* 18(1):23–43** — the
+   "aoristic signature" paper, and the citation the software itself uses.
+   Paywalled; §2 characterises it from the 1998 and 2000 papers and from
+   Ashby & Bowers.
+6. **Crema 2012, *JAMT* 19(3):440–461** — the Monte Carlo alternative to
+   aoristic summation, and the direct ancestor of §3.3's discrete-outcome idea
+   in a different field. Paywalled; characterised via Crema 2024.
+7. **Priestley 1764, *A Description of a Chart of Biography*** — the full text
+   IS reachable and is quoted in §3.4, but only the uncertainty passage was
+   read. The rest of the pamphlet is the earliest known design rationale for a
+   life timeline and deserves a full excerpt under `system/research/`.
+8. **Gneiting & Raftery 2007's interval score, worked** — §4.6 names it as the
+   principled scoring function for an interval estimate but does not derive its
+   form. Ingest the definition and work an example against a `DateRecord`, so
+   the "sharpness subject to calibration" slogan has arithmetic under it.
+9. **Mountakis, Klos & Witteveen 2015 concurrent flexibility** — already queued
+   under Go Deep (item 6) for the PLAN; §4.4 shows the same correction applies
+   to the SCORE, which raises its priority. One ingestion serves both.
+10. **A citable source, either way, on product completion meters and data
+    quality** — §4.5 records that none was found. Until one exists the Goodhart
+    argument stands on surrogation (Choi, Hecht & Tayler) and must say so.
+11. **ISO/IEC 25012** — the data-quality model's own text, unreachable in the
+    v206 session; §4.1 relies on Wang & Strong instead.
+12. **Rosenberg & Grafton, *Cartographies of Time* (2010)** — the history of
+    timeline forms. Lending-restricted; §3.4 uses Priestley's own words instead,
+    which is stronger, but the survey would place him.
+
+Status: queued, none ingested yet (v206).
