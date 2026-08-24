@@ -1,0 +1,102 @@
+[
+ {
+  "fixture_id": "reading-room-opens-with-the-inventory",
+  "turns": [
+   {
+    "message": "Before we go anywhere — what have you got in front of you? An album, a box of prints, some paperwork, someone on the phone — or nothing at all, which is fine too.",
+    "placed": null,
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-album-dates-by-photo",
+  "turns": [
+   {
+    "message": "A shoebox is a good start. Pull out one you can't place at all, and tell me what's in the frame — and what's near it: the envelope, the back, the sleeve it came in.",
+    "placed": null,
+    "landmark": null
+   },
+   {
+    "message": "The tree is up and the car in the driveway is the Country Squire you had between '86 and '88 — so that one sits inside that window rather than on any single day. A photograph gives a window, not a date, and I'd rather keep the window honest.",
+    "placed": {
+     "best": "1987",
+     "earliest": "1986",
+     "latest": "1988",
+     "granularity": "range",
+     "confidence": "certain",
+     "basis": "photo",
+     "anchors": []
+    },
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-document-beats-memory",
+  "turns": [
+   {
+    "message": "The report card is printed 12 June 1984 — you'd remembered it as the spring. I'll keep both; the paper and the memory are two different kinds of witness, and the paper is the one with a date on it.",
+    "placed": {
+     "best": "1984-06-12",
+     "earliest": "1984-06-12",
+     "latest": "1984-06-12",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "document",
+     "anchors": []
+    },
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-mom-on-the-phone",
+  "turns": [
+   {
+    "message": "Your mom says you moved in in '84 — I've put that down as hers, in her words. That's second-hand by nature, so I'm holding it as approximate rather than settled.",
+    "placed": {
+     "best": "1984",
+     "earliest": "1984",
+     "latest": "1984",
+     "granularity": "year",
+     "confidence": "certain",
+     "basis": "relative",
+     "anchors": [
+      "birth"
+     ]
+    },
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-asks-for-the-address-grade",
+  "turns": [
+   {
+    "message": "Wildwood Elementary, 1220 Wildwood Avenue in Yucaipa — the street is the piece that matters, because an address gives us the district, and a district keeps records with exact years in them.",
+    "placed": null,
+    "landmark": {
+     "domain": "schools",
+     "label": "Wildwood Elementary",
+     "place": "1220 Wildwood Avenue, Yucaipa"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-i-will-find-out",
+  "turns": [
+   {
+    "message": "Then that one's at your sister's, and it can stay there. What have you got to hand instead?",
+    "placed": null,
+    "landmark": null
+   },
+   {
+    "message": "Good hour. We put the Yucaipa years on the map and dated the report card to the day; your mom would know the rest of the addresses, and that list is on her page whenever you want it.",
+    "placed": null,
+    "landmark": null
+   }
+  ]
+ }
+]

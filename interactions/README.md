@@ -178,13 +178,13 @@ context, evals, registration, version, and seat surface (ADR 0018).
 ## The child-interaction paradigm
 
 **Conversation is the parent.** Every other conversational surface in the
-product is a CHILD of it that adds exactly ONE goal. Five are built
-(v188, v189, v190, v193, v195); the shape below is what they repeat. Deviating
-from it is a design defect, not a variant.
+product is a CHILD of it that adds exactly ONE goal. Seven are built
+(v188, v189, v190, v193, v195, v197, v204); the shape below is what they
+repeat. Deviating from it is a design defect, not a variant.
 
 1. **One goal, named.** Placement, onboarding, identity, arc walking,
-   placing a memory in time. A child that would carry two goals is two
-   children.
+   placing a memory in time, the dating question set, dating from evidence.
+   A child that would carry two goals is two children.
 2. **Composition, never a fork.** `extends: conversation` plus an exact
    `extends.version`; `prompt/identity.md`, `prompt/behavior.md`,
    `prompt/examples.md` and `router/*` append parent-to-child, while
@@ -195,7 +195,8 @@ from it is a design defect, not a variant.
    `prompt/turn-instructions.md` is REPLAYed verbatim by the caller with
    `{<goal>_stage}` and the target's own placeholders filled in. The
    stage is derived from the transcript, never stored.
-4. **Exactly ONE additive structured-output field.** Optional; absent or
+4. **Exactly ONE additive structured-output field — or none at all.**
+   Optional; absent or
    malformed degrades to ordinary Conversation behavior and never errors
    a turn; gated on a `TurnShape` flag so the output-contract appendix is
    byte-identical when the gate is `None` (a required test on every
@@ -203,7 +204,13 @@ from it is a design defect, not a variant.
    `system/conversation_delivery.py` (owns no vocabulary, returns `None`,
    never raises) and closed in the child's own module (owns the roster —
    though not always the roster's contents: `entity_setup.maps_to` is
-   checked against slugs the CALLER supplies).
+   checked against slugs the CALLER supplies). The rule's INTENT is *no new
+   vocabulary per child*, and v204 is the one case that reads it in the
+   strict direction: `reading_room` mints NO field and REUSES two that
+   already exist — `placed` and `landmark` — behind its single `TurnShape`
+   gate. Reuse is always better than a third shape for the same fact; a
+   child inventing a field a sibling already owns is the defect this rule
+   exists to prevent.
 5. **Its own lints, goldens, and evals harness.** `<child>-evals` is the
    seat gate; passing Conversation alone never seats a model in a child.
 6. **Its own version bump, ADR amendment row, and `framework_files`
@@ -235,7 +242,7 @@ Play on a Foundation row does NOT approve anything — the questions already
 exist — so the "approve + start" half is a no-op there and only the
 conversation side runs.
 
-### The five children
+### The seven children
 
 | Child | The one goal | Additive output field | Stages | Stage source | Closed validator | Lints |
 |---|---|---|---|---|---|---|
@@ -246,9 +253,17 @@ conversation side runs.
 | `timeline` (v195, amended v196) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| null` (a range with a basis is first-class; there is no deferral shape) | `open` · `place` · `close` | `timeline_interaction.timeline_stage_for_session` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | six `timeline_gates.*` |
 | `landmarks` (v197) | **the always-present dating question set** — the handful of dated facts every other memory hangs on | `landmark: {domain, label, rung values, date?, span?, skipped?} \| null` (a vague answer is an answer) | `open` · `ask` · `close` | `landmarks_interaction.landmark_stage_for_session` | `landmarks_interaction.validate_landmark` (closed domain set from `questions.yaml`, ladder rungs only, every date normalized through `chronology.parse_edtf`) | five `landmark_gates.*` |
 
+| `reading_room` (v204) | **dating from evidence** — turn what is physically in the room into dated facts | NONE of its own: it REUSES `placed` (the timeline lane's) and `landmark` (the landmarks lane's), both opened by one gate | `open` · `work` · `close` | `reading_room.reading_room_stage_for_session` | `reading_room.validate_evidence` (delegates the vocabularies to `timeline_interaction.validate_placed`, then applies each evidence basis's own honesty ceiling) + `landmarks_interaction.validate_landmark` | five `reading_room_gates.*`, two of them SHARED (`never_proposes_a_date` = `timeline_interaction.proposes_a_date`, `no_pressure` = `landmarks_interaction.pressure`) |
+
 The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
-`entity_stage` · `arc_stage` · `timeline_stage` · `landmark_stage`. Every one defaults to
-`None`.
+`entity_stage` · `arc_stage` · `timeline_stage` · `landmark_stage` ·
+`reading_room_stage`. Every one defaults to `None`.
+
+`reading_room` is the one child that RECOMPUTES its own plan mid-session —
+evidence → record → recompute → next ask — which is why it is a session
+rather than a question. The plan is a pure function of the graph
+(`timeline.dig_plan`, the same greedy `keystones` runs, extended to `k`) and
+is never persisted, exactly as `arc_walk`'s is not.
 
 `arc_walk` is the one child whose "roster" is computed rather than read:
 its plan is rebuilt from the bank at every Play and never persisted
@@ -271,8 +286,8 @@ stage, and one validator.
 ### Proposed, not built
 
 Future children the paradigm anticipates, with no files under
-`interactions/` yet: none today. The last entry here — `landmarks`, seeded
-by `system/research/landmarks.md` — shipped in v197.
+`interactions/` yet: none today. The last entry here — `reading_room`,
+seeded by `system/research/go-deep.md` — shipped in v204.
 
 ## Model-agnosticism rule
 

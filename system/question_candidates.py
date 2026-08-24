@@ -656,6 +656,24 @@ _WIKI_QUESTION_BOILERPLATE = (
     re.compile(r"^what has gone unsaid between .+\??$", re.IGNORECASE),
 )
 
+def _is_dig_list_line(question: str) -> bool:
+    """True for a Reading Room dig-list row (v204, ADR 0025).
+
+    A dig list renders into the WITNESS's `## Open Questions` section but is
+    addressed to THEM, not to the vault's owner. Harvesting it would put
+    "What year did we move?" into the owner's own daily queue — the one
+    question they cannot answer, and the whole reason the row exists.
+    One definition of the marker: `timeline.DIG_LIST_MARKER`.
+    """
+    try:
+        import timeline  # noqa: PLC0415
+
+        marker = timeline.DIG_LIST_MARKER
+    except Exception:  # noqa: BLE001
+        marker = "Reading Room"
+    return question.lstrip("*").strip().lower().startswith(marker.lower())
+
+
 WIKI_HARVEST_CAP = 3  # per weekly run — the wiki should whisper, not flood
 
 
@@ -690,6 +708,8 @@ def harvest_wiki_questions(dry_run: bool = False, cap: int = WIKI_HARVEST_CAP) -
             if not question or len(question.split()) < 5 or "?" not in question:
                 continue
             if any(rx.match(question) for rx in _WIKI_QUESTION_BOILERPLATE):
+                continue
+            if _is_dig_list_line(question):
                 continue
             if near_duplicate_of(question, existing_pairs + bank_pairs):
                 continue

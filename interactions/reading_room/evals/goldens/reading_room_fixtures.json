@@ -1,0 +1,224 @@
+[
+ {
+  "fixture_id": "reading-room-opens-with-the-inventory",
+  "inventory": "",
+  "anchors": {
+   "birth": {
+    "label": "when you were born",
+    "kind": "birth",
+    "date": {
+     "best": "1976-04-11",
+     "earliest": "1976-04-11",
+     "latest": "1976-04-11",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "stated",
+     "anchors": [],
+     "provenance": []
+    }
+   }
+  },
+  "turns": [
+   {
+    "stage": "open",
+    "witness": null,
+    "expected_placed": null,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-album-dates-by-photo",
+  "inventory": "a shoebox of prints and the envelopes they came in",
+  "anchors": {
+   "birth": {
+    "label": "when you were born",
+    "kind": "birth",
+    "date": {
+     "best": "1976-04-11",
+     "earliest": "1976-04-11",
+     "latest": "1976-04-11",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "stated",
+     "anchors": [],
+     "provenance": []
+    }
+   }
+  },
+  "turns": [
+   {
+    "stage": "open",
+    "witness": null,
+    "expected_placed": null,
+    "expected_landmark": null
+   },
+   {
+    "stage": "work",
+    "witness": null,
+    "expected_placed": {
+     "best": "1987",
+     "earliest": "1986",
+     "latest": "1988",
+     "granularity": "range",
+     "confidence": "approximate",
+     "basis": "photo",
+     "anchors": [],
+     "provenance": []
+    },
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-document-beats-memory",
+  "inventory": "a folder of school paperwork",
+  "anchors": {
+   "birth": {
+    "label": "when you were born",
+    "kind": "birth",
+    "date": {
+     "best": "1976-04-11",
+     "earliest": "1976-04-11",
+     "latest": "1976-04-11",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "stated",
+     "anchors": [],
+     "provenance": []
+    }
+   }
+  },
+  "turns": [
+   {
+    "stage": "work",
+    "witness": null,
+    "expected_placed": {
+     "best": "1984-06-12",
+     "earliest": "1984-06-12",
+     "latest": "1984-06-12",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "document",
+     "anchors": [],
+     "provenance": []
+    },
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-mom-on-the-phone",
+  "inventory": "my mother, on speakerphone",
+  "anchors": {
+   "birth": {
+    "label": "when you were born",
+    "kind": "birth",
+    "date": {
+     "best": "1976-04-11",
+     "earliest": "1976-04-11",
+     "latest": "1976-04-11",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "stated",
+     "anchors": [],
+     "provenance": []
+    }
+   }
+  },
+  "turns": [
+   {
+    "stage": "work",
+    "witness": {
+     "slug": "mom",
+     "name": "Mom"
+    },
+    "expected_placed": {
+     "best": "1984",
+     "earliest": "1984",
+     "latest": "1984",
+     "granularity": "year",
+     "confidence": "approximate",
+     "basis": "relative",
+     "anchors": [
+      "birth"
+     ],
+     "provenance": [
+      {
+       "source": "witness:mom",
+       "basis": "relative",
+       "name": "Mom"
+      }
+     ]
+    },
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-asks-for-the-address-grade",
+  "inventory": "a box of report cards",
+  "anchors": {
+   "birth": {
+    "label": "when you were born",
+    "kind": "birth",
+    "date": {
+     "best": "1976-04-11",
+     "earliest": "1976-04-11",
+     "latest": "1976-04-11",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "stated",
+     "anchors": [],
+     "provenance": []
+    }
+   }
+  },
+  "turns": [
+   {
+    "stage": "work",
+    "witness": null,
+    "expected_placed": null,
+    "expected_landmark": {
+     "domain": "schools",
+     "label": "Wildwood Elementary",
+     "place": "1220 Wildwood Avenue, Yucaipa"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "reading-room-i-will-find-out",
+  "inventory": "nothing — the boxes are at my sister's",
+  "anchors": {
+   "birth": {
+    "label": "when you were born",
+    "kind": "birth",
+    "date": {
+     "best": "1976-04-11",
+     "earliest": "1976-04-11",
+     "latest": "1976-04-11",
+     "granularity": "day",
+     "confidence": "certain",
+     "basis": "stated",
+     "anchors": [],
+     "provenance": []
+    }
+   }
+  },
+  "turns": [
+   {
+    "stage": "work",
+    "witness": null,
+    "expected_placed": null,
+    "expected_landmark": null
+   },
+   {
+    "stage": "close",
+    "witness": null,
+    "expected_placed": null,
+    "expected_landmark": null
+   }
+  ]
+ }
+]

@@ -9,6 +9,7 @@
     {"id": "entity_candidate", "package": "entity_candidate"},
     {"id": "arc_walk", "package": "arc_walk"},
     {"id": "timeline", "package": "timeline"},
-    {"id": "landmarks", "package": "landmarks"}
+    {"id": "landmarks", "package": "landmarks"},
+    {"id": "reading_room", "package": "reading_room"}
   ]
 }

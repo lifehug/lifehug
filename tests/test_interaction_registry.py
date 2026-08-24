@@ -31,6 +31,7 @@ class RegistryContractTests(unittest.TestCase):
                 ("arc_walk", "arc_walk"),
                 ("timeline", "timeline"),
                 ("landmarks", "landmarks"),
+                ("reading_room", "reading_room"),
             ],
         )
         for entry in value["interactions"]:
