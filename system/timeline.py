@@ -703,7 +703,10 @@ def save_landmark(domain: str, record: object) -> dict:
 
     Replacement is by ``label`` because the ladder revisits the same subject —
     a city today, an address next week, a span after that — and each pass adds
-    rungs to the SAME entry rather than making a second one.
+    rungs to the SAME entry rather than making a second one. HOW the two
+    records combine is `landmarks_interaction.merge_landmark_entry` — one
+    definition, so the none terminal supersedes and is superseded here exactly
+    as it does everywhere else.
     """
     if not isinstance(record, dict):
         raise ValueError("a landmark record must be an object")
@@ -719,10 +722,10 @@ def save_landmark(domain: str, record: object) -> dict:
         domains = data["domains"] = {}
     entries = [e for e in (domains.get(key) or []) if isinstance(e, dict)]
     label = str(record.get("label") or "").strip()
-    merged = dict(record)
+    merged = landmarks_interaction.merge_landmark_entry(None, record)
     for existing in entries:
         if str(existing.get("label") or "").strip() == label:
-            merged = {**existing, **record}
+            merged = landmarks_interaction.merge_landmark_entry(existing, record)
             break
     entries = [e for e in entries
                if str(e.get("label") or "").strip() != label] + [merged]

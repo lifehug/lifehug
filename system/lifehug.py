@@ -1499,11 +1499,21 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
         record["span"] = span
     if args.complete:
         record["chain_complete"] = True
+    if getattr(args, "none", False):
+        if not _li.domain_accepts_none(row):
+            print(f"error: {row['domain']} cannot be answered 'none' — "
+                  f"its ladder opens at {row['ladder'][0]!r}, not "
+                  f"{_li.NONE_OPENER!r}")
+            return 1
+        record["none"] = True
     validated = _li.validate_landmark(record)
     if validated is None:
         print("error: nothing to record")
         return 1
     saved = _timeline.save_landmark(validated["domain"], validated)
+    if saved.get("none"):
+        print(f"recorded {validated['domain']}: none — the domain is complete")
+        return 0
     print(f"recorded {validated['domain']}: "
           f"{saved.get('label') or _li.rung_reached(saved, row) or 'noted'}")
     return 0
@@ -2890,6 +2900,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="this family member is still with us")
     living.add_argument("--not-living", dest="living", action="store_false",
                         help="this family member has died")
+    p.add_argument("--none", action="store_true",
+                   help="this never happened (no service, no children) — a "
+                        "TERMINAL answer that completes the domain")
     for rung in ("year", "month", "day", "city", "address", "household",
                  "name", "grades", "happened", "who", "what", "where", "branch",
                  "relation"):

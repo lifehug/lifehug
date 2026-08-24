@@ -1007,6 +1007,19 @@ fetched, so this is cited at abstract level). Concretely, for us:
 - **Partnerships that were not marriages.** The LHC carries cohabitation as a
   row distinct from marriage precisely because the legal event and the life
   event differ. Item 7's phrasing must not assume a wedding.
+- **The domain never happened at all.** No military service, no children, no
+  marriage, no one lost yet. Four of the eight domains open with a yes/no
+  precisely because the answer may be *no* — and *no* is a complete answer,
+  not a rung below target. An instrument that can only record presence keeps
+  asking a person about a life they did not live, which is the single most
+  reliable way to make it read as a form. This is the **none terminal** (owner
+  ruling 6, 2026-08-24), and it arrived the way edge cases usually do: the
+  founder said plainly on 2026-08-24 that he had never served, and the
+  Military row stayed open, because `happened → branch → span` had no rung a
+  "no" could ever reach. A reversal — "actually I did serve, briefly" —
+  supersedes the none rather than arguing with it, for the same reason 2.6
+  gives about vagueness: the person is the authority on their own life, and
+  the instrument's job is to keep up.
 - **Non-Gregorian and non-Western calendars.** A birth date may be recorded
   in a different calendar or as a season. `DateRecord` can hold `1954~` or a
   season code; the instrument must accept those rather than demanding a

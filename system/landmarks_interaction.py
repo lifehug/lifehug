@@ -41,6 +41,18 @@ Three owner rulings shape the surface (2026-08-23):
    things already; the ladder exists because *more* would unlock more, not
    because less is a failure.
 
+One more ruling arrived from a live incident (2026-08-24), and it is the
+mirror of ruling 3 (rulings 4 and 5 — the ledger's shape and the keystone
+star — live on `timeline.landmark_rows_for`):
+
+6. **"That never happened" is a finished answer.** A person with no military
+   service, no partnerships, or no children must be able to COMPLETE those
+   domains — the row leaves the open list and is never offered again. The
+   none terminal is derived from the question set (:func:`domain_accepts_none`
+   — the four domains whose ladder opens at ``happened``), and a later
+   reversal supersedes it rather than fighting it
+   (:func:`merge_landmark_entry`).
+
 Contract: ``docs/pr-specs/landmarks.md``.
 Research: ``system/research/landmarks.md``.
 """
@@ -135,6 +147,80 @@ def onboarding_domains(framework_root: str | Path | None = None) -> tuple[str, .
     """The domains asked at onboarding, in order (owner ruling 1)."""
     return tuple(row["domain"] for row in load_questions(framework_root)
                  if row["onboarding"])
+
+
+# --------------------------------------------------------------------------
+# The none terminal (owner ruling 6, 2026-08-24)
+# --------------------------------------------------------------------------
+
+#: The ladder rung that makes a domain answerable with "that never happened".
+#: A domain whose ladder OPENS here asks a yes/no first — "did you serve?",
+#: "do you have children?" — so "no" is a complete, final answer to the whole
+#: domain, not a rung below target. Domains that open at `year`, `city`,
+#: `name` or `what` ask for a THING, and their emptiness is not something a
+#: person can assert in one word.
+NONE_OPENER = "happened"
+
+
+def domain_accepts_none(row: object) -> bool:
+    """True when this domain can be answered ``none`` — and be DONE.
+
+    Derived from the question set rather than declared beside it: the set
+    already says which domains open with :data:`NONE_OPENER`, and those are
+    exactly the ones a person can close by saying it never happened
+    (`landmarks.md` §5.2). Gating matters — `{"domain": "birth", "none":
+    true}` would complete the axis with no date and take
+    `chronology.from_age` down with it.
+
+    v202's ninth domain `family` is deliberately outside the gate, and the
+    derivation reaches that on its own: its ladder opens at ``who``, because
+    it is an ENUMERATION of people. "No siblings" does not mean there was no
+    family — there are still parents and grandparents — so a family chain is
+    finished the way every chain is, with ``chain_complete``, not with a none.
+    A domain answered "none" is a domain that never existed; a chain answered
+    "that's everyone" is a domain fully enumerated. They are different facts.
+    """
+    if not isinstance(row, dict):
+        return False
+    ladder = tuple(row.get("ladder") or ())
+    return bool(ladder) and ladder[0] == NONE_OPENER
+
+
+def none_domains(framework_root: str | Path | None = None) -> tuple[str, ...]:
+    """Every domain a person can close with "that never happened", in order."""
+    return tuple(row["domain"] for row in load_questions(framework_root)
+                 if domain_accepts_none(row))
+
+
+def is_none_entry(entry: object, row: object) -> bool:
+    """True when this filed entry IS the domain's none terminal."""
+    return (isinstance(entry, dict) and entry.get("none") is True
+            and domain_accepts_none(row))
+
+
+#: Keys that are bookkeeping rather than something the person said.
+_NON_ANSWER_KEYS = frozenset({"domain", "none", "skipped", "chain_complete"})
+
+
+def asserts_happened(entry: object) -> bool:
+    """True when this entry answers ``happened`` by carrying anything at all.
+
+    A live find, 2026-08-24: the founder named all four of his children with a
+    span, and the row still read `open`, because the model filled `label` and
+    `span` and nobody had filled `happened` — so the ladder's FIRST rung was
+    unsatisfied and :func:`rung_reached` returned None for a fully answered
+    domain. `happened` is not a fact anyone states separately; it is entailed
+    by every other fact in the domain. You cannot name your children without
+    having children.
+
+    Read-side, deliberately: entries already filed in real vaults are healed
+    by this the next time they are read, with no migration.
+    """
+    if not isinstance(entry, dict):
+        return False
+    return any(value not in (None, "", (), [], {})
+               for key, value in entry.items()
+               if key not in _NON_ANSWER_KEYS)
 
 
 # --------------------------------------------------------------------------
@@ -233,12 +319,29 @@ def rung_reached(entry: object, row: object) -> str | None:
     first unsatisfied one — a person who gave a span but no address is at
     ``address``'s predecessor, because the ladder is a ladder.
 
-    Two rungs are also satisfied by the entry's own date record rather than a
-    key of their own: ``span``, since v199, and — since lifehug#207 — every
-    rung in :data:`_DATE_GRAIN_RUNGS`, at the grain the record resolves.
+    Three rungs are satisfied by something other than a key of their own.
+    ``span``, since v199, and — since lifehug#207 — every rung in
+    :data:`_DATE_GRAIN_RUNGS`, at the grain the entry's date record resolves.
+    And ``happened``, the one rung nobody states outright, is satisfied by
+    anything else in the entry at all (:func:`asserts_happened`); without that
+    the ladder's first rung is unreachable in practice and every answer to a
+    yes/no domain lands below rung one — which is what was happening.
+
+    The one exception to the walk itself is the **none terminal** (owner
+    ruling 6): a person who says they never served has answered the military
+    ladder *to the end* — there is no branch and no span to climb to, and a
+    life with none of a thing must be able to finish that domain the same way
+    a life with one does. A none entry therefore reports the domain's
+    ``complete_at`` rung, so every caller below — status, the next question,
+    the rendered ledger — follows from this one definition instead of
+    re-checking the flag.
     """
     if not isinstance(entry, dict) or not isinstance(row, dict):
         return None
+    if is_none_entry(entry, row):
+        ladder = tuple(row.get("ladder") or ())
+        target = row.get("complete_at")
+        return target if target in ladder else (ladder[-1] if ladder else None)
     reached: str | None = None
     for rung in row.get("ladder") or ():
         value = entry.get(rung)
@@ -246,6 +349,8 @@ def rung_reached(entry: object, row: object) -> str | None:
             value = entry.get("span") or entry.get("date")
         elif rung in _DATE_GRAIN_RUNGS and value in (None, "", (), [], {}) \
                 and _date_grain_reaches(entry, rung):
+            value = True
+        elif rung == NONE_OPENER and not value and asserts_happened(entry):
             value = True
         if value in (None, "", (), [], {}):
             break
@@ -259,7 +364,9 @@ def status_for_domain(entries: object, row: object) -> str:
     ``open``     nothing filed at all.
     ``partial``  filed, but at least one entry is below ``complete_at``.
     ``complete`` every entry has reached ``complete_at``, and — for a chain
-                 domain — the person has said the list is finished.
+                 domain — the person has said the list is finished. A domain
+                 answered with the none terminal is complete: "I never
+                 served" is a finished answer, not a partial one.
     """
     if not isinstance(row, dict):
         raise LandmarkInteractionError("status_for_domain needs a domain row")
@@ -273,7 +380,8 @@ def status_for_domain(entries: object, row: object) -> str:
         reached = rung_reached(entry, row)
         if reached is None or ladder.index(reached) < target_index:
             return "partial"
-    if row.get("chain") and not any(e.get("chain_complete") for e in rows):
+    if row.get("chain") and not any(e.get("chain_complete")
+                                    or is_none_entry(e, row) for e in rows):
         return "partial"
     return "complete"
 
@@ -299,7 +407,8 @@ def next_rung(entries: object, row: object) -> dict | None:
         index = ladder.index(reached) if reached in ladder else -1
         if index < target_index:
             return _rung(domain, ladder[index + 1], entry.get("label"))
-    if row.get("chain") and not any(e.get("chain_complete") for e in rows):
+    if row.get("chain") and not any(e.get("chain_complete")
+                                    or is_none_entry(e, row) for e in rows):
         if domain == "family":
             # v202: which TIER is missing decides the question (see
             # FAMILY_TIER_TEXTS) — a fixed chain-more line would ask for more
@@ -483,10 +592,15 @@ def validate_landmark(value: object, *,
     """Closed validation of the model's one additive output field.
 
     Accepts ``{"domain", "label", "date"?, "place"?, "subject"?,
-    "chain_complete"?, "skipped"?}``. Returns the normalized record, or None
-    when the value is unusable, absent, or a skip with nothing in it. The
-    domain must be one the question set declares — an invented domain is
+    "chain_complete"?, "skipped"?, "none"?}``. Returns the normalized record,
+    or None when the value is unusable, absent, or a skip with nothing in it.
+    The domain must be one the question set declares — an invented domain is
     dropped, never stored.
+
+    ``none`` is the terminal (owner ruling 6) and outranks ``skipped``: a
+    skip is "not now", a none is "there is nothing here, ever". It is honored
+    only where :func:`domain_accepts_none` allows it; asserted anywhere else
+    it is simply dropped, and the rest of the record is read normally.
     """
     if not isinstance(value, dict):
         return None
@@ -497,6 +611,8 @@ def validate_landmark(value: object, *,
         row = domain_row(domain, framework_root=framework_root)
     except LandmarkInteractionError:
         return None
+    if value.get("none") is True and domain_accepts_none(row):
+        return {"domain": domain, "none": True}
     if value.get("skipped"):
         return {"domain": domain, "skipped": True}
     record: dict = {"domain": domain}
@@ -723,6 +839,34 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
 # Filing (the package names it; the host writes it)
 # --------------------------------------------------------------------------
 
+def merge_landmark_entry(existing: object, record: object) -> dict:
+    """How one filed landmark supersedes another, within a domain and label.
+
+    The ladder revisits the same subject over many conversations, so the
+    default is a MERGE — a city today, an address next week, a span after
+    that, all landing on one entry. The none terminal is the exception in
+    both directions, and neither direction argues with the person:
+
+    * a none answer **replaces** whatever was there. "Actually I never
+      served" is a correction, and leaving the old branch behind would keep
+      contradicting it.
+    * a substantive answer **clears** a standing none (and a standing skip).
+      "Actually I did serve, briefly" reopens the domain at the rung the new
+      answer reaches — the none record is superseded, not fought.
+
+    One definition, so the store and every future caller agree
+    (recurring-defect doctrine).
+    """
+    incoming = dict(record) if isinstance(record, dict) else {}
+    prior = dict(existing) if isinstance(existing, dict) else {}
+    if incoming.get("none") is True:
+        return incoming
+    merged = {**prior, **incoming}
+    merged.pop("none", None)
+    merged.pop("skipped", None)
+    return merged
+
+
 def landmark_invocation(record: object) -> list[str] | None:
     """The ``lifehug.py landmark-record`` argv that files one landmark, or None.
 
@@ -730,12 +874,17 @@ def landmark_invocation(record: object) -> list[str] | None:
     a span, and a landmark with neither (a city, a school name) all file the
     same way, and `timeline.save_landmark` merges by label so the ladder's
     later rungs land on the same entry.
+
+    A **skip** files nothing — it is not an answer. A **none** files, because
+    it is: it is the answer that finishes the domain.
     """
     if not isinstance(record, dict) or record.get("skipped"):
         return None
     domain = str(record.get("domain") or "").strip()
     if not domain:
         return None
+    if record.get("none") is True:
+        return ["landmark-record", domain, "--none"]
     label = str(record.get("label") or "").strip()
     date = record.get("date")
     argv = ["landmark-record", domain]

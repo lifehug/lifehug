@@ -36,6 +36,12 @@ REQUIRED_GOLDEN_IDS = frozenset({
     "landmarks-family-decline-respected",
     "landmarks-family-named-follow-up",
     "landmarks-residence-gap-is-a-question",
+    # v203 (owner ruling 6): a life with none of a thing must be able to
+    # FINISH that domain, and a later reversal must supersede the none
+    # rather than argue with it.
+    "landmarks-none-is-a-finished-answer",
+    "landmarks-none-is-superseded-not-fought",
+    "landmarks-none-completes-children",
 })
 
 #: These hold on every landmark turn. `never_presses_sensitive` is scoped to a

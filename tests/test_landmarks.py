@@ -1217,3 +1217,300 @@ class ConcreteLandmarkUnknownTests(unittest.TestCase):
         import timeline  # noqa: PLC0415
 
         self.assertIsInstance(timeline.unknowns({}, landmarks="not a store"), list)
+
+
+class NoneTerminalTests(unittest.TestCase):
+    """v203 / owner ruling 6 — a life with none of a thing can FINISH that
+    domain.
+
+    The live incident (staging, 2026-08-24): the founder Played the Military
+    landmark, said plainly that he had never served, the message filed — and
+    the Military row stayed in the open Landmarks list forever, because
+    `military`'s ladder is happened → branch → span and there was no rung a
+    "no" could ever reach. His reply is reproduced verbatim below because the
+    shape of it is the point: a clear negative for the domain we asked about,
+    with something adjacent volunteered in the same breath.
+    """
+
+    #: The founder's own words on staging, 2026-08-24 (synthetic ids only).
+    LIVE_REPLY = (
+        "I have not served in the military. It's not military service, but I "
+        "did serve a two-year mission for my church as a Mormon missionary. I "
+        "served that in Zurich, Switzerland, when I was 19."
+    )
+
+    def _validated(self, raw: dict) -> object:
+        """Both layers, in the order a real caller runs them."""
+        return li.validate_landmark(engine._parse_landmark(raw))  # noqa: SLF001
+
+    def test_only_the_yes_no_domains_accept_a_none(self):
+        """Derived from the set, not declared beside it: `happened` opens
+        exactly the domains a person can close by saying it never happened."""
+        self.assertEqual(li.none_domains(),
+                         ("partnerships", "children", "military", "losses"))
+        for domain in ("birth", "family", "residences", "schools", "work"):
+            self.assertFalse(li.domain_accepts_none(li.domain_row(domain)),
+                             f"{domain} opens at a THING, not a yes/no")
+
+    def test_family_is_outside_the_terminal_by_derivation(self):
+        """v202's ninth domain enumerates PEOPLE: its ladder opens at `who`,
+        so the gate excludes it with no rule of its own. "No siblings" is not
+        an empty family — there are still parents — and a chain finishes with
+        `chain_complete`, which is a different fact from never having
+        happened."""
+        row = li.domain_row("family")
+        self.assertEqual(row["ladder"][0], "who")
+        self.assertTrue(row["chain"])
+        self.assertFalse(li.domain_accepts_none(row))
+        self.assertIsNone(self._validated({"domain": "family", "none": True}))
+        # And a family entry that carries a none flag is still just an entry:
+        # the flag is inert, the ladder is walked normally.
+        entry = {"domain": "family", "none": True,
+                 "label": "Jo", "who": "Jo", "relation": "sibling"}
+        self.assertFalse(li.is_none_entry(entry, row))
+        self.assertEqual(li.rung_reached(entry, row), "relation")
+
+    def test_the_live_negative_answer_completes_the_domain(self):
+        record = self._validated({"domain": "military", "none": True})
+        self.assertEqual(record, {"domain": "military", "none": True})
+        row = li.domain_row("military")
+        self.assertEqual(li.rung_reached(record, row), "span")
+        self.assertEqual(li.status_for_domain([record], row), "complete")
+        self.assertIsNone(li.next_rung([record], row))
+
+    def test_the_military_row_leaves_the_open_list(self):
+        """The owner's ruling, stated as the assertion: an answered landmark
+        leaves the list."""
+        rows = li.landmark_rows({"military": [{"domain": "military",
+                                               "none": True}]})
+        military = next(r for r in rows if r["domain"] == "military")
+        self.assertEqual(military["status"], "complete")
+        self.assertNotIn("military",
+                         [r["domain"] for r in li.open_landmarks(rows)])
+
+    def test_a_person_with_no_partnerships_or_children_can_finish_those_too(self):
+        for domain in ("partnerships", "children", "losses"):
+            with self.subTest(domain=domain):
+                record = self._validated({"domain": domain, "none": True})
+                self.assertEqual(record, {"domain": domain, "none": True})
+                row = li.domain_row(domain)
+                self.assertEqual(li.status_for_domain([record], row), "complete")
+                self.assertIsNone(li.next_rung([record], row))
+
+    def test_a_none_on_a_thing_domain_is_dropped_not_honored(self):
+        """`{"domain": "birth", "none": true}` would complete the axis with no
+        date and take `chronology.from_age` down with it."""
+        for domain in ("birth", "residences", "schools", "work"):
+            with self.subTest(domain=domain):
+                self.assertIsNone(self._validated({"domain": domain,
+                                                   "none": True}))
+        row = li.domain_row("birth")
+        self.assertEqual(
+            li.status_for_domain([{"domain": "birth", "none": True}], row),
+            "partial",
+        )
+
+    def test_a_none_outranks_a_skip_and_is_not_one(self):
+        """A skip is "not now" and files nothing; a none is "there is nothing
+        here" and files, because it is the answer."""
+        record = self._validated({"domain": "military", "none": True,
+                                  "skipped": True})
+        self.assertEqual(record, {"domain": "military", "none": True})
+        self.assertEqual(li.landmark_invocation(record),
+                         ["landmark-record", "military", "--none"])
+        self.assertIsNone(li.landmark_invocation({"domain": "military",
+                                                  "skipped": True}))
+
+    def test_the_structural_layer_carries_the_flag(self):
+        self.assertIn("none", engine._LANDMARK_KEYS)  # noqa: SLF001
+        self.assertEqual(engine._parse_landmark({"domain": "military",  # noqa: SLF001
+                                                 "none": True}),
+                         {"domain": "military", "none": True})
+        # A non-boolean flag is dropped, exactly as `skipped` is — and what
+        # is left is a bare domain, which is not a landmark.
+        self.assertEqual(engine._parse_landmark({"domain": "military",  # noqa: SLF001
+                                                 "none": "yes"}),
+                         {"domain": "military"})
+        self.assertIsNone(self._validated({"domain": "military",
+                                           "none": "yes"}))
+
+    def test_the_turn_contract_tells_the_model_to_emit_it(self):
+        shape = engine.TurnShape(position=1, question_allowed=True,
+                                 user_turns=1, target_exchanges=4,
+                                 landmark_stage="ask")
+        block = engine._output_contract_block(shape)  # noqa: SLF001
+        self.assertIn('"none": true | false', block)
+        self.assertIn("I never served", block)
+        leaf = (ROOT / "interactions" / "landmarks" / "prompt"
+                / "turn-instructions.md").read_text(encoding="utf-8")
+        self.assertIn('"none": true', leaf)
+
+    def test_a_landmark_stageless_turn_is_untouched(self):
+        """Passive users, and every non-landmark turn, see no new key."""
+        shape = engine.TurnShape(position=1, question_allowed=True,
+                                 user_turns=1, target_exchanges=4)
+        self.assertNotIn("none", engine._output_contract_block(shape))  # noqa: SLF001
+
+    def test_the_adjacent_story_is_not_filed_as_a_landmark(self):
+        """He said "not the military, but I did serve a mission" in one
+        breath. The mission is a story; it is not a military landmark, and it
+        is not a domain of its own."""
+        self.assertIsNone(self._validated({"domain": "mission", "none": True}))
+        self.assertIsNone(self._validated({"domain": "military",
+                                           "branch": ""}))
+        self.assertIn("mission", self.LIVE_REPLY)
+
+
+class HappenedIsEntailedTests(unittest.TestCase):
+    """v203 — the ladder's first rung was unreachable in practice.
+
+    Found in the same 2026-08-24 look: a person answered `children` fully —
+    four names and a span — and the row still read `open`, because the model
+    filled `label` and `span` and nothing ever filled `happened`. `happened`
+    is not a fact anyone states separately; it is entailed by every other fact
+    in the domain. Synthetic names throughout.
+    """
+
+    LIVE_SHAPE = {
+        "domain": "children",
+        "label": "Ada Vance, Roscoe Vance, Junie Vance, Wilbur Vance",
+        "span": {"start": {"best": "2010-12-21", "earliest": "2010-12-21",
+                           "latest": "2010-12-21", "granularity": "day",
+                           "confidence": "certain", "basis": "stated"},
+                 "end": {"best": "2021-10-11", "earliest": "2021-10-11",
+                         "latest": "2021-10-11", "granularity": "day",
+                         "confidence": "certain", "basis": "stated"}},
+    }
+
+    def test_a_full_answer_no_longer_lands_below_rung_one(self):
+        row = li.domain_row("children")
+        self.assertTrue(li.asserts_happened(self.LIVE_SHAPE))
+        self.assertEqual(li.rung_reached(self.LIVE_SHAPE, row), "happened")
+
+    def test_bookkeeping_alone_does_not_assert_it(self):
+        for entry in ({"domain": "children"},
+                      {"domain": "children", "skipped": True},
+                      {"domain": "children", "none": True},
+                      {"domain": "children", "label": ""}):
+            with self.subTest(entry=entry):
+                self.assertFalse(li.asserts_happened(entry))
+
+    def test_the_none_terminal_still_wins_over_the_entailment(self):
+        """A none record carries nothing else, so the two never collide — and
+        if one ever did, `none` is checked first."""
+        row = li.domain_row("military")
+        self.assertEqual(li.rung_reached({"domain": "military", "none": True},
+                                         row), "span")
+
+    def test_a_thing_domain_is_untouched(self):
+        """`residences` opens at `city`; nothing is entailed there."""
+        row = li.domain_row("residences")
+        self.assertIsNone(li.rung_reached({"domain": "residences",
+                                           "address": "11 Bell Ave"}, row))
+
+
+class NoneSupersessionTests(unittest.TestCase):
+    """"Actually I did serve, briefly" — the none record is superseded, not
+    fought (owner ruling 6)."""
+
+    def test_a_later_answer_clears_a_standing_none(self):
+        """"Actually I did serve, briefly." The domain reopens at the rung the
+        new answer reaches — it does not argue, and it does not fork."""
+        merged = li.merge_landmark_entry({"domain": "military", "none": True},
+                                         {"domain": "military",
+                                          "happened": "yes",
+                                          "branch": "the Army"})
+        self.assertEqual(merged, {"domain": "military", "happened": "yes",
+                                  "branch": "the Army"})
+        row = li.domain_row("military")
+        self.assertEqual(li.rung_reached(merged, row), "branch")
+        self.assertEqual(li.status_for_domain([merged], row), "partial")
+        self.assertEqual(li.next_rung([merged], row)["rung"], "span")
+        rows = li.landmark_rows({"military": [merged]})
+        self.assertIn("military",
+                      [r["domain"] for r in li.open_landmarks(rows)])
+
+    def test_a_none_replaces_whatever_was_there(self):
+        merged = li.merge_landmark_entry({"domain": "military",
+                                          "happened": "yes",
+                                          "branch": "the Army"},
+                                         {"domain": "military", "none": True})
+        self.assertEqual(merged, {"domain": "military", "none": True})
+
+    def test_the_ladder_still_merges_when_neither_side_is_a_none(self):
+        merged = li.merge_landmark_entry({"domain": "residences",
+                                          "label": "Bell Avenue",
+                                          "city": "Dayton"},
+                                         {"domain": "residences",
+                                          "label": "Bell Avenue",
+                                          "address": "11 Bell Ave"})
+        self.assertEqual(merged["city"], "Dayton")
+        self.assertEqual(merged["address"], "11 Bell Ave")
+
+    def test_the_store_supersedes_in_both_directions(self):
+        import timeline  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            timeline.save_landmark("military", {"domain": "military",
+                                                "none": True})
+            row = li.domain_row("military")
+            entries = timeline.load_landmarks()["military"]
+            self.assertEqual(li.status_for_domain(entries, row), "complete")
+
+            timeline.save_landmark("military", {"domain": "military",
+                                                "happened": "yes",
+                                                "branch": "the Army"})
+            entries = timeline.load_landmarks()["military"]
+            self.assertEqual(len(entries), 1, "the reversal must not fork")
+            self.assertNotIn("none", entries[0])
+            self.assertEqual(li.status_for_domain(entries, row), "partial")
+
+            timeline.save_landmark("military", {"domain": "military",
+                                                "none": True})
+            entries = timeline.load_landmarks()["military"]
+            self.assertEqual(entries, [{"domain": "military", "none": True}])
+
+    def test_a_none_domain_never_becomes_an_anchor(self):
+        """It has no date, so there is nothing to anchor — and nothing must be
+        invented for it."""
+        index = li.anchors_from_landmarks({"military": [{"domain": "military",
+                                                         "none": True}]})
+        self.assertEqual(index, {})
+
+
+class NoneCliTests(unittest.TestCase):
+    """The one writer files it; a `--none` on a thing-domain is refused."""
+
+    def _run(self, argv: list[str]) -> int:
+        import lifehug  # noqa: PLC0415
+
+        parser = lifehug.build_parser()
+        args = parser.parse_args(argv)
+        return args.func(args)
+
+    def test_the_verb_files_a_none_and_completes_the_domain(self):
+        import timeline  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            self.assertEqual(self._run(["landmark-record", "military",
+                                        "--none"]), 0)
+            entries = timeline.load_landmarks()["military"]
+            self.assertEqual(entries, [{"domain": "military", "none": True}])
+            self.assertEqual(
+                li.status_for_domain(entries, li.domain_row("military")),
+                "complete",
+            )
+
+    def test_the_verb_refuses_a_none_on_a_thing_domain(self):
+        import timeline  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            self.assertEqual(self._run(["landmark-record", "birth",
+                                        "--none"]), 1)
+            self.assertFalse(store.exists())
