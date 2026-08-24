@@ -1495,14 +1495,24 @@ def compile_timeline(dry_run: bool = False) -> bool:
         chip = chrono.display_date(record, with_basis=False) if record is not None else ""
         when = chip or e["when_hint"] or "(undated)"
         title = tl_mod.event_title(e)
-        anchor_part = f" · anchor: {e['anchor']}" if e["anchor"] else ""
+        # v205 (ADR 0026): a derived date shows the landmark provenance it
+        # came from; the classifier's free-text anchor is demoted to the
+        # source line rather than contradicting the chip.
+        derived = e.get("date_derived") or {}
+        demoted = ""
+        if derived:
+            anchor_part = f" · {derived.get('provenance') or ''}"
+            if e["anchor"]:
+                demoted = f" · classified anchor: {e['anchor']}"
+        else:
+            anchor_part = f" · anchor: {e['anchor']}" if e["anchor"] else ""
         pin = " · 📌 placed by you" if e.get("placement") == "manual" else ""
         badge = (f" · ✉ {tcorr.badge_text(e['corroboration'])}"
                  if e.get("corroboration") else "")
         head = f"- **{when}** — **{title}**{anchor_part}{pin}{badge}"
         if title.rstrip(".") == e["description"].rstrip("."):
-            return f"{head}  \n  _source: {e['source']}_"
-        return f"{head}  \n  {e['description']}  \n  _source: {e['source']}_"
+            return f"{head}  \n  _source: {e['source']}{demoted}_"
+        return f"{head}  \n  {e['description']}  \n  _source: {e['source']}{demoted}_"
 
     lines = [
         "---",

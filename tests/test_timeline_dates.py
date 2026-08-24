@@ -219,11 +219,36 @@ class EventTests(VaultFixture):
         self.assertEqual(letter["date"].basis, "age")
         self.assertEqual(letter["date"].best, "1984~")
 
-    def test_an_undatable_event_keeps_its_when_hint_and_no_record(self):
+    def test_an_undatable_event_is_bounded_by_the_place_it_happened_in(self):
+        """v205 (ADR 0026): the bike has no claim of its own — but its source
+        is cited by a place with a known span, so cross-dating gives it that
+        span as BOUNDS. Its own words are untouched."""
+        data = tl.timeline_data()
+        placed = [e for rows in data["event_lineup"].values() for e in rows]
+        bike = next(e for e in placed if e["title"] == "The bike with no brakes")
+        self.assertIsNotNone(bike["date"])
+        self.assertEqual(bike["date"].granularity, "range")
+        self.assertEqual(bike["date"].basis, "anchor")
+        self.assertEqual(bike["date_derived"]["rule"], "containment")
+        self.assertEqual(bike["when_hint"], "sixth grade")
+
+    def test_a_moment_no_anchor_reaches_stays_honestly_undated(self):
+        """The other half of the same rule: nothing is invented. An era with no
+        span and a place with no span leave the moment where it was."""
+        self.write_roster(childhood={"date": None})
+        (self.root / "wiki" / "periods" / "childhood.md").write_text(
+            PAGE.format(title="Childhood", page_type="period", chrono=1,
+                        extra="", sources=_sources(["A1", "A2"])),
+            encoding="utf-8")
+        (self.root / "wiki" / "places" / "mesa.md").write_text(
+            PAGE.format(title="Mesa", page_type="place", chrono=0,
+                        extra="", sources=_sources(["A1", "A2"])),
+            encoding="utf-8")
         data = tl.timeline_data()
         placed = [e for rows in data["event_lineup"].values() for e in rows]
         bike = next(e for e in placed if e["title"] == "The bike with no brakes")
         self.assertIsNone(bike["date"])
+        self.assertNotIn("date_derived", bike)
         self.assertEqual(bike["when_hint"], "sixth grade")
 
     def test_dated_moments_sort_first_and_in_date_order(self):

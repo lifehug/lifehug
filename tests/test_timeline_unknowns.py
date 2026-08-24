@@ -81,9 +81,13 @@ class UnknownsFixture(unittest.TestCase):
             PAGE.format(title="My 30s", page_type="period", chrono=2,
                         extra="date: 2002/2012\n", sources=_sources(["A2"])),
             encoding="utf-8")
+        # v205: the undated era carries the fixture's undated MOMENT. Before
+        # cross-dating any moment could stand in; now a moment inside a dated
+        # era or a dated place is bounded by it, so the one moment that must
+        # stay undated has to live where nothing reaches it.
         (root / "wiki" / "periods" / "the-lost-years.md").write_text(
             PAGE.format(title="The Lost Years", page_type="period", chrono=3,
-                        extra="", sources=_sources([])),
+                        extra="", sources=_sources(["A3"])),
             encoding="utf-8")
         (root / "wiki" / "places" / "mesa.md").write_text(
             PAGE.format(title="Mesa", page_type="place", chrono=0,
@@ -105,6 +109,13 @@ class UnknownsFixture(unittest.TestCase):
                  "when_hint": "", "anchor": None, "date": {"stated": "1984"}},
                 {"title": "The bike with no brakes",
                  "description": "I rode a bike with no brakes.",
+                 "when_hint": "", "anchor": None, "date": None},
+            ]}), encoding="utf-8")
+        (root / "state" / "classifications" / "answers-a3.json").write_text(json.dumps({
+            "source_path": "answers/A3.md",
+            "events": [
+                {"title": "The dog that followed me home",
+                 "description": "A dog followed me home and stayed.",
                  "when_hint": "", "anchor": None, "date": None},
             ]}), encoding="utf-8")
         (root / "state" / "classifications" / "answers-a2.json").write_text(json.dumps({
