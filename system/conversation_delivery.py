@@ -848,10 +848,19 @@ def _parse_placed(raw: object) -> dict | None:
 _LANDMARK_KEYS = frozenset({
     "domain", "label", "place", "subject", "date", "span", "skipped",
     "chain_complete",
+    # v202 (family-landmark): `birth_order` is a free-text field alongside
+    # label/place/subject, not a rung.
+    "birth_order",
     # ladder rungs
     "year", "month", "day", "city", "address", "household",
     "name", "grades", "happened", "who", "what", "where", "branch",
+    "relation", "living",
 })
+
+#: v202: rungs whose value is a real bool. `living` is TRI-STATE — absent is
+#: UNKNOWN — and a stated ``False`` is a FACT, so it must survive the string
+#: check below rather than degrading the whole record.
+_LANDMARK_BOOL_KEYS = frozenset({"living"})
 _LANDMARK_TEXT_MAX_CHARS = 160
 _LANDMARK_DATE_KEYS = frozenset({
     "best", "earliest", "latest", "granularity", "confidence", "basis",
@@ -897,6 +906,9 @@ def _parse_landmark(raw: object) -> dict | None:
     parsed: dict = {}
     for key, value in raw.items():
         if key in ("date", "span", "skipped", "chain_complete"):
+            continue
+        if key in _LANDMARK_BOOL_KEYS and isinstance(value, bool):
+            parsed[key] = value
             continue
         if value is True:
             parsed[key] = True

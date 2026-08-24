@@ -1472,13 +1472,13 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
     record: dict = {"domain": row["domain"]}
     if args.label:
         record["label"] = args.label
-    for field in ("place", "subject"):
+    for field in ("place", "subject", "birth_order"):
         value = getattr(args, field, None)
         if value:
             record[field] = value
     for rung in row["ladder"]:
         value = getattr(args, rung.replace("-", "_"), None)
-        if value:
+        if isinstance(value, bool) or value:
             record[rung] = value
     if args.date:
         parsed = _chrono.parse_edtf(args.date, basis="stated")
@@ -1712,6 +1712,14 @@ def cmd_entity_verdict(args: argparse.Namespace) -> int:
         flags.append("--not-living")
     if args.maps_to:
         flags.extend(["--maps-to", args.maps_to])
+    # v202 (family-landmark §D): a person the FAMILY landmark set named may
+    # have no roster row yet — `--ensure` creates one holding only the identity
+    # facts (never page-eligible). `landmarks_interaction.
+    # family_roster_invocations` mints exactly this vector.
+    if getattr(args, "name", None):
+        flags.extend(["--name", args.name])
+    if getattr(args, "ensure", False):
+        flags.append("--ensure")
     if args.json:
         flags.append("--json")
     return run_python("entity_verdict.py", flags)
@@ -2413,6 +2421,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="This person is no longer living")
     p.add_argument("--maps-to", dest="maps_to", metavar="SLUG",
                    help="This entity is really that existing page — wins over graduate")
+    p.add_argument("--ensure", action="store_true",
+                   help="Create the roster entry when the slug is unknown, rather "
+                        "than refusing — for a person a LANDMARK named (v202). "
+                        "Never page-eligible on creation.")
+    p.add_argument("--name", metavar="NAME",
+                   help="With --ensure: the person's name on the created entry")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_entity_verdict)
 
@@ -2866,8 +2880,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--end", default="", help="EDTF end of a span")
     p.add_argument("--complete", action="store_true",
                    help="the chain is finished — stop offering more of this domain")
+    # v202 (family-landmark): birth order is a free-text FIELD, not a rung, so
+    # an unstated one never blocks the ladder from reaching `birth`.
+    p.add_argument("--birth-order", dest="birth_order", default="",
+                   help="e.g. 'two years older', 'the middle of five'")
+    # `living` is TRI-STATE: absent is UNKNOWN, and a stated False is a fact.
+    living = p.add_mutually_exclusive_group()
+    living.add_argument("--living", dest="living", action="store_true", default=None,
+                        help="this family member is still with us")
+    living.add_argument("--not-living", dest="living", action="store_false",
+                        help="this family member has died")
     for rung in ("year", "month", "day", "city", "address", "household",
-                 "name", "grades", "happened", "who", "what", "where", "branch"):
+                 "name", "grades", "happened", "who", "what", "where", "branch",
+                 "relation"):
         p.add_argument(f"--{rung}", default="", help=f"ladder rung: {rung}")
     p.set_defaults(func=cmd_landmark_record)
 

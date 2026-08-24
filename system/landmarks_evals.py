@@ -28,11 +28,20 @@ REQUIRED_GOLDEN_IDS = frozenset({
     # v198 (go-deep.md §4.3): reporting the derivation is right;
     # naming a date and inviting agreement is the banned move.
     "landmarks-reports-the-arithmetic-never-asks-agreement",
+    # v202 (family-landmark): the ninth domain, and the two "unknowns are
+    # concrete" rulings that came with it.
+    "landmarks-family-opening",
+    "landmarks-family-sibling-interval",
+    "landmarks-family-elder-gently",
+    "landmarks-family-decline-respected",
+    "landmarks-family-named-follow-up",
+    "landmarks-residence-gap-is-a-question",
 })
 
 #: These hold on every landmark turn. `never_presses_sensitive` is scoped to a
-#: sensitive domain and `no_year_demand` is suspended for `birth` — the one
-#: carve-out (landmarks.md §2.1) — so neither is unconditional.
+#: sensitive domain and `no_year_demand` is suspended for a PERSON'S BIRTH
+#: (`landmarks_interaction.YEAR_OPENER_DOMAINS`; landmarks.md §2.1 + §2.9), so
+#: neither is unconditional.
 _ALWAYS_APPLICABLE_LINTS = frozenset({
     "accepts_vague",
     "no_form_voice",
@@ -45,7 +54,10 @@ _ALWAYS_APPLICABLE_LINTS = frozenset({
 
 def _applicable(domain: object, sensitive: bool) -> frozenset[str]:
     applicable = set(_ALWAYS_APPLICABLE_LINTS)
-    if str(domain or "") != "birth":
+    # v202: the year-opener carve-out is a NAMED SET on the interaction module
+    # (`birth`, `family`, `children` — see YEAR_OPENER_DOMAINS), read here
+    # rather than re-derived, so the harness and the lint can never disagree.
+    if str(domain or "") not in landmarks_interaction.YEAR_OPENER_DOMAINS:
         applicable.add("no_year_demand")
     if sensitive:
         applicable.add("never_presses_sensitive")

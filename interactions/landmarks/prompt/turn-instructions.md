@@ -17,6 +17,13 @@ THE ONE THING TO ASK THIS TURN:
 Record the landmark in `landmark` ONLY when the USER actually gave you one
 this turn. Use the domain you were asking about. Put what they said in the
 rung's own key — the city in `city`, the street in `address`, the school in
-`label` — and a date only when they supplied one. When they skipped, set
-`{"domain": "<the domain>", "skipped": true}`. Never invent a place, a date,
-a name, or a domain that is not in LANDMARKS.
+`label` — and a date only when they supplied one.
+
+For `family`, one record per PERSON: their name in `label` and `who`, their
+tier in `relation` (`sibling`, `parent` or `grandparent` — those three words
+exactly), their birth year in `date`, "two years older" in `birth_order`, and
+`living` as a real true/false ONLY when they told you. Leave `living` out when
+you do not know; absent means unknown, and it never means dead.
+
+When they skipped, set `{"domain": "<the domain>", "skipped": true}`. Never
+invent a place, a date, a name, or a domain that is not in LANDMARKS.

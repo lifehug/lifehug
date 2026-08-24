@@ -199,5 +199,106 @@
     "landmark": null
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-family-opening",
+  "turns": [
+   {
+    "message": "Before we get to places — who was in your family growing up, brothers and sisters? Skip any of this whenever you like; I won't ask twice.",
+    "landmark": null
+   },
+   {
+    "message": "James. Good — I'll keep him straight from here.",
+    "landmark": {
+     "domain": "family",
+     "label": "James",
+     "who": "James",
+     "relation": "sibling"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-sibling-interval",
+  "turns": [
+   {
+    "message": "Two years older than you, and you were born in 1978 — so James lands around 1976. That gives me a second fixed point in your childhood, which is the stretch that's hardest to place.",
+    "landmark": {
+     "domain": "family",
+     "label": "James",
+     "who": "James",
+     "relation": "sibling",
+     "birth_order": "two years older",
+     "date": {
+      "best": "1976",
+      "earliest": null,
+      "latest": null,
+      "granularity": "year",
+      "confidence": "approximate",
+      "basis": "age",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-elder-gently",
+  "turns": [
+   {
+    "message": "Betty Jo. Thank you for telling me she's gone — I'll hold that, and I won't ask you to date it.",
+    "landmark": {
+     "domain": "family",
+     "label": "Betty Jo",
+     "who": "Betty Jo",
+     "relation": "grandparent",
+     "living": false
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-decline-respected",
+  "turns": [
+   {
+    "message": "That's alright — we'll leave the family side where it is.",
+    "landmark": {
+     "domain": "family",
+     "skipped": true
+    }
+   },
+   {
+    "message": "Thanks for these.",
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-named-follow-up",
+  "turns": [
+   {
+    "message": "Four or five is plenty to go on. Jackie's noted.",
+    "landmark": {
+     "domain": "family",
+     "label": "Jackie",
+     "who": "Jackie",
+     "relation": "sibling"
+    }
+   },
+   {
+    "message": "No trouble — Jackie's year can sit open, and it'll be waiting under your timeline with her name on it whenever it turns up.",
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-residence-gap-is-a-question",
+  "turns": [
+   {
+    "message": "Five of the seven is a real list — I have Mesa through '92 and Yucaipa from '95. Where did you live between Mesa and Yucaipa?",
+    "landmark": null
+   }
+  ]
  }
 ]

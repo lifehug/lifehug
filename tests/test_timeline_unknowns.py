@@ -291,8 +291,39 @@ class ProbeGoldenTests(unittest.TestCase):
         ),
     }
 
+    #: v202: two kinds are SELF-PROBING — `landmarks_interaction` mints them
+    #: already carrying the ladder's own subject-named question ("What year was
+    #: Jackie born?"), which `choose_probe` cannot see because it has no view
+    #: of the question set. A KIND_OPENERS entry for them would be a second,
+    #: never-used wording of the same question, so they are pinned against
+    #: their BUILDERS instead. `timeline.unknowns` is what keeps them: it skips
+    #: `choose_probe` for any row that arrived with a probe text of its own.
+    SELF_PROBING_KINDS = ("landmark_subject", "residence_gap")
+
+    SELF_PROBING_LANDMARKS = {
+        "family": [{"domain": "family", "label": "Jackie", "who": "Jackie",
+                    "relation": "sibling"}],
+        "residences": [
+            {"label": "Mesa", "city": "Mesa", "address": "1 Mesa Rd",
+             "span": {"start": {"best": "1988", "earliest": "1988",
+                                "latest": "1988", "granularity": "year",
+                                "confidence": "approximate", "basis": "stated"},
+                      "end": {"best": "1992", "earliest": "1992",
+                              "latest": "1992", "granularity": "year",
+                              "confidence": "approximate", "basis": "stated"}}},
+            {"label": "Yucaipa", "city": "Yucaipa", "address": "2 Oak St",
+             "span": {"start": {"best": "1995", "earliest": "1995",
+                                "latest": "1995", "granularity": "year",
+                                "confidence": "approximate", "basis": "stated"},
+                      "end": {"best": "2001", "earliest": "2001",
+                              "latest": "2001", "granularity": "year",
+                              "confidence": "approximate", "basis": "stated"}}},
+        ],
+    }
+
     def test_every_unknown_kind_has_a_concrete_probe(self):
-        self.assertEqual(set(self.GOLDENS), set(tl.UNKNOWN_KINDS))
+        self.assertEqual(set(self.GOLDENS) | set(self.SELF_PROBING_KINDS),
+                         set(tl.UNKNOWN_KINDS))
         for kind, (row, bare, anchored) in self.GOLDENS.items():
             with self.subTest(kind=kind):
                 self.assertEqual(ti.choose_probe(row)["text"], bare)
@@ -301,6 +332,22 @@ class ProbeGoldenTests(unittest.TestCase):
                 self.assertIn("?", anchored)
                 self.assertEqual(anchored.count("?"), 1)
                 self.assertNotIn("what year", anchored.lower())
+
+    def test_the_self_probing_kinds_bring_their_own_named_question(self):
+        """v202: the landmark set's own unknowns arrive with the ladder's
+        exact, subject-named wording, and `unknowns()` does not replace it."""
+        rows = {row["kind"]: row
+                for row in tl.unknowns({}, landmarks=self.SELF_PROBING_LANDMARKS)}
+        for kind in self.SELF_PROBING_KINDS:
+            with self.subTest(kind=kind):
+                text = rows[kind]["probe"]["text"]
+                self.assertTrue(text.endswith("?"))
+                self.assertEqual(text.count("?"), 1)
+        self.assertEqual(rows["landmark_subject"]["probe"]["text"],
+                         "What year was Jackie born?")
+        self.assertEqual(
+            rows["residence_gap"]["probe"]["text"],
+            "Where did you live between Mesa and Yucaipa, around 1992–1995?")
 
     def test_every_keystone_anchor_kind_asks_a_real_question(self):
         goldens = {

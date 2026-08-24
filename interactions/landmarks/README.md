@@ -13,13 +13,16 @@ rungs of the elicitation playbook (`sequence`, `landmark`) are marked
 `needs_anchor` over an index that was nearly always empty. This Interaction is
 the missing input (`system/research/landmarks.md` §3.7).
 
-**Two of these domains are closed lists.** Every address in order, and every
-school in order, are enumerable, finite, verifiable and *finishable* — they
-tile the whole timeline, they are the coarse containers every finer interval
-propagates inside (Allen 1983's "reference intervals"), and they are the two
-domains a living relative can often supply outright. Everything else is an
-open set. That asymmetry is why residences and schools come first
-(`landmarks.md` §2.7).
+**Three of these domains are closed lists.** Every address in order, every
+school in order, and — since v202 — every member of the family you came from,
+are enumerable, finite, verifiable and *finishable*. The first two tile the
+whole timeline and are the coarse containers every finer interval propagates
+inside (Allen 1983's "reference intervals"); the third is the one made of
+**people**, so its members go to the entity roster as PERSON entries with the
+relationship fact rather than into a parallel store. All three are domains a
+living relative can supply outright — and the family domain is where we learn
+**who those relatives are**. Everything else is an open set. That asymmetry is
+why family, residences and schools come first (`landmarks.md` §2.7 + §2.9).
 
 **A vague answer is an answer.** "Somewhere outside Dayton, the eighties"
 bounds everything it overlaps. The **specificity ladder** — city → address →
@@ -33,12 +36,16 @@ Timeline forever, answerable at any time, and never enters the daily question
 queue. No reminders. No counts in prose. The `landmark_gates.no_form_voice`
 lint is the mechanical form of that rule.
 
-**Never ask for a year — except the birthday.** A birth date is overlearned
-semantic knowledge, not a reconstruction, and every fielded life-history
-instrument takes it first because the calendar's axis starts there (SHARELIFE
-ST006/ST007, NLSY97's "month the respondent turned 14"). Every other date
-comes out sideways. `landmark_gates.no_year_demand` suspends only for
-`birth`.
+**Never ask for a year — except a person's birthday.** A birth date is
+overlearned semantic knowledge, not a reconstruction, and every fielded
+life-history instrument takes it first because the calendar's axis starts there
+(SHARELIFE ST006/ST007, NLSY97's "month the respondent turned 14"). Every other
+date comes out sideways. v202 draws out the consequence the carve-out always
+had: it is about the KIND of fact, not whose fact it is, so "what year was
+Jackie born?" is legitimate for a sibling or a child too.
+`landmark_gates.no_year_demand` suspends for exactly
+`landmarks_interaction.YEAR_OPENER_DOMAINS` — `birth`, `family`, `children`
+(`landmarks.md` §2.1 + §2.9).
 
 **Never propose a date.** Reporting the arithmetic is right — "anything at
 the Bell house lands between '84 and '90 now" states a derivation and shows its
@@ -85,9 +92,11 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The durable store | `timeline.load_landmarks()`, `timeline.save_landmark(domain, record)`, `timeline.landmark_birth_date()` |
 | The anchors they become | `landmarks_interaction.anchors_from_landmarks(landmarks)`; `timeline_interaction.anchors_for_person(landmarks=…)` |
 | The gap they reveal | `landmarks_interaction.places_without_stories(landmarks, event_places=…)`, `PLACE_NO_STORIES_KIND`; `timeline.timeline_data()["place_no_stories"]` |
+| The gaps the SET reveals (v202) | `landmarks_interaction.incomplete_subjects(landmarks)` → `LANDMARK_SUBJECT_KIND`, one NAMED unknown per half-filled subject in a `chain: true` domain; `residence_gaps(landmarks)` → `RESIDENCE_GAP_KIND`, one per interior hole between two dated residence spans. Both reach `timeline.unknowns()` carrying the ladder's own subject-named question |
+| The roster join and the witnesses (v202) | `landmarks_interaction.family_members`, `family_roster_invocations(landmarks)` → `lifehug.py entity-verdict person <slug> clear --relationship … [--living|--not-living] --ensure`; `witness_candidates(landmarks)`, `timeline.timeline_data()["witnesses"]` |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
-| The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--complete]` |
+| The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
 writes it.
