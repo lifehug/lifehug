@@ -50,11 +50,18 @@ asks you for a year.
   `age` (their age against their birthday), `anchor` (a landmark plus a
   before/after), `order` (sequence only), `public_event`, `connector`.
 - **Landmarks** — the **universal** set of dating questions everyone gets:
-  birth, the places lived, schooling, partnerships, children, jobs. Same for
-  every person, and the skeleton that makes everything else placeable by
-  arithmetic. Some are answered at onboarding; the rest sit here with Play and
-  surface later. (`system/research/landmarks.md` is the authority for the set
-  and its wording.)
+  birth, **the family you came from**, the places lived, schooling,
+  partnerships, children, jobs. Same for every person, and the skeleton that
+  makes everything else placeable by arithmetic. Some are answered at
+  onboarding; the rest sit here with Play and surface later.
+  (`system/research/landmarks.md` is the authority for the set and its
+  wording.)
+- **Family** (v202) — the second domain, where practitioner intake puts it. A
+  sibling's birth year anchors **childhood**, the stretch the residence chain
+  covers worst; parents and grandparents are the **witnesses** who can supply
+  the two closed lists when memory cannot. The *dates* are landmarks; the
+  *people* are roster entities with a relationship fact — never a second
+  store. (research §2.9)
 - **Anchor** — a landmark of the person's own *once it is dated*: their
   birthday, a residence with a span, an era with a span, a dated moment.
   Collectively they are the life-history calendar, and every probe above the
@@ -66,10 +73,17 @@ asks you for a year.
   **events** sit under their place.
 - **Unknown** — ONE concrete thing the person can answer about:
   `{kind, key, label, probe}`, where the label names the subject and the probe
-  is a real question about it. Five kinds: a specific undated **moment**, an
+  is a real question about it. Seven kinds: a specific undated **moment**, an
   era's missing **bounds**, a **place**'s span, an **era gap** (a dated hole
   between two dated bands — the kind that could not exist before dates did),
-  and a **date contradiction**. Never a count: "116 moments I can't place" is
+  a **date contradiction**, and — v202, the *unknowns are concrete* principle
+  applied to the landmark set — a **landmark subject** (one half-filled person
+  or place inside an enumeration domain, named: "What year was Jackie born?")
+  and a **residence gap** (a hole between two dated residence spans: "Where
+  did you live between Mesa and Yucaipa, around 1992–1995?"). The last two
+  arrive carrying the ladder's own subject-named question, so `unknowns()`
+  leaves their probe alone rather than replacing it with a generic opener.
+  Never a count: "116 moments I can't place" is
   a number, and a number is not a question (owner-set, 2026-08-23). The counts
   live on the **ledger** (`unknown_ledger`), and the page offers the top
   `UNKNOWNS_PAGE_CAP` unknowns by leverage.

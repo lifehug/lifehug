@@ -322,5 +322,335 @@
     "expected_landmark": null
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-family-opening",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "open",
+    "domain": "family",
+    "rung": "who",
+    "sensitive": false,
+    "expected_landmark": null
+   },
+   {
+    "stage": "ask",
+    "domain": "family",
+    "rung": "who",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "family",
+     "label": "James",
+     "who": "James",
+     "relation": "sibling"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-sibling-interval",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "family": [
+    {
+     "label": "James",
+     "who": "James",
+     "relation": "sibling"
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "family",
+    "rung": "birth",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "family",
+     "label": "James",
+     "birth_order": "two years older",
+     "date": {
+      "best": "1976",
+      "earliest": "1976",
+      "latest": "1976",
+      "granularity": "year",
+      "confidence": "approximate",
+      "basis": "age",
+      "anchors": [],
+      "provenance": []
+     },
+     "who": "James",
+     "relation": "sibling"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-elder-gently",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "family": [
+    {
+     "label": "James",
+     "who": "James",
+     "relation": "sibling",
+     "date": {
+      "best": "1976",
+      "earliest": "1976",
+      "latest": "1976",
+      "granularity": "year",
+      "confidence": "approximate",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    },
+    {
+     "label": "Desi",
+     "who": "Desi",
+     "relation": "parent"
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "family",
+    "rung": "who",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "family",
+     "label": "Betty Jo",
+     "who": "Betty Jo",
+     "relation": "grandparent",
+     "living": false
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-decline-respected",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "family",
+    "rung": "who",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "family",
+     "skipped": true
+    }
+   },
+   {
+    "stage": "close",
+    "domain": "family",
+    "rung": null,
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-family-named-follow-up",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "family": [
+    {
+     "label": "James",
+     "who": "James",
+     "relation": "sibling",
+     "date": {
+      "best": "1976",
+      "earliest": "1976",
+      "latest": "1976",
+      "granularity": "year",
+      "confidence": "approximate",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "family",
+    "rung": "who",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "family",
+     "label": "Jackie",
+     "who": "Jackie",
+     "relation": "sibling"
+    }
+   },
+   {
+    "stage": "ask",
+    "domain": "family",
+    "rung": "birth",
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-residence-gap-is-a-question",
+  "landmarks": {
+   "birth": [
+    {
+     "year": "1978",
+     "date": {
+      "best": "1978",
+      "earliest": "1978",
+      "latest": "1978",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "residences": [
+    {
+     "label": "Mesa",
+     "city": "Mesa",
+     "span": {
+      "start": {
+       "best": "1988",
+       "earliest": "1988",
+       "latest": "1988",
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "1992",
+       "earliest": "1992",
+       "latest": "1992",
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    },
+    {
+     "label": "Yucaipa",
+     "city": "Yucaipa",
+     "span": {
+      "start": {
+       "best": "1995",
+       "earliest": "1995",
+       "latest": "1995",
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "2001",
+       "earliest": "2001",
+       "latest": "2001",
+       "granularity": "year",
+       "confidence": "approximate",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "city",
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
  }
 ]

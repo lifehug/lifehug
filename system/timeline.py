@@ -1074,6 +1074,13 @@ UNKNOWN_KINDS = (
     "place_span",
     "era_gap",
     "date_contradiction",
+    # v202 (family-landmark, owner rulings 4 and 5): the landmark set's own
+    # concrete unknowns — ONE half-filled subject ("What year was Jackie
+    # born?") and ONE hole in the residence chain ("Where did you live between
+    # Mesa and Yucaipa?"). Both arrive from `landmarks_interaction` carrying
+    # their own exact question.
+    "landmark_subject",
+    "residence_gap",
 )
 
 #: The aggregate gap kinds that are counted rather than asked.
@@ -1100,6 +1107,10 @@ def unknown_key(gap: dict) -> str:
         return f"moment:{gap.get('period') or ''}:{gap.get('source_short') or ''}"
     if kind in ("period_bound", "place_span"):
         return f"{kind}:{gap.get('slug') or gap.get('period') or ''}"
+    # v202: both landmark-derived kinds mint their own key at build time (the
+    # domain and the two span labels are only known there); it is authoritative.
+    if kind in ("landmark_subject", "residence_gap") and gap.get("key"):
+        return str(gap["key"])
     scope = str(gap.get("period") or "")
     return f"{kind}:{scope}" if scope else kind
 
@@ -1119,7 +1130,7 @@ def moment_unknown(event: dict, period: str | None) -> dict:
     return row
 
 
-def unknowns(data: dict) -> list[dict]:
+def unknowns(data: dict, landmarks: object = None) -> list[dict]:
     """Every ANSWERABLE unknown as `{kind, key, label, probe, ...}`.
 
     One subject per row (v196). An unknown is something a person can picture:
@@ -1204,7 +1215,26 @@ def unknowns(data: dict) -> list[dict]:
         }
         add(row)
 
+    # 5. v202 (owner rulings 4 and 5): the landmark set's own concrete
+    #    unknowns. Guarded exactly as `timeline_data`'s landmark reads are — a
+    #    landmark problem must never take the timeline down.
+    try:
+        for row in landmarks_interaction.incomplete_subjects(landmarks):
+            add(row)
+        for row in landmarks_interaction.residence_gaps(landmarks):
+            add(row)
+    except Exception:  # noqa: BLE001
+        pass
+
     for row in rows:
+        # v202: a row that arrived with its OWN exact question keeps it. The
+        # landmark-derived kinds carry the ladder's subject-named wording
+        # ("What year was Jackie born?"), which a generic KIND_OPENERS entry
+        # could not express — one mechanism instead of two. Byte-identical for
+        # every pre-existing row: none of them carried a probe before this line.
+        probe = row.get("probe")
+        if isinstance(probe, dict) and str(probe.get("text") or "").strip():
+            continue
         row["probe"] = timeline_interaction.choose_probe(row, anchors=anchors)
     return rows
 
@@ -1573,7 +1603,7 @@ def timeline_data(evidence: list[dict] | None = None,
     }
     # v196: concrete unknowns, leverage-ordered and capped for a page; the
     # aggregate counts live on the ledger where they belong.
-    all_unknowns = unknowns(data)
+    all_unknowns = unknowns(data, landmarks=filed_landmarks)
     data["unknown_ledger"] = unknown_ledger(data)
     data["unknowns"] = offered_unknowns(all_unknowns, dependency_index(data))
     data["keystones"] = keystones(data)
@@ -1590,8 +1620,15 @@ def timeline_data(evidence: list[dict] | None = None,
                 filed_landmarks, event_places=_event_place_labels(data)
             )
         )
+        # v202 (family-landmark §D): the living family members, as witnesses
+        # for the ask-the-living hooks. v200's `place_no_stories.witnesses`
+        # (who was in THAT house) is a narrower, better claim and is untouched.
+        data["witnesses"] = list(
+            landmarks_interaction.witness_candidates(filed_landmarks)
+        )
     except Exception:  # noqa: BLE001
         data["landmarks"], data["place_no_stories"] = [], []
+        data["witnesses"] = []
     data["counts"]["landmarks_open"] = sum(
         1 for row in data["landmarks"] if row.get("status") != "complete"
     )

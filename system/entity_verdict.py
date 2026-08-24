@@ -9,6 +9,7 @@ and the candidate lane's promote-override.
 
     entity-verdict <type> <slug> graduate|never|clear
         [--alias A]... [--relationship R] [--living|--not-living] [--maps-to SLUG]
+        [--ensure [--name NAME]]
 
   - `graduate` — an entity the owner knows matters shouldn't have to wait
     for its second mention: `page_eligible` is forced true regardless of
@@ -49,6 +50,10 @@ fact, which is exactly what the recurring-defect doctrine exists to prevent.
   - `--relationship R` — closed against `focus_candidate.FOCUS_RELATIONSHIPS`
     (the focus lane's list, imported rather than re-typed).
   - `--living` / `--not-living` — a real bool on the entry.
+  - `--ensure` (v202) — an absent slug is CREATED rather than refused, for a
+    person the family landmark set named who has no answer mentions yet. The
+    created row is never page-eligible (ADR 0013's mention floor); it exists
+    to hold the settled identity facts. Idempotent.
   - `--maps-to SLUG` — the merge. SLUG must be another entity in the SAME
     roster or a known Focus slug. **maps-to wins over graduate**: supplied
     together, the mapping applies and the graduation does not, because a
@@ -152,11 +157,37 @@ def _union_aliases(entry: dict, additions: Sequence[str]) -> None:
     entry["aliases"] = existing
 
 
+#: v202 (family-landmark §D): the entry `ensure` creates for a person the
+#: roster has never heard of. `qualifies` and `page_eligible` are False ON
+#: PURPOSE — ADR 0013 put a >=1-mention floor on graduated pages, and a brother
+#: named once in an intake answer has not earned a wiki page. The row exists to
+#: hold the SETTLED IDENTITY facts (`entity_roster._SETTLED_IDENTITY_FIELDS`)
+#: durably from day one; `entity_roster.apply_previous_decisions` folds it into
+#: the real entry by name/alias the moment they are actually mentioned.
+ENSURED_SOURCE = "landmark:family"
+
+
+def _ensured_entry(slug: str, name: str | None) -> dict:
+    return {
+        "name": (name or slug.replace("-", " ")).strip(),
+        "slug": slug,
+        "aliases": [],
+        "qualifies": False,
+        "score": 0.0,
+        "unique_answers": 0,
+        "page_eligible": False,
+        "maps_to_focus": None,
+        "source": ENSURED_SOURCE,
+    }
+
+
 def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   aliases: Sequence[str] = (),
                   relationship: str | None = None,
                   living: bool | None = None,
-                  maps_to: str | None = None) -> dict:
+                  maps_to: str | None = None,
+                  ensure: bool = False,
+                  name: str | None = None) -> dict:
     """Apply one verdict — and, since v190, one round of identity facts — to
     one roster entity, atomically. Returns the entity's post-verdict record
     (the same dict object written to disk). Raises `EntityVerdictError` on
@@ -182,14 +213,26 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
     data = read_json(path, default=None)
     entities = data.get("entities") if isinstance(data, dict) else None
     if not isinstance(entities, list):
-        raise EntityVerdictError(
-            f"no {entity_type} roster on disk yet — run entity-roster first")
+        if not ensure:
+            raise EntityVerdictError(
+                f"no {entity_type} roster on disk yet — run entity-roster first")
+        data = {"version": 1, "type": entity_type, "entities": []}
+        entities = data["entities"]
 
     target = None
     for entity in entities:
         if isinstance(entity, dict) and entity.get("slug") == slug:
             target = entity
             break
+    if target is None and ensure:
+        # v202: a person the LANDMARK SET just named may legitimately have no
+        # roster row yet — the roster is derived from answer mentions, and an
+        # intake answer that names a brother is the first time we have heard
+        # of him. Creating the row is the only way the relationship fact has
+        # anywhere durable to live; it does NOT create a page (see
+        # `_ensured_entry`). Idempotent: a second identical call finds the row.
+        target = _ensured_entry(slug, name)
+        entities.append(target)
     if target is None:
         known = ", ".join(sorted(
             str(e.get("slug", "")) for e in entities
@@ -292,6 +335,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="This entity is really that existing page — another "
                              "entity on this roster, or a Focus slug. Wins over "
                              "graduate in the same call.")
+    parser.add_argument("--ensure", action="store_true",
+                        help="Create the roster entry when the slug is unknown, "
+                             "rather than refusing — for a person a LANDMARK "
+                             "named (v202). Never page-eligible on creation.")
+    parser.add_argument("--name", metavar="NAME",
+                        help="With --ensure: the person's name on the created entry")
     parser.add_argument("--json", action="store_true", help="Print the result as JSON")
     args = parser.parse_args(argv)
 
@@ -300,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
             args.type, args.slug, args.verdict,
             aliases=args.alias, relationship=args.relationship,
             living=args.living, maps_to=args.maps_to,
+            ensure=args.ensure, name=args.name,
         )
     except EntityVerdictError as exc:
         print(f"✗ entity-verdict: {exc}", file=sys.stderr)

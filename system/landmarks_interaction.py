@@ -147,6 +147,14 @@ RUNG_TEXTS = {
     ("birth", "year"): "What year were you born?",
     ("birth", "month"): "What month?",
     ("birth", "day"): "And the day?",
+    # v202 (family-landmark): the constellation. `birth` is the direct year
+    # question, permitted here for exactly the reason it is permitted for the
+    # person's own birthday — a birth year is overlearned semantic knowledge,
+    # not a reconstruction (landmarks.md §2.1 + §2.9).
+    ("family", "who"): "Who was in your family growing up — brothers and sisters?",
+    ("family", "relation"): "And how is {label} related to you?",
+    ("family", "birth"): "What year was {label} born?",
+    ("family", "living"): "Is {label} still with us?",
     ("residences", "city"): "Do you remember where you lived? Where was that?",
     ("residences", "address"): "Do you remember the address on {label}?",
     ("residences", "span"): "When did you move into {label}, and when did you leave?",
@@ -157,7 +165,7 @@ RUNG_TEXTS = {
     ("schools", "span"): "Roughly when did you start and finish at {label}?",
     ("partnerships", "happened"): "Have you ever been married, or had a long partnership?",
     ("partnerships", "who"): "Who was that?",
-    ("partnerships", "year"): "Roughly what year did that begin?",
+    ("partnerships", "year"): "Roughly when did that begin?",
     ("partnerships", "month"): "Do you remember the month?",
     ("children", "happened"): "Do you have children?",
     ("children", "who"): "What are their names?",
@@ -171,24 +179,35 @@ RUNG_TEXTS = {
     ("military", "span"): "When did you go in, and when did you come out?",
     ("losses", "happened"): "Is there someone you have lost that belongs on this?",
     ("losses", "who"): "Who was that?",
-    ("losses", "year"): "What year was that?",
+    ("losses", "year"): "Roughly when was that?",
 }
 
 #: A rung the person has not reached costs more to ask than one they have.
 #: The ladder is walked one rung at a time, never skipped ahead.
 LADDER_COST = {"city": 1, "name": 1, "what": 1, "happened": 1, "year": 1,
                "who": 2, "place": 2, "where": 2, "branch": 2, "month": 2,
+               "relation": 2, "birth": 2,
                "address": 3, "grades": 3, "day": 3,
-               "span": 4, "household": 5}
+               "span": 4, "household": 5, "living": 5}
 DEFAULT_RUNG_COST = 3
+
+#: A rung whose cost differs in ONE domain. `who` is a FOLLOW-UP rung in
+#: partnerships, children and losses (something has to have happened first),
+#: so it costs 2 — but it is `family`'s OPENER, and every other domain's
+#: opener costs 1 because a name is the cheapest thing anyone can give.
+#: Without this the family row sorts behind the residence chain in
+#: `open_landmarks` and `build_landmarks_plan`, which inverts the reason the
+#: domain exists (v202 §A.1: it is the cheapest anchor per question in the set).
+DOMAIN_RUNG_COST = {("family", "who"): 1}
 
 #: lifehug#207: the rungs a DateRecord satisfies on its own, and the grain each
 #: one needs. The package's own CLI and turn writers produce ONE ``date``
 #: record with no per-grain keys, so before this table a day-precision birthday
 #: left the domain ``partial`` with ``next = year`` forever (found live on the
 #: platform, lifehug-platform#613). ``span`` already had this fallback; the
-#: date-grain rungs now have it too.
-_DATE_GRAIN_RUNGS = {"year": 1, "month": 2, "day": 3}
+#: date-grain rungs now have it too — including v202's ``family.birth``, which
+#: is a relative's birth YEAR and is stored the same way.
+_DATE_GRAIN_RUNGS = {"birth": 1, "year": 1, "month": 2, "day": 3}
 
 #: How far up ``_DATE_GRAIN_RUNGS`` a granularity actually reaches. Season,
 #: range and era rank 0 and fill nothing — a coarse date is still an ANSWER
@@ -281,6 +300,13 @@ def next_rung(entries: object, row: object) -> dict | None:
         if index < target_index:
             return _rung(domain, ladder[index + 1], entry.get("label"))
     if row.get("chain") and not any(e.get("chain_complete") for e in rows):
+        if domain == "family":
+            # v202: which TIER is missing decides the question (see
+            # FAMILY_TIER_TEXTS) — a fixed chain-more line would ask for more
+            # siblings forever and never reach the elders.
+            question = _rung(domain, ladder[0], None)
+            question["text"] = FAMILY_TIER_TEXTS[family_next_tier(rows)]
+            return question
         return _rung(domain, ladder[0], None, chain_more=True)
     return None
 
@@ -297,7 +323,8 @@ def _rung(domain: str, rung: str, subject: object, *, chain_more: bool = False) 
         "rung": rung,
         "subject": label or None,
         "text": text.format(label=label or "that one"),
-        "cost": LADDER_COST.get(rung, DEFAULT_RUNG_COST),
+        "cost": DOMAIN_RUNG_COST.get(
+            (domain, rung), LADDER_COST.get(rung, DEFAULT_RUNG_COST)),
     }
 
 
@@ -307,6 +334,34 @@ CHAIN_MORE_TEXTS = {
     "schools": "Was there another school after that?",
     "work": "And after that?",
 }
+
+#: v202 (family-landmark): the family chain has TIERS, and the tier that is
+#: missing decides the question. A single fixed "and who else?" would ask for
+#: more siblings forever and never reach the elders — who are the witnesses
+#: (`landmarks.md` §2.7 claim 2, §2.9). Consulted by :func:`next_rung`, which
+#: is the only function holding both the entries and the row; `_rung` stays a
+#: pure formatter.
+FAMILY_TIERS = ("sibling", "parent", "grandparent")
+FAMILY_TIER_TEXTS = {
+    "sibling": "Who was in your family growing up — brothers and sisters?",
+    "parent": "And your parents — what were their names?",
+    "grandparent": "What about your grandparents — do you know their names?",
+    None: "Anyone else in the family who belongs on this?",
+}
+
+
+def family_next_tier(entries: object) -> str | None:
+    """The first family tier with nobody filed in it, or None when all three are.
+
+    The tiers are walked in `FAMILY_TIERS` order — siblings, then parents, then
+    grandparents — which is the order practitioner intake uses (research §2.9).
+    """
+    filed = {str((e or {}).get("relation") or "").strip().lower()
+             for e in (entries or ()) if isinstance(e, dict)}
+    for tier in FAMILY_TIERS:
+        if tier not in filed:
+            return tier
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -411,7 +466,15 @@ def _user_turns(session: object) -> int:
 
 #: Free-text fields a landmark record may carry, and their length caps. A
 #: label is a name, not a story.
-_TEXT_CAPS = {"label": 120, "place": 120, "subject": 120}
+#: v202 (family-landmark): ``birth_order`` ("two years older", "the middle
+#: of five") is a free-text FIELD, not a ladder rung, so an unstated birth
+#: order can never block the family ladder from reaching ``birth``.
+_TEXT_CAPS = {"label": 120, "place": 120, "subject": 120, "birth_order": 60}
+
+#: Ladder rungs whose value is a real bool rather than a string. ``living``
+#: is TRI-STATE: absent means unknown, and ``False`` is a fact the person
+#: stated — it must survive validation, so the string branch is not enough.
+_BOOL_RUNGS = frozenset({"living"})
 _RUNG_MAX_CHARS = 32
 
 
@@ -459,6 +522,8 @@ def validate_landmark(value: object, *,
         raw = value.get(rung)
         if isinstance(raw, str) and raw.strip():
             record[rung] = raw.strip()[:_RUNG_MAX_CHARS * 4]
+        elif rung in _BOOL_RUNGS and isinstance(raw, bool):
+            record[rung] = raw
         elif raw is True:
             record[rung] = True
     if value.get("chain_complete"):
@@ -516,9 +581,19 @@ LANDMARK_LINT_CLASSES = (
     "landmark_gates.never_proposes_a_date",
 )
 
+#: The domains where asking for a calendar year outright is legitimate
+#: (landmarks.md §2.1 + §2.9): the carve-out is about the KIND of fact, not
+#: about whose fact it is. A birth year — anyone's — is overlearned semantic
+#: knowledge, not a reconstruction, so `birth`, `family` and `children` all
+#: qualify. `children`'s own v199 rung text ("What year was {label} born?")
+#: already asked it; before v202 that domain violated its own lint.
+#: ONE definition; `landmarks_evals._applicable` reads this set rather than
+#: re-deriving it (recurring-defect doctrine).
+YEAR_OPENER_DOMAINS = frozenset({"birth", "family", "children"})
+
 #: Asking a person to produce a year for a MEMORY is the banned move
-#: (chronology.md §6 rule 1). The birth date is the sole carve-out, and it is
-#: recognized by the stage's own domain, not by phrasing.
+#: (chronology.md §6 rule 1). The carve-out above is recognized by the stage's
+#: own domain, not by phrasing.
 _YEAR_DEMAND_RES = (
     re.compile(r"\bwhat year (?:was|did|were)\b", re.IGNORECASE),
     re.compile(r"\bwhich year\b", re.IGNORECASE),
@@ -579,9 +654,10 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
                 return match
         return None
 
-    # The birthday is the sole carve-out (landmarks.md §2.1): it is
-    # overlearned semantic knowledge, not a reconstruction.
-    if str(domain or "") != "birth":
+    # A birth date is the carve-out (landmarks.md §2.1 + §2.9): it is
+    # overlearned semantic knowledge, not a reconstruction — and that is true
+    # of a sibling's or a child's birth year exactly as of the person's own.
+    if str(domain or "") not in YEAR_OPENER_DOMAINS:
         match = _first(_YEAR_DEMAND_RES)
         if match:
             findings.append({
@@ -669,6 +745,10 @@ def landmark_invocation(record: object) -> list[str] | None:
         value = str(record.get(field) or "").strip()
         if value:
             argv += [f"--{field}", value]
+    # v202 (family-landmark): `birth_order` is a free-text field, not a rung.
+    birth_order = str(record.get("birth_order") or "").strip()
+    if birth_order:
+        argv += ["--birth-order", birth_order]
     edtf = chrono.to_edtf(chrono.from_dict(date)) if date else None
     if edtf:
         argv += ["--date", edtf]
@@ -679,10 +759,16 @@ def landmark_invocation(record: object) -> list[str] | None:
             argv += [f"--{bound}", value]
     for rung in ("city", "address", "household", "name", "grades",
                  "happened", "who", "what", "where", "branch",
-                 "year", "month", "day"):
+                 "relation", "year", "month", "day"):
         value = record.get(rung)
         if isinstance(value, str) and value.strip():
             argv += [f"--{rung}", value.strip()]
+    # v202: `living` is a real bool and TRI-STATE — absent is unknown, and a
+    # stated False is a fact, so it needs the two-flag form entity_verdict
+    # already uses rather than a value pair.
+    living = record.get("living")
+    if isinstance(living, bool):
+        argv.append("--living" if living else "--not-living")
     if record.get("chain_complete"):
         argv.append("--complete")
     return argv
@@ -695,6 +781,7 @@ def landmark_invocation(record: object) -> list[str] | None:
 #: How each landmark domain enters `timeline.anchor_index`.
 ANCHOR_KINDS = {
     "birth": "birth",
+    "family": "landmark",
     "residences": "residence",
     "schools": "period",
     "partnerships": "landmark",
@@ -729,7 +816,12 @@ def anchors_from_landmarks(landmarks: object) -> dict:
             if record is None:
                 continue
             label = str(entry.get("label") or domain).strip()
-            key = "birth" if domain == "birth" else _anchor_key(domain, label, position)
+            if domain == "birth":
+                key = "birth"
+            elif domain == "family":
+                key = _family_anchor_key(entry, label, position)
+            else:
+                key = _anchor_key(domain, label, position)
             index.setdefault(key, {"label": _anchor_label(domain, label),
                                    "date": record, "kind": kind})
     return index
@@ -765,14 +857,265 @@ def _anchor_key(domain: str, label: str, position: int) -> str:
     return f"{domain}-{slug or position}"
 
 
+def _family_anchor_key(entry: dict, label: str, position: int) -> str:
+    """``family:sibling-james:birth`` — relation-qualified, so two Jameses in
+    two tiers cannot collide, and the key reads as what it is.
+
+    The relation is the CLOSED `focus_candidate.FOCUS_RELATIONSHIPS` value
+    (``sibling``), not the spoken word (``brother``): a second relationship
+    vocabulary living only in anchor keys is the duplicate definition the
+    recurring-defect doctrine forbids (contract §C, deviation 2).
+    """
+    name = _SLUG_RE.sub("-", label.lower()).strip("-")[:40] or str(position)
+    relation = _SLUG_RE.sub("-", str(entry.get("relation") or "kin").lower()).strip("-")
+    return f"family:{relation or 'kin'}-{name}:birth"
+
+
 def _anchor_label(domain: str, label: str) -> str:
     if domain == "birth":
         return "when you were born"
+    if domain == "family":
+        # Renders the owner's own probe style through the existing anchored
+        # opener: "Bell Avenue — was that before or after James was born?"
+        return f"{label} was born"
     if domain == "residences":
         return label
     if domain == "schools":
         return label
     return label
+
+
+# --------------------------------------------------------------------------
+# The roster join and the witnesses (v202, family-landmark §D)
+# --------------------------------------------------------------------------
+
+#: The family tiers, as CLOSED `focus_candidate.FOCUS_RELATIONSHIPS` values.
+#: There is no second relationship vocabulary: a family landmark's `relation`
+#: IS the roster's `relationship`, which is why the join needs no translation
+#: table and no parallel store.
+FAMILY_RELATIONS = frozenset(FAMILY_TIERS)
+
+
+def family_members(landmarks: object) -> tuple[dict, ...]:
+    """Every filed family member as ``{slug, name, relation, living, date}``.
+
+    ``living`` is TRI-STATE and stays ``None`` unless the person said so; a
+    missing value is *unknown*, never "no longer with us".
+    """
+    filed = landmarks if isinstance(landmarks, dict) else {}
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for entry in filed.get("family") or ():
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("label") or entry.get("who") or "").strip()
+        if not name:
+            continue
+        slug = _SLUG_RE.sub("-", name.lower()).strip("-")[:60]
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        relation = str(entry.get("relation") or "").strip().lower()
+        living = entry.get("living")
+        rows.append({
+            "slug": slug,
+            "name": name,
+            "relation": relation if relation in FAMILY_RELATIONS else None,
+            "living": living if isinstance(living, bool) else None,
+            "date": entry.get("date"),
+        })
+    return tuple(rows)
+
+
+def family_roster_invocations(landmarks: object) -> list[list[str]]:
+    """The ``entity-verdict`` argv that files each family member on the ROSTER.
+
+    The same "the package names it; the host writes it" split as
+    :func:`landmark_invocation`. A person named in the family landmark set
+    reaches the roster as a PERSON entity carrying the relationship fact —
+    `entity_verdict`'s `--relationship` / `--living` identity facts (ADR 0013,
+    v190) are exactly the settled, refresh-surviving facts this is
+    (`entity_roster._SETTLED_IDENTITY_FIELDS`).
+
+    ``clear`` is the verdict because the landmark set asserts an IDENTITY, not
+    a page verdict — graduating a brother named once would breach ADR 0013's
+    >=1-mention floor. ``--ensure`` creates the entry when the roster has never
+    heard the name; `entity_roster.apply_previous_decisions` folds it into the
+    real entry by name/alias the moment they are actually mentioned.
+
+    A member with no relation yields nothing: the roster's vocabulary is
+    closed, and an unqualified guess is worse than silence.
+    """
+    argvs: list[list[str]] = []
+    for member in family_members(landmarks):
+        if not member["relation"]:
+            continue
+        argv = ["entity-verdict", "person", member["slug"], "clear",
+                "--name", member["name"],
+                "--relationship", member["relation"]]
+        if member["living"] is True:
+            argv.append("--living")
+        elif member["living"] is False:
+            argv.append("--not-living")
+        argv.append("--ensure")
+        argvs.append(argv)
+    return argvs
+
+
+#: The two closed lists a second person can supply COMPLETELY (`landmarks.md`
+#: §2.7 claim 2). The research flags that claim as a DESIGN PREMISE, not a
+#: measured finding — "is *not* measured anywhere we have found" — and this
+#: does not upgrade it.
+WITNESS_CAN_SUPPLY = ("residences", "schools")
+
+
+def witness_candidates(landmarks: object) -> tuple[dict, ...]:
+    """Living family members, as witnesses for the ask-the-living hooks.
+
+    A **witness** is a living person who was there (`go-deep.md` §7). v200's
+    `places_without_stories` sources witnesses from the residence `household`
+    rung — a narrower and better claim about ONE house, deliberately left
+    alone. This is the other source: the family constellation, which is where
+    witnesses actually come from (`landmarks.md` §2.9).
+
+    Only an EXPLICIT ``living: True`` qualifies. Unknown is not a witness and
+    is not a non-witness, and nothing here ever invokes anybody's mortality.
+    """
+    return tuple({
+        "slug": member["slug"],
+        "name": member["name"],
+        "relation": member["relation"],
+        "can_supply": WITNESS_CAN_SUPPLY,
+    } for member in family_members(landmarks) if member["living"] is True)
+
+
+# --------------------------------------------------------------------------
+# Concrete unknowns from the landmark set (v202, owner rulings 4 and 5)
+# --------------------------------------------------------------------------
+
+LANDMARK_SUBJECT_KIND = "landmark_subject"
+RESIDENCE_GAP_KIND = "residence_gap"
+
+#: How a landmark-derived unknown enters the timeline's probe vocabulary. Both
+#: kinds arrive with their OWN exact question — the ladder's, subject-named —
+#: so `timeline.unknowns` leaves their probe alone rather than replacing it
+#: with a generic opener.
+_LANDMARK_SUBJECT_STEP = "landmark"
+_RESIDENCE_GAP_STEP = "residence"
+
+RESIDENCE_GAP_OPENER = (
+    "Where did you live between {first} and {second}, around {years}?"
+)
+
+
+def incomplete_subjects(landmarks: object, *,
+                        framework_root: str | Path | None = None) -> tuple[dict, ...]:
+    """One concrete unknown per HALF-FILLED subject in an enumeration domain.
+
+    Owner ruling 4 (2026-08-24), the *unknowns are concrete* principle applied
+    to the landmark set: a domain row carries exactly ONE ``next`` question no
+    matter how many named people or places sit incomplete inside it. Each of
+    those subjects is separately answerable, so each becomes its own unknown,
+    NAMED — "What year was Jackie born?", never a generic re-ask.
+
+    An **enumeration domain** is one with ``chain: true`` — family, residences,
+    schools, work. That is what `chain` already means; a second hand-written
+    list of "domains that enumerate" is the duplicate definition the
+    recurring-defect doctrine forbids (contract deviation 4).
+
+    The probe text is `next_rung`'s own rendering for that entry, so there is
+    ONE definition of "the next question for this subject" and the domain row
+    and the unknown can never disagree.
+    """
+    filed = landmarks if isinstance(landmarks, dict) else {}
+    rows: list[dict] = []
+    for row in load_questions(framework_root):
+        if not row.get("chain"):
+            continue
+        domain = row["domain"]
+        ladder = list(row.get("ladder") or ())
+        target = row.get("complete_at")
+        target_index = ladder.index(target) if target in ladder else len(ladder) - 1
+        for entry in filed.get(domain) or ():
+            if not isinstance(entry, dict):
+                continue
+            label = str(entry.get("label") or "").strip()
+            if not label:
+                continue
+            reached = rung_reached(entry, row)
+            index = ladder.index(reached) if reached in ladder else -1
+            if index >= target_index:
+                continue
+            question = _rung(domain, ladder[index + 1], label)
+            slug = _SLUG_RE.sub("-", label.lower()).strip("-")[:40]
+            rows.append({
+                "kind": LANDMARK_SUBJECT_KIND,
+                "key": f"{LANDMARK_SUBJECT_KIND}:{domain}:{slug}",
+                "label": label,
+                "domain": domain,
+                "rung": question["rung"],
+                "landmark": {"domain": domain, "label": label},
+                "probe": {"step": _LANDMARK_SUBJECT_STEP,
+                          "cost": question["cost"],
+                          "text": question["text"]},
+            })
+    return tuple(rows)
+
+
+def residence_gaps(landmarks: object) -> tuple[dict, ...]:
+    """The holes the residence chain leaves, as concrete unknowns.
+
+    Owner ruling 5 (2026-08-24). The residence chain is the domain that is
+    supposed to TILE the timeline (`landmarks.md` §2.7 consequence 1) — so a
+    hole between two named spans is a real, answerable question with a name at
+    each end: "Where did you live between Mesa and Yucaipa, around 1992-1995?"
+    A partial list is accepted whole; the remaining holes persist; nothing
+    nags.
+
+    Rules:
+
+    * **Interior only.** Nothing before the first residence (that asks about
+      infancy) and nothing after the last (that is a nag).
+    * **A hole needs a whole year in it** — ``end + 1 >= start`` is not a hole,
+      so abutting, overlapping and consecutive-year spans mint nothing.
+    * The years are **REPORTED** — the interval the person's own spans imply —
+      never a date named and offered for agreement (`go-deep.md` §4.3).
+
+    This is NOT `timeline.era_gap`: that is a hole between two dated wiki
+    PERIODS. Both can surface for the same years; they are different questions
+    with different answers, and neither derives the other.
+    """
+    filed = landmarks if isinstance(landmarks, dict) else {}
+    dated: list[tuple[int, int, str]] = []
+    for entry in filed.get("residences") or ():
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label") or "").strip()
+        span = entry.get("span") if isinstance(entry.get("span"), dict) else {}
+        start = chrono.year_of(chrono.from_dict(span.get("start")))
+        end = chrono.year_of(chrono.from_dict(span.get("end")), end=True)
+        if not label or start is None or end is None:
+            continue
+        dated.append((int(start), int(end), label))
+    dated.sort()
+    rows: list[dict] = []
+    for (_, end, first), (start, _, second) in zip(dated, dated[1:]):
+        if end + 1 >= start:
+            continue
+        years = f"{end}–{start}"
+        first_slug = _SLUG_RE.sub("-", first.lower()).strip("-")[:40]
+        second_slug = _SLUG_RE.sub("-", second.lower()).strip("-")[:40]
+        rows.append({
+            "kind": RESIDENCE_GAP_KIND,
+            "key": f"{RESIDENCE_GAP_KIND}:{first_slug}:{second_slug}",
+            "label": f"between {first} and {second}",
+            "between": [first, second],
+            "years": [str(end), str(start)],
+            "probe": {"step": _RESIDENCE_GAP_STEP, "cost": 2,
+                      "text": RESIDENCE_GAP_OPENER.format(
+                          first=first, second=second, years=years)},
+        })
+    return tuple(rows)
 
 
 # --------------------------------------------------------------------------

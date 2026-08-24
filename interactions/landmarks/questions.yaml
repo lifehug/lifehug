@@ -9,7 +9,10 @@
 #   order        the position in the set (1 = first)
 #   onboarding   asked at onboarding, in GENERALITIES (owner ruling 1)
 #   ask          the general onboarding question — never "what year" except
-#                `birth`, the one legitimate date opener (landmarks.md §2.1)
+#                for a PERSON'S BIRTH: `birth`, `family` and `children`, the
+#                legitimate date openers (landmarks.md §2.1 + §2.9). The
+#                carve-out is about the KIND of fact — a birth year is
+#                overlearned, not reconstructed — not about whose it is.
 #   ladder       the specificity ladder, coarse -> fine, pipe-separated
 #                (owner ruling 3: a vague answer is ANSWERED; it stays open
 #                only because more would unlock more)
@@ -22,7 +25,7 @@
 #   why          the one-line sourced reason this domain is here
 
 version: 1
-domains: birth|residences|schools|partnerships|children|work|military|losses
+domains: birth|family|residences|schools|partnerships|children|work|military|losses
 
 birth.order: 1
 birth.onboarding: true
@@ -35,7 +38,27 @@ birth.chain: false
 birth.sensitive: false
 birth.why: The axis. Every age statement becomes a year; the one legitimate date opener.
 
-residences.order: 2
+# v202 (family-landmark, owner-set 2026-08-24): the family you came from.
+# Order 2 — where practitioner intake puts it, straight after the subject's own
+# birth and ahead of schooling and work (research §2.9; Montana's data sheet,
+# ND VHP Segment 1 items 3-4). A third CLOSED list, and the only one made of
+# people: its members go to the entity roster as PERSON entries with the
+# relationship fact, never to a parallel family store.
+# One entry per PERSON; `save_landmark` merges by label, so the label is the
+# name. `living` sits past `complete_at`, exactly like residences' `household`
+# — recorded when stated, never demanded, and UNKNOWN unless stated.
+family.order: 2
+family.onboarding: true
+family.ask: Who was in your family growing up — brothers and sisters?
+family.ladder: who|relation|birth|living
+family.complete_at: birth
+family.precision: year
+family.unlocks: sibling_interval|span_containment|witness_supply
+family.chain: true
+family.sensitive: false
+family.why: A third closed list, and the only one made of people — siblings date childhood, elders are the witnesses.
+
+residences.order: 3
 residences.onboarding: true
 residences.ask: Do you remember where you lived? Where was that?
 residences.ladder: city|address|span|household
@@ -46,7 +69,7 @@ residences.chain: true
 residences.sensitive: false
 residences.why: A closed list that tiles the whole timeline; the LHC's first row.
 
-schools.order: 3
+schools.order: 4
 schools.onboarding: true
 schools.ask: Which schools did you go to?
 schools.ladder: name|place|grades|span
@@ -57,7 +80,7 @@ schools.chain: true
 schools.sensitive: false
 schools.why: The second closed list, and the only domain with an external calendar grid.
 
-partnerships.order: 4
+partnerships.order: 5
 partnerships.onboarding: true
 partnerships.ask: Have you ever been married, or had a long partnership?
 partnerships.ladder: happened|who|year|month
@@ -68,7 +91,7 @@ partnerships.chain: false
 partnerships.sensitive: false
 partnerships.why: Reported to the exact month in the LHC's validation data (26 of 28).
 
-children.order: 5
+children.order: 6
 children.onboarding: true
 children.ask: Do you have children?
 children.ladder: happened|who|year|month
@@ -79,7 +102,7 @@ children.chain: false
 children.sensitive: false
 children.why: Month-exact in validation (9 of 10), and dates another person's whole page.
 
-work.order: 6
+work.order: 7
 work.onboarding: false
 work.ask: What work have you done?
 work.ladder: what|where|span
@@ -90,7 +113,7 @@ work.chain: true
 work.sensitive: false
 work.why: Dense but churny — 72% agreement across the full spectrum; year grain only.
 
-military.order: 7
+military.order: 8
 military.onboarding: false
 military.ask: Did you serve?
 military.ladder: happened|branch|span
@@ -101,7 +124,7 @@ military.chain: false
 military.sensitive: false
 military.why: Sharply bounded and institutionally dated.
 
-losses.order: 8
+losses.order: 9
 losses.onboarding: false
 losses.ask: Is there someone you have lost that belongs on this?
 losses.ladder: happened|who|year

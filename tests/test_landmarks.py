@@ -48,12 +48,17 @@ class QuestionSetTests(unittest.TestCase):
             self.assertTrue(row["why"], f"{row['domain']} has no sourced reason")
             self.assertIn(row["complete_at"], row["ladder"])
 
-    def test_residences_and_schools_lead_and_are_chains(self):
-        """landmarks.md §2.7: the two closed lists come first."""
+    def test_the_closed_lists_lead_and_are_chains(self):
+        """landmarks.md §2.7 + §2.9: the THREE closed lists come first.
+
+        v202 inserts `family` at 2 — where practitioner intake puts it
+        (Montana's data sheet; ND VHP Segment 1 items 3-4), and because it is a
+        third closed list: enumerable, finite, ordered, finishable.
+        """
         order = [r["domain"] for r in self.rows]
         self.assertEqual(order[0], "birth", "the axis is first")
-        self.assertEqual(order[1:3], ["residences", "schools"])
-        for domain in ("residences", "schools"):
+        self.assertEqual(order[1:4], ["family", "residences", "schools"])
+        for domain in ("family", "residences", "schools"):
             self.assertTrue(li.domain_row(domain)["chain"])
 
     def test_every_rung_has_a_question(self):
@@ -71,8 +76,8 @@ class QuestionSetTests(unittest.TestCase):
     def test_onboarding_is_the_general_pass_only(self):
         """Owner ruling 1: onboarding asks in generalities."""
         self.assertEqual(li.onboarding_domains(),
-                         ("birth", "residences", "schools", "partnerships",
-                          "children"))
+                         ("birth", "family", "residences", "schools",
+                          "partnerships", "children"))
 
     def test_an_unknown_domain_is_refused(self):
         with self.assertRaises(li.LandmarkInteractionError):
@@ -800,3 +805,415 @@ class DateGrainRungTests(unittest.TestCase):
         self.assertEqual(
             li.rung_reached({"year": "1978", "date": _date("1978-04-12")}, row),
             "day")
+
+
+# ---------------------------------------------------------------------------
+# v202 — the Family landmark (contract: docs/pr-specs/family-landmark.md)
+# ---------------------------------------------------------------------------
+
+
+def _family(label, relation, *, year=None, living=None, **extra):
+    entry = {"domain": "family", "label": label, "who": label,
+             "relation": relation, **extra}
+    if year is not None:
+        entry["date"] = _date(year)
+    if living is not None:
+        entry["living"] = living
+    return entry
+
+
+class FamilyDomainTests(unittest.TestCase):
+    """The ninth domain: siblings as anchors, elders as witnesses (§B)."""
+
+    def setUp(self) -> None:
+        self.row = li.domain_row("family")
+
+    def test_family_is_second_a_chain_and_at_onboarding(self):
+        self.assertEqual(self.row["order"], 2)
+        self.assertTrue(self.row["chain"])
+        self.assertTrue(self.row["onboarding"])
+        self.assertFalse(self.row["sensitive"])
+        self.assertEqual(self.row["ladder"], ("who", "relation", "birth", "living"))
+        self.assertEqual(self.row["complete_at"], "birth")
+
+    def test_living_sits_past_the_completion_target(self):
+        """Exactly like residences' `household`: recorded when stated, never
+        demanded, and UNKNOWN unless stated."""
+        ladder = list(self.row["ladder"])
+        self.assertGreater(ladder.index("living"),
+                           ladder.index(self.row["complete_at"]))
+
+    def test_a_name_alone_sits_at_the_first_rung(self):
+        self.assertEqual(li.rung_reached({"label": "Jackie", "who": "Jackie"},
+                                         self.row), "who")
+
+    def test_the_ladder_climbs_to_the_birth_year(self):
+        entry = _family("James", "sibling", year="1976")
+        self.assertEqual(li.rung_reached(entry, self.row), "birth")
+
+    def test_the_next_question_NAMES_the_incomplete_person(self):
+        """Owner ruling 4: never a generic re-ask."""
+        entries = [_family("James", "sibling", year="1976"),
+                   _family("Jackie", "sibling")]
+        question = li.next_rung(entries, self.row)
+        self.assertEqual(question["rung"], "birth")
+        self.assertEqual(question["subject"], "Jackie")
+        self.assertEqual(question["text"], "What year was Jackie born?")
+
+    def test_the_chain_walks_the_tiers_siblings_parents_grandparents(self):
+        entries = []
+        self.assertEqual(li.family_next_tier(entries), "sibling")
+        entries.append(_family("James", "sibling", year="1976"))
+        self.assertEqual(li.family_next_tier(entries), "parent")
+        entries.append(_family("Desi", "parent", year="1950"))
+        self.assertEqual(li.family_next_tier(entries), "grandparent")
+        entries.append(_family("Betty Jo", "grandparent", year="1921"))
+        self.assertIsNone(li.family_next_tier(entries))
+
+    def test_the_chain_more_question_asks_for_the_MISSING_tier(self):
+        entries = [_family("James", "sibling", year="1976")]
+        question = li.next_rung(entries, self.row)
+        self.assertEqual(question["text"], li.FAMILY_TIER_TEXTS["parent"])
+        self.assertIn("parents", question["text"])
+
+    def test_the_family_opener_is_priced_like_every_other_opener(self):
+        """Otherwise the row sorts behind the residence chain and the reason
+        the domain exists is inverted (§A.1)."""
+        self.assertEqual(li.next_rung([], self.row)["cost"], 1)
+        rows = li.landmark_rows({})
+        self.assertEqual(li.open_landmarks(rows)[0]["domain"], "birth",
+                         "with no birthday the axis is starred and leads")
+        unstarred = li.open_landmarks([r for r in rows if r["domain"] != "birth"])
+        self.assertEqual(unstarred[0]["domain"], "family")
+
+    def test_a_direct_year_question_is_permitted_for_a_sibling(self):
+        """landmarks.md §2.9: the carve-out is about the KIND of fact."""
+        text = "What year was Jackie born?"
+        self.assertEqual(li.lint_landmark_reply(text, stage="ask", domain="family"), [])
+        self.assertEqual(li.lint_landmark_reply(text, stage="ask", domain="children"), [])
+        findings = li.lint_landmark_reply(text, stage="ask", domain="residences")
+        self.assertEqual([f["lint"] for f in findings],
+                         ["landmark_gates.no_year_demand"])
+
+    def test_the_carve_out_is_ONE_named_set_read_by_the_harness_too(self):
+        self.assertEqual(li.YEAR_OPENER_DOMAINS,
+                         frozenset({"birth", "family", "children"}))
+        for domain in li.YEAR_OPENER_DOMAINS:
+            self.assertNotIn("no_year_demand",
+                             landmarks_evals._applicable(domain, False))  # noqa: SLF001
+
+    def test_every_domains_own_rung_text_survives_its_own_lints(self):
+        """The defect this contract stops patching one at a time: a domain
+        whose own question trips its own lint is a contradiction, not a
+        subtlety (v199 shipped three)."""
+        for (domain, _rung), text in li.RUNG_TEXTS.items():
+            rendered = text.format(label="Jackie")
+            with self.subTest(domain=domain, text=rendered):
+                self.assertEqual(
+                    li.lint_landmark_reply(
+                        rendered, stage="ask", domain=domain,
+                        sensitive=li.domain_row(domain)["sensitive"]),
+                    [])
+
+    def test_living_is_TRI_STATE_through_both_validation_layers(self):
+        for value, expected in ((True, True), (False, False)):
+            record = engine._parse_landmark(  # noqa: SLF001
+                {"domain": "family", "label": "Betty Jo", "living": value})
+            self.assertEqual(li.validate_landmark(record)["living"], expected)
+        record = engine._parse_landmark(  # noqa: SLF001
+            {"domain": "family", "label": "Betty Jo"})
+        self.assertNotIn("living", li.validate_landmark(record))
+
+    def test_birth_order_is_a_field_and_never_blocks_the_ladder(self):
+        entry = _family("James", "sibling", year="1976",
+                        birth_order="two years older")
+        self.assertEqual(li.rung_reached(entry, self.row), "birth")
+        self.assertNotIn("birth_order", self.row["ladder"])
+        argv = li.landmark_invocation(entry)
+        self.assertEqual(argv[argv.index("--birth-order") + 1], "two years older")
+
+    def test_the_invocation_emits_the_living_bool_as_a_flag_pair(self):
+        self.assertIn("--living",
+                      li.landmark_invocation(_family("Desi", "parent", living=True)))
+        self.assertIn("--not-living",
+                      li.landmark_invocation(_family("Betty Jo", "grandparent",
+                                                     living=False)))
+        self.assertNotIn("--living",
+                         li.landmark_invocation(_family("Desi", "parent")))
+
+    def test_every_flag_the_family_invocation_emits_is_a_real_cli_flag(self):
+        """One writer, and the package never names a flag the CLI refuses."""
+        import lifehug  # noqa: PLC0415
+
+        parser = lifehug.build_parser()
+        args = parser.parse_args(li.landmark_invocation(
+            _family("James", "sibling", year="1976",
+                    birth_order="two years older", living=True)))
+        self.assertEqual(args.domain, "family")
+        self.assertEqual(args.relation, "sibling")
+        self.assertEqual(args.birth_order, "two years older")
+        self.assertTrue(args.living)
+        args = parser.parse_args(li.landmark_invocation(
+            _family("Betty Jo", "grandparent", living=False)))
+        self.assertIs(args.living, False)
+
+    def test_the_cli_round_trips_a_family_record_through_validation(self):
+        import lifehug  # noqa: PLC0415
+
+        parser = lifehug.build_parser()
+        args = parser.parse_args(li.landmark_invocation(
+            _family("Betty Jo", "grandparent", living=False)))
+        record = {"domain": args.domain, "label": args.label, "who": args.who,
+                  "relation": args.relation, "living": args.living}
+        self.assertIs(li.validate_landmark(record)["living"], False)
+
+
+class FamilyAnchorTests(unittest.TestCase):
+    """§C: the join between a filed relative and the derived anchor index."""
+
+    def test_a_sibling_birth_year_becomes_a_relation_qualified_anchor(self):
+        anchors = li.anchors_from_landmarks(
+            {"family": [_family("James", "sibling", year="1976")]})
+        self.assertEqual(list(anchors), ["family:sibling-james:birth"])
+        row = anchors["family:sibling-james:birth"]
+        self.assertEqual(row["kind"], "landmark")
+        self.assertEqual(row["label"], "James was born")
+
+    def test_the_key_uses_the_CLOSED_relationship_word_not_the_spoken_one(self):
+        """Deviation 2: `sibling`, never `brother` — one vocabulary."""
+        key = next(iter(li.anchors_from_landmarks(
+            {"family": [_family("James", "sibling", year="1976")]})))
+        self.assertIn("sibling", key)
+        self.assertNotIn("brother", key)
+
+    def test_two_relatives_with_the_same_name_do_not_collide(self):
+        anchors = li.anchors_from_landmarks({"family": [
+            _family("James", "sibling", year="1976"),
+            _family("James", "grandparent", year="1911"),
+        ]})
+        self.assertEqual(len(anchors), 2)
+
+    def test_an_undated_relative_mints_no_anchor(self):
+        self.assertEqual(
+            li.anchors_from_landmarks({"family": [_family("Jackie", "sibling")]}), {})
+
+    def test_the_family_anchor_reaches_the_timeline_index_like_any_other(self):
+        import timeline  # noqa: PLC0415
+
+        anchors = timeline.anchor_index(
+            [], [], [], landmarks=li.anchors_from_landmarks(
+                {"family": [_family("James", "sibling", year="1976")]}))
+        self.assertIn("family:sibling-james:birth", anchors)
+
+
+class FamilyRosterJoinTests(unittest.TestCase):
+    """§D: the people go to the ROSTER; there is no parallel family store."""
+
+    LANDMARKS = {"family": [
+        _family("James", "sibling", year="1976", living=True),
+        _family("Betty Jo", "grandparent", living=False),
+        _family("Nobody", ""),
+    ]}
+
+    def _empty_roster(self):
+        """A throwaway roster file, and every module that names one pointed at
+        it. Synthetic only — nothing here ever touches a real vault."""
+        import entity_roster  # noqa: PLC0415
+        import entity_verdict  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        path = tmp / "person.json"
+        path.write_text(json.dumps(
+            {"version": 1, "type": "person", "entities": []}), encoding="utf-8")
+        for module in (entity_roster, entity_verdict):
+            patcher = mock.patch.object(module, "roster_file", lambda _t, p=path: p)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return path
+
+    def test_the_relation_vocabulary_is_the_rosters_own(self):
+        import focus_candidate  # noqa: PLC0415
+
+        self.assertTrue(li.FAMILY_RELATIONS <= set(focus_candidate.FOCUS_RELATIONSHIPS))
+
+    def test_the_invocations_name_the_existing_roster_verb(self):
+        argvs = li.family_roster_invocations(self.LANDMARKS)
+        self.assertEqual(len(argvs), 2, "a member with no relation is skipped")
+        self.assertEqual(argvs[0][:4], ["entity-verdict", "person", "james", "clear"])
+        self.assertIn("--relationship", argvs[0])
+        self.assertIn("--living", argvs[0])
+        self.assertIn("--not-living", argvs[1])
+        for argv in argvs:
+            self.assertIn("--ensure", argv)
+            self.assertNotIn("graduate", argv)
+
+    def test_every_flag_the_roster_invocation_emits_is_a_real_cli_flag(self):
+        """The package never names a flag `lifehug.py entity-verdict` refuses."""
+        import lifehug  # noqa: PLC0415
+
+        parser = lifehug.build_parser()
+        for argv in li.family_roster_invocations(self.LANDMARKS):
+            with self.subTest(slug=argv[2]):
+                args = parser.parse_args(argv)
+                self.assertEqual(args.type, "person")
+                self.assertEqual(args.verdict, "clear")
+                self.assertTrue(args.ensure)
+                self.assertTrue(args.name)
+                self.assertIn(args.relationship, li.FAMILY_RELATIONS)
+
+    def test_ensure_creates_a_row_that_is_never_page_eligible(self):
+        """ADR 0013's >=1-mention floor: an identity fact is not a page."""
+        import entity_roster  # noqa: PLC0415
+        import entity_verdict  # noqa: PLC0415
+
+        path = self._empty_roster()
+        entry = entity_verdict.apply_verdict(
+            "person", "james", "clear", relationship="sibling",
+            living=True, ensure=True, name="James")
+        self.assertFalse(entry["page_eligible"])
+        self.assertFalse(entry["qualifies"])
+        self.assertEqual(entry["relationship"], "sibling")
+        self.assertTrue(entry["living"])
+        self.assertTrue(entity_roster._has_settled_identity(entry))  # noqa: SLF001
+        self.assertIn("james", path.read_text(encoding="utf-8"))
+
+    def test_ensure_is_idempotent(self):
+        import entity_verdict  # noqa: PLC0415
+
+        path = self._empty_roster()
+        for _ in range(2):
+            entity_verdict.apply_verdict(
+                "person", "james", "clear", relationship="sibling",
+                ensure=True, name="James")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(len(data["entities"]), 1)
+
+    def test_without_ensure_an_unknown_slug_is_still_refused(self):
+        import entity_verdict  # noqa: PLC0415
+
+        self._empty_roster()
+        with self.assertRaises(entity_verdict.EntityVerdictError):
+            entity_verdict.apply_verdict("person", "james", "clear",
+                                         relationship="sibling")
+
+
+class WitnessTests(unittest.TestCase):
+    """§D: a witness is a LIVING person who was there — explicitly living."""
+
+    def test_only_an_explicit_living_true_is_a_witness(self):
+        rows = li.witness_candidates({"family": [
+            _family("Desi", "parent", living=True),
+            _family("Betty Jo", "grandparent", living=False),
+            _family("Jackie", "sibling"),
+        ]})
+        self.assertEqual([row["name"] for row in rows], ["Desi"])
+        self.assertEqual(rows[0]["can_supply"], ("residences", "schools"))
+
+    def test_the_residence_household_witnesses_are_left_alone(self):
+        """v200's narrower, better claim about ONE house is untouched."""
+        rows = li.places_without_stories({"residences": [{
+            "label": "Bell Avenue", "household": "Mom and James",
+            "span": {"start": _date("1984"), "end": _date("1990")}}]})
+        self.assertEqual(rows[0]["witnesses"], "Mom and James")
+
+
+class ConcreteLandmarkUnknownTests(unittest.TestCase):
+    """Owner rulings 4 and 5: unknowns are concrete, and they have names."""
+
+    LANDMARKS = {
+        "family": [_family("James", "sibling", year="1976"),
+                   _family("Jackie", "sibling")],
+        "residences": [
+            {"label": "Mesa", "city": "Mesa", "address": "1 Mesa Rd",
+             "span": {"start": _date("1988"), "end": _date("1992")}},
+            {"label": "Yucaipa", "city": "Yucaipa",
+             "span": {"start": _date("1995"), "end": _date("2001")}},
+        ],
+    }
+
+    def test_each_incomplete_subject_is_its_own_named_unknown(self):
+        by_label = {row["label"]: row
+                    for row in li.incomplete_subjects(self.LANDMARKS)}
+        self.assertIn("Jackie", by_label)
+        self.assertNotIn("James", by_label, "a complete subject asks nothing")
+        self.assertEqual(by_label["Jackie"]["kind"], "landmark_subject")
+        self.assertEqual(by_label["Jackie"]["probe"]["text"],
+                         "What year was Jackie born?")
+        self.assertEqual(by_label["Jackie"]["landmark"],
+                         {"domain": "family", "label": "Jackie"})
+
+    def test_a_named_residence_without_a_span_asks_by_name_too(self):
+        by_label = {row["label"]: row
+                    for row in li.incomplete_subjects(self.LANDMARKS)}
+        self.assertIn("Yucaipa", by_label)
+        self.assertIn("Yucaipa", by_label["Yucaipa"]["probe"]["text"])
+
+    def test_the_subject_probe_IS_the_ladders_own_next_question(self):
+        """One definition — the row's `next` and the unknown cannot disagree."""
+        for row in li.incomplete_subjects(self.LANDMARKS):
+            question = li.next_rung(
+                [e for e in self.LANDMARKS[row["domain"]]
+                 if e.get("label") == row["label"]],
+                li.domain_row(row["domain"]))
+            self.assertEqual(row["probe"]["text"], question["text"])
+
+    def test_enumeration_means_chain_true_not_a_hand_written_list(self):
+        chains = {row["domain"] for row in li.load_questions() if row["chain"]}
+        self.assertEqual(chains, {"family", "residences", "schools", "work"})
+
+    def test_a_hole_between_two_residences_becomes_a_named_question(self):
+        rows = li.residence_gaps(self.LANDMARKS)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["kind"], "residence_gap")
+        self.assertEqual(rows[0]["between"], ["Mesa", "Yucaipa"])
+        self.assertEqual(rows[0]["years"], ["1992", "1995"])
+        self.assertEqual(
+            rows[0]["probe"]["text"],
+            "Where did you live between Mesa and Yucaipa, around 1992–1995?")
+
+    def test_abutting_and_consecutive_spans_are_not_holes(self):
+        for end, start in (("1992", "1992"), ("1992", "1993"), ("1995", "1992")):
+            with self.subTest(end=end, start=start):
+                self.assertEqual(li.residence_gaps({"residences": [
+                    {"label": "A",
+                     "span": {"start": _date("1988"), "end": _date(end)}},
+                    {"label": "B",
+                     "span": {"start": _date(start), "end": _date("2001")}},
+                ]}), ())
+
+    def test_no_gap_is_minted_before_the_first_or_after_the_last(self):
+        self.assertEqual(li.residence_gaps({"residences": [
+            {"label": "Only",
+             "span": {"start": _date("1988"), "end": _date("1992")}}]}), ())
+
+    def test_the_gap_question_reports_and_never_asks_for_agreement(self):
+        import timeline_interaction as ti  # noqa: PLC0415
+
+        for row in li.residence_gaps(self.LANDMARKS):
+            self.assertIsNone(ti.proposes_a_date(row["probe"]["text"]))
+            self.assertEqual(
+                li.lint_landmark_reply(row["probe"]["text"], stage="ask",
+                                       domain="residences"), [])
+
+    def test_both_kinds_reach_the_timelines_unknowns_with_their_own_probe(self):
+        import timeline  # noqa: PLC0415
+
+        by_key = {row["key"]: row
+                  for row in timeline.unknowns({}, landmarks=self.LANDMARKS)}
+        self.assertEqual(by_key["landmark_subject:family:jackie"]["probe"]["text"],
+                         "What year was Jackie born?")
+        self.assertIn("Mesa", by_key["residence_gap:mesa:yucaipa"]["probe"]["text"])
+
+    def test_the_new_kinds_are_declared_and_keyed(self):
+        import timeline  # noqa: PLC0415
+
+        self.assertIn("landmark_subject", timeline.UNKNOWN_KINDS)
+        self.assertIn("residence_gap", timeline.UNKNOWN_KINDS)
+        for row in (li.incomplete_subjects(self.LANDMARKS)
+                    + li.residence_gaps(self.LANDMARKS)):
+            self.assertEqual(timeline.unknown_key(row), row["key"])
+
+    def test_a_broken_store_never_takes_the_unknowns_down(self):
+        import timeline  # noqa: PLC0415
+
+        self.assertIsInstance(timeline.unknowns({}, landmarks="not a store"), list)

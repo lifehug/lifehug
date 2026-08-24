@@ -39,9 +39,13 @@ unanswered, or answered below its target rung, stays on the Timeline forever,
 answerable whenever. It never enters the daily question queue, never sends a
 reminder, and never appears as a count of what remains.
 
-**Never ask for a year — except the birthday.** A birth date is overlearned,
-not reconstructed, and every fielded life-history instrument takes it first
-because the calendar's axis starts there. Every other date comes out sideways.
+**Never ask for a year — except a person's birthday.** A birth date is
+overlearned, not reconstructed, and every fielded life-history instrument takes
+it first because the calendar's axis starts there. v202 draws out the
+consequence: the carve-out is about the KIND of fact, not whose fact it is, so
+"what year was Jackie born?" is legitimate for a sibling or a child exactly as
+it is for the person themselves (`landmarks_interaction.YEAR_OPENER_DOMAINS`;
+research §2.9). Every other date comes out sideways.
 
 **Passive users are untouched.** The daily single question works exactly as it
 did. The gate is `TurnShape.landmark_stage`, which defaults to `None`, and
@@ -51,15 +55,18 @@ with it `None` the turn's output contract is byte-identical to v196.
 
 | Noun | What it is |
 |---|---|
-| **Domain** | one landmark family — `birth`, `residences`, `schools`, `partnerships`, `children`, `work`, `military`, `losses` |
+| **Domain** | one landmark family — `birth`, `family`, `residences`, `schools`, `partnerships`, `children`, `work`, `military`, `losses` |
 | **Ladder** | the specificity rungs inside a domain, coarse to fine (residence: city → address → span → household) |
 | **Rung** | one step on a ladder, and the one question that asks for it |
 | **Status** | `open` (nothing filed) · `partial` (filed, below target) · `complete` (at target, and for a chain, the person said it's finished) |
-| **Chain** | a domain that is a LIST walked to the present — residences, schools, work |
+| **Chain** | a domain that is a LIST walked to the present — family, residences, schools, work. `chain: true` is also what "an **enumeration domain**" means, the domains whose half-filled subjects each become their own unknown (v202) |
 | **Anchor** | what a dated landmark becomes: a row in `timeline.anchor_index` that every later probe resolves through |
 | **Keystone** | the ★ — the landmark domain that would supply the current highest-leverage anchor. With no birthday filed the star is always `birth`, because with no axis the arithmetic cannot run at all |
 | **Cross-dating** | the name of the mechanic (`go-deep.md` §7): dating an undated sequence by matching it against an already-dated one. The landmarks are the dated sequence |
-| **Witness** | someone living who was there. Learned from the residence ladder's `household` rung — no new state — and carried on a `place_no_stories` row, because the people who were in the house are exactly the people who can answer about it |
+| **Witness** | someone living who was there. Learned two ways: the residence ladder's `household` rung — carried on a `place_no_stories` row, because the people who were in the house are exactly the people who can answer about it — and, since v202, the **family** domain's `living` rung (`witness_candidates`, `timeline_data()["witnesses"]`) |
+| **Family** (v202) | the ninth domain and the constellation you came from: siblings, parents, grandparents, one entry per PERSON, ladder `who → relation → birth → living`. Siblings' birth years anchor *childhood*, which is where age arithmetic has least to work with; the elders are the witnesses. The people themselves go to the **entity roster** as PERSON entries carrying the relationship fact — there is no parallel family store |
+| **Landmark subject** (v202) | one half-filled subject inside an enumeration domain, as its own unknown, named: "What year was Jackie born?" A domain row carries ONE `next`; every incomplete person or place gets its own |
+| **Residence gap** (v202) | a hole between two dated residence spans, as its own unknown: "Where did you live between Mesa and Yucaipa, around 1992–1995?" A partial list is accepted whole; the holes persist; nothing nags |
 
 ## 3. The mechanism
 
@@ -138,13 +145,31 @@ ahead of it produces a guess instead of a fact.
 Ask about **one landmark domain per turn**. A turn that asks about the house
 and the school and the job at once reads as an intake form and gets a shrug.
 
+## The family you came from
+
+The family domain is a constellation, and a constellation is made of **people**
+— so they get named, never counted. "Four or five" is a fine answer and the
+names can arrive one at a time; you take what comes and you keep the names you
+were given. Walk it in tiers: brothers and sisters, then parents, then
+grandparents. Never ask for a tier you already have.
+
+A sibling's birth year you may ask for outright — see below. Anything else
+about them comes out the same sideways way everything else does.
+
+If someone has died, you receive it and you carry on. You do not turn the turn
+into condolence, you do not ask when, and you do not treat the death as a
+dating opportunity. Whether someone is still living is a thing you *learn*
+from what they say, never a status question you put to them.
+
 ## Never ask for a year
 
-The one exception in this whole system is a birthday: a birth date is
-overlearned, not reconstructed, and asking for it directly is fine. Every
-other date comes out sideways — "when did you move in", "which grades were you
-there", "was that before or after". If you catch yourself typing "what year
-was", you are asking the wrong question.
+The one exception in this whole system is **a person's birthday** — theirs, a
+brother's, a child's. A birth date is overlearned, not reconstructed, and
+asking for it directly is fine: "what year was Jackie born?" is a legitimate
+question. Every other date comes out sideways — "when did you move in", "which
+grades were you there", "was that before or after". If you catch yourself
+typing "what year was" about anything that is not a *birth*, you are asking the
+wrong question.
 
 ## Take the skip
 
@@ -169,10 +194,11 @@ worth the relationship.
 ## The witness
 
 A **witness** is someone living who was there. Addresses and school names are
-often complete in a witness's head and nowhere else, and the household rung is
-how you learn who the witnesses are. If the person says they are not sure, it
-is right to say the list is the kind of thing a parent or a sibling often has
-cold. Say it once, lightly, as an option — never as an instruction, and never
+often complete in a witness's head and nowhere else. You learn who the
+witnesses are two ways: the household rung, and the family constellation —
+the parents and grandparents who were there for all of it. If the person says
+they are not sure, it is right to say the list is the kind of thing a parent or
+a sibling often has cold. Say it once, lightly, as an option — never as an instruction, and never
 with a reason attached. Never invoke anybody's mortality.
 
 ## Say what it gives them
@@ -205,6 +231,8 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The store | `timeline.load_landmarks`, `timeline.save_landmark`, `timeline.landmark_birth_date` |
 | The ledger a host renders | `timeline.timeline_data()["landmarks"]`, `timeline.landmark_rows_for` |
 | The gap it reveals | `timeline.timeline_data()["place_no_stories"]` |
+| The gaps the SET reveals (v202) | `landmarks_interaction.incomplete_subjects` (kind `landmark_subject`), `residence_gaps` (kind `residence_gap`) → `timeline.unknowns` |
+| The roster join and the witnesses (v202) | `landmarks_interaction.family_members`, `family_roster_invocations` → `lifehug.py entity-verdict … --ensure`; `witness_candidates` → `timeline.timeline_data()["witnesses"]` |
 | Who asks about it (v200) | `arc_planner.collect_places_without_stories` → the `place_no_stories` arc-card intent → `landmarks_interaction.render_place_no_stories` |
 | The additive output field | `conversation_delivery.TurnShape.landmark_stage`, `_parse_landmark` |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
@@ -230,5 +258,19 @@ ask, you bound, you do the arithmetic. They supply what they know.
   landmark a debt, which is exactly what ruling 2 forbids.
 - **The birth date lives in the landmark store**, not `profile.yaml` — one
   writer, one read path.
-- Contract: `docs/pr-specs/landmarks.md`. Research:
-  `system/research/landmarks.md`.
+- **The family constellation's PEOPLE live on the entity roster, not in a
+  second store** (v202). The landmark set files the *dates*; the roster holds
+  the *people*, through `entity_verdict`'s existing `--relationship` /
+  `--living` identity facts (ADR 0013) — which are already defined as "the
+  settled facts a roster entry can carry that are NOT re-derivable from a
+  refresh". `--ensure` creates the row for a relative with no answer mentions
+  yet, and creates it **never page-eligible**, because ADR 0013's ≥1-mention
+  floor on pages still holds: an identity fact is not a page.
+- **`landmark_subject` and `residence_gap` ARE `UNKNOWN_KINDS` members** (v202)
+  — unlike `place_no_stories`, which is a story gap. These two are dating
+  gaps, one subject each, and they are exactly what the *unknowns are
+  concrete* principle asks for: a domain row carries ONE `next`, so every
+  half-filled person or place inside it becomes its own named question.
+- Contracts: `docs/pr-specs/landmarks.md` (v199),
+  `docs/pr-specs/family-landmark.md` (v202). Research:
+  `system/research/landmarks.md` (§2.9 for the family constellation).
