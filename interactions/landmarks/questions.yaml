@@ -23,6 +23,17 @@
 #   chain        true when the answer is a LIST walked to the present
 #   sensitive    true when the domain is offered, never asked
 #   why          the one-line sourced reason this domain is here
+#
+# THE NONE TERMINAL (owner ruling 6, 2026-08-24) is DERIVED from this file
+# rather than declared in it: a domain whose `ladder` OPENS at `happened`
+# asks a yes/no first, so "no" is a complete and final answer to the whole
+# domain — a person with no military service, no partnerships or no children
+# must be able to finish those domains the same way a person with them can.
+# `landmarks_interaction.domain_accepts_none` is the one reader of that rule;
+# moving a ladder's first rung to or from `happened` moves the terminal with
+# it, which is the point. `family` opens at `who` and is therefore OUTSIDE the
+# terminal by derivation, correctly: it enumerates people, and "no siblings"
+# is not an empty family — a chain finishes with `chain_complete`.
 
 version: 1
 domains: birth|family|residences|schools|partnerships|children|work|military|losses

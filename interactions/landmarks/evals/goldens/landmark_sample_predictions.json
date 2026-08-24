@@ -300,5 +300,46 @@
     "landmark": null
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-none-is-a-finished-answer",
+  "turns": [
+   {
+    "message": "Got it — no service, then. That's the whole answer to that one, so I'll leave it there.",
+    "landmark": {
+     "domain": "military",
+     "none": true
+    }
+   },
+   {
+    "message": "Thank you for these. They make everything else easier to place.",
+    "landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-none-is-superseded-not-fought",
+  "turns": [
+   {
+    "message": "Ah — the Army after all. Good, I'll put that back on the map. Where did they send you?",
+    "landmark": {
+     "domain": "military",
+     "happened": "yes",
+     "branch": "the Army"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-none-completes-children",
+  "turns": [
+   {
+    "message": "No children — understood, and that's a complete answer. I won't bring it up again.",
+    "landmark": {
+     "domain": "children",
+     "none": true
+    }
+   }
+  ]
  }
 ]

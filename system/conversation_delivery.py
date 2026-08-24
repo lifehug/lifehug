@@ -493,7 +493,8 @@ def _output_contract_block(shape: TurnShape) -> str:
         '"granularity": "day | month | season | year | range | era", '
         '"confidence": "certain | approximate | inferred | conjectural", '
         '"basis": "stated | age | anchor | order | public_event | connector"}, '
-        '"span": {"start": {…}, "end": {…}}, "skipped": true | false} | null,\n'
+        '"span": {"start": {…}, "end": {…}}, "skipped": true | false, '
+        '"none": true | false} | null,\n'
         if shape.landmark_stage is not None
         else ""
     )
@@ -504,8 +505,11 @@ def _output_contract_block(shape: TurnShape) -> str:
         "street in \"address\", the school or the place in \"label\". A date "
         "or a span only when they supplied one. A coarse answer is an answer: "
         '"the eighties" is a real span, not a miss. When they skip, it is '
-        '{"domain": "<the domain>", "skipped": true}. Never invent a place, a '
-        "date, a name, or a domain you were not given.\n"
+        '{"domain": "<the domain>", "skipped": true}. When they say it never '
+        'happened at all — "I never served", "we didn\'t have children" — '
+        'that is a real, finished answer: {"domain": "<the domain>", "none": '
+        "true}. Never invent a place, a date, a name, or a domain you were "
+        "not given.\n"
         if shape.landmark_stage is not None
         else ""
     )
@@ -851,6 +855,11 @@ _LANDMARK_KEYS = frozenset({
     # v202 (family-landmark): `birth_order` is a free-text field alongside
     # label/place/subject, not a rung.
     "birth_order",
+    # v203: the none terminal — "I never served", "no children". Structurally
+    # a sibling of `skipped`; semantically its opposite (a skip is "not now",
+    # a none is "there is nothing here"). Which domains may carry it is
+    # `landmarks_interaction.domain_accepts_none`'s call, not this layer's.
+    "none",
     # ladder rungs
     "year", "month", "day", "city", "address", "household",
     "name", "grades", "happened", "who", "what", "where", "branch",
@@ -905,7 +914,7 @@ def _parse_landmark(raw: object) -> dict | None:
         return None
     parsed: dict = {}
     for key, value in raw.items():
-        if key in ("date", "span", "skipped", "chain_complete"):
+        if key in ("date", "span", "skipped", "chain_complete", "none"):
             continue
         if key in _LANDMARK_BOOL_KEYS and isinstance(value, bool):
             parsed[key] = value
@@ -933,6 +942,8 @@ def _parse_landmark(raw: object) -> dict | None:
             parsed["span"] = bounds
     if raw.get("skipped") is True:
         parsed["skipped"] = True
+    if raw.get("none") is True:
+        parsed["none"] = True
     if raw.get("chain_complete") is True:
         parsed["chain_complete"] = True
     if not parsed.get("domain"):

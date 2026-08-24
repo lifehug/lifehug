@@ -39,6 +39,15 @@ unanswered, or answered below its target rung, stays on the Timeline forever,
 answerable whenever. It never enters the daily question queue, never sends a
 reminder, and never appears as a count of what remains.
 
+**"That never happened" is a finished answer.** Four of the nine domains —
+`partnerships`, `children`, `military`, `losses` — open with a yes/no, and
+*no* completes them outright. A person with no military service is DONE with
+military: the row leaves the open list and is never offered again. This is the
+mirror of the rule above, and it is the difference between an instrument and a
+form (owner ruling 6, 2026-08-24; `landmarks.md` §5.2). `family` is *not* one
+of the four — its ladder opens at `who`, and "no siblings" does not mean there
+was no family. An enumeration domain is finished the way every chain is.
+
 **Never ask for a year — except a person's birthday.** A birth date is
 overlearned, not reconstructed, and every fielded life-history instrument takes
 it first because the calendar's axis starts there. v202 draws out the
@@ -59,6 +68,8 @@ with it `None` the turn's output contract is byte-identical to v196.
 | **Ladder** | the specificity rungs inside a domain, coarse to fine (residence: city → address → span → household) |
 | **Rung** | one step on a ladder, and the one question that asks for it |
 | **Status** | `open` (nothing filed) · `partial` (filed, below target) · `complete` (at target, and for a chain, the person said it's finished) |
+| **Entailment** | `happened` is the one rung nobody states outright. It is satisfied by anything else the entry carries (`landmarks_interaction.asserts_happened`) — you cannot name your children without having children. Without it the first rung of all four yes/no domains was unreachable, and a fully answered domain read as if nothing had been said |
+| **None terminal** | `{"domain": …, "none": true}` — the answer "that never happened". Reports the domain's `complete_at` rung, so the domain is `complete` by the same definition every other answer uses. Available only where the ladder opens at `happened` (`landmarks_interaction.domain_accepts_none`), so `partnerships`/`children`/`military`/`losses` and nothing else: `{"domain": "birth", "none": true}` would complete the axis with no date, and `family` is an enumeration, not a yes/no |
 | **Chain** | a domain that is a LIST walked to the present — family, residences, schools, work. `chain: true` is also what "an **enumeration domain**" means, the domains whose half-filled subjects each become their own unknown (v202) |
 | **Anchor** | what a dated landmark becomes: a row in `timeline.anchor_index` that every later probe resolves through |
 | **Keystone** | the ★ — the landmark domain that would supply the current highest-leverage anchor. With no birthday filed the star is always `birth`, because with no axis the arithmetic cannot run at all |
@@ -83,7 +94,17 @@ closed key set) then `landmarks_interaction.validate_landmark` (semantic,
 closed domain set, and every date normalized through
 `chronology.parse_edtf` so its bounds are filled). It files through
 `lifehug.py landmark-record`, which merges into the same entry by label,
-because the ladder revisits the same subject over many conversations.
+because the ladder revisits the same subject over many conversations. HOW two
+records combine is one function, `landmarks_interaction.merge_landmark_entry`:
+normally a merge, so later rungs land on the same entry; a `none` **replaces**
+what was there, and any substantive answer **clears** a standing `none`. That
+is what "actually I did serve, briefly" does — the none is superseded, not
+fought, and the domain reopens at the rung the new answer reaches.
+
+A **skip** and a **none** are not the same thing and do not file the same way.
+A skip is "not now": it records nothing (`landmark_invocation` returns `None`)
+and the domain stays open. A none is "there is nothing here": it files
+(`landmark-record <domain> --none`) because it is the answer.
 
 ## 4. The algorithm, worked
 
@@ -116,6 +137,21 @@ And three things become possible that were not before:
 
 Ladder status through those three commands: `open` → `partial` (city only) →
 `partial` (still, because the chain has not been declared finished).
+
+Now the same person is asked "did you serve?" and says they never did:
+
+```
+landmark-record military --none
+```
+
+`military`'s ladder is `happened → branch → span` and its `complete_at` is
+`span`, so before v203 that answer had no rung to reach and the row stayed
+open forever. `rung_reached` now reports `span` for a none entry, which is the
+only place the rule lives: `status_for_domain` returns `complete`, `next_rung`
+returns `None`, `open_landmarks` drops the row, and a host that renders "only
+the rows that are not complete" hides it without knowing the rule exists.
+`anchors_from_landmarks` yields nothing for it — there is no date, so there is
+nothing to anchor, and nothing is invented.
 
 ## 5. In the loop
 
@@ -177,6 +213,23 @@ wrong question.
 these end that landmark for this conversation. You say something ordinary and
 move on or stop. You never ask twice, never say "are you sure", never explain
 what they are missing out on.
+
+## "No" is an answer, and it ends the domain
+
+Some of these questions have a real answer of *no*. Never served. No children.
+Never married. That is not a gap and not a skip — it is the finished answer,
+and you record it as one. Say something ordinary, and never raise that domain
+again.
+
+A skip and a no are different, and you must not confuse them. "Let's leave
+that" is a skip: it ends the topic for today. "There's nothing there" is a no:
+it ends the topic for good. If you cannot tell which one you heard, treat it
+as a skip — a domain asked once more is a small cost; a life recorded as
+childless because someone changed the subject is not.
+
+If they later say the opposite — "actually I did serve, briefly" — take it
+without comment and without pointing out that they told you otherwise. They
+are the authority on their own life.
 
 ## Receive the coarse answer
 
@@ -256,6 +309,12 @@ ask, you bound, you do the arithmetic. They supply what they know.
   timeline whisper, at most one per card, counted within the same weekly
   `arc_planner.DEFAULT_GAP_MAX`. Minting it into the bank would make an open
   landmark a debt, which is exactly what ruling 2 forbids.
+- **A none is a first-class terminal, not a status value** (v203). It is a
+  RECORD (`{"domain": …, "none": true}`) that reports the domain's own
+  `complete_at` rung, so `status` keeps its three values and every host that
+  already renders "not `complete`" hides the row with no change. Modeling it
+  as a fourth status would have made every renderer, on every medium, learn a
+  new word for "done".
 - **The birth date lives in the landmark store**, not `profile.yaml` — one
   writer, one read path.
 - **The family constellation's PEOPLE live on the entity roster, not in a

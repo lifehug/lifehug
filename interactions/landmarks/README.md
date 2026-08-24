@@ -96,7 +96,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The roster join and the witnesses (v202) | `landmarks_interaction.family_members`, `family_roster_invocations(landmarks)` → `lifehug.py entity-verdict person <slug> clear --relationship … [--living|--not-living] --ensure`; `witness_candidates(landmarks)`, `timeline.timeline_data()["witnesses"]` |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
-| The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete]` |
+| The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete] [--none]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
 writes it.

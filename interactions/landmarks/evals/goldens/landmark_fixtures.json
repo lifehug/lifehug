@@ -652,5 +652,77 @@
     "expected_landmark": null
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-none-is-a-finished-answer",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "military",
+    "rung": "happened",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "military",
+     "none": true
+    },
+    "domains_named": [
+     "military"
+    ]
+   },
+   {
+    "stage": "close",
+    "domain": "military",
+    "rung": null,
+    "sensitive": false,
+    "expected_landmark": null
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-none-is-superseded-not-fought",
+  "landmarks": {
+   "military": [
+    {
+     "domain": "military",
+     "none": true
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "military",
+    "rung": "branch",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "military",
+     "happened": "yes",
+     "branch": "the Army"
+    },
+    "domains_named": [
+     "military"
+    ]
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-none-completes-children",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "children",
+    "rung": "happened",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "children",
+     "none": true
+    },
+    "domains_named": [
+     "children"
+    ]
+   }
+  ]
  }
 ]
