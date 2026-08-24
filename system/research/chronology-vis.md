@@ -1082,8 +1082,11 @@ Numbered so a contract can cite them.
     the same warning: a life will always look sharper near the present, and
     that is memory, not quality.
 17. **Distinguish derived from stated on the display** (§1.5's italic
-    convention; ADR 0021's `derived: true`). A score computed from stated dates
-    only, shown beside the one that includes derivation, is the honest pair.
+    convention). v205's cross-dating pass (ADR 0026) already marks what it
+    derived and reports it as `cross_dating` plus
+    `counts["events_cross_dated"]`, so the inputs exist: a score computed from
+    stated dates only, shown beside the one that includes derivation, is the
+    honest pair.
 18. **If it animates: ≤2 s, un-staggered, few marks, every frame a legible
     chart** (§5.1, §5.2). More than a handful of movers ⇒ show before/after
     instead.
