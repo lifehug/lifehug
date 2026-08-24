@@ -9,7 +9,7 @@ nav_order: 5
 
 ## 1. What it does & what it's for
 
-Eight roles in this system put a model into a seat; five of them are
+Ten roles in this system put a model into a seat; seven of them are
 children of one of the other three. The founding three: talking with the
 user (Chat/Conversation), judging whether a generated question deserves
 to exist (Question Judgment), and resolving whether two pending Focus
@@ -42,15 +42,16 @@ An **Interaction** is defined once, precisely, in the
 situation — purpose, behavior contract, context recipe, scope, and evals,
 packaged as files any qualified model can execute. "Interaction" names
 the *definition*, not any one model's behavior, and not the code that
-runs it. Eight exist today, each with its own handbook page:
+runs it. Ten exist today, each with its own handbook page:
 [Conversation](conversation.md), [Question Judgment](question-judgment.md),
-[Focus Curation](focus-curation.md), and Conversation's five **children**
+[Focus Curation](focus-curation.md), and Conversation's seven **children**
 — [Question Candidate](question-candidate.md) (placement),
 [Focus Candidate](focus-candidate.md) (onboarding),
 [Entity Candidate](entity-candidate.md) (identity),
 [Arc Walk](arc-walk.md) (arc walking), and
 [Timeline](timeline.md) (placing a memory in time), and
-[Landmarks](landmarks.md) (the always-present dating question set).
+[Landmarks](landmarks.md) (the always-present dating question set), and
+[Reading Room](reading-room.md) (dating from evidence).
 
 **The child-interaction paradigm.** Conversation is the parent; a child
 adds exactly ONE goal, a stage-keyed `prompt/turn-instructions.md` leaf

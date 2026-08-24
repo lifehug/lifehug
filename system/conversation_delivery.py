@@ -51,6 +51,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
+import chronology as _chrono
 import conversation
 import conversation_lints
 from ai_provider import (
@@ -217,6 +218,14 @@ class TurnShape:
     # test: test_output_contract_block_byte_identical_without_landmark_stage
     # — the passive daily question's prompt does not move by one byte).
     landmark_stage: str | None = None
+    # the Reading Room (v204, ADR 0025): additive, default None, and the one
+    # gate that opens TWO existing keys rather than a new one. A Reading Room
+    # turn can produce a dated moment (`placed`, the Timeline lane's shape) or
+    # a landmark (`landmark`, the Landmarks lane's shape) — it mints no third
+    # vocabulary of its own. Every other caller leaves it None and the
+    # appendix stays byte-identical (required test:
+    # test_output_contract_block_byte_identical_without_reading_room_stage).
+    reading_room_stage: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -342,6 +351,13 @@ def _diagnostic(operation: str, reason: str, session_id: str) -> None:
 # --------------------------------------------------------------------------
 
 
+#: The basis vocabulary the output contract advertises, DERIVED from
+#: `chronology.BASES` (recurring-defect doctrine: one authoritative
+#: definition). Before v204 this was a hand-typed literal in two places, so a
+#: basis added to the tuple silently never reached the model.
+_BASIS_VOCABULARY = " | ".join(_chrono.BASES)
+
+
 def _output_contract_block(shape: TurnShape) -> str:
     """The engine's structured-output appendix to the Wave-1 turn prompt.
 
@@ -464,10 +480,10 @@ def _output_contract_block(shape: TurnShape) -> str:
         '  "placed": {"best": "the EDTF date", "earliest": "the earliest it '
         'could be", "latest": "the latest it could be", "granularity": "day | '
         'month | season | year | range | era", "confidence": "certain | '
-        'approximate | inferred | conjectural", "basis": "stated | age | '
-        'anchor | order | public_event | connector", "anchors": ["the landmark '
+        f'approximate | inferred | conjectural", "basis": "{_BASIS_VOCABULARY}"'
+        ', "anchors": ["the landmark '
         'keys you used"]} | null,\n'
-        if shape.timeline_stage is not None
+        if shape.timeline_stage is not None or shape.reading_room_stage is not None
         else ""
     )
     placed_note = (
@@ -480,7 +496,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         "say they will find out, that is an ordinary answer: receive it, ask "
         'nothing more, and leave "placed" null. '
         "Never invent an anchor key that is not in ANCHORS.\n"
-        if shape.timeline_stage is not None
+        if shape.timeline_stage is not None or shape.reading_room_stage is not None
         else ""
     )
     # landmarks (v197, Design §D): the one additive "landmark" output key
@@ -492,10 +508,10 @@ def _output_contract_block(shape: TurnShape) -> str:
         '"label": "what it is called", "date": {"best": "the EDTF date", '
         '"granularity": "day | month | season | year | range | era", '
         '"confidence": "certain | approximate | inferred | conjectural", '
-        '"basis": "stated | age | anchor | order | public_event | connector"}, '
+        f'"basis": "{_BASIS_VOCABULARY}"}}, '
         '"span": {"start": {…}, "end": {…}}, "skipped": true | false, '
         '"none": true | false} | null,\n'
-        if shape.landmark_stage is not None
+        if shape.landmark_stage is not None or shape.reading_room_stage is not None
         else ""
     )
     landmark_note = (
@@ -510,7 +526,7 @@ def _output_contract_block(shape: TurnShape) -> str:
         'that is a real, finished answer: {"domain": "<the domain>", "none": '
         "true}. Never invent a place, a date, a name, or a domain you were "
         "not given.\n"
-        if shape.landmark_stage is not None
+        if shape.landmark_stage is not None or shape.reading_room_stage is not None
         else ""
     )
     return (
@@ -855,7 +871,7 @@ _LANDMARK_KEYS = frozenset({
     # v202 (family-landmark): `birth_order` is a free-text field alongside
     # label/place/subject, not a rung.
     "birth_order",
-    # v203: the none terminal — "I never served", "no children". Structurally
+    # v204: the none terminal — "I never served", "no children". Structurally
     # a sibling of `skipped`; semantically its opposite (a skip is "not now",
     # a none is "there is nothing here"). Which domains may carry it is
     # `landmarks_interaction.domain_accepts_none`'s call, not this layer's.

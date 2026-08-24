@@ -735,6 +735,23 @@ _PRESSURE_RES = (
     re.compile(r"\bwe can'?t (?:move on|continue) (?:until|without)\b", re.IGNORECASE),
 )
 
+def pressure(text: object) -> object:
+    """The first span where a reply refuses a skip or leans on the person.
+
+    ONE definition, TWO callers (recurring-defect doctrine): the landmarks
+    lane runs it on a sensitive domain, and the Reading Room runs it on every
+    turn, because "are you sure?" over somebody's photo album is the same
+    defect as "are you sure?" over a loss. `reading_room.lint_reading_room_reply`
+    is the second caller.
+    """
+    body = text if isinstance(text, str) else ""
+    for pattern in _PRESSURE_RES:
+        match = pattern.search(body)
+        if match:
+            return match
+    return None
+
+
 #: A reply that treats a coarse answer as a miss.
 _REJECTS_VAGUE_RES = (
     re.compile(r"\bthat'?s (?:too )?(?:vague|not specific enough|not enough)\b",
@@ -811,7 +828,7 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
         })
 
     if sensitive:
-        match = _first(_PRESSURE_RES)
+        match = pressure(body)
         if match:
             findings.append({
                 "lint": "landmark_gates.never_presses_sensitive",

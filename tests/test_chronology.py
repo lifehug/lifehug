@@ -42,7 +42,13 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(ch.CONFIDENCES,
                          ("certain", "approximate", "inferred", "conjectural"))
         self.assertEqual(ch.BASES, ("stated", "age", "anchor", "order",
-                                    "public_event", "connector"))
+                                    "public_event", "connector",
+                                    "document", "photo", "relative"))
+        # v204 (the Reading Room): the three evidence bases are the tail of
+        # BASES and their own tuple, and every one of them is weighted.
+        self.assertEqual(ch.EVIDENCE_BASES, ("document", "photo", "relative"))
+        self.assertEqual(ch.BASES[-3:], ch.EVIDENCE_BASES)
+        self.assertEqual(set(ch.BASIS_WEIGHT), set(ch.BASES))
 
     def test_off_vocabulary_values_are_rejected_at_construction(self):
         for kwargs in ({"granularity": "epoch"}, {"confidence": "sure"},

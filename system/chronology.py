@@ -51,12 +51,39 @@ CONFIDENCES = ("certain", "approximate", "inferred", "conjectural")
 #: birthday arithmetic; `anchor` is a landmark they supplied; `order` is
 #: relative sequence only; `public_event` is the living-in-history route;
 #: `connector` is institutional evidence (timeline_corroboration).
-BASES = ("stated", "age", "anchor", "order", "public_event", "connector")
+#:
+#: v204 (the Reading Room, ADR 0025) adds the three EVIDENCE bases, whose
+#: warrant is none of the six above (`system/research/go-deep.md` §10):
+#: `document` is a printed date read off paper — near-certain and often exact
+#: to the day; `photo` is a contextual date, which is a WINDOW by construction
+#: (§5.1) and an interval by default; `relative` is the person relaying
+#: somebody else's memory, second-hand but — for the childhood facts a parent
+#: witnessed and they did not — often better than their own dating (§6.4).
+BASES = (
+    "stated", "age", "anchor", "order", "public_event", "connector",
+    "document", "photo", "relative",
+)
+
+#: The three evidence bases of the Reading Room, in one place so a caller can
+#: ask "did this come out of an artifact?" without re-listing them.
+EVIDENCE_BASES = ("document", "photo", "relative")
 
 #: How much each basis is trusted when two claims disagree (ruling 3).
+#:
+#: The three v204 weights are FLAT — one number each, no era-conditional
+#: term (Reading Room ruling 5). `document` outranks `stated` because a
+#: printed date is not a reconstruction; `relative` sits just under `stated`
+#: because proxy report is meant to be used *with* the index report and not
+#: instead of it (Straughen et al. 2013, go-deep.md §6.4); `photo` sits under
+#: both because a contextual date bounds rather than names. The research's
+#: "relatives beat self for childhood" nuance stays a research note, NOT a
+#: mechanism.
 BASIS_WEIGHT = {
+    "document": 7.0,
     "stated": 6.0,
+    "relative": 5.5,
     "age": 5.0,
+    "photo": 4.5,
     "anchor": 4.0,
     "public_event": 3.0,
     "connector": 2.0,
@@ -413,6 +440,16 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
         return body
     if claim_basis == "age":
         return f"{body} — you said you were {claim}"
+    # v204 (the Reading Room): the three evidence bases each name their own
+    # warrant, and `photo` says out loud that it is a window (go-deep.md
+    # §11.21 — "the system should say so on the record it writes").
+    if claim_basis == "document":
+        return f"{body} — printed on {claim}"
+    if claim_basis == "photo":
+        return f"{body} — from the photograph: {claim} (a window, not a day)"
+    if claim_basis == "relative":
+        name = witness_name(record)
+        return f"{body} — {name} says {claim}" if name else f"{body} — a relative says {claim}"
     return f"{body} — you said {claim}"
 
 
@@ -783,6 +820,79 @@ def reconcile(claims: object) -> dict:
     )
     records = [record for _, record in ordered]
     return {"best_supported": records[0], "alternates": records[1:]}
+
+
+# --------------------------------------------------------------------------
+# The witness (v204, the Reading Room — ADR 0025)
+# --------------------------------------------------------------------------
+
+#: A provenance entry whose `source` names the living person who told us the
+#: fact. `witness:<slug>` is the WHOLE convention: there is no witness table,
+#: no witness state, and no new file. `claim_score` already treats `source`
+#: as the consilience identity, so two different witnesses corroborating one
+#: claim count as two independent origins for free.
+WITNESS_SOURCE_PREFIX = "witness:"
+
+
+def witness_provenance(
+    slug: object,
+    *,
+    name: object = None,
+    said_at: object = None,
+    claim: object = None,
+) -> dict | None:
+    """One provenance entry for something a relative relayed.
+
+    ``witness_provenance("mom", name="Mom", said_at="2026-08-24",
+    claim="we moved in '84")`` →
+    ``{"source": "witness:mom", "name": "Mom", "said_at": "2026-08-24",
+    "claim": "we moved in '84", "basis": "relative"}``.
+
+    Returns ``None`` for a blank slug rather than minting ``"witness:"``.
+    """
+    text = str(slug or "").strip()
+    # Idempotent: an already-prefixed slug must not be prefixed twice, and
+    # `str.lstrip` would eat the leading letters of "sister" (every one of
+    # them is in "witness:"), so removeprefix is the only correct tool here.
+    text = text.removeprefix(WITNESS_SOURCE_PREFIX).strip()
+    if not text:
+        return None
+    entry: dict = {"source": f"{WITNESS_SOURCE_PREFIX}{text}", "basis": "relative"}
+    for key, value in (("name", name), ("said_at", said_at), ("claim", claim)):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            entry[key] = cleaned[:_CLAIM_TEXT_MAX_CHARS] if key == "claim" else cleaned
+    return entry
+
+
+def witness_slug(record: object) -> str | None:
+    """The slug of the first witness in a record's provenance, or ``None``."""
+    parsed = record if isinstance(record, DateRecord) else from_dict(record)
+    if parsed is None:
+        return None
+    for item in parsed.provenance:
+        source = str(item.get("source") or "")
+        if source.startswith(WITNESS_SOURCE_PREFIX):
+            slug = source[len(WITNESS_SOURCE_PREFIX):].strip()
+            if slug:
+                return slug
+    return None
+
+
+def witness_name(record: object) -> str | None:
+    """The display name of the first witness in a record's provenance."""
+    parsed = record if isinstance(record, DateRecord) else from_dict(record)
+    if parsed is None:
+        return None
+    for item in parsed.provenance:
+        if str(item.get("source") or "").startswith(WITNESS_SOURCE_PREFIX):
+            name = str(item.get("name") or "").strip()
+            if name:
+                return name
+            slug = str(item.get("source") or "")[len(WITNESS_SOURCE_PREFIX):].strip()
+            if slug:
+                return slug.replace("-", " ")
+    return None
 
 
 # --------------------------------------------------------------------------

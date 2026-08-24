@@ -1383,10 +1383,17 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
     (`arc_planner._timeline_gap_intent`) and a minted keystone question
     (`timeline_interaction.mint_keystone_question`) are the two ways the row
     becomes a question, and both match by `question_id`, never by adjacency.
-    """
-    import timeline_interaction  # noqa: PLC0415
 
-    index = dependency_index(data)
+    v204 (the Reading Room, ADR 0025): the scoring pass and the greedy loop
+    moved out to `_scored_anchors` and `_greedy_plan`, so `dig_plan` EXTENDS
+    this same plan to `k` picks with a witness partition instead of forking a
+    second, drifting copy of it. Nothing about a keystone changed.
+    """
+    return _greedy_plan(_scored_anchors(data), n)
+
+
+def _anchor_labels(data: dict) -> dict[str, str]:
+    """`{anchor_key: human label}` for every anchor `dependency_index` mints."""
     labels = {f"period:{p['slug']}": p["name"] for p in (data.get("periods") or [])}
     for slug, rows_here in (data.get("entity_lineup") or {}).items():  # noqa: B007
         for row in rows_here:
@@ -1397,6 +1404,19 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
         for event in rows_here:
             labels.setdefault(f"event:{slug}:{event.get('source_short') or ''}",
                               str(event.get("title") or event.get("description") or ""))
+    return labels
+
+
+def _scored_anchors(data: dict) -> list[dict]:
+    """Every anchor that resolves at least one unknown, with its probe.
+
+    The rows are freshly built on every call, so the greedy loop is free to
+    stamp `gain` on the ones it picks without mutating anything shared.
+    """
+    import timeline_interaction  # noqa: PLC0415
+
+    index = dependency_index(data)
+    labels = _anchor_labels(data)
     anchors = data.get("anchors") or ()
     anchor_rows = timeline_interaction.anchor_rows_for_prompt(anchors)
     scored = []
@@ -1421,27 +1441,717 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
             "probe": probe,
             "anchors": [dict(row) for row in anchor_rows],
         })
-    # The greedy plan over the residual graph (go-deep.md §8.3).
+    return scored
+
+
+def _greedy_plan(
+    scored: list[dict],
+    n: int,
+    *,
+    width: object = None,
+    universe: set[str] | None = None,
+) -> list[dict]:
+    """The one greedy-over-the-residual definition (go-deep.md §8.3).
+
+    `universe`, when given, restricts every resolve set to it — that is how
+    the Reading Room takes the unknowns a WITNESS owns off the in-session
+    table without building a second graph.
+
+    `width`, when given, is `unknown_key -> float`, and the objective becomes
+    the CONTINUOUS width-sum the research demands (§8.4, warning 3: a
+    threshold count such as "how many become month-precise" is not
+    submodular, so greedy stalls on it; a width-sum is, and the count stays a
+    display number). With `width=None` every unknown weighs 1.0 and the key
+    degenerates to exactly the pre-v204 `(-gain, cost, anchor)` ordering.
+    """
     plan: list[dict] = []
     covered: set[str] = set()
     remaining = list(scored)
     for _ in range(max(int(n), 0)):
-        best = None
-        best_key = None
+        best: dict | None = None
+        best_key: tuple | None = None
+        best_marginal: set[str] = set()
         for row in remaining:
-            gain = len(set(row["unknown_keys"]) - covered)
+            resolved = set(row["unknown_keys"])
+            if universe is not None:
+                resolved &= universe
+            marginal = resolved - covered
+            gain = len(marginal)
             if gain <= 0:
                 continue
-            key = (-gain, row["probe"].get("cost", 99), row["anchor"])
+            gained = float(sum(width(key) for key in marginal)) if width else float(gain)
+            key = (-gained, -gain, row["probe"].get("cost", 99), row["anchor"])
             if best_key is None or key < best_key:
-                best, best_key = row, key
-        if best is None:
+                best, best_key, best_marginal = row, key, marginal
+        if best is None or best_key is None:
             break  # nothing left adds anything — a shorter plan is the honest one
-        best["gain"] = -best_key[0]
+        best["gain"] = len(best_marginal)
+        if width is not None:
+            best["width_gain"] = -best_key[0]
         plan.append(best)
-        covered |= set(best["unknown_keys"])
+        covered |= best_marginal
         remaining = [row for row in remaining if row is not best]
     return plan
+
+
+# ---------------------------------------------------------------------------
+# The Reading Room (v204, ADR 0025) — the plan, the precision grade, the witness.
+# ---------------------------------------------------------------------------
+
+#: How many asks one Reading Room session arrives with (ruling 4). Three is
+#: the number the research settles on: greedy is within (1 − 1/e) of optimal
+#: on a monotone submodular coverage objective, and "at k ≈ 3 nothing better
+#: is worth building" (`system/research/go-deep.md` §8.3).
+DIG_PLAN_SIZE = 3
+
+#: How many witness lines the Timeline row shows (ruling 4). The lists
+#: themselves are longer; the ROW is calm.
+WITNESS_LINE_CAP = 2
+
+#: How many questions one witness's dig list may carry. "Don't ask for too
+#: much at once. Ask simple, straightforward questions." (FamilySearch, via
+#: go-deep.md §6.6 — the sharpest craft warning in the whole review.)
+WITNESS_LIST_CAP = 5
+
+#: The one string both the renderer and the harvest filter match on, so a dig
+#: list rendered into a person's `## Open Questions` never becomes one of the
+#: vault owner's own bank questions. One definition, two callers
+#: (recurring-defect doctrine).
+DIG_LIST_MARKER = "Reading Room"
+
+#: The single line of guidance every dig list carries. Never a form.
+DIG_LIST_FOOTER = (
+    "Ask about events, not processes — cue, don't correct."
+)
+
+#: Generation order for the witness partition (go-deep.md §6.1: the one place
+#: age-based triage is codified is US federal statute, and it orders oldest
+#: first). `other`, `colleague` and `mentor` sit last because they are rarely
+#: witnesses to a childhood. Urgency is THIS ORDERING and nothing else — never
+#: a label on a person, and never a word about anybody's mortality.
+WITNESS_GENERATION_ORDER = (
+    "grandparent", "parent", "sibling", "spouse", "partner", "friend",
+    "child", "mentor", "colleague", "other",
+)
+
+#: The closed vocabulary of precision grades (owner ruling, 2026-08-24): rank
+#: by marginal coverage AND ask for the grade of detail that unlocks the
+#: derivations. A school is a name until you have its ADDRESS; then it is a
+#: district, and a district keeps records, and records give exact years
+#: (go-deep.md §5.3). A birthday guessed to the year dates nothing to the day.
+PRECISION_TARGETS = ("day", "month", "year", "span", "address", "city", "order")
+
+#: What each grade actually buys — the clause the session says out loud.
+PRECISION_UNLOCKS = {
+    "day": "day-grade arithmetic on every age in the story",
+    "month": "the season and the school term it fell inside",
+    "year": "everything that stretch of years contains",
+    "span": "every moment inside it, bounded from both ends",
+    "address": "the district that keeps the records — and the exact years inside them",
+    "city": "the entrance cutoff in force that year, and the calendar it implies",
+    "order": "the sequence, which is what people remember best",
+}
+
+#: The grade to reach for, by unknown/anchor kind. `entity` splits on the
+#: entity's own type: a place wants its street address, a person wants a day.
+PRECISION_TARGET_BY_KIND = {
+    "period": "span",
+    "period_bound": "span",
+    "place_span": "address",
+    "place": "address",
+    "person": "day",
+    "event": "day",
+    "moment": "day",
+    "era_gap": "year",
+    "date_contradiction": "month",
+}
+
+#: v202 minted two landmark-derived unknown kinds that `dependency_index`
+#: correctly gives leverage 0: they place nothing that exists today. But each
+#: one CREATES AN ANCHOR, and an anchor is the thing every other unknown is
+#: placed against — which is the Reading Room's whole premise. The decision
+#: (ADR 0025): they are NOT ranked on the coverage axis (that would mean
+#: simulating a graph that does not exist yet, and warning 1 says do not
+#: generalize the solver). They are given a QUOTA at the head of the session
+#: instead, because they are also exactly the questions a document in the room
+#: can answer — "what year was Jackie born" is printed on a birth certificate.
+#: Their `would_place` stays honest at 1: the agenda never claims a gain the
+#: ask has not earned.
+ANCHOR_CREATING_KINDS = ("landmark_subject", "residence_gap")
+LANDMARK_ASK_QUOTA = 1
+
+#: A landmark subject's precision grade is the grade of the RUNG it is short
+#: of — the ladder already decided what the next answer has to be.
+PRECISION_TARGET_BY_RUNG = {
+    "year": "year", "month": "month", "day": "day", "birth": "day",
+    "city": "city", "place": "city", "address": "address",
+    "span": "span", "grades": "year", "household": "order",
+    "who": "order", "relation": "order", "living": "order",
+    "name": "order", "what": "order", "where": "city", "branch": "order",
+    "happened": "year",
+}
+
+_SCHOOL_WORDS = (
+    "school", "elementary", "primary", "middle", "junior high", "high school",
+    "academy", "college", "university", "kindergarten", "grade",
+)
+_BIRTH_WORDS = ("birth", "born", "birthday")
+
+
+def unknown_width(row: object) -> float:
+    """Years of ambiguity one unknown carries — the CONTINUOUS ranking quantity.
+
+    go-deep.md §8.4, warning 3: a threshold metric ("how many become
+    month-precise") is **not submodular**, so greedy stalls on it — two asks
+    that each halve an interval can jointly cross the line while each scores
+    zero alone. A width-sum is submodular, so the plan ranks on width and
+    *displays* the count.
+
+    An unknown with no interval at all weighs 1.0, which is the honest floor:
+    on a vault where nothing carries bounds the ranking degenerates EXACTLY
+    to marginal coverage, and §8.2's worked example reproduces unchanged.
+    """
+    if not isinstance(row, dict):
+        return 1.0
+    years = row.get("years")
+    if isinstance(years, (list, tuple)) and len(years) == 2:
+        try:
+            span = float(years[1]) - float(years[0])
+        except (TypeError, ValueError):
+            span = 0.0
+        if span > 0:
+            return span
+    return 1.0
+
+
+def _living_roster(roster: object, data: object = None) -> list[dict]:
+    """The people who could be asked, ordered by generation, oldest first.
+
+    Inferred ONLY from stated facts, from the TWO sources the package already
+    has and never a third:
+
+    1. **`timeline_data()["witnesses"]`** — v202's family landmark, which is
+       where witnesses actually come from (`landmarks.md` §2.9). Its
+       `relation` IS the roster's `relationship`: one closed vocabulary, no
+       translation table.
+    2. The person entity roster's `relationship` + `living`, supplied by the
+       owner through `entity-verdict`.
+
+    `living` is tri-state in both: only an EXPLICIT yes makes a witness.
+    Unknown is not a witness and is not a non-witness, and nothing here ever
+    invokes anybody's mortality.
+    """
+    people: list[dict] = []
+    seen: set[str] = set()
+    for row in ((data or {}).get("witnesses") or ()) if isinstance(data, dict) else ():
+        if not isinstance(row, dict):
+            continue
+        slug = str(row.get("slug") or "").strip()
+        relation = str(row.get("relation") or "").strip()
+        if not slug or not relation or slug in seen:
+            continue
+        seen.add(slug)
+        people.append({"slug": slug,
+                       "name": str(row.get("name") or slug.replace("-", " ")),
+                       "relationship": relation})
+    entities = roster
+    if isinstance(entities, dict):
+        entities = entities.get("entities")
+    if entities is None:
+        try:
+            import entity_roster  # noqa: PLC0415
+
+            entities = entity_roster.load_roster("person").get("entities") or []
+        except Exception:  # noqa: BLE001
+            entities = []
+    for entry in entities or ():
+        if not isinstance(entry, dict) or entry.get("living") is not True:
+            continue
+        slug = str(entry.get("slug") or "").strip()
+        relationship = str(entry.get("relationship") or "").strip()
+        if not slug or not relationship or slug in seen:
+            continue
+        seen.add(slug)
+        people.append({
+            "slug": slug,
+            "name": str(entry.get("name") or slug.replace("-", " ")),
+            "relationship": relationship,
+        })
+    order = {name: i for i, name in enumerate(WITNESS_GENERATION_ORDER)}
+    people.sort(key=lambda row: (order.get(row["relationship"], len(order)), row["slug"]))
+    return people
+
+
+def _entity_reach(data: dict) -> dict[str, tuple[set[str], set[str]]]:
+    """`{entity_slug: (periods, sources)}` from the lineup the vault already has."""
+    reach: dict[str, tuple[set[str], set[str]]] = {}
+    for period_slug, rows_here in (data.get("entity_lineup") or {}).items():
+        for row in rows_here or ():
+            slug = str(row.get("slug") or "").strip()
+            if not slug:
+                continue
+            periods, sources = reach.setdefault(slug, (set(), set()))
+            periods.add(str(period_slug))
+            for source in (row.get("sources") or ()):
+                sources.add(str(source))
+            for source in (row.get("evidence") or ()):
+                sources.add(str(source))
+    return reach
+
+
+def _ref_reach(ref: str, data: dict, rows_by_key: dict[str, dict],
+               reach: dict | None = None) -> tuple[set[str], set[str]]:
+    """The (periods, sources) one anchor key or unknown key touches.
+
+    These are the SAME two joins `dependency_index` walks — shared source, and
+    presence in the era whose bounds are missing. No new edge type is invented
+    here (design consequence 11: "no new state").
+    """
+    text = str(ref or "")
+    periods: set[str] = set()
+    sources: set[str] = set()
+    row = rows_by_key.get(text)
+    if row is not None:
+        if row.get("period"):
+            periods.add(str(row["period"]))
+        # A residence gap's `between` names two HOUSES, not two era slugs —
+        # reading it as a period slug would be a silent false join.
+        if str(row.get("kind") or "") not in ANCHOR_CREATING_KINDS:
+            for slug in (row.get("between") or ()):
+                periods.add(str(slug))
+        for key in ("source_short", "source"):
+            if row.get(key):
+                sources.add(str(row[key]))
+        return periods, sources
+    kind, _, tail = text.partition(":")
+    if kind == "period":
+        periods.add(tail)
+    elif kind == "event":
+        period_slug, _, short = tail.partition(":")
+        periods.add(period_slug)
+        if short:
+            sources.add(short)
+    elif kind == "entity":
+        index = _entity_reach(data) if reach is None else reach
+        entity_periods, entity_sources = index.get(tail, (set(), set()))
+        periods |= entity_periods
+        sources |= entity_sources
+    return periods, sources
+
+
+def _witness_matcher(data: dict, people: list[dict], rows: object = None):
+    """A closure that answers `witness_for` for many refs at one graph cost.
+
+    `witness_for` is the single-ref public face of this; `dig_plan` uses the
+    matcher directly so it does not re-walk `unknowns()` once per unknown.
+    """
+    reach = _entity_reach(data)
+    rows_by_key = {row["key"]: row for row in (rows if rows is not None
+                                               else unknowns(data))}
+
+    def match(ref: object) -> dict | None:
+        text = str(ref or "")
+        row = rows_by_key.get(text)
+        # v202's landmark-derived unknowns have no era and no source to join
+        # on — and they do not need one. Family, residences and schools are
+        # the three enumeration domains, and an elder can supply all three
+        # outright (`landmarks_interaction.WITNESS_CAN_SUPPLY` plus the family
+        # constellation itself). So they route to the oldest living witness,
+        # which is what the generation ordering already put first.
+        if row is not None and str(row.get("kind") or "") in ANCHOR_CREATING_KINDS:
+            return dict(people[0]) if people else None
+        if text.startswith("entity:"):
+            slug = text.split(":", 1)[1]
+            for person in people:
+                if person["slug"] == slug:
+                    return dict(person)
+        periods, sources = _ref_reach(text, data, rows_by_key, reach=reach)
+        if not periods and not sources:
+            return None
+        for person in people:
+            their_periods, their_sources = reach.get(person["slug"], (set(), set()))
+            if (their_periods & periods) or (their_sources & sources):
+                return dict(person)
+        return None
+
+    return match
+
+
+def witness_for(ref: object, data: dict, roster: object = None,
+                landmarks: object = None) -> dict | None:
+    """The living person whose own facts touch `ref`, or ``None``.
+
+    A **witness** is someone living who was there — §6 of the go-deep research
+    and the one unknown class better probing will never place: "there are
+    mysteries about Grandma I could resolve if I asked my uncle, who is still
+    living, today."
+
+    Inferred from stated facts only. `relationship` and `living` are the two
+    identity fields the owner already supplied through `entity-verdict`; the
+    JOIN is an edge `dependency_index` already walks (shared source, or
+    presence in the era whose bounds are missing). No new state
+    (design consequence 11). Returns ``{"slug", "name", "relationship"}``.
+    """
+    people = _living_roster(roster, data)
+    if not people:
+        return None
+    return _witness_matcher(data, people, unknowns(data, landmarks))(ref)
+
+
+def precision_target_for(ref: object, *, label: object = "", kind: object = None,
+                         entity_type: object = None, rung: object = None) -> str:
+    """The grade of detail to ask for — the owner's 2026-08-24 emphasis.
+
+    The ladder, in order, and it is deliberately short:
+
+    1. a birthday is asked to the **day** (the one date the whole calendar's
+       axis starts from, and overlearned rather than reconstructed);
+    2. a school is asked for its **address**, because the name alone unlocks
+       nothing and the address unlocks the district, its records, and the
+       exact years inside them (§5.3);
+    3. a landmark subject is asked at the grade of the RUNG it is short of —
+       the specificity ladder already decided what the next answer has to be,
+       and a second opinion here would be a duplicate definition;
+    4. otherwise the kind decides (`PRECISION_TARGET_BY_KIND`), defaulting to
+       `year`.
+    """
+    text = str(label or "").lower()
+    name = str(ref or "")
+    if any(word in text for word in _BIRTH_WORDS) or name.endswith(":birth"):
+        return "day"
+    if any(word in text for word in _SCHOOL_WORDS):
+        return "address"
+    if rung:
+        grade = PRECISION_TARGET_BY_RUNG.get(str(rung))
+        if grade:
+            return grade
+    key = str(kind or "")
+    if not key:
+        head = name.partition(":")[0]
+        key = str(entity_type or head) if head != "entity" else str(entity_type or "place")
+    return PRECISION_TARGET_BY_KIND.get(key, "year")
+
+
+def precision_ask(target: object) -> str:
+    """The ONE extra clause the Reading Room adds to a probe.
+
+    It names the grade and what the grade buys, and it never names a date —
+    `timeline_interaction.proposes_a_date` is run over every one of these in
+    the test suite.
+    """
+    grade = str(target or "")
+    unlocks = PRECISION_UNLOCKS.get(grade, PRECISION_UNLOCKS["year"])
+    openers = {
+        "day": "If anything in front of you prints the exact day, read that out",
+        "month": "The month, if the paper gives it",
+        "year": "Whatever the paper says, even just the year",
+        "span": "Both ends if you have them — when it started and when it ended",
+        "address": "The street address is the piece that matters, not just the name",
+        "city": "The town, not just the state",
+        "order": "The order they came in, even without any dates",
+    }
+    return f"{openers.get(grade, openers['year'])} — that gives us {unlocks}."
+
+
+def witness_question(row: object) -> str:
+    """The plain question one dig list carries, addressed to the witness.
+
+    Genealogy's QUESTION SHAPE, oral history's ETHICS (§6.7), and §6.4's rule
+    on top of both: ask about **events**, not processes. Discrete, witnessed,
+    publicly-marked facts survive thirty years; gradual ones drift, and always
+    later.
+    """
+    if not isinstance(row, dict):
+        return ""
+    label = str(row.get("label") or "it").strip()
+    kind = str(row.get("kind") or "")
+    # v202's landmark-derived rows arrive with their OWN exact, subject-named
+    # question ("What year was Jackie born?"). It reads correctly addressed to
+    # a witness as it stands, and re-wording it here would be the second
+    # definition the recurring-defect doctrine forbids.
+    probe = row.get("probe")
+    if kind in ANCHOR_CREATING_KINDS and isinstance(probe, dict):
+        text = str(probe.get("text") or "").strip()
+        if text:
+            return text
+    if kind == "place_span":
+        return f"What years did we live at {label}?"
+    if kind == "period_bound":
+        return f"When did {label} start, and when did it end?"
+    if kind == "era_gap":
+        between = [str(slug).replace("-", " ") for slug in (row.get("between") or ())]
+        if len(between) == 2:
+            return f"What happened between {between[0]} and {between[1]}?"
+        return "What happened in the years in between?"
+    if kind == "date_contradiction":
+        return f"Which came first — {label}?"
+    return f"What year was {label}?"
+
+
+#: The two lists that dominate everything else, and the only two that are
+#: FINISHABLE (design consequence 17, go-deep.md §5.3/§5.4/§10). They head the
+#: first witness's list whenever their landmark domain is still open.
+STANDING_DIG_ASKS = (
+    {
+        "unknown_key": "landmark:residences",
+        "question": "Every address we ever lived at, in order — as many as you can.",
+        "unlocks": "every moment that happened inside one of them",
+        "precision_target": "address",
+    },
+    {
+        "unknown_key": "landmark:schools",
+        "question": "Every school I went to, in order, and the town each one was in.",
+        "unlocks": "the school-year arithmetic that turns every “I was in third grade” into a year",
+        "precision_target": "address",
+    },
+)
+
+
+def _open_landmark_domains(data: dict) -> set[str]:
+    rows = data.get("landmarks")
+    if not isinstance(rows, list):
+        return set()
+    return {
+        str(row.get("domain"))
+        for row in rows
+        if isinstance(row, dict) and row.get("status") != "complete"
+    }
+
+
+def dig_plan(data: dict, roster: object = None, k: int = DIG_PLAN_SIZE,
+             landmarks: object = None) -> dict:
+    """The Reading Room's plan: what to ask, at what grade, and who to ask.
+
+    ``{"asks": [...], "witness_lists": {...}, "witness_order": [...],
+    "witness_lines": [...], "unreachable": [...], "remaining": int,
+    "open_unknowns": int, "k": int}``.
+
+    Built in three moves.
+
+    **0. The anchor-creating quota.** v202 minted two landmark-derived unknown
+    kinds (`landmark_subject`, `residence_gap`) that `dependency_index`
+    correctly scores at leverage 0 — they place nothing that exists today. But
+    each one CREATES AN ANCHOR, and an anchor is the thing every other unknown
+    is placed against. Ranking them on the coverage axis would mean simulating
+    a graph that does not exist yet, which warning 1 of §8.4 says not to do.
+    So they get a QUOTA at the head of the session instead
+    (`LANDMARK_ASK_QUOTA`), cheapest rung first, and their `would_place` stays
+    honestly at 1. They are also exactly the questions a document in the room
+    can answer: "what year was Jackie born" is printed on a birth certificate.
+
+    **1. Greedy over the residual.** The same `_greedy_plan` `keystones` runs,
+    extended to `k` picks and ranked on the CONTINUOUS width-sum with the
+    count displayed (§8.4, warning 3). This is the session itself: the person
+    has paper in front of them, and these are the things that paper can place.
+
+    **2. The precision grade.** Each pick names the grade of detail that
+    unlocks the derivations behind it, and says what the grade buys — the
+    owner's 2026-08-24 emphasis, and the reason this is a Reading Room and
+    not a list of open questions. A school is a name until you have its
+    address; then it is a district, and a district keeps records.
+
+    **3. The witness partition, over what is LEFT.** §8.2's real finding is
+    that the greedy plan surfaces the unknowns *no anchor in the graph
+    reaches at all* — "no amount of asking this person better will place it;
+    one question to a relative will." So the residual after `k` asks, plus
+    everything unreachable, is offered to the living roster: each unknown that
+    has a witness becomes an item on THAT person's dig list, ordered by
+    generation, oldest first (§6.1). What remains after that is
+    `unreachable` — kept in the ledger, never deleted, because a witness who
+    has died does not delete the question.
+
+    The partition runs LAST on purpose. Running it first — taking every
+    unknown a living relative shares an era with off the table before the
+    session starts — empties the Reading Room of exactly the work it exists
+    to do, because a parent shares an era with the whole of a childhood.
+
+    NEVER proposes a date. Every string this function emits is a question or a
+    derivation; naming a year and inviting agreement is the one banned move
+    (§4.3, Lindsay et al. 2004) and the suite runs
+    `timeline_interaction.proposes_a_date` over all of them.
+    """
+    rows = unknowns(data, landmarks)
+    rows_by_key = {row["key"]: row for row in rows}
+    open_keys = set(rows_by_key)
+
+    # v204 ruling on v202's two landmark-derived kinds: they are asked on
+    # their own merit, not ranked against the coverage objective. See
+    # ANCHOR_CREATING_KINDS.
+    anchor_creating = [
+        row for row in rows
+        if str(row.get("kind") or "") in ANCHOR_CREATING_KINDS
+    ]
+    anchor_creating.sort(
+        key=lambda row: (int((row.get("probe") or {}).get("cost") or 99), row["key"]))
+    quota = max(min(int(k), LANDMARK_ASK_QUOTA), 0)
+    head_rows = anchor_creating[:quota]
+
+    covered: set[str] = set()
+    asks: list[dict] = []
+    for row in head_rows:
+        target = precision_target_for(row["key"], label=row.get("label"),
+                                      kind=row.get("kind"), rung=row.get("rung"))
+        probe = row.get("probe") or {}
+        probe_text = str(probe.get("text") or "").strip()
+        covered.add(row["key"])
+        asks.append({
+            "ref": row["key"],
+            "anchor": None,
+            "question_id": None,
+            "label": str(row.get("label") or row["key"]),
+            "probe": probe,
+            "ask": f"{probe_text} {precision_ask(target)}".strip(),
+            "precision_target": target,
+            "precision_unlocks": PRECISION_UNLOCKS.get(target, ""),
+            # Honest: it places itself. What it BUYS is a new anchor, and the
+            # next session's plan is where that shows up.
+            "would_place": 1,
+            "gain": 1,
+            "width_gain": unknown_width(row),
+            "remaining": max(len(open_keys) - len(covered), 0),
+            "unknown_keys": [row["key"]],
+            "creates_anchor": True,
+            "witness": None,
+            "anchors": [],
+        })
+
+    scored = _scored_anchors(data)
+    plan = _greedy_plan(
+        scored, max(int(k) - len(asks), 0),
+        width=lambda key: unknown_width(rows_by_key.get(key)),
+        universe=open_keys - covered,
+    )
+
+    for row in plan:
+        marginal = set(row["unknown_keys"]) - covered
+        covered |= marginal
+        entity_type = None
+        if row["anchor"].startswith("entity:"):
+            entity_type = _entity_type(data, row["anchor"].split(":", 1)[1])
+        target = precision_target_for(row["anchor"], label=row["label"],
+                                      entity_type=entity_type)
+        probe_text = str((row.get("probe") or {}).get("text") or "").strip()
+        asks.append({
+            "ref": row["anchor"],
+            "anchor": row["anchor"],
+            "question_id": row["question_id"],
+            "label": row["label"],
+            "probe": row.get("probe"),
+            "ask": f"{probe_text} {precision_ask(target)}".strip(),
+            "precision_target": target,
+            "precision_unlocks": PRECISION_UNLOCKS.get(target, ""),
+            "would_place": row.get("gain", 0),
+            "gain": row.get("gain", 0),
+            "width_gain": row.get("width_gain", float(row.get("gain", 0))),
+            "remaining": max(len(open_keys) - len(covered), 0),
+            "unknown_keys": sorted(marginal),
+            "creates_anchor": False,
+            "witness": None,
+            "anchors": row.get("anchors") or [],
+        })
+
+    people = _living_roster(roster, data)
+    leftover = sorted(open_keys - covered)
+    by_witness: dict[str, dict] = {}
+    placed_with_a_witness: set[str] = set()
+    if people:
+        match = _witness_matcher(data, people, rows)
+        for key in leftover:
+            person = match(key)
+            if person is None:
+                continue
+            placed_with_a_witness.add(key)
+            row = rows_by_key.get(key) or {}
+            entry = by_witness.setdefault(person["slug"], {
+                "slug": person["slug"],
+                "name": person["name"],
+                "relationship": person["relationship"],
+                "questions": [],
+                "footer": DIG_LIST_FOOTER,
+            })
+            target = precision_target_for(key, label=row.get("label"),
+                                          kind=row.get("kind"),
+                                          rung=row.get("rung"))
+            entry["questions"].append({
+                "unknown_key": key,
+                "question": witness_question(row),
+                "unlocks": PRECISION_UNLOCKS.get(target, ""),
+                "precision_target": target,
+                "width": unknown_width(row),
+            })
+
+    order = {person["slug"]: i for i, person in enumerate(people)}
+    witness_order = sorted(by_witness, key=lambda slug: (order.get(slug, len(order)), slug))
+    for entry in by_witness.values():
+        entry["questions"].sort(key=lambda q: (-float(q.get("width") or 1.0),
+                                               q["unknown_key"]))
+        entry["questions"] = entry["questions"][:WITNESS_LIST_CAP]
+    # The two lists that dominate everything else (design consequence 17) head
+    # the CLOSEST KIN in the living roster — not whoever happens to hold an
+    # item — because "every address" and "every school" are exactly what a
+    # parent can produce in one sitting (§5.3, §5.4, §10). They are the only
+    # reason a witness list can exist with no unknown behind it.
+    standing = [dict(item) for item in STANDING_DIG_ASKS
+                if item["unknown_key"].split(":", 1)[1] in _open_landmark_domains(data)]
+    if standing and people:
+        first = people[0]
+        head = by_witness.setdefault(first["slug"], {
+            "slug": first["slug"],
+            "name": first["name"],
+            "relationship": first["relationship"],
+            "questions": [],
+            "footer": DIG_LIST_FOOTER,
+        })
+        head["questions"] = standing + head["questions"][:max(
+            WITNESS_LIST_CAP - len(standing), 0)]
+        if first["slug"] not in witness_order:
+            witness_order = sorted(
+                by_witness, key=lambda slug: (order.get(slug, len(order)), slug))
+
+    return {
+        "k": int(k),
+        "asks": asks,
+        "witness_lists": {slug: by_witness[slug] for slug in witness_order},
+        "witness_order": witness_order,
+        "witness_lines": witness_order[:WITNESS_LINE_CAP],
+        # Kept, never deleted: an unknown whose only witness has died stays
+        # here labelled "no living witness known" by the surface that renders
+        # it (plan decision, 2026-08-23).
+        "unreachable": [key for key in leftover if key not in placed_with_a_witness],
+        "remaining": max(len(open_keys) - len(covered), 0),
+        "open_unknowns": len(rows),
+    }
+
+
+def _entity_type(data: dict, slug: str) -> str | None:
+    for rows_here in (data.get("entity_lineup") or {}).values():
+        for row in rows_here or ():
+            if str(row.get("slug") or "") == slug:
+                return str(row.get("type") or "") or None
+    return None
+
+
+def render_dig_list(entry: object) -> list[str]:
+    """One witness's dig list, as the lines a wiki page carries.
+
+    Short, plain, never a form (§6.6). Every line is marked with
+    :data:`DIG_LIST_MARKER` so the wiki harvester can tell a question meant
+    for somebody ELSE from one meant for the vault's owner.
+    """
+    if not isinstance(entry, dict):
+        return []
+    name = str(entry.get("name") or entry.get("slug") or "").strip()
+    lines = []
+    for item in (entry.get("questions") or ())[:WITNESS_LIST_CAP]:
+        question = str(item.get("question") or "").strip()
+        if not question:
+            continue
+        unlocks = str(item.get("unlocks") or "").strip()
+        tail = f" — would give us {unlocks}" if unlocks else ""
+        lines.append(f"- **{DIG_LIST_MARKER}, for {name}:** {question}{tail}")
+    if lines:
+        lines.append(f"- **{DIG_LIST_MARKER}:** {entry.get('footer') or DIG_LIST_FOOTER}")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -1635,6 +2345,20 @@ def timeline_data(evidence: list[dict] | None = None,
     data["counts"]["landmarks_open"] = sum(
         1 for row in data["landmarks"] if row.get("status") != "complete"
     )
+    # v204 (the Reading Room, ADR 0025): additive, and derived — the plan and
+    # the per-witness lists are recomputed from the graph every read, exactly
+    # like `keystones`. There is no dig state and no homework inbox
+    # (design consequence 13). Guarded the same way the landmark block is: a
+    # broken roster must never take the whole timeline down.
+    try:
+        data["reading_room"] = dig_plan(data, landmarks=filed_landmarks)
+    except Exception:  # noqa: BLE001
+        data["reading_room"] = {
+            "k": DIG_PLAN_SIZE, "asks": [], "witness_lists": {},
+            "witness_order": [], "witness_lines": [], "unreachable": [],
+            "remaining": 0, "open_unknowns": 0,
+        }
+    data["counts"]["reading_room_asks"] = len(data["reading_room"]["asks"])
     return data
 
 

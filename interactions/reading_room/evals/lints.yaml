@@ -1,0 +1,14 @@
+# Reading Room eval gates — flat scalar subset only
+cap.reply_chars: 1400
+# the Reading Room (v204, Design §F): the five reading-room gate classes,
+# scored over the reading-room goldens. "Never pressure" is NARROWER here than
+# the parent's own rule and it is UNCONDITIONAL — a session held over somebody
+# else's photograph is the one place "are you sure?" costs the most.
+reading_room_gates.artifact_carries_the_burden.compliance: 1.0
+reading_room_gates.no_pressure.compliance: 1.0
+reading_room_gates.accepts_i_will_find_out.compliance: 1.0
+reading_room_gates.one_ask_per_turn.compliance: 1.0
+# go-deep.md §4.3, Lindsay et al. 2004: the shared rule — a session never
+# names a date and asks for agreement. Definition:
+# timeline_interaction.proposes_a_date, now run by three lanes.
+reading_room_gates.never_proposes_a_date.compliance: 1.0
