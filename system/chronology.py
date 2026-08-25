@@ -220,6 +220,44 @@ def _opt_str(value: object) -> str | None:
     return value.strip() or None
 
 
+def normalized_date(value: object) -> dict | None:
+    """One date, with its bounds filled in — the ONE normalization definition.
+
+    A model (or a CLI flag, or a roster refresh) supplies ``best`` and rarely
+    the bounds; a record with no ``earliest``/``latest`` renders as an empty
+    string and dates nothing (:func:`display_date`, :func:`year_of`). So every
+    stored date is re-derived through :func:`parse_edtf`, which fills the
+    bounds from the EDTF expression, and the caller's own granularity /
+    confidence / basis are kept where they were given.
+
+    Promoted to this module in v217 (person dates). It was
+    ``landmarks_interaction._normalized_date``, and the person-roster store
+    needs the identical treatment for `born`/`died` — a second copy living in
+    `entity_roster` is exactly the duplicate definition the recurring-defect
+    doctrine forbids. `landmarks_interaction._normalized_date` is now an alias
+    of this function; there is no second body.
+    """
+    parsed = from_dict(value)
+    if parsed is None:
+        return None
+    if parsed.earliest or parsed.latest:
+        return parsed.to_dict()
+    rebuilt = parse_edtf(parsed.best, basis=parsed.basis)
+    if rebuilt is None:
+        return parsed.to_dict()
+    supplied = value if isinstance(value, dict) else {}
+    return DateRecord(
+        best=rebuilt.best,
+        earliest=rebuilt.earliest,
+        latest=rebuilt.latest,
+        granularity=supplied.get("granularity") or rebuilt.granularity,
+        confidence=supplied.get("confidence") or rebuilt.confidence,
+        basis=parsed.basis,
+        anchors=parsed.anchors,
+        provenance=parsed.provenance,
+    ).to_dict()
+
+
 # --------------------------------------------------------------------------
 # EDTF parsing and rendering
 # --------------------------------------------------------------------------

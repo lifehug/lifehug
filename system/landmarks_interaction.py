@@ -801,35 +801,12 @@ def validate_landmark(value: object, *,
     return record
 
 
-def _normalized_date(value: object) -> dict | None:
-    """One date, with its bounds filled in.
-
-    A model supplies ``best`` and rarely the bounds; a record with no
-    ``earliest``/``latest`` renders as an empty string and dates nothing
-    (`chronology.display_date`, `chronology.year_of`). So every landmark date
-    is re-derived through `chronology.parse_edtf`, which fills the bounds from
-    the EDTF expression, and the model's own granularity / confidence / basis
-    are kept where it gave them.
-    """
-    parsed = chrono.from_dict(value)
-    if parsed is None:
-        return None
-    if parsed.earliest or parsed.latest:
-        return parsed.to_dict()
-    rebuilt = chrono.parse_edtf(parsed.best, basis=parsed.basis)
-    if rebuilt is None:
-        return parsed.to_dict()
-    supplied = value if isinstance(value, dict) else {}
-    return chrono.DateRecord(
-        best=rebuilt.best,
-        earliest=rebuilt.earliest,
-        latest=rebuilt.latest,
-        granularity=supplied.get("granularity") or rebuilt.granularity,
-        confidence=supplied.get("confidence") or rebuilt.confidence,
-        basis=parsed.basis,
-        anchors=parsed.anchors,
-        provenance=parsed.provenance,
-    ).to_dict()
+#: One date, with its bounds filled in. v217 PROMOTED this body to
+#: :func:`chronology.normalized_date` — the person roster needs the identical
+#: treatment for `born`/`died`, and a second copy is the duplicate definition
+#: the recurring-defect doctrine forbids. The private name stays as the alias
+#: its callers here already use; there is no second body.
+_normalized_date = chrono.normalized_date
 
 
 # --------------------------------------------------------------------------
@@ -1769,6 +1746,74 @@ def anchors_from_landmarks(landmarks: object) -> dict:
     return index
 
 
+#: v217 (person dates): the anchor keys a ROSTER person mints. Namespaced
+#: apart from `family:<relation>-<name>:birth` on purpose — the family
+#: landmark is the SOURCE OF TRUTH for a family member's birth date and the
+#: roster row is its derived copy, so the two must never both enter the index
+#: for the same person. :func:`anchors_from_people` enforces that by slug.
+PERSON_ANCHOR_KINDS = {"born": "landmark", "died": "landmark"}
+
+
+def anchors_from_people(people: object, landmarks: object = None) -> dict:
+    """``{key: {label, date, kind}}`` — roster people's `born`/`died` as anchors.
+
+    This is what finally wires the `entity_date` unlock that
+    `interactions/landmarks/questions.yaml` has declared on `partnerships` and
+    `children` since v197 with zero consumers: a person's own dates become
+    anchors the same way a family landmark's date does, so "the year my
+    brother was born" can date anything else in the vault.
+
+    **One anchor per person per fact (D10).** When BOTH a family landmark and
+    a roster `born` exist for the same person, the LANDMARK WINS and the
+    roster copy is skipped — the landmark store is the source of truth and the
+    roster row is a derived copy of it (`person_roster_invocations` is the
+    only writer of that copy). The same rule applies to `died` against a
+    `losses` landmark. There is no reconciler and no second birth-date writer:
+    there is one store per fact and a documented precedence.
+
+    ``people`` is a person roster (``{"entities": [...]}``) or the entity list
+    itself. ``landmarks`` is the RAW filed landmark store — the precedence
+    above is resolved by person slug, which only the raw entries carry, so a
+    caller that has already reduced its store to an anchor index must pass the
+    raw store here (or nothing) rather than the index. Omit it and every
+    roster date enters, which is correct for a caller that has no landmark
+    store to duplicate.
+    """
+    entities = people
+    if isinstance(entities, dict):
+        entities = entities.get("entities")
+    filed = landmarks if isinstance(landmarks, dict) and any(
+        isinstance(value, list) for value in landmarks.values()) else {}
+    claimed = {
+        "born": {m["slug"] for m in family_members(filed)
+                 if chrono.from_dict(m["date"]) is not None},
+        "died": {p["slug"] for p in lost_people(filed) if p["date"] is not None},
+    }
+    index: dict[str, dict] = {}
+    for entry in entities or ():
+        if not isinstance(entry, dict):
+            continue
+        slug = str(entry.get("slug") or "").strip()
+        if not slug:
+            continue
+        name = str(entry.get("name") or slug.replace("-", " ")).strip()
+        for field, kind in PERSON_ANCHOR_KINDS.items():
+            if slug in claimed[field]:
+                continue  # the landmark store already anchors this fact
+            record = chrono.from_dict(entry.get(field))
+            if record is None:
+                continue
+            index.setdefault(f"person:{slug}:{field}",
+                             {"label": _person_anchor_label(name, field),
+                              "date": record, "kind": kind})
+    return index
+
+
+def _person_anchor_label(name: str, field: str) -> str:
+    """The probe-style label, matching `_anchor_label`'s family phrasing."""
+    return f"{name} was born" if field == "born" else f"{name} died"
+
+
 def _entry_date(entry: dict) -> object:
     """One entry's date record — a point, or a span read as one interval.
 
@@ -1869,15 +1914,48 @@ def family_members(landmarks: object) -> tuple[dict, ...]:
     return tuple(rows)
 
 
-def family_roster_invocations(landmarks: object) -> list[list[str]]:
-    """The ``entity-verdict`` argv that files each family member on the ROSTER.
+def lost_people(landmarks: object) -> tuple[dict, ...]:
+    """Every person named in a `losses` entry, as ``{slug, name, date}``.
+
+    v217 (person dates). `losses` is the domain whose whole point is a death
+    year — its declared unlock is `terminus_ante_quem` — and before this the
+    person it names never reached the roster at all: `family_members` reads
+    only ``filed["family"]``, so a death date the person volunteered was
+    collected and then dropped on the floor.
+
+    ``date`` is the entry's own record read through :func:`_entry_date`, the
+    same reader the anchor index uses, so a `year` rung and a `span` both
+    resolve. A losses entry with no readable name yields nothing; an entry
+    with a name and no date still yields a row, because knowing WHO was lost
+    is itself the identity fact (`living: false`).
+    """
+    filed = landmarks if isinstance(landmarks, dict) else {}
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for entry in filed.get("losses") or ():
+        if not isinstance(entry, dict) or entry.get("none"):
+            continue
+        name = str(entry.get("label") or entry.get("who") or "").strip()
+        if not name:
+            continue
+        slug = _SLUG_RE.sub("-", name.lower()).strip("-")[:60]
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        rows.append({"slug": slug, "name": name, "date": _entry_date(entry)})
+    return tuple(rows)
+
+
+def person_roster_invocations(landmarks: object) -> list[list[str]]:
+    """The ``entity-verdict`` argv that files each landmark-named PERSON on the
+    ROSTER — the family tiers, and (v217) the people named in `losses`.
 
     The same "the package names it; the host writes it" split as
-    :func:`landmark_invocation`. A person named in the family landmark set
-    reaches the roster as a PERSON entity carrying the relationship fact —
-    `entity_verdict`'s `--relationship` / `--living` identity facts (ADR 0013,
-    v190) are exactly the settled, refresh-surviving facts this is
-    (`entity_roster._SETTLED_IDENTITY_FIELDS`).
+    :func:`landmark_invocation`. A person named in the landmark set reaches
+    the roster as a PERSON entity carrying the identity facts —
+    `entity_verdict`'s `--relationship` / `--living` / `--born` / `--died`
+    (ADR 0013, v190, v217) are exactly the settled, refresh-surviving facts
+    this is (`entity_roster._SETTLED_IDENTITY_FIELDS`).
 
     ``clear`` is the verdict because the landmark set asserts an IDENTITY, not
     a page verdict — graduating a brother named once would breach ADR 0013's
@@ -1885,8 +1963,24 @@ def family_roster_invocations(landmarks: object) -> list[list[str]]:
     heard the name; `entity_roster.apply_previous_decisions` folds it into the
     real entry by name/alias the moment they are actually mentioned.
 
-    A member with no relation yields nothing: the roster's vocabulary is
-    closed, and an unqualified guess is worse than silence.
+    A FAMILY member with no relation yields nothing: the roster's vocabulary
+    is closed, and an unqualified guess is worse than silence. A family
+    member's stated birth year rides along as ``--born`` (v217) — before this
+    it was collected by the `family` ladder and then discarded here.
+
+    A LOSSES person yields ``--died`` (when the entry is dated) and always
+    ``--not-living``, and carries NO ``--relationship``: the losses ladder
+    never asks how the person was related, and the roster's relationship
+    vocabulary is closed. The dates keep the basis of the landmark record they
+    came from, so the roster copy is honestly a copy — the landmark store
+    stays the source of truth, and :func:`anchors_from_people` is what keeps
+    the copy from minting a duplicate anchor.
+
+    NOTE ON SENSITIVITY: `losses` is the one `sensitive: true` domain, and a
+    roster entry has nowhere to record that. Adding a sensitivity field to the
+    roster is machinery this change deliberately does not invent; the created
+    row is never page-eligible, exactly like the family rows, so nothing about
+    the loss is published by this join.
     """
     argvs: list[list[str]] = []
     for member in family_members(landmarks):
@@ -1899,9 +1993,37 @@ def family_roster_invocations(landmarks: object) -> list[list[str]]:
             argv.append("--living")
         elif member["living"] is False:
             argv.append("--not-living")
+        argv.extend(_date_flags("born", chrono.from_dict(member["date"])))
+        argv.append("--ensure")
+        argvs.append(argv)
+    for person in lost_people(landmarks):
+        argv = ["entity-verdict", "person", person["slug"], "clear",
+                "--name", person["name"], "--not-living"]
+        argv.extend(_date_flags("died", person["date"]))
         argv.append("--ensure")
         argvs.append(argv)
     return argvs
+
+
+def _date_flags(flag: str, record: object) -> list[str]:
+    """``["--born", "1948", "--born-basis", "stated"]`` for one date record.
+
+    The basis travels with the date because the roster copy must not
+    misrepresent a derived claim as a stated one: `entity_verdict`'s
+    precedence rule (`_preferred_date`) reads exactly this to decide whether a
+    later claim may replace an earlier one.
+    """
+    edtf = chrono.to_edtf(record)
+    if not edtf:
+        return []
+    basis = getattr(record, "basis", None) or "stated"
+    return [f"--{flag}", edtf, f"--{flag}-basis", str(basis)]
+
+
+#: v217: the pre-v217 name of :func:`person_roster_invocations`, kept because
+#: hosts vendor these bytes and call it by name. One definition, two names —
+#: never a second body.
+family_roster_invocations = person_roster_invocations
 
 
 #: The two closed lists a second person can supply COMPLETELY (`landmarks.md`

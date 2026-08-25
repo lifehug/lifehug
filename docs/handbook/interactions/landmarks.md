@@ -420,6 +420,19 @@ ask, you bound, you do the arithmetic. They supply what they know.
   refresh". `--ensure` creates the row for a relative with no answer mentions
   yet, and creates it **never page-eligible**, because ADR 0013's ≥1-mention
   floor on pages still holds: an identity fact is not a page.
+- **A person's OWN two dates are settled identity facts too** (v217).
+  `entity-verdict --born/--died` writes them, and they join
+  `_SETTLED_IDENTITY_FIELDS`, so a roster refresh cannot drop them. The join
+  now emits them: a family member's stated birth year rides along as
+  `--born`, and the people named in `losses` reach the roster at all for the
+  first time, carrying `--died` and `--not-living`. The rows are still never
+  page-eligible on creation — nothing about a loss is published by this join.
+- **One anchor per person per fact** (v217). A family landmark's birth date
+  and the roster's `born` are the same fact in two stores, so
+  `anchors_from_people` skips the roster copy whenever the landmark store
+  already anchors it: the landmark store is the source of truth, the roster
+  row is its derived copy, and there is no reconciler because there is
+  nothing to reconcile.
 - **`landmark_subject` and `residence_gap` ARE `UNKNOWN_KINDS` members** (v202)
   — unlike `place_no_stories`, which is a story gap. These two are dating
   gaps, one subject each, and they are exactly what the *unknowns are

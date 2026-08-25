@@ -35,6 +35,7 @@ from pathlib import Path
 SYSTEM_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SYSTEM_DIR))
 
+import chronology
 from ai_provider import failure_metadata
 from lifehug_core import (
     ANSWERS_DIR,
@@ -329,15 +330,27 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
 
 #: entity-identity-context (v190, Design §E): the settled facts a roster entry
 #: can carry that are NOT re-derivable from a refresh — an owner verdict
-#: (ADR 0013) and the two identity facts the owner supplies in the Play
-#: conversation (`entity-verdict --relationship/--living|--not-living`). An
-#: entry carrying any of them survives a refresh that drops or contradicts it,
-#: exactly as an owner_verdict alone did before v190. `maps_to_focus` is
-#: deliberately NOT here: a merge's durability lives on the SURVIVOR (the
-#: loser's names are unioned into the target's aliases, which
-#: `_entity_keys`/`apply_previous_decisions` then fold by forever), not on the
-#: loser's own row.
-_SETTLED_IDENTITY_FIELDS = ("relationship", "living")
+#: (ADR 0013) and the identity facts the owner supplies in the Play
+#: conversation (`entity-verdict --relationship/--living|--not-living`, and
+#: since v217 `--born/--died`). An entry carrying any of them survives a
+#: refresh that drops or contradicts it, exactly as an owner_verdict alone did
+#: before v190. `maps_to_focus` is deliberately NOT here: a merge's durability
+#: lives on the SURVIVOR (the loser's names are unioned into the target's
+#: aliases, which `_entity_keys`/`apply_previous_decisions` then fold by
+#: forever), not on the loser's own row.
+#:
+#: v217 (person dates) adds `born` and `died`. They belong here for exactly
+#: the reason the tuple exists: a birth or death date is stated ONCE — by the
+#: person, or by a family/losses landmark — and is never re-derivable from the
+#: entity-candidate refresh, whose whole input is mention statistics. Omitting
+#: them would mean a roster refresh silently drops the most common datable
+#: facts in a life story.
+_SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died")
+
+#: The two date-shaped settled fields, as a subset of the tuple above. Named
+#: once so the store's precedence rule (`entity_verdict._preferred_date`) and
+#: the anchor derivation both read the same list rather than re-typing it.
+PERSON_DATE_FIELDS = ("born", "died")
 
 
 def _has_settled_identity(entry: dict) -> bool:
@@ -673,6 +686,14 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
         living = e.get("living")
         if isinstance(living, bool):
             entry["living"] = living
+        # v217 (person dates): `born`/`died` are settled identity facts too,
+        # normalized through the ONE date definition every landmark date
+        # already uses (`chronology.normalized_date`) so a record that arrives
+        # with only `best` still carries real bounds and can date anything.
+        for date_field in PERSON_DATE_FIELDS:
+            record = chronology.normalized_date(e.get(date_field))
+            if record is not None:
+                entry[date_field] = record
         owner_verdict = e.get("owner_verdict")
         if owner_verdict in ("graduate", "never"):
             entry["owner_verdict"] = owner_verdict

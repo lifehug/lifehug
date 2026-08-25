@@ -359,13 +359,17 @@ working.
 | Resolution | `entity_roster.py` — `load_candidates()`, `build_prompt()`, `normalize()`, `deterministic()`, `apply_previous_decisions()` |
 | Base eligibility formula (shared by `normalize()` and `entity_verdict.py`) | `entity_roster.base_page_eligible()` |
 | Owner verdicts (ADR 0013) | `entity_verdict.py` — `apply_verdict()`; CLI `entity-verdict <type> <slug> graduate\|never\|clear [--json]` |
+| Settled identity facts (v190; v217 dates) | `entity_roster._SETTLED_IDENTITY_FIELDS` = `relationship`, `living`, `born`, `died` — the facts a refresh cannot re-derive and therefore cannot drop. Written by `entity_verdict.apply_verdict()` through `--relationship`, `--living\|--not-living`, `--born <edtf> [--born-basis]`, `--died <edtf> [--died-basis]` |
+| Person-date precedence (v217) | `entity_verdict._preferred_date()` — derived never overwrites stated, same basis wins by recency, ordered by `chronology.claim_score` (no second strength table). Dates are parsed by `chronology.parse_edtf` and normalized by `chronology.normalized_date`, the same two calls `landmark-record --date` makes |
+| Person dates as anchors (v217) | `landmarks_interaction.anchors_from_people(people, landmarks)` → `person:<slug>:born\|died`; skips any fact the landmark store already anchors, so a family/losses landmark and its roster copy never both enter the index. Joined in `timeline.timeline_data()` and `timeline_interaction.anchors_for_person(people=…)` |
+| Person-page dates (v217) | `wiki_compile._person_dates_sentence()` (the summary line) and `_person_date_edtf()` → `frontmatter(born_edtf=…, died_edtf=…)` |
 | Graduation (mention bars, page build) | `wiki_compile.plan_entities()` |
 | Candidate-research evidence/source authority | `candidate_research.py`, `sources/candidate-research/entity_candidate/` |
 | Orphan-page cleanup/demotion | `wiki_compile.cleanup_orphan_entity_pages()` |
 | Theme-specific keyword curation (v97, out of this page's core scope) | `wiki_compile.theme_keyword_map()` |
 | CLI | `lifehug.py entity-roster --type <t> [--resolve\|--emit-task PATH\|--from-response PATH\|--show] [--min-score\|--min-answers]`, `entity-verdict <type> <slug> graduate\|never\|clear` |
 | Monthly wiring | `monthly_research.sh` — entity-roster refresh (all five types) runs after `focus-autopilot` and before the final `compile`, so a newly-approved Focus's mapping and this run's roster decisions both land in the same recompile |
-| Guard tests | `tests/test_entity_owner_verdicts.py`, `tests/test_wiki_compile.py`, `tests/test_v97_theme_roster.py`, `tests/walkthrough_entity_verdicts.py` (repo-verify exact names before citing in a PR) |
+| Guard tests | `tests/test_entity_owner_verdicts.py`, `tests/test_person_dates.py`, `tests/test_wiki_compile.py`, `tests/test_v97_theme_roster.py`, `tests/walkthrough_entity_verdicts.py` (repo-verify exact names before citing in a PR) |
 
 **Change-safely notes.** `base_page_eligible()` is the one place
 person/place/period/object/theme eligibility is computed — any future

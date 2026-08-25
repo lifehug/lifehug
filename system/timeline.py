@@ -2940,6 +2940,19 @@ def timeline_data(evidence: list[dict] | None = None,
         landmark_anchors = landmarks_interaction.anchors_from_landmarks(filed_landmarks)
     except Exception:  # noqa: BLE001
         filed_landmarks, landmark_anchors = {}, {}
+    # v217 (person dates): a roster person's `born`/`died` is an anchor too —
+    # this is the `entity_date` unlock `questions.yaml` has declared since
+    # v197 with no consumer. `anchors_from_people` skips any fact the landmark
+    # store already anchors, so there is exactly one anchor per person per
+    # fact and no reconciler. Guarded like every other derived block here.
+    try:
+        import entity_roster as _entity_roster  # noqa: PLC0415
+
+        landmark_anchors = dict(landmark_anchors)
+        landmark_anchors.update(landmarks_interaction.anchors_from_people(
+            _entity_roster.load_roster("person"), filed_landmarks))
+    except Exception:  # noqa: BLE001
+        pass
     if birth_date is None:
         try:
             birth_date = landmark_birth_date(filed_landmarks)
