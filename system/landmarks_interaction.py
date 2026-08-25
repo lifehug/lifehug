@@ -1527,6 +1527,44 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
     return merged
 
 
+def entry_name(entry: object, row: object) -> str | None:
+    """What ONE filed entry is CALLED, spelled the way it was filed.
+
+    The READ side's identity as a NAME rather than as a merge key:
+    :func:`identity_named` first (``label`` / ``name``, placeholders refused),
+    then the domain's own :func:`identity_rung`, which is where a record filed
+    straight to ``who`` puts the person — the founder's four children were
+    filed exactly that way. Same order as :func:`landmark_entry_key`, which is
+    this identity case-folded into the key two records of the same entry merge
+    on.
+
+    The one deliberate difference from that key: a PLACEHOLDER label
+    (:data:`_PLACEHOLDER_LABELS`) is a fine merge key — two entries both
+    called "unknown" are the same unidentified entry — and is not a name, so
+    it is refused here and reads as an unnamed entry instead.
+
+    ``None`` where the entry names nobody, which is the right answer for
+    `birth`, whose ladder has no subject at all.
+    """
+    if not isinstance(entry, dict) or not isinstance(row, dict):
+        return None
+    named = identity_named(entry, row)
+    if named:
+        return named
+    rung = identity_rung(row)
+    if not rung:
+        return None
+    value = entry.get(rung)
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    lowered = cleaned.lower()
+    if not cleaned or lowered in _PLACEHOLDER_LABELS \
+            or lowered == str(row.get("domain") or "").strip().lower():
+        return None
+    return cleaned
+
+
 def landmark_entry_key(entry: object, row: object = None) -> str:
     """The identity ONE filed entry is merged on, within its domain.
 
@@ -2189,8 +2227,15 @@ def describe_landmarks_plan(plan: object) -> list[str]:
 
 
 def render_landmarks(rows: object, *, limit: int = 8) -> str:
-    """The `{landmarks}` prompt block — what we already know, so the model
-    never asks for it twice."""
+    """The CONVERSATION's `{landmarks}` block — one line per DOMAIN, status
+    only, so the model never asks for a domain twice.
+
+    Its sibling :func:`render_known_entries` is the RECORDER's block and names
+    the entries themselves: a status line is the right thing to show someone
+    deciding what to ask, and the wrong thing to show a machine deciding what
+    to file (v216, and the reason `- children: partial (4)` could not stop a
+    single duplicate).
+    """
     lines = []
     for row in (rows or ())[:max(int(limit), 0)]:
         if not isinstance(row, dict) or row.get("status") == "open":
@@ -2199,6 +2244,137 @@ def render_landmarks(rows: object, *, limit: int = 8) -> str:
         lines.append(f"- {row.get('domain')}: {row.get('status')}"
                      + (f" ({count})" if count else ""))
     return "\n".join(lines) if lines else "(nothing yet)"
+
+
+# --------------------------------------------------------------------------
+# What is ALREADY FILED, per domain (v216, lifehug#230)
+# --------------------------------------------------------------------------
+#
+# THE DEFECT the design audit found (D7). The recorder's leaf has carried the
+# heading "ALREADY KNOWN — never record these again" since v212, and what was
+# rendered under it was `render_landmarks` above: one line per DOMAIN, saying
+# `- children: partial (4)`. A model cannot avoid re-filing four children it
+# has never been shown. The instruction was unactionable, so a re-answer — the
+# ordinary shape of a person going back over their own life, and the shape the
+# per-turn listener will make routine — re-emits facts already in the store,
+# and `answer_shape` then reads their own names coming back as fresh evidence.
+#
+# So the block names the ENTRIES. One rendering definition, here beside the
+# ladder that reads them (`rung_reached`), so the prompt and any future host
+# render a filed entry the same way — and `known_entry_labels` beside it is
+# the ONE derivation both the block and the `known_labels` lint input come
+# from, rather than two lists of names that can disagree.
+
+#: How many filed entries :func:`render_known_entries` names before it stops
+#: and says how many more there are. Twelve is a working life's worth of jobs
+#: — the founder's own answer — and the tail keeps the block honest about
+#: being a window rather than the whole store.
+KNOWN_ENTRIES_LIMIT = 12
+
+#: What :func:`render_known_entries` says when a domain holds nothing yet.
+NO_KNOWN_ENTRIES = "(nothing filed for this domain yet)"
+
+
+def landmark_entries(landmarks: object, domain: object) -> tuple[dict, ...]:
+    """The entries filed under ONE domain, in whichever shape the caller has.
+
+    ONE accessor for the store's own shape: a dict is the LANDMARKS store
+    (``{domain: [entry, ...]}``) and is indexed by ``domain``; a list or tuple
+    is that domain's entries, already selected by the caller. Anything else,
+    and any non-dict or empty member, is nothing.
+    """
+    name = str(domain or "").strip()
+    rows: object = (landmarks.get(name) if isinstance(landmarks, dict)
+                    else landmarks)
+    if not isinstance(rows, (list, tuple)):
+        return ()
+    return tuple(entry for entry in rows if isinstance(entry, dict) and entry)
+
+
+def render_entry(entry: object, row: object) -> str:
+    """ONE filed entry as one line: what it is called, and what is dated on it.
+
+    The name comes from :func:`entry_name` — the same identity the ladder and
+    the merge key read — and the date from the entry's own record or span,
+    rendered the way the person would recognise it
+    (:func:`chronology.display_date`, basis clause suppressed, exactly as
+    :func:`places_without_stories` reports a span). A domain with no identity
+    rung (`birth`) has no subject to name, so its line is the date alone.
+
+    The two terminals say what they are: a domain answered with a no, or one
+    the person declined, is filed and must never be re-filed as a fact.
+    """
+    if not isinstance(entry, dict) or not entry or not isinstance(row, dict):
+        return ""
+    if is_none_entry(entry, row):
+        return "- (they said plainly this never happened)"
+    if entry.get("skipped") is True:
+        return "- (they declined this for now)"
+    record = _entry_date(entry)
+    dated = chrono.display_date(record, with_basis=False) if record else ""
+    dated = dated.strip() or "no date filed"
+    name = entry_name(entry, row)
+    if identity_rung(row) is None:
+        return f"- {dated}"
+    return f"- {name or '(unnamed)'} — {dated}"
+
+
+def render_known_entries(landmarks: object, domain: object, *,
+                         limit: int = KNOWN_ENTRIES_LIMIT,
+                         framework_root: str | Path | None = None) -> str:
+    """The recorder's ``{known_entries}`` block — this domain's filed entries.
+
+    What the store already holds for the ONE domain being asked about, one
+    line per entry, so "never record these again" is something a model can
+    actually act on. Other domains are not in it: the recorder can only emit
+    records for the domain it was given, so a status line about another one is
+    noise in a prompt whose whole virtue is being small.
+    """
+    row = domain_row(domain, framework_root=framework_root)
+    entries = landmark_entries(landmarks, domain)
+    ceiling = max(int(limit), 0)
+    lines = [line for line in (render_entry(entry, row)
+                               for entry in entries[:ceiling]) if line]
+    if not lines:
+        return NO_KNOWN_ENTRIES
+    hidden = len(entries) - ceiling
+    if hidden > 0:
+        lines.append(f"- …and {hidden} more already filed for this domain")
+    return "\n".join(lines)
+
+
+def known_entry_labels(landmarks: object, domain: object, *,
+                       extra: object = (),
+                       framework_root: str | Path | None = None
+                       ) -> tuple[str, ...]:
+    """The names ALREADY filed for a domain — the ``known_labels`` derivation.
+
+    ONE derivation, THREE consumers (recurring-defect doctrine): the
+    ``{known_entries}`` block the recorder shows the model,
+    :func:`answer_shape` (through :func:`answer_must_record`), which must not
+    read a name it supplied itself coming back as the person's own evidence,
+    and :func:`records_missing_entries`, which must not retry for an entry
+    that is already in the store. Before v216 that argument was hand-passed at
+    each call site, which is to say it was empty everywhere.
+
+    ``extra`` is unioned in for a host holding names from somewhere else (a
+    roster, a prior turn); order is the store's, then the extras, and the
+    first spelling of a name wins.
+    """
+    row = domain_row(domain, framework_root=framework_root)
+    names: list[str] = []
+    seen: set[str] = set()
+    candidates = [entry_name(entry, row)
+                  for entry in landmark_entries(landmarks, domain)]
+    candidates.extend(extra or ())
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        names.append(text)
+    return tuple(names)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -42,3 +42,16 @@ empty first extraction, and the extraction that comes back after ONE
 `landmark_recorder.record_answer` from those raw completions and walks the
 whole path: lint fires, reminder, clean emit — and the same cases again with
 the reply removed entirely, because the recorder never needed it (ADR 0028).
+
+`landmark-known-entries-01.json` is the recorder's DUPLICATE-SUPPRESSION
+acceptance (v216, lifehug#230) and is likewise not part of the seat: each case
+carries a LANDMARKS store, so `landmark_recorder.record_answer` composes the
+prompt with the entries already filed in it and derives `known_labels` from
+the same entries. It pins the founder shape — four children filed, re-answered
+with nothing new, which files nothing in ONE attempt and fires no lint — plus
+a re-answer carrying one genuinely new entry (only that entry comes back, and
+the many-records class does not retry for the four it can see) and a finer
+date on an entry already filed, which is a refinement under the same name
+rather than a duplicate. `merge_landmark_entry` and `timeline.save_landmarks`
+are pinned beside them as the store-side backstop for whatever the model
+repeats anyway.

@@ -1,0 +1,269 @@
+{
+  "fixture_id": "landmark-known-entries-01",
+  "note": "v216 / lifehug#230 — THE RECORDER KNOWS WHAT IT ALREADY KNOWS. The recorder's leaf has carried \"never record these again\" since v212 over a block that named DOMAIN STATUSES (`- children: partial (4)`), and `known_labels` — which both recording lints take — was hand-passed, which is to say empty at every call site. So a re-answer re-emitted facts already in the store and the lints read the person's own filed names as fresh evidence. These cases drive `landmark_recorder.record_answer` with a LANDMARKS store and pin the three outcomes that follow: a pure restatement files nothing in one attempt, a re-answer carrying one new entry files exactly that entry, and a finer date on an entry already filed is a refinement rather than a duplicate. Deliberately NOT in landmark_fixtures.json: these are recorder completions, not reference transcripts.",
+  "cases": [
+    {
+      "case_id": "children-re-answered-with-nothing-new",
+      "note": "The founder shape, and the one D7 is about: the four children are already in the store, he goes back over them, and there is nothing new in it. The recorder is SHOWN them, files nothing, and — because `known_labels` is derived from the same entries — `answer_shape` reads their names coming back as the model's own word rather than fresh evidence, so the blocking lint does not fire and no regeneration is spent. Before v216 the block said `- children: partial (4)`, the names were unknown to both, and this answer cost two completions and came back WITHHELD.",
+      "domain": "children",
+      "landmarks": {
+        "children": [
+          {
+            "domain": "children",
+            "label": "Corinne",
+            "date": {
+              "best": "1979-04-02",
+              "earliest": "1979-04-02",
+              "latest": "1979-04-02",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Corinne"
+          },
+          {
+            "domain": "children",
+            "label": "Maddox",
+            "date": {
+              "best": "1981-11-15",
+              "earliest": "1981-11-15",
+              "latest": "1981-11-15",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Maddox"
+          },
+          {
+            "domain": "children",
+            "label": "Sela",
+            "date": {
+              "best": "1984-06-30",
+              "earliest": "1984-06-30",
+              "latest": "1984-06-30",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Sela"
+          },
+          {
+            "domain": "children",
+            "label": "Ivo",
+            "date": {
+              "best": "1990-02-08",
+              "earliest": "1990-02-08",
+              "latest": "1990-02-08",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Ivo"
+          }
+        ]
+      },
+      "user_message": "Four of them: Corinne, Maddox, Sela and Ivo.",
+      "reply": "Corinne, Maddox, Sela and Ivo. A full house.",
+      "attempt": {
+        "raw": "{\"landmarks\": []}"
+      },
+      "expected_status": "nothing",
+      "expected_attempts": 1,
+      "expected_landmarks": []
+    },
+    {
+      "case_id": "children-only-the-one-that-is-new-comes-back",
+      "note": "A re-answer that DOES carry something new. Four names are already filed and the fifth is not; one record comes back and it is the right one. The many-records lint must not retry for the four — they are covered by the same derived `known_labels` — which is the difference between one completion and two on every re-answer a person makes.",
+      "domain": "children",
+      "landmarks": {
+        "children": [
+          {
+            "domain": "children",
+            "label": "Corinne",
+            "date": {
+              "best": "1979-04-02",
+              "earliest": "1979-04-02",
+              "latest": "1979-04-02",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Corinne"
+          },
+          {
+            "domain": "children",
+            "label": "Maddox",
+            "date": {
+              "best": "1981-11-15",
+              "earliest": "1981-11-15",
+              "latest": "1981-11-15",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Maddox"
+          },
+          {
+            "domain": "children",
+            "label": "Sela",
+            "date": {
+              "best": "1984-06-30",
+              "earliest": "1984-06-30",
+              "latest": "1984-06-30",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Sela"
+          },
+          {
+            "domain": "children",
+            "label": "Ivo",
+            "date": {
+              "best": "1990-02-08",
+              "earliest": "1990-02-08",
+              "latest": "1990-02-08",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Ivo"
+          }
+        ]
+      },
+      "user_message": "Corinne, Maddox, Sela and Ivo — and Wren, who came along in 1994.",
+      "reply": "And Wren too. Five, then.",
+      "attempt": {
+        "raw": "{\"landmarks\": [{\"domain\": \"children\", \"label\": \"Wren\", \"who\": \"Wren\", \"date\": {\"best\": \"1994\"}}]}"
+      },
+      "expected_status": "recorded",
+      "expected_attempts": 1,
+      "expected_landmarks": [
+        {
+          "domain": "children",
+          "label": "Wren",
+          "date": {
+            "best": "1994",
+            "earliest": "1994",
+            "latest": "1994",
+            "granularity": "year",
+            "confidence": "certain",
+            "basis": "anchor",
+            "anchors": [],
+            "provenance": []
+          },
+          "who": "Wren"
+        }
+      ]
+    },
+    {
+      "case_id": "children-a-finer-date-is-not-a-duplicate",
+      "note": "The one time an entry already filed IS recorded again: the block shows Sela at a year, the person gives the day, and the record comes back under the SAME name carrying only what is new. `merge_landmark_entry` then lands it on the same entry rather than beside it, which is the store-side backstop for whatever the model repeats anyway.",
+      "domain": "children",
+      "landmarks": {
+        "children": [
+          {
+            "domain": "children",
+            "label": "Corinne",
+            "date": {
+              "best": "1979-04-02",
+              "earliest": "1979-04-02",
+              "latest": "1979-04-02",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Corinne"
+          },
+          {
+            "domain": "children",
+            "label": "Maddox",
+            "date": {
+              "best": "1981-11-15",
+              "earliest": "1981-11-15",
+              "latest": "1981-11-15",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Maddox"
+          },
+          {
+            "domain": "children",
+            "label": "Sela",
+            "date": {
+              "best": "1984",
+              "earliest": "1984",
+              "latest": "1984",
+              "granularity": "year",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Sela"
+          },
+          {
+            "domain": "children",
+            "label": "Ivo",
+            "date": {
+              "best": "1990-02-08",
+              "earliest": "1990-02-08",
+              "latest": "1990-02-08",
+              "granularity": "day",
+              "confidence": "certain",
+              "basis": "anchor",
+              "anchors": [],
+              "provenance": []
+            },
+            "who": "Ivo"
+          }
+        ]
+      },
+      "user_message": "Sela's birthday is the 30th of June, 1984.",
+      "reply": "The 30th of June. Noted.",
+      "attempt": {
+        "raw": "{\"landmarks\": [{\"domain\": \"children\", \"label\": \"Sela\", \"who\": \"Sela\", \"date\": {\"best\": \"1984-06-30\"}}]}"
+      },
+      "expected_status": "recorded",
+      "expected_attempts": 1,
+      "expected_landmarks": [
+        {
+          "domain": "children",
+          "label": "Sela",
+          "date": {
+            "best": "1984-06-30",
+            "earliest": "1984-06-30",
+            "latest": "1984-06-30",
+            "granularity": "day",
+            "confidence": "certain",
+            "basis": "anchor",
+            "anchors": [],
+            "provenance": []
+          },
+          "who": "Sela"
+        }
+      ]
+    }
+  ]
+}
