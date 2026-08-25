@@ -1037,6 +1037,19 @@ def _fill_band(band: dict, entity_lineup: dict[str, list[dict]],
     for place in places.values():
         if place.get("date") is None:
             place["date"] = _place_span(place["events"])
+            # v208: an envelope taken from the moments inside is a DERIVED
+            # span, and ADR 0026's rule is that a derived date is marked by
+            # `date_derived` and by nothing else. Without the mark the
+            # placement score's stated half would read an envelope the
+            # cross-dating pass produced as something the person stated, and
+            # ADR 0027's pair would move when the pass ran.
+            if place["date"] is not None:
+                place["date_derived"] = {
+                    "rule": "moments", "join": "moment_envelope",
+                    "anchor": f"entity:{place['slug']}",
+                    "label": str(place.get("label") or place["slug"]),
+                    "provenance": "from the moments you have already dated",
+                }
         place.pop("sources", None)
     band["places"] = sorted(
         places.values(),
@@ -1591,6 +1604,312 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
     second, drifting copy of it. Nothing about a keystone changed.
     """
     return _greedy_plan(_scored_anchors(data), n)
+
+
+# ---------------------------------------------------------------------------
+# The placement score (v208, ADR 0027) — the level and its margin, one
+# arithmetic. Beside `keystones`/`dig_plan`, the house home for derived
+# timeline arithmetic.
+# ---------------------------------------------------------------------------
+
+#: The band thresholds, Recoin-style (`system/research/chronology-vis.md`
+#: §4.3): arbitrary but STABLE, and never peer-relative — there are no peers
+#: in a private vault. `1: <0.2 · 2: <0.4 · 3: <0.6 · 4: <0.8 · 5: ≥0.8`.
+PLACEMENT_BANDS = (0.2, 0.4, 0.6, 0.8)
+
+#: The finest width the score can express — one day, in years. A fully
+#: day-pinned vault ROUNDS to 1.0 at four places without ever reaching it,
+#: which is the honest shape: an interval is never nothing.
+DAY_YEARS = 1.0 / 365.0
+
+#: Four places, everywhere. A score is a banded chip, not a readout.
+PLACEMENT_ROUNDING = 4
+
+#: What one answered anchor buys, as a width in years. Every rung of the
+#: elicitation ladder ends at a year-or-finer claim
+#: (`timeline_interaction.PLAYBOOK_STEPS`), and the year is the unit the score
+#: is measured in — so the margin collapses its resolve set to one year. A
+#: finer answer over-delivers and never under-delivers, which keeps the margin
+#: a FLOOR exactly as the score itself is one (ADR 0027).
+ANCHOR_GRAIN_YEARS = 1.0
+
+
+def _record_width(record: object, life: tuple[int, int]) -> float:
+    """A dated thing's interval width in years, floored at one day.
+
+    The bounds are filled by grain the way the rest of the chronology fills
+    them — `chronology._ordinal` fills a bare year down to 1 January at the
+    start and up to 31 December at the end — so "1984" is a whole year wide
+    and "1984-07-11" is a day. An open bound (`1984/..`) is clamped to the
+    life: the honest reading of "or later" is "or later, in this life".
+    """
+    parsed = chrono.from_dict(record)
+    if parsed is None:
+        return float(max(life[1] - life[0], 1))
+    first = chrono._ordinal(parsed.earliest, end=False) or (life[0], 1, 1)  # noqa: SLF001
+    last = chrono._ordinal(parsed.latest, end=True) or (life[1], 12, 31)  # noqa: SLF001
+    try:
+        days = (datetime(*last) - datetime(*first)).days
+    except (TypeError, ValueError):
+        return DAY_YEARS
+    return max(float(days) / 365.0, DAY_YEARS)
+
+
+def _years_width(years: object) -> float:
+    """An unknown interval's width — `unknown_width`'s definition, reused so
+    the score and the plan's ranking can never be two numbers."""
+    return unknown_width({"years": years})
+
+
+def _stated_view(data: dict) -> dict:
+    """`data` as it would read if the cross-dating pass had never run.
+
+    Ruling 3 (#637): **stated and derived are a pair**, and the stated half
+    must be immovable by the pass. So the stated basis reads every DERIVED
+    span as absent — an era the band ladder dated, and the band that reports
+    that era's span — and an era's moments fall back to the honest floor
+    exactly as they would have before the pass. Nothing is mutated: the view
+    is shallow copies.
+    """
+    periods = []
+    derived_slugs: set[str] = set()
+    for period in data.get("periods") or ():
+        if period.get("date_derived"):
+            derived_slugs.add(str(period.get("slug")))
+            period = {**period, "date": None}
+        periods.append(period)
+    bands = []
+    for band in data.get("bands") or ():
+        members = {str(slug) for slug in (band.get("periods") or ())}
+        if band.get("date_derived") or (band.get("kind") == "period"
+                                        and members & derived_slugs):
+            band = {**band, "date": None}
+        bands.append(band)
+    return {**data, "periods": periods, "bands": bands}
+
+
+def _thing(kind: str, key: str, *, record: object, unknown_row: dict,
+           data: dict, stated: dict, life: tuple[int, int]) -> dict:
+    """One scored thing: what it is, the interval it occupies, and the
+    interval it would occupy on the stated basis alone."""
+    derived = bool(unknown_row.get("date_derived"))
+    dated = record is not None
+    if dated:
+        years = _record_years(record) or [life[0], life[1]]
+        width = _record_width(record, life)
+    else:
+        years = unknown_years(unknown_row, data, life=life) or [life[0], life[1]]
+        width = _years_width(years)
+    if dated and not derived:
+        stated_years, stated_width = years, width
+    else:
+        # Ruling 3: on the stated basis anything the person did not state is
+        # UNPLACED, and the interval it falls back to must be one the pass
+        # cannot have widened or narrowed — so an undated thing is read against
+        # the stated view too, not only a derived one. Without this an undated
+        # moment inherits the era span the pass just derived, and `score_stated`
+        # moves when the pass runs.
+        stated_years = unknown_years(unknown_row, stated, life=life) or [life[0], life[1]]
+        stated_width = _years_width(stated_years)
+    return {"kind": kind, "key": key, "years": years, "width": width,
+            "stated_years": stated_years, "stated_width": stated_width,
+            "dated": dated, "derived": derived}
+
+
+def _scored_things(data: dict, life: tuple[int, int]) -> list[dict]:
+    """Every THING the timeline holds, with the interval it occupies.
+
+    The population is exactly what `unknowns()` and the dated lineups
+    enumerate between them — placed moments, unplaced moments, eras, and the
+    place spans inside the bands. ONE enumeration, shared by `placement_score`
+    and by its own tests, so "what is scored" can never become two lists.
+    """
+    stated = _stated_view(data)
+    things: list[dict] = []
+
+    def moment(event: dict, slug: object) -> None:
+        row = dict(event)
+        row.update({"kind": "moment", "period": slug,
+                    "source_short": event.get("source_short")})
+        things.append(_thing("moment", unknown_key(row), record=event.get("date"),
+                             unknown_row=row, data=data, stated=stated, life=life))
+
+    for slug, rows_here in (data.get("event_lineup") or {}).items():
+        for event in rows_here or ():
+            moment(event, slug)
+    for event in data.get("unplaced_events") or ():
+        moment(event, None)
+
+    for period in data.get("periods") or ():
+        row = dict(period)
+        row.update({"kind": "period_bound", "slug": period.get("slug"),
+                    "period": period.get("slug")})
+        things.append(_thing("period", unknown_key(row), record=period.get("date"),
+                             unknown_row=row, data=data, stated=stated, life=life))
+
+    seen: set[str] = set()
+    for band in data.get("bands") or ():
+        for place in band.get("places") or ():
+            slug = str(place.get("slug") or "").strip()
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            row = dict(place)
+            row.update({"kind": "place_span", "slug": slug, "period": band.get("ref")})
+            things.append(_thing("place_span", unknown_key(row), record=place.get("date"),
+                                 unknown_row=row, data=data, stated=stated, life=life))
+    return things
+
+
+def _level(things: list[dict], life: tuple[int, int], *, key: str = "width") -> float:
+    """`1 − Σwᵢ / (n · L)`, clamped to [0, 1] and rounded to four places."""
+    span = float(max(life[1] - life[0], 1))
+    if not things:
+        return 0.0
+    total = sum(float(thing[key]) for thing in things)
+    value = 1.0 - (total / (len(things) * span))
+    return round(min(max(value, 0.0), 1.0), PLACEMENT_ROUNDING)
+
+
+def placement_score_band(score: float) -> int:
+    """`1..5` from a score — fixed thresholds, documented as arbitrary but
+    stable (`chronology-vis.md` §4.3, design consequence 5: band it, never
+    render a bare continuous percentage)."""
+    for index, threshold in enumerate(PLACEMENT_BANDS, start=1):
+        if score < threshold:
+            return index
+    return len(PLACEMENT_BANDS) + 1
+
+
+def _per_year_band(things: list[dict], life: tuple[int, int]) -> list[dict]:
+    """The strip: one row per calendar year of the life.
+
+    `pinned_fraction` is the AORISTIC weight (Ratcliffe & McCullagh 1998, via
+    `chronology-vis.md` §2.1) — each thing gives `min(1, 1/wᵢ)` to every year
+    its interval covers, normalised by how many things cover that year — so a
+    day-pinned thing contributes ~1 to its year and a decade-wide thing ~0.1
+    to each of ten. This is the half that answers Crema's summation problem
+    (§2.2): five smeared moments and five pinned ones sum identically and
+    read here as very different lives.
+
+    `stated_vs_derived` is the share of that year's weight carried by things
+    the cross-dating pass did NOT date — §1.5's italic convention, as a
+    number. An empty year emits `0`, honestly: a flat stretch means nobody
+    asked (design consequence 16).
+    """
+    rows: list[dict] = []
+    for year in range(int(life[0]), int(life[1]) + 1):
+        covering = [thing for thing in things
+                    if thing["years"] and thing["years"][0] <= year <= thing["years"][1]]
+        if not covering:
+            rows.append({"year": year, "pinned_fraction": 0.0,
+                         "stated_vs_derived": 0.0})
+            continue
+        weights = [min(1.0, 1.0 / max(float(thing["width"]), DAY_YEARS))
+                   for thing in covering]
+        total = sum(weights)
+        stated = sum(weight for weight, thing in zip(weights, covering)
+                     if not thing["derived"])
+        rows.append({
+            "year": year,
+            "pinned_fraction": round(total / len(covering), PLACEMENT_ROUNDING),
+            "stated_vs_derived": (round(stated / total, PLACEMENT_ROUNDING)
+                                  if total else 0.0),
+        })
+    return rows
+
+
+def _next_gain(data: dict, things: list[dict], life: tuple[int, int],
+               score: float) -> dict | None:
+    """The margin, from the SAME arithmetic as the level (§B.5).
+
+    The top row of the existing greedy plan, re-expressed in score units: the
+    level recomputed with that anchor's resolve set collapsed to the anchor's
+    own grain (:data:`ANCHOR_GRAIN_YEARS`), minus the level now. Computed by
+    re-running the level over a copied population — the promise-equals-
+    delivery discipline `cross_dating.gain_sentence_for_record` (v207) already
+    applies to the filing sentence, applied here to the number.
+
+    `count` is the MOMENTS the resolve set holds, because moments are what
+    dating an anchor actually dates; the star's own `leverage` remains the
+    whole set and is unchanged.
+    """
+    plan = keystones(data, 1)
+    if not plan:
+        return None
+    row = plan[0]
+    keys = set(row.get("unknown_keys") or row.get("resolves") or ())
+    if not keys:
+        return None
+    collapsed = [
+        {**thing, "width": min(float(thing["width"]), ANCHOR_GRAIN_YEARS)}
+        if thing["key"] in keys else thing
+        for thing in things
+    ]
+    delta = _level(collapsed, life) - score
+    return {
+        "anchor": str(row.get("anchor") or ""),
+        "count": sum(1 for key in keys if str(key).startswith("moment:")),
+        "delta": round(max(delta, 0.0), PLACEMENT_ROUNDING),
+    }
+
+
+def placement_score(data: dict) -> dict | None:
+    """How placed this life is, 0 → 1 — **at least** this organised (ADR 0027).
+
+    `None` when no birth landmark exists: without a birthday there is no `L`,
+    no floor for an unplaced thing, and no honest denominator. That is correct,
+    and it is why `birth` wears the ★.
+
+    Otherwise `1 − Σwᵢ/(n·L)` over every thing the timeline holds, where `wᵢ`
+    is the width in years of the interval that thing occupies — its own where
+    it is dated, `unknown_years`' where it is not. Four rules travel with the
+    number and are not optional:
+
+    * **Width, never presence.** A field-filled meter is an improper scoring
+      rule, maximised by writing anything down; a width score is not, because
+      the ladder stores a hedge as a WIDER interval (Gneiting & Raftery 2007,
+      via `chronology-vis.md` §4.6). Guessing cannot pay.
+    * **It is a floor.** Marginal width sums overestimate wherever ordering
+      constraints exist — by 3× in Mountakis, Klos & Witteveen's worked case
+      (§4.4) — so the number says *at least this organised*, never *exactly*.
+      `caveat_floor` is `True` and stays `True` until the concurrent-
+      flexibility correction lands.
+    * **Stated and derived are a pair.** `score_stated` recomputes with every
+      derived record read as undated; the cross-dating pass moves `score` and
+      cannot move `score_stated` (§1.5's italic convention, as two numbers).
+    * **It is not a verdict on the life.** It is scoped to what the timeline
+      can order and place — placement, never "completeness" or "accuracy".
+
+    Returns the payload block described in ADR 0027; hosts render it, and
+    nothing here renders anything.
+    """
+    if not isinstance(data, dict):
+        return None
+    life = life_span(data)
+    if life is None:
+        return None
+    things = _scored_things(data, life)
+    if not things:
+        return None
+    score = _level(things, life)
+    dated = [thing for thing in things if thing["dated"]]
+    derived = sum(1 for thing in dated if thing["derived"])
+    stated = len(dated) - derived
+    return {
+        "score": score,
+        "score_stated": _level(things, life, key="stated_width"),
+        "band": placement_score_band(score),
+        "stated_fraction": (round(stated / len(dated), PLACEMENT_ROUNDING)
+                            if dated else 0.0),
+        "derived_fraction": (round(derived / len(dated), PLACEMENT_ROUNDING)
+                             if dated else 0.0),
+        "life_span_years": int(max(life[1] - life[0], 1)),
+        "things": len(things),
+        "per_year_band": _per_year_band(things, life),
+        "caveat_floor": True,
+        "next_gain": _next_gain(data, things, life, score),
+    }
 
 
 def _anchor_labels(data: dict) -> dict[str, str]:
@@ -2609,6 +2928,18 @@ def timeline_data(evidence: list[dict] | None = None,
             "remaining": 0, "open_unknowns": 0,
         }
     data["counts"]["reading_room_asks"] = len(data["reading_room"]["asks"])
+    # v208 (ADR 0027): the placement score — the level and its margin, from one
+    # arithmetic. Derivation-time, stateless, additive-with-default, and
+    # guarded exactly like every other derived block here: a scoring problem
+    # must never take the timeline down. Absent on failure and absent with no
+    # birth landmark, which is the honest shape rather than a zero.
+    try:
+        score = placement_score(data)
+    except Exception:  # noqa: BLE001
+        score = None
+    if score is not None:
+        data["placement"] = score
+        data["counts"]["placement_band"] = score["band"]
     return data
 
 
