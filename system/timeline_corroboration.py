@@ -237,9 +237,14 @@ _CONTRADICTION_HINT = ("Answer to resolve it — your story is never silently "
 
 def _contradiction(level, *, period, key, entity, description, source,
                    connector, memory_says, evidence_says, evidence_count,
-                   message, candidate_text):
+                   message, candidate_text, years=None):
     return {
         "kind": "date_contradiction",
+        # v208 (ADR 0027): the UNION of the two disputed claims' intervals —
+        # the honest width of a contradiction is everything both accounts
+        # between them allow. Computed where the claims are; `unknown_years`
+        # reads it and never re-derives it from the rendered sentences.
+        "years": list(years) if years else None,
         "level": level,
         "period": period,
         "key": key,
@@ -321,6 +326,7 @@ def corroborate(periods: list[dict],
             evidence_says = _span_text(first, last)
             contradictions.append(_contradiction(
                 "period",
+                years=[min(stated[0], first), max(stated[1], last)],
                 period=period["slug"],
                 key=f"period-{period['slug']}",
                 entity=dominant["entity"],
@@ -370,12 +376,15 @@ def corroborate(periods: list[dict],
         if hint_years:
             memory_says = "/".join(str(y) for y in sorted(hint_years))
             story_bit = f"your story says {memory_says}"
+            memory_span = (min(hint_years), max(hint_years))
         else:
             memory_says = _span_text(*stated)
             story_bit = (f"your story places it in {period_names.get(slot, slot)} "
                          f"({memory_says})")
+            memory_span = stated
         contradictions.append(_contradiction(
             "event",
+            years=[min(memory_span[0], first), max(memory_span[1], last)],
             period=slot,
             key=f"event-{_content_key(event.get('source', ''), description)}",
             entity=_badge(matched)["entities"][0]["entity"],

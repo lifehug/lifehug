@@ -39,6 +39,7 @@ from __future__ import annotations
 import contextlib
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SYSTEM_DIR = Path(__file__).resolve().parent
@@ -1140,6 +1141,152 @@ def moment_unknown(event: dict, period: str | None) -> dict:
     return row
 
 
+# ---------------------------------------------------------------------------
+# The interval a thing occupies absent an answer — ONE definition (v208).
+# ---------------------------------------------------------------------------
+
+
+def _now_year() -> int:
+    return datetime.now(timezone.utc).year
+
+
+def life_span(data: object = None, birth_date: object = None) -> tuple[int, int] | None:
+    """``(birth_year, current_year)`` — the stretch the timeline can order.
+
+    This is `L` in the placement score and the honest floor for anything the
+    vault cannot bound more tightly than *sometime in this life*. ``None``
+    when no birth landmark exists — which is exactly why `birth` wears the ★:
+    without it there is no denominator, no floor, and no score (ADR 0027).
+    """
+    record = birth_date
+    if record is None and isinstance(data, dict):
+        row = (data.get("anchors") or {}).get("birth")
+        record = row.get("date") if isinstance(row, dict) else None
+    year = chrono.year_of(record)
+    if year is None:
+        return None
+    return (int(year), max(int(year), _now_year()))
+
+
+def _record_years(record: object) -> list[int] | None:
+    """A date record as ``[first_year, last_year]``; ``None`` when unusable."""
+    first = chrono.year_of(record)
+    last = chrono.year_of(record, end=True)
+    if first is None or last is None:
+        return None
+    return [int(first), int(max(first, last))]
+
+
+def _band_span(data: dict, ref: object) -> list[int] | None:
+    """The span of the band a slug or band ref names.
+
+    An era's OWN date where it carries one (including a span the v207 band
+    ladder derived), else the band that covers it — which is how a moment
+    inside a chapter-kind band still gets bounds when its period has none.
+    """
+    slug = str(ref or "").strip()
+    if not slug:
+        return None
+    for period in data.get("periods") or ():
+        if str(period.get("slug")) != slug or period.get("date") is None:
+            continue
+        years = _record_years(period["date"])
+        if years:
+            return years
+    for band in data.get("bands") or ():
+        if band.get("date") is None:
+            continue
+        members = [str(member) for member in (band.get("periods") or ())]
+        if str(band.get("ref")) != slug and slug not in members:
+            continue
+        years = _record_years(band["date"])
+        if years:
+            return years
+    return None
+
+
+def _spine_hole(data: dict, slug: object) -> list[int] | None:
+    """The hole an UNDATED era occupies between its dated neighbours.
+
+    `era_gaps`' own arithmetic, read for ONE era instead of between two: the
+    stretch after the last dated era before it and before the first dated era
+    after it. ``None`` when either neighbour is missing, or when the two
+    abut.
+    """
+    periods = list(data.get("periods") or ())
+    index = next((n for n, row in enumerate(periods)
+                  if str(row.get("slug")) == str(slug)), None)
+    if index is None:
+        return None
+    before = next((chrono.year_of(row.get("date"), end=True)
+                   for row in reversed(periods[:index]) if row.get("date") is not None),
+                  None)
+    after = next((chrono.year_of(row.get("date"))
+                  for row in periods[index + 1:] if row.get("date") is not None), None)
+    if before is None or after is None:
+        return None
+    start, end = int(before) + 1, int(after) - 1
+    return [start, end] if end >= start else None
+
+
+def _own_years(row: dict) -> list[int] | None:
+    """The interval a row already carries, coerced to two ints.
+
+    `era_gap` mints its own (`era_gaps`, above) and `residence_gap` mints its
+    own as strings (`landmarks_interaction.residence_gaps`); both are the
+    honest answer for their kind and neither is recomputed here.
+    """
+    years = row.get("years")
+    if not isinstance(years, (list, tuple)) or len(years) != 2:
+        return None
+    try:
+        first, last = int(years[0]), int(years[1])
+    except (TypeError, ValueError):
+        return None
+    return [min(first, last), max(first, last)]
+
+
+def unknown_years(row: dict, data: dict, *, life: tuple[int, int] | None) -> list[int]:
+    """The interval this thing occupies **absent an answer** (v208, ADR 0027).
+
+    **One definition, three consumers.** The placement score's per-thing width
+    (`placement_score`), the certainty chart's cloud-dot position and
+    tap-span, and the ghost's prior span (`cross_dating.stamp_prior_spans`)
+    are all THIS interval. Divergence between what the cloud draws and what
+    the score counts would be the promise/delivery drift the dating-dataflow
+    audit already found once.
+
+    | kind | years |
+    |---|---|
+    | `moment` in an era whose band has a span | the band's span (containment, ADR 0026, read as bounds) |
+    | `moment` in an undated era, or unplaced | `life` — the honest floor |
+    | `period_bound` | the era's derived span, else the hole between its dated neighbours on the spine, else `life` |
+    | `place_span` | its band's span, else `life` |
+    | `era_gap` | unchanged — it already carries its own |
+    | `date_contradiction` | the union of the disputed claims' intervals |
+    | `landmark_subject`, `residence_gap` | the row's own interval where the ladder named one, else `life` |
+
+    ``life`` is `(birth_year, current_year)` from the birth landmark. With no
+    birth date there is no floor, so a row carrying no interval of its own
+    gets ``[]`` — no `years`, and (ADR 0027) no score at all. That is
+    correct, and it is why `birth` wears the ★.
+    """
+    if not isinstance(row, dict) or not isinstance(data, dict):
+        return []
+    floor = [int(life[0]), int(life[1])] if life else []
+    kind = str(row.get("kind") or "")
+    if kind in ("era_gap", "residence_gap", "date_contradiction", "landmark_subject"):
+        return _own_years(row) or floor
+    if kind == "moment":
+        return _band_span(data, row.get("period")) or floor
+    if kind == "period_bound":
+        slug = row.get("slug") or row.get("period")
+        return _band_span(data, slug) or _spine_hole(data, slug) or floor
+    if kind == "place_span":
+        return _band_span(data, row.get("period")) or floor
+    return _own_years(row) or floor
+
+
 def unknowns(data: dict, landmarks: object = None) -> list[dict]:
     """Every ANSWERABLE unknown as `{kind, key, label, probe, ...}`.
 
@@ -1235,6 +1382,16 @@ def unknowns(data: dict, landmarks: object = None) -> list[dict]:
             add(row)
     except Exception:  # noqa: BLE001
         pass
+
+    # v208 (ADR 0027): every row carries the interval it currently occupies
+    # absent an answer, so `unknown_width` finds a real width where it used to
+    # hit its 1.0 ranking floor — and the score, the chart's cloud and the
+    # ghost's prior span all read the SAME number.
+    life = life_span(data)
+    for row in rows:
+        years = unknown_years(row, data, life=life)
+        if years:
+            row["years"] = years
 
     for row in rows:
         # v202: a row that arrived with its OWN exact question keeps it. The
@@ -2357,6 +2514,10 @@ def timeline_data(evidence: list[dict] | None = None,
     for contradiction in corroboration["contradictions"]:
         gap = {"kind": "date_contradiction",
                "period": contradiction["period"],
+               # v208: the union of the two disputed claims' intervals, carried
+               # through so `unknown_years` reads the claims rather than the
+               # rendered sentence.
+               "years": contradiction.get("years"),
                "message": contradiction["message"],
                "hint": contradiction["hint"]}
         if gap["period"]:
