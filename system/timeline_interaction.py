@@ -943,7 +943,8 @@ _DEFER_PRESSURE_PHRASES = (
     "just give me",
     "surely you",
 )
-_YEAR_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
+#: v218: `chronology.YEAR_RE`, the one year pattern (was an identical copy).
+_YEAR_RE = chrono.YEAR_RE
 _SPAN_LIMIT = 400
 
 

@@ -312,7 +312,8 @@ _CHAPTER_SPAN_RES = (
     re.compile(r"\b(\d{4})\s*(?:[-–—]|to|through|until|till)\s*(\d{4})\b", re.IGNORECASE),
     re.compile(r"\bfrom\s+(\d{4})\s+(?:to|until|through)\s+(\d{4})\b", re.IGNORECASE),
 )
-_CHAPTER_YEAR_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
+#: v218: `chronology.YEAR_RE`, the one year pattern (was an identical copy).
+_CHAPTER_YEAR_RE = chrono.YEAR_RE
 
 
 def chapter_date(chapter: dict) -> object:

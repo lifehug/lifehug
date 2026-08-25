@@ -94,6 +94,24 @@ the one shown. The store stays the backstop — `merge_landmark_entry` is
 idempotent and filing keys on the entry's own identity — so this saves a
 completion and a wrong file, not a correctness invariant.
 
+**The general listener** (v218, ADR 0029). Every trigger above is FOCUSED —
+handed a domain, asked for the answer to the question that was asked. That
+restriction is load-bearing and it stays: it is what keeps a mission abroad
+from being filed as military service, and the design audit that proposed
+repealing it rejected its own proposal. But nobody has to ask a landmark
+question for someone to say a datable thing. *"We moved to Dayton the summer
+after Mom died"* is a residence, a relative date and a death year, said in a
+conversation about a house. So the recorder gained a SECOND TRIGGER — the
+same loop with no domain — that listens to one message and returns two typed
+lists: landmark records of any domain, and person DATES. Person dates are
+**family only**, by owner ruling, and the rule is enforced at validation
+rather than in the prompt, because ADR 0028's whole lesson is that prompt
+prose alone cannot be certified. For the same reason the mode ships with its
+own deterministic floor: a table-driven prescreen decides whether there could
+be time in the message at all, and a listener that comes back empty when there
+was is a blocking lint, one regeneration, and then a WITHHELD record a sweep
+can re-run. Never silence.
+
 **Never ask for a year — except a person's birthday.** A birth date is
 overlearned, not reconstructed, and every fielded life-history instrument takes
 it first because the calendar's axis starts there. v202 draws out the
@@ -360,8 +378,12 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The recorder (v212; v216 known entries) | `system/landmark_recorder.py` — `build_recorder_prompt`, `parse_recorder_output`, `record_answer`, `recordable_keys`; leaf `interactions/landmarks/prompt/recorder.md`. The already-filed block and the lints' names: `landmarks_interaction.render_known_entries`, `known_entry_labels`, `landmark_entries`, `render_entry`, `entry_name` |
 | Its blocking backstop (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, `answer_must_record`, `answer_shape`, `recording_reminder` |
 | Its retryable one (v214) | `landmarks_interaction.RECORD_EVERY_ENTRY_LINT`, `records_missing_entries`, `many_records_reminder`; filing `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` |
+| The general listener (v218) | `landmark_recorder.listen_to_answer` = `record_answer(domain=None, …)`; `system/general_listener.py` — `build_listener_prompt`, `parse_listener_output`, `render_domain_digest`, `render_all_known_entries`; leaf `interactions/landmarks/prompt/listener.md` |
+| Its prescreen (v218) | `general_listener.may_contain_datable` over `PRESCREEN_TABLES` — `chronology.YEAR_RE`/`MONTH_NAMES`/`NUMBER_WORDS`, `cross_dating.AGE_STATEMENT_RES`/`AGE_BAND_AGES`, `recommend_focuses.TIME_PERIOD_PATTERNS`, plus `DECADE_RE`, `DURATION_RES`, `BECOMING_RES`, `THIRD_PERSON_AGE_RES`, `ANCHOR_RELATIVE_RES` |
+| Its backstop (v218) | `general_listener.LISTENER_HEARD_NOTHING_LINT`, `listener_heard_nothing`, `listening_reminder`, `store_terms` |
+| Its person dates (v218) | `general_listener.validate_person_record`, `person_invocations`; `landmarks_interaction.person_date_relations`, `NON_FAMILY_RELATIONS`, `person_slug`, `date_flags` |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py` |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py` |
 
 ## 8. Decisions
 

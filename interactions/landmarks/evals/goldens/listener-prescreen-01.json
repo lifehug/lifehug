@@ -1,0 +1,189 @@
+{
+ "fixture_id": "listener-prescreen-01",
+ "note": "v218 / ADR 0029 — THE PRESCREEN, as measured. `general_listener.may_contain_datable` is the deterministic half of the general listener: it never decides what a date IS, only whether there could be one, so that the backstop has something to compare a silent listener against. Every case below is a shape the 2026-08-25 measurement asked for by name, and every table it reads is either an existing table of this repo read BY NAME (`chronology.YEAR_RE`, `chronology.MONTH_NAMES`, `chronology.NUMBER_WORDS`, `cross_dating.AGE_STATEMENT_RES`, `cross_dating.AGE_BAND_AGES`, `recommend_focuses.TIME_PERIOD_PATTERNS`) or one of the four shapes nothing in the repo could see. The NEGATIVE cases are the load-bearing ones: `marry`, `marching`, the modal `may`, `at 19%` and `at 19:30` are the traps the measurement named.",
+ "cases": [
+  {
+   "text": "I was born in 1952.",
+   "fires": true,
+   "reason": "year",
+   "note": "years 1800-2099, the one pattern `chronology.YEAR_RE`"
+  },
+  {
+   "text": "It was 1899 when they came over.",
+   "fires": true,
+   "reason": "year"
+  },
+  {
+   "text": "We will be there in 2099.",
+   "fires": true,
+   "reason": "year"
+  },
+  {
+   "text": "There were 1200 of them.",
+   "fires": false,
+   "note": "a four-digit number outside a life's range is not a year"
+  },
+  {
+   "text": "Sometime in the 1970s we sold the farm.",
+   "fires": true,
+   "reason": "year",
+   "note": "the decade form — `chronology`'s own decade pattern is anchored and cannot be spliced into prose, so this is that sentence with the anchors off"
+  },
+  {
+   "text": "We married in March.",
+   "fires": true,
+   "reason": "month",
+   "note": "month names, word-bounded"
+  },
+  {
+   "text": "I hated marching band.",
+   "fires": false,
+   "note": "`march` inside `marching` must not fire"
+  },
+  {
+   "text": "Did they marry in the end?",
+   "fires": false,
+   "note": "the `mar` abbreviation must not fire inside `marry`"
+  },
+  {
+   "text": "We met in May 1979.",
+   "fires": true,
+   "reason": "month",
+   "note": "`May` fires only capitalized and next to a date"
+  },
+  {
+   "text": "It was 2 May 1968.",
+   "fires": true,
+   "reason": "month"
+  },
+  {
+   "text": "He may have been right about that.",
+   "fires": false,
+   "note": "the modal verb never fires"
+  },
+  {
+   "text": "We may go in the spring.",
+   "fires": false
+  },
+  {
+   "text": "At 19 I shipped out.",
+   "fires": true,
+   "reason": "age",
+   "note": "an age statement opening a sentence — `cross_dating.AGE_STATEMENT_RES` read through `_sentence_normalized`"
+  },
+  {
+   "text": "At 19% interest nobody was buying.",
+   "fires": false,
+   "note": "the borrowed table's own exclusion: `at N%` is not an age"
+  },
+  {
+   "text": "We got there at 19:30.",
+   "fires": false,
+   "note": "and `at N:MM` is not an age"
+  },
+  {
+   "text": "At 19 Elm Street we had a porch.",
+   "fires": false,
+   "note": "and neither is a house number"
+  },
+  {
+   "text": "When I was about five we moved.",
+   "fires": true,
+   "reason": "age",
+   "note": "spelled-out ages, from `chronology.NUMBER_WORDS`"
+  },
+  {
+   "text": "We stayed two years.",
+   "fires": true,
+   "reason": "duration",
+   "note": "spelled-out small numbers with a unit"
+  },
+  {
+   "text": "Three years back we sold the house.",
+   "fires": true,
+   "reason": "duration",
+   "note": "`N back` alongside `N ago`, which nothing in the repo read"
+  },
+  {
+   "text": "Five years ago I retired.",
+   "fires": true,
+   "reason": "duration"
+  },
+  {
+   "text": "I was turning forty when it happened.",
+   "fires": true,
+   "reason": "becoming",
+   "note": "becoming/turning N — the crossing, not the past"
+  },
+  {
+   "text": "He became a teenager that summer.",
+   "fires": true,
+   "reason": "becoming"
+  },
+  {
+   "text": "She stayed until she was nine.",
+   "fires": true,
+   "reason": "third_person_age",
+   "note": "a THIRD person's age; every borrowed age table is first-person"
+  },
+  {
+   "text": "When Ivo was three we moved again.",
+   "fires": true,
+   "reason": "third_person_age",
+   "note": "a capitalized name is the subject"
+  },
+  {
+   "text": "As a kid I hated it.",
+   "fires": true,
+   "reason": "life_stage",
+   "note": "life-stage phrases with no number in them"
+  },
+  {
+   "text": "Growing up we never had much.",
+   "fires": true,
+   "reason": "life_stage"
+  },
+  {
+   "text": "That was in high school.",
+   "fires": true,
+   "reason": "life_stage",
+   "note": "the named periods come from `recommend_focuses.TIME_PERIOD_PATTERNS`"
+  },
+  {
+   "text": "My twenties were a blur.",
+   "fires": true,
+   "reason": "life_stage"
+  },
+  {
+   "text": "The summer after we moved, everything changed.",
+   "fires": true,
+   "reason": "anchor_relative",
+   "note": "the owner's relative-dates ruling: a moment fixed against another moment is evidence"
+  },
+  {
+   "text": "When Ivo was born we were still in the trailer.",
+   "fires": true,
+   "reason": "anchor_relative"
+  },
+  {
+   "text": "Right after we married he enlisted.",
+   "fires": true,
+   "reason": "anchor_relative"
+  },
+  {
+   "text": "The year Mom died the garden went to seed.",
+   "fires": true,
+   "reason": "anchor_relative"
+  },
+  {
+   "text": "I love a good pizza and a long walk.",
+   "fires": false,
+   "note": "and nothing at all fires on a message with no time in it"
+  },
+  {
+   "text": "",
+   "fires": false,
+   "note": "an empty message is not a finding"
+  }
+ ]
+}

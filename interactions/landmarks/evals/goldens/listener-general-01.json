@@ -1,0 +1,204 @@
+{
+ "fixture_id": "listener-general-01",
+ "note": "v218 / ADR 0029 — THE GENERAL LISTENER. ADR 0028's recorder is FOCUSED: it is handed a domain and records the answer to the question that was asked, and the 2026-08-25 adversarial audit explicitly REFUSED to repeal that restriction — 'something else in the same breath never excuses the domain's own answer' is what keeps a mission abroad from being filed as military service. But people say datable things when nobody asked. These cases drive `landmark_recorder.listen_to_answer` — the same loop with `domain=None` — and pin the mode's whole contract: typed lists (`landmarks` any domain, `people` FAMILY-ONLY by owner ruling), a deterministic prescreen, and the backstop that makes it shippable. Deliberately NOT in landmark_fixtures.json: these are listener completions, not reference transcripts.",
+ "cases": [
+  {
+   "case_id": "three-datable-facts-across-domains",
+   "note": "The founder shape the whole mode exists for: nobody asked a landmark question, and one sentence carries a move, a school and a job. Three records, three domains, one attempt, no lint. The FOCUSED recorder could not have produced two of these — its restriction to the asked domain is a property of focused mode and is untouched.",
+   "landmarks": {},
+   "user_message": "We moved to Dayton in 1974, right after I finished at Fairview High, and I started at Danforth Steel that fall.",
+   "reply": "Dayton in '74 — and straight into the steel.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"residences\", \"label\": \"Dayton\", \"city\": \"Dayton\", \"date\": \"1974\"}, {\"domain\": \"schools\", \"label\": \"Fairview High\", \"name\": \"Fairview High\"}, {\"domain\": \"work\", \"label\": \"Danforth Steel\", \"what\": \"steel work\", \"date\": \"1974\"}], \"people\": []}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_people": [],
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "a-dateless-message-that-slipped-the-prescreen",
+   "note": "The asymmetry, pinned. The prescreen is LIBERAL by owner ruling, so it fires on messages that carry no fact — here it does not fire at all and the listener's honest empty answer is simply correct. A prescreen false positive is never a listener failure: see `listener_heard_nothing`, where the lint fires on prescreen-positive + both lists empty + no decline, and the noise costs exactly one haiku-class regeneration.",
+   "landmarks": {},
+   "user_message": "I love a good pizza and a long walk, and not much else.",
+   "reply": "A short list, well chosen.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": []}"
+   },
+   "expected_status": "nothing",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_people": [],
+   "prescreen_fires": false
+  },
+  {
+   "case_id": "a-family-sibling-year-is-a-person-record",
+   "note": "The v217 seam, reached by ear. A sibling's birth year is a FAMILY person date, so it becomes a roster entry through `entity-verdict --born` with the basis travelling beside it — not a landmark record, because `family`'s own ladder is not what was asked here.",
+   "landmarks": {},
+   "user_message": "My sister Ruth was born in 1948, two years before me.",
+   "reply": "Ruth, 1948.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [{\"name\": \"Ruth\", \"relation\": \"sibling\", \"born\": \"1948\", \"basis\": \"stated\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_people": [
+    {
+     "name": "Ruth",
+     "relation": "sibling",
+     "basis": "stated",
+     "born": {
+      "best": "1948",
+      "earliest": "1948",
+      "latest": "1948",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "expected_invocations": [
+    [
+     "entity-verdict",
+     "person",
+     "ruth",
+     "clear",
+     "--name",
+     "Ruth",
+     "--relationship",
+     "sibling",
+     "--born",
+     "1948",
+     "--born-basis",
+     "stated",
+     "--ensure"
+    ]
+   ],
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "a-non-family-persons-date-is-dropped-by-name",
+   "note": "The owner's ruling, enforced where a prompt cannot be talked out of it. The listener heard a dated person and `validate_person_record` refused the record because a colleague is not family — a NAMED drop (`person_relation_not_family`), never a silent one. It also clears the backstop: a refusal is a decision, not a miss, and regenerating would ask the model to break the rule it just obeyed.",
+   "landmarks": {},
+   "user_message": "My old boss Hal was born in 1948 — he ran that shop for thirty years.",
+   "reply": "Hal ran it a long time.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [{\"name\": \"Hal\", \"relation\": \"colleague\", \"born\": \"1948\", \"basis\": \"stated\"}]}"
+   },
+   "expected_status": "nothing",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [
+    "person_relation_not_family"
+   ],
+   "expected_people": [],
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "restated-known-entries-file-nothing",
+   "note": "v216's dedupe holds in the no-focus mode. Two children are already filed with their exact birthdays; the person goes back over them and there is nothing new in it. The listener files nothing in ONE attempt — the backstop does not fire, because every fragment the prescreen saw is already in the store word for word (`store_terms`), which is the one place where 'was this fragment consumed?' is decidable.",
+   "landmarks": {
+    "children": [
+     {
+      "domain": "children",
+      "label": "Corinne",
+      "who": "Corinne",
+      "date": {
+       "best": "1979-04-02",
+       "earliest": "1979-04-02",
+       "latest": "1979-04-02",
+       "granularity": "day",
+       "confidence": "certain",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     },
+     {
+      "domain": "children",
+      "label": "Maddox",
+      "who": "Maddox",
+      "date": {
+       "best": "1981-11-15",
+       "earliest": "1981-11-15",
+       "latest": "1981-11-15",
+       "granularity": "day",
+       "confidence": "certain",
+       "basis": "stated",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    ]
+   },
+   "user_message": "Corinne was born 2 April 1979 and Maddox 15 November 1981.",
+   "reply": "Corinne and Maddox.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": []}"
+   },
+   "expected_status": "nothing",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_people": [],
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "the-backstop-withholds-rather-than-dropping",
+   "note": "The non-negotiable, and the reason the mode can ship at all. ADR 0028 certified that prompt prose alone is ignorable, so the no-focus mode ships with its own deterministic backstop: the prescreen saw a year, the listener came back with nothing twice, and the outcome is WITHHELD carrying `landmark_gates.listener_heard_nothing` — a state a host sweep can run again. Never silence, and never a fabricated record. Exactly `answer_must_record`'s shape.",
+   "landmarks": {},
+   "user_message": "We moved to Dayton in 1974 and the whole street smelled of the mill.",
+   "reply": "Dayton, then.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": []}"
+   },
+   "expected_status": "withheld",
+   "expected_attempts": 2,
+   "expected_lint_ids": [
+    "landmark_gates.listener_heard_nothing"
+   ],
+   "expected_findings": [],
+   "expected_people": [],
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "one-invalid-record-among-many-drops-alone",
+   "note": "ADR 0028 amendment §2, carried in: each record runs BOTH pinned validators ALONE, so a record naming a key its domain cannot read drops by itself and never takes a sibling with it. `birth` is not a key `family` can read (it degrades the whole record to None) and `pets` is not a domain at all; the move survives both.",
+   "landmarks": {},
+   "user_message": "We moved to Dayton in 1974 and my brother James was born in 1962.",
+   "reply": "Dayton, and James.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"residences\", \"label\": \"Dayton\", \"city\": \"Dayton\", \"date\": \"1974\"}, {\"domain\": \"family\", \"label\": \"James\", \"birth\": \"1962\"}, {\"domain\": \"pets\", \"label\": \"Rex\"}], \"people\": [{\"name\": \"James\", \"relation\": \"sibling\", \"born\": \"1962\", \"basis\": \"stated\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_people": [
+    {
+     "name": "James",
+     "relation": "sibling",
+     "basis": "stated",
+     "born": {
+      "best": "1962",
+      "earliest": "1962",
+      "latest": "1962",
+      "granularity": "year",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "prescreen_fires": true
+  }
+ ]
+}

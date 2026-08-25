@@ -995,7 +995,10 @@ _ECHO_STOPWORDS = frozenset({
 })
 
 _ECHO_TOKEN_RE = re.compile(r"[A-Z][A-Za-z'’\-]{2,}")
-_ECHO_YEAR_RE = re.compile(r"\b(?:1[89]\d{2}|20\d{2})\b")
+#: v218: the ONE year pattern, `chronology.YEAR_RE`. This was a private
+#: fourth copy of the same sentence; the name stays because the echo rules
+#: below read it, but there is no second pattern.
+_ECHO_YEAR_RE = chrono.YEAR_RE
 _SENTENCE_ENDERS = frozenset(".!?:;\"'“”‘’(—–-\n\r")
 
 
@@ -1838,6 +1841,25 @@ def _entry_date(entry: dict) -> object:
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
+#: How long a roster slug may be. The anchor keys use 40; a PERSON slug has
+#: always used 60 (`family_members`, `lost_people`), and that number moves
+#: here rather than being typed a third time.
+PERSON_SLUG_LIMIT = 60
+
+
+def person_slug(name: object) -> str:
+    """``"Betty Jo Thorne"`` -> ``"betty-jo-thorne"`` — the roster slug.
+
+    ONE definition (recurring-defect doctrine): :func:`family_members`,
+    :func:`lost_people` and — from v218 — the general listener's person
+    records all mint the slug a roster row is found by, and three copies of
+    one lowercase-and-hyphenate line is how two of them quietly disagree.
+    Returns ``""`` for anything with no slug in it, which every caller reads
+    as "no row".
+    """
+    text = str(name or "").strip().lower()
+    return _SLUG_RE.sub("-", text).strip("-")[:PERSON_SLUG_LIMIT]
+
 
 def _anchor_key(domain: str, label: str, position: int) -> str:
     slug = _SLUG_RE.sub("-", label.lower()).strip("-")[:40]
@@ -1882,6 +1904,39 @@ def _anchor_label(domain: str, label: str) -> str:
 #: table and no parallel store.
 FAMILY_RELATIONS = frozenset(FAMILY_TIERS)
 
+#: The relationships that are NOT family, out of the roster's own closed
+#: vocabulary (`focus_candidate.FOCUS_RELATIONSHIPS`). Named as the EXCLUSION
+#: rather than as a tenth list of family words, so a relationship added to
+#: that vocabulary lands on the family side by default and a test has to say
+#: otherwise — the failure that matters is a stranger's birthday reaching the
+#: roster, and defaulting the other way makes that failure the silent one.
+NON_FAMILY_RELATIONS = frozenset({"friend", "colleague", "mentor", "other"})
+
+#: v218 (ADR 0029), OWNER-RULED: **person dates as a user feature are FAMILY
+#: ONLY.** A relationship in here is a person whose birth or death date the
+#: general listener may file to the roster; anything else — a friend, a
+#: colleague, a boss, an unqualified name — is anchor evidence for the
+#: timeline and never a person record.
+#:
+#: DERIVED, never listed: the roster's closed vocabulary minus
+#: :data:`NON_FAMILY_RELATIONS`. `family`'s own three tiers are in it by
+#: construction, and so are the three the landmark set enumerates elsewhere —
+#: `children` names a child, `partnerships` names a spouse or a partner.
+#: `test_the_family_relations_are_the_roster_vocabulary_minus_the_strangers`
+#: binds the derivation to `focus_candidate.FOCUS_RELATIONSHIPS`, so a new
+#: relationship word cannot land here unnoticed.
+
+
+def person_date_relations() -> frozenset[str]:
+    """:data:`NON_FAMILY_RELATIONS` subtracted from the roster's own vocabulary.
+
+    A function rather than a constant because `focus_candidate` is imported
+    lazily everywhere in this family (it pulls the focus stack in), and the
+    answer is a two-line set operation over a frozen tuple.
+    """
+    from focus_candidate import FOCUS_RELATIONSHIPS  # noqa: PLC0415
+
+    return frozenset(FOCUS_RELATIONSHIPS) - NON_FAMILY_RELATIONS
 
 def family_members(landmarks: object) -> tuple[dict, ...]:
     """Every filed family member as ``{slug, name, relation, living, date}``.
@@ -1898,7 +1953,7 @@ def family_members(landmarks: object) -> tuple[dict, ...]:
         name = str(entry.get("label") or entry.get("who") or "").strip()
         if not name:
             continue
-        slug = _SLUG_RE.sub("-", name.lower()).strip("-")[:60]
+        slug = person_slug(name)
         if not slug or slug in seen:
             continue
         seen.add(slug)
@@ -1938,7 +1993,7 @@ def lost_people(landmarks: object) -> tuple[dict, ...]:
         name = str(entry.get("label") or entry.get("who") or "").strip()
         if not name:
             continue
-        slug = _SLUG_RE.sub("-", name.lower()).strip("-")[:60]
+        slug = person_slug(name)
         if not slug or slug in seen:
             continue
         seen.add(slug)
@@ -2005,7 +2060,7 @@ def person_roster_invocations(landmarks: object) -> list[list[str]]:
     return argvs
 
 
-def _date_flags(flag: str, record: object) -> list[str]:
+def date_flags(flag: str, record: object) -> list[str]:
     """``["--born", "1948", "--born-basis", "stated"]`` for one date record.
 
     The basis travels with the date because the roster copy must not
@@ -2018,6 +2073,12 @@ def _date_flags(flag: str, record: object) -> list[str]:
         return []
     basis = getattr(record, "basis", None) or "stated"
     return [f"--{flag}", edtf, f"--{flag}-basis", str(basis)]
+
+
+#: v218: PUBLIC, because the general listener emits the same two flags for a
+#: person it heard a date for. The private name stays as this module's own
+#: alias; there is no second body.
+_date_flags = date_flags
 
 
 #: v217: the pre-v217 name of :func:`person_roster_invocations`, kept because
