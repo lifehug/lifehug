@@ -61,7 +61,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["placed"]`, enabled by `TurnShape(timeline_stage=…)` |
 | Closed validation of that field | `timeline_interaction.validate_placed(value, anchors=…)` |
 | The seven timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES`. The seventh, `never_proposes_a_date`, is SHARED with the landmarks lane from one definition (`timeline_interaction.proposes_a_date`) |
-| Filing an accepted placement | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…)` → a `PlaceInvocation(argv, stdin_text)`; the host runs BOTH halves (`timeline-place` reads the description on stdin and exits 1 without it — lifehug#223) |
+| Filing an accepted placement | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…, placement_key=…)` → a `PlaceInvocation(argv, stdin_text)`; the host runs BOTH halves (`timeline-place` reads the description on stdin and exits 1 without it — lifehug#223). `placement_key` is the moment's own `timeline.placement_key`, carried on the unknown row — pass it and identity is mint/join-symmetric; omit it and the CLI derives the key from source + description as it always has (lifehug#228) |
 | The unknowns to Play | `timeline.unknowns(data)`, `timeline.UNKNOWN_KINDS`, `timeline.keystones(data)`, `timeline.KEYSTONE_CAP` |
 | The two ways a keystone is asked | `timeline_interaction.whisper_from_keystone`, `timeline_interaction.mint_keystone_question` / `insert_keystone_question` / `timeline_probe_index` |
 | This turn's timeline item | `timeline_interaction.timeline_item_for_session`, `timeline_interaction.timeline_asks_so_far`, `conversation_delivery.timeline_item_for_turn` |
@@ -69,7 +69,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`, the SAME definition `reading_room.placement_gain_sentence` says. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{timeline_stage}`, `{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --timeline [--era <slug>] [--json]` |
-| The write verb | `lifehug.py timeline-place <source> --period <slug> [--date <edtf>] [--basis <basis>] [--anchor <key>]…` |
+| The write verb | `lifehug.py timeline-place <source> --period <slug> [--date <edtf>] [--basis <basis>] [--anchor <key>]… [--placement-key <12-hex>]` |
 
 The FILING of a placement is entirely host-side: the package names the date,
 the host writes it.

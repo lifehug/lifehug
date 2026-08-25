@@ -413,6 +413,22 @@ Playing an unknown writes through the path that already existed —
 the display pin — so a placement teaches the loop exactly as it always did,
 on demand instead of at three whispers a week.
 
+**One key, minted and joined (v215).** A placement's identity is
+`timeline.placement_key` — `sha1(source + "\n" + description)` — and it is
+both the mint and the join. A pin is stored under it and
+`timeline.resolve_placements` is the only thing that pairs a stored pin with a
+live moment. Because an unknown row is *named* by the moment's title, a host
+filing from conversation once minted from that title against a join expecting
+the description: the record landed in `stale_placements` and rendered nowhere,
+with exit 0 (lifehug#228). So identity now travels whole — an unknown row
+carries its moment's own `placement_key`, `place_invocation` passes it as
+`--placement-key`, and the CLI stores it verbatim. `resolve_placements` also
+re-joins the pins the old recipe orphaned, deterministically and at read time:
+no migration, no state file, no model call, and never a guess when two moments
+share one legacy key. Anything that still joins nothing stays in
+`stale_placements` and is counted at `counts["stale_placements"]`, with
+`counts["placements_rejoined"]` naming what the repair rescued on that read.
+
 Weekly too, `arc-plan` reads `place_no_stories` off the same assembled
 payload and plans a **place aside** onto a card whose gap slot the whisper
 left empty (v200). Nothing is written: a place stops being a gap the moment a
@@ -432,11 +448,12 @@ on every read.
 | The classifier's claim | `system/classify_story.py` (`events[].title`, `events[].date`) |
 | The export and page frontmatter | `system/wiki_compile.py` (`compile_timeline`, `frontmatter(date_edtf=…)`) |
 | The viewer | `system/serve_wiki.py` (`view_timeline`) |
-| The write path | `lifehug.py timeline-place ... [--date] [--basis] [--anchor]`, `system/jobs.py` |
+| The write path | `lifehug.py timeline-place ... [--date] [--basis] [--anchor] [--placement-key]`, `system/jobs.py` |
+| Placement identity (mint, join, repair) | `system/timeline.py` (`placement_key`, `legacy_title_key`, `resolve_placements`) |
 | Plan a timeline Play | `lifehug.py arc-plan-target --timeline [--era <slug>]` |
 | Durable state | `state/timeline_placements.json` |
 | Research basis | `system/research/chronology.md`, `system/research/chronology-vis.md`, `system/research.md` §4a |
-| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py`, `tests/test_placement_score.py` |
+| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py`, `tests/test_placement_score.py`, `tests/test_timeline_place_filing.py` |
 
 ## 7. Decisions
 

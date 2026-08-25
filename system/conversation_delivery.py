@@ -1693,8 +1693,14 @@ def _file_placement(item: dict, placed: dict, *, session_id: str,
         invocation = timeline_interaction.place_invocation(
             placed,
             source=str(item.get("source") or f"answers/{question_id}.md"),
-            description=str(item.get("label") or question_text or question_id)[:200],
+            description=str(item.get("label") or question_text or question_id),
             period=str(item.get("period") or timeline_interaction.anchor_slug(item.get("anchor"))),
+            # v215 (lifehug#228): the item's OWN key. `label` is the moment's
+            # title, and hashing a title against a join that expects the
+            # description filed a record that rendered nowhere — exit 0, and
+            # the date the person named was gone. The clamp moved into
+            # `place_invocation`, so there is one description length too.
+            placement_key=str(item.get("placement_key") or ""),
         )
         if invocation is None:
             return False

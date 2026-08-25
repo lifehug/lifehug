@@ -629,10 +629,95 @@ PLACEMENTS_FILE = TIMELINE_PLACEMENTS_FILE
 LANDMARKS_STORE = LANDMARKS_FILE
 
 
+#: The longest description a placement carries — ONE definition, read by
+#: `timeline_interaction.place_invocation` (which clamps every host's
+#: description to it) and by `legacy_title_key` below (which must reproduce the
+#: exact bytes a pre-v215 mint hashed). A live host clamping on its own is what
+#: made this a two-recipe identity in the first place.
+PLACEMENT_DESCRIPTION_MAX = 200
+
+
 def placement_key(event: dict) -> str:
+    """The identity of one placement: the event's SOURCE and its DESCRIPTION.
+
+    This is the mint AND the join — `resolve_placements` below is the only
+    thing that pairs a stored placement with a live event, and it computes the
+    event side with this function. A host that mints a key from anything else
+    (v213 minted from the unknown's LABEL, which since v195 is the event's
+    TITLE) files a record that lands in `stale_placements` and renders
+    nowhere: exit 0, and the date the person named is gone (lifehug#228).
+    """
     import hashlib  # noqa: PLC0415
     payload = f"{event.get('source', '')}\n{event.get('description', '')}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def legacy_title_key(event: dict) -> str:
+    """The key a pre-v215 conversational mint would have produced for `event`.
+
+    The one asymmetric recipe that ever shipped: `moment_unknown` names the row
+    by the event's TITLE, `conversation_delivery._file_placement` passed that
+    label as the description, and `cmd_timeline_place` hashed it against a join
+    expecting the description. `""` when the event has no title, or when the
+    title IS the description (nothing to repair — the two recipes agree).
+
+    This is frozen history, not a second identity: it exists so
+    `resolve_placements` can re-join the records that recipe orphaned, and
+    nothing mints with it.
+    """
+    title = str((event or {}).get("title") or "").strip()[:PLACEMENT_DESCRIPTION_MAX]
+    if not title:
+        return ""
+    legacy = placement_key({"source": (event or {}).get("source", ""),
+                            "description": title})
+    return "" if legacy == placement_key(event) else legacy
+
+
+def resolve_placements(placements: dict | None,
+                       events: list[dict]) -> list[tuple[dict, str]]:
+    """Every stored placement paired with the live event key it joins, in store
+    order — `""` when it joins nothing.
+
+    ONE join, read by `place_events` (which pins the moment), `timeline_data`
+    (which counts what is still orphaned) and `retire_redundant_placements`.
+
+    Two ways a row resolves:
+
+    1. its stored key IS a live event's `placement_key` — every placement the
+       viewer and the CLI ever filed; and
+    2. its stored key is the pre-v215 `legacy_title_key` of exactly one live
+       event — the deterministic REPAIR, so a date captured in conversation
+       between v213 and v215 joins on the next compile with no migration, no
+       state file and no model call.
+
+    The row keeps its stored `key`: a repaired pin renders, retires and
+    unplaces under the identity the store actually holds. Ambiguity never
+    guesses — two live events sharing one legacy key resolve neither, and a
+    second row claiming a key some earlier row already took stays orphaned.
+    """
+    rows = ((placements or {}).get("placements") or [])
+    if not rows:
+        return []
+    live: dict[str, dict] = {}
+    for event in events:
+        live.setdefault(placement_key(event), event)
+    legacy: dict[str, str | None] = {}
+    for key, event in live.items():
+        alias = legacy_title_key(event)
+        if not alias or alias in live:
+            continue
+        legacy[alias] = None if alias in legacy and legacy[alias] != key else key
+    resolved: list[tuple[dict, str]] = []
+    taken: set[str] = set()
+    for row in rows:
+        key = str(row.get("key") or "")
+        target = key if key in live else (legacy.get(key) or "")
+        if not target or target in taken:
+            resolved.append((row, ""))
+            continue
+        taken.add(target)
+        resolved.append((row, target))
+    return resolved
 
 
 def load_placements() -> dict:
@@ -837,10 +922,13 @@ def place_events(events: list[dict], periods: list[dict],
     placed: dict[str, list[dict]] = {p["slug"]: [] for p in periods}
     unplaced: list[dict] = []
     vocab = learned_era_vocabulary(periods, events)
+    # v215: the join is `resolve_placements` — the ONE pairing of a stored
+    # placement with the live event it is about, repair included.
     manual_by_key = {}
     if placements:
-        manual_by_key = {p["key"]: p for p in placements.get("placements", [])
-                         if p.get("period") in placed}
+        manual_by_key = {key: row
+                         for row, key in resolve_placements(placements, events)
+                         if key and row.get("period") in placed}
 
     for event in events:
         # 0) The owner said so — manual placement outranks every heuristic.
@@ -906,11 +994,14 @@ def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
     events = load_events()
     vocab = learned_era_vocabulary(periods, events)
     events_by_key = {placement_key(e): e for e in events}
+    # v215: the same join every other reader uses, so a repaired pin retires
+    # when the loop catches up with it instead of hanging around forever.
+    joined = {id(row): key for row, key in resolve_placements(data, events)}
     period_slugs = {p["slug"] for p in periods}
     keep: list[dict] = []
     retired: list[dict] = []
     for pin in data["placements"]:
-        event = events_by_key.get(pin.get("key"))
+        event = events_by_key.get(joined.get(id(pin)) or "")
         if (event is not None and pin.get("period") in period_slugs
                 and heuristic_slot(event, periods, vocab) == pin["period"]):
             retired.append({**pin, "retired_at": now_utc(),
@@ -1176,7 +1267,13 @@ def unknown_key(gap: dict) -> str:
 
 
 def moment_unknown(event: dict, period: str | None) -> dict:
-    """One undated moment, named by its own title — the commonest unknown."""
+    """One undated moment, named by its own title — the commonest unknown.
+
+    v215: the row carries the moment's own `placement_key`, so a host that
+    files this unknown's answer files it under the identity `place_events`
+    joins on. The `label` is what a person reads and the description is what
+    they hear back; neither is identity any more (lifehug#228).
+    """
     label = str(event.get("title") or event.get("description") or "this moment").strip()
     row = {
         "kind": "moment",
@@ -1184,6 +1281,8 @@ def moment_unknown(event: dict, period: str | None) -> dict:
         "source_short": event.get("source_short"),
         "source": event.get("source"),
         "label": label,
+        "description": str(event.get("description") or "").strip(),
+        "placement_key": placement_key(event),
         "hint": "Anchor it against something already dated — never a guessed year.",
     }
     row["key"] = unknown_key(row)
@@ -2915,13 +3014,18 @@ def timeline_data(evidence: list[dict] | None = None,
     )
 
     # Placements whose event no longer exists (reclassification rewrote the
-    # description) or whose period page is gone — surfaced, never silently
-    # misapplied.
-    live_keys = {placement_key(e) for e in events}
+    # description, or a pre-v215 mint keyed on the title and `resolve_placements`
+    # could not repair it) or whose period page is gone. v215: this list is the
+    # LOUD end of the placement path — `counts["stale_placements"]` carries it
+    # so a host can surface "you named a date and it landed nowhere" instead of
+    # a silent zero, and `counts["placements_rejoined"]` says how many the
+    # repair pass rescued on this read.
     period_slugs = {p["slug"] for p in periods}
-    stale_placements = [p for p in placements.get("placements", [])
-                        if p.get("key") not in live_keys
-                        or p.get("period") not in period_slugs]
+    resolved_placements = resolve_placements(placements, events)
+    stale_placements = [row for row, key in resolved_placements
+                        if not key or row.get("period") not in period_slugs]
+    rejoined_placements = sum(1 for row, key in resolved_placements
+                              if key and key != str(row.get("key") or ""))
 
     chapters = align_chapters(load_chapters(), periods)
     chapters_by_period: dict[str, list[dict]] = {}
@@ -2992,6 +3096,10 @@ def timeline_data(evidence: list[dict] | None = None,
             # v207: eras that were undated until the pass gave them a span.
             "periods_cross_dated": int(
                 (cross_dating_report.get("bands") or {}).get("derived") or 0),
+            # v215 (lifehug#228): a placement that joins nothing is never
+            # silent again.
+            "stale_placements": len(stale_placements),
+            "placements_rejoined": rejoined_placements,
         },
     }
     # v196: concrete unknowns, leverage-ordered and capped for a page; the

@@ -2650,6 +2650,10 @@ def view_timeline():
                 f'{_token_input()}'
                 f'<input type="hidden" name="source" value="{html.escape(event["source"])}">'
                 f'<input type="hidden" name="description" value="{html.escape(event["description"])}">'
+                # v215: the moment's own identity, posted alongside — one key,
+                # minted where the moment is known, joined where it is read.
+                f'<input type="hidden" name="placement_key" '
+                f'value="{html.escape(tl_mod.placement_key(event))}">'
                 f'<select name="period"><option value="">where does this belong?</option>{period_options}</select>'
                 f'<input name="when_hint" placeholder="when? (your own words)" '
                 f'value="{html.escape(event["when_hint"])}">'
@@ -3599,7 +3603,8 @@ def act_timeline_place(form):
         "note": _f(form, "note"),
     }
     # v195: the viewer may carry a date record for the moment being placed.
-    for field in ("date", "basis"):
+    # v215: and the moment's own placement key, when the view knew it.
+    for field in ("date", "basis", "placement_key"):
         value = _f(form, field)
         if value:
             payload[field] = value

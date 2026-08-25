@@ -293,7 +293,7 @@ def validate_evidence(value: object, *, anchors: object = (),
 
 
 def filing_invocations(turn: object, *, source: str = "", description: str = "",
-                       period: str = "") -> list[PlaceInvocation]:
+                       period: str = "", placement_key: str = "") -> list[PlaceInvocation]:
     """The complete calls the host runs to file whatever this turn produced.
 
     The package NAMES, the host WRITES — the same split every child uses. A
@@ -319,7 +319,7 @@ def filing_invocations(turn: object, *, source: str = "", description: str = "",
     placed = turn.get("placed")
     if placed:
         invocation = _ti.place_invocation(placed, source=source, description=description,
-                                          period=period)
+                                          period=period, placement_key=placement_key)
         if invocation is not None:
             out.append(invocation)
     landmark = turn.get("landmark")

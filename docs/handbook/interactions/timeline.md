@@ -150,6 +150,17 @@ date a person named in conversation exited 1 into a silent `place_failed`
 (lifehug#223, fixed in v213 — `tests/test_timeline_place_filing.py` now
 executes the filing against a real temp vault).
 
+The call also carries the moment's **identity**. A placement is keyed by
+`sha1(source + "\n" + description)` and joined by the same recipe, but an
+unknown row is *named* by the moment's title — so v213's filing minted from
+the title against a join expecting the description, and every conversational
+date landed in `stale_placements`, unrendered, at exit 0 (lifehug#228, fixed in
+v215). `place_invocation(..., placement_key=…)` now passes the row's own
+`timeline.placement_key` through as `--placement-key`, which the CLI stores
+verbatim; `timeline.resolve_placements` re-joins the records the old recipe
+orphaned at read time, and anything still unjoined is counted at
+`timeline_data()["counts"]["stale_placements"]` rather than being silent.
+
 ## 5. Where it lives
 
 | Concern | Location |
@@ -160,10 +171,11 @@ executes the filing against a real temp vault).
 | The date primitive | `system/chronology.py` |
 | Unknowns, leverage, keystones, deferred | `system/timeline.py` |
 | Plan a timeline Play (read-only) | `lifehug.py arc-plan-target --timeline [--era <slug>] [--json]` |
-| The write path | `lifehug.py timeline-place ... [--date] [--basis] [--anchor]` |
+| The write path | `lifehug.py timeline-place ... [--date] [--basis] [--anchor] [--placement-key]` |
+| Placement identity (mint, join, repair) | `system/timeline.py` (`placement_key`, `legacy_title_key`, `resolve_placements`) |
 | Goldens | `interactions/timeline/evals/goldens/timeline_*.json` |
 | Independent evals | `lifehug.py timeline-evals --json` |
-| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py` |
+| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_timeline_place_filing.py` |
 
 The package declares role tiers but no default concrete seat. The five
 `timeline_gates.*` compliance classes require perfect scores over ten recorded
