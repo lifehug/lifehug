@@ -899,7 +899,82 @@ def cross_date(*, event_lineup: object, unplaced_events: object = (),
         # hidden from the second sweep rather than pinning its own moments.
         period_by_slug = containment_periods(periods)
         sweep()
+    # v208 (ADR 0027 §9): the ghost's source. Every DATED moment — stated or
+    # derived — learns what its interval would be absent its date, on the same
+    # walk rather than in a second pass that could drift from this one.
+    report["prior_spans"] = stamp_prior_spans(
+        event_lineup=lineup, unplaced_events=unplaced_events, periods=periods,
+        birth_date=birth_date)
     return report
+
+
+# ---------------------------------------------------------------------------
+# The ghost's source (v208, ADR 0027 §9) — reconstructed, never stored.
+# ---------------------------------------------------------------------------
+
+
+def prior_span(event: object, *, periods: object = (), bands: object = None,
+               life: object = None) -> list[int] | None:
+    """What this dated moment's interval WOULD be absent its date.
+
+    The 4A ghost is *reconstructable*, not stored history (the dating-dataflow
+    rule: no state). It is `timeline.unknown_years` read for a moment that now
+    has a date — its era's span where the era has one, else the life — and it
+    is ``None`` when that reconstruction is not WIDER than the moment's own
+    interval, because then there is nothing to ghost.
+
+    **Honesty note.** After an era's own dates improve, old ghosts *tighten* on
+    the next read: the ghost shows today's honest reconstruction of "before",
+    not a historical screenshot of what the page once said. That is the
+    stateless trade, and it is stated rather than fixed by keeping history.
+    """
+    import timeline  # noqa: PLC0415  (one definition of the interval, lazily)
+
+    if not isinstance(event, dict) or event.get("date") is None:
+        return None
+    row = {"kind": "moment", "period": event.get("__period")}
+    view = {"periods": list(periods or ()), "bands": list(bands or ())}
+    prior = timeline.unknown_years(row, view, life=life)
+    if not prior:
+        return None
+    first = chrono.year_of(event.get("date"))
+    last = chrono.year_of(event.get("date"), end=True)
+    if first is None or last is None:
+        return None
+    if (prior[1] - prior[0]) <= (int(last) - int(first)):
+        return None
+    return prior
+
+
+def stamp_prior_spans(*, event_lineup: object, unplaced_events: object = (),
+                      periods: object = (), bands: object = None,
+                      birth_date: object = None) -> int:
+    """Give every DATED moment its ``prior_span``; returns how many were given.
+
+    One walk, in the same pass that stamps ``date_derived``, so a stated moment
+    and a derived one carry the ghost alike — the ghost is about what the
+    timeline could bound the moment to before it had a date, and that is a
+    property of the era, not of who supplied the date.
+    """
+    import timeline  # noqa: PLC0415
+
+    life = timeline.life_span(None, birth_date)
+    lineup = event_lineup if isinstance(event_lineup, dict) else {}
+    stamped = 0
+    for slug, rows in list(lineup.items()) + [(None, unplaced_events or ())]:
+        for event in rows or ():
+            if not isinstance(event, dict):
+                continue
+            event.pop("prior_span", None)
+            event["__period"] = slug
+            try:
+                found = prior_span(event, periods=periods, bands=bands, life=life)
+            finally:
+                event.pop("__period", None)
+            if found is not None:
+                event["prior_span"] = found
+                stamped += 1
+    return stamped
 
 
 def containment_periods(periods: object) -> dict:

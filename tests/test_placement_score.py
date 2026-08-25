@@ -555,3 +555,121 @@ class NoBirthNoBlockTests(VaultFixture):
         self.assertIn("placement", self.data())
         self.assertEqual(self.data()["counts"]["placement_band"],
                          self.data()["placement"]["band"])
+
+
+# ---------------------------------------------------------------------------
+# §C — `prior_span`, the ghost's source (contract §E.7).
+# ---------------------------------------------------------------------------
+
+
+class PriorSpanTests(unittest.TestCase):
+    PERIODS = [{"slug": "childhood", "name": "Childhood", "date": edtf("1984/1990")}]
+
+    def test_an_era_spanned_moment_carries_the_ghost(self):
+        lineup = {"childhood": [{"title": "The bike", "date": edtf("1986-07-11")}]}
+        self.assertEqual(xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                                              birth_date=edtf("1981-07-11")), 1)
+        self.assertEqual(lineup["childhood"][0]["prior_span"], [1984, 1990])
+
+    def test_the_founders_shape_born_in_redlands(self):
+        """The mark is the day the birthday gives; the ghost is the era it sits
+        in, which is where the timeline could have put it before."""
+        lineup = {"childhood": [{"title": "Born in Redlands", "source_short": "A1",
+                                 "date": edtf("1981-07-11")}]}
+        xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                             birth_date=edtf("1981-07-11"))
+        row = lineup["childhood"][0]
+        self.assertEqual(chrono.to_edtf(row["date"]), "1981-07-11")
+        self.assertEqual(row["prior_span"], [1984, 1990])
+
+    def test_a_reconstruction_no_wider_than_the_moment_is_omitted(self):
+        periods = [{"slug": "childhood", "name": "Childhood", "date": edtf("1986")}]
+        lineup = {"childhood": [{"title": "The long stretch", "date": edtf("1984/1990")}]}
+        self.assertEqual(xd.stamp_prior_spans(event_lineup=lineup, periods=periods,
+                                              birth_date=edtf("1981-07-11")), 0)
+        self.assertNotIn("prior_span", lineup["childhood"][0])
+
+    def test_an_unplaced_dated_moment_ghosts_the_whole_life(self):
+        unplaced = [{"title": "The dog", "date": edtf("1993-04-02")}]
+        xd.stamp_prior_spans(event_lineup={}, unplaced_events=unplaced,
+                             periods=self.PERIODS, birth_date=edtf("1981-07-11"))
+        self.assertEqual(unplaced[0]["prior_span"][0], 1981)
+
+    def test_with_no_birthday_an_unbounded_moment_has_no_ghost(self):
+        unplaced = [{"title": "The dog", "date": edtf("1993-04-02")}]
+        self.assertEqual(xd.stamp_prior_spans(event_lineup={}, unplaced_events=unplaced,
+                                              periods=self.PERIODS), 0)
+        self.assertNotIn("prior_span", unplaced[0])
+
+    def test_an_undated_moment_never_gets_one(self):
+        lineup = {"childhood": [{"title": "The bike", "date": None}]}
+        self.assertEqual(xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                                              birth_date=edtf("1981-07-11")), 0)
+        self.assertNotIn("prior_span", lineup["childhood"][0])
+
+    def test_a_stated_and_a_derived_moment_are_ghosted_alike(self):
+        lineup = {"childhood": [
+            {"title": "Stated", "date": edtf("1986-07-11")},
+            {"title": "Derived", "date": edtf("1987-01-02"),
+             "date_derived": {"rule": "containment"}},
+        ]}
+        xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                             birth_date=edtf("1981-07-11"))
+        self.assertEqual([row["prior_span"] for row in lineup["childhood"]],
+                         [[1984, 1990], [1984, 1990]])
+
+    def test_the_ghost_tightens_when_the_era_tightens(self):
+        """The stateless trade, stated plainly: a ghost is today's honest
+        reconstruction of "before", not a screenshot of what the page said."""
+        lineup = {"childhood": [{"title": "The bike", "date": edtf("1986-07-11")}]}
+        xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                             birth_date=edtf("1981-07-11"))
+        self.assertEqual(lineup["childhood"][0]["prior_span"], [1984, 1990])
+        tighter = [{"slug": "childhood", "name": "Childhood", "date": edtf("1985/1987")}]
+        xd.stamp_prior_spans(event_lineup=lineup, periods=tighter,
+                             birth_date=edtf("1981-07-11"))
+        self.assertEqual(lineup["childhood"][0]["prior_span"], [1985, 1987])
+
+    def test_the_ghost_is_recomputed_not_accumulated(self):
+        lineup = {"childhood": [{"title": "The bike", "date": edtf("1986-07-11")}]}
+        xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                             birth_date=edtf("1981-07-11"))
+        undated_era = [{"slug": "childhood", "name": "Childhood", "date": None}]
+        xd.stamp_prior_spans(event_lineup=lineup, periods=undated_era, birth_date=None)
+        self.assertNotIn("prior_span", lineup["childhood"][0])
+
+    def test_the_walk_leaves_no_scratch_key_behind(self):
+        lineup = {"childhood": [{"title": "The bike", "date": edtf("1986-07-11")}]}
+        xd.stamp_prior_spans(event_lineup=lineup, periods=self.PERIODS,
+                             birth_date=edtf("1981-07-11"))
+        self.assertEqual(set(lineup["childhood"][0]),
+                         {"title", "date", "prior_span"})
+
+
+class PriorSpanThroughTimelineDataTests(VaultFixture):
+    """End to end: the pass stamps it, and the report says how many."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_period(dated="1984/1990")
+
+    def test_the_dated_moments_carry_the_ghost_after_a_real_read(self):
+        data = self.data()
+        rows = [event for group in data["event_lineup"].values() for event in group]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertIsNotNone(row.get("date"))
+            # Containment gives them the era's own span, so there is nothing
+            # wider left to ghost — the honest answer is no ghost at all.
+            self.assertNotIn("prior_span", row)
+
+    def test_a_day_pinned_moment_inside_the_era_does_carry_one(self):
+        (self.root / "state" / "classifications" / "answers-a1.json").write_text(
+            json.dumps({"source_path": "answers/A1.md", "events": [
+                {"title": "The bike with no brakes",
+                 "description": "The bike with no brakes.", "when_hint": "",
+                 "anchor": None, "date": {"stated": "1986-07-11"}}]}), encoding="utf-8")
+        data = self.data()
+        rows = {row["title"]: row for group in data["event_lineup"].values() for row in group}
+        self.assertEqual(rows["The bike with no brakes"]["prior_span"], [1984, 1990])
+        self.assertGreaterEqual(data["cross_dating"]["prior_spans"], 1)
