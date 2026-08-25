@@ -133,6 +133,23 @@ asks you for a year.
   not an estimate — a certain birthday gives a certain date), an **age** join
   keeps the hedge the person gave, and **containment** is `inferred` for a
   place, `conjectural` for an era. An explicit record is never overwritten.
+- **Placement** (v208) — how much of this life the timeline can order and
+  place, as one number from 0 to 1. Scored on the WIDTH of what is known, never
+  on whether a field has a value; a **floor**, never an exact reading; a
+  **pair**, stated beside derived; and shown as one of five **bands**, never a
+  bare percentage. The word is *placement* — never "completeness", never
+  "accuracy", and never a verdict on the life.
+  <!-- parity: timeline.PLACEMENT_ROUNDING = 4 -->
+- **Ghost** (v208) — what a dated moment's interval would be *absent its date*:
+  its era's span where the era has one, else the life (`prior_span`). It is
+  reconstructed on every read, never stored — so after an era's own dates
+  improve, old ghosts tighten. A ghost is today's honest reconstruction of
+  "before", not a screenshot of what the page once said.
+- **Glow** (v208) — how much one unanswered thing would light up if it were
+  answered: `resolves` (the other unknowns the anchor this row would *become*
+  would also place) and `leverage` (`1 + len(resolves)`, self-inclusive, so a
+  row with no reach is exactly 1). The glow is relative and its ranking is the
+  host's; the package supplies raw honest numbers and ranks nothing.
 - **Whisper** — the week's arc card carrying a keystone's real probe and the
   person's own landmarks into an ordinary conversation. Raised only where it
   fits, at most once, any precision accepted, never pressed.
@@ -202,6 +219,91 @@ The join is deliberately narrow. Markers are small, explicit pattern sets — a
 sibling's birth in the same sentence vetoes the birth join outright, and a
 free-text anchor that names nothing in your landmark index derives nothing at
 all. **A miss is fine; a wrong join is not.**
+
+**How organised is it** (v208, [ADR 0027](../adr/0027-the-placement-score.md)).
+The owner asked for a level — *how placed is this life, 0 → 1* — and already
+had the margin: the star's *"one answer would place 53 things"*. They turned
+out to be one arithmetic. `timeline.unknown_width` has ranked the Reading
+Room's plan on interval width since v204, because a threshold count is not
+submodular and a width-sum is; the level is that same sum, normalised:
+
+```
+score = 1 − Σwᵢ / (n · L)
+```
+
+over every thing the timeline holds — placed moments, unplaced moments, eras,
+place spans — where `wᵢ` is the width in years of the interval that thing
+currently occupies and `L` is the life span. A dated thing contributes its own
+interval; an undated one contributes `unknown_years`, the ONE definition of
+"the interval this occupies absent an answer" that the score, the chart's cloud
+and the ghost all read.
+
+Four things about that number are not optional.
+
+**It scores width, never presence.** A meter that asks *does this field have a
+value?* is an improper scoring rule in Gneiting & Raftery's exact sense — it is
+maximised by writing anything down, true or not. A width score is not, because
+the ladder refuses to record a narrower interval than the person can hold and
+stores a hedge as a *wider* one with a weaker confidence. **Guessing cannot
+pay.** And the score is downstream of the never-propose-a-date rule: it does
+not police itself, and it is only honest while that rule holds above it.
+
+**It is a floor.** Marginal width sums measure the smallest box containing the
+possibilities, so a well-ordered but loosely-bounded life reads as more
+disorganised than it is — by 3× in the worked case in the research. The copy
+says *at least this organised*, never *exactly*, and `caveat_floor` stays
+`True` until the concurrent-flexibility correction lands.
+
+**It comes as a pair.** `score_stated` recomputes with every derived record
+read as undated, so the cross-dating pass moves `score` and **cannot** move
+`score_stated`. That is the documentary editors' italic convention expressed as
+two numbers, and it is what stops derivation from flattering the person's own
+work.
+
+**It is banded, and it is not a verdict.** `band` is 1–5 on fixed thresholds —
+arbitrary, stable, documented as such, never peer-relative, because there are
+no peers in a private vault. One measure shown alone is treated as the thing
+itself; a banded chip beside other readings is not. And the number is scoped to
+what the timeline can *order and place*: it is never a score for the life.
+
+With **no birth landmark there is no score at all** — no life span, no floor
+for a thing nothing can bound, no honest denominator. The block is simply
+absent. That is correct, and it is why `birth` wears the ★.
+
+**The strip.** `per_year_band` gives one row per calendar year: each thing
+contributes `min(1, 1/wᵢ)` to every year its interval covers, normalised by how
+many things cover that year — the aoristic weight, uniform prior, from crime
+mapping by way of archaeology. A day-pinned thing contributes ~1 to its year; a
+decade-wide thing ~0.1 to each of ten. This is the half that answers Crema's
+summation problem: five moments smeared over five blocks and five pinned inside
+those blocks sum *identically*, and the strip tells them apart. An empty year
+reads `0`, honestly — a flat stretch means nobody asked, which is coverage, not
+biography.
+
+**The margin.** `next_gain` is the top row of the existing greedy plan,
+re-expressed in score units: the level recomputed with that anchor's resolve
+set collapsed to the anchor's own grain — one year
+(<!-- parity: timeline.ANCHOR_GRAIN_YEARS = 1.0 -->`ANCHOR_GRAIN_YEARS`), the
+coarsest thing the ladder accepts as *placed* — minus the level now. It runs
+the same arithmetic over a copied population, the way the filing beat runs the
+pass itself rather than guessing at it, so the margin can only claim what
+answering will actually deliver.
+
+**The ghost's honesty note.** Every dated moment carries `prior_span`, what its
+interval would be absent its date, stamped on the pass's own walk so stated and
+derived moments alike have it. Nothing is stored — so when an era's own dates
+improve, the old ghosts *tighten* on the next read. The ghost is today's honest
+reconstruction of "before", not a historical screenshot. That is the trade
+statelessness buys, and it is said out loud rather than fixed by keeping
+history nobody asked us to keep.
+
+**What answering one thing is worth.** Every unknown row now carries
+`resolves` and `leverage` — the other unknowns the anchor this row would
+*become* would also place, and `1 + len(resolves)`. A row with no reach is
+exactly 1, because answering it still places itself. That is the **glow**, and
+its ranking is deliberately not computed here: the package gives raw numbers
+and the host quantiles them. A keystone's `gain` is a different number and
+stays one — display reach against marginal plan value.
 
 **What happens when accounts disagree.** Nothing is overwritten.
 `chronology.reconcile` scores every claim by its basis, its confidence, and
@@ -322,7 +424,8 @@ on every read.
 | Concern | Location |
 |---|---|
 | The date primitive | `system/chronology.py` |
-| The cross-dating pass | `system/cross_dating.py` (`derive`, `cross_date`, `derivable_moments`) |
+| The cross-dating pass | `system/cross_dating.py` (`derive`, `cross_date`, `derivable_moments`, `stamp_prior_spans`) |
+| The placement score and the interval it counts | `system/timeline.py` (`placement_score`, `unknown_years`, `unknown_anchor`) |
 | The model, bands, unknowns, leverage, keystones | `system/timeline.py` |
 | Corroboration windows | `system/timeline_corroboration.py` |
 | The elicitation | `interactions/timeline/`, `system/timeline_interaction.py` |
@@ -332,12 +435,13 @@ on every read.
 | The write path | `lifehug.py timeline-place ... [--date] [--basis] [--anchor]`, `system/jobs.py` |
 | Plan a timeline Play | `lifehug.py arc-plan-target --timeline [--era <slug>]` |
 | Durable state | `state/timeline_placements.json` |
-| Research basis | `system/research/chronology.md`, `system/research.md` §4a |
-| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py` |
+| Research basis | `system/research/chronology.md`, `system/research/chronology-vis.md`, `system/research.md` §4a |
+| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py`, `tests/test_placement_score.py` |
 
 ## 7. Decisions
 
 - [ADR 0024 — Chronology with basis](../adr/0024-chronology-with-basis.md) — dates as intervals, asking anchor-first, contradictions that keep both claims, derived order, keystones, and the fifth child interaction (amended v196: the deferral state is deleted, and a keystone is asked as a whisper or a minted question).
 - [ADR 0026 — Cross-dating](../adr/0026-cross-dating.md) — a resolved anchor places its dependent moments; leverage counts only what the pass can actually derive.
+- [ADR 0027 — The placement score](../adr/0027-the-placement-score.md) — the level and its margin are one arithmetic; width never presence; a floor, a pair, and a band.
 - [The Timeline Interaction](interactions/timeline.md) — the conversation that places a memory.
 - [ADR 0023](../adr/0023-arc-walking.md) — the sibling child whose stage and caller-fact shape this one copies.

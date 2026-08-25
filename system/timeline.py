@@ -1311,6 +1311,12 @@ def unknowns(data: dict, landmarks: object = None) -> list[dict]:
     quiet window; an unknown the person could not date simply stays
     outstanding, keeps its leverage, and is asked again when the ordering says
     it is worth asking.
+
+    v208 (ADR 0027): every row also carries `years`, the interval it currently
+    occupies absent an answer (`unknown_years`) — the ONE interval the
+    placement score's width, the chart's cloud dot and the ghost's prior span
+    are all read from. `resolves` and `leverage` arrive later, in
+    `offered_unknowns`, because they need the dependency index.
     """
     import timeline_interaction  # noqa: PLC0415  (probe vocabulary lives with the interaction)
 

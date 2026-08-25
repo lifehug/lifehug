@@ -791,3 +791,40 @@ class RowReachThroughTimelineDataTests(VaultFixture):
                 self.assertIsInstance(row["resolves"], list)
                 self.assertGreaterEqual(row["leverage"], 1)
                 self.assertEqual(row["leverage"], 1 + len(row["resolves"]))
+
+
+class DocParityTests(unittest.TestCase):
+    """The `<!-- parity: -->` grammar coerces scalars only, so a tuple written
+    as an annotation would LOOK like a guard and check nothing. This is the
+    real guard for the numbers ADR 0027 and the handbook quote."""
+
+    def test_the_adr_quotes_the_live_band_thresholds(self):
+        adr = (ROOT / "docs" / "adr" / "0027-the-placement-score.md").read_text(encoding="utf-8")
+        self.assertIn("`PLACEMENT_BANDS = 0.2/0.4/0.6/0.8`", adr)
+        self.assertEqual(tl.PLACEMENT_BANDS, (0.2, 0.4, 0.6, 0.8))
+
+    def test_the_handbook_names_the_score_the_pair_and_the_floor(self):
+        page = (ROOT / "docs" / "handbook" / "timeline.md").read_text(encoding="utf-8")
+        self.assertIn("score = 1 − Σwᵢ / (n · L)", page)
+        self.assertIn("caveat_floor", page)
+        self.assertIn("score_stated", page)
+        self.assertIn("prior_span", page)
+        # Ruling 4: the words are scoped, and the forbidden ones are named.
+        flat = " ".join(page.split())
+        self.assertIn('never "completeness", never "accuracy"', flat)
+        self.assertIn("never a verdict on the life", flat)
+
+    def test_the_glossary_carries_the_four_new_terms(self):
+        page = (ROOT / "docs" / "handbook" / "glossary.md").read_text(encoding="utf-8")
+        for term in ("**Placement**", "**Certainty line**", "**Ghost**", "**Glow**"):
+            with self.subTest(term=term):
+                self.assertIn(term, page)
+
+    def test_the_twin_table_names_every_field_the_platform_half_consumes(self):
+        adr = (ROOT / "docs" / "adr" / "0027-the-placement-score.md").read_text(encoding="utf-8")
+        for field in ("`placement` block", "`counts.placement_band`",
+                      "`unknowns[].years`", "`unknowns[].leverage` / `.resolves`",
+                      "`event_lineup[…][].prior_span`", "`bands[].date` / `periods[].date`",
+                      "`keystones[0]`"):
+            with self.subTest(field=field):
+                self.assertIn(field, adr)
