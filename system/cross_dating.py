@@ -460,7 +460,7 @@ _AGE_VALUE = rf"(?:\d{{1,2}}|{_AGE_WORD})"
 #: Explicit age STATEMENTS only. `chronology.parse_age` is deliberately greedy
 #: (it reads any number it is handed), so the pass never hands it raw prose —
 #: it hands it exactly the fragment one of these matched.
-_AGE_STATEMENT_RES = (
+AGE_STATEMENT_RES = (
     re.compile(rf"\bwhen (?:i|we) (?:was|were)\s+({_HEDGE}\s+)?({_AGE_VALUE}(?:\s+or\s+{_AGE_VALUE})?)\b",
                re.IGNORECASE),
     re.compile(rf"\b(?:i|we) (?:was|were)\s+({_HEDGE}\s+)?({_AGE_VALUE}(?:\s+or\s+{_AGE_VALUE})?)\s+years old\b",
@@ -471,6 +471,13 @@ _AGE_STATEMENT_RES = (
     re.compile(rf"\bat ({_HEDGE}\s+)?(\d{{1,2}})\b(?!\s*(?:st\b|nd\b|rd\b|th\b|%|:|am\b|pm\b))(?!\s+[A-Z][a-z])"),
 )
 
+
+#: v218: PUBLIC, because the general listener's prescreen asks the same
+#: question of raw prose that this pass asks of a moment — "is there an age
+#: statement in here?" — and a second table of age phrasings is exactly the
+#: duplicate the recurring-defect doctrine forbids. The private name stays as
+#: the alias this module's own reader uses; there is no second tuple.
+_AGE_STATEMENT_RES = AGE_STATEMENT_RES
 
 def age_statement(event: object) -> str | None:
     """The age fragment a moment states in the person's own words, or ``None``."""

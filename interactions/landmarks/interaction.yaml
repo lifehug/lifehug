@@ -12,6 +12,12 @@ composition.leaf: prompt/turn-instructions.md|context/manifest.md
 # behavior, no examples and no transcript, which is the whole reason the
 # second completion is small.
 composition.recorder: prompt/recorder.md
+# v218 (ADR 0029): the general LISTENER is the recorder with no domain, and it
+# gets its own leaf for the same reason the recorder did — a no-focus pass
+# needs the nine domains' key sets and the family-relation vocabulary, and
+# needs none of the one domain's ask, ladder or none-rule. Same loop, same one
+# retry; a different leaf. It never joins the conversation's load order either.
+composition.listener: prompt/listener.md
 role.router: haiku-class
 role.worker: sonnet-class
 role.planner: sonnet-class
@@ -21,6 +27,11 @@ role.planner: sonnet-class
 # session. `landmark_recorder.DEFAULT_RECORDER_ROLE` carries the same value
 # and test_the_recorder_role_matches_the_manifest pins them equal.
 role.recorder: haiku-class
+# The listening pass is the same extraction on the same size of evidence, so
+# it is the same class of model. `general_listener.DEFAULT_LISTENER_ROLE`
+# carries the same value and test_the_listener_role_matches_the_manifest pins
+# them equal.
+role.listener: haiku-class
 # landmarks (v197, Design §E): the stop rules. A landmark pass is never an
 # interrogation — the person is doing us a favour. system/
 # landmarks_interaction.py carries the same two numbers as constants and
@@ -39,3 +50,7 @@ budget.landmarks: 900
 budget.conversation: 1600
 budget.turn_instructions: 1400
 budget.recorder: 900
+# The listener leaf carries nine domain lines and the person-record rules
+# where the recorder carries one domain's; still no identity, no behavior, no
+# examples and no transcript, which is the property the size pin holds.
+budget.listener: 1500

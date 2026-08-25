@@ -107,6 +107,27 @@ partial record is worth more than none. Filing is per entry
 terminal or an entry carrying a field its own ladder cannot read
 (`unreadable_fields`).
 
+**The general listener** (v218, ADR 0029). Every trigger above is FOCUSED —
+handed a domain, asked for the answer to the question that was asked — and
+that restriction stays exactly where it is: *"something else in the same
+breath never excuses the domain's own answer"* is what stops a two-year
+mission abroad being filed as military service, and the 2026-08-25 audit
+rejected its own proposal to repeal it. But people say datable things when
+nobody asked. So `record_answer(domain=None, ...)` — named
+`listen_to_answer` — is a SECOND TRIGGER on the SAME loop, with a leaf
+(`prompt/listener.md`, `role.listener`), a parse and a backstop swapped and
+nothing else. There is no second loop. Its output is TYPED LISTS —
+`{"landmarks": [...], "people": [...]}`: landmark records of ANY domain
+through both pinned validators alone, and person DATES filing through v217's
+roster seam. **Person dates are FAMILY ONLY** (owner ruling): a record whose
+relation is absent or not family is dropped at validation with a named
+finding, never filed, and the guard does not depend on the leaf obeying the
+rule. Its backstop is `landmark_gates.listener_heard_nothing` — the
+deterministic prescreen `general_listener.may_contain_datable` saw time in the
+message and nothing came back — with the SAME one regeneration and then a
+WITHHELD record a host sweep can re-run. There is deliberately no
+`placements` list: moment identity for prose is phase 2.
+
 **Never propose a date.** Reporting the arithmetic is right — "anything at
 the Bell house lands between '84 and '90 now" states a derivation and shows its
 working. Naming a date and asking for agreement is forbidden in every domain,
@@ -152,6 +173,10 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The seven landmark lints | `landmarks_interaction.lint_landmark_reply(text, stage=…, domain=…, sensitive=…, domains_named=…, landmark=…, user_message=…, known_labels=…)`; `landmarks_interaction.LANDMARK_LINT_CLASSES`. The sixth, `never_proposes_a_date`, is SHARED — its one definition is `timeline_interaction.proposes_a_date`, run by both lanes |
 | The recorder (v212, ADR 0028; v214 many-records; v216 known entries) | `landmark_recorder.build_recorder_prompt(domain=…, question_asked=…, answer=…, reply=…, landmarks=…, reminder=…)` — `landmarks` is the LANDMARKS store (or the domain's own entries) and fills the ALREADY-FILED block · `parse_recorder_output(raw)` → `tuple[dict, ...]` (BOTH pinned validation layers, PER RECORD) · `record_answer(…, call=…)` — the whole loop, with the model injected · `recordable_keys(row)` — the only keys this domain can READ, walked from v211's own `landmarks_interaction.rung_satisfiers` and intersected with what both validation layers keep (the writer-side half of #219/#220: no `span` on `children`, no `label` on `birth`, no `name` on `children`, no `birth` key on `family`). Leaf: `prompt/recorder.md`; role: `role.recorder`. **Platform wiring:** the engine calls the recorder AFTER the reply is generated and files through the same durable path the live turn files through; the landmark re-harvest calls the SAME function instead of re-composing the live turn prompt |
 | The one BLOCKING lint, and its retry (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, raised from `answer_must_record(user_message, record, reply=…, domain=…, known_labels=…)` — ONE definition, run by the recorder as its backstop and by `lint_landmark_reply` for a host still reading the reply's own field. On a finding, regenerate ONCE with `recording_reminder(domain)` appended (`landmark_recorder.MAX_ATTEMPTS = 2`), then emit or withhold |
+| The general listener (v218, ADR 0029) | `landmark_recorder.listen_to_answer(answer=…, reply=…, landmarks=…, call=…)` — `record_answer(domain=None, …)`, the SAME loop · `general_listener.build_listener_prompt` / `parse_listener_output` → `Heard(landmarks, people, findings)` · `render_domain_digest()` — the nine domains as nine `domain: key | key` lines, from `landmark_recorder.recordable_keys`, never nine pasted ladders · `render_all_known_entries(landmarks)` — v216's block for EVERY domain, capped at `KNOWN_PER_DOMAIN` per domain and `KNOWN_TOTAL` in all. Leaf: `prompt/listener.md`; role: `role.listener`. Purpose: `DATE_RECORD_PURPOSE` (`"date_record"`), a SECOND name beside `LANDMARK_RECORD_PURPOSE` |
+| The listener's prescreen (v218) | `general_listener.may_contain_datable(text) -> Verdict(fired, reasons, terms)` — deterministic and table-driven, DERIVED: `chronology.YEAR_RE`/`MONTH_NAMES`/`NUMBER_WORDS`, `cross_dating.AGE_STATEMENT_RES`/`AGE_BAND_AGES`, `recommend_focuses.TIME_PERIOD_PATTERNS`, plus this module's own four (`DURATION_RES`, `BECOMING_RES`, `THIRD_PERSON_AGE_RES`, `ANCHOR_RELATIVE_RES`, `DECADE_RE`). `_sentence_normalized` lets the borrowed case-sensitive tables read a whole message without being re-typed |
+| The listener's backstop (v218) | `general_listener.LISTENER_HEARD_NOTHING_LINT` from `listener_heard_nothing(user_message, records, people, findings=…, landmarks=…, verdict=…)`, its regeneration `listening_reminder(verdict)`. Cleared by a decline (`answer_shape`), by a `DROPPED_NON_FAMILY` finding, or by a restatement (`store_terms`, v216's dedupe in the no-focus mode) |
+| Person dates from the listener (v218) | `general_listener.validate_person_record(value) -> (record, finding)` — FAMILY ONLY against `landmarks_interaction.person_date_relations()` (the roster vocabulary minus `NON_FAMILY_RELATIONS`), dates through `entity_verdict.parse_person_date` · `person_invocations(people)` → `lifehug.py entity-verdict … --born/--died`, with `landmarks_interaction.date_flags` and `person_slug` shared with v217's own roster join |
 | One answer, many records (v214) | Output `{"landmarks": [ ... ]}`; `RecorderOutcome.records` (`.record` = the first, for v212 callers). The RETRYABLE class `landmarks_interaction.RECORD_EVERY_ENTRY_LINT` from `records_missing_entries(user_message, records, reply=…, domain=…, known_labels=…)`, its regeneration `many_records_reminder(domain, count)` — the SAME single retry, and it files what it has either way. Filing: `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` → `timeline.save_landmarks` |
 | Filing an accepted landmark | `landmarks_interaction.landmark_invocation(record)` → `lifehug.py landmark-record` |
 | The durable store | `timeline.load_landmarks()`, `timeline.save_landmark(domain, record)`, `timeline.landmark_birth_date()` |

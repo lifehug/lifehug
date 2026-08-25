@@ -450,8 +450,23 @@ def to_edtf(record: object) -> str | None:
 # Display
 # --------------------------------------------------------------------------
 
-_MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July",
-                "August", "September", "October", "November", "December")
+#: The twelve month names, in order. PUBLIC from v218: this module is the one
+#: home for the package's time tables, and the general listener's prescreen
+#: builds its month pattern from these very words rather than typing a tenth
+#: copy of them (recurring-defect doctrine, docs/BUILDING.md §7). The private
+#: name stays as the alias :func:`display_date` already uses; there is no
+#: second tuple.
+MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July",
+               "August", "September", "October", "November", "December")
+_MONTH_NAMES = MONTH_NAMES
+
+#: The ONE four-digit-year pattern, 1800-2099 — the range a human life is
+#: stated in. PROMOTED in v218 from the three identical private copies that
+#: had grown up around it (`landmarks_interaction._ECHO_YEAR_RE`,
+#: `timeline._CHAPTER_YEAR_RE`, `timeline_interaction._YEAR_RE`), each of
+#: which now reads this object. A year the timeline can hold and a year the
+#: recorder can hear must never be two different sentences.
+YEAR_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
 
 
 def display_date(record: object, *, with_basis: bool = True) -> str:

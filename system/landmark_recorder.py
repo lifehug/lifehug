@@ -44,10 +44,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import conversation_delivery
+import general_listener as gl
 import landmarks_interaction as li
 from lifehug_core import INTERACTIONS_DIR
 
 RECORDER_PROMPT = "recorder.md"
+
+#: The LLM purpose this pass spends its completion on. v218 names it here
+#: because nothing package-side named it before, and the general listener
+#: needs a name to be a SECOND of: `general_listener.DATE_RECORD_PURPOSE` is
+#: `"date_record"`, a second name and never a rename of this one. Two prompts,
+#: two outputs, two backstops — a host budgets, routes and audits them apart.
+RECORDER_PURPOSE = gl.LANDMARK_RECORD_PURPOSE
 
 #: The recorder's own role. A small model is the right one here and the cost
 #: statement is honest: ONE extra completion per landmark ANSWER — not per
@@ -86,6 +94,17 @@ class RecorderOutcome:
 
     status: str
     records: tuple[dict, ...] = ()
+    #: v218 (ADR 0029): the PERSON DATES a no-focus pass heard, typed
+    #: separately because they file through a different seam
+    #: (`entity-verdict --born/--died`, v217) and are FAMILY-ONLY by owner
+    #: ruling. Always empty in focused mode, so every v214 caller is
+    #: untouched — a heterogeneous `records` list was the shape the audit
+    #: refused.
+    people: tuple[dict, ...] = ()
+    #: The NAMED drops a no-focus parse made
+    #: (`general_listener.DROPPED_NON_FAMILY` / `DROPPED_NO_DATE`). A refused
+    #: record must be legible, not silent.
+    findings: tuple[str, ...] = ()
     attempts: int = 0
     lint_ids: tuple[str, ...] = ()
     reason: str = ""
@@ -301,12 +320,23 @@ def parse_recorder_output(raw: object, *,
     return tuple(records)
 
 
-def record_answer(*, domain: str, answer: str, call, reply: str = "",
-                  question_asked: str = "", landmarks: object = (),
-                  known_labels: object = (),
+def record_answer(*, answer: str, call, domain: str | None = None,
+                  reply: str = "", question_asked: str = "",
+                  landmarks: object = (), known_labels: object = (),
                   model: str = DEFAULT_RECORDER_ROLE,
                   framework_root: str | Path | None = None) -> RecorderOutcome:
     """Run the recorder over one answer: extract, lint, retry once, file.
+
+    **THE ONE LOOP, TWO MODES (v218, ADR 0029).** With a ``domain`` this is
+    the FOCUSED recorder ADR 0028 built: it is shown that domain's ladder and
+    that domain's filed entries, and it records the answer to the question
+    that was asked — and only that domain, which the 2026-08-25 audit
+    explicitly refused to repeal. With ``domain=None`` it is the GENERAL
+    LISTENER: no question was asked, so it hears whatever datable facts are
+    in the message, across every domain, plus FAMILY person dates. Same
+    attempt count, same single retry, same withheld terminal; a different
+    leaf, a different parse and a different lint. There is no second loop, and
+    `listen_to_answer` is a named door onto this one.
 
     ``call(prompt, model) -> str`` is injected so this loop is testable and so
     a host can route the completion however it routes every other one. The
@@ -337,6 +367,18 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
     is still 2: a second regeneration would be a loop, and the lints exist to
     make a failure legible, not to keep rolling the dice.
 
+    In NO-FOCUS mode the contract reads the same with one substitution:
+    `general_listener.listener_heard_nothing` replaces `answer_must_record`
+    as the blocking backstop, and it asks a question only a no-focus pass can
+    ask — *the deterministic prescreen
+    (`general_listener.may_contain_datable`) saw time in this message and
+    nothing came back*. One regeneration carrying
+    `general_listener.listening_reminder`, then ``STATUS_WITHHELD`` with
+    `general_listener.LISTENER_HEARD_NOTHING_LINT` on it, which a host sweep
+    can run again. Never silence, and never a fabricated record.
+    `records_missing_entries` does NOT run there: it is a per-DOMAIN
+    completeness class and a no-focus pass has no domain to be complete for.
+
     ``known_labels`` is DERIVED, not hand-passed (v216, lifehug#230). Both
     lints take it and both were being run with an empty one, because the only
     thing that could fill it — the entries already in the store — reached this
@@ -346,28 +388,61 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
     entries; the argument survives as the ``extra`` union for a host holding
     names from somewhere else.
     """
-    known = li.known_entry_labels(landmarks, domain, extra=known_labels,
-                                  framework_root=framework_root)
+    listening = not str(domain or "").strip()
+    known = () if listening else li.known_entry_labels(
+        landmarks, domain, extra=known_labels, framework_root=framework_root)
+    verdict = gl.may_contain_datable(answer) if listening else None
     prompts: list[str] = []
     reminder = ""
     finding: dict | None = None
     best: tuple[dict, ...] = ()
+    people: tuple[dict, ...] = ()
+    findings: tuple[str, ...] = ()
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        prompt = build_recorder_prompt(
-            domain=domain, question_asked=question_asked, answer=answer,
-            reply=reply, landmarks=landmarks, reminder=reminder,
-            framework_root=framework_root,
+        prompt = (
+            gl.build_listener_prompt(answer=answer, reply=reply,
+                                     landmarks=landmarks, reminder=reminder,
+                                     framework_root=framework_root)
+            if listening else
+            build_recorder_prompt(
+                domain=domain, question_asked=question_asked, answer=answer,
+                reply=reply, landmarks=landmarks, reminder=reminder,
+                framework_root=framework_root,
+            )
         )
         prompts.append(prompt)
         try:
             raw = call(prompt, model)
         except Exception as exc:  # noqa: BLE001 — provider failures are data here
-            if best:
+            if best or people:
                 return RecorderOutcome(status=STATUS_RECORDED, records=best,
+                                       people=people, findings=findings,
                                        attempts=attempt, reason=str(exc),
                                        prompts=tuple(prompts))
             return RecorderOutcome(status=STATUS_UNAVAILABLE, attempts=attempt,
-                                   reason=str(exc), prompts=tuple(prompts))
+                                   findings=findings, reason=str(exc),
+                                   prompts=tuple(prompts))
+        if listening:
+            # THE NO-FOCUS RUNG of the same loop (ADR 0029). Same attempts,
+            # same single retry, same withheld terminal — a different leaf, a
+            # different parse and a different lint, and nothing else.
+            heard = gl.parse_listener_output(raw,
+                                             framework_root=framework_root)
+            findings = tuple(dict.fromkeys(findings + heard.findings))
+            if len(heard) > len(best) + len(people):
+                best, people = heard.landmarks, heard.people
+            finding = gl.listener_heard_nothing(
+                answer, best, people, findings=findings,
+                landmarks=landmarks, verdict=verdict,
+                framework_root=framework_root)
+            if finding is None:
+                return RecorderOutcome(
+                    status=(STATUS_RECORDED if (best or people)
+                            else STATUS_NOTHING),
+                    records=best, people=people, findings=findings,
+                    attempts=attempt, prompts=tuple(prompts))
+            reminder = gl.listening_reminder(verdict)
+            continue
         records = parse_recorder_output(raw, framework_root=framework_root)
         if len(records) > len(best):
             best = records
@@ -396,10 +471,39 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
         reminder = li.recording_reminder(domain)
     return RecorderOutcome(
         status=STATUS_WITHHELD, attempts=MAX_ATTEMPTS,
-        lint_ids=(li.ANSWER_MUST_RECORD_LINT,),
+        people=people, findings=findings,
+        lint_ids=((gl.LISTENER_HEARD_NOTHING_LINT,) if listening
+                  else (li.ANSWER_MUST_RECORD_LINT,)),
         reason=str((finding or {}).get("detail", "")),
         prompts=tuple(prompts),
     )
+
+
+def listen_to_answer(*, answer: str, call, reply: str = "",
+                     landmarks: object = (),
+                     model: str = gl.DEFAULT_LISTENER_ROLE,
+                     framework_root: str | Path | None = None
+                     ) -> RecorderOutcome:
+    """The GENERAL LISTENER (v218, ADR 0029) — the recorder with no domain.
+
+    A named door onto :func:`record_answer` with ``domain=None``, never a
+    second loop: the attempt count, the single retry and the withheld
+    terminal are the same body, and this exists so a caller's intent is
+    legible at the call site and so the listener's own default role
+    (`general_listener.DEFAULT_LISTENER_ROLE`) applies without every host
+    remembering to pass it.
+
+    It listens to ONE user message — with the reply alongside only as echo
+    evidence, exactly as the focused recorder uses it — and returns
+    :attr:`RecorderOutcome.records` (landmark records of ANY domain) and
+    :attr:`RecorderOutcome.people` (FAMILY person dates, owner-ruled). The
+    focused mode's restriction to the asked domain is untouched and stays a
+    property of that mode: an off-domain fact in a focused landmark session
+    is still not that session's to record.
+    """
+    return record_answer(domain=None, answer=answer, call=call, reply=reply,
+                         landmarks=landmarks, model=model,
+                         framework_root=framework_root)
 
 
 # --------------------------------------------------------------------------
@@ -432,6 +536,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"error": f"unreadable payload: {exc}"}))
         return 1
     domain = args.domain or payload.get("domain") or ""
+    if not domain.strip():
+        # This CLI is the FOCUSED recorder's. The no-focus mode has its own
+        # front door (`general_listener.py`), and defaulting into it on a
+        # missing flag would hide a typo behind a different pass.
+        print(json.dumps({"error": "a domain is required "
+                                   "(the no-focus mode is general_listener.py)"}))
+        return 1
     try:
         if args.dry_run:
             print(build_recorder_prompt(
