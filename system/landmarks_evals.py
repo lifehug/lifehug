@@ -49,6 +49,12 @@ REQUIRED_GOLDEN_IDS = frozenset({
     # the domain's OPENING question again.
     "landmarks-the-label-is-the-name-it-asked-for",
     "landmarks-a-bare-label-climbs-the-thing-ladders",
+    # v212 (lifehug#221): replying is not recording. Both live failures, as
+    # the turns they should have been, plus the ambiguous turn that must NOT
+    # be punished for staying quiet.
+    "landmarks-military-none-with-a-story-alongside",
+    "landmarks-losses-are-recorded-not-only-received",
+    "landmarks-ambiguous-answer-is-not-a-missed-record",
 })
 
 #: These hold on every landmark turn. `never_presses_sensitive` is scoped to a
@@ -65,8 +71,15 @@ _ALWAYS_APPLICABLE_LINTS = frozenset({
 })
 
 
-def _applicable(domain: object, sensitive: bool) -> frozenset[str]:
+def _applicable(domain: object, sensitive: bool, *,
+                answered: bool = False) -> frozenset[str]:
     applicable = set(_ALWAYS_APPLICABLE_LINTS)
+    # v212 (lifehug#221): scored only on a turn whose fixture supplies the
+    # person's own message. Without it the class cannot fire at all, so
+    # scoring it there would be free compliance — a gate that measures
+    # nothing.
+    if answered:
+        applicable.add("answer_must_record")
     # v202: the year-opener carve-out is a NAMED SET on the interaction module
     # (`birth`, `family`, `children` — see YEAR_OPENER_DOMAINS), read here
     # rather than re-derived, so the harness and the lint can never disagree.
@@ -117,7 +130,11 @@ def load_gates(*, framework_root: str | Path | None = None) -> dict[str, float]:
 
 _FIXTURE_KEYS = {"fixture_id", "landmarks", "turns"}
 _TURN_KEYS = {"stage", "domain", "rung", "sensitive", "expected_landmark",
-              "domains_named"}
+              "domains_named",
+              # v212 (lifehug#221): the person's own message this reply
+              # answers, and the labels already in LANDMARKS — the two inputs
+              # `landmark_gates.answer_must_record` needs to be honest.
+              "user_message", "known_labels"}
 
 
 def validate_fixtures(fixtures: list[dict]) -> list[str]:
@@ -186,6 +203,10 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
         for turn, pred_turn in zip(fixture["turns"], prediction.get("turns") or []):
             domain = turn.get("domain")
             sensitive = bool(turn.get("sensitive"))
+            structural = conversation_delivery._parse_landmark(  # noqa: SLF001
+                pred_turn.get("landmark")
+            )
+            validated = landmarks_interaction.validate_landmark(structural)
             findings = {
                 item["lint"].split(".", 1)[1]
                 for item in landmarks_interaction.lint_landmark_reply(
@@ -194,15 +215,19 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
                     domain=domain,
                     sensitive=sensitive,
                     domains_named=turn.get("domains_named") or (),
+                    # v212: the recording gate reads what the turn emitted and
+                    # what the person actually said — exactly what a real
+                    # caller holds at this point.
+                    landmark=validated,
+                    user_message=turn.get("user_message"),
+                    known_labels=turn.get("known_labels") or (),
                 )
             }
-            for lint_class in _applicable(domain, sensitive):
+            for lint_class in _applicable(
+                domain, sensitive, answered=bool(turn.get("user_message"))
+            ):
                 counts[lint_class][1] += 1
                 counts[lint_class][0] += lint_class not in findings
-            structural = conversation_delivery._parse_landmark(  # noqa: SLF001
-                pred_turn.get("landmark")
-            )
-            validated = landmarks_interaction.validate_landmark(structural)
             field_total += 1
             field_correct += validated == turn["expected_landmark"]
     scores: dict[str, object] = {

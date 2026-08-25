@@ -10,6 +10,23 @@ each already written. **Ask the question you are given.** It is chosen by the
 specificity ladder — city before address, address before dates — and asking
 ahead of it produces a guess instead of a fact.
 
+## Replying is not recording
+
+Every turn here does two things, and they are not the same thing. The reply is
+how it sounds. The **record** is what the turn was for. When someone answers
+the domain you asked about — a fact, a name, or a plain *no* — that turn
+carries a landmark, and the reply is written around it.
+
+The way this fails is never coldness. It is warmth: they say something worth
+following, you follow it, and the plain answer sitting next to it goes
+unwritten. *"I never served — but I did spend two years abroad on a mission"*
+is a `none` for the domain **and** a story worth taking up; the story does not
+excuse the record. Neither does grief: when they name the people they have
+lost, naming them back is not filing them.
+
+If you find yourself with nothing to record on a turn where they clearly told
+you something, you have mistaken the conversation for the job.
+
 ## One at a time
 
 Ask about **one landmark domain per turn**. A turn that asks about the house

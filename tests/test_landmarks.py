@@ -1903,3 +1903,514 @@ class LeafShapedAnswerMatrixTests(unittest.TestCase):
                 self.assertIsNotNone(
                     li.identity_rung(row),
                     f"{domain} has no identity rung for a bare label to reach")
+
+
+class AnswerMustRecordTests(unittest.TestCase):
+    """v212 (lifehug#221) — replying is not recording.
+
+    Two live landmark sessions on the platform's v207+ leaf came back with a
+    warm, engaged reply and `landmark: null`: the military question answered
+    with a plain "I have not served" alongside a mission story, and the losses
+    question answered with the names of actual people. The record lost to the
+    conversation, twice, on the same leaf. This class makes that shape
+    mechanically visible.
+    """
+
+    BAD_FIXTURE = (ROOT / "interactions" / "landmarks" / "evals" / "goldens"
+                   / "landmark-answer-not-recorded-bad-01.json")
+
+    def _cases(self) -> list[dict]:
+        data = json.loads(self.BAD_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(data["fixture_id"], "landmark-answer-not-recorded-bad-01")
+        return data["cases"]
+
+    def _record(self, case: dict, raws: list[str]) -> object:
+        """Drive the recorder over one case with scripted completions."""
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        seen: list[str] = []
+
+        def _call(prompt: str, model: str) -> str:
+            seen.append(prompt)
+            return raws[min(len(seen), len(raws)) - 1]
+
+        outcome = recorder.record_answer(
+            domain=case["domain"], answer=case["user_message"],
+            reply=case["reply"], call=_call,
+        )
+        return outcome, seen
+
+    def _finding(self, case: dict, record: object) -> object:
+        return li.answer_must_record(case["user_message"], record,
+                                     reply=case["reply"],
+                                     domain=case["domain"])
+
+    def test_the_class_is_declared_and_named(self):
+        self.assertIn(li.ANSWER_MUST_RECORD_LINT, li.LANDMARK_LINT_CLASSES)
+        self.assertEqual(li.ANSWER_MUST_RECORD_LINT,
+                         "landmark_gates.answer_must_record")
+
+    def test_both_live_failures_are_caught_by_the_recorder(self):
+        cases = self._cases()
+        self.assertEqual([c["case_id"] for c in cases],
+                         ["military-none-lost-to-the-mission-story",
+                          "losses-named-back-but-never-filed"])
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        for case in cases:
+            with self.subTest(case=case["case_id"]):
+                # The empty first extraction, repeated: the recorder refuses
+                # to call it done and withholds rather than dropping it.
+                outcome, seen = self._record(case, [case["attempt"]["raw"]])
+                self.assertEqual(outcome.status, recorder.STATUS_WITHHELD)
+                self.assertEqual(outcome.lint_ids,
+                                 (li.ANSWER_MUST_RECORD_LINT,))
+                self.assertEqual(len(seen), recorder.MAX_ATTEMPTS)
+
+    def test_the_recorder_regenerates_once_and_emits(self):
+        """The retry path, end to end: lint -> reminder -> emit."""
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        for case in self._cases():
+            with self.subTest(case=case["case_id"]):
+                outcome, seen = self._record(
+                    case, [case["attempt"]["raw"], case["regenerated"]["raw"]])
+                self.assertEqual(outcome.status, recorder.STATUS_RECORDED)
+                self.assertEqual(outcome.attempts, 2)
+                self.assertEqual(outcome.record, case["expected_landmark"])
+                # The reminder is what made the difference, and only the
+                # SECOND prompt carries it.
+                reminder = li.recording_reminder(case["domain"])
+                self.assertNotIn(reminder, seen[0])
+                self.assertIn(reminder, seen[1])
+                self.assertIsNone(self._finding(case, outcome.record))
+
+    def test_the_recorder_never_needed_the_reply(self):
+        """The audit's hardest case: reply generation failed entirely."""
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        case = dict(self._cases()[0], reply="")
+        outcome, _ = self._record(
+            case, [case["attempt"]["raw"], case["regenerated"]["raw"]])
+        self.assertEqual(outcome.status, recorder.STATUS_RECORDED)
+        self.assertEqual(outcome.record, case["expected_landmark"])
+
+    def test_a_mission_is_not_a_military_landmark(self):
+        """The domain's own answer is a none; the story goes to capture."""
+        case = self._cases()[0]
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        record = recorder.parse_recorder_output(case["regenerated"]["raw"])
+        self.assertEqual(record, {"domain": "military", "none": True})
+        self.assertEqual(li.status_for_domain([record],
+                                              li.domain_row("military")),
+                         "complete")
+
+    def test_a_loss_records_the_person_and_never_invents_a_date(self):
+        case = self._cases()[1]
+        record = case["expected_landmark"]
+        self.assertEqual(record["who"], "Needy Beecham")
+        self.assertEqual(record["subject"], "my mother's mother")
+        self.assertNotIn("date", record)
+        self.assertNotIn("year", record)
+
+    def test_any_emitted_record_clears_the_class(self):
+        for emitted in ({"domain": "military", "none": True},
+                        {"domain": "military", "skipped": True},
+                        {"domain": "military", "branch": "Navy"}):
+            with self.subTest(emitted=emitted):
+                self.assertNotIn(li.ANSWER_MUST_RECORD_LINT, [
+                    f["lint"] for f in li.lint_landmark_reply(
+                        "No service then. Zurich at nineteen, though.",
+                        stage="ask", domain="military", landmark=emitted,
+                        user_message="I have not served in the military.",
+                    )
+                ])
+
+    def test_a_skip_is_never_a_missed_record(self):
+        self.assertEqual(li.answer_shape("I don't remember, honestly.",
+                                         "Of course — we'll leave it."),
+                         "skip")
+        self.assertNotIn(li.ANSWER_MUST_RECORD_LINT, [
+            f["lint"] for f in li.lint_landmark_reply(
+                "Of course — we'll leave it.", stage="ask", domain="military",
+                user_message="I don't remember, honestly.",
+            )
+        ])
+
+    def test_an_ambiguous_answer_is_not_punished(self):
+        """Fail toward skip: no name, no year, no denial — no finding."""
+        user = ("We moved around a fair bit when I was small — a few "
+                "different places, and it all blurs together now.")
+        reply = "A lot of moving. We can take them one at a time."
+        self.assertEqual(li.answer_shape(user, reply), "unknown")
+        self.assertNotIn(li.ANSWER_MUST_RECORD_LINT, [
+            f["lint"] for f in li.lint_landmark_reply(
+                reply, stage="ask", domain="residences", user_message=user)
+        ])
+
+    def test_a_negative_only_counts_where_a_none_can_be_recorded(self):
+        """`family` opens at `who`: "no siblings" is not an empty family."""
+        user = "I didn't have any brothers or sisters."
+        reply = "An only child, then. Who else was at home?"
+        self.assertNotIn(li.ANSWER_MUST_RECORD_LINT, [
+            f["lint"] for f in li.lint_landmark_reply(
+                reply, stage="ask", domain="family", user_message=user)
+        ])
+        self.assertIn(li.ANSWER_MUST_RECORD_LINT, [
+            f["lint"] for f in li.lint_landmark_reply(
+                "No children, then.", stage="ask", domain="children",
+                user_message="No, we never had children.")
+        ])
+
+    def test_the_model_echoing_what_it_already_knew_is_not_evidence(self):
+        """A label already in LANDMARKS is the model's own word, not theirs."""
+        self.assertEqual(
+            li.answer_shape("Yes, Bell Avenue.", "Bell Avenue, right.",
+                            known_labels=("Bell Avenue",)),
+            "unknown",
+        )
+        self.assertEqual(
+            li.answer_shape("Yes, Bell Avenue.", "Bell Avenue, right."),
+            "substantive",
+        )
+
+    def test_pre_v212_call_sites_are_byte_identical(self):
+        """Every existing caller passes no user message, so it cannot fire."""
+        self.assertEqual(
+            li.lint_landmark_reply("Where did you live?", stage="ask",
+                                   domain="residences"),
+            [],
+        )
+
+    def test_the_shape_vocabulary_is_closed(self):
+        for user, reply, expected in (
+            ("", "", "unknown"),
+            ("Let's leave that one.", "Of course.", "skip"),
+            ("I never served.", "No service, then.", "negative"),
+        ):
+            with self.subTest(user=user):
+                self.assertEqual(
+                    li.answer_shape(user, reply, accepts_none=True), expected)
+                self.assertIn(
+                    li.answer_shape(user, reply, accepts_none=True),
+                    li.ANSWER_SHAPES)
+
+    def test_the_seat_scores_the_class_and_can_fail_it(self):
+        """The gate has a real denominator — it is not free compliance."""
+        import copy  # noqa: PLC0415
+
+        fixtures = landmarks_evals.load_fixtures()
+        predictions = landmarks_evals.load_sample_predictions()
+        self.assertEqual(
+            landmarks_evals.score_goldens(fixtures, predictions)
+            ["answer_must_record.compliance"], 1.0)
+        broken = copy.deepcopy(predictions)
+        for row in broken:
+            if row["fixture_id"] == "landmarks-military-none-with-a-story-alongside":
+                row["turns"][0]["landmark"] = None
+        scores = landmarks_evals.score_goldens(fixtures, broken)
+        self.assertLess(scores["answer_must_record.compliance"], 1.0)
+        self.assertTrue(landmarks_evals.check_gates(
+            scores, landmarks_evals.load_gates()))
+
+    def test_the_gate_and_the_class_list_agree(self):
+        gates = landmarks_evals.load_gates()
+        self.assertIn("answer_must_record.compliance", gates)
+        self.assertEqual(
+            sorted(gates),
+            sorted(f"{name.split('.', 1)[1]}.compliance"
+                   for name in li.LANDMARK_LINT_CLASSES),
+        )
+
+    def test_the_new_files_ship_in_framework_files(self):
+        manifest = json.loads(
+            (ROOT / "system" / "version.json").read_text(encoding="utf-8"))
+        self.assertIn(
+            "interactions/landmarks/evals/goldens/"
+            "landmark-answer-not-recorded-bad-01.json",
+            manifest["framework_files"],
+        )
+
+    def test_the_turn_instructions_state_recording_is_the_first_job(self):
+        text = (ROOT / "interactions" / "landmarks" / "prompt"
+                / "turn-instructions.md").read_text(encoding="utf-8")
+        self.assertIn("Recording is this turn's FIRST job", text)
+        behavior = (ROOT / "interactions" / "landmarks" / "prompt"
+                    / "behavior.md").read_text(encoding="utf-8")
+        self.assertIn("Replying is not recording", behavior)
+
+
+class LandmarkRecorderTests(unittest.TestCase):
+    """v212 / ADR 0028 — one recorder, two triggers.
+
+    The conversation writes the reply; the recorder files the record. The
+    audit (platform #586) certified that the emission instruction was already
+    in the live leaf when the founder's military answer was swallowed, so the
+    only certifiable mechanism is a deterministic pass with a blocking
+    backstop. This is that pass.
+    """
+
+    def setUp(self) -> None:
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        self.recorder = recorder
+
+    def _prompt(self, **kwargs) -> str:
+        base = {"domain": "military", "question_asked": "Did you serve?",
+                "answer": "I never served.", "reply": "No service, then."}
+        return self.recorder.build_recorder_prompt(**{**base, **kwargs})
+
+    def test_the_recorder_has_no_voice_and_no_transcript(self):
+        """The whole reason the second call is small."""
+        prompt = self._prompt()
+        for absent in ("## IDENTITY", "## BEHAVIOR", "## EXAMPLES",
+                       "## SESSION"):
+            self.assertNotIn(absent, prompt)
+        self.assertIn("You are not in the conversation", prompt)
+        self.assertLess(len(prompt), 4000)
+
+    def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
+        military = self._prompt()
+        self.assertIn("happened | branch | span", military)
+        self.assertIn("CAN THIS DOMAIN BE ANSWERED \"NEVER HAPPENED\": yes",
+                      military)
+        family = self._prompt(domain="family",
+                              question_asked="Who was in your family?")
+        self.assertIn("CAN THIS DOMAIN BE ANSWERED \"NEVER HAPPENED\": no",
+                      family)
+
+    def test_the_reminder_is_appended_only_when_given(self):
+        self.assertNotIn("first job", self._prompt())
+        self.assertIn(li.recording_reminder("military"),
+                      self._prompt(reminder=li.recording_reminder("military")))
+
+    def test_an_unknown_domain_is_refused_at_composition(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._prompt(domain="pets")
+
+    def test_parsing_runs_both_pinned_validation_layers(self):
+        self.assertEqual(
+            self.recorder.parse_recorder_output(
+                '{"landmark": {"domain": "residences", "city": "Dayton", '
+                '"label": "Dayton"}}'),
+            {"domain": "residences", "label": "Dayton", "city": "Dayton"},
+        )
+        # A domain the question set never declares is dropped, not stored.
+        self.assertIsNone(self.recorder.parse_recorder_output(
+            '{"landmark": {"domain": "pets", "label": "Rex"}}'))
+        # A fence is tolerated; nothing looser is.
+        self.assertEqual(
+            self.recorder.parse_recorder_output(
+                '```json\n{"landmark": {"domain": "military", "none": true}}\n```'),
+            {"domain": "military", "none": True},
+        )
+        for junk in ("", "no idea", '{"landmark": "military"}', None, 7):
+            with self.subTest(junk=junk):
+                self.assertIsNone(self.recorder.parse_recorder_output(junk))
+
+    def test_nothing_said_about_the_domain_records_nothing_and_is_correct(self):
+        outcome = self.recorder.record_answer(
+            domain="residences", answer="Anyway, how are you today?",
+            reply="Doing fine.", call=lambda p, m: '{"landmark": null}')
+        self.assertEqual(outcome.status, self.recorder.STATUS_NOTHING)
+        self.assertEqual(outcome.attempts, 1)
+        self.assertIsNone(outcome.record)
+
+    def test_a_skip_records_the_skip_and_never_retries(self):
+        outcome = self.recorder.record_answer(
+            domain="military", answer="Let's leave that one.",
+            reply="Of course.",
+            call=lambda p, m: '{"landmark": {"domain": "military", '
+                              '"skipped": true}}')
+        self.assertEqual(outcome.status, self.recorder.STATUS_RECORDED)
+        self.assertEqual(outcome.record, {"domain": "military", "skipped": True})
+        self.assertEqual(outcome.attempts, 1)
+
+    def test_a_provider_failure_is_data_never_an_exception(self):
+        def _boom(prompt: str, model: str) -> str:
+            raise RuntimeError("no provider")
+
+        outcome = self.recorder.record_answer(
+            domain="military", answer="I never served.", reply="", call=_boom)
+        self.assertEqual(outcome.status, self.recorder.STATUS_UNAVAILABLE)
+        self.assertIn("no provider", outcome.reason)
+        self.assertIsNone(outcome.record)
+
+    def test_the_retry_is_bounded_at_exactly_one(self):
+        calls: list[str] = []
+
+        def _empty(prompt: str, model: str) -> str:
+            calls.append(prompt)
+            return '{"landmark": null}'
+
+        outcome = self.recorder.record_answer(
+            domain="children", answer="No, we never had children.",
+            reply="No children, then.", call=_empty)
+        self.assertEqual(len(calls), self.recorder.MAX_ATTEMPTS)
+        self.assertEqual(self.recorder.MAX_ATTEMPTS, 2)
+        self.assertEqual(outcome.status, self.recorder.STATUS_WITHHELD)
+
+    def test_the_recorder_role_matches_the_manifest(self):
+        """Tuning the knob and tuning the constant stay one edit."""
+        raw = (ROOT / "interactions" / "landmarks"
+               / "interaction.yaml").read_text(encoding="utf-8")
+        self.assertIn(f"role.recorder: {self.recorder.DEFAULT_RECORDER_ROLE}",
+                      raw)
+        self.assertIn(f"composition.recorder: prompt/{self.recorder.RECORDER_PROMPT}",
+                      raw)
+
+    def test_the_recorder_ships_in_framework_files(self):
+        manifest = json.loads(
+            (ROOT / "system" / "version.json").read_text(encoding="utf-8"))
+        for path in ("system/landmark_recorder.py",
+                     "interactions/landmarks/prompt/recorder.md",
+                     "docs/adr/0028-the-landmark-recorder.md"):
+            with self.subTest(path=path):
+                self.assertIn(path, manifest["framework_files"])
+
+    def test_the_recorder_offers_only_keys_the_domain_can_read(self):
+        """v211's `DOMAIN_AGNOSTIC_FIELDS`, from the writer's side.
+
+        Both shapes it names are live founder shapes that validate, store,
+        and are read by nothing: a `span` on `children`, whose ladder has no
+        span, and a `label` on `birth`, whose ladder names no subject. The
+        recorder is never told it may write either.
+        """
+        children = self.recorder.recordable_keys(li.domain_row("children"))
+        self.assertNotIn("span", children)
+        self.assertIn("who", children)
+        self.assertIn("label", children)
+        birth = self.recorder.recordable_keys(li.domain_row("birth"))
+        self.assertNotIn("label", birth)
+        self.assertNotIn("subject", birth)
+        self.assertNotIn("span", birth)
+        self.assertIn("date", birth)
+        for field in li.DOMAIN_AGNOSTIC_FIELDS:
+            for row in li.load_questions():
+                if field in self.recorder.recordable_keys(row):
+                    with self.subTest(field=field, domain=row["domain"]):
+                        self.assertTrue(
+                            any(field in li.rung_satisfiers(row, rung)
+                                for rung in row["ladder"]),
+                            f"{row['domain']} is offered {field} but no rung "
+                            "of its ladder reads it",
+                        )
+
+    def test_recordable_keys_are_exactly_the_ladders_satisfiers(self):
+        """The reconciliation (v212 onto v211): ONE declaration, not two.
+
+        What the recorder may WRITE is derived from
+        `landmarks_interaction.rung_satisfiers` — the same list the
+        ladder-consistency guard walks on the READ side — intersected with
+        what `validate_landmark` will actually keep for that domain. Nothing
+        else may appear as a rung field, and no satisfier the validator keeps
+        may go unoffered.
+        """
+        extras = {"domain", "subject", "birth_order", "skipped", "none",
+                  "chain_complete"}
+        for row in li.load_questions():
+            offered = set(self.recorder.recordable_keys(row))
+            satisfiers = set()
+            for rung in row["ladder"]:
+                if rung == li.NONE_OPENER:
+                    continue
+                satisfiers |= set(li.rung_satisfiers(row, rung))
+            with self.subTest(domain=row["domain"]):
+                self.assertFalse(
+                    offered - satisfiers - extras,
+                    f"{row['domain']} offers a field no rung satisfies",
+                )
+                storable = {f for f in satisfiers
+                            if self.recorder._survives(row["domain"], f)}  # noqa: SLF001
+                self.assertEqual(
+                    offered & satisfiers, storable,
+                    f"{row['domain']}: offered rung fields must be exactly "
+                    "the satisfiers the validator keeps",
+                )
+                # `happened` is entailed by a SHAPE, not a field, so it is
+                # never offered — v211's own statement of the same rule.
+                self.assertNotIn(li.NONE_OPENER, offered)
+
+    def test_a_field_the_validator_drops_is_never_offered(self):
+        """`name` satisfies any identity rung on READ, and is dropped on WRITE.
+
+        `identity_named` looks in `label` OR `name`, so `rung_satisfiers`
+        lists both — but `validate_landmark` stores a rung key only when it
+        is that domain's own rung, so a `name` filed on `children` never
+        survives. Offering it would manufacture exactly the class this fixes.
+        """
+        self.assertIn("name", li.rung_satisfiers(li.domain_row("children"),
+                                                 "who"))
+        self.assertFalse(self.recorder._survives("children", "name"))  # noqa: SLF001
+        self.assertNotIn("name",
+                         self.recorder.recordable_keys(li.domain_row("children")))
+        # On `schools` it IS the rung's own key, so it is offered.
+        self.assertIn("name",
+                      self.recorder.recordable_keys(li.domain_row("schools")))
+
+    def test_every_offered_key_survives_validation(self):
+        """Nothing the recorder is told to write is dropped downstream."""
+        samples = {
+            "who": "Jackie", "relation": "sibling", "living": True,
+            "label": "Jackie", "subject": "my sister", "city": "Dayton",
+            "address": "14 Bell Avenue", "household": "Mom and Dad",
+            "name": "Fairview Elementary", "place": "Dayton",
+            "grades": "K-6", "what": "linotype operator", "where": "Dayton",
+            "branch": "Navy", "birth_order": "two years older",
+            "year": "1978", "month": "April", "day": "12", "birth": "1976",
+        }
+        for row in li.load_questions():
+            keys = self.recorder.recordable_keys(row)
+            emitted: dict = {"domain": row["domain"]}
+            for key in keys:
+                if key in samples:
+                    emitted[key] = samples[key]
+            if len(emitted) == 1:
+                continue
+            with self.subTest(domain=row["domain"]):
+                validated = li.validate_landmark(
+                    engine._parse_landmark(emitted))  # noqa: SLF001
+                self.assertIsNotNone(validated)
+                for key in emitted:
+                    self.assertIn(key, validated,
+                                  f"{row['domain']} loses {key} in validation")
+
+    def test_an_offered_record_actually_climbs_its_ladder(self):
+        """The end the whole class exists for: the row stops re-asking.
+
+        A leaf-shaped record built ONLY from the keys this domain is offered
+        must reach a rung — the failure mode v211 fixed on the read side was
+        a perfect answer reaching `None` and the row re-asking its own
+        opening question forever.
+        """
+        samples = {
+            "who": "Jackie", "label": "Jackie", "city": "Dayton",
+            "name": "Fairview Elementary", "what": "linotype operator",
+            "branch": "Navy", "year": "1978",
+        }
+        for row in li.load_questions():
+            emitted = {"domain": row["domain"]}
+            emitted.update({k: samples[k]
+                            for k in self.recorder.recordable_keys(row)
+                            if k in samples})
+            if len(emitted) == 1:
+                continue
+            with self.subTest(domain=row["domain"]):
+                record = li.validate_landmark(
+                    engine._parse_landmark(emitted))  # noqa: SLF001
+                self.assertIsNotNone(li.rung_reached(record, row),
+                                     f"{row['domain']} reaches no rung")
+
+    def test_the_leaf_names_the_readable_keys(self):
+        prompt = self._prompt(domain="children",
+                              question_asked="Do you have children?")
+        self.assertIn("THE ONLY KEYS THIS DOMAIN CAN READ:", prompt)
+        self.assertIn("Use only the keys listed above", prompt)
+        self.assertNotIn("span", prompt.split("CAN THIS DOMAIN")[0])
+
+    def test_only_the_family_ladder_offers_birth_order(self):
+        for row in li.load_questions():
+            with self.subTest(domain=row["domain"]):
+                offered = "birth_order" in self.recorder.recordable_keys(row)
+                self.assertEqual(offered, row["domain"] == "family")

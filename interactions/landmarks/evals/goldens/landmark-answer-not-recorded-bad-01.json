@@ -1,0 +1,44 @@
+{
+ "fixture_id": "landmark-answer-not-recorded-bad-01",
+ "note": "INTENTIONALLY BROKEN (v212, ADR 0028, lifehug#221). The two live failures verbatim (surnames synthesized), as the RECORDER's acceptance: `reply` is the warm, engaged reply the person actually got, `attempt` is the recorder's first extraction — empty, the observed failure — and `regenerated` is what comes back after ONE `landmarks_interaction.recording_reminder()`. NOT a correct reference transcript, so deliberately NOT in landmark_fixtures.json, whose gates are all 1.0 compliance. tests/test_landmarks.py drives `landmark_recorder.record_answer` from these two raw completions and asserts the whole path: lint fires -> reminder -> emit.",
+ "cases": [
+  {
+   "case_id": "military-none-lost-to-the-mission-story",
+   "stage": "ask",
+   "domain": "military",
+   "sensitive": false,
+   "user_message": "I have not served in the military. It's not military service, but I did serve a two-year mission for my church as a Mormon missionary. I served that in Zurich, Switzerland, when I was 19.",
+   "reply": "Zurich at nineteen — two years of it. That's a whole chapter on its own. What was the hardest part of arriving there?",
+   "attempt": {
+    "raw": "{\"landmark\": null}"
+   },
+   "regenerated": {
+    "raw": "{\"landmark\": {\"domain\": \"military\", \"none\": true}}"
+   },
+   "expected_landmark": {
+    "domain": "military",
+    "none": true
+   }
+  },
+  {
+   "case_id": "losses-named-back-but-never-filed",
+   "stage": "ask",
+   "domain": "losses",
+   "sensitive": true,
+   "user_message": "The biggest loss would be Needy and Darvin Beecham on my mom's side, and James Edwin Thorne.",
+   "reply": "Needy and Darvin, and James Edwin. That's a lot of weight to be carrying at once.",
+   "attempt": {
+    "raw": "{\"landmark\": null}"
+   },
+   "regenerated": {
+    "raw": "{\"landmark\": {\"domain\": \"losses\", \"label\": \"Needy Beecham\", \"who\": \"Needy Beecham\", \"subject\": \"my mother's mother\"}}"
+   },
+   "expected_landmark": {
+    "domain": "losses",
+    "label": "Needy Beecham",
+    "who": "Needy Beecham",
+    "subject": "my mother's mother"
+   }
+  }
+ ]
+}

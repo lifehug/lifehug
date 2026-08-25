@@ -48,6 +48,23 @@ form (owner ruling 6, 2026-08-24; `landmarks.md` §5.2). `family` is *not* one
 of the four — its ladder opens at `who`, and "no siblings" does not mean there
 was no family. An enumeration domain is finished the way every chain is.
 
+**Recording is not replying** (v212, ADR 0028). Until v209 one model
+completion did two jobs on a landmark turn — be good company, and file a fact
+— and when the two competed, company won. The way it failed was never
+coldness: someone says *"I never served, but I did spend two years abroad on a
+mission"*, the turn takes up the mission, and the plain answer sitting next to
+it goes unwritten. The instruction telling the model to record it was already
+there. So the recording became its own pass: the conversation writes the
+reply, and the **recorder** reads the person's own message afterwards and
+files the record. One recorder, two triggers — the live turn and the
+historical sweep — with `landmark_gates.answer_must_record` (the lane's only
+BLOCKING lint) and exactly one regeneration as its backstop. Detection is
+deliberately narrow (`answer_shape`): a skip wins outright, a negative counts
+only where a none terminal exists, and "substantive" means the reply echoed a
+name or a year the person supplied in that same message. An answer with
+neither is invisible to the class on purpose — the class blocks a send, so
+ambiguity must never punish a good turn.
+
 **Never ask for a year — except a person's birthday.** A birth date is
 overlearned, not reconstructed, and every fielded life-history instrument takes
 it first because the calendar's axis starts there. v202 draws out the
@@ -182,6 +199,23 @@ each already written. **Ask the question you are given.** It is chosen by the
 specificity ladder — city before address, address before dates — and asking
 ahead of it produces a guess instead of a fact.
 
+## Replying is not recording
+
+Every turn here does two things, and they are not the same thing. The reply is
+how it sounds. The **record** is what the turn was for. When someone answers
+the domain you asked about — a fact, a name, or a plain *no* — that turn
+carries a landmark, and the reply is written around it.
+
+The way this fails is never coldness. It is warmth: they say something worth
+following, you follow it, and the plain answer sitting next to it goes
+unwritten. *"I never served — but I did spend two years abroad on a mission"*
+is a `none` for the domain **and** a story worth taking up; the story does not
+excuse the record. Neither does grief: when they name the people they have
+lost, naming them back is not filing them.
+
+If you find yourself with nothing to record on a turn where they clearly told
+you something, you have mistaken the conversation for the job.
+
 ## One at a time
 
 Ask about **one landmark domain per turn**. A turn that asks about the house
@@ -294,6 +328,8 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The roster join and the witnesses (v202) | `landmarks_interaction.family_members`, `family_roster_invocations` → `lifehug.py entity-verdict … --ensure`; `witness_candidates` → `timeline.timeline_data()["witnesses"]` |
 | Who asks about it (v200) | `arc_planner.collect_places_without_stories` → the `place_no_stories` arc-card intent → `landmarks_interaction.render_place_no_stories` |
 | The additive output field | `conversation_delivery.TurnShape.landmark_stage`, `_parse_landmark` |
+| The recorder (v212) | `system/landmark_recorder.py` — `build_recorder_prompt`, `parse_recorder_output`, `record_answer`, `recordable_keys`; leaf `interactions/landmarks/prompt/recorder.md` |
+| Its blocking backstop (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, `answer_must_record`, `answer_shape`, `recording_reminder` |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
 | Tests | `tests/test_landmarks.py` |
 
@@ -331,6 +367,19 @@ ask, you bound, you do the arithmetic. They supply what they know.
   domain, so the fifth instance fails the build instead of a real vault.
   Every fix is READ-SIDE: vaults already written heal on the next read,
   and there is no migration.
+- **Recording is its own pass, and its lint is the lane's only blocking one**
+  (v212, ADR 0028, lifehug#221). The alternative was cheaper and is what the
+  branch started as: keep one completion and lint the reply. The certification
+  audit retired it — the emission instruction was already present when the
+  failure happened, so strengthening the instruction cannot be certified, and
+  a lint on the reply still leaves recording competing with conversing for one
+  completion. The cost is named rather than buried: ONE extra `haiku-class`
+  completion per landmark ANSWER, on a prompt with no identity, no behavior,
+  no examples and no transcript — never on the daily question and never on a
+  session that is not a landmark session. Every other `landmark_gates.*` class
+  stays advisory: they describe how a turn should SOUND, and a turn that
+  sounds slightly wrong is still worth sending. A turn that loses the answer
+  is not.
 - **The birth date lives in the landmark store**, not `profile.yaml` — one
   writer, one read path.
 - **The family constellation's PEOPLE live on the entity roster, not in a

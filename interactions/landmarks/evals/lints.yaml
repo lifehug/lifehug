@@ -13,3 +13,9 @@ landmark_gates.never_presses_sensitive.compliance: 1.0
 # never names a date and asks for agreement. Definition:
 # timeline_interaction.proposes_a_date, run by both lanes.
 landmark_gates.never_proposes_a_date.compliance: 1.0
+# v212 (lifehug#221): the BLOCKING one. Recording is the turn's first job —
+# a turn that answers a real answer and files nothing has lost the recording
+# to the conversing. Scored only on goldens that supply the person's own
+# message, because that is the only honest evidence the lint can read
+# (`landmarks_interaction.answer_shape`; ambiguity fails toward skip).
+landmark_gates.answer_must_record.compliance: 1.0
