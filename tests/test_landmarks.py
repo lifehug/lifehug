@@ -1777,14 +1777,14 @@ class LadderConsistencyTests(unittest.TestCase):
 
     def test_every_field_the_writer_stores_maps_to_a_rung_or_is_declared(self):
         for row in self.rows:
-            ladder = list(row["ladder"])
-            satisfiers = {field for rung in ladder
-                          for field in li.rung_satisfiers(row, rung)}
+            # v214: `unreadable_fields` IS this leg's sentence, moved onto the
+            # module so the store can recognize the same shape.
+            unread = set(li.unreadable_fields(
+                dict.fromkeys(self._stored_fields(row), "x"), row))
             for field in self._stored_fields(row):
                 with self.subTest(domain=row["domain"], field=field):
                     self.assertTrue(
-                        field in ladder or field in satisfiers
-                        or field in li.NON_RUNG_FIELDS
+                        field not in unread
                         or field in li.DOMAIN_AGNOSTIC_FIELDS,
                         f"{row['domain']}: {field!r} is stored by the writer "
                         f"but is neither a rung, a declared satisfier, nor "
@@ -1796,13 +1796,8 @@ class LadderConsistencyTests(unittest.TestCase):
         writer files that that domain's ladder has no rung for."""
         unread = set()
         for row in self.rows:
-            ladder = list(row["ladder"])
-            satisfiers = {field for rung in ladder
-                          for field in li.rung_satisfiers(row, rung)}
-            for field in self._stored_fields(row):
-                if field in ladder or field in satisfiers \
-                        or field in li.NON_RUNG_FIELDS:
-                    continue
+            stored = dict.fromkeys(self._stored_fields(row), "x")
+            for field in li.unreadable_fields(stored, row):
                 unread.add((row["domain"], field))
         self.assertEqual(unread, self.UNREAD)
         self.assertEqual({field for _domain, field in unread},
@@ -2000,8 +1995,11 @@ class AnswerMustRecordTests(unittest.TestCase):
         case = self._cases()[0]
         import landmark_recorder as recorder  # noqa: PLC0415
 
-        record = recorder.parse_recorder_output(case["regenerated"]["raw"])
-        self.assertEqual(record, {"domain": "military", "none": True})
+        # v214: the parse returns a record SET, and a none is always alone
+        # in it — a terminal answers the whole domain.
+        records = recorder.parse_recorder_output(case["regenerated"]["raw"])
+        self.assertEqual(records, ({"domain": "military", "none": True},))
+        record = records[0]
         self.assertEqual(li.status_for_domain([record],
                                               li.domain_row("military")),
                          "complete")
@@ -2168,7 +2166,12 @@ class LandmarkRecorderTests(unittest.TestCase):
                        "## SESSION"):
             self.assertNotIn(absent, prompt)
         self.assertIn("You are not in the conversation", prompt)
-        self.assertLess(len(prompt), 4000)
+        # v214 moved this ceiling from 4000: the leaf now carries ONE worked
+        # multi-entry example, because the certification audit's whole
+        # finding was that prose alone is ignorable. It is still a leaf with
+        # no identity, no behavior and no transcript, which is the property
+        # this pin exists to hold.
+        self.assertLess(len(prompt), 4400)
 
     def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
         military = self._prompt()
@@ -2190,24 +2193,41 @@ class LandmarkRecorderTests(unittest.TestCase):
             self._prompt(domain="pets")
 
     def test_parsing_runs_both_pinned_validation_layers(self):
+        """v214: the same two layers, per record, into a record SET."""
         self.assertEqual(
             self.recorder.parse_recorder_output(
                 '{"landmark": {"domain": "residences", "city": "Dayton", '
                 '"label": "Dayton"}}'),
-            {"domain": "residences", "label": "Dayton", "city": "Dayton"},
+            ({"domain": "residences", "label": "Dayton", "city": "Dayton"},),
         )
         # A domain the question set never declares is dropped, not stored.
-        self.assertIsNone(self.recorder.parse_recorder_output(
-            '{"landmark": {"domain": "pets", "label": "Rex"}}'))
+        self.assertEqual(self.recorder.parse_recorder_output(
+            '{"landmark": {"domain": "pets", "label": "Rex"}}'), ())
         # A fence is tolerated; nothing looser is.
         self.assertEqual(
             self.recorder.parse_recorder_output(
                 '```json\n{"landmark": {"domain": "military", "none": true}}\n```'),
-            {"domain": "military", "none": True},
+            ({"domain": "military", "none": True},),
         )
         for junk in ("", "no idea", '{"landmark": "military"}', None, 7):
             with self.subTest(junk=junk):
-                self.assertIsNone(self.recorder.parse_recorder_output(junk))
+                self.assertEqual(self.recorder.parse_recorder_output(junk), ())
+
+    def test_the_v212_singleton_envelope_still_parses_unchanged(self):
+        """No flag day: a v212 prompt, host or stored completion still reads."""
+        singleton = self.recorder.parse_recorder_output(
+            '{"landmark": {"domain": "military", "branch": "the Army", '
+            '"label": "the Army"}}')
+        listed = self.recorder.parse_recorder_output(
+            '{"landmarks": [{"domain": "military", "branch": "the Army", '
+            '"label": "the Army"}]}')
+        self.assertEqual(singleton, listed)
+        self.assertEqual(len(singleton), 1)
+        # And `{"landmark": null}` and `{"landmarks": []}` say the same thing.
+        self.assertEqual(self.recorder.parse_recorder_output(
+            '{"landmark": null}'), ())
+        self.assertEqual(self.recorder.parse_recorder_output(
+            '{"landmarks": []}'), ())
 
     def test_nothing_said_about_the_domain_records_nothing_and_is_correct(self):
         outcome = self.recorder.record_answer(
@@ -2414,3 +2434,380 @@ class LandmarkRecorderTests(unittest.TestCase):
             with self.subTest(domain=row["domain"]):
                 offered = "birth_order" in self.recorder.recordable_keys(row)
                 self.assertEqual(offered, row["domain"] == "family")
+
+
+class ManyRecordsTests(unittest.TestCase):
+    """v214 / lifehug#227 — one answer, MANY records.
+
+    Two live failures on the founder's own vault, 2026-08-25, both of them
+    the same sentence: *one answer can carry many entries and the recorder
+    could file one*. The work question was answered with a whole working
+    life; v212's output held a single `landmark`, both attempts degraded, and
+    the entire answer was WITHHELD. The children question was answered with
+    four names and four exact birth dates; they were collapsed into one
+    aggregate entry carrying a `span` that `children`'s ladder cannot even
+    read, and the ladder went on asking who they were.
+    """
+
+    FIXTURE = (ROOT / "interactions" / "landmarks" / "evals" / "goldens"
+               / "landmark-many-records-01.json")
+
+    def setUp(self) -> None:
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        self.recorder = recorder
+        data = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(data["fixture_id"], "landmark-many-records-01")
+        self.cases = {case["case_id"]: case for case in data["cases"]}
+
+    def _drive(self, case: dict, raws: list[str] | None = None):
+        if raws is None:
+            raws = [case["attempt"]["raw"]]
+            if "regenerated" in case:
+                raws.append(case["regenerated"]["raw"])
+        seen: list[str] = []
+
+        def _call(prompt: str, model: str) -> str:
+            seen.append(prompt)
+            return raws[min(len(seen), len(raws)) - 1]
+
+        outcome = self.recorder.record_answer(
+            domain=case["domain"], answer=case["user_message"],
+            reply=case["reply"], call=_call,
+        )
+        return outcome, seen
+
+    # -- the golden, end to end -------------------------------------------
+
+    def test_every_golden_case_records_every_entry(self):
+        for case_id, case in self.cases.items():
+            with self.subTest(case=case_id):
+                outcome, seen = self._drive(case)
+                self.assertEqual(outcome.status, self.recorder.STATUS_RECORDED)
+                self.assertEqual(list(outcome.records),
+                                 case["expected_landmarks"])
+                self.assertEqual(outcome.attempts, case["expected_attempts"])
+                self.assertEqual(len(seen), case["expected_attempts"])
+                # `record` is still the first of them, for every v212 caller.
+                self.assertEqual(outcome.record, case["expected_landmarks"][0])
+
+    def test_the_work_answer_that_was_withheld_now_files_every_job(self):
+        """The first live failure: a working life, one record, withheld."""
+        case = self.cases["work-twelve-jobs-recorded-as-one"]
+        outcome, seen = self._drive(case)
+        self.assertEqual(len(outcome.records), 6)
+        self.assertEqual([r["label"] for r in outcome.records],
+                         ["Harlow's", "Kessler", "Danforth Steel",
+                          "Verity Tool", "Bramwell Freight",
+                          "Ashby Community College"])
+        # The retry is what made the difference, and only the SECOND prompt
+        # carries the reminder.
+        self.assertNotIn("One record per entry: send", seen[0].split(
+            "Never invent a place")[-1])
+        self.assertIn(li.many_records_reminder("work", 1), seen[1])
+
+    def test_the_four_children_land_as_four_dated_entries(self):
+        """The second live failure: four birth dates, one aggregate row."""
+        case = self.cases["children-four-collapsed-into-one-aggregate"]
+        outcome, _ = self._drive(case)
+        self.assertEqual(len(outcome.records), 4)
+        row = li.domain_row("children")
+        for record in outcome.records:
+            with self.subTest(child=record["label"]):
+                self.assertEqual(record["date"]["granularity"], "day")
+                self.assertEqual(li.rung_reached(record, row), "month")
+        # The ladder reads them per ENTRY, so the domain is finished and the
+        # question does not come back.
+        self.assertEqual(li.status_for_domain(list(outcome.records), row),
+                         "complete")
+        self.assertIsNone(li.next_rung(list(outcome.records), row))
+
+    def test_one_invalid_record_drops_alone(self):
+        """Both layers run PER RECORD: a bad sibling never costs a good one."""
+        case = self.cases["losses-one-invalid-record-drops-alone"]
+        first = self.recorder.parse_recorder_output(case["attempt"]["raw"])
+        self.assertEqual(list(first), case["attempt_landmarks"])
+        self.assertEqual(len(first), 2)
+        self.assertEqual([r["label"] for r in first],
+                         ["Needy Beecham", "James Edwin Thorne"])
+        # Three were sent; the middle one carried a key no landmark holds.
+        self.assertEqual(len(json.loads(case["attempt"]["raw"])["landmarks"]), 3)
+
+    # -- the boundary ------------------------------------------------------
+
+    def test_a_single_entry_answer_never_retries(self):
+        for case_id in ("one-fact-is-still-one-record",
+                        "a-none-is-one-record-and-never-plural"):
+            with self.subTest(case=case_id):
+                outcome, seen = self._drive(self.cases[case_id])
+                self.assertEqual(len(seen), 1)
+                self.assertEqual(outcome.lint_ids, ())
+
+    def test_a_terminal_is_never_plural_however_many_names_ride_along(self):
+        """The mission story names Zurich AND Switzerland; the answer is a no."""
+        case = self.cases["a-none-is-one-record-and-never-plural"]
+        self.assertIsNone(li.records_missing_entries(
+            case["user_message"], [{"domain": "military", "none": True}],
+            reply=case["reply"], domain="military"))
+        self.assertIsNone(li.records_missing_entries(
+            case["user_message"], [{"domain": "military", "skipped": True}],
+            reply=case["reply"], domain="military"))
+
+    def test_one_uncovered_name_alone_is_never_evidence(self):
+        """A qualifier is not a second entry: "Dayton, Ohio" is one place."""
+        self.assertIsNone(li.records_missing_entries(
+            "We lived on Bell Avenue in Dayton, Ohio.",
+            [{"domain": "residences", "label": "Bell Avenue",
+              "city": "Dayton", "address": "Bell Avenue"}],
+            reply="Bell Avenue in Dayton.", domain="residences"))
+
+    def test_a_domain_with_no_identity_rung_is_never_plural(self):
+        """`birth` is one person and one birthday, whatever the message says."""
+        self.assertIsNone(li.identity_rung(li.domain_row("birth")))
+        self.assertIsNone(li.records_missing_entries(
+            "I was born in Akron in 1952, my brother Wendell in 1955.",
+            [{"domain": "birth", "date": {"best": "1952"}}],
+            reply="Akron, 1952.", domain="birth"))
+
+    def test_nothing_recorded_is_the_other_classs_question(self):
+        """Two classes, two questions, no overlap."""
+        message = "Corinne, Maddox, Sela and Ivo."
+        self.assertIsNone(li.records_missing_entries(
+            message, [], domain="children", reply=message))
+        self.assertIsNotNone(li.answer_must_record(
+            message, (), reply=message, domain="children"))
+        # And ANY one valid record answers `answer_must_record`, whatever the
+        # many-records class then says about the rest.
+        self.assertIsNone(li.answer_must_record(
+            message, ({"domain": "children", "label": "Corinne"},),
+            reply=message, domain="children"))
+
+    def test_unrecorded_years_are_evidence_only_where_entries_date_separately(self):
+        """A `span` domain legitimately states two years for ONE entry."""
+        self.assertFalse(li._dates_each_entry(li.domain_row("residences")))  # noqa: SLF001
+        self.assertFalse(li._dates_each_entry(li.domain_row("work")))  # noqa: SLF001
+        for domain in ("children", "family", "losses", "partnerships"):
+            with self.subTest(domain=domain):
+                self.assertTrue(li._dates_each_entry(li.domain_row(domain)))  # noqa: SLF001
+        self.assertIsNone(li.records_missing_entries(
+            "I was at the mill from 1971 to 1994.",
+            [{"domain": "work", "label": "the mill", "what": "the mill",
+              "span": {"start": {"best": "1971"}, "end": {"best": "1994"}}}],
+            reply="The mill, 1971 to 1994.", domain="work"))
+
+    # -- the retry is bounded, and it never costs a record -----------------
+
+    def test_a_still_plural_retry_files_what_it_has_and_never_withholds(self):
+        case = self.cases["work-twelve-jobs-recorded-as-one"]
+        outcome, seen = self._drive(case, [case["attempt"]["raw"]])
+        self.assertEqual(len(seen), self.recorder.MAX_ATTEMPTS)
+        self.assertEqual(outcome.status, self.recorder.STATUS_RECORDED)
+        self.assertEqual(outcome.lint_ids, (li.RECORD_EVERY_ENTRY_LINT,))
+        self.assertEqual(len(outcome.records), 1)
+        self.assertIn("came back", outcome.reason)
+
+    def test_a_shrinking_retry_never_loses_the_larger_set(self):
+        case = self.cases["work-twelve-jobs-recorded-as-one"]
+        outcome, _ = self._drive(
+            case, [case["regenerated"]["raw"], '{"landmarks": []}'])
+        self.assertEqual(len(outcome.records), 6)
+        self.assertEqual(outcome.status, self.recorder.STATUS_RECORDED)
+
+    def test_a_provider_failure_on_the_retry_files_what_it_has(self):
+        case = self.cases["work-twelve-jobs-recorded-as-one"]
+        calls: list[str] = []
+
+        def _call(prompt: str, model: str) -> str:
+            calls.append(prompt)
+            if len(calls) > 1:
+                raise RuntimeError("no provider")
+            return case["attempt"]["raw"]
+
+        outcome = self.recorder.record_answer(
+            domain="work", answer=case["user_message"], reply=case["reply"],
+            call=_call)
+        self.assertEqual(outcome.status, self.recorder.STATUS_RECORDED)
+        self.assertEqual(len(outcome.records), 1)
+        self.assertIn("no provider", outcome.reason)
+
+    def test_the_reminder_asks_for_the_list_and_forbids_padding_it(self):
+        reminder = li.many_records_reminder("children", 1)
+        self.assertIn('"landmarks"', reminder)
+        self.assertIn("never invent an entry", reminder)
+        self.assertIn("never split one entry into two", reminder)
+        self.assertIn("(`children`)", reminder)
+
+    # -- filing: one entry per record --------------------------------------
+
+    def test_four_children_file_as_four_entries_and_retire_the_aggregate(self):
+        import timeline  # noqa: PLC0415
+
+        case = self.cases["children-four-collapsed-into-one-aggregate"]
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            # The founder's vault, as it actually stood: ONE aggregate entry
+            # with a span the ladder cannot read.
+            timeline.save_landmark("children", {
+                "domain": "children", "label": "our four",
+                "span": {"start": chrono.parse_edtf("1979").to_dict(),
+                         "end": chrono.parse_edtf("1990").to_dict()}})
+            self.assertEqual(len(timeline.load_landmarks()["children"]), 1)
+            outcome, _ = self._drive(case)
+            saved = timeline.save_landmarks("children", outcome.records)
+            entries = timeline.load_landmarks()["children"]
+        self.assertEqual(len(saved), 4)
+        self.assertEqual([e["label"] for e in entries],
+                         ["Corinne", "Maddox", "Sela", "Ivo"])
+        self.assertNotIn("our four", [e.get("label") for e in entries])
+
+    def test_a_named_entry_the_person_gave_is_never_retired(self):
+        import timeline  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            timeline.save_landmark("children", {"domain": "children",
+                                                "label": "Corinne",
+                                                "who": "Corinne"})
+            timeline.save_landmark("children", {"domain": "children",
+                                                "label": "Maddox",
+                                                "who": "Maddox"})
+            entries = timeline.load_landmarks()["children"]
+        self.assertEqual([e["label"] for e in entries], ["Corinne", "Maddox"])
+
+    def test_who_only_records_do_not_collapse_onto_one_another(self):
+        """The label-keyed store's own defect: four `who`s, one entry."""
+        import timeline  # noqa: PLC0415
+
+        row = li.domain_row("children")
+        keys = {li.landmark_entry_key({"domain": "children", "who": name}, row)
+                for name in ("Corinne", "Maddox", "Sela", "Ivo")}
+        self.assertEqual(len(keys), 4)
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            for name in ("Corinne", "Maddox", "Sela", "Ivo"):
+                timeline.save_landmark("children", {"domain": "children",
+                                                    "who": name})
+            entries = timeline.load_landmarks()["children"]
+        self.assertEqual(len(entries), 4)
+
+    def test_the_entry_key_is_the_read_sides_own_identity_order(self):
+        row = li.domain_row("residences")
+        self.assertEqual(li.IDENTITY_FIELDS, ("label", "name"))
+        self.assertEqual(
+            li.landmark_entry_key({"label": "Bell Avenue", "city": "Dayton"},
+                                  row), "bell avenue")
+        self.assertEqual(
+            li.landmark_entry_key({"city": "Dayton"}, row), "dayton")
+        # Case-folded: one place, one entry.
+        self.assertEqual(li.landmark_entry_key({"label": "BELL AVENUE"}, row),
+                         li.landmark_entry_key({"label": "bell avenue"}, row))
+        # No identity at all still keys on "", which is right for `birth`.
+        self.assertEqual(
+            li.landmark_entry_key({"domain": "birth"}, li.domain_row("birth")),
+            "")
+
+    def test_a_none_retires_every_entry_in_its_domain(self):
+        import timeline  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            timeline.save_landmark("children", {"domain": "children",
+                                                "label": "Corinne",
+                                                "who": "Corinne"})
+            timeline.save_landmark("children", {"domain": "children",
+                                                "label": "Maddox",
+                                                "who": "Maddox"})
+            timeline.save_landmark("children", {"domain": "children",
+                                                "none": True})
+            entries = timeline.load_landmarks()["children"]
+        self.assertEqual(entries, [{"domain": "children", "none": True}])
+
+    def test_a_substantive_record_clears_a_standing_terminal(self):
+        import timeline  # noqa: PLC0415
+
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            timeline.save_landmark("children", {"domain": "children",
+                                                "none": True})
+            timeline.save_landmark("children", {"domain": "children",
+                                                "label": "Corinne",
+                                                "who": "Corinne"})
+            entries = timeline.load_landmarks()["children"]
+        self.assertEqual([e["label"] for e in entries], ["Corinne"])
+
+    def test_one_invocation_per_entry_and_no_aggregate_form(self):
+        case = self.cases["children-four-collapsed-into-one-aggregate"]
+        outcome, _ = self._drive(case)
+        argvs = li.landmark_invocations(outcome.records)
+        self.assertEqual(len(argvs), 4)
+        for argv, record in zip(argvs, outcome.records):
+            with self.subTest(child=record["label"]):
+                self.assertEqual(argv[:2], ["landmark-record", "children"])
+                self.assertIn(record["label"], argv)
+                self.assertIn("--date", argv)
+        # A skip files nothing, and its siblings still file.
+        self.assertEqual(li.landmark_invocations(
+            [{"domain": "children", "skipped": True},
+             {"domain": "children", "label": "Ivo", "who": "Ivo"}]),
+            [["landmark-record", "children", "--label", "Ivo", "--who", "Ivo"]])
+
+    # -- where the class lives ---------------------------------------------
+
+    def test_the_class_is_the_recorders_and_not_the_replys(self):
+        """The turn's own `landmark` field is singular by its pinned contract.
+
+        Failing a turn for recording one entry of three would fail it for
+        obeying the only contract it has. The plural output belongs to the
+        recorder, so the class that reads it does too — which is why this one
+        is NOT in `LANDMARK_LINT_CLASSES` and its sibling is.
+        """
+        self.assertNotIn(li.RECORD_EVERY_ENTRY_LINT, li.LANDMARK_LINT_CLASSES)
+        self.assertIn(li.ANSWER_MUST_RECORD_LINT, li.LANDMARK_LINT_CLASSES)
+        self.assertEqual(li.RECORD_EVERY_ENTRY_LINT,
+                         "landmark_gates.record_every_entry")
+        case = self.cases["losses-one-invalid-record-drops-alone"]
+        self.assertEqual(
+            [f["lint"] for f in li.lint_landmark_reply(
+                case["reply"], stage="ask", domain="losses", sensitive=True,
+                landmark={"domain": "losses", "label": "Needy Beecham"},
+                user_message=case["user_message"])],
+            [])
+
+    def test_the_reply_goldens_own_losses_turn_shows_why(self):
+        """The v212 reference transcript, read with v214's eyes.
+
+        Its person names three people and its expected turn field carries
+        one, because one is all a turn field can carry. That is the whole
+        case for a separate recorder pass with a plural output.
+        """
+        fixture = next(f for f in landmarks_evals.load_fixtures()
+                       if f["fixture_id"]
+                       == "landmarks-losses-are-recorded-not-only-received")
+        turn = next(t for t in fixture["turns"] if t.get("user_message"))
+        finding = li.records_missing_entries(
+            turn["user_message"], turn["expected_landmark"],
+            domain=turn["domain"])
+        self.assertIsNotNone(finding)
+        self.assertEqual(finding["lint"], li.RECORD_EVERY_ENTRY_LINT)
+
+    def test_the_leaf_teaches_the_list_shape_with_a_worked_example(self):
+        leaf = self.recorder.load_recorder_leaf()
+        self.assertIn('{"landmarks": [', leaf)
+        self.assertIn("One record per entry, and every entry they stated",
+                      leaf)
+        self.assertIn("THEY SAID:", leaf)
+        self.assertIn("Three things they said, three records", leaf)
+        self.assertNotIn("take the FIRST person they named", leaf)
+
+    def test_the_new_golden_ships_in_framework_files(self):
+        manifest = json.loads(
+            (ROOT / "system" / "version.json").read_text(encoding="utf-8"))
+        self.assertIn(
+            "interactions/landmarks/evals/goldens/"
+            "landmark-many-records-01.json",
+            manifest["framework_files"])

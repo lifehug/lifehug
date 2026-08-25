@@ -179,3 +179,151 @@ harder is not a fix.
   as the recorder's acceptance: the empty extraction lints, the reminder is
   appended, the regeneration emits. An ambiguous answer that records nothing
   and must NOT lint is pinned beside them.
+
+---
+
+## Amendment (v214, 2026-08-25): one answer, MANY records
+
+Issue: lifehug#227. Status: proposed, extending the decision above rather
+than replacing any part of it.
+
+### Context
+
+One day after the recorder shipped, the founder's own vault produced two more
+failures of the same shape — and the shape is not *replying instead of
+recording* this time. It is **one answer carrying many entries, and a
+recorder that could file one**.
+
+> Asked what work he had done, he answered with about twelve jobs. The
+> recorder's canonical output was `{"landmark": {...}}` — exactly one record.
+> Both attempts degraded to nothing and the whole answer was **withheld**.
+
+> Asked about his children, he named four of them with four exact birth
+> dates. They were collapsed into ONE aggregate entry carrying a `span`
+> across all four birthdays — a field `children`'s ladder
+> (`happened | who | year | month`) has no rung for at all, so every rung
+> below `who` read nothing and the question kept coming back.
+
+The losses golden that shipped WITH v212 says the same thing out loud: its
+person names three people and its expected turn field carries one, because
+one is all a turn field can carry.
+
+`children`, `work`, `residences`, `family`, `partnerships` and `losses` are
+all **multi-entry domains** by construction — four of them are declared
+`chain: true` and the other two enumerate people. One answer routinely
+carries many entries. Filing one of them is losing the rest, and the ladder
+reads per ENTRY, so a collapsed aggregate is not merely lossy: it re-asks a
+question the person already answered.
+
+### Decision
+
+1. **The recorder speaks in record SETS.** The canonical output is
+   `{"landmarks": [<record>, ...]}`. v212's `{"landmark": {...}}` is still
+   accepted and normalizes to a one-element set, and `{"landmark": null}` and
+   `{"landmarks": []}` say the same thing — no flag day for any prompt, host
+   or stored completion.
+
+2. **Both pinned layers run PER RECORD.**
+   `landmark_recorder.parse_recorder_output` returns a `tuple[dict, ...]` and
+   puts each record through `conversation_delivery._parse_landmark` then
+   `landmarks_interaction.validate_landmark` **alone**. An invalid record
+   drops by itself and never takes a sibling with it — the twelve-job answer
+   must not be lost because the eleventh job named a key `work` cannot read.
+   A malformed envelope degrades to an EMPTY tuple, never an error.
+
+3. **`RECORDED` means at least one record validated.**
+   `RecorderOutcome.records` is the outcome; `.record` remains as its first
+   entry so every v212 caller keeps working. `answer_must_record` is
+   unchanged in spirit — its question is *was anything recorded at all* — and
+   zero valid records against an answer that plainly asserts facts is still
+   ONE regeneration and then `STATUS_WITHHELD`.
+
+4. **A second, RETRYABLE lint: `landmark_gates.record_every_entry`.** The
+   certification audit's finding stands — prose alone is ignorable — so the
+   leaf's new worked multi-entry example is backed by a deterministic class.
+   `landmarks_interaction.records_missing_entries` fires on exactly two
+   decidable shapes and nothing else:
+
+   * **unrecorded names** — proper-noun groups in the person's own message
+     whose head word appears in no record that came back. Two of them
+     normally, because one uncovered group is the ordinary shape of a
+     qualifier ("Dayton, Ohio" recorded as Dayton); one is enough once the
+     answer is already known to be plural (two or more records came back);
+   * **unrecorded years** — on a domain that dates each entry SEPARATELY (a
+     date grain and no `span` rung, derived not listed), the person stated
+     two or more distinct years and fewer records than that carry a date.
+     Four birthdates, one dated record.
+
+   It never fires where the answer cannot be plural: a record set carrying
+   the none or skip terminal (which answers the whole domain), or a domain
+   with no identity rung (`birth` — one person, one birthday).
+
+   On a finding the recorder regenerates ONCE with `many_records_reminder`,
+   which asks for the list and forbids padding it in the same breath, and
+   then **files what it has either way**. `MAX_ATTEMPTS` is still 2 across
+   both triggers. This branch can never withhold: a partial record is worth
+   more than none, and the person already said it once.
+
+   The class is deliberately **not** in `LANDMARK_LINT_CLASSES`. That is the
+   closed set `lint_landmark_reply` scores over the reply goldens, and the
+   turn's own additive `landmark` field is singular by the pinned turn
+   contract — a turn that records one entry of three is obeying the only
+   contract it has, and failing it for that would punish correct behavior.
+   The plural output belongs to the recorder, so the class that reads it
+   does too.
+
+5. **Filing is per entry, and only two shapes are ever superseded.**
+   `timeline.save_landmark` keyed entries on `label` alone, which collapses a
+   whole multi-entry answer the moment the writer files names under the
+   domain's own rung instead: four children filed as `who` all keyed on `""`.
+   It now keys on `landmarks_interaction.landmark_entry_key` — the READ
+   side's own identity order, `label` then `name` then the domain's
+   `identity_rung`, case-folded. `entry_superseded_by` states the three
+   cross-entry rules:
+
+   * a **none** retires its whole domain (`merge_landmark_entry` has always
+     said a none *replaces whatever was there*; per-domain is what that
+     sentence means once a domain holds many entries);
+   * a **substantive** record clears a standing none or skip — the same rule
+     read the other way;
+   * a **clean** record retires an entry carrying a field no rung of its
+     domain can read (`unreadable_fields`) — exactly the `span`-on-`children`
+     aggregate. The test is the SHAPE, never the content: an entry whose
+     every field its own ladder can read is an entry somebody stated, and
+     nothing here touches it.
+
+   `timeline.save_landmarks` and `landmarks_interaction.landmark_invocations`
+   are the batch forms: one entry per record, one `landmark-record`
+   invocation per entry, no aggregate form anywhere.
+
+6. **`unreadable_fields` is one definition, two callers.** The
+   ladder-consistency guard derived that sentence inline to pin
+   `DOMAIN_AGNOSTIC_FIELDS`; the store needs the same sentence to recognize a
+   machine-written shape. It now lives on the module and both read it
+   (recurring-defect doctrine, docs/BUILDING.md §7).
+
+### The boundary, stated honestly
+
+"How many entries is this answer?" is **not** decidable from a string, and
+this amendment does not pretend otherwise. The two shapes above are the
+decidable subset; everything else answers `None` and never lints. The
+under-detection is deliberate and the over-detection is cheap by
+construction: a false positive costs exactly one haiku-class regeneration and
+can never drop, withhold or alter a record. That asymmetry is why the name
+floor drops to one once the answer is already plural, and why the reminder
+spends a whole sentence forbidding invention.
+
+### Consequences
+
+- **Platform twin.** The engine files `outcome.records`, not
+  `outcome.record` — one durable entry per record, through the same filing
+  path — and the landmark re-harvest inherits the new trigger for free, which
+  is what makes re-running the founder's withheld work answer a fix.
+- **Vaults heal on write.** No migration: the `span`-carrying children
+  aggregate is retired the first time a clean `children` record is filed, and
+  entries the person named are never touched.
+- **Goldens.**
+  `interactions/landmarks/evals/goldens/landmark-many-records-01.json` pins
+  both live failures (names synthesized) plus the three cases that must NOT
+  change: a single-fact answer, a none answer, and one invalid record among
+  many dropping alone.

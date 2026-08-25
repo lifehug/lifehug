@@ -75,6 +75,27 @@ purpose — the class blocks, so ambiguity fails toward skip
 (`landmarks_interaction.answer_shape`). Because the recorder never needed the
 reply, a turn whose reply generation FAILED still records.
 
+**One answer, many records** (v214, ADR 0028 amendment, lifehug#227). One day
+later the same vault produced the next failure in the class: a work answer
+naming about twelve jobs was WITHHELD, because the recorder's output could
+carry one record; and four children with four exact birth dates were
+collapsed into one aggregate entry carrying a `span` the `children` ladder has
+no rung for. Children, work, residences, family, partnerships and losses are
+all multi-entry domains. So the canonical output is
+`{"landmarks": [ ... ]}` — v212's `{"landmark": {...}}` still parses to a
+one-element set — each record runs BOTH validation layers alone so an invalid
+one drops without its siblings, and `RECORDED` means at least one validated.
+The second, RETRYABLE class `landmark_gates.record_every_entry`
+(`records_missing_entries`) fires on two decidable shapes only — unrecorded
+proper-noun groups, and unrecorded years on a domain that dates each entry
+separately — never on a terminal and never on `birth`. It spends the SAME one
+regeneration and then files what it has: it can never withhold, because a
+partial record is worth more than none. Filing is per entry
+(`timeline.save_landmarks`, `landmark_invocations`), keyed on
+`landmark_entry_key`, and `entry_superseded_by` retires only a standing
+terminal or an entry carrying a field its own ladder cannot read
+(`unreadable_fields`).
+
 **Never propose a date.** Reporting the arithmetic is right — "anything at
 the Bell house lands between '84 and '90 now" states a derivation and shows its
 working. Naming a date and asking for agreement is forbidden in every domain,
@@ -116,8 +137,9 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["landmark"]`, enabled by `TurnShape(landmark_stage=…)` |
 | Closed validation of that field | `landmarks_interaction.validate_landmark(value)` |
 | The seven landmark lints | `landmarks_interaction.lint_landmark_reply(text, stage=…, domain=…, sensitive=…, domains_named=…, landmark=…, user_message=…, known_labels=…)`; `landmarks_interaction.LANDMARK_LINT_CLASSES`. The sixth, `never_proposes_a_date`, is SHARED — its one definition is `timeline_interaction.proposes_a_date`, run by both lanes |
-| The recorder (v212, ADR 0028) | `landmark_recorder.build_recorder_prompt(domain=…, question_asked=…, answer=…, reply=…, landmarks=…, reminder=…)` · `parse_recorder_output(raw)` (BOTH pinned validation layers) · `record_answer(…, call=…)` — the whole loop, with the model injected · `recordable_keys(row)` — the only keys this domain can READ, walked from v211's own `landmarks_interaction.rung_satisfiers` and intersected with what both validation layers keep (the writer-side half of #219/#220: no `span` on `children`, no `label` on `birth`, no `name` on `children`, no `birth` key on `family`). Leaf: `prompt/recorder.md`; role: `role.recorder`. **Platform wiring:** the engine calls the recorder AFTER the reply is generated and files through the same durable path the live turn files through; the landmark re-harvest calls the SAME function instead of re-composing the live turn prompt |
+| The recorder (v212, ADR 0028; v214 many-records) | `landmark_recorder.build_recorder_prompt(domain=…, question_asked=…, answer=…, reply=…, landmarks=…, reminder=…)` · `parse_recorder_output(raw)` → `tuple[dict, ...]` (BOTH pinned validation layers, PER RECORD) · `record_answer(…, call=…)` — the whole loop, with the model injected · `recordable_keys(row)` — the only keys this domain can READ, walked from v211's own `landmarks_interaction.rung_satisfiers` and intersected with what both validation layers keep (the writer-side half of #219/#220: no `span` on `children`, no `label` on `birth`, no `name` on `children`, no `birth` key on `family`). Leaf: `prompt/recorder.md`; role: `role.recorder`. **Platform wiring:** the engine calls the recorder AFTER the reply is generated and files through the same durable path the live turn files through; the landmark re-harvest calls the SAME function instead of re-composing the live turn prompt |
 | The one BLOCKING lint, and its retry (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, raised from `answer_must_record(user_message, record, reply=…, domain=…, known_labels=…)` — ONE definition, run by the recorder as its backstop and by `lint_landmark_reply` for a host still reading the reply's own field. On a finding, regenerate ONCE with `recording_reminder(domain)` appended (`landmark_recorder.MAX_ATTEMPTS = 2`), then emit or withhold |
+| One answer, many records (v214) | Output `{"landmarks": [ ... ]}`; `RecorderOutcome.records` (`.record` = the first, for v212 callers). The RETRYABLE class `landmarks_interaction.RECORD_EVERY_ENTRY_LINT` from `records_missing_entries(user_message, records, reply=…, domain=…, known_labels=…)`, its regeneration `many_records_reminder(domain, count)` — the SAME single retry, and it files what it has either way. Filing: `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` → `timeline.save_landmarks` |
 | Filing an accepted landmark | `landmarks_interaction.landmark_invocation(record)` → `lifehug.py landmark-record` |
 | The durable store | `timeline.load_landmarks()`, `timeline.save_landmark(domain, record)`, `timeline.landmark_birth_date()` |
 | The anchors they become | `landmarks_interaction.anchors_from_landmarks(landmarks)`; `timeline_interaction.anchors_for_person(landmarks=…)` |
