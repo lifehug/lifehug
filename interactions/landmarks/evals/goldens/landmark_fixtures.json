@@ -724,5 +724,102 @@
     ]
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-the-label-is-the-name-it-asked-for",
+  "landmarks": {
+   "partnerships": [
+    {
+     "domain": "partnerships",
+     "label": "Marisol Reyes",
+     "date": {
+      "best": "2007-01-11",
+      "earliest": "2007-01-11",
+      "latest": "2007-01-11",
+      "granularity": "day",
+      "confidence": "certain",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   ],
+   "children": [
+    {
+     "domain": "children",
+     "label": "Charlee Joy Rivers"
+    },
+    {
+     "domain": "children",
+     "label": "James Everett Rivers"
+    },
+    {
+     "domain": "children",
+     "label": "Nora Belle Rivers"
+    },
+    {
+     "domain": "children",
+     "label": "Silas Reed Rivers"
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "children",
+    "rung": "year",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "children",
+     "label": "Charlee Joy Rivers",
+     "date": {
+      "best": "2009",
+      "earliest": "2009",
+      "latest": "2009",
+      "granularity": "year",
+      "confidence": "approximate",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-a-bare-label-climbs-the-thing-ladders",
+  "landmarks": {
+   "residences": [
+    {
+     "domain": "residences",
+     "label": "Costa Mesa"
+    }
+   ],
+   "schools": [
+    {
+     "domain": "schools",
+     "label": "Lincoln High"
+    }
+   ],
+   "work": [
+    {
+     "domain": "work",
+     "label": "Line cook"
+    }
+   ]
+  },
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "schools",
+    "rung": "place",
+    "sensitive": false,
+    "expected_landmark": {
+     "domain": "schools",
+     "label": "Lincoln High",
+     "place": "Dayton"
+    }
+   }
+  ]
  }
 ]

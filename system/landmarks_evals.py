@@ -42,6 +42,13 @@ REQUIRED_GOLDEN_IDS = frozenset({
     "landmarks-none-is-a-finished-answer",
     "landmarks-none-is-superseded-not-fought",
     "landmarks-none-completes-children",
+    # lifehug#219: the ladder reads what the writer writes. Both priors are
+    # founder shapes, structurally verbatim with synthetic surnames — a
+    # partnership and four children carrying only `label`, and the three
+    # `thing` chains carrying only `label`. Before the fix these turns asked
+    # the domain's OPENING question again.
+    "landmarks-the-label-is-the-name-it-asked-for",
+    "landmarks-a-bare-label-climbs-the-thing-ladders",
 })
 
 #: These hold on every landmark turn. `never_presses_sensitive` is scoped to a
