@@ -65,6 +65,20 @@ name or a year the person supplied in that same message. An answer with
 neither is invisible to the class on purpose — the class blocks a send, so
 ambiguity must never punish a good turn.
 
+**One answer, many records** (v214, ADR 0028 amendment). The next failure in
+the same class arrived a day later, and it was not about tone at all: someone
+answers *"what work have you done"* with a whole working life, or names four
+children with four birthdays, and one record comes back. Most of these domains
+are multi-entry by construction — four are declared `chain: true` and two more
+enumerate people — so the recorder now emits a LIST, each record is validated
+on its own so a bad one never costs a good one, and a second, RETRYABLE lint
+(`landmark_gates.record_every_entry`) spends the same single regeneration when
+the person plainly stated more entries than came back. That branch never
+withholds: it files what it has, because a partial record is worth more than
+none. Each record lands as its own entry in the store, and the only prior
+entries a new one retires are a standing terminal and the collapsed aggregate
+— an entry carrying a field its own ladder has no rung for.
+
 **Never ask for a year — except a person's birthday.** A birth date is
 overlearned, not reconstructed, and every fielded life-history instrument takes
 it first because the calendar's axis starts there. v202 draws out the
@@ -321,7 +335,7 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The question set | `interactions/landmarks/questions.yaml` |
 | The runtime authority (pure) | `system/landmarks_interaction.py` |
 | The eval harness | `system/landmarks_evals.py` |
-| The store | `timeline.load_landmarks`, `timeline.save_landmark`, `timeline.landmark_birth_date` |
+| The store | `timeline.load_landmarks`, `timeline.save_landmark`, `timeline.save_landmarks` (v214), `timeline.landmark_birth_date` |
 | The ledger a host renders | `timeline.timeline_data()["landmarks"]`, `timeline.landmark_rows_for` |
 | The gap it reveals | `timeline.timeline_data()["place_no_stories"]` |
 | The gaps the SET reveals (v202) | `landmarks_interaction.incomplete_subjects` (kind `landmark_subject`), `residence_gaps` (kind `residence_gap`) → `timeline.unknowns` |
@@ -330,6 +344,7 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The additive output field | `conversation_delivery.TurnShape.landmark_stage`, `_parse_landmark` |
 | The recorder (v212) | `system/landmark_recorder.py` — `build_recorder_prompt`, `parse_recorder_output`, `record_answer`, `recordable_keys`; leaf `interactions/landmarks/prompt/recorder.md` |
 | Its blocking backstop (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, `answer_must_record`, `answer_shape`, `recording_reminder` |
+| Its retryable one (v214) | `landmarks_interaction.RECORD_EVERY_ENTRY_LINT`, `records_missing_entries`, `many_records_reminder`; filing `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
 | Tests | `tests/test_landmarks.py` |
 

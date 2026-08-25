@@ -1,0 +1,263 @@
+{
+ "fixture_id": "landmark-many-records-01",
+ "note": "v214 / lifehug#227 — ONE ANSWER, MANY RECORDS. The recorder's acceptance for multi-entry domains, driven by tests/test_landmarks.py through `landmark_recorder.record_answer` from the raw completions below. Two of these are live 2026-08-25 failures on the founder's own vault (names synthesized): a work answer naming a whole career that v212 WITHHELD because its output could carry one record, and four children with four exact birth dates collapsed into one aggregate entry carrying a `span` the `children` ladder cannot read. Deliberately NOT in landmark_fixtures.json: these are recorder completions, not reference transcripts.",
+ "cases": [
+  {
+   "case_id": "work-twelve-jobs-recorded-as-one",
+   "note": "The live withholding, 2026-08-25: the founder answered the work question with a whole working life and v212's single-record output could carry one of them. The first attempt here is that one record; the retry is the answer.",
+   "domain": "work",
+   "user_message": "Quite a lot, honestly. I bagged groceries at Harlow's in high school, then I drove a truck for Kessler, then I was at Danforth Steel for eleven years. After that I ran the shop at Verity Tool, did two years at Bramwell Freight dispatching, and I finished up teaching shop at Ashby Community College.",
+   "reply": "Danforth Steel for eleven years — that's the long one. What was the shop floor like when you started?",
+   "attempt": {
+    "raw": "{\"landmark\": {\"domain\": \"work\", \"label\": \"Danforth Steel\", \"what\": \"steel work\", \"where\": \"Danforth Steel\"}}"
+   },
+   "regenerated": {
+    "raw": "{\"landmarks\": [{\"domain\": \"work\", \"label\": \"Harlow's\", \"what\": \"bagged groceries\", \"where\": \"Harlow's\"}, {\"domain\": \"work\", \"label\": \"Kessler\", \"what\": \"drove a truck\", \"where\": \"Kessler\"}, {\"domain\": \"work\", \"label\": \"Danforth Steel\", \"what\": \"steel work\", \"where\": \"Danforth Steel\"}, {\"domain\": \"work\", \"label\": \"Verity Tool\", \"what\": \"ran the shop\", \"where\": \"Verity Tool\"}, {\"domain\": \"work\", \"label\": \"Bramwell Freight\", \"what\": \"dispatching\", \"where\": \"Bramwell Freight\"}, {\"domain\": \"work\", \"label\": \"Ashby Community College\", \"what\": \"taught shop\", \"where\": \"Ashby Community College\"}]}"
+   },
+   "expected_attempts": 2,
+   "attempt_landmarks": [
+    {
+     "domain": "work",
+     "label": "Danforth Steel",
+     "what": "steel work",
+     "where": "Danforth Steel"
+    }
+   ],
+   "expected_landmarks": [
+    {
+     "domain": "work",
+     "label": "Harlow's",
+     "what": "bagged groceries",
+     "where": "Harlow's"
+    },
+    {
+     "domain": "work",
+     "label": "Kessler",
+     "what": "drove a truck",
+     "where": "Kessler"
+    },
+    {
+     "domain": "work",
+     "label": "Danforth Steel",
+     "what": "steel work",
+     "where": "Danforth Steel"
+    },
+    {
+     "domain": "work",
+     "label": "Verity Tool",
+     "what": "ran the shop",
+     "where": "Verity Tool"
+    },
+    {
+     "domain": "work",
+     "label": "Bramwell Freight",
+     "what": "dispatching",
+     "where": "Bramwell Freight"
+    },
+    {
+     "domain": "work",
+     "label": "Ashby Community College",
+     "what": "taught shop",
+     "where": "Ashby Community College"
+    }
+   ]
+  },
+  {
+   "case_id": "children-four-collapsed-into-one-aggregate",
+   "note": "The live collapse: four children with four exact birth dates filed as ONE entry carrying a span `children`'s ladder cannot even read. Four dates stated, one dated record back — the year leg of the many-records class.",
+   "domain": "children",
+   "user_message": "Four of them. Corinne was born 1979-04-02, Maddox came along 1981-11-15, then Sela on 1984-06-30, and Ivo on 1990-02-08.",
+   "reply": "Four of them. That's a full house.",
+   "attempt": {
+    "raw": "{\"landmark\": {\"domain\": \"children\", \"label\": \"our four\", \"span\": {\"start\": {\"best\": \"1979\"}, \"end\": {\"best\": \"1990\"}}}}"
+   },
+   "regenerated": {
+    "raw": "{\"landmarks\": [{\"domain\": \"children\", \"label\": \"Corinne\", \"who\": \"Corinne\", \"date\": {\"best\": \"1979-04-02\"}}, {\"domain\": \"children\", \"label\": \"Maddox\", \"who\": \"Maddox\", \"date\": {\"best\": \"1981-11-15\"}}, {\"domain\": \"children\", \"label\": \"Sela\", \"who\": \"Sela\", \"date\": {\"best\": \"1984-06-30\"}}, {\"domain\": \"children\", \"label\": \"Ivo\", \"who\": \"Ivo\", \"date\": {\"best\": \"1990-02-08\"}}]}"
+   },
+   "expected_attempts": 2,
+   "attempt_landmarks": [
+    {
+     "domain": "children",
+     "label": "our four",
+     "span": {
+      "start": {
+       "best": "1979",
+       "earliest": "1979",
+       "latest": "1979",
+       "granularity": "year",
+       "confidence": "certain",
+       "basis": "anchor",
+       "anchors": [],
+       "provenance": []
+      },
+      "end": {
+       "best": "1990",
+       "earliest": "1990",
+       "latest": "1990",
+       "granularity": "year",
+       "confidence": "certain",
+       "basis": "anchor",
+       "anchors": [],
+       "provenance": []
+      }
+     }
+    }
+   ],
+   "expected_landmarks": [
+    {
+     "domain": "children",
+     "label": "Corinne",
+     "date": {
+      "best": "1979-04-02",
+      "earliest": "1979-04-02",
+      "latest": "1979-04-02",
+      "granularity": "day",
+      "confidence": "certain",
+      "basis": "anchor",
+      "anchors": [],
+      "provenance": []
+     },
+     "who": "Corinne"
+    },
+    {
+     "domain": "children",
+     "label": "Maddox",
+     "date": {
+      "best": "1981-11-15",
+      "earliest": "1981-11-15",
+      "latest": "1981-11-15",
+      "granularity": "day",
+      "confidence": "certain",
+      "basis": "anchor",
+      "anchors": [],
+      "provenance": []
+     },
+     "who": "Maddox"
+    },
+    {
+     "domain": "children",
+     "label": "Sela",
+     "date": {
+      "best": "1984-06-30",
+      "earliest": "1984-06-30",
+      "latest": "1984-06-30",
+      "granularity": "day",
+      "confidence": "certain",
+      "basis": "anchor",
+      "anchors": [],
+      "provenance": []
+     },
+     "who": "Sela"
+    },
+    {
+     "domain": "children",
+     "label": "Ivo",
+     "date": {
+      "best": "1990-02-08",
+      "earliest": "1990-02-08",
+      "latest": "1990-02-08",
+      "granularity": "day",
+      "confidence": "certain",
+      "basis": "anchor",
+      "anchors": [],
+      "provenance": []
+     },
+     "who": "Ivo"
+    }
+   ]
+  },
+  {
+   "case_id": "losses-one-invalid-record-drops-alone",
+   "note": "Each record runs BOTH validation layers by itself. The middle record carries a key no landmark can hold, so it degrades and its two siblings are filed — `attempt_landmarks` is that first pass, two records where three were sent. The answer is already plural, so the dropped name is one uncovered group too many and the one retry recovers it.",
+   "domain": "losses",
+   "user_message": "The biggest loss would be Needy and Darvin Beecham on my mom's side, and James Edwin Thorne.",
+   "reply": "Needy and Darvin, and James Edwin.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"losses\", \"label\": \"Needy Beecham\", \"who\": \"Needy Beecham\", \"subject\": \"my mother's mother\"}, {\"domain\": \"losses\", \"label\": \"Darvin Beecham\", \"who\": \"Darvin Beecham\", \"when\": \"the year I turned thirty\"}, {\"domain\": \"losses\", \"label\": \"James Edwin Thorne\", \"who\": \"James Edwin Thorne\"}]}"
+   },
+   "regenerated": {
+    "raw": "{\"landmarks\": [{\"domain\": \"losses\", \"label\": \"Needy Beecham\", \"who\": \"Needy Beecham\", \"subject\": \"my mother's mother\"}, {\"domain\": \"losses\", \"label\": \"Darvin Beecham\", \"who\": \"Darvin Beecham\"}, {\"domain\": \"losses\", \"label\": \"James Edwin Thorne\", \"who\": \"James Edwin Thorne\"}]}"
+   },
+   "expected_attempts": 2,
+   "attempt_landmarks": [
+    {
+     "domain": "losses",
+     "label": "Needy Beecham",
+     "subject": "my mother's mother",
+     "who": "Needy Beecham"
+    },
+    {
+     "domain": "losses",
+     "label": "James Edwin Thorne",
+     "who": "James Edwin Thorne"
+    }
+   ],
+   "expected_landmarks": [
+    {
+     "domain": "losses",
+     "label": "Needy Beecham",
+     "subject": "my mother's mother",
+     "who": "Needy Beecham"
+    },
+    {
+     "domain": "losses",
+     "label": "Darvin Beecham",
+     "who": "Darvin Beecham"
+    },
+    {
+     "domain": "losses",
+     "label": "James Edwin Thorne",
+     "who": "James Edwin Thorne"
+    }
+   ]
+  },
+  {
+   "case_id": "one-fact-is-still-one-record",
+   "note": "The singleton envelope is still read, and a single-entry answer never triggers the retry — v212's behavior, unchanged.",
+   "domain": "residences",
+   "user_message": "We were in Dayton the whole time I was small.",
+   "reply": "Dayton for all of it, then.",
+   "attempt": {
+    "raw": "{\"landmark\": {\"domain\": \"residences\", \"label\": \"Dayton\", \"city\": \"Dayton\"}}"
+   },
+   "expected_attempts": 1,
+   "attempt_landmarks": [
+    {
+     "domain": "residences",
+     "label": "Dayton",
+     "city": "Dayton"
+    }
+   ],
+   "expected_landmarks": [
+    {
+     "domain": "residences",
+     "label": "Dayton",
+     "city": "Dayton"
+    }
+   ]
+  },
+  {
+   "case_id": "a-none-is-one-record-and-never-plural",
+   "note": "A terminal answers the WHOLE domain, so the many-records class never fires on it however many proper nouns the story alongside it carries.",
+   "domain": "military",
+   "user_message": "I have not served in the military. It's not military service, but I did serve a two-year mission for my church as a Mormon missionary. I served that in Zurich, Switzerland, when I was 19.",
+   "reply": "Zurich at nineteen — two years of it. What was the hardest part of arriving there?",
+   "attempt": {
+    "raw": "{\"landmark\": {\"domain\": \"military\", \"none\": true}}"
+   },
+   "expected_attempts": 1,
+   "attempt_landmarks": [
+    {
+     "domain": "military",
+     "none": true
+    }
+   ],
+   "expected_landmarks": [
+    {
+     "domain": "military",
+     "none": true
+    }
+   ]
+  }
+ ]
+}

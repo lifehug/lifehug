@@ -701,20 +701,36 @@ def load_landmarks() -> dict:
 
 
 def save_landmark(domain: str, record: object) -> dict:
-    """Add or replace one landmark entry, keyed by its label within a domain.
+    """Add or replace ONE landmark entry, keyed by its identity in a domain.
 
-    Replacement is by ``label`` because the ladder revisits the same subject —
+    Replacement is by identity because the ladder revisits the same subject —
     a city today, an address next week, a span after that — and each pass adds
     rungs to the SAME entry rather than making a second one. HOW the two
     records combine is `landmarks_interaction.merge_landmark_entry` — one
     definition, so the none terminal supersedes and is superseded here exactly
     as it does everywhere else.
+
+    v214 (lifehug#227) changes WHICH identity, and adds the one cross-entry
+    rule. The key was ``label`` alone, which collapses a whole multi-entry
+    answer the moment the writer files a name under the domain's own rung
+    instead: four children filed as ``who`` all keyed on ``""`` and became one
+    aggregate entry. It is now `landmarks_interaction.landmark_entry_key` —
+    the READ side's own identity order, label then name then the domain's
+    identity rung — and `entry_superseded_by` retires the two shapes a new
+    entry legitimately replaces (a standing none/skip, and exactly that
+    unidentified aggregate). Entries the person named are never touched.
     """
     if not isinstance(record, dict):
         raise ValueError("a landmark record must be an object")
     key = str(domain or "").strip()
     if not key:
         raise ValueError("a landmark needs a domain")
+    try:
+        row = landmarks_interaction.domain_row(key)
+    except landmarks_interaction.LandmarkInteractionError:
+        # A domain the question set does not declare still files, keyed on
+        # the identity fields alone — degrade, never refuse a write.
+        row = None
     data = read_json(LANDMARKS_STORE, default=None)
     if not isinstance(data, dict):
         data = {}
@@ -723,17 +739,37 @@ def save_landmark(domain: str, record: object) -> dict:
     if not isinstance(domains, dict):
         domains = data["domains"] = {}
     entries = [e for e in (domains.get(key) or []) if isinstance(e, dict)]
-    label = str(record.get("label") or "").strip()
+    entry_key = landmarks_interaction.landmark_entry_key(record, row)
     merged = landmarks_interaction.merge_landmark_entry(None, record)
+    surviving = []
     for existing in entries:
-        if str(existing.get("label") or "").strip() == label:
+        if landmarks_interaction.landmark_entry_key(existing, row) == entry_key:
             merged = landmarks_interaction.merge_landmark_entry(existing, record)
-            break
-    entries = [e for e in entries
-               if str(e.get("label") or "").strip() != label] + [merged]
-    domains[key] = entries
+            continue
+        if landmarks_interaction.entry_superseded_by(existing, record, row):
+            continue
+        surviving.append(existing)
+    domains[key] = surviving + [merged]
     write_json(LANDMARKS_STORE, data)
     return merged
+
+
+def save_landmarks(domain: str, records: object) -> list[dict]:
+    """File a whole recorder outcome — ONE entry per record (v214).
+
+    The batch writer named by ADR 0028's many-records amendment: one answer
+    can carry four children or twelve jobs, and every one of them is its own
+    entry under the domain. There is no aggregate form and no second filing
+    path — this is :func:`save_landmark` in order, which is exactly what a
+    host looping `landmarks_interaction.landmark_invocations` does through
+    the CLI.
+    """
+    rows = records if isinstance(records, (list, tuple)) else [records]
+    saved = []
+    for record in rows:
+        if isinstance(record, dict) and not record.get("skipped"):
+            saved.append(save_landmark(domain, record))
+    return saved
 
 
 def landmark_birth_date(landmarks: object = None) -> object:

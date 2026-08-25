@@ -23,8 +23,17 @@ over the turns people already gave. The sweep therefore inherits the lint and
 the retry for free, which is the only reason re-running a historical answer is
 a fix rather than a second roll of the same dice.
 
+**One answer, MANY records (v214, lifehug#227).** The canonical output is
+``{"landmarks": [<record>, ...]}`` and the whole module speaks in record
+SETS. v212's ``{"landmark": {...}}`` is still accepted and normalizes to a
+one-element set, so no prompt, no host and no stored payload has a flag day.
+Children, work, residences, family, partnerships and losses are all
+multi-entry domains: one answer routinely carries many entries, and filing
+one of them is losing the rest. Each record is validated ALONE, so an invalid
+one drops without taking its siblings with it.
+
 Pure except for the one injected ``call``: the prompt build, the parse, the
-validation and the lint are all deterministic and separately testable, and a
+validation and the lints are all deterministic and separately testable, and a
 host that runs its own model REPLAYs those four and never this module's loop.
 """
 
@@ -65,14 +74,27 @@ class LandmarkRecorderError(Exception):
 
 @dataclass(frozen=True)
 class RecorderOutcome:
-    """What one recorder pass produced."""
+    """What one recorder pass produced.
+
+    v214: :attr:`records` is the outcome — a person can answer one question
+    with four children or twelve jobs, and every one of them is an entry.
+    :attr:`record` remains as the FIRST of them so a caller written against
+    v212 keeps working unchanged; a caller that files is filing
+    :attr:`records`, and `landmarks_interaction.landmark_invocations` turns
+    the set into one invocation per entry.
+    """
 
     status: str
-    record: dict | None = None
+    records: tuple[dict, ...] = ()
     attempts: int = 0
     lint_ids: tuple[str, ...] = ()
     reason: str = ""
     prompts: tuple[str, ...] = field(default=(), repr=False)
+
+    @property
+    def record(self) -> dict | None:
+        """The first record, for every v212 caller (see the class note)."""
+        return self.records[0] if self.records else None
 
 
 def _prompt_path(framework_root: str | Path | None = None) -> Path:
@@ -221,29 +243,51 @@ def build_recorder_prompt(*, domain: str, question_asked: str,
 
 
 def parse_recorder_output(raw: object, *,
-                          framework_root: str | Path | None = None) -> dict | None:
-    """One recorder completion through BOTH pinned validation layers.
+                          framework_root: str | Path | None = None
+                          ) -> tuple[dict, ...]:
+    """One recorder completion through BOTH pinned validation layers, per record.
 
     `conversation_delivery._parse_landmark` (structural, closed key set) then
     `landmarks_interaction.validate_landmark` (semantic, closed domain set,
     dates normalized). The SAME two layers the live turn's additive field
     goes through — the recorder introduces no second vocabulary for what a
-    landmark is, and a malformed completion degrades to ``None``, never to an
-    error and never to a half-record.
+    landmark is.
+
+    v214 (lifehug#227) changes the SHAPE and nothing else. The canonical
+    envelope is ``{"landmarks": [ ... ]}``; ``{"landmark": {...}}`` is still
+    read and normalizes to a one-element result, so a v212 prompt, host or
+    stored completion parses exactly as it did. EACH record runs both layers
+    ALONE — the founder's twelve-job answer must not be lost because the
+    eleventh job named a key `work` cannot read — and duplicates collapse.
+    A malformed envelope degrades to an EMPTY tuple, never to an error, never
+    to a half-record, and never to a dropped sibling.
     """
     if not isinstance(raw, str):
-        return None
+        return ()
     text = raw.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
     try:
         data = json.loads(text)
     except (ValueError, TypeError):
-        return None
+        return ()
     if not isinstance(data, dict):
-        return None
-    structural = conversation_delivery._parse_landmark(data.get("landmark"))  # noqa: SLF001
-    return li.validate_landmark(structural, framework_root=framework_root)
+        return ()
+    payload = data.get("landmarks")
+    if isinstance(payload, dict):
+        candidates: list[object] = [payload]
+    elif isinstance(payload, (list, tuple)):
+        candidates = list(payload)
+    else:
+        candidates = [data.get("landmark")]
+    records: list[dict] = []
+    for candidate in candidates:
+        structural = conversation_delivery._parse_landmark(candidate)  # noqa: SLF001
+        validated = li.validate_landmark(structural,
+                                         framework_root=framework_root)
+        if isinstance(validated, dict) and validated not in records:
+            records.append(validated)
+    return tuple(records)
 
 
 def record_answer(*, domain: str, answer: str, call, reply: str = "",
@@ -257,7 +301,9 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
     a host can route the completion however it routes every other one. The
     contract:
 
-    * a validated record -> ``STATUS_RECORDED``;
+    * at least one validated record -> ``STATUS_RECORDED``, carrying ALL of
+      them (v214). "Recorded" has always meant *the answer is in the store*,
+      and one valid record means it is;
     * nothing found, and nothing in the person's message says they answered ->
       ``STATUS_NOTHING`` — the correct outcome when they changed the subject;
     * nothing found while `landmarks_interaction.answer_must_record` says they
@@ -265,13 +311,25 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
       still comes back empty, ``STATUS_WITHHELD`` carrying the lint id. A
       withheld record is a thing a host can try again later; it is never a
       silent drop and never a fabricated record.
+    * records found while `landmarks_interaction.records_missing_entries` says
+      they stated MORE of them (v214) -> the SAME one regeneration, carrying
+      `many_records_reminder`, and then ``STATUS_RECORDED`` regardless, with
+      the larger of the two sets and the retryable lint id on it. This branch
+      can never withhold: a partial record is worth more than none, and the
+      person already said it once.
     * the provider being unavailable is ``STATUS_UNAVAILABLE`` — the person's
       turn is untouched either way, which is the point of separating the two
-      jobs in the first place.
+      jobs in the first place. Unavailable on the RETRY, with records already
+      in hand, files those records rather than throwing them away.
+
+    There is exactly ONE retry across both findings, and :data:`MAX_ATTEMPTS`
+    is still 2: a second regeneration would be a loop, and the lints exist to
+    make a failure legible, not to keep rolling the dice.
     """
     prompts: list[str] = []
     reminder = ""
     finding: dict | None = None
+    best: tuple[dict, ...] = ()
     for attempt in range(1, MAX_ATTEMPTS + 1):
         prompt = build_recorder_prompt(
             domain=domain, question_asked=question_asked, answer=answer,
@@ -282,16 +340,34 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
         try:
             raw = call(prompt, model)
         except Exception as exc:  # noqa: BLE001 — provider failures are data here
+            if best:
+                return RecorderOutcome(status=STATUS_RECORDED, records=best,
+                                       attempts=attempt, reason=str(exc),
+                                       prompts=tuple(prompts))
             return RecorderOutcome(status=STATUS_UNAVAILABLE, attempts=attempt,
                                    reason=str(exc), prompts=tuple(prompts))
-        record = parse_recorder_output(raw, framework_root=framework_root)
+        records = parse_recorder_output(raw, framework_root=framework_root)
+        if len(records) > len(best):
+            best = records
+        if best:
+            missed = li.records_missing_entries(
+                answer, best, reply=reply, domain=domain,
+                known_labels=known_labels, framework_root=framework_root,
+            )
+            if missed is None or attempt == MAX_ATTEMPTS:
+                return RecorderOutcome(
+                    status=STATUS_RECORDED, records=best, attempts=attempt,
+                    lint_ids=((li.RECORD_EVERY_ENTRY_LINT,) if missed
+                              else ()),
+                    reason=str((missed or {}).get("detail", "")),
+                    prompts=tuple(prompts),
+                )
+            reminder = li.many_records_reminder(domain, len(best))
+            continue
         finding = li.answer_must_record(
-            answer, record, reply=reply, domain=domain,
+            answer, records, reply=reply, domain=domain,
             known_labels=known_labels, framework_root=framework_root,
         )
-        if record is not None:
-            return RecorderOutcome(status=STATUS_RECORDED, record=record,
-                                   attempts=attempt, prompts=tuple(prompts))
         if finding is None:
             return RecorderOutcome(status=STATUS_NOTHING, attempts=attempt,
                                    prompts=tuple(prompts))
@@ -355,7 +431,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(json.dumps({
         "status": outcome.status,
+        # v214: `records` is the answer; `record` stays as its first entry so
+        # a v212 reader of this CLI keeps reading.
+        "records": list(outcome.records),
         "record": outcome.record,
+        "invocations": li.landmark_invocations(outcome.records),
         "attempts": outcome.attempts,
         "lint_ids": list(outcome.lint_ids),
         "reason": outcome.reason,

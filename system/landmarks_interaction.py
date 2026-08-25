@@ -421,6 +421,32 @@ def rung_satisfiers(row: object, rung: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(fields))
 
 
+def unreadable_fields(entry: object, row: object) -> tuple[str, ...]:
+    """The fields this entry carries that NO rung of its domain can read.
+
+    v214 (lifehug#227), and the recurring-defect doctrine applied to the
+    ladder-consistency guard's own leg 4: the guard derived this inline to
+    pin :data:`DOMAIN_AGNOSTIC_FIELDS`, and the store now needs the same
+    sentence to recognize a machine-written shape. One definition, both
+    callers.
+
+    A field is unreadable when it is neither a rung of the domain, nor a
+    declared :func:`rung_satisfiers` of one, nor bookkeeping
+    (:data:`NON_RUNG_FIELDS`). The live instance is a ``span`` on
+    ``children``, whose ladder is `happened | who | year | month` and has no
+    span at all: the founder's four children were filed as ONE entry with a
+    span across all four birthdays, and every rung below `who` read nothing.
+    """
+    if not isinstance(entry, dict) or not isinstance(row, dict):
+        return ()
+    ladder = list(row.get("ladder") or ())
+    satisfiers = {field for rung in ladder
+                  for field in rung_satisfiers(row, rung)}
+    return tuple(field for field in entry
+                 if field not in ladder and field not in satisfiers
+                 and field not in NON_RUNG_FIELDS)
+
+
 def rung_reached(entry: object, row: object) -> str | None:
     """The finest ladder rung this entry actually satisfies, or None.
 
@@ -526,7 +552,12 @@ def next_rung(entries: object, row: object) -> dict | None:
         reached = rung_reached(entry, row)
         index = ladder.index(reached) if reached in ladder else -1
         if index < target_index:
-            return _rung(domain, ladder[index + 1], entry.get("label"))
+            # lifehug#219's read-side rule, applied to the QUESTION too: the
+            # subject is whatever field the writer put the name in, so a
+            # `who`-only child is asked about by name rather than as "that
+            # one".
+            return _rung(domain, ladder[index + 1],
+                         identity_named(entry, row) or entry.get("label"))
     if row.get("chain") and not any(e.get("chain_complete")
                                     or is_none_entry(e, row) for e in rows):
         if domain == "family":
@@ -827,6 +858,22 @@ LANDMARK_LINT_CLASSES = (
 #: other landmark class is advisory, scored over the goldens.
 ANSWER_MUST_RECORD_LINT = "landmark_gates.answer_must_record"
 
+#: The RETRYABLE recording lint (v214, ADR 0028 amendment). Its sibling above
+#: fires when NOTHING was recorded; this one fires when something was and the
+#: person plainly stated more entries than came back. The difference in
+#: severity is the whole point: a host regenerates once on this finding and
+#: then files whatever it has, because a partial record is worth more than no
+#: record and a lint must never cost the person a fact they gave.
+#:
+#: Deliberately NOT in :data:`LANDMARK_LINT_CLASSES`, which is the closed set
+#: :func:`lint_landmark_reply` scores over the REPLY goldens. The turn's own
+#: additive `landmark` field is singular by the pinned turn contract, so a
+#: turn that records one entry of three is obeying its contract exactly — and
+#: failing it for that would punish the only behavior available to it. The
+#: plural output belongs to the RECORDER, so the class that reads it does
+#: too; `landmark_recorder.record_answer` is its one caller.
+RECORD_EVERY_ENTRY_LINT = "landmark_gates.record_every_entry"
+
 #: The domains where asking for a calendar year outright is legitimate
 #: (landmarks.md §2.1 + §2.9): the carve-out is about the KIND of fact, not
 #: about whose fact it is. A birth year — anyone's — is overlearned semantic
@@ -1074,12 +1121,19 @@ def answer_must_record(user_message: object, record: object, *,
     evidence.
 
     Returns a finding (`lint` / `detail` / `span`) or ``None``. ``record`` is
-    whatever came back through validation; any non-empty record clears the
-    check, including a skip and a none. ``reply`` is the person-facing text,
+    whatever came back through validation — ONE record, or (v214) the whole
+    tuple :func:`landmark_recorder.parse_recorder_output` now returns; any
+    non-empty record in it clears the check, including a skip and a none.
+    "Did they record ANYTHING" is this class's whole question, and one valid
+    record answers it whatever else was missed — :data:`RECORD_EVERY_ENTRY_LINT`
+    is the class that reads the rest. ``reply`` is the person-facing text,
     used only as the ECHO evidence described above the regexes — a recorder
     that runs with no reply at all (generation failed) still has the NEGATIVE
     signal, which is the case that matters most.
     """
+    if isinstance(record, (list, tuple)):
+        record = next((item for item in record
+                       if isinstance(item, dict) and item), None)
     if isinstance(record, dict) and record:
         return None
     accepts_none = False
@@ -1111,6 +1165,220 @@ def answer_must_record(user_message: object, record: object, *,
     }
 
 
+# --------------------------------------------------------------------------
+# v214 (lifehug#227): one answer, many records
+# --------------------------------------------------------------------------
+#
+# THE FAILURE, twice on the founder's own vault at v212. Asked what work he
+# had done, he answered with about twelve jobs; the recorder's canonical
+# output held exactly ONE `landmark`, both attempts degraded, and the whole
+# answer was WITHHELD. Asked about his children, he named four of them with
+# four exact birthdates; the writer of the day collapsed them into ONE
+# aggregate entry carrying an illegal `span`, and the ladder — which reads
+# per entry — went on asking who they were.
+#
+# Children, work, residences, family, partnerships and losses are all
+# MULTI-ENTRY domains: one answer routinely carries many entries, and the
+# recorder is now asked for all of them (`{"landmarks": [...]}`). This class
+# is the deterministic backstop for that ask, and it is deliberately the
+# WEAKER of the two recording lints: it fires on evidence that entries were
+# missed, and a host answers it with ONE regeneration and then files what it
+# has. It can never cost the person a record that was already made.
+#
+# THE BOUNDARY, stated as honestly as `answer_shape`'s. "How many entries is
+# this answer?" is not decidable from a string. Two shapes ARE decidable and
+# this class fires on those two and nothing else:
+#
+#   1. UNRECORDED NAMES — proper-noun groups in the person's own message whose
+#      head word appears nowhere in any record that came back. TWO of them
+#      normally, because ONE uncovered group is the ordinary shape of a
+#      qualifier ("Dayton, Ohio", recorded as Dayton). One is enough only when
+#      the answer is ALREADY known to be plural — two or more records came
+#      back — where a leftover name is far likelier to be a missed entry than
+#      a qualifier, and where the retry is the cheapest thing in the loop.
+#   2. UNRECORDED YEARS — on a domain whose ladder dates each entry
+#      SEPARATELY (a date grain and no `span`: birth-of-a-person and
+#      event domains), the person stated two or more distinct years and
+#      fewer records than that carry a date. Four birthdates, one record.
+#
+# And it never fires at all where the answer cannot be plural: a domain with
+# no identity rung (`birth` — one person, one birthday), or a record set
+# carrying the none or skip terminal, which is a whole-domain answer.
+
+#: Word-ish tokens inside a stored record value, for the coverage test.
+_RECORD_TOKEN_RE = re.compile(r"[A-Za-z'’\-]{2,}")
+
+
+def _name_groups(text: object) -> tuple[tuple[str, ...], ...]:
+    """Proper-noun GROUPS a message states, lowercased, in order.
+
+    :func:`_echo_terms`' tokens, with adjacency preserved: consecutive
+    capitalized words with only whitespace between them are ONE name ("James
+    Edwin Thorne"), which is what makes counting entries possible at all. The
+    sentence-opener and stopword rules are `_echo_terms`' own — a capital at
+    the start of a sentence proves nothing about the word.
+    """
+    body = text if isinstance(text, str) else ""
+    groups: list[tuple[str, ...]] = []
+    current: list[str] = []
+    last_end = -1
+    for match in _ECHO_TOKEN_RE.finditer(body):
+        start = match.start()
+        prior = body[:start].rstrip()
+        opens_sentence = not prior or prior[-1] in _SENTENCE_ENDERS
+        adjacent = (bool(current) and last_end >= 0
+                    and not body[last_end:start].strip()
+                    and not opens_sentence)
+        if not adjacent and current:
+            groups.append(tuple(current))
+            current = []
+        last_end = match.end()
+        token = match.group(0).lower().strip("'’-")
+        if opens_sentence or len(token) <= 2 or token in _ECHO_STOPWORDS:
+            continue
+        current.append(token)
+    if current:
+        groups.append(tuple(current))
+    return tuple(group for group in groups if group)
+
+
+def _record_terms(records: object) -> set[str]:
+    """Every word and year the filed records themselves carry.
+
+    VALUES only, never keys: a record's own key names ("who", "domain") are
+    the vocabulary of the store, not anything the person said, and counting
+    them as coverage would hide a missed entry called Who.
+    """
+    terms: set[str] = set()
+
+    def walk(value: object) -> None:
+        if isinstance(value, str):
+            terms.update(token.lower().strip("'’-")
+                         for token in _RECORD_TOKEN_RE.findall(value))
+            terms.update(_ECHO_YEAR_RE.findall(value))
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    for record in (records or ()):
+        if isinstance(record, dict):
+            walk(record)
+    return terms
+
+
+def _dates_each_entry(row: object) -> bool:
+    """True when this domain's ladder dates every entry on its own.
+
+    Derived from the ladder, never listed: a `span` rung is a STRETCH, and
+    one entry's stretch legitimately states two years ("1984 to 1990"), so a
+    year count says nothing there. A date-grain rung with no span is one
+    year per entry, and then the count is evidence.
+    """
+    ladder = tuple(row.get("ladder") or ()) if isinstance(row, dict) else ()
+    return "span" not in ladder and any(rung in _DATE_GRAIN_RUNGS
+                                        for rung in ladder)
+
+
+def records_missing_entries(user_message: object, records: object, *,
+                            reply: object = "", domain: object = None,
+                            known_labels: object = (),
+                            framework_root: str | Path | None = None) -> dict | None:
+    """The one definition of "they stated more entries than came back".
+
+    ONE definition, one caller today: `landmark_recorder.record_answer` runs
+    it over its own extraction as the retry trigger. Unlike
+    :func:`answer_must_record` beside it, it is NOT run from
+    :func:`lint_landmark_reply` — see :data:`RECORD_EVERY_ENTRY_LINT` for
+    why a singular reply field must never be failed for being singular.
+
+    Returns a finding (`lint` / `detail` / `span`) or ``None``. It answers
+    ``None`` for everything it cannot decide — see the boundary above — and
+    it is never a reason to drop or withhold a record. A false positive costs
+    one regeneration and nothing else, which is why the name floor drops to
+    one once the answer is already plural.
+    """
+    filed = [r for r in (records if isinstance(records, (list, tuple))
+                         else [records]) if isinstance(r, dict) and r]
+    if not filed:
+        # Nothing recorded at all is `answer_must_record`'s question, not
+        # this one. Two classes, two questions, no overlap.
+        return None
+    text = user_message if isinstance(user_message, str) else ""
+    if not text.strip():
+        return None
+    asked = str(domain or "").strip()
+    if not asked:
+        return None
+    try:
+        row = domain_row(asked, framework_root=framework_root)
+    except LandmarkInteractionError:
+        return None
+    if identity_rung(row) is None:
+        return None
+    if any(record.get("none") or record.get("skipped") for record in filed):
+        # A terminal answers the WHOLE domain. There is no second entry.
+        return None
+    known = {str(label).strip().lower() for label in (known_labels or ())
+             if str(label).strip()}
+    covered = _record_terms(filed) | known
+    for label in known:
+        covered |= {token.lower() for token in _RECORD_TOKEN_RE.findall(label)}
+    missed = [group for group in _name_groups(text) if group[0] not in covered]
+    floor = 1 if len(filed) > 1 else 2
+    detail = ""
+    if len(missed) >= floor:
+        detail = (
+            f"they named {len(missed) + len(filed)} things and "
+            f"{len(filed)} came back — one record per entry: "
+            + ", ".join(" ".join(group) for group in missed[:4])
+            + " were not recorded"
+        )
+    elif _dates_each_entry(row):
+        stated = {year for year in _ECHO_YEAR_RE.findall(text)} - known
+        dated = sum(1 for record in filed if record.get("date"))
+        if len(stated) >= 2 and dated < len(stated):
+            detail = (
+                f"they stated {len(stated)} separate dates and {dated} "
+                "record(s) carry one — every entry they dated is its own "
+                "record with its own date"
+            )
+    if not detail:
+        return None
+    body = reply if isinstance(reply, str) else ""
+    return {
+        "lint": RECORD_EVERY_ENTRY_LINT,
+        "detail": detail,
+        "span": [0, min(len(body), _SPAN_LIMIT)],
+    }
+
+
+#: What a host appends to ONE regeneration when
+#: :data:`RECORD_EVERY_ENTRY_LINT` fires. It asks for the LIST and, in the
+#: same breath, forbids padding it: the failure this class fixes is a lost
+#: entry, and the failure it must not cause is an invented one.
+MANY_RECORDS_REMINDER = (
+    "You recorded {count}, and they stated more than that. One record per "
+    "entry: send `{{\"landmarks\": [ ... ]}}` with EVERY entry they named "
+    "for this domain{domain_clause} — each person, each job, each place its "
+    "own object, carrying its own name and its own date. Record only what "
+    "they said: never invent an entry, a name or a date to fill the list "
+    "out, and never split one entry into two."
+)
+
+
+def many_records_reminder(domain: object = None, count: int = 1) -> str:
+    """:data:`MANY_RECORDS_REMINDER`, with the domain and the count named."""
+    name = str(domain or "").strip()
+    clause = f" (`{name}`)" if name else ""
+    return MANY_RECORDS_REMINDER.format(
+        domain_clause=clause,
+        count="one entry" if count == 1 else f"{count} entries",
+    )
+
+
 def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
                         sensitive: bool = False,
                         domains_named: object = (),
@@ -1130,7 +1398,9 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
     pre-v212 shape so every existing call site is byte-identical:
 
     * ``landmark`` — the ``landmark`` field this turn actually emitted (raw
-      or validated; only its presence is read here).
+      or validated; only its presence is read here). v214: a LIST of records
+      is accepted here too, which is what the recorder returns now — any
+      non-empty one in it clears the check.
     * ``user_message`` — the person's own message this reply answers. Without
       it, :data:`ANSWER_MUST_RECORD_LINT` cannot fire at all, because the
       only honest evidence for "they answered" lives in what they said.
@@ -1257,6 +1527,83 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
     return merged
 
 
+def landmark_entry_key(entry: object, row: object = None) -> str:
+    """The identity ONE filed entry is merged on, within its domain.
+
+    v214 (lifehug#227). `timeline.save_landmark` merged on ``label`` alone,
+    which is fine while every record carries one and catastrophic the moment
+    a domain files MANY: four children filed as ``who`` with no ``label``
+    all key on the empty string and collapse into a single entry — the
+    aggregate shape the founder's own vault held. So the key is the same
+    identity the READ side uses, in the same order (:data:`IDENTITY_FIELDS`),
+    with the domain's own :func:`identity_rung` behind it — one definition of
+    "which entry is this", used by the writer and the ladder alike.
+
+    Case-folded, because "Bell Avenue" and "bell avenue" are one place. An
+    entry with no identity at all keys on ``""`` and merges with the other
+    unidentified entries of its domain, exactly as before — that is the right
+    behavior for `birth`, whose ladder names no subject.
+    """
+    if not isinstance(entry, dict):
+        return ""
+    for field in IDENTITY_FIELDS:
+        text = entry.get(field)
+        if isinstance(text, str) and text.strip():
+            return text.strip().casefold()
+    rung = identity_rung(row) if isinstance(row, dict) else None
+    if rung:
+        value = entry.get(rung)
+        if isinstance(value, str) and value.strip():
+            return value.strip().casefold()
+    return ""
+
+
+def entry_superseded_by(existing: object, record: object,
+                        row: object) -> bool:
+    """Whether filing ``record`` retires a DIFFERENT prior entry outright.
+
+    v214 (lifehug#227). :func:`merge_landmark_entry` says how two records of
+    the SAME entry combine; this says the one thing that has to happen
+    ACROSS entries, and it says it in two narrow rules. Everything else
+    survives untouched — a machine that rewrites entries the person stated is
+    a worse defect than the one being fixed here.
+
+    1. **A none retires the whole domain.** "Actually I never served" is a
+       correction of everything filed under `military`, however many entries
+       that was — :func:`merge_landmark_entry` has always said a none
+       *replaces whatever was there*, and per-domain is what that sentence
+       means once a domain can hold many entries.
+    2. **A substantive answer clears a standing terminal.** "Actually we did
+       have children" retires the none, and a skip is not an answer to keep
+       beside one — the same rule read the other way.
+    3. **A clean record retires the collapsed aggregate.** An entry carrying
+       a field no rung of its domain can read (:func:`unreadable_fields`) was
+       written by a machine that had many entries and filed one — the
+       founder's four children as a single row with a `span` across all four
+       birthdays, which `children`'s ladder has no rung for. That shape is
+       superseded the moment a record with no such field is filed for the
+       domain. The test is the SHAPE, never the content: an entry whose every
+       field its own ladder can read is an entry somebody stated, and it is
+       never touched by this.
+    """
+    if not (isinstance(existing, dict) and isinstance(record, dict)
+            and isinstance(row, dict)):
+        return False
+    if record.get("skipped") or not str(record.get("domain") or "").strip():
+        return False
+    substantive = not record.get("none")
+    if not substantive:
+        # Rule 1: a none is the domain's whole answer, so nothing else in the
+        # domain survives it.
+        return True
+    terminal = is_none_entry(existing, row) or (
+        bool(existing.get("skipped")) and not asserts_happened(existing))
+    if terminal:
+        return True
+    return bool(unreadable_fields(existing, row)
+                and not unreadable_fields(record, row))
+
+
 def landmark_invocation(record: object) -> list[str] | None:
     """The ``lifehug.py landmark-record`` argv that files one landmark, or None.
 
@@ -1311,6 +1658,24 @@ def landmark_invocation(record: object) -> list[str] | None:
     if record.get("chain_complete"):
         argv.append("--complete")
     return argv
+
+
+def landmark_invocations(records: object) -> list[list[str]]:
+    """Every ``landmark-record`` argv one recorder outcome files (v214).
+
+    ONE record per entry, in the order the recorder emitted them, skips
+    dropped by :func:`landmark_invocation`'s own rule. A host that files a
+    recorder outcome runs exactly this list — there is no aggregate form and
+    no second filing path, which is what keeps each entry its own row in
+    `state/landmarks.json`.
+    """
+    rows = records if isinstance(records, (list, tuple)) else [records]
+    argvs = []
+    for record in rows:
+        argv = landmark_invocation(record)
+        if argv is not None:
+            argvs.append(argv)
+    return argvs
 
 
 # --------------------------------------------------------------------------
