@@ -231,9 +231,15 @@ adding the raw or excerpted source under `system/research/<topic>/`.
    principled scoring function for an interval estimate but does not derive its
    form. Ingest the definition and work an example against a `DateRecord`, so
    the "sharpness subject to calibration" slogan has arithmetic under it.
-9. **Mountakis, Klos & Witteveen 2015 concurrent flexibility** — already queued
-   under Go Deep (item 6) for the PLAN; §4.4 shows the same correction applies
-   to the SCORE, which raises its priority. One ingestion serves both.
+9. **Mountakis, Klos & Witteveen 2015 concurrent flexibility** — **THE named
+   follow-up.** Already queued under Go Deep (item 6) for the PLAN; §4.4 shows
+   the same correction applies to the SCORE, which raises its priority. One
+   ingestion serves both. The placement score SHIPPED in v208 (ADR 0027)
+   without it, which is exactly why `caveat_floor` is `True` and the copy says
+   *at least this organised*: a marginal width sum overestimates disorder
+   wherever ordering constraints exist, by 3× in the worked case. Ingesting
+   this item and building the bipartite-matching correction is what would let
+   that caveat come off — and nothing else would.
 10. **A citable source, either way, on product completion meters and data
     quality** — §4.5 records that none was found. Until one exists the Goodhart
     argument stands on surrogation (Choi, Hecht & Tayler) and must say so.
@@ -243,4 +249,9 @@ adding the raw or excerpted source under `system/research/<topic>/`.
     timeline forms. Lending-restricted; §3.4 uses Priestley's own words instead,
     which is stronger, but the survey would place him.
 
-Status: queued, none ingested yet (v206).
+Status: queued, none ingested yet (v206). **The score itself is DONE** —
+v208 (ADR 0027) implements §6 design consequences 2, 3, 5, 7, 8, 16 and 17 as
+`timeline.placement_score`, and consequence 1's cloud/mark pair and 13's
+per-end grading as `unknowns[].years` and `event_lineup[…][].prior_span`. What
+remains on this topic is READING, not building, with item 9 the one item that
+would change the arithmetic.

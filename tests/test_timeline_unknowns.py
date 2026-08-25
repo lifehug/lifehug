@@ -184,13 +184,24 @@ class UnknownRecordTests(UnknownsFixture):
             self.assertTrue(row["label"])
             self.assertIn(row["label"], row["probe"]["text"])
 
-    def test_the_page_is_capped_and_leverage_ordered(self):
-        rows = [{"key": f"k{n}", "kind": "moment", "label": f"m{n}",
-                 "probe": {"cost": 1}} for n in range(50)]
-        index = {"period:x": {"k7", "k8", "k9"}, "period:y": {"k1"}}
+    def test_the_page_is_capped_and_reach_ordered(self):
+        """v208 (ADR 0027): a row is ranked by what ANSWERING IT is worth — the
+        reach of the anchor it would become — rather than by the size of the
+        largest resolve set it happens to belong to. `leverage` is
+        self-inclusive, so a row with no reach at all is exactly 1."""
+        rows = [{"key": f"period_bound:p{n}", "kind": "period_bound",
+                 "slug": f"p{n}", "label": f"era {n}", "probe": {"cost": 1}}
+                for n in range(50)]
+        index = {"period:p7": {"period_bound:p7", "moment:a", "moment:b", "moment:c"},
+                 "period:p1": {"moment:d"}}
         offered = tl.offered_unknowns(rows, index, limit=3)
-        self.assertEqual([row["key"] for row in offered], ["k7", "k8", "k9"])
-        self.assertEqual(offered[0]["leverage"], 3)
+        self.assertEqual([row["key"] for row in offered[:2]],
+                         ["period_bound:p7", "period_bound:p1"])
+        self.assertEqual(offered[0]["resolves"], ["moment:a", "moment:b", "moment:c"])
+        self.assertEqual(offered[0]["leverage"], 4)
+        self.assertEqual(offered[1]["leverage"], 2)
+        self.assertEqual(offered[2]["leverage"], 1)
+        self.assertEqual(len(offered), 3)
         self.assertEqual(tl.UNKNOWNS_PAGE_CAP, 30)
 
     def test_an_era_gap_is_emitted_between_two_dated_eras(self):
