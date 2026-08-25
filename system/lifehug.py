@@ -760,7 +760,17 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
         return result.returncode
     output = (result.stdout or "") + (result.stderr or "")
     match = _re.search(r"correction source: (\S+)", output)
-    key = timeline.placement_key({"source": args.source, "description": description})
+    # v215 (lifehug#228): identity is MINTED where the moment is known and
+    # travels whole. `--placement-key` is that key, stored verbatim, so a host
+    # whose description is a title (a timeline unknown's label) still files
+    # under the key `place_events` joins on. Absent the flag the key is derived
+    # from source + description exactly as it always has been — the viewer's
+    # placement form posts the event's real description and needs nothing else.
+    key = str(getattr(args, "placement_key", "") or "").strip()
+    if key and not _re.fullmatch(r"[0-9a-f]{12}", key):
+        print(f"Error: --placement-key must be 12 hex characters: {key!r}", file=sys.stderr)
+        return 1
+    key = key or timeline.placement_key({"source": args.source, "description": description})
     timeline.save_placement(
         key,
         args.source,
@@ -2624,6 +2634,9 @@ def build_parser() -> argparse.ArgumentParser:
                                    "stated|age|anchor|order|public_event|connector")
     p.add_argument("--anchor", action="append", default=[],
                    help="Landmark key the date leans on (repeatable)")
+    p.add_argument("--placement-key", dest="placement_key",
+                   help="The moment's own 12-hex placement key, when the caller "
+                        "knows it (identity travels whole; derived otherwise)")
     p.set_defaults(func=cmd_timeline_place)
 
     p = sub.add_parser("timeline-unplace",

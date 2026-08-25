@@ -489,7 +489,7 @@ class PlaceInvocation(NamedTuple):
 
 
 def place_invocation(placed: object, *, source: str, description: str,
-                     period: str) -> PlaceInvocation | None:
+                     period: str, placement_key: str = "") -> PlaceInvocation | None:
     """The exact `lifehug.py timeline-place` call for an accepted placement.
 
     The package NAMES the date; the host WRITES it — the same split every
@@ -504,6 +504,16 @@ def place_invocation(placed: object, *, source: str, description: str,
 
     `description` is REQUIRED for the same reason `source` and `period` are:
     an empty one is a call the CLI refuses, so it never becomes an argv here.
+    It is clamped to `timeline.PLACEMENT_DESCRIPTION_MAX` HERE, once, so no
+    host has to know the length — a host clamping on its own is half of how
+    identity became two recipes (lifehug#228).
+
+    `placement_key` is that identity, and it travels whole: an unknown row
+    carries its event's own `timeline.placement_key`
+    (`timeline.moment_unknown`), this passes it through as `--placement-key`,
+    and the CLI stores it verbatim. Absent it the CLI derives the key from
+    source + description exactly as it always has — which is right for the
+    viewer's own placement form, where the description IS the event's.
     """
     if not isinstance(placed, dict):
         return None
@@ -511,6 +521,9 @@ def place_invocation(placed: object, *, source: str, description: str,
     if record is None or not source or not period or not str(description).strip():
         return None
     args = ["timeline-place", str(source), "--period", str(period)]
+    key = str(placement_key or "").strip()
+    if key:
+        args += ["--placement-key", key]
     edtf = chrono.to_edtf(record)
     if edtf:
         args += ["--date", edtf]
@@ -520,7 +533,9 @@ def place_invocation(placed: object, *, source: str, description: str,
     when_hint = chrono.display_date(record, with_basis=False)
     if when_hint:
         args += ["--when-hint", when_hint]
-    return PlaceInvocation(args, str(description))
+    import timeline  # noqa: PLC0415
+
+    return PlaceInvocation(args, str(description)[:timeline.PLACEMENT_DESCRIPTION_MAX])
 
 
 # --------------------------------------------------------------------------

@@ -601,7 +601,7 @@ def _build_timeline_place(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(
         payload,
         required={"source", "description", "period"},
-        optional={"when_hint", "note", "date", "basis", "anchors"},
+        optional={"when_hint", "note", "date", "basis", "anchors", "placement_key"},
     )
     source_payload = {"ref": payload["source"]}
     source = _source_ref(source_payload)
@@ -644,6 +644,13 @@ def _build_timeline_place(payload: dict) -> tuple[Invocation, ...]:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", key):
             raise ValueError("invalid anchor")
         args += ["--anchor", key]
+    # v215 (lifehug#228): the durable twin carries the moment's own identity
+    # when its caller knows it, validated exactly as `timeline-unplace`'s is.
+    placement_key = _optional_text(payload, "placement_key", maximum=12)
+    if placement_key:
+        if not _PLACEMENT_KEY_RE.fullmatch(placement_key):
+            raise ValueError("invalid placement key")
+        args += ["--placement-key", placement_key]
     return (_cli(*args, stdin_text=_text(payload, "description", maximum=100_000)),)
 
 
