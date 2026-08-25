@@ -1485,13 +1485,16 @@ def unknown_anchor(row: object) -> str | None:
     return None
 
 
-def offered_unknowns(rows: list[dict], index: dict[str, set[str]],
-                     limit: int = UNKNOWNS_PAGE_CAP) -> list[dict]:
-    """The unknowns a page offers: leverage first, then the cheapest probe.
+def row_leverage(row: dict, index: dict[str, set[str]]) -> tuple[list[str], int]:
+    """ONE unknown row's reach: `(resolves, leverage)` (v208, ADR 0027).
 
-    Every row carries its own **reach** (v208, ADR 0027), so the ordering is
-    visible rather than mysterious and a host can draw the glow from honest
-    numbers:
+    The single definition of row leverage — extracted so every caller that
+    orders unknowns (`offered_unknowns`, `timeline_interaction.build_timeline_plan`)
+    reads it off the same arithmetic instead of keeping its own copy (issue
+    #216: `build_timeline_plan` had drifted back to the PRE-v208 definition,
+    which ranked a row by the largest resolve set it happened to BELONG to
+    rather than what THIS answer would place — the recurring-defect doctrine
+    forbids a second copy of a fact this load-bearing).
 
     * `resolves` — the other unknowns that answering THIS row would place,
       taken from `dependency_index` under the anchor this row would become
@@ -1499,11 +1502,21 @@ def offered_unknowns(rows: list[dict], index: dict[str, set[str]],
       no anchor.
     * `leverage` — `1 + len(resolves)`, self-inclusive: a row with no reach
       has `leverage: 1` exactly, because answering it still places itself.
+    """
+    anchor = unknown_anchor(row)
+    resolved = set(index.get(anchor) or ()) if anchor else set()
+    resolved.discard(row["key"])
+    resolves = sorted(resolved)
+    return resolves, 1 + len(resolves)
 
-    Before v208 `leverage` was the size of the largest resolve set a row
-    happened to BELONG to, which ranked a row by what somebody else's answer
-    would do for it. The number a page shows should be what THIS answer is
-    worth, and the ordering follows the number it shows.
+
+def offered_unknowns(rows: list[dict], index: dict[str, set[str]],
+                     limit: int = UNKNOWNS_PAGE_CAP) -> list[dict]:
+    """The unknowns a page offers: leverage first, then the cheapest probe.
+
+    Every row carries its own **reach** (v208, ADR 0027), computed by the one
+    shared `row_leverage` definition, so the ordering is visible rather than
+    mysterious and a host can draw the glow from honest numbers.
 
     The glow itself is RELATIVE and its ranking is the host's job — these are
     raw per-row numbers and nothing here quantiles them. `keystones()` is
@@ -1511,11 +1524,7 @@ def offered_unknowns(rows: list[dict], index: dict[str, set[str]],
     plan value, and they are different questions.
     """
     for row in rows:
-        anchor = unknown_anchor(row)
-        resolved = set(index.get(anchor) or ()) if anchor else set()
-        resolved.discard(row["key"])
-        row["resolves"] = sorted(resolved)
-        row["leverage"] = 1 + len(row["resolves"])
+        row["resolves"], row["leverage"] = row_leverage(row, index)
     ordered = sorted(rows, key=lambda row: (
         -int(row.get("leverage") or 0),
         int((row.get("probe") or {}).get("cost") or 99),

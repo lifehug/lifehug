@@ -1019,6 +1019,11 @@ def build_timeline_plan(data: dict, *, era: str | None = None,
     a plan of BANK QUESTIONS and `arc_walk.normalize_target` requires bank
     categories, while a timeline unknown is neither. Keeping the closed roster
     closed is worth one extra plan builder (contract deviation 3).
+
+    Leverage is `timeline.row_leverage` — the one definition `offered_unknowns`
+    also reads off (issue #216: this function used to carry its own pre-v208
+    copy of the arithmetic, which drifted from the self-inclusive `1 +
+    len(resolves)` definition `offered_unknowns` moved to in v208).
     """
     import timeline  # noqa: PLC0415
 
@@ -1029,13 +1034,9 @@ def build_timeline_plan(data: dict, *, era: str | None = None,
                 if wanted == str(row.get("period") or "").lower()
                 or wanted in [str(x).lower() for x in (row.get("between") or [])]]
     index = timeline.dependency_index(data)
-    resolved_by = {}
-    for anchor_key, keys in index.items():
-        for key in keys:
-            resolved_by[key] = max(resolved_by.get(key, 0), len(keys))
     starred = {row["anchor"] for row in (data.get("keystones") or [])}
     for row in rows:
-        row["leverage"] = resolved_by.get(row["key"], 0)
+        row["resolves"], row["leverage"] = timeline.row_leverage(row, index)
         row["starred"] = row["key"] in starred
     rows.sort(key=lambda row: (
         not row["starred"],

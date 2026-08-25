@@ -429,6 +429,36 @@ class TimelinePlanTests(UnknownsFixture):
         self.assertIn("Timeline plan", lines)
         self.assertIn("probe (", lines)
 
+    def test_leverage_matches_the_one_shared_definition(self):
+        """Issue #216: `build_timeline_plan` must read leverage off
+        `timeline.row_leverage` — the same self-inclusive `1 + len(resolves)`
+        definition `offered_unknowns` uses — never an independent copy.
+        Before the fix this function kept a pre-v208 `resolved_by` loop that
+        was neither self-inclusive nor keyed off `unknown_anchor`, so a row
+        with real reach could disagree with (or a no-reach row could read 0
+        leverage instead of) the number `row_leverage` gives it."""
+        index = tl.dependency_index(self.data)
+        plan = ti.build_timeline_plan(self.data)
+        self.assertTrue(plan["unknowns"])
+        for row in plan["unknowns"]:
+            want_resolves, want_leverage = tl.row_leverage(row, index)
+            self.assertEqual(row["resolves"], want_resolves)
+            self.assertEqual(row["leverage"], want_leverage)
+            # Self-inclusive: answering a row always places itself, so
+            # leverage is never 0 even when the row resolves nothing else.
+            self.assertGreaterEqual(row["leverage"], 1)
+
+    def test_no_independent_leverage_arithmetic_in_the_interaction(self):
+        """Recurring-defect guard (issue #216): `build_timeline_plan` reads
+        leverage from `timeline.row_leverage` — it must never regrow its own
+        loop over `dependency_index` (the `resolved_by` shape this replaced)."""
+        src = (SYSTEM / "timeline_interaction.py").read_text(encoding="utf-8")
+        marker = "def build_timeline_plan"
+        build_src = src[src.index(marker):]
+        build_src = build_src[:build_src.index("\ndef ", 1)]
+        self.assertIn("timeline.row_leverage(", build_src)
+        self.assertNotIn("resolved_by", build_src)
+
 
 class PlannerTimelineTests(unittest.TestCase):
     """v196: ONE knob, and no adjacency anywhere."""
