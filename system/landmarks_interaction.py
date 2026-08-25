@@ -1202,7 +1202,7 @@ def incomplete_subjects(landmarks: object, *,
         ladder = list(row.get("ladder") or ())
         target = row.get("complete_at")
         target_index = ladder.index(target) if target in ladder else len(ladder) - 1
-        for entry in filed.get(domain) or ():
+        for position, entry in enumerate(filed.get(domain) or (), start=1):
             if not isinstance(entry, dict):
                 continue
             label = str(entry.get("label") or "").strip()
@@ -1218,6 +1218,13 @@ def incomplete_subjects(landmarks: object, *,
                 "kind": LANDMARK_SUBJECT_KIND,
                 "key": f"{LANDMARK_SUBJECT_KIND}:{domain}:{slug}",
                 "label": label,
+                # v208: the anchor key THIS subject's answer would mint, from
+                # the same two functions `anchors_from_landmarks` uses — so
+                # `timeline.unknown_anchor` can name it without a second
+                # spelling of the key living in the timeline module.
+                "anchor": (_family_anchor_key(entry, label, position)
+                           if domain == "family"
+                           else _anchor_key(domain, label, position)),
                 "domain": domain,
                 "rung": question["rung"],
                 "landmark": {"domain": domain, "label": label},

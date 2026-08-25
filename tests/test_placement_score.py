@@ -673,3 +673,121 @@ class PriorSpanThroughTimelineDataTests(VaultFixture):
         rows = {row["title"]: row for group in data["event_lineup"].values() for row in group}
         self.assertEqual(rows["The bike with no brakes"]["prior_span"], [1984, 1990])
         self.assertGreaterEqual(data["cross_dating"]["prior_spans"], 1)
+
+
+# ---------------------------------------------------------------------------
+# §D — `unknown_anchor`, row `resolves` and `leverage` (contract §E.8).
+# ---------------------------------------------------------------------------
+
+
+class UnknownAnchorTests(unittest.TestCase):
+    def test_each_kind_maps_to_the_anchor_it_would_become(self):
+        self.assertEqual(
+            tl.unknown_anchor({"kind": "period_bound", "slug": "childhood"}),
+            "period:childhood")
+        self.assertEqual(
+            tl.unknown_anchor({"kind": "place_span", "slug": "mesa", "period": "childhood"}),
+            "entity:mesa")
+        self.assertEqual(
+            tl.unknown_anchor({"kind": "moment", "period": "childhood",
+                               "source_short": "A1"}),
+            "event:childhood:A1")
+        self.assertEqual(
+            tl.unknown_anchor({"kind": "landmark_subject", "domain": "family",
+                               "anchor": "family:sibling-james:birth"}),
+            "family:sibling-james:birth")
+
+    def test_the_self_only_kinds_name_no_anchor(self):
+        for row in ({"kind": "moment", "period": None, "source_short": "A9"},
+                    {"kind": "era_gap", "between": ["a", "b"]},
+                    {"kind": "date_contradiction", "period": "childhood"},
+                    {"kind": "residence_gap", "between": ["Mesa", "Yucaipa"]},
+                    {"kind": "landmark_subject", "domain": "family"}):
+            with self.subTest(kind=row["kind"]):
+                self.assertIsNone(tl.unknown_anchor(row))
+
+    def test_a_landmark_subject_carries_the_key_its_own_ladder_mints(self):
+        import landmarks_interaction as li
+
+        filed = {"family": [{"label": "Jackie", "relation": "sibling"}],
+                 "residences": [{"label": "Mesa"}]}
+        rows = {row["key"]: row for row in li.incomplete_subjects(filed)}
+        family = rows["landmark_subject:family:jackie"]
+        self.assertEqual(family["anchor"], "family:sibling-jackie:birth")
+        self.assertEqual(tl.unknown_anchor(family), "family:sibling-jackie:birth")
+        residence = rows["landmark_subject:residences:mesa"]
+        self.assertEqual(residence["anchor"], "residences-mesa")
+
+    def test_the_key_matches_what_anchors_from_landmarks_would_mint(self):
+        """One spelling of the anchor key, not two — the recurring-defect
+        doctrine applied to the thing the glow is drawn from."""
+        import landmarks_interaction as li
+
+        dated = {"family": [{"label": "Jackie", "relation": "sibling",
+                             "date": {"best": "1984"}}]}
+        self.assertIn("family:sibling-jackie:birth", li.anchors_from_landmarks(dated))
+        undated = {"family": [{"label": "Jackie", "relation": "sibling"}]}
+        self.assertEqual(li.incomplete_subjects(undated)[0]["anchor"],
+                         "family:sibling-jackie:birth")
+
+
+class RowReachTests(unittest.TestCase):
+    """§E.8 — the numbers are raw; the ranking is the host's."""
+
+    def test_resolves_is_the_dependency_index_set_minus_the_rows_own_key(self):
+        rows = [{"key": "period_bound:childhood", "kind": "period_bound",
+                 "slug": "childhood", "probe": {"cost": 1}}]
+        index = {"period:childhood": {"period_bound:childhood", "moment:childhood:A1",
+                                      "moment:childhood:A2"}}
+        offered = tl.offered_unknowns(rows, index)
+        self.assertEqual(offered[0]["resolves"],
+                         ["moment:childhood:A1", "moment:childhood:A2"])
+        self.assertEqual(offered[0]["leverage"], 3)
+
+    def test_a_row_with_no_reach_has_leverage_one_exactly(self):
+        rows = [{"key": "era_gap:a:b", "kind": "era_gap", "probe": {"cost": 1}}]
+        offered = tl.offered_unknowns(rows, {"period:childhood": {"moment:x"}})
+        self.assertEqual(offered[0]["resolves"], [])
+        self.assertEqual(offered[0]["leverage"], 1)
+
+    def test_a_heavy_tail_is_emitted_raw_and_unranked(self):
+        """One anchor reaching 53 things and a dozen reaching none: the package
+        supplies honest per-row numbers, and the glow's rank-quantiles are the
+        platform's job (ruling 5)."""
+        big = {f"moment:era:{n}" for n in range(53)}
+        rows = [{"key": "period_bound:era", "kind": "period_bound", "slug": "era",
+                 "probe": {"cost": 1}}]
+        rows += [{"key": f"era_gap:g{n}", "kind": "era_gap", "probe": {"cost": 1}}
+                 for n in range(12)]
+        index = {"period:era": big}
+        offered = tl.offered_unknowns(rows, index)
+        self.assertEqual(offered[0]["leverage"], 54)
+        self.assertEqual([row["leverage"] for row in offered[1:]], [1] * 12)
+
+    def test_keystones_are_untouched_by_the_row_definition(self):
+        """Row `leverage` is display reach; keystone `gain` is marginal plan
+        value. Different questions, different numbers, both correct."""
+        payload = crema_payload(pinned=False)
+        stars = tl.keystones(payload)
+        self.assertTrue(stars)
+        for star in stars:
+            self.assertEqual(star["leverage"], len(star["unknown_keys"]))
+            self.assertEqual(star["resolves"], star["unknown_keys"])
+
+
+class RowReachThroughTimelineDataTests(VaultFixture):
+    def test_the_era_row_reaches_the_moments_the_index_gives_it(self):
+        data = self.data()
+        rows = {row["key"]: row for row in data["unknowns"]}
+        era = rows["period_bound:childhood"]
+        index = tl.dependency_index(data)
+        self.assertEqual(set(era["resolves"]),
+                         set(index["period:childhood"]) - {era["key"]})
+        self.assertEqual(era["leverage"], 1 + len(era["resolves"]))
+
+    def test_every_offered_row_carries_both_numbers(self):
+        for row in self.data()["unknowns"]:
+            with self.subTest(key=row["key"]):
+                self.assertIsInstance(row["resolves"], list)
+                self.assertGreaterEqual(row["leverage"], 1)
+                self.assertEqual(row["leverage"], 1 + len(row["resolves"]))

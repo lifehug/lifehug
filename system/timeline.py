@@ -1436,20 +1436,80 @@ def unknown_ledger(data: dict) -> dict:
     }
 
 
+def unknown_anchor(row: object) -> str | None:
+    """The anchor key this unknown would BECOME when it is answered (v208).
+
+    The glow's source. `dependency_index` maps an anchor to everything one
+    answer places; this maps a ROW to the anchor it would supply, so a row can
+    be asked "and what else would that place?" without a second graph.
+
+    | kind | anchor |
+    |---|---|
+    | `period_bound` | `period:<slug>` |
+    | `place_span` | `entity:<slug>` |
+    | `moment` | `event:<period>:<source_short>` |
+    | `landmark_subject` | the landmark anchor key its ladder mints (`family:sibling-james:birth`, `residences-mesa`) |
+    | unplaced `moment`, `era_gap`, `date_contradiction`, `residence_gap` | ``None`` — self-only |
+
+    Two of those are deliberate honesty rather than omission. An **unplaced**
+    moment has no `event:` key to become: dating it places itself, and it may
+    close an `era_gap` it turns out to occupy — which `dependency_index`
+    already records under the event key ONCE it is placed. And a
+    **residence gap**'s answer mints a residence anchor whose slug nobody
+    knows yet; naming a key for a place the person has not named would be a
+    promise with no delivery behind it.
+    """
+    if not isinstance(row, dict):
+        return None
+    kind = str(row.get("kind") or "")
+    if kind == "period_bound":
+        slug = str(row.get("slug") or row.get("period") or "").strip()
+        return f"period:{slug}" if slug else None
+    if kind == "place_span":
+        slug = str(row.get("slug") or "").strip()
+        return f"entity:{slug}" if slug else None
+    if kind == "moment":
+        period = str(row.get("period") or "").strip()
+        if not period:
+            return None
+        return f"event:{period}:{row.get('source_short') or ''}"
+    if kind == "landmark_subject":
+        anchor = str(row.get("anchor") or "").strip()
+        return anchor or None
+    return None
+
+
 def offered_unknowns(rows: list[dict], index: dict[str, set[str]],
                      limit: int = UNKNOWNS_PAGE_CAP) -> list[dict]:
     """The unknowns a page offers: leverage first, then the cheapest probe.
 
-    Every row keeps its own `leverage` (how many other unknowns the best
-    anchor for it would also place), so the ordering is visible rather than
-    mysterious.
+    Every row carries its own **reach** (v208, ADR 0027), so the ordering is
+    visible rather than mysterious and a host can draw the glow from honest
+    numbers:
+
+    * `resolves` — the other unknowns that answering THIS row would place,
+      taken from `dependency_index` under the anchor this row would become
+      (`unknown_anchor`), minus the row's own key. `[]` when the row becomes
+      no anchor.
+    * `leverage` — `1 + len(resolves)`, self-inclusive: a row with no reach
+      has `leverage: 1` exactly, because answering it still places itself.
+
+    Before v208 `leverage` was the size of the largest resolve set a row
+    happened to BELONG to, which ranked a row by what somebody else's answer
+    would do for it. The number a page shows should be what THIS answer is
+    worth, and the ordering follows the number it shows.
+
+    The glow itself is RELATIVE and its ranking is the host's job — these are
+    raw per-row numbers and nothing here quantiles them. `keystones()` is
+    untouched: row `leverage` is display reach, keystone `gain` is marginal
+    plan value, and they are different questions.
     """
-    resolved_by: dict[str, int] = {}
-    for keys in index.values():
-        for key in keys:
-            resolved_by[key] = max(resolved_by.get(key, 0), len(keys))
     for row in rows:
-        row["leverage"] = resolved_by.get(row["key"], 0)
+        anchor = unknown_anchor(row)
+        resolved = set(index.get(anchor) or ()) if anchor else set()
+        resolved.discard(row["key"])
+        row["resolves"] = sorted(resolved)
+        row["leverage"] = 1 + len(row["resolves"])
     ordered = sorted(rows, key=lambda row: (
         -int(row.get("leverage") or 0),
         int((row.get("probe") or {}).get("cost") or 99),
