@@ -135,11 +135,20 @@ in the anchors this episode actually offered — an invented anchor drops the
 whole record rather than filing something wrong.
 
 The package names the date; the host writes it.
-`timeline_interaction.place_invocation` builds the exact argv for the write
+`timeline_interaction.place_invocation` builds the exact call for the write
 path that already existed: `lifehug.py timeline-place <source> --period <slug>
 [--date <edtf>] [--basis <basis>] [--anchor <key>]…`, which files a `--kind
 date` correction source (the durable half) and saves the display pin (which
 auto-retires once classification catches up).
+
+The call is a `PlaceInvocation` — `argv` AND `stdin_text` — because the command
+reads the moment's description on **stdin** and exits 1 without it. The host
+runs both halves: `subprocess.run([…, *inv.argv], input=inv.stdin_text)`. They
+travel together for a reason: while they were two values,
+`conversation_delivery._file_placement` ran the argv with no `input=` and every
+date a person named in conversation exited 1 into a silent `place_failed`
+(lifehug#223, fixed in v213 — `tests/test_timeline_place_filing.py` now
+executes the filing against a real temp vault).
 
 ## 5. Where it lives
 

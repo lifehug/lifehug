@@ -353,7 +353,7 @@ class ValidatePlacedTests(unittest.TestCase):
         self.assertEqual(placed["granularity"], "range")
         self.assertEqual(placed["basis"], "age")
         argv = ti.place_invocation(placed, source="answers/A1.md",
-                                   description="preschool", period="childhood")
+                                   description="preschool", period="childhood").argv
         self.assertEqual(argv[argv.index("--date") + 1], "1983/1985")
 
     def test_every_other_shape_is_none(self):
@@ -364,11 +364,12 @@ class ValidatePlacedTests(unittest.TestCase):
 
 class PlaceInvocationTests(unittest.TestCase):
     def test_the_bridge_builds_the_exact_timeline_place_argv(self):
-        args = ti.place_invocation(
+        call = ti.place_invocation(
             {"best": "1984~", "earliest": "1983", "latest": "1986",
              "granularity": "range", "confidence": "approximate", "basis": "age",
              "anchors": ["birth"]},
             source="answers/A1.md", description="the letter", period="childhood")
+        args = call.argv
         self.assertEqual(args[:4], ["timeline-place", "answers/A1.md", "--period", "childhood"])
         self.assertIn("--date", args)
         self.assertEqual(args[args.index("--date") + 1], "1984~")
@@ -382,6 +383,26 @@ class PlaceInvocationTests(unittest.TestCase):
     def test_a_missing_target_files_nothing(self):
         self.assertIsNone(ti.place_invocation({"best": "1984"}, source="",
                                               description="d", period="p"))
+
+    def test_the_call_carries_the_stdin_the_cli_requires(self):
+        """lifehug#223: `timeline-place` reads the description on stdin and
+        exits 1 without it, so argv alone is half a call. One return value,
+        both halves — a host holding the argv holds the stdin too."""
+        call = ti.place_invocation({"best": "1984", "granularity": "year",
+                                    "confidence": "approximate", "basis": "document"},
+                                   source="answers/A1.md", description="the letter",
+                                   period="childhood")
+        self.assertEqual(call.stdin_text, "the letter")
+        self.assertEqual(tuple(call._fields), ("argv", "stdin_text"))
+
+    def test_a_missing_description_files_nothing(self):
+        """The description is as required as source and period: an empty one
+        is a call the CLI refuses, so it never becomes an argv here."""
+        for description in ("", "   "):
+            with self.subTest(description=description):
+                self.assertIsNone(ti.place_invocation(
+                    {"best": "1984"}, source="answers/A1.md",
+                    description=description, period="childhood"))
 
 
 class LintTests(unittest.TestCase):

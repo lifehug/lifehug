@@ -91,7 +91,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | Closed validation of those fields | `reading_room.validate_evidence(value, anchors=…, witness=…)` (delegates to `timeline_interaction.validate_placed`) and `landmarks_interaction.validate_landmark` |
 | What each basis honestly owes | `reading_room.normalize_evidence_record`, `reading_room.CONFIDENCE_CEILING` |
 | The five reading-room lints | `reading_room.lint_reading_room_reply(text, stage=…)`; `reading_room.READING_ROOM_LINT_CLASSES`. The fifth, `never_proposes_a_date`, is SHARED — its one definition is `timeline_interaction.proposes_a_date`. `no_pressure` is shared too: `landmarks_interaction.pressure` |
-| Filing an accepted record | `reading_room.filing_invocations(turn, source=…, description=…, period=…)` → `lifehug.py timeline-place` / `landmark-record` |
+| Filing an accepted record | `reading_room.filing_invocations(turn, source=…, description=…, period=…)` → `lifehug.py timeline-place` / `landmark-record`, each as a `PlaceInvocation(argv, stdin_text)` the host runs with `input=` (lifehug#223) |
 | The close, and the homework | `reading_room.render_dig_lists(plan)`, `reading_room.describe_close(plan)`; rendered by `wiki_compile.apply_dig_lists` into the witness's own `## Open Questions` |
 | The harvest guard | `question_candidates._is_dig_list_line` — a dig list is addressed to the WITNESS and must never enter the owner's own queue |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{reading_room_stage}`, `{inventory}`, `{agenda}`, `{next_ask}`, `{anchors}` |

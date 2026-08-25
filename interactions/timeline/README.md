@@ -61,7 +61,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["placed"]`, enabled by `TurnShape(timeline_stage=…)` |
 | Closed validation of that field | `timeline_interaction.validate_placed(value, anchors=…)` |
 | The seven timeline lints | `timeline_interaction.lint_timeline_reply(text, stage=…, probe_step=…, known_years=…)`; `timeline_interaction.TIMELINE_LINT_CLASSES`. The seventh, `never_proposes_a_date`, is SHARED with the landmarks lane from one definition (`timeline_interaction.proposes_a_date`) |
-| Filing an accepted placement | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…)` |
+| Filing an accepted placement | `timeline_interaction.place_invocation(placed, source=…, description=…, period=…)` → a `PlaceInvocation(argv, stdin_text)`; the host runs BOTH halves (`timeline-place` reads the description on stdin and exits 1 without it — lifehug#223) |
 | The unknowns to Play | `timeline.unknowns(data)`, `timeline.UNKNOWN_KINDS`, `timeline.keystones(data)`, `timeline.KEYSTONE_CAP` |
 | The two ways a keystone is asked | `timeline_interaction.whisper_from_keystone`, `timeline_interaction.mint_keystone_question` / `insert_keystone_question` / `timeline_probe_index` |
 | This turn's timeline item | `timeline_interaction.timeline_item_for_session`, `timeline_interaction.timeline_asks_so_far`, `conversation_delivery.timeline_item_for_turn` |

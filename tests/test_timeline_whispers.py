@@ -152,10 +152,11 @@ class AnswerRoutingTests(unittest.TestCase):
             "placed": {"best": "1984/1990", "granularity": "range",
                        "confidence": "inferred", "basis": "anchor",
                        "anchors": ["mesa"]}})
-        argv = ti.place_invocation(placed, source="answers/A1.md",
+        call = ti.place_invocation(placed, source="answers/A1.md",
                                    description="the bike", period="mesa")
-        self.assertEqual(argv[0], "timeline-place")
-        self.assertIn("--basis", argv)
+        self.assertEqual(call.argv[0], "timeline-place")
+        self.assertIn("--basis", call.argv)
+        self.assertEqual(call.stdin_text, "the bike")
 
 
 class ArcYieldTests(unittest.TestCase):

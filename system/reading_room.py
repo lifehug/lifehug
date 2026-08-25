@@ -51,6 +51,7 @@ if str(_SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import timeline as _timeline  # noqa: E402
+from timeline_interaction import PlaceInvocation  # noqa: E402
 
 
 class ReadingRoomError(ValueError):
@@ -292,30 +293,40 @@ def validate_evidence(value: object, *, anchors: object = (),
 
 
 def filing_invocations(turn: object, *, source: str = "", description: str = "",
-                       period: str = "") -> list[list[str]]:
-    """The argv the host runs to file whatever this turn produced.
+                       period: str = "") -> list[PlaceInvocation]:
+    """The complete calls the host runs to file whatever this turn produced.
 
     The package NAMES, the host WRITES — the same split every child uses. A
     `placed` record goes through `timeline-place`, a `landmark` through
     `landmark-record`, and this lane owns neither verb.
+
+    Every row is a `timeline_interaction.PlaceInvocation` — argv AND the stdin
+    that command reads — so a host can run the list uniformly::
+
+        subprocess.run([..., *inv.argv], input=inv.stdin_text, text=True)
+
+    `timeline-place` reads its description on stdin and exits 1 without it;
+    `landmark-record` takes everything as flags and carries `stdin_text=""`.
+    Returning bare argv is what let the one wired host drop the description
+    (lifehug#223), and this lane will not re-plant it.
     """
     import landmarks_interaction as _li  # noqa: PLC0415
     import timeline_interaction as _ti  # noqa: PLC0415
 
     if not isinstance(turn, dict):
         return []
-    out = []
+    out: list[PlaceInvocation] = []
     placed = turn.get("placed")
     if placed:
-        argv = _ti.place_invocation(placed, source=source, description=description,
-                                    period=period)
-        if argv:
-            out.append(argv)
+        invocation = _ti.place_invocation(placed, source=source, description=description,
+                                          period=period)
+        if invocation is not None:
+            out.append(invocation)
     landmark = turn.get("landmark")
     if landmark:
         argv = _li.landmark_invocation(landmark)
         if argv:
-            out.append(argv)
+            out.append(_ti.PlaceInvocation(argv, ""))
     return out
 
 

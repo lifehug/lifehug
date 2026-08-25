@@ -706,12 +706,28 @@ class FilingTests(unittest.TestCase):
                        "basis": "document", "anchors": []},
             "landmark": {"domain": "schools", "label": "Wildwood Elementary"},
         }
-        argvs = rr.filing_invocations(turn, source="A1", description="the move",
+        calls = rr.filing_invocations(turn, source="A1", description="the move",
                                       period="childhood-yucaipa")
-        self.assertEqual([argv[0] for argv in argvs],
+        self.assertEqual([call.argv[0] for call in calls],
                          ["timeline-place", "landmark-record"])
-        self.assertIn("--basis", argvs[0])
-        self.assertIn(argvs[0][argvs[0].index("--basis") + 1], ch.BASES)
+        argv = calls[0].argv
+        self.assertIn("--basis", argv)
+        self.assertIn(argv[argv.index("--basis") + 1], ch.BASES)
+
+    def test_the_place_call_carries_the_description_the_cli_reads_on_stdin(self):
+        """lifehug#223: argv without stdin is half a call — `timeline-place`
+        exits 1 on an empty description, so the two must travel together."""
+        calls = rr.filing_invocations(
+            {"placed": {"best": "1984", "granularity": "year",
+                        "confidence": "approximate", "basis": "document"}},
+            source="A1", description="the move", period="childhood-yucaipa")
+        self.assertEqual(calls[0].stdin_text, "the move")
+
+    def test_a_placement_with_no_description_files_nothing(self):
+        self.assertEqual(
+            rr.filing_invocations({"placed": {"best": "1984"}},
+                                  source="A1", description="", period="childhood"),
+            [])
 
     def test_nothing_to_file_is_no_invocation(self):
         self.assertEqual(rr.filing_invocations({}), [])
