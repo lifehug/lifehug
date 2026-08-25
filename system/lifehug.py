@@ -1748,6 +1748,12 @@ def cmd_entity_verdict(args: argparse.Namespace) -> int:
         flags.append("--living")
     elif args.living is False:
         flags.append("--not-living")
+    # v217 (person dates): born/died ride the SAME single call — one writer
+    # for one roster file stays one writer.
+    for flag in ("born", "born_basis", "died", "died_basis"):
+        value = getattr(args, flag, None)
+        if value:
+            flags.extend([f"--{flag.replace('_', '-')}", str(value)])
     if args.maps_to:
         flags.extend(["--maps-to", args.maps_to])
     # v202 (family-landmark §D): a person the FAMILY landmark set named may
@@ -2457,6 +2463,15 @@ def build_parser() -> argparse.ArgumentParser:
                          help="This person is still living")
     _living.add_argument("--not-living", dest="living", action="store_false",
                          help="This person is no longer living")
+    # v217 (person dates): the two most common datable facts in a life story.
+    p.add_argument("--born", metavar="EDTF",
+                   help="When this person was born (EDTF or a human form)")
+    p.add_argument("--born-basis", dest="born_basis", metavar="B",
+                   help="How the birth date was arrived at (chronology.BASES; default stated)")
+    p.add_argument("--died", metavar="EDTF",
+                   help="When this person died (same date forms as --born)")
+    p.add_argument("--died-basis", dest="died_basis", metavar="B",
+                   help="How the death date was arrived at (chronology.BASES; default stated)")
     p.add_argument("--maps-to", dest="maps_to", metavar="SLUG",
                    help="This entity is really that existing page — wins over graduate")
     p.add_argument("--ensure", action="store_true",

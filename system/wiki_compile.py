@@ -353,7 +353,8 @@ def _is_retracted(item: dict, slug: str) -> bool:
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
                 synthesized: bool = True, origin: str = "focus", section: str = "",
                 chrono: int | None = None, sensitivity: str = "private",
-                date_edtf: str = "") -> str:
+                date_edtf: str = "", born_edtf: str = "",
+                died_edtf: str = "") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -377,6 +378,14 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         # reads it back, so the span survives a recompile and finally gives
         # `approximate_dates` a writer.
         lines.append(f"date: {date_edtf}")
+    # v217 (person dates): a person's own two dates, the most common datable
+    # facts in a life story. Separate keys rather than a reused `date:` span —
+    # `timeline.load_entities` reads `date` as a PLACE's residence span, and a
+    # lifespan is not that.
+    if born_edtf:
+        lines.append(f"born: {born_edtf}")
+    if died_edtf:
+        lines.append(f"died: {died_edtf}")
     if section:
         lines.append(f'section: "{section}"')
     lines += [
@@ -515,7 +524,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
                 seed_related=None, origin="focus", section="", chrono=None,
-                date_edtf=""):
+                date_edtf="", born_edtf="", died_edtf=""):
     if _RETRACTIONS:
         cited_items = [i for i in cited_items if not _is_retracted(i, slug)]
         supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
@@ -532,6 +541,8 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "summary": summary,
         "chrono": chrono,
         "date_edtf": date_edtf,
+        "born_edtf": born_edtf,
+        "died_edtf": died_edtf,
         "open_questions": open_questions,
         "open_questions_header": open_questions_header,
         "seed_related": seed_related or [],
@@ -768,7 +779,8 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
         chrono = ent.get("chrono") if entity_type == "period" else None
         descs.append(_descriptor(
             entity_type, name, slug, sources, cited_items, supporting,
-            summary=f"A {noun} in the author's life, compiled automatically from "
+            summary=f"{_person_dates_sentence(ent) if entity_type == 'person' else ''}"
+                    f"A {noun} in the author's life, compiled automatically from "
                     f"{len(cited_items)} mentions across the story. Owner-only.",
             open_questions=[
                 f"- What did {name} mean in the author's life?",
@@ -777,8 +789,41 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
             origin="mention",
             chrono=chrono if isinstance(chrono, int) else None,
             date_edtf=(_period_date_edtf(ent) if entity_type == "period" else ""),
+            born_edtf=(_person_date_edtf(ent, "born") if entity_type == "person" else ""),
+            died_edtf=(_person_date_edtf(ent, "died") if entity_type == "person" else ""),
         ))
     return descs
+
+
+def _person_date_edtf(entity: dict, field: str) -> str:
+    """A person roster entry's `born` or `died` as EDTF, or "".
+
+    v217. The roster stores a full `chronology.DateRecord`; the page carries
+    its canonical EDTF expression so a recompile never loses the date and a
+    reader can see it without opening the roster.
+    """
+    import chronology as chrono  # noqa: PLC0415
+
+    return chrono.to_edtf(chrono.from_dict(entity.get(field))) or ""
+
+
+def _person_dates_sentence(entity: dict) -> str:
+    """``"Born 1948, died 2019. "`` — the visible half of v217's person dates.
+
+    Empty when the person has neither date, which is every person the roster
+    has not learned a date for, so no existing page's summary changes.
+    """
+    import chronology as chrono  # noqa: PLC0415
+
+    born = chrono.from_dict(entity.get("born"))
+    died = chrono.from_dict(entity.get("died"))
+    parts = []
+    if born is not None:
+        parts.append(f"Born {chrono.display_date(born, with_basis=False)}")
+    if died is not None:
+        parts.append(("d" if parts else "D") + "ied "
+                     + chrono.display_date(died, with_basis=False))
+    return f"{', '.join(parts)}. " if parts else ""
 
 
 def _period_date_edtf(entity: dict) -> str:
@@ -1360,7 +1405,9 @@ def render_page(desc, synth, related, backlinks, slug_title):
         frontmatter(desc["title"], desc["type"], desc["sources"], related,
                     synthesized=bool(synth["synthesized"]), origin=desc.get("origin", "focus"),
                     section=desc.get("section", ""), chrono=desc.get("chrono"),
-                    sensitivity=floor, date_edtf=desc.get("date_edtf", "")),
+                    sensitivity=floor, date_edtf=desc.get("date_edtf", ""),
+                    born_edtf=desc.get("born_edtf", ""),
+                    died_edtf=desc.get("died_edtf", "")),
         "",
         f"# {desc['title']}",
         "",

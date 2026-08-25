@@ -8,8 +8,9 @@ can stamp on any roster entity, mirroring the focus lane's dismiss-forever
 and the candidate lane's promote-override.
 
     entity-verdict <type> <slug> graduate|never|clear
-        [--alias A]... [--relationship R] [--living|--not-living] [--maps-to SLUG]
-        [--ensure [--name NAME]]
+        [--alias A]... [--relationship R] [--living|--not-living]
+        [--born EDTF [--born-basis B]] [--died EDTF [--died-basis B]]
+        [--maps-to SLUG] [--ensure [--name NAME]]
 
   - `graduate` — an entity the owner knows matters shouldn't have to wait
     for its second mention: `page_eligible` is forced true regardless of
@@ -50,6 +51,17 @@ fact, which is exactly what the recurring-defect doctrine exists to prevent.
   - `--relationship R` — closed against `focus_candidate.FOCUS_RELATIONSHIPS`
     (the focus lane's list, imported rather than re-typed).
   - `--living` / `--not-living` — a real bool on the entry.
+  - `--born EDTF` / `--died EDTF` (v217) — the two most common datable
+    facts in a life story, finally with a home on the person they belong
+    to. Parsed by `chronology.parse_edtf` and normalized by
+    `chronology.normalized_date` — the SAME two calls `lifehug.py
+    landmark-record --date` makes, not a second date reader — and stored
+    as a full `DateRecord` dict so a bare year still carries real bounds
+    and can date something. `--born-basis` / `--died-basis` name the
+    warrant (`chronology.BASES`, default `stated`); they are what makes
+    the precedence rule below expressible from the command line.
+    Both fields are in `entity_roster._SETTLED_IDENTITY_FIELDS`, so a
+    roster refresh can never drop them.
   - `--ensure` (v202) — an absent slug is CREATED rather than refused, for a
     person the family landmark set named who has no answer mentions yet. The
     created row is never page-eligible (ADR 0013's mention floor); it exists
@@ -84,8 +96,10 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import chronology  # noqa: E402
 from entity_roster import (  # noqa: E402
     ENTITY_TYPES,
+    PERSON_DATE_FIELDS,
     THRESHOLDS,
     _focus_map,
     apply_owner_verdict,
@@ -142,6 +156,59 @@ def _validated_identity(
     return cleaned, relationship, living
 
 
+def parse_person_date(flag: str, value: object, basis: object = None) -> dict | None:
+    """One `--born`/`--died` value as a stored `DateRecord` dict, or ``None``.
+
+    ONE date definition, reused: `chronology.parse_edtf` reads the expression
+    exactly as `lifehug.py landmark-record --date` does, and
+    `chronology.normalized_date` fills the bounds exactly as every landmark
+    date already gets them. Nothing here re-implements EDTF.
+
+    Raises `EntityVerdictError` — never writes — on an unreadable date or an
+    unknown basis, so a typo leaves the roster byte-for-byte unchanged.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        raise EntityVerdictError(f"--{flag} requires a date")
+    basis_name = str(basis).strip() if basis is not None else "stated"
+    if basis_name not in chronology.BASES:
+        raise EntityVerdictError(
+            f"--{flag}-basis must be one of {', '.join(chronology.BASES)}")
+    record = chronology.parse_edtf(text, basis=basis_name)
+    if record is None:
+        raise EntityVerdictError(f"--{flag} is not a date I can read: {text!r}")
+    return chronology.normalized_date(record.to_dict())
+
+
+def _preferred_date(existing: object, incoming: object) -> object:
+    """Which of two claims for the same person-date the roster keeps.
+
+    **Derived never overwrites stated.** A `born` the person stated outright
+    must not lose to one some later pass inferred from an anchor, an age
+    statement or an ordering — those are the cheapest claims in the vault and
+    they arrive on every refresh, so "last writer wins" would quietly erode
+    the best fact on the entry.
+
+    **Same-basis update wins by recency.** Two claims of equal support are the
+    person correcting themself (or a better-corroborated re-statement of the
+    same fact), and the newer one is the one they meant.
+
+    The strength order is not re-typed here: it is `chronology.claim_score`,
+    the package's one definition of how well-supported a dating claim is
+    (basis weight + confidence weight + consilience). Incoming wins on a tie,
+    which is exactly the recency rule; a strictly weaker incoming claim is
+    dropped.
+    """
+    if incoming is None:
+        return existing
+    if existing is None:
+        return incoming
+    return incoming if chronology.claim_score(incoming) >= chronology.claim_score(existing) \
+        else existing
+
+
 def _union_aliases(entry: dict, additions: Sequence[str]) -> None:
     """Union `additions` into `entry["aliases"]` in place — trimmed, order
     preserved, deduplicated case-insensitively, and never the entry's own
@@ -185,6 +252,10 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   aliases: Sequence[str] = (),
                   relationship: str | None = None,
                   living: bool | None = None,
+                  born: object = None,
+                  born_basis: object = None,
+                  died: object = None,
+                  died_basis: object = None,
                   maps_to: str | None = None,
                   ensure: bool = False,
                   name: str | None = None) -> dict:
@@ -203,6 +274,12 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
     if verdict not in VERDICTS:
         raise EntityVerdictError(f"unknown verdict: {verdict!r} (graduate|never|clear)")
     aliases, relationship, living = _validated_identity(aliases, relationship, living)
+    # v217: both person dates are parsed BEFORE any read, so an unreadable
+    # date refuses the whole call and leaves the roster untouched.
+    dates = {
+        "born": parse_person_date("born", born, born_basis),
+        "died": parse_person_date("died", died, died_basis),
+    }
     maps_to = str(maps_to).strip() if maps_to is not None else None
     if maps_to == "":
         raise EntityVerdictError("--maps-to requires a slug")
@@ -266,6 +343,12 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         target["relationship"] = relationship
     if living is not None:
         target["living"] = living
+    # v217 (person dates): derived never overwrites stated; a same-basis
+    # restatement wins by recency. `_preferred_date` is the whole rule.
+    for date_field in PERSON_DATE_FIELDS:
+        chosen = _preferred_date(target.get(date_field), dates[date_field])
+        if chosen is not None:
+            target[date_field] = chosen
 
     if maps_to is not None:
         # maps-to WINS over graduate (module docstring): a mapped entity
@@ -331,6 +414,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="This person is still living")
     living.add_argument("--not-living", dest="living", action="store_false",
                         help="This person is no longer living")
+    parser.add_argument("--born", metavar="EDTF",
+                        help="When this person was born (EDTF or a human form: "
+                             "1948, 1948-03, spring 1948, about 1948)")
+    parser.add_argument("--born-basis", metavar="B", default=None,
+                        help=f"How the birth date was arrived at "
+                             f"({', '.join(chronology.BASES)}; default stated)")
+    parser.add_argument("--died", metavar="EDTF",
+                        help="When this person died (same date forms as --born)")
+    parser.add_argument("--died-basis", metavar="B", default=None,
+                        help=f"How the death date was arrived at "
+                             f"({', '.join(chronology.BASES)}; default stated)")
     parser.add_argument("--maps-to", metavar="SLUG",
                         help="This entity is really that existing page — another "
                              "entity on this roster, or a Focus slug. Wins over "
@@ -348,7 +442,10 @@ def main(argv: list[str] | None = None) -> int:
         entity = apply_verdict(
             args.type, args.slug, args.verdict,
             aliases=args.alias, relationship=args.relationship,
-            living=args.living, maps_to=args.maps_to,
+            living=args.living,
+            born=args.born, born_basis=args.born_basis,
+            died=args.died, died_basis=args.died_basis,
+            maps_to=args.maps_to,
             ensure=args.ensure, name=args.name,
         )
     except EntityVerdictError as exc:
@@ -378,6 +475,10 @@ def main(argv: list[str] | None = None) -> int:
         learned.append(f"relationship: {entity['relationship']}")
     if args.living is not None:
         learned.append(f"living: {'yes' if entity['living'] else 'no'}")
+    for flag, field in (("born", "born"), ("died", "died")):
+        if getattr(args, flag, None) and entity.get(field):
+            learned.append(
+                f"{field}: {chronology.display_date(entity[field], with_basis=False)}")
     if learned:
         print(f"  identity — {'; '.join(learned)}")
     return 0

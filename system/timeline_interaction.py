@@ -186,7 +186,7 @@ def _anchor_rows(anchors: object) -> list[dict]:
 
 def anchors_for_person(*, birth_date: object = None, periods: object = (),
                        places: object = (), events: object = (),
-                       landmarks: object = None) -> tuple[dict, ...]:
+                       landmarks: object = None, people: object = ()) -> tuple[dict, ...]:
     """The person's own dated landmarks, ordered — the life-history calendar.
 
     Birthday first (it dates everything else by arithmetic), then residences
@@ -194,6 +194,12 @@ def anchors_for_person(*, birth_date: object = None, periods: object = (),
     and role are the natural index of lifetime periods (Conway &
     Pleydell-Pearce 2000), which is why "when we lived in X" outperforms "what
     year".
+
+    v217: `people` is the PERSON roster. A person's `born`/`died` enters as an
+    anchor through `landmarks_interaction.anchors_from_people`, which is also
+    where the one-anchor-per-fact precedence lives (a family landmark's birth
+    date beats the roster's derived copy of it). This is what makes the
+    `entity_date` unlock real.
 
     v197: `landmarks` is the filed answer set from the Landmarks Interaction
     (`landmarks_interaction.anchors_from_landmarks`'s output, or the raw store
@@ -219,6 +225,11 @@ def anchors_for_person(*, birth_date: object = None, periods: object = (),
         rows[str(key)] = {"label": str(row.get("label") or key),
                           "date": record,
                           "kind": str(row.get("kind") or "landmark")}
+    if people:
+        import landmarks_interaction as _li  # noqa: PLC0415
+
+        for key, row in _li.anchors_from_people(people, landmarks).items():
+            rows.setdefault(key, dict(row))
     birth = chrono.from_dict(birth_date) if birth_date is not None else None
     if birth is not None:
         rows["birth"] = {"label": "when you were born", "date": birth, "kind": "birth"}
