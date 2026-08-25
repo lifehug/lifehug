@@ -1383,9 +1383,18 @@ class HappenedIsEntailedTests(unittest.TestCase):
     }
 
     def test_a_full_answer_no_longer_lands_below_rung_one(self):
+        """v203 got this entry to rung one; lifehug#219 gets it to rung two.
+
+        The same live shape, one release later: `happened` is entailed by the
+        label AND the label is a name list, so the entry now reaches `who` —
+        the rung the names were always an answer to. Pinning `happened` here
+        was pinning half the defect.
+        """
         row = li.domain_row("children")
         self.assertTrue(li.asserts_happened(self.LIVE_SHAPE))
-        self.assertEqual(li.rung_reached(self.LIVE_SHAPE, row), "happened")
+        self.assertEqual(li.rung_reached(self.LIVE_SHAPE, row), "who")
+        self.assertEqual(li.identity_named(self.LIVE_SHAPE, row),
+                         self.LIVE_SHAPE["label"])
 
     def test_bookkeeping_alone_does_not_assert_it(self):
         for entry in ({"domain": "children"},
@@ -1514,3 +1523,383 @@ class NoneCliTests(unittest.TestCase):
             self.assertEqual(self._run(["landmark-record", "birth",
                                         "--none"]), 1)
             self.assertFalse(store.exists())
+
+
+# ---------------------------------------------------------------------------
+# lifehug#219 — the ladder reads what the writer writes
+# ---------------------------------------------------------------------------
+
+
+class IdentityRungTests(unittest.TestCase):
+    """The founder's own shapes, structurally verbatim, synthetic surnames.
+
+    The live find (2026-08-25): the store held `partnerships` with his wife's
+    name in `label` and a day-precision date, and `children` with every child
+    labelled — and `/timeline` went on asking *"Who was that?"* and *"What are
+    their names?"*, because `rung_reached` counted the `who` rung only under a
+    `who` key that the writer never emits. Same class as lifehug#207.
+    """
+
+    PARTNERSHIP = {"domain": "partnerships", "label": "Marisol Reyes",
+                   "date": _date("2007-01-11")}
+    CHILDREN = ({"domain": "children", "label": "Charlee Joy Rivers"},
+                {"domain": "children", "label": "James Everett Rivers"},
+                {"domain": "children", "label": "Nora Belle Rivers"},
+                {"domain": "children", "label": "Silas Reed Rivers"})
+
+    def test_the_spouses_name_and_a_date_finish_the_partnership(self):
+        row = li.domain_row("partnerships")
+        self.assertEqual(li.rung_reached(self.PARTNERSHIP, row), "month")
+        self.assertEqual(li.status_for_domain([self.PARTNERSHIP], row), "complete")
+        self.assertIsNone(li.next_rung([self.PARTNERSHIP], row))
+
+    def test_the_who_rung_alone_is_reached_by_the_name(self):
+        """Strip the date and the row still climbs off `happened` onto `who`."""
+        row = li.domain_row("partnerships")
+        named = {k: v for k, v in self.PARTNERSHIP.items() if k != "date"}
+        self.assertEqual(li.rung_reached(named, row), "who")
+        self.assertEqual(li.next_rung([named], row)["rung"], "year")
+
+    def test_the_partnership_row_leaves_the_open_list(self):
+        rows = li.landmark_rows({"partnerships": [self.PARTNERSHIP]})
+        offered = {r["domain"] for r in li.open_landmarks(rows)}
+        self.assertNotIn("partnerships", offered)
+
+    def test_every_labelled_child_reaches_who(self):
+        row = li.domain_row("children")
+        for entry in self.CHILDREN:
+            with self.subTest(child=entry["label"]):
+                self.assertEqual(li.rung_reached(entry, row), "who")
+        self.assertEqual(li.status_for_domain(list(self.CHILDREN), row), "partial")
+
+    def test_the_follow_up_asks_the_missing_year_BY_NAME(self):
+        """Owner ruling 4 (v202) finally reachable here: never a generic re-ask."""
+        row = li.domain_row("children")
+        question = li.next_rung(list(self.CHILDREN), row)
+        self.assertEqual(question["rung"], "year")
+        self.assertEqual(question["subject"], "Charlee Joy Rivers")
+        self.assertEqual(question["text"], "What year was Charlee Joy Rivers born?")
+
+    def test_an_answered_child_hands_the_question_to_the_next_one(self):
+        row = li.domain_row("children")
+        entries = [{**self.CHILDREN[0], "date": _date("2009-03")},
+                   *self.CHILDREN[1:]]
+        question = li.next_rung(entries, row)
+        self.assertEqual(question["subject"], "James Everett Rivers")
+
+    def test_a_name_LIST_in_one_label_is_still_names(self):
+        row = li.domain_row("children")
+        entry = {"domain": "children",
+                 "label": "Charlee Joy Rivers, James Everett Rivers"}
+        self.assertEqual(li.rung_reached(entry, row), "who")
+
+    def test_an_empty_or_placeholder_label_is_not_a_name(self):
+        row = li.domain_row("children")
+        for label in ("", "   ", "that one", "unknown", "children", "—"):
+            with self.subTest(label=label):
+                entry = {"domain": "children", "label": label,
+                         "happened": "yes"}
+                self.assertIsNone(li.identity_named(entry, row))
+                self.assertEqual(li.rung_reached(entry, row), "happened")
+
+    def test_the_identity_rung_is_DERIVED_not_a_hand_written_list(self):
+        """The first rung that is neither `happened` nor a date grain."""
+        self.assertIsNone(li.identity_rung(li.domain_row("birth")))
+        expected = {"family": "who", "residences": "city", "schools": "name",
+                    "partnerships": "who", "children": "who", "work": "what",
+                    "military": "branch", "losses": "who"}
+        for domain, rung in expected.items():
+            with self.subTest(domain=domain):
+                row = li.domain_row(domain)
+                self.assertEqual(li.identity_rung(row), rung)
+                ladder = list(row["ladder"])
+                head = ladder[: ladder.index(rung)]
+                self.assertTrue(
+                    all(r == li.NONE_OPENER or r in ("year", "month", "day",
+                                                     "birth")
+                        for r in head),
+                    f"{domain}: {head} is not entailment-or-date",
+                )
+
+    def test_the_schools_chain_reads_a_bare_school_name(self):
+        """The turn contract says "the school in `label`" in so many words."""
+        row = li.domain_row("schools")
+        entry = {"domain": "schools", "label": "Lincoln High"}
+        self.assertEqual(li.rung_reached(entry, row), "name")
+        self.assertEqual(li.next_rung([entry], row)["rung"], "place")
+
+    def test_a_labelled_subject_becomes_a_NAMED_unknown(self):
+        """`incomplete_subjects` skipped these entirely: with `rung_reached`
+        returning None the index was -1 and the probe re-asked the opener."""
+        subjects = li.incomplete_subjects(
+            {"schools": [{"domain": "schools", "label": "Lincoln High"}]})
+        self.assertEqual([s["rung"] for s in subjects], ["place"])
+        self.assertIn("Lincoln High", subjects[0]["probe"]["text"])
+
+    def test_an_explicit_rung_key_still_wins_over_the_label(self):
+        row = li.domain_row("residences")
+        entry = {"domain": "residences", "label": "Bell Avenue",
+                 "city": "Dayton", "address": "11 Bell Ave"}
+        self.assertEqual(li.rung_reached(entry, row), "address")
+
+    def test_the_goldens_carry_these_shapes_and_the_ladder_reads_them(self):
+        """The eval seat's two new priors ARE these shapes — one definition of
+        "what a real vault looks like", not a fixture that drifts from the
+        suite that motivated it."""
+        fixtures = {row["fixture_id"]: row
+                    for row in landmarks_evals.load_fixtures()}
+        children = fixtures["landmarks-the-label-is-the-name-it-asked-for"]
+        self.assertEqual([e["label"] for e in children["landmarks"]["children"]],
+                         [e["label"] for e in self.CHILDREN])
+        self.assertEqual(
+            li.next_rung(children["landmarks"]["children"],
+                         li.domain_row("children"))["subject"],
+            "Charlee Joy Rivers")
+        self.assertEqual(
+            li.status_for_domain(children["landmarks"]["partnerships"],
+                                 li.domain_row("partnerships")),
+            "complete")
+        things = fixtures["landmarks-a-bare-label-climbs-the-thing-ladders"]
+        for domain, rung in (("residences", "city"), ("schools", "name"),
+                             ("work", "what")):
+            with self.subTest(domain=domain):
+                row = li.domain_row(domain)
+                entry = things["landmarks"][domain][0]
+                self.assertEqual(set(entry), {"domain", "label"})
+                self.assertEqual(li.rung_reached(entry, row), rung)
+                self.assertNotEqual(li.next_rung([entry], row)["text"],
+                                    row["ask"])
+
+
+class LadderConsistencyTests(unittest.TestCase):
+    """The class guard (recurring-defect doctrine, docs/BUILDING.md §7).
+
+    Three defects in this class have now shipped — `span` (v199), the date
+    grains (lifehug#207) and the identity rung (lifehug#219) — and every one of
+    them is the same sentence: *the ladder could not read what the writer
+    writes*. Patching the fourth instance is not the fix. This suite asserts
+    the property instead:
+
+    1. every rung has a question, and every question is a rung;
+    2. every rung text survives its own domain's lints;
+    3. **every rung is reachable from every field that satisfies it**, which
+       is what `rung_satisfiers` declares — this leg fails for lifehug#207 and
+       for lifehug#219 on the pre-fix code;
+    4. **every field the writer can store is a rung, a declared satisfier, or
+       explicitly not a rung** — so a new writer field cannot land in a vault
+       with no rung able to see it.
+    """
+
+    #: The grain a date must carry to satisfy each date-grain rung.
+    GRAIN = {"birth": "1976", "year": "1976", "month": "1976-04",
+             "day": "1976-04-12"}
+
+    def setUp(self) -> None:
+        self.rows = li.load_questions()
+
+    def _value(self, field: str, rung: str) -> object:
+        if field == "date":
+            return _date(self.GRAIN.get(rung, "1976"))
+        if field == "span":
+            return {"start": _date("1984"), "end": _date("1990")}
+        if rung in li._BOOL_RUNGS:  # noqa: SLF001
+            return True
+        return self.GRAIN.get(rung, "Jackie")
+
+    def test_every_question_is_a_rung_and_every_rung_a_question(self):
+        declared = {(row["domain"], rung)
+                    for row in self.rows for rung in row["ladder"]}
+        self.assertEqual(set(li.RUNG_TEXTS), declared)
+
+    def test_every_rung_text_survives_its_own_domains_lints(self):
+        for (domain, rung), text in li.RUNG_TEXTS.items():
+            rendered = text.format(label="Jackie")
+            with self.subTest(domain=domain, rung=rung):
+                self.assertEqual(
+                    li.lint_landmark_reply(
+                        rendered, stage="ask", domain=domain,
+                        sensitive=li.domain_row(domain)["sensitive"]),
+                    [])
+
+    def test_every_rung_is_reachable_from_every_field_that_satisfies_it(self):
+        """The guard that would have caught lifehug#207 AND lifehug#219."""
+        for row in self.rows:
+            ladder = list(row["ladder"])
+            for index, rung in enumerate(ladder):
+                for field in li.rung_satisfiers(row, rung):
+                    prefix = {earlier: self._value(earlier, earlier)
+                              for earlier in ladder[:index]}
+                    entry = {"domain": row["domain"], **prefix,
+                             field: self._value(field, rung)}
+                    reached = li.rung_reached(entry, row)
+                    with self.subTest(domain=row["domain"], rung=rung,
+                                      field=field):
+                        self.assertIsNotNone(
+                            reached,
+                            f"{row['domain']}.{rung} unreachable via {field!r}")
+                        self.assertGreaterEqual(
+                            ladder.index(reached), index,
+                            f"{row['domain']}.{rung} filed under {field!r} "
+                            f"only reached {reached!r}")
+
+    def test_the_entailed_opener_is_the_one_rung_with_no_named_field(self):
+        """`happened` is satisfied by a SHAPE, not a field — said out loud so
+        the leg above is not quietly counting it as covered."""
+        for row in self.rows:
+            if not li.domain_accepts_none(row):
+                continue
+            with self.subTest(domain=row["domain"]):
+                self.assertEqual(li.rung_satisfiers(row, li.NONE_OPENER),
+                                 (li.NONE_OPENER,))
+                self.assertEqual(
+                    li.rung_reached({"domain": row["domain"], "place": "Ohio"},
+                                    row),
+                    li.NONE_OPENER)
+
+    #: Every field the writer stores that NO rung of that domain can read.
+    #: Pinned, so the slack cannot grow: a `span` on `children` is exactly the
+    #: shape the founder's own entry carried, filed and invisible.
+    UNREAD = {("birth", "label"), ("birth", "span"), ("family", "span"),
+              ("partnerships", "span"), ("children", "span"),
+              ("losses", "span")}
+
+    def _stored_fields(self, row: dict) -> set[str]:
+        """Every field `validate_landmark` will keep for this domain."""
+        ladder = list(row["ladder"])
+        everything = {"domain": row["domain"], "label": "Jackie",
+                      "place": "Dayton", "subject": "Jackie",
+                      "birth_order": "the middle of five",
+                      "date": _date("1976-04-12"),
+                      "span": {"start": _date("1984"), "end": _date("1990")},
+                      "chain_complete": True}
+        everything.update({rung: self._value(rung, rung) for rung in ladder})
+        return set(li.validate_landmark(everything))
+
+    def test_every_field_the_writer_stores_maps_to_a_rung_or_is_declared(self):
+        for row in self.rows:
+            ladder = list(row["ladder"])
+            satisfiers = {field for rung in ladder
+                          for field in li.rung_satisfiers(row, rung)}
+            for field in self._stored_fields(row):
+                with self.subTest(domain=row["domain"], field=field):
+                    self.assertTrue(
+                        field in ladder or field in satisfiers
+                        or field in li.NON_RUNG_FIELDS
+                        or field in li.DOMAIN_AGNOSTIC_FIELDS,
+                        f"{row['domain']}: {field!r} is stored by the writer "
+                        f"but is neither a rung, a declared satisfier, nor "
+                        f"declared NON_RUNG_FIELDS",
+                    )
+
+    def test_the_unread_fields_are_pinned_and_cannot_grow(self):
+        """The domain-agnostic slack, named. Every pair here is a field the
+        writer files that that domain's ladder has no rung for."""
+        unread = set()
+        for row in self.rows:
+            ladder = list(row["ladder"])
+            satisfiers = {field for rung in ladder
+                          for field in li.rung_satisfiers(row, rung)}
+            for field in self._stored_fields(row):
+                if field in ladder or field in satisfiers \
+                        or field in li.NON_RUNG_FIELDS:
+                    continue
+                unread.add((row["domain"], field))
+        self.assertEqual(unread, self.UNREAD)
+        self.assertEqual({field for _domain, field in unread},
+                         set(li.DOMAIN_AGNOSTIC_FIELDS))
+
+    def test_a_rung_that_is_not_on_the_ladder_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            li.rung_satisfiers(li.domain_row("birth"), "who")
+
+
+class LeafShapedAnswerMatrixTests(unittest.TestCase):
+    """The certification audit's executed matrix, as the acceptance test.
+
+    Audit (lifehug-platform#586, 2026-08-25): the ladder/writer mismatch is a
+    NINE-domain class, not a `who` bug. The leaf (`prompt/turn-instructions.md`)
+    teaches `label` — *"the school in `label`"* — while seven of the nine
+    ladders demand `city` / `name` / `what` / `who`, so a PERFECT leaf-shaped
+    answer left seven domains re-asking their own opening question forever.
+    Only `birth` (a date) and `family` (whose leaf paragraph does teach the
+    rung keys) worked.
+
+    One row per domain: the leaf-shaped emission, through validation, then the
+    rung it reaches, the status, and the question the row asks NEXT. Every
+    row is a cell of the audit's table; the whole table is the contract.
+    """
+
+    LEAF: dict[str, dict] = {
+        "birth": {"domain": "birth", "date": _date("1978-04-12")},
+        "family": {"domain": "family", "label": "Steph", "who": "Steph",
+                   "relation": "sibling"},
+        "residences": {"domain": "residences", "label": "Costa Mesa"},
+        "schools": {"domain": "schools", "label": "Lincoln High"},
+        "partnerships": {"domain": "partnerships", "label": "Katie",
+                         "date": _date("2007-01-11")},
+        "children": {"domain": "children", "label": "Charlee",
+                     "span": {"start": _date("2010-12-21"),
+                              "end": _date("2021-10-11")}},
+        "work": {"domain": "work", "label": "Line cook"},
+        "military": {"domain": "military", "none": True},
+        "losses": {"domain": "losses", "label": "Grandpa Ray"},
+    }
+
+    #: domain -> (rung reached, status, the next question — None when complete)
+    EXPECTED = {
+        "birth": ("day", "complete", None),
+        "family": ("relation", "partial", "What year was Steph born?"),
+        "residences": ("city", "partial",
+                       "Do you remember the address on Costa Mesa?"),
+        "schools": ("name", "partial", "Where was Lincoln High — what town?"),
+        "partnerships": ("month", "complete", None),
+        "children": ("who", "partial", "What year was Charlee born?"),
+        "work": ("what", "partial", "Where was that?"),
+        "military": ("span", "complete", None),
+        "losses": ("who", "partial", "Roughly when was that?"),
+    }
+
+    def test_the_matrix_covers_every_domain_in_the_set(self):
+        domains = tuple(row["domain"] for row in li.load_questions())
+        self.assertEqual(tuple(self.LEAF), domains)
+        self.assertEqual(set(self.EXPECTED), set(domains))
+
+    def test_a_perfect_leaf_shaped_answer_never_re_asks_the_opener(self):
+        for domain, (rung, status, question) in self.EXPECTED.items():
+            with self.subTest(domain=domain):
+                row = li.domain_row(domain)
+                record = li.validate_landmark(self.LEAF[domain])
+                self.assertIsNotNone(record, f"{domain}: the leaf shape "
+                                             f"did not even validate")
+                self.assertEqual(li.rung_reached(record, row), rung)
+                self.assertEqual(li.status_for_domain([record], row), status)
+                nxt = li.next_rung([record], row)
+                self.assertEqual((nxt or {}).get("text"), question)
+                if question is not None:
+                    self.assertNotEqual(
+                        question, row["ask"],
+                        f"{domain} re-asks its own opening question")
+
+    def test_the_completed_rows_leave_the_offered_list(self):
+        filed = {domain: [li.validate_landmark(self.LEAF[domain])]
+                 for domain in self.LEAF}
+        offered = {r["domain"] for r in li.open_landmarks(li.landmark_rows(filed))}
+        complete = {domain for domain, (_r, status, _q) in self.EXPECTED.items()
+                    if status == "complete"}
+        self.assertFalse(offered & complete)
+        self.assertEqual(offered, set(self.EXPECTED) - complete)
+
+    def test_the_leaf_teaches_the_label_which_is_why_this_is_a_class(self):
+        """The mismatch's source, pinned: the turn contract says `label`."""
+        leaf = " ".join(
+            (ROOT / "interactions" / "landmarks" / "prompt"
+             / "turn-instructions.md").read_text(encoding="utf-8").split())
+        self.assertIn("`label`", leaf,
+                      "the leaf no longer names `label` — re-derive this class")
+        for domain in ("residences", "schools", "work", "partnerships",
+                       "children", "losses", "military"):
+            with self.subTest(domain=domain):
+                row = li.domain_row(domain)
+                self.assertIsNotNone(
+                    li.identity_rung(row),
+                    f"{domain} has no identity rung for a bare label to reach")

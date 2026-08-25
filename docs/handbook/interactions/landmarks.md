@@ -69,6 +69,7 @@ with it `None` the turn's output contract is byte-identical to v196.
 | **Rung** | one step on a ladder, and the one question that asks for it |
 | **Status** | `open` (nothing filed) · `partial` (filed, below target) · `complete` (at target, and for a chain, the person said it's finished) |
 | **Entailment** | `happened` is the one rung nobody states outright. It is satisfied by anything else the entry carries (`landmarks_interaction.asserts_happened`) — you cannot name your children without having children. Without it the first rung of all four yes/no domains was unreachable, and a fully answered domain read as if nothing had been said |
+| **Identity rung** (v211) | the rung whose answer IS what the entry is called — `who` for the people domains, `city`/`name`/`what`/`branch` for the rest, and nothing at all for `birth`. DERIVED as the first rung that is neither `happened` nor a date grain (`landmarks_interaction.identity_rung`), and satisfied by the name the writer files under `label` (`identity_named`). The turn contract tells the model to put "the school in `label`", so before lifehug#219 **seven of the nine domains re-asked their own opening question after a perfect answer** — the founder's four labelled children were asked "What are their names?" forever. Same class as the `span` fallback (v199) and the date grains (lifehug#207): the ladder could not read what the writer writes |
 | **None terminal** | `{"domain": …, "none": true}` — the answer "that never happened". Reports the domain's `complete_at` rung, so the domain is `complete` by the same definition every other answer uses. Available only where the ladder opens at `happened` (`landmarks_interaction.domain_accepts_none`), so `partnerships`/`children`/`military`/`losses` and nothing else: `{"domain": "birth", "none": true}` would complete the axis with no date, and `family` is an enumeration, not a yes/no |
 | **Chain** | a domain that is a LIST walked to the present — family, residences, schools, work. `chain: true` is also what "an **enumeration domain**" means, the domains whose half-filled subjects each become their own unknown (v202) |
 | **Anchor** | what a dated landmark becomes: a row in `timeline.anchor_index` that every later probe resolves through |
@@ -320,6 +321,16 @@ ask, you bound, you do the arithmetic. They supply what they know.
   already renders "not `complete`" hides the row with no change. Modeling it
   as a fourth status would have made every renderer, on every medium, learn a
   new word for "done".
+- **A rung is satisfied by whatever the WRITER files it under, not only by
+  a key of its own name** (v211, lifehug#219). Four rungs now read a
+  neighbouring field — `span` from `date` (v199), the date grains from
+  `date` (lifehug#207), `happened` from any answer at all (v203), and the
+  identity rung from `label` (v211) — and all four were the same defect
+  arriving in a different domain. `rung_satisfiers` is that list as data
+  and the ladder-consistency guard walks it for every rung of every
+  domain, so the fifth instance fails the build instead of a real vault.
+  Every fix is READ-SIDE: vaults already written heal on the next read,
+  and there is no migration.
 - **The birth date lives in the landmark store**, not `profile.yaml` — one
   writer, one read path.
 - **The family constellation's PEOPLE live on the entity roster, not in a

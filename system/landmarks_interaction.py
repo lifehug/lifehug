@@ -310,6 +310,116 @@ def _date_grain_reaches(entry: dict, rung: str) -> bool:
     return _GRAIN_RANK.get(grain, 0) >= _DATE_GRAIN_RUNGS[rung]
 
 
+#: lifehug#219: the fields the WRITER puts a subject's IDENTITY in. The turn
+#: contract tells the model to put "the school in ``label``", and
+#: `timeline.save_landmark` merges entries BY ``label`` — so ``label`` is the
+#: field every filed landmark carries its subject under, whatever that domain
+#: calls the rung. ``name`` rides along because it is `schools`' own rung word
+#: and a writer that reaches for it directly is naming the same thing.
+IDENTITY_FIELDS = ("label", "name")
+
+#: A label that is not a name. `_rung` renders an unnamed subject as "that
+#: one" and `anchors_from_landmarks` falls back to the domain word, so both
+#: can be written back into an entry by a careless caller; neither is somebody
+#: the person named, and neither may satisfy an identity rung.
+_PLACEHOLDER_LABELS = frozenset({"that one", "unknown", "unnamed", "n/a",
+                                 "none", "someone", "?", "-", "—"})
+
+
+def identity_rung(row: object) -> str | None:
+    """The rung whose answer IS what the entry is called, or None.
+
+    DERIVED from the ladder, never a hand-written per-domain list (the
+    recurring-defect doctrine): it is the first rung that is neither
+    :data:`NONE_OPENER` — entailed by everything else, and a yes, not a name —
+    nor a date grain, because a date is not a name either. That lands on
+    ``family.who``, ``partnerships.who``, ``children.who``, ``losses.who``,
+    ``residences.city``, ``schools.name``, ``work.what`` and
+    ``military.branch``, and on nothing at all for ``birth``, whose ladder is
+    three date grains and whose entry has no subject to name.
+    """
+    ladder = tuple(row.get("ladder") or ()) if isinstance(row, dict) else ()
+    for rung in ladder:
+        if rung == NONE_OPENER or rung in _DATE_GRAIN_RUNGS:
+            continue
+        return rung
+    return None
+
+
+def identity_named(entry: object, row: object) -> str | None:
+    """The subject this entry names, read from the writer's own fields.
+
+    lifehug#219, live on the founder's own vault and confirmed by the
+    executed certification audit (lifehug-platform#586): the store held
+    ``partnerships`` with his wife's name in ``label`` and ``children`` with
+    all four of his children labelled, and `/timeline` went on asking *"Who
+    was that?"* and *"What are their names?"* — because
+    :func:`rung_reached` counted the ``who`` rung only under a ``who`` key
+    that the writer never emits. The ladder could not read what the writer
+    writes; this is the same defect class as lifehug#207's date grains and
+    v199's span, and it is fixed the same way — READ-SIDE, so vaults already
+    written heal on the next read with no migration.
+
+    Structural, never fuzzy: a non-empty, non-placeholder identity field is a
+    name (a name-LIST is still names); an empty one, a whitespace one, the
+    domain word itself, or one of :data:`_PLACEHOLDER_LABELS` is not.
+    """
+    if not isinstance(entry, dict) or not isinstance(row, dict):
+        return None
+    domain = str(row.get("domain") or "").strip().lower()
+    for field in IDENTITY_FIELDS:
+        text = entry.get(field)
+        if not isinstance(text, str):
+            continue
+        cleaned = text.strip()
+        lowered = cleaned.lower()
+        if not cleaned or lowered in _PLACEHOLDER_LABELS or lowered == domain:
+            continue
+        return cleaned
+    return None
+
+
+#: Fields a landmark record carries that are NOT ladder rungs and never will
+#: be: the bookkeeping keys plus the free-text descriptors. Named so the
+#: ladder-consistency guard can tell "not a rung" from "a rung the writer
+#: cannot reach", which is the shape of every defect in this class so far.
+NON_RUNG_FIELDS = _NON_ANSWER_KEYS | frozenset({"place", "subject", "birth_order"})
+
+#: Fields :func:`validate_landmark` stores on EVERY domain, because the record
+#: shape is domain-agnostic — so a domain with no matching rung files them and
+#: never reads them. Named rather than tolerated: the ladder-consistency guard
+#: pins the exact ``(domain, field)`` pairs, so this slack cannot grow. Both
+#: live ones are real: a ``span`` on `children` is the shape the founder's own
+#: entry had, and a ``label`` on `birth` names a subject the axis has not got.
+DOMAIN_AGNOSTIC_FIELDS = frozenset({"label", "span"})
+
+
+def rung_satisfiers(row: object, rung: str) -> tuple[str, ...]:
+    """Every entry field that can satisfy ``rung``, its own key first.
+
+    ONE definition of *what answers this rung*, so the ladder-consistency
+    guard can walk it and a rung the writer cannot reach fails the build
+    instead of stranding a real vault. The three fallbacks are the three
+    defects this class has already shipped:
+
+    * ``span`` → ``date`` (v199)
+    * the date grains → ``date`` (lifehug#207)
+    * the identity rung → ``label`` / ``name`` (lifehug#219)
+
+    :data:`NONE_OPENER` is the one rung with no named satisfier — it is
+    entailed by ANY answer field at all (:func:`asserts_happened`), which is a
+    shape rather than a field, and the guard says so out loud.
+    """
+    if not isinstance(row, dict) or rung not in tuple(row.get("ladder") or ()):
+        raise LandmarkInteractionError(
+            f"{rung!r} is not a rung of {(row or {}).get('domain')!r}")
+    fields = [rung]
+    if rung == "span" or rung in _DATE_GRAIN_RUNGS:
+        fields.append("date")
+    elif rung == identity_rung(row):
+        fields.extend(IDENTITY_FIELDS)
+    return tuple(dict.fromkeys(fields))
+
 
 def rung_reached(entry: object, row: object) -> str | None:
     """The finest ladder rung this entry actually satisfies, or None.
@@ -319,13 +429,19 @@ def rung_reached(entry: object, row: object) -> str | None:
     first unsatisfied one — a person who gave a span but no address is at
     ``address``'s predecessor, because the ladder is a ladder.
 
-    Three rungs are satisfied by something other than a key of their own.
-    ``span``, since v199, and — since lifehug#207 — every rung in
-    :data:`_DATE_GRAIN_RUNGS`, at the grain the entry's date record resolves.
-    And ``happened``, the one rung nobody states outright, is satisfied by
-    anything else in the entry at all (:func:`asserts_happened`); without that
-    the ladder's first rung is unreachable in practice and every answer to a
-    yes/no domain lands below rung one — which is what was happening.
+    Four rungs are satisfied by something other than a key of their own, and
+    every one of them is the same defect: the ladder could not read what the
+    writer writes. ``span``, since v199, and — since lifehug#207 — every rung
+    in :data:`_DATE_GRAIN_RUNGS`, at the grain the entry's date record
+    resolves. Since lifehug#219, the domain's :func:`identity_rung`, satisfied
+    by the name the writer files under ``label`` (:func:`identity_named`) —
+    the founder's four labelled children were being asked "What are their
+    names?" forever. And ``happened``, the one rung nobody states outright, is
+    satisfied by anything else in the entry at all (:func:`asserts_happened`);
+    without that the ladder's first rung is unreachable in practice and every
+    answer to a yes/no domain lands below rung one — which is what was
+    happening. :func:`rung_satisfiers` is that list as data, and the
+    ladder-consistency guard walks it so the next one fails the build.
 
     The one exception to the walk itself is the **none terminal** (owner
     ruling 6): a person who says they never served has answered the military
@@ -343,6 +459,7 @@ def rung_reached(entry: object, row: object) -> str | None:
         target = row.get("complete_at")
         return target if target in ladder else (ladder[-1] if ladder else None)
     reached: str | None = None
+    identity = identity_rung(row)
     for rung in row.get("ladder") or ():
         value = entry.get(rung)
         if rung == "span":
@@ -351,6 +468,9 @@ def rung_reached(entry: object, row: object) -> str | None:
                 and _date_grain_reaches(entry, rung):
             value = True
         elif rung == NONE_OPENER and not value and asserts_happened(entry):
+            value = True
+        elif rung == identity and value in (None, "", (), [], {}) \
+                and identity_named(entry, row):
             value = True
         if value in (None, "", (), [], {}):
             break

@@ -341,5 +341,40 @@
     }
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-the-label-is-the-name-it-asked-for",
+  "turns": [
+   {
+    "message": "Two thousand nine for Charlee — that's down. And James, when did he come along?",
+    "landmark": {
+     "domain": "children",
+     "label": "Charlee Joy Rivers",
+     "date": {
+      "best": "2009",
+      "earliest": "2009",
+      "latest": "2009",
+      "granularity": "year",
+      "confidence": "approximate",
+      "basis": "stated",
+      "anchors": [],
+      "provenance": []
+     }
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-a-bare-label-climbs-the-thing-ladders",
+  "turns": [
+   {
+    "message": "Dayton it is. Lincoln High, then — that's placed.",
+    "landmark": {
+     "domain": "schools",
+     "label": "Lincoln High",
+     "place": "Dayton"
+    }
+   }
+  ]
  }
 ]
