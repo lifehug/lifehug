@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 _SYSTEM_DIR = Path(__file__).resolve().parent
 if str(_SYSTEM_DIR) not in sys.path:
@@ -466,19 +467,48 @@ def validate_placed(value: object, *, anchors: object = ()) -> dict | None:
     return record.to_dict()
 
 
+class PlaceInvocation(NamedTuple):
+    """ONE complete call to `lifehug.py timeline-place`: argv AND its stdin.
+
+    The two travel together because the command cannot run without both —
+    `cmd_timeline_place` reads the moment's description off stdin and exits 1
+    when it is empty, so argv alone is not a call, it is half of one. They
+    were two values once: `place_invocation` took a `description` and dropped
+    it on the floor, `conversation_delivery._file_placement` ran the argv with
+    no `input=`, and every date a person named in conversation exited 1 into a
+    `place_failed` diagnostic (lifehug#223). A single return value makes that
+    mistake unspeakable: a host that has the argv has the stdin too.
+
+    ``stdin_text`` mirrors the name the durable-queue twin already uses
+    (``jobs.Invocation.stdin_text``) — one vocabulary for "the text this
+    command reads", whichever host is running it.
+    """
+
+    argv: list[str]
+    stdin_text: str
+
+
 def place_invocation(placed: object, *, source: str, description: str,
-                     period: str) -> list[str] | None:
-    """The exact `lifehug.py timeline-place` argv for an accepted placement.
+                     period: str) -> PlaceInvocation | None:
+    """The exact `lifehug.py timeline-place` call for an accepted placement.
 
     The package NAMES the date; the host WRITES it — the same split every
     other child's additive field uses (ADR 0018/0023). This is the bridge, and
     it is pure: a caller feeds `validate_placed`'s output in and gets the
-    argument vector out, or `None` when there is nothing to file.
+    complete invocation out — argv plus the description the command reads on
+    stdin — or `None` when there is nothing to file.
+
+    The host's contract is one line::
+
+        subprocess.run([..., *inv.argv], input=inv.stdin_text, text=True)
+
+    `description` is REQUIRED for the same reason `source` and `period` are:
+    an empty one is a call the CLI refuses, so it never becomes an argv here.
     """
     if not isinstance(placed, dict):
         return None
     record = chrono.from_dict(placed)
-    if record is None or not source or not period:
+    if record is None or not source or not period or not str(description).strip():
         return None
     args = ["timeline-place", str(source), "--period", str(period)]
     edtf = chrono.to_edtf(record)
@@ -490,7 +520,7 @@ def place_invocation(placed: object, *, source: str, description: str,
     when_hint = chrono.display_date(record, with_basis=False)
     if when_hint:
         args += ["--when-hint", when_hint]
-    return args
+    return PlaceInvocation(args, str(description))
 
 
 # --------------------------------------------------------------------------

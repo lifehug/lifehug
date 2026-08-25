@@ -1678,24 +1678,35 @@ def _file_placement(item: dict, placed: dict, *, session_id: str,
     The package NAMES the date, the host WRITES it (ADR 0018/0023/0024) — and
     on this path the host is the package's own CLI, invoked exactly as the
     Review lane invokes it. Never raises: the message is already delivered.
+
+    `place_invocation` returns argv AND the stdin the command requires
+    (`timeline_interaction.PlaceInvocation`); both are passed here. Running the
+    argv without `input=` is what made every conversational date exit 1 into a
+    silent `place_failed` (lifehug#223), and the vault is selected explicitly
+    with `--vault-root` rather than by a working directory the CLI never reads.
     """
     try:
         import subprocess  # noqa: PLC0415
 
         import timeline_interaction  # noqa: PLC0415
 
-        argv = timeline_interaction.place_invocation(
+        invocation = timeline_interaction.place_invocation(
             placed,
             source=str(item.get("source") or f"answers/{question_id}.md"),
             description=str(item.get("label") or question_text or question_id)[:200],
             period=str(item.get("period") or timeline_interaction.anchor_slug(item.get("anchor"))),
         )
-        if not argv:
+        if invocation is None:
             return False
+        root = vault_root if vault_root is not None else VAULT_ROOT
+        command = [sys.executable, str(SYSTEM_DIR / "lifehug.py")]
+        if root is not None:
+            command += ["--vault-root", str(root)]
         result = subprocess.run(  # noqa: S603
-            [sys.executable, str(SYSTEM_DIR / "lifehug.py"), *argv],
+            [*command, *invocation.argv],
+            input=invocation.stdin_text,
             capture_output=True, text=True, timeout=120,
-            cwd=str(Path(vault_root) if vault_root is not None else VAULT_ROOT),
+            cwd=str(root) if root is not None else None,
         )
         if result.returncode != 0:
             _diagnostic("timeline_place", "place_failed", session_id)
