@@ -821,5 +821,83 @@
     }
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-military-none-with-a-story-alongside",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "military",
+    "rung": "happened",
+    "sensitive": false,
+    "user_message": "I have not served in the military. It's not military service, but I did serve a two-year mission for my church as a Mormon missionary. I served that in Zurich, Switzerland, when I was 19.",
+    "domains_named": [
+     "military"
+    ],
+    "expected_landmark": {
+     "domain": "military",
+     "none": true
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-losses-are-recorded-not-only-received",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "losses",
+    "rung": "who",
+    "sensitive": true,
+    "user_message": "The biggest loss would be Needy and Darvin Beecham on my mom's side, and James Edwin Thorne.",
+    "domains_named": [
+     "losses"
+    ],
+    "expected_landmark": {
+     "domain": "losses",
+     "label": "Needy Beecham",
+     "who": "Needy Beecham",
+     "subject": "my mother's mother"
+    }
+   },
+   {
+    "stage": "ask",
+    "domain": "losses",
+    "rung": "who",
+    "sensitive": true,
+    "user_message": "Darvin was her husband. James Edwin was my father's brother.",
+    "domains_named": [
+     "losses"
+    ],
+    "known_labels": [
+     "Needy Beecham"
+    ],
+    "expected_landmark": {
+     "domain": "losses",
+     "label": "Darvin Beecham",
+     "who": "Darvin Beecham",
+     "subject": "my mother's father"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-ambiguous-answer-is-not-a-missed-record",
+  "landmarks": {},
+  "turns": [
+   {
+    "stage": "ask",
+    "domain": "residences",
+    "rung": "city",
+    "sensitive": false,
+    "user_message": "We moved around a fair bit when I was small — a few different places, and it all blurs together now.",
+    "domains_named": [
+     "residences"
+    ],
+    "expected_landmark": null
+   }
+  ]
  }
 ]

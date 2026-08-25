@@ -815,7 +815,17 @@ LANDMARK_LINT_CLASSES = (
     # agreement. The DEFINITION is `timeline_interaction.proposes_a_date` —
     # one definition, two callers, per the recurring-defect doctrine.
     "landmark_gates.never_proposes_a_date",
+    # v212 (lifehug#221): recording is the turn's FIRST job. A turn that
+    # replies warmly to a real answer and emits no `landmark` has lost the
+    # recording to the conversing — the observed live failure this class
+    # exists to make impossible. BLOCKING (see ANSWER_MUST_RECORD_LINT).
+    "landmark_gates.answer_must_record",
 )
+
+#: The one blocking landmark lint (v212). Named as a constant because a host
+#: adds it to its own runtime blocking set and feeds the retry below; every
+#: other landmark class is advisory, scored over the goldens.
+ANSWER_MUST_RECORD_LINT = "landmark_gates.answer_must_record"
 
 #: The domains where asking for a calendar year outright is legitimate
 #: (landmarks.md §2.1 + §2.9): the carve-out is about the KIND of fact, not
@@ -884,16 +894,249 @@ _REJECTS_VAGUE_RES = (
 _SPAN_LIMIT = 400
 
 
+# --------------------------------------------------------------------------
+# v212 (lifehug#221): recording is the turn's first job
+# --------------------------------------------------------------------------
+#
+# THE FAILURE. On a landmark session the model replied warmly to a real
+# answer and emitted no `landmark` at all — twice, on the same leaf. Asked
+# about military service: *"I have not served in the military. It's not
+# military service, but I did serve a two-year mission for my church…"* — the
+# reply took up the mission and recorded nothing, where the domain's own
+# answer was a plain `{"domain": "military", "none": true}`. Asked about
+# losses, the person named the people they had lost; the reply named them
+# back and recorded nothing. Recording lost to conversing.
+#
+# THE BOUNDARY, stated honestly. This is a PURE lint over text: it cannot
+# read a mind and it does not try. "Substantive" is undecidable from a
+# string, so the class fires on exactly two deterministic shapes, both of
+# which require the caller to pass the user's own message:
+#
+#   1. a NEGATIVE — the person plainly denied the domain — and only where the
+#      domain can carry a none terminal (`domain_accepts_none`), because only
+#      there is "no" a finished answer with a record of its own; and
+#   2. an ECHO — the reply repeats back a proper noun or a year the person
+#      supplied in that same message. That is the model's OWN acknowledgment
+#      shape: it demonstrably received a specific fact, restated it, and filed
+#      nothing.
+#
+# Everything else is UNKNOWN and never lints. A substantive answer carrying
+# no name and no year ("we lived in a little house by the river") is
+# invisible to this class and that under-detection is deliberate: this lint
+# blocks a send, and a false positive would punish a good turn. Ambiguity —
+# including every "I don't remember" shape, which is read as a SKIP before
+# anything else is considered — fails toward skip, never toward lint.
+
+#: The person ended the topic for now. Checked FIRST and it wins outright:
+#: a skip records nothing by design, and every hedged half-answer that reads
+#: like one is deliberately swept in here so the ambiguity fails toward skip.
+_SKIP_RES = (
+    re.compile(r"\b(?:i|we) (?:don'?t|do not|can'?t|cannot|couldn'?t) "
+               r"(?:really )?(?:know|remember|recall|say|tell)\b", re.IGNORECASE),
+    re.compile(r"\bno (?:idea|clue|memory)\b", re.IGNORECASE),
+    re.compile(r"\b(?:skip|pass on) (?:that|this|it)\b", re.IGNORECASE),
+    re.compile(r"\b(?:let'?s |can we )?(?:leave|drop|park) (?:that|this|it)\b",
+               re.IGNORECASE),
+    re.compile(r"\b(?:not|maybe) (?:now|today|right now|another time|later)\b",
+               re.IGNORECASE),
+    re.compile(r"\b(?:i'?d |i would )?rather not\b", re.IGNORECASE),
+    re.compile(r"\bcome back to (?:that|this|it)\b", re.IGNORECASE),
+)
+
+#: The person denied the domain outright. Only consulted where the domain
+#: accepts a none terminal, so the four yes/no domains and nothing else.
+_DOMAIN_NEGATIVE_RES = (
+    re.compile(r"\b(?:i|we) (?:have )?never\b", re.IGNORECASE),
+    re.compile(r"\bnever (?:served|married|been married|had|did)\b", re.IGNORECASE),
+    re.compile(r"\b(?:i|we) (?:did|do|have|had|was|were|am|are)"
+               r"(?: not|n'?t)\b", re.IGNORECASE),
+    re.compile(r"\bno (?:children|kids|service|military|marriage|partner|"
+               r"partnership|losses)\b", re.IGNORECASE),
+    re.compile(r"\bthere (?:is|was|'s) (?:nothing|no one|nobody|none)\b",
+               re.IGNORECASE),
+    re.compile(r"^\s*(?:no|nope|none|nah)\b", re.IGNORECASE),
+    re.compile(r"\bnot (?:really|at all|that i know of)\b", re.IGNORECASE),
+)
+
+#: Capitalized words that carry no identity, so an echo of one proves
+#: nothing. Deliberately short: a relationship word ("Mom", "Dad") IS an
+#: identity here, and a month name IS a date the person supplied.
+_ECHO_STOPWORDS = frozenset({
+    "and", "but", "for", "the", "they", "them", "their", "there", "then",
+    "that", "this", "these", "those", "she", "her", "his", "him", "you",
+    "your", "yes", "not", "our", "was", "were", "when", "what", "where",
+    "who", "why", "how", "one", "two", "all", "just", "well", "yeah",
+    "okay", "sure", "thanks", "thank", "sorry", "maybe", "some", "any",
+    "actually", "also", "about",
+})
+
+_ECHO_TOKEN_RE = re.compile(r"[A-Z][A-Za-z'’\-]{2,}")
+_ECHO_YEAR_RE = re.compile(r"\b(?:1[89]\d{2}|20\d{2})\b")
+_SENTENCE_ENDERS = frozenset(".!?:;\"'“”‘’(—–-\n\r")
+
+
+def _echo_terms(text: str) -> set[str]:
+    """Proper nouns and years a message states, folded to lowercase.
+
+    A capitalized word that OPENS a sentence proves nothing — English
+    capitalizes there anyway — so it is skipped unless it also appears
+    mid-sentence somewhere. Years are taken wherever they fall.
+    """
+    terms: set[str] = set()
+    for match in _ECHO_TOKEN_RE.finditer(text):
+        start = match.start()
+        prior = text[:start].rstrip()
+        if not prior or prior[-1] in _SENTENCE_ENDERS:
+            continue
+        token = match.group(0).lower().strip("'’-")
+        if len(token) > 2 and token not in _ECHO_STOPWORDS:
+            terms.add(token)
+    terms.update(_ECHO_YEAR_RE.findall(text))
+    return terms
+
+
+def answer_shape(user_message: object, reply: object, *,
+                 accepts_none: bool = False,
+                 known_labels: object = ()) -> str:
+    """What the person's message was, as far as a string can honestly say.
+
+    Returns one of :data:`ANSWER_SHAPES`. ONE definition (recurring-defect
+    doctrine): the lint below is its only caller today and a host that wants
+    the same judgment calls this rather than re-deriving it.
+
+    * ``"skip"`` — "not now", and every hedge that reads like one.
+    * ``"negative"`` — a plain denial of a domain that can carry a none.
+    * ``"substantive"`` — the reply echoes a proper noun or a year the person
+      supplied in this same message: the model received a specific fact and
+      said it back.
+    * ``"unknown"`` — anything else, including a real answer with no name and
+      no year in it. Never lints.
+    """
+    user_text = user_message if isinstance(user_message, str) else ""
+    reply_text = reply if isinstance(reply, str) else ""
+    if not user_text.strip():
+        return "unknown"
+    for pattern in _SKIP_RES:
+        if pattern.search(user_text):
+            return "skip"
+    if accepts_none:
+        for pattern in _DOMAIN_NEGATIVE_RES:
+            if pattern.search(user_text):
+                return "negative"
+    known = {str(label).strip().lower() for label in (known_labels or ())
+             if str(label).strip()}
+    known_terms: set[str] = set()
+    for label in known:
+        known_terms |= _echo_terms(label.title())
+        known_terms.add(label)
+    shared = (_echo_terms(user_text) & _echo_terms(reply_text)) - known_terms
+    if shared:
+        return "substantive"
+    return "unknown"
+
+
+#: The closed vocabulary :func:`answer_shape` returns.
+ANSWER_SHAPES = ("skip", "negative", "substantive", "unknown")
+
+#: What a host appends to ONE regeneration when
+#: :data:`ANSWER_MUST_RECORD_LINT` fires. The reply was not the problem — the
+#: missing record was — so the reminder asks for the record and explicitly
+#: keeps the reply.
+RECORDING_REMINDER = (
+    "You answered them and recorded nothing. The `landmark` field is this "
+    "turn's first job, not its afterthought: emit the record for the domain "
+    "you asked about{domain_clause} — the fact in the rung's own key, or "
+    "{{\"domain\": \"<the domain>\", \"none\": true}} when they said plainly "
+    "that it never happened. Something they said alongside it does not "
+    "excuse the domain's own answer. Keep the reply you wrote; send the "
+    "record with it."
+)
+
+
+def recording_reminder(domain: object = None) -> str:
+    """:data:`RECORDING_REMINDER`, with the asked domain named when known."""
+    name = str(domain or "").strip()
+    clause = f" (`{name}`)" if name else ""
+    return RECORDING_REMINDER.format(domain_clause=clause)
+
+
+def answer_must_record(user_message: object, record: object, *,
+                       reply: object = "", domain: object = None,
+                       known_labels: object = (),
+                       framework_root: str | Path | None = None) -> dict | None:
+    """The one definition of "they answered and nothing was recorded".
+
+    ONE definition, TWO callers (recurring-defect doctrine): the RECORDER
+    (`landmark_recorder.record_answer`, which is what actually files a
+    landmark from v212 forward) runs it on its own extraction as the blocking
+    backstop, and `lint_landmark_reply` runs it for a host that still reads
+    the reply's own additive field. Both ask the same question of the same
+    evidence.
+
+    Returns a finding (`lint` / `detail` / `span`) or ``None``. ``record`` is
+    whatever came back through validation; any non-empty record clears the
+    check, including a skip and a none. ``reply`` is the person-facing text,
+    used only as the ECHO evidence described above the regexes — a recorder
+    that runs with no reply at all (generation failed) still has the NEGATIVE
+    signal, which is the case that matters most.
+    """
+    if isinstance(record, dict) and record:
+        return None
+    accepts_none = False
+    asked = str(domain or "").strip()
+    if asked:
+        try:
+            accepts_none = domain_accepts_none(
+                domain_row(asked, framework_root=framework_root)
+            )
+        except LandmarkInteractionError:
+            accepts_none = False
+    body = reply if isinstance(reply, str) else ""
+    shape = answer_shape(user_message, body, accepts_none=accepts_none,
+                         known_labels=known_labels)
+    if shape not in ("negative", "substantive"):
+        return None
+    detail = (
+        "they said plainly that this never happened and nothing was recorded "
+        '— a negative is the domain\'s answer: emit '
+        '{"domain": "…", "none": true}'
+        if shape == "negative" else
+        "their own words come back in the reply and nothing was recorded — "
+        "replying is not recording; emit the landmark"
+    )
+    return {
+        "lint": ANSWER_MUST_RECORD_LINT,
+        "detail": detail,
+        "span": [0, min(len(body), _SPAN_LIMIT)],
+    }
+
+
 def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
                         sensitive: bool = False,
-                        domains_named: object = ()) -> list[dict]:
-    """Deterministic findings for the five ``landmark_gates.*`` classes.
+                        domains_named: object = (),
+                        landmark: object = None,
+                        user_message: object = None,
+                        known_labels: object = (),
+                        framework_root: str | Path | None = None) -> list[dict]:
+    """Deterministic findings for the seven ``landmark_gates.*`` classes.
 
     Pure — no model, no I/O. Findings share `conversation_lints.lint_turn`'s
     shape (`lint` / `detail` / `span`), exactly as
     `timeline_interaction.lint_timeline_reply` does, so one caller can merge
     both sets of findings uniformly. An unrecognized stage is treated as
     ``"ask"`` — fail toward the strictest ordinary rule.
+
+    v212 (lifehug#221) adds three OPTIONAL inputs, all defaulting to the
+    pre-v212 shape so every existing call site is byte-identical:
+
+    * ``landmark`` — the ``landmark`` field this turn actually emitted (raw
+      or validated; only its presence is read here).
+    * ``user_message`` — the person's own message this reply answers. Without
+      it, :data:`ANSWER_MUST_RECORD_LINT` cannot fire at all, because the
+      only honest evidence for "they answered" lives in what they said.
+    * ``known_labels`` — labels already in LANDMARKS. An echo of one is the
+      model repeating something IT already had, not receiving something new,
+      so those terms are excluded from the echo test.
     """
     body = text if isinstance(text, str) else ""
     if stage not in VALID_LANDMARK_STAGES:
@@ -969,6 +1212,16 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
                       "2004)",
             "span": [proposal.start(), proposal.end()],
         })
+
+    # v212 (lifehug#221): recording is not replying. The DEFINITION is
+    # `answer_must_record` above — the recorder's own backstop — run here too
+    # for a host that reads the reply's additive `landmark` field directly.
+    recording = answer_must_record(
+        user_message, landmark, reply=body, domain=domain,
+        known_labels=known_labels, framework_root=framework_root,
+    )
+    if recording is not None:
+        findings.append(recording)
     return findings
 
 

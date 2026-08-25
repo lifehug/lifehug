@@ -376,5 +376,49 @@
     }
    }
   ]
+ },
+ {
+  "fixture_id": "landmarks-military-none-with-a-story-alongside",
+  "turns": [
+   {
+    "message": "No service, then — that's the whole answer to that one and I won't raise it again. Two years on a mission is its own thing entirely, though. What was it like arriving there at nineteen?",
+    "landmark": {
+     "domain": "military",
+     "none": true
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-losses-are-recorded-not-only-received",
+  "turns": [
+   {
+    "message": "Needy — your mother's mother. Thank you for putting her here. Only if you want to: was Darvin her husband?",
+    "landmark": {
+     "domain": "losses",
+     "label": "Needy Beecham",
+     "who": "Needy Beecham",
+     "subject": "my mother's mother"
+    }
+   },
+   {
+    "message": "Darvin alongside her, then. I have him.",
+    "landmark": {
+     "domain": "losses",
+     "label": "Darvin Beecham",
+     "who": "Darvin Beecham",
+     "subject": "my mother's father"
+    }
+   }
+  ]
+ },
+ {
+  "fixture_id": "landmarks-ambiguous-answer-is-not-a-missed-record",
+  "turns": [
+   {
+    "message": "A lot of moving. We can take them one at a time — whichever one comes to mind first.",
+    "landmark": null
+   }
+  ]
  }
 ]

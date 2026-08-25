@@ -7,9 +7,20 @@ modes: collect
 load_order: identity|behavior|examples|landmarks|conversation|turn_instructions
 composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
 composition.leaf: prompt/turn-instructions.md|context/manifest.md
+# v212 (ADR 0028): the RECORDER is its own composition and its own leaf. It
+# never joins the conversation's load order — it carries no identity, no
+# behavior, no examples and no transcript, which is the whole reason the
+# second completion is small.
+composition.recorder: prompt/recorder.md
 role.router: haiku-class
 role.worker: sonnet-class
 role.planner: sonnet-class
+# The recording pass is extraction, not conversation: a small model is the
+# right one, and the honest cost is ONE extra completion per landmark ANSWER
+# — never on the daily question, never on a session that is not a landmark
+# session. `landmark_recorder.DEFAULT_RECORDER_ROLE` carries the same value
+# and test_the_recorder_role_matches_the_manifest pins them equal.
+role.recorder: haiku-class
 # landmarks (v197, Design §E): the stop rules. A landmark pass is never an
 # interrogation — the person is doing us a favour. system/
 # landmarks_interaction.py carries the same two numbers as constants and
@@ -27,3 +38,4 @@ budget.examples: 1400
 budget.landmarks: 900
 budget.conversation: 1600
 budget.turn_instructions: 1400
+budget.recorder: 900
