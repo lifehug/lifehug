@@ -19,6 +19,12 @@ The caller assembles, in this order:
    the direction that tells the model what to do with the sentence is rendered
    WITH the sentence, so an absent gain adds no instruction either.
 
+The RECORDER is a separate pass with a separate leaf and is not part of this
+assembly (ADR 0028). Its own block, `{known_entries}`, is
+`landmarks_interaction.render_known_entries(landmarks, domain)` — the filed
+ENTRIES of the one domain being asked about, not the domain statuses item 2
+renders (v216).
+
 Nothing else is added. The person's answers, the vault, and the timeline are
 all reached through the ordinary Conversation context; this Interaction adds
 exactly the four substitutions above.

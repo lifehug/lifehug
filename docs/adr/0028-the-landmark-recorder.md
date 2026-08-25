@@ -327,3 +327,105 @@ spends a whole sentence forbidding invention.
   both live failures (names synthesized) plus the three cases that must NOT
   change: a single-fact answer, a none answer, and one invalid record among
   many dropping alone.
+
+## Amendment (v216, 2026-08-25): the recorder knows what it already knows
+
+Status: accepted. The design audit's defect D7 (PR lifehug#230; no issue was filed for it).
+
+### Context
+
+The recorder's leaf has carried this heading since v212:
+
+```
+ALREADY KNOWN — never record these again:
+{landmarks}
+```
+
+What filled it was `landmarks_interaction.render_landmarks` — the
+CONVERSATION's block, one line per DOMAIN:
+
+```
+- children: partial (4)
+```
+
+That is the right thing to show someone deciding what to **ask**, and the
+wrong thing to show a machine deciding what to **file**. "Never record these
+again" names nothing, so it could not be obeyed: a model cannot decline to
+re-file four children it has never been shown. And `build_recorder_prompt`
+accepted only a sequence, so the LANDMARKS store — the dict shape every real
+caller holds, this module's own CLI included — rendered as `(nothing yet)`.
+
+The second half is worse, because it was silent. Both recording lints take
+`known_labels` — the names already in the store — for one reason:
+`answer_shape` reads the person's own words coming back in the reply as
+evidence they stated a fact, and a name the MODEL was handed is not that.
+`known_labels` was hand-passed at every call site, which is to say empty at
+all of them, even though `record_answer` was already holding the store the
+labels come from.
+
+Together those make a re-answer expensive and wrong. A re-answer is not an
+edge case: it is the ordinary shape of a person going back over their own
+life, and per-turn listening will make it routine. Asked about his children
+a second time, the founder's four filed names come back in the reply,
+`answer_shape` calls it substantive, the empty extraction lints, one
+regeneration is spent, and the answer is **withheld** — or, worse, the four
+are filed again.
+
+### Decision
+
+1. **The block names the ENTRIES, not the domains.**
+   `landmarks_interaction.render_known_entries(landmarks, domain)` fills a
+   renamed `{known_entries}` slot with the filed entries of the ONE domain
+   being asked about — the only domain the recorder can emit records for —
+   one line each: `- Corinne — 2 April 1979`, `- Wren — no date filed`, and
+   the two terminals saying what they are. It is bounded by
+   `KNOWN_ENTRIES_LIMIT = 12` with the remainder counted, so the block is a
+   window that admits to being one.
+
+2. **ONE rendering definition** (recurring-defect doctrine), and it lives
+   beside the ladder that reads the same entries. `landmark_entries` is the
+   store's own shape (dict, or a selected list); `render_entry` is the line,
+   reading the name through `entry_name` — `identity_named`, then the
+   domain's own `identity_rung`, the same order `landmark_entry_key` merges
+   on, because the founder's four children were filed as `who` with no
+   `label` — and the date through the ladder's own `_entry_date` and
+   `chronology.display_date`. No second formatter, in this package or in a
+   host.
+
+3. **`known_labels` is DERIVED, not hand-passed.**
+   `known_entry_labels(landmarks, domain, extra=…)` is the one derivation the
+   block, `answer_must_record`/`answer_shape` and `records_missing_entries`
+   all draw from; `record_answer` computes it from the store it was already
+   given and unions the caller's own names in. The prompt the model reads and
+   the lints that judge its answer now name the same entries.
+
+4. **The leaf teaches the rule the heading only ever claimed.** Never record
+   an entry that is listed. Record a listed entry again ONLY when the person
+   gave something that line does not have — a name where it says `(unnamed)`,
+   or a finer date than the one shown — and then under the SAME name,
+   carrying only what is new. When everything they said is already up there,
+   `{"landmarks": []}` is the correct output, and the derived `known_labels`
+   is what keeps that from linting.
+
+### Consequences
+
+- **The store is still the backstop.** Nothing here trusts the model to
+  dedupe. `merge_landmark_entry` remains idempotent and
+  `timeline.save_landmarks` keys on `landmark_entry_key`, so a repeated
+  record lands on the entry it names rather than beside it — the prompt block
+  saves a completion and a wrong file, not a correctness invariant.
+- **The prompt-size pin moves 4400 → 4800.** The leaf gained ~250 characters
+  of prose; every domain's prompt with an EMPTY block lands between 4582 and
+  4699, and the block itself is bounded by `KNOWN_ENTRIES_LIMIT`. It is still
+  a leaf with no identity, no behavior and no transcript — the property that
+  pin exists to hold.
+- **Platform twin.** A host REPLAYing the recorder passes the vault's
+  LANDMARKS store as `landmarks` and stops passing `known_labels` unless it
+  has names from somewhere else; the `{landmarks}` token in the recorder leaf
+  is now `{known_entries}`. The conversation leaf's own `{landmarks}` block
+  is untouched.
+- **Goldens.**
+  `interactions/landmarks/evals/goldens/landmark-known-entries-01.json` pins
+  the founder shape (four filed, re-answered, nothing new: no records, ONE
+  attempt, no lint), a re-answer carrying one genuinely new entry, and a
+  finer date on an entry already filed.

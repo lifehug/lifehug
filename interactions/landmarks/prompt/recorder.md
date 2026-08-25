@@ -13,8 +13,8 @@ THE RUNGS THIS DOMAIN CAN CARRY: {ladder}
 THE ONLY KEYS THIS DOMAIN CAN READ: {recordable_keys}
 CAN THIS DOMAIN BE ANSWERED "NEVER HAPPENED": {none_allowed}
 
-ALREADY KNOWN — never record these again:
-{landmarks}
+ALREADY FILED FOR THIS DOMAIN — these entries are already in the store:
+{known_entries}
 
 WHAT THEY SAID:
 {answer}
@@ -75,6 +75,13 @@ date they did not give you to make the list longer.
   their own, in the order they named them. Do not wait for later turns and do
   not pick one — they said them all in the same breath and the rest will not
   be asked for again.
+- **Never record an entry that is already filed above.** People go back over
+  their own lives; saying a name again is not a new entry. If everything they
+  said is already up there, emit `{"landmarks": []}` — it was heard, and there
+  is nothing left to file. Record an entry named above ONLY when they gave you
+  something that line does not have: a name where it says `(unnamed)`, or a
+  finer date than the one shown — a month where it shows a year. Then send
+  that ONE record, under the SAME name, carrying only what is new.
 - If they truly said nothing about this domain — they changed the subject, or
   answered a different question entirely — emit `{"landmarks": []}`.
   Recording nothing is correct exactly there and nowhere else.

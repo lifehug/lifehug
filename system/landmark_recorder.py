@@ -217,13 +217,24 @@ def build_recorder_prompt(*, domain: str, question_asked: str,
 
     Deliberately NOT the conversation prompt. It carries no identity, no
     behavior, no examples and no transcript — only the domain, its ladder,
-    the question that was asked, what the person said, and what they were
-    told back. That is the entire evidence a recording decision needs, and
-    leaving the rest out is what makes the second call small.
+    what is ALREADY FILED under it, the question that was asked, what the
+    person said, and what they were told back. That is the entire evidence a
+    recording decision needs, and leaving the rest out is what makes the
+    second call small.
+
+    ``landmarks`` is the LANDMARKS store (``{domain: [entry, ...]}``) or, for
+    a caller that has already selected them, this domain's own entries —
+    `landmarks_interaction.landmark_entries` reads both. v216 (lifehug#230)
+    changed what it is FOR: until then the block under "ALREADY KNOWN — never
+    record these again" was `render_landmarks`, one line per domain saying
+    `- children: partial (4)`, and a store dict — which is what every real
+    caller holds, this module's own CLI included — rendered as "(nothing
+    yet)". A model cannot decline to re-file four children it has never been
+    shown. It is now `render_known_entries`, which names them.
     """
     row = li.domain_row(domain, framework_root=framework_root)
-    rows = landmarks if isinstance(landmarks, (list, tuple)) else ()
-    block = li.render_landmarks(rows) if rows else "(nothing yet)"
+    known = li.render_known_entries(landmarks, domain,
+                                    framework_root=framework_root)
     filled = load_recorder_leaf(framework_root)
     # `.replace`, never `.format` — every leaf in this package substitutes the
     # same way, and these leaves carry literal JSON braces.
@@ -232,7 +243,7 @@ def build_recorder_prompt(*, domain: str, question_asked: str,
         ("{ladder}", " | ".join(row["ladder"])),
         ("{recordable_keys}", " | ".join(recordable_keys(row))),
         ("{none_allowed}", "yes" if li.domain_accepts_none(row) else "no"),
-        ("{landmarks}", block),
+        ("{known_entries}", known),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),
         ("{reminder}", f"\n\n{reminder.strip()}" if reminder else ""),
@@ -325,7 +336,18 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
     There is exactly ONE retry across both findings, and :data:`MAX_ATTEMPTS`
     is still 2: a second regeneration would be a loop, and the lints exist to
     make a failure legible, not to keep rolling the dice.
+
+    ``known_labels`` is DERIVED, not hand-passed (v216, lifehug#230). Both
+    lints take it and both were being run with an empty one, because the only
+    thing that could fill it — the entries already in the store — reached this
+    function as ``landmarks`` and went nowhere but the prompt. It is now
+    `landmarks_interaction.known_entry_labels` over that same store, so the
+    block the model reads and the lints that judge its answer name the same
+    entries; the argument survives as the ``extra`` union for a host holding
+    names from somewhere else.
     """
+    known = li.known_entry_labels(landmarks, domain, extra=known_labels,
+                                  framework_root=framework_root)
     prompts: list[str] = []
     reminder = ""
     finding: dict | None = None
@@ -352,7 +374,7 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
         if best:
             missed = li.records_missing_entries(
                 answer, best, reply=reply, domain=domain,
-                known_labels=known_labels, framework_root=framework_root,
+                known_labels=known, framework_root=framework_root,
             )
             if missed is None or attempt == MAX_ATTEMPTS:
                 return RecorderOutcome(
@@ -366,7 +388,7 @@ def record_answer(*, domain: str, answer: str, call, reply: str = "",
             continue
         finding = li.answer_must_record(
             answer, records, reply=reply, domain=domain,
-            known_labels=known_labels, framework_root=framework_root,
+            known_labels=known, framework_root=framework_root,
         )
         if finding is None:
             return RecorderOutcome(status=STATUS_NOTHING, attempts=attempt,
@@ -388,9 +410,13 @@ def main(argv: list[str] | None = None) -> int:
     """`landmark_recorder.py --domain X [--dry-run] < payload.json`.
 
     Payload: ``{"domain"?, "answer", "reply"?, "question_asked"?,
-    "landmarks"?, "known_labels"?}``. ``--dry-run`` prints the composed
-    prompt and calls nothing, which is how a host verifies its own REPLAY
-    against this leaf without spending a completion.
+    "landmarks"?, "known_labels"?}``. ``landmarks`` is the LANDMARKS store as
+    `timeline.load_landmarks` returns it — a dict of domain to entries — and
+    from v216 it is what fills the prompt's ALREADY-FILED block and the lints'
+    ``known_labels`` alike; ``known_labels`` remains for names from elsewhere
+    and is unioned in. ``--dry-run`` prints the composed prompt and calls
+    nothing, which is how a host verifies its own REPLAY against this leaf
+    without spending a completion.
     """
     import argparse  # noqa: PLC0415
     import sys  # noqa: PLC0415
@@ -413,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
                 question_asked=payload.get("question_asked", ""),
                 answer=payload.get("answer", ""),
                 reply=payload.get("reply", ""),
-                landmarks=payload.get("landmarks") or (),
+                landmarks=payload.get("landmarks") or {},
             ))
             return 0
         from ai_provider import call_ai  # noqa: PLC0415
@@ -422,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
             domain=domain, answer=payload.get("answer", ""),
             reply=payload.get("reply", ""),
             question_asked=payload.get("question_asked", ""),
-            landmarks=payload.get("landmarks") or (),
+            landmarks=payload.get("landmarks") or {},
             known_labels=payload.get("known_labels") or (),
             call=call_ai, model=args.model,
         )

@@ -64,6 +64,17 @@ said, and what they were told back. **One recorder, two triggers:**
 generated, and what a historical sweep calls over answers people already gave,
 so the sweep inherits the backstop instead of re-rolling the same dice.
 
+**The recorder knows what it already knows** (v216, lifehug#230). Its prompt
+carries the entries ALREADY FILED for the domain being asked about — one line
+each, name and date (`render_known_entries`) — because the heading it has
+carried since v212 said *never record these again* over a block that named
+only domain STATUSES, and a model cannot decline to re-file four children it
+has never been shown. The same entries supply `known_labels`
+(`known_entry_labels`), which both recording lints take precisely so a name
+the model was handed is not read back as the person's own fresh evidence. A
+person going back over their own life now costs ONE completion and files
+nothing; before, it cost two and came back withheld.
+
 Its backstop is `landmark_gates.answer_must_record` — the lane's ONE blocking
 lint — plus exactly one regeneration carrying `recording_reminder()`. A second
 empty pass is a WITHHELD record a host can retry, never a silent drop and
@@ -133,11 +144,13 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The specificity ladder | `landmarks_interaction.rung_reached`, `next_rung`, `RUNG_TEXTS`, `LADDER_COST` |
 | The ledger a host renders | `landmarks_interaction.landmark_rows(landmarks, keystone_domains=…)`, `open_landmarks(rows)`; `timeline.timeline_data()["landmarks"]` |
 | The `{landmark_stage}` this turn is in | `landmarks_interaction.landmark_stage_for_session(session, user_leaving=…, all_settled=…, skip_streak=…)` |
-| The `{landmarks}` block | `landmarks_interaction.render_landmarks(rows)` |
+| The conversation's `{landmarks}` block | `landmarks_interaction.render_landmarks(rows)` — one line per DOMAIN, status only |
+| The recorder's `{known_entries}` block (v216) | `landmarks_interaction.render_known_entries(landmarks, domain)` — one line per filed ENTRY of the domain being asked about, from `landmark_entries` through `render_entry` (`entry_name` + the ladder's own date), bounded by `KNOWN_ENTRIES_LIMIT`. A status line is the right thing to show someone deciding what to ASK and the wrong thing to show a machine deciding what to FILE |
+| The names both lints must already know (v216) | `landmarks_interaction.known_entry_labels(landmarks, domain, extra=…)` — ONE derivation for the block, `answer_must_record`/`answer_shape` and `records_missing_entries`; `record_answer` derives it from the store it was given instead of taking it hand-passed (which is to say empty) |
 | The one additive turn-output field | `conversation_delivery.parse_turn_output(...)["landmark"]`, enabled by `TurnShape(landmark_stage=…)` |
 | Closed validation of that field | `landmarks_interaction.validate_landmark(value)` |
 | The seven landmark lints | `landmarks_interaction.lint_landmark_reply(text, stage=…, domain=…, sensitive=…, domains_named=…, landmark=…, user_message=…, known_labels=…)`; `landmarks_interaction.LANDMARK_LINT_CLASSES`. The sixth, `never_proposes_a_date`, is SHARED — its one definition is `timeline_interaction.proposes_a_date`, run by both lanes |
-| The recorder (v212, ADR 0028; v214 many-records) | `landmark_recorder.build_recorder_prompt(domain=…, question_asked=…, answer=…, reply=…, landmarks=…, reminder=…)` · `parse_recorder_output(raw)` → `tuple[dict, ...]` (BOTH pinned validation layers, PER RECORD) · `record_answer(…, call=…)` — the whole loop, with the model injected · `recordable_keys(row)` — the only keys this domain can READ, walked from v211's own `landmarks_interaction.rung_satisfiers` and intersected with what both validation layers keep (the writer-side half of #219/#220: no `span` on `children`, no `label` on `birth`, no `name` on `children`, no `birth` key on `family`). Leaf: `prompt/recorder.md`; role: `role.recorder`. **Platform wiring:** the engine calls the recorder AFTER the reply is generated and files through the same durable path the live turn files through; the landmark re-harvest calls the SAME function instead of re-composing the live turn prompt |
+| The recorder (v212, ADR 0028; v214 many-records; v216 known entries) | `landmark_recorder.build_recorder_prompt(domain=…, question_asked=…, answer=…, reply=…, landmarks=…, reminder=…)` — `landmarks` is the LANDMARKS store (or the domain's own entries) and fills the ALREADY-FILED block · `parse_recorder_output(raw)` → `tuple[dict, ...]` (BOTH pinned validation layers, PER RECORD) · `record_answer(…, call=…)` — the whole loop, with the model injected · `recordable_keys(row)` — the only keys this domain can READ, walked from v211's own `landmarks_interaction.rung_satisfiers` and intersected with what both validation layers keep (the writer-side half of #219/#220: no `span` on `children`, no `label` on `birth`, no `name` on `children`, no `birth` key on `family`). Leaf: `prompt/recorder.md`; role: `role.recorder`. **Platform wiring:** the engine calls the recorder AFTER the reply is generated and files through the same durable path the live turn files through; the landmark re-harvest calls the SAME function instead of re-composing the live turn prompt |
 | The one BLOCKING lint, and its retry (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, raised from `answer_must_record(user_message, record, reply=…, domain=…, known_labels=…)` — ONE definition, run by the recorder as its backstop and by `lint_landmark_reply` for a host still reading the reply's own field. On a finding, regenerate ONCE with `recording_reminder(domain)` appended (`landmark_recorder.MAX_ATTEMPTS = 2`), then emit or withhold |
 | One answer, many records (v214) | Output `{"landmarks": [ ... ]}`; `RecorderOutcome.records` (`.record` = the first, for v212 callers). The RETRYABLE class `landmarks_interaction.RECORD_EVERY_ENTRY_LINT` from `records_missing_entries(user_message, records, reply=…, domain=…, known_labels=…)`, its regeneration `many_records_reminder(domain, count)` — the SAME single retry, and it files what it has either way. Filing: `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` → `timeline.save_landmarks` |
 | Filing an accepted landmark | `landmarks_interaction.landmark_invocation(record)` → `lifehug.py landmark-record` |

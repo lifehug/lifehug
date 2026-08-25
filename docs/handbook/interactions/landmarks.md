@@ -79,6 +79,21 @@ none. Each record lands as its own entry in the store, and the only prior
 entries a new one retires are a standing terminal and the collapsed aggregate
 — an entry carrying a field its own ladder has no rung for.
 
+**The recorder knows what it already knows** (v216, ADR 0028 amendment). The
+same class again, from the other end: the recorder's prompt has told it
+*never record these again* since v212 over a block that named domain
+STATUSES — `- children: partial (4)` — so it could not obey, and the names
+already in the store never reached the lints either. A person going back over
+their own life therefore re-emitted facts already filed, and their own filed
+names came back in the reply and read as fresh evidence. The prompt now
+carries the ENTRIES of the domain being asked about, one line each with its
+name and its date, and the same entries supply the `known_labels` both
+recording lints take. A pure restatement now files nothing in one completion;
+a listed entry is recorded again only for a name it lacks or a finer date than
+the one shown. The store stays the backstop — `merge_landmark_entry` is
+idempotent and filing keys on the entry's own identity — so this saves a
+completion and a wrong file, not a correctness invariant.
+
 **Never ask for a year — except a person's birthday.** A birth date is
 overlearned, not reconstructed, and every fielded life-history instrument takes
 it first because the calendar's axis starts there. v202 draws out the
@@ -342,7 +357,7 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The roster join and the witnesses (v202) | `landmarks_interaction.family_members`, `family_roster_invocations` → `lifehug.py entity-verdict … --ensure`; `witness_candidates` → `timeline.timeline_data()["witnesses"]` |
 | Who asks about it (v200) | `arc_planner.collect_places_without_stories` → the `place_no_stories` arc-card intent → `landmarks_interaction.render_place_no_stories` |
 | The additive output field | `conversation_delivery.TurnShape.landmark_stage`, `_parse_landmark` |
-| The recorder (v212) | `system/landmark_recorder.py` — `build_recorder_prompt`, `parse_recorder_output`, `record_answer`, `recordable_keys`; leaf `interactions/landmarks/prompt/recorder.md` |
+| The recorder (v212; v216 known entries) | `system/landmark_recorder.py` — `build_recorder_prompt`, `parse_recorder_output`, `record_answer`, `recordable_keys`; leaf `interactions/landmarks/prompt/recorder.md`. The already-filed block and the lints' names: `landmarks_interaction.render_known_entries`, `known_entry_labels`, `landmark_entries`, `render_entry`, `entry_name` |
 | Its blocking backstop (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, `answer_must_record`, `answer_shape`, `recording_reminder` |
 | Its retryable one (v214) | `landmarks_interaction.RECORD_EVERY_ENTRY_LINT`, `records_missing_entries`, `many_records_reminder`; filing `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |

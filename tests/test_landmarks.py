@@ -2166,12 +2166,19 @@ class LandmarkRecorderTests(unittest.TestCase):
                        "## SESSION"):
             self.assertNotIn(absent, prompt)
         self.assertIn("You are not in the conversation", prompt)
-        # v214 moved this ceiling from 4000: the leaf now carries ONE worked
-        # multi-entry example, because the certification audit's whole
-        # finding was that prose alone is ignorable. It is still a leaf with
-        # no identity, no behavior and no transcript, which is the property
-        # this pin exists to hold.
-        self.assertLess(len(prompt), 4400)
+        # v216 moves this ceiling from 4400 (v214 moved it from 4000 for the
+        # worked multi-entry example). The leaf gained the never-re-record
+        # rule — the actionable half of a heading it has carried since v212 —
+        # which is ~250 characters of prose, and every domain's prompt with an
+        # EMPTY already-filed block now lands between 4582 and 4699. It is
+        # still a leaf with no identity, no behavior and no transcript, which
+        # is the property this pin exists to hold.
+        self.assertLess(len(prompt), 4800)
+        for row in li.load_questions():
+            with self.subTest(domain=row["domain"]):
+                self.assertLess(len(self._prompt(domain=row["domain"],
+                                                 question_asked=row["ask"])),
+                                4800)
 
     def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
         military = self._prompt()
@@ -2810,4 +2817,214 @@ class ManyRecordsTests(unittest.TestCase):
         self.assertIn(
             "interactions/landmarks/evals/goldens/"
             "landmark-many-records-01.json",
+            manifest["framework_files"])
+
+
+class KnownEntriesTests(unittest.TestCase):
+    """v216 / lifehug#230 — the recorder knows what it already knows.
+
+    The design audit's D7. Since v212 the recorder's leaf has carried the
+    heading *"ALREADY KNOWN — never record these again"* over a block that
+    named DOMAIN STATUSES — `- children: partial (4)` — and a store dict, the
+    shape every real caller holds, rendered as "(nothing yet)". A model cannot
+    decline to re-file four children it has never been shown. `known_labels`,
+    which both recording lints take, was hand-passed and therefore empty
+    everywhere, so a person going back over their own life had their own filed
+    names read back as fresh evidence.
+    """
+
+    FIXTURE = (ROOT / "interactions" / "landmarks" / "evals" / "goldens"
+               / "landmark-known-entries-01.json")
+
+    def setUp(self) -> None:
+        import landmark_recorder as recorder  # noqa: PLC0415
+
+        self.recorder = recorder
+        data = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(data["fixture_id"], "landmark-known-entries-01")
+        self.cases = {case["case_id"]: case for case in data["cases"]}
+
+    def _drive(self, case: dict):
+        seen: list[str] = []
+
+        def _call(prompt: str, model: str) -> str:
+            seen.append(prompt)
+            return case["attempt"]["raw"]
+
+        outcome = self.recorder.record_answer(
+            domain=case["domain"], answer=case["user_message"],
+            reply=case["reply"], landmarks=case["landmarks"], call=_call)
+        return outcome, seen
+
+    # -- the golden, end to end -------------------------------------------
+
+    def test_every_golden_case_files_only_what_is_new(self):
+        for case_id, case in self.cases.items():
+            with self.subTest(case=case_id):
+                outcome, seen = self._drive(case)
+                self.assertEqual(outcome.status, case["expected_status"])
+                self.assertEqual(list(outcome.records),
+                                 case["expected_landmarks"])
+                self.assertEqual(outcome.attempts, case["expected_attempts"])
+                self.assertEqual(len(seen), case["expected_attempts"])
+                self.assertEqual(outcome.lint_ids, ())
+
+    def test_the_prompt_names_the_entries_not_the_domains_status(self):
+        """The whole defect, in one assertion."""
+        case = self.cases["children-re-answered-with-nothing-new"]
+        _, seen = self._drive(case)
+        block = seen[0].split("ALREADY FILED FOR THIS DOMAIN")[1]
+        block = block.split("WHAT THEY SAID:")[0]
+        for name in ("Corinne", "Maddox", "Sela", "Ivo"):
+            self.assertIn(name, block)
+        # The status row that was there before says nothing a model can act on.
+        self.assertNotIn("children: partial", seen[0])
+
+    def test_the_restatement_would_have_withheld_without_it(self):
+        """Why this is a defect and not a nicety: the counterfactual.
+
+        With no known labels, the four names coming back in the reply are read
+        as the person's own fresh evidence, the blocking lint fires, and the
+        answer costs a regeneration and comes back WITHHELD.
+        """
+        case = self.cases["children-re-answered-with-nothing-new"]
+        self.assertIsNotNone(li.answer_must_record(
+            case["user_message"], (), reply=case["reply"], domain="children"))
+        self.assertIsNone(li.answer_must_record(
+            case["user_message"], (), reply=case["reply"], domain="children",
+            known_labels=li.known_entry_labels(case["landmarks"], "children")))
+
+    def test_the_leaf_teaches_the_rule_the_heading_only_ever_claimed(self):
+        leaf = self.recorder.load_recorder_leaf()
+        self.assertIn("{known_entries}", leaf)
+        self.assertIn("Never record an entry that is already filed above",
+                      leaf)
+        self.assertIn("finer date than the one shown", leaf)
+        self.assertNotIn("{landmarks}\n", leaf)
+
+    # -- ONE derivation, three consumers -----------------------------------
+
+    def test_the_labels_and_the_block_come_from_the_same_entries(self):
+        case = self.cases["children-re-answered-with-nothing-new"]
+        labels = li.known_entry_labels(case["landmarks"], "children")
+        self.assertEqual(labels, ("Corinne", "Maddox", "Sela", "Ivo"))
+        block = li.render_known_entries(case["landmarks"], "children")
+        for label in labels:
+            self.assertIn(label, block)
+
+    def test_a_name_filed_only_under_the_identity_rung_is_still_known(self):
+        """The founder's four children were filed as `who` with no `label`."""
+        row = li.domain_row("children")
+        entry = {"domain": "children", "who": "Wren"}
+        self.assertIsNone(li.identity_named(entry, row))
+        self.assertEqual(li.entry_name(entry, row), "Wren")
+        self.assertEqual(li.known_entry_labels({"children": [entry]},
+                                               "children"), ("Wren",))
+
+    def test_a_placeholder_label_is_a_merge_key_but_never_a_name(self):
+        row = li.domain_row("residences")
+        entry = {"domain": "residences", "label": "unknown"}
+        self.assertEqual(li.landmark_entry_key(entry, row), "unknown")
+        self.assertIsNone(li.entry_name(entry, row))
+        self.assertIn("(unnamed)", li.render_entry(entry, row))
+
+    def test_extra_labels_are_unioned_in_and_the_first_spelling_wins(self):
+        entries = [{"domain": "children", "label": "Corinne"}]
+        self.assertEqual(
+            li.known_entry_labels({"children": entries}, "children",
+                                  extra=("corinne", "Wren")),
+            ("Corinne", "Wren"))
+
+    def test_the_store_and_a_selected_list_read_the_same(self):
+        entries = [{"domain": "children", "label": "Corinne"}]
+        self.assertEqual(li.landmark_entries({"children": entries},
+                                             "children"),
+                         li.landmark_entries(entries, "children"))
+        self.assertEqual(li.landmark_entries({"children": entries}, "work"),
+                         ())
+        self.assertEqual(li.landmark_entries(None, "children"), ())
+
+    # -- the block itself ---------------------------------------------------
+
+    def test_an_empty_domain_says_so_rather_than_pretending(self):
+        self.assertEqual(li.render_known_entries({}, "children"),
+                         li.NO_KNOWN_ENTRIES)
+
+    def test_the_block_is_bounded_and_says_how_many_it_did_not_name(self):
+        entries = [{"domain": "work", "label": f"Job {n}", "what": "work"}
+                   for n in range(li.KNOWN_ENTRIES_LIMIT + 3)]
+        block = li.render_known_entries({"work": entries}, "work")
+        self.assertEqual(len(block.splitlines()), li.KNOWN_ENTRIES_LIMIT + 1)
+        self.assertIn("…and 3 more already filed", block)
+
+    def test_a_domain_with_no_subject_renders_the_date_alone(self):
+        row = li.domain_row("birth")
+        self.assertIsNone(li.identity_rung(row))
+        self.assertEqual(li.render_entry({"domain": "birth",
+                                          "date": _date("1952")}, row),
+                         "- 1952")
+
+    def test_the_two_terminals_say_what_they_are(self):
+        military = li.domain_row("military")
+        self.assertIn("never happened",
+                      li.render_entry({"domain": "military", "none": True},
+                                      military))
+        self.assertIn("declined",
+                      li.render_entry({"domain": "military", "skipped": True},
+                                      military))
+
+    def test_an_undated_entry_says_so_rather_than_inventing_one(self):
+        row = li.domain_row("children")
+        self.assertEqual(
+            li.render_entry({"domain": "children", "label": "Wren"}, row),
+            "- Wren — no date filed")
+
+    # -- the store-side backstop -------------------------------------------
+
+    def test_merging_a_record_already_filed_changes_nothing(self):
+        """Whatever the model repeats anyway lands on the same entry."""
+        case = self.cases["children-re-answered-with-nothing-new"]
+        for entry in case["landmarks"]["children"]:
+            with self.subTest(entry=entry["label"]):
+                self.assertEqual(li.merge_landmark_entry(entry, entry), entry)
+                self.assertEqual(li.merge_landmark_entry(entry, dict(entry)),
+                                 entry)
+
+    def test_a_repeated_record_never_becomes_a_second_entry(self):
+        import timeline  # noqa: PLC0415
+
+        case = self.cases["children-re-answered-with-nothing-new"]
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            timeline.save_landmarks("children", case["landmarks"]["children"])
+            first = timeline.load_landmarks()["children"]
+            timeline.save_landmarks("children", case["landmarks"]["children"])
+            second = timeline.load_landmarks()["children"]
+        self.assertEqual(len(first), 4)
+        self.assertEqual(second, first)
+
+    def test_a_finer_date_refines_the_entry_it_names(self):
+        import timeline  # noqa: PLC0415
+
+        case = self.cases["children-a-finer-date-is-not-a-duplicate"]
+        tmp = root_parent_tmp(self, ROOT)
+        store = tmp / "landmarks.json"
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            timeline.save_landmarks("children", case["landmarks"]["children"])
+            outcome, _ = self._drive(case)
+            timeline.save_landmarks("children", outcome.records)
+            entries = timeline.load_landmarks()["children"]
+        self.assertEqual(len(entries), 4)
+        sela = next(e for e in entries if e["label"] == "Sela")
+        self.assertEqual(sela["date"]["granularity"], "day")
+        self.assertEqual(li.rung_reached(sela, li.domain_row("children")),
+                         "month")
+
+    def test_the_new_golden_ships_in_framework_files(self):
+        manifest = json.loads(
+            (ROOT / "system" / "version.json").read_text(encoding="utf-8"))
+        self.assertIn(
+            "interactions/landmarks/evals/goldens/"
+            "landmark-known-entries-01.json",
             manifest["framework_files"])
