@@ -1508,23 +1508,37 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
         value = getattr(args, rung.replace("-", "_"), None)
         if isinstance(value, bool) or value:
             record[rung] = value
-    if args.date:
-        parsed = _chrono.parse_edtf(args.date, basis="stated")
-        if parsed is None:
-            print(f"error: unreadable date {args.date!r}")
+    # v222 (B4): the date arrives WHOLE or not at all. Every one of these
+    # three records used to be rebuilt with `basis="stated"` and an empty
+    # provenance, so a date the system calculated from an age was filed as one
+    # the person had stated — `chronology.claim_score` then paid it +2.0 it
+    # had not earned. `chronology.date_from_argv` honors what the CALLER
+    # declared on `--basis`/`--anchor`/`--provenance` and only falls back to
+    # `stated` when nothing was declared at all, which is the one honest
+    # reading of a person typing `--date 1984` at a terminal. Machine callers
+    # go through `landmarks_interaction.landmark_invocation`, which always
+    # declares.
+    for bound, given, prefix in (("date", args.date, ""),
+                                 ("start", args.start, "start_"),
+                                 ("end", args.end, "end_")):
+        try:
+            parsed = _chrono.date_from_argv(
+                given,
+                basis=getattr(args, f"{prefix}basis", None),
+                granularity=getattr(args, f"{prefix}granularity", None),
+                confidence=getattr(args, f"{prefix}confidence", None),
+                anchors=getattr(args, f"{prefix}anchor", None) or (),
+                provenance=getattr(args, f"{prefix}provenance", None) or (),
+            )
+        except _chrono.ChronologyError as exc:
+            print(f"error: --{bound}: {exc}")
             return 1
-        record["date"] = parsed.to_dict()
-    span = {}
-    for bound, flag in (("start", args.start), ("end", args.end)):
-        if not flag:
+        if parsed is None:
             continue
-        parsed = _chrono.parse_edtf(flag, basis="stated")
-        if parsed is None:
-            print(f"error: unreadable {bound} {flag!r}")
-            return 1
-        span[bound] = parsed.to_dict()
-    if span:
-        record["span"] = span
+        if bound == "date":
+            record["date"] = parsed.to_dict()
+        else:
+            record.setdefault("span", {})[bound] = parsed.to_dict()
     if args.complete:
         record["chain_complete"] = True
     if getattr(args, "none", False):
@@ -2946,6 +2960,35 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", default="", help="EDTF date for a point landmark")
     p.add_argument("--start", default="", help="EDTF start of a span")
     p.add_argument("--end", default="", help="EDTF end of a span")
+    # v222 (B4): a date without its warrant is a claim with no evidence, and
+    # an undeclared basis used to be silently filed as `stated`. Each of the
+    # three dates carries its own — the two ends of a span are two separate
+    # claims and are rarely dated the same way.
+    for value_flag, prefix in (("date", ""), ("start", "start-"), ("end", "end-")):
+        dest = prefix.replace("-", "_")
+        # No argparse `choices` on any of the three: `chronology.BASES`,
+        # `GRANULARITIES` and `CONFIDENCES` are the ONE closed vocabularies and
+        # `chronology.date_from_argv` is the ONE place that checks a value
+        # against them — a copy of any list here is exactly the second
+        # definition the recurring-defect doctrine forbids.
+        p.add_argument(f"--{prefix}basis", dest=f"{dest}basis", default="",
+                       help=f"how the --{value_flag} was arrived at, one of "
+                            f"chronology.BASES (default: stated — a date you "
+                            f"type here is one you are stating)")
+        p.add_argument(f"--{prefix}granularity", dest=f"{dest}granularity", default="",
+                       help=f"grain of the --{value_flag}, one of "
+                            f"chronology.GRANULARITIES (default: read off the date)")
+        p.add_argument(f"--{prefix}confidence", dest=f"{dest}confidence", default="",
+                       help=f"how firmly the --{value_flag} is held, one of "
+                            f"chronology.CONFIDENCES (default: read off the date)")
+        p.add_argument(f"--{prefix}anchor", dest=f"{dest}anchor", action="append",
+                       default=[], help=f"a landmark the --{value_flag} leaned on "
+                                        f"(repeatable)")
+        p.add_argument(f"--{prefix}provenance", dest=f"{dest}provenance",
+                       action="append", default=[],
+                       help=f"one JSON provenance object for the --{value_flag}, "
+                            f'e.g. \'{{"claim":"about five","basis":"age"}}\' '
+                            f"(repeatable)")
     p.add_argument("--complete", action="store_true",
                    help="the chain is finished — stop offering more of this domain")
     # v202 (family-landmark): birth order is a free-text FIELD, not a rung, so
