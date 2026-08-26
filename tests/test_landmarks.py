@@ -3697,7 +3697,7 @@ class ProvenanceSurvivesTests(unittest.TestCase):
     def test_a_calculated_date_can_no_longer_masquerade_as_stated(self):
         """The incident: +2.0 of `claim_score` the claim had not earned.
 
-        Filed pre-v219, this record came back ``basis="stated",
+        Filed pre-v220, this record came back ``basis="stated",
         confidence="certain"`` — 10.0 — and outscored the very claim it was
         derived FROM. It now lands at its own 8.0, and a genuinely stated
         rival beats it, which is the whole point of a basis.

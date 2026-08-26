@@ -903,7 +903,7 @@ _LANDMARK_PROVENANCE_MAX_CHARS = 160
 def _parse_landmark_date(raw: object) -> dict | None:
     """Structural layer of a landmark's date — interval AND warrant.
 
-    v219 (B4): ``anchors`` and ``provenance`` were in :data:`_LANDMARK_DATE_KEYS`
+    v220 (B4): ``anchors`` and ``provenance`` were in :data:`_LANDMARK_DATE_KEYS`
     from the start — a payload carrying them PASSED the subset check — and then
     the copy loop below read only the six string keys and dropped them on the
     floor. A date the recorder had anchored on the person's birth and quoted

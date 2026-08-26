@@ -606,7 +606,7 @@ def identity_named(entry: object, row: object) -> str | None:
     return None
 
 
-#: Where the claims a date OUTRANKED are kept (v219, B4). Never overwritten,
+#: Where the claims a date OUTRANKED are kept (v220, B4). Never overwritten,
 #: never deleted: a person who said something once said it, and a system that
 #: files a better-supported date over theirs owes them the record that it did.
 #: `merge_landmark_entry` writes them, :func:`landmark_date` reads them.
@@ -1728,7 +1728,7 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
     One definition, so the store and every future caller agree
     (recurring-defect doctrine).
 
-    **The DATE fields are the exception to the dict merge** (v219, B4).
+    **The DATE fields are the exception to the dict merge** (v220, B4).
     ``{**prior, **incoming}`` is right for a city and an address — a later
     rung is a fuller answer to the same question — and it was quietly wrong
     for a date, because two dates for one entry are not a fuller answer, they
@@ -1823,7 +1823,7 @@ def landmark_date(entry: object, *, bound: object = None) -> dict:
     own ``date``.
 
     The read side's single seat. Wave D/E renders the alternates and the
-    conflict; today the point is that both are ANSWERABLE — before v219 the
+    conflict; today the point is that both are ANSWERABLE — before v220 the
     losing claim did not exist to ask about.
     """
     if not isinstance(entry, dict):
@@ -1971,7 +1971,7 @@ def landmark_invocation(record: object) -> list[str] | None:
     A **skip** files nothing — it is not an answer. A **none** files, because
     it is: it is the answer that finishes the domain.
 
-    v219 (B4): a date crosses to the writer WHOLE. This function used to
+    v220 (B4): a date crosses to the writer WHOLE. This function used to
     serialize the EDTF expression alone (``--date 1984``), and
     `lifehug.py landmark-record` rebuilt what arrived with ``basis="stated"``
     — so a date the system CALCULATED from an age was filed as one the person
@@ -2428,7 +2428,7 @@ def date_flags(flag: str, record: object) -> list[str]:
     later claim may replace an earlier one.
 
     **This is the PERSON-ROSTER carriage, and it is narrower than the landmark
-    one on purpose — for now.** v219 made `chronology.date_argv` /
+    one on purpose — for now.** v220 made `chronology.date_argv` /
     `date_from_argv` the one definition of a `DateRecord` crossing a process
     boundary, carrying all five of `chronology.WARRANT_FIELDS`; this pair of
     flags carries the basis alone because `lifehug.py entity-verdict` accepts
