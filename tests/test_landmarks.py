@@ -2123,6 +2123,28 @@ class CaptureCardinalityAcceptanceTests(unittest.TestCase):
         self.assertEqual(by_label["Katie"]["probe"]["text"],
                          "Roughly when did you and Katie get together?")
 
+    def test_a_loss_gap_is_about_a_named_person_never_loss_discovery(self):
+        """§2.4 / §10: loss DISCOVERY is offer-only and never enters the
+        queue. A per-subject gap is a different question — it is about
+        somebody the person already named, which is exactly why widening the
+        enumeration to `losses` does not widen the discovery prompt. The
+        structure guarantees it: `incomplete_subjects` renders only rungs
+        PAST the identity rung, and only for an entry carrying a name."""
+        row = li.domain_row("losses")
+        opener = row["ask"]
+        gaps = li.incomplete_subjects({"losses": [
+            {"domain": "losses", "label": "Grandpa Ray", "who": "Grandpa Ray"},
+            {"domain": "losses", "skipped": True},
+            {"domain": "losses", "none": True},
+        ]})
+        self.assertEqual([gap["label"] for gap in gaps], ["Grandpa Ray"])
+        self.assertNotEqual(gaps[0]["probe"]["text"], opener)
+        self.assertNotIn("lost someone", gaps[0]["probe"]["text"])
+        # An empty domain mints no gap at all — the opener stays where it is,
+        # on the landmark row, offered rather than asked.
+        self.assertEqual(li.incomplete_subjects({"losses": []}), ())
+        self.assertTrue(row["sensitive"])
+
     def test_the_three_partnership_events_are_three_distinct_asks(self):
         """§2.2 / §10: first meeting, the start of dating and the marriage are
         distinct events. This wave delivers the QUESTIONS; the claim records
