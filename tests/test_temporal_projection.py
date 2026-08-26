@@ -31,14 +31,16 @@ def raised_finding_codes(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     codes: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+        # Every construction of an error class counts, not only `raise` — a
+        # module may build the error in a helper and raise it at the call site.
+        if not isinstance(node, ast.Call):
             continue
-        func = node.exc.func
+        func = node.func
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
         if not (name.endswith("Error") or name == "error"):
             continue
-        if node.exc.args and isinstance(node.exc.args[0], ast.Constant):
-            value = node.exc.args[0].value
+        if node.args and isinstance(node.args[0], ast.Constant):
+            value = node.args[0].value
             if isinstance(value, str):
                 codes.add(value)
     return codes

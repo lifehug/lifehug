@@ -34,14 +34,16 @@ def raised_finding_codes(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     codes: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+        # Every construction of an error class counts, not only `raise` — a
+        # module may build the error in a helper and raise it at the call site.
+        if not isinstance(node, ast.Call):
             continue
-        func = node.exc.func
+        func = node.func
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
         if not (name.endswith("Error") or name == "error"):
             continue
-        if node.exc.args and isinstance(node.exc.args[0], ast.Constant):
-            value = node.exc.args[0].value
+        if node.args and isinstance(node.args[0], ast.Constant):
+            value = node.args[0].value
             if isinstance(value, str):
                 codes.add(value)
     return codes
@@ -106,6 +108,18 @@ class VocabularyTests(unittest.TestCase):
         with self.assertRaises(tc.TemporalClaimError) as caught:
             tc.validate_temporal_claim(claim(event_kind="Not A Kind"))
         self.assertEqual(caught.exception.code, "unknown_event_kind")
+
+    def test_every_claim_type_has_exactly_one_value_shape(self):
+        # A new claim_type with no declared value shape would fall through to
+        # the date branch and be silently mis-stored; this partition makes that
+        # a build failure instead.
+        shaped = set(tc.DATED_CLAIM_TYPES) | set(tc.QUANTITY_CLAIM_TYPES)
+        self.assertEqual(
+            set(tc.CLAIM_TYPES) - shaped - {"relative_order", "identity"}, set()
+        )
+        self.assertEqual(
+            set(tc.DATED_CLAIM_TYPES) & set(tc.QUANTITY_CLAIM_TYPES), set()
+        )
 
     def test_claim_basis_covers_every_chronology_basis(self):
         # Recurring-defect doctrine: a new date basis fails this test instead
@@ -360,6 +374,89 @@ class TemporalValueTests(unittest.TestCase):
         self.assertEqual(
             tc.validate_ordering_relation({"relation": "between", "anchors": ["a", "b"]}),
             {"relation": "between", "anchors": ["a", "b"]},
+        )
+
+    def test_an_age_is_a_length_not_a_calendar_position(self):
+        # Plan §6.4, §10: "I was about 12" is a fuzzy quantity. It becomes an
+        # interval only once a birth anchor exists, in the fold — storing a
+        # computed birthday here would be the false precision §2.2 forbids.
+        normalized = tc.validate_temporal_claim(
+            claim(claim_type="age", event_kind="move", temporal_value="about 12")
+        )
+        value = normalized["temporal_value"]
+        self.assertEqual(value["kind"], "age")
+        self.assertEqual(value["unit"], "years")
+        self.assertTrue(value["approximate"])
+        self.assertEqual(value["text"], "about 12")
+        self.assertNotIn("best", value)
+        self.assertNotIn("earliest", value)
+
+    def test_the_package_owns_the_one_age_parser(self):
+        # chronology.parse_age decides what "about" means; this module does not
+        # re-decide it.
+        low, high, approximate = chrono.parse_age("about 12")
+        value = tc.validate_temporal_quantity("about 12", claim_type="age")
+        self.assertEqual((value["low"], value["high"]), (float(low), float(high)))
+        self.assertEqual(value["approximate"], bool(approximate))
+
+    def test_a_hedged_age_is_not_the_same_claim_as_a_flat_one(self):
+        hedged = tc.validate_temporal_claim(
+            claim(claim_type="age", event_kind="move", temporal_value="about 12")
+        )
+        flat = tc.validate_temporal_claim(
+            claim(claim_type="age", event_kind="move", temporal_value="12")
+        )
+        self.assertNotEqual(hedged["claim_id"], flat["claim_id"])
+
+    def test_a_duration_is_supplied_structurally_never_reparsed_here(self):
+        normalized = tc.validate_temporal_claim(
+            claim(
+                claim_type="duration",
+                event_kind="job",
+                temporal_value={"amount": 3, "unit": "years", "text": "three years"},
+            )
+        )
+        value = normalized["temporal_value"]
+        self.assertEqual(
+            (value["kind"], value["low"], value["high"], value["unit"]),
+            ("duration", 3.0, 3.0, "years"),
+        )
+        # No free-text duration parser lives here — a second parser is the
+        # recurring defect the package's doctrine forbids.
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            tc.validate_temporal_claim(
+                claim(claim_type="duration", event_kind="job",
+                      temporal_value="three years")
+            )
+        self.assertEqual(caught.exception.code, "duration_value_unusable")
+
+    def test_an_unusable_age_is_a_named_failure(self):
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            tc.validate_temporal_claim(
+                claim(claim_type="age", event_kind="move", temporal_value="banana")
+            )
+        self.assertEqual(caught.exception.code, "age_value_unusable")
+
+    def test_a_band_must_be_a_band(self):
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            tc.validate_temporal_quantity(
+                {"low": 9, "high": 4, "unit": "years"}, claim_type="duration"
+            )
+        self.assertEqual(caught.exception.code, "duration_value_unusable")
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            tc.validate_temporal_quantity(
+                {"amount": 3, "unit": "fortnights"}, claim_type="duration"
+            )
+        self.assertEqual(caught.exception.code, "unknown_quantity_unit")
+
+    def test_the_quantity_round_trips_through_its_dataclass(self):
+        quantity = tc.TemporalQuantity(
+            kind="duration", low=2.0, high=4.0, unit="months", approximate=True,
+            text="a couple of months",
+        )
+        self.assertEqual(
+            tc.validate_temporal_quantity(quantity, claim_type="duration"),
+            quantity.to_dict(),
         )
 
     def test_confidence_is_calibrated_support_in_zero_to_one(self):

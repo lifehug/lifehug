@@ -68,9 +68,16 @@ Dates
 
 ``temporal_value`` is a :class:`chronology.DateRecord` (the package's one date
 definition: an EDTF interval with a granularity, a confidence, a basis, its
-anchors and its provenance) or an :class:`OrderingRelation` for a claim that
-only fixes order. There is no second date parser here and there must never be
-one; ``chronology`` owns EDTF, intervals, arithmetic and reconciliation.
+anchors and its provenance), a :class:`TemporalQuantity` for an age or a
+duration, or an :class:`OrderingRelation` for a claim that only fixes order.
+There is no second date parser here and there must never be one; ``chronology``
+owns EDTF, intervals, arithmetic, ``parse_age`` and reconciliation.
+
+An age and a duration are LENGTHS, not calendar positions. *"I was about 12"*
+becomes an interval only once a birth anchor exists, and that arithmetic
+belongs to the fold (``chronology.from_age``), not to the claim — a claim that
+stored a computed birthday as though the person had said one is precisely the
+false precision plan §2.2 forbids.
 
 Note the two ``basis`` vocabularies are different questions and both are
 needed. ``chronology.BASES`` answers *how was this interval arrived at*
@@ -313,6 +320,9 @@ ERROR_CODES = (
     "temporal_claim_needs_event_kind",
     "temporal_claim_needs_value",
     "temporal_value_unusable",
+    "age_value_unusable",
+    "duration_value_unusable",
+    "unknown_quantity_unit",
     "relative_order_needs_relation",
     "ordered_claim_needs_date",
     "evidence_required",
@@ -823,17 +833,128 @@ def ordering_relation_from_dict(value: object) -> OrderingRelation | None:
 # The temporal value: a date record or an ordering relation
 # --------------------------------------------------------------------------
 
-#: Claim types whose ``temporal_value`` is a :class:`chronology.DateRecord`.
-DATED_CLAIM_TYPES = ("date", "range", "age", "duration")
+#: Claim types whose ``temporal_value`` is a :class:`chronology.DateRecord` —
+#: a POSITION on the calendar.
+DATED_CLAIM_TYPES = ("date", "range")
+
+#: Claim types whose ``temporal_value`` is a :class:`TemporalQuantity` — a
+#: LENGTH, which is a different thing and must not be stored as an interval.
+#: *"I was about 12"* and *"we lived there three years"* are not calendar
+#: positions and become intervals only once an anchor exists, in the fold
+#: (plan §6.4, §10) — storing a fabricated interval at claim time is exactly
+#: the false precision §2.2 forbids.
+QUANTITY_CLAIM_TYPES = ("age", "duration")
+
+#: Units a quantity may be expressed in. Coarsest first.
+QUANTITY_UNITS = ("years", "months", "weeks", "days")
+
+
+@dataclass(frozen=True)
+class TemporalQuantity:
+    """An age or a duration: a band, a unit, and the phrase it came from.
+
+    A band rather than a number because *"about 12"* is a band and *"12"* is
+    not, and the difference is part of what was asserted.
+    ``chronology.parse_age`` is the ONE age parser in this package and this
+    class calls it rather than re-deciding what "about" means.
+    """
+
+    kind: str
+    low: float
+    high: float
+    unit: str = "years"
+    approximate: bool = False
+    text: str | None = None
+
+    def to_dict(self) -> dict:
+        payload: dict = {
+            "kind": self.kind,
+            "low": self.low,
+            "high": self.high,
+            "unit": self.unit,
+            "approximate": self.approximate,
+        }
+        if self.text:
+            payload["text"] = self.text
+        return payload
+
+
+def _quantity_error(claim_type: str, message: str) -> TemporalClaimError:
+    """The named finding for an unusable age or duration."""
+    if claim_type == "age":
+        return TemporalClaimError("age_value_unusable", message)
+    return TemporalClaimError("duration_value_unusable", message)
+
+
+def validate_temporal_quantity(value: object, *, claim_type: str) -> dict:
+    """Normalize an age or duration value or raise :class:`TemporalClaimError`.
+
+    An ``age`` given as text goes through ``chronology.parse_age`` — the
+    package's one age parser — so *"about 12"* widens exactly the way it
+    widens everywhere else. A ``duration`` is supplied structurally; this
+    module deliberately adds no free-text duration parser, because a second
+    parser is the recurring defect the package's doctrine forbids.
+    """
+    if isinstance(value, TemporalQuantity):
+        value = value.to_dict()
+    if claim_type == "age" and isinstance(value, str):
+        parsed = chrono.parse_age(value)
+        if parsed is None:
+            raise TemporalClaimError("age_value_unusable", f"not an age statement: {value!r}")
+        low, high, approximate = parsed
+        return {
+            "kind": "age",
+            "low": float(low),
+            "high": float(high),
+            "unit": "years",
+            "approximate": bool(approximate),
+            "text": collapsed_text(value),
+        }
+    if not isinstance(value, dict):
+        raise _quantity_error(
+            claim_type, f"a {claim_type} claim needs a quantity, got {value!r}"
+        )
+    unit = collapsed_text(value.get("unit")) or "years"
+    if unit not in QUANTITY_UNITS:
+        raise TemporalClaimError("unknown_quantity_unit", f"unknown unit: {unit!r}")
+    raw_low = value.get("low")
+    for key in ("amount", "value", "age"):
+        if raw_low is None:
+            raw_low = value.get(key)
+    raw_high = value.get("high")
+    if raw_high is None:
+        raw_high = raw_low
+    try:
+        low = float(raw_low)  # type: ignore[arg-type]
+        high = float(raw_high)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise _quantity_error(
+            claim_type, f"a {claim_type} needs a numeric band, got {value!r}"
+        ) from None
+    if low < 0 or high < low:
+        raise _quantity_error(claim_type, f"{low}..{high} is not a band")
+    normalized: dict = {
+        "kind": claim_type,
+        "low": low,
+        "high": high,
+        "unit": unit,
+        "approximate": bool(value.get("approximate")),
+    }
+    text = optional_text(value.get("text"))
+    if text:
+        normalized["text"] = text
+    return normalized
 
 
 def normalized_temporal_value(value: object, *, claim_type: str) -> object:
     """The claim's value in its one legal shape for that claim type.
 
-    ``date | range | age | duration`` normalize through ``chronology`` — there
-    is one date definition in this package and this module does not add a
-    second parser. ``relative_order`` normalizes through
-    :func:`validate_ordering_relation`. ``identity`` carries no value at all.
+    ``date | range`` normalize through ``chronology`` — there is one date
+    definition in this package and this module does not add a second parser.
+    ``age | duration`` normalize through :func:`validate_temporal_quantity`,
+    which is a length and not a calendar position. ``relative_order``
+    normalizes through :func:`validate_ordering_relation`. ``identity``
+    carries no value at all.
     """
     if claim_type == "identity":
         if value is not None:
@@ -844,6 +965,8 @@ def normalized_temporal_value(value: object, *, claim_type: str) -> object:
         return None
     if claim_type == "relative_order":
         return validate_ordering_relation(value)
+    if claim_type in QUANTITY_CLAIM_TYPES:
+        return validate_temporal_quantity(value, claim_type=claim_type)
     record = chrono.from_dict(value)
     if record is None and isinstance(value, str):
         record = chrono.parse_edtf(value)
@@ -869,6 +992,16 @@ def _temporal_identity(value: object) -> object:
             "kind": "order",
             "relation": value.get("relation"),
             "anchors": sorted(_normalized_mention_key(a) for a in value.get("anchors") or ()),
+        }
+    if isinstance(value, dict) and value.get("kind") in QUANTITY_CLAIM_TYPES:
+        # The raw phrase is annotation; the band, the unit and whether it was
+        # hedged are the assertion.
+        return {
+            "kind": value["kind"],
+            "low": value.get("low"),
+            "high": value.get("high"),
+            "unit": value.get("unit"),
+            "approximate": bool(value.get("approximate")),
         }
     record = chrono.from_dict(value)
     if record is None:
@@ -1092,6 +1225,8 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
         )
     if claim_type in DATED_CLAIM_TYPES and not isinstance(temporal_value, dict):
         raise TemporalClaimError("ordered_claim_needs_date", f"a {claim_type} claim needs a date")
+    if claim_type in QUANTITY_CLAIM_TYPES and not isinstance(temporal_value, dict):
+        raise _quantity_error(claim_type, f"a {claim_type} claim needs a quantity")
 
     raw_evidence = value.get("evidence")
     if isinstance(raw_evidence, (str, dict, EvidenceSpan)):
@@ -1620,6 +1755,8 @@ __all__ = [
     "EVENT_KIND_RE",
     "IDEMPOTENCY_KEYS",
     "MAX_EVIDENCE_QUOTE_CHARS",
+    "QUANTITY_CLAIM_TYPES",
+    "QUANTITY_UNITS",
     "RECEIPTS_DIR",
     "RELATION_ANCHOR_ARITY",
     "SCHEMA_VERSION",
@@ -1636,6 +1773,7 @@ __all__ = [
     "TemporalClaim",
     "TemporalClaimError",
     "TemporalContractError",
+    "TemporalQuantity",
     "bounded_quote",
     "bounded_source_key",
     "claim_basis_for_date_basis",
@@ -1669,4 +1807,5 @@ __all__ = [
     "validate_ordering_relation",
     "validate_source_ref",
     "validate_temporal_claim",
+    "validate_temporal_quantity",
 ]
