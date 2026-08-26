@@ -808,6 +808,35 @@ def run_migrations(target_version, current_version):
                 f"next landmark write): {exc}"
             )
 
+    if target_version >= 231 and current_version < 231:
+        # v231: the calculated timeline is PUBLISHED (wave D item D3, plan §7).
+        # Wave D's derivation existed and nothing ever wrote it down, so the
+        # question queue read an empty door. This publishes the first
+        # generation over whatever the vault already holds, so an upgrading
+        # vault arrives with a projection instead of waiting for its next
+        # landmark write to produce one.
+        #
+        # It runs after the v224 flip for the same reason that block runs last:
+        # it imports `timeline`, whose import binds the interpreter to one
+        # vault and refuses an unrepaired one. It also runs AFTER the flip
+        # specifically, because the flip is what puts a pre-v224 vault's
+        # landmarks into the claim substrate this projection is derived from —
+        # publishing first would publish a timeline missing every landmark.
+        #
+        # Idempotent in the way a materialized view is: publishing again is
+        # never wrong, it is simply the next generation, and §7's repair path
+        # (delete both files, publish again) is the same call.
+        try:
+            from timeline import publish_calculated_timeline  # local import; same dir
+            from temporal_publication import publication_report_line  # local import
+            summary = publish_calculated_timeline()
+            print(f"  {publication_report_line(summary)}")
+        except Exception as exc:  # never let a migration break the update
+            print(
+                "  Note: calculated timeline publication deferred (it will run "
+                f"on the next landmark write): {exc}"
+            )
+
 
 def apply_version(version):
     """Apply a specific version by extracting framework files from its tag."""

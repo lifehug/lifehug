@@ -50,6 +50,7 @@ import chronology as chrono  # noqa: E402
 import cross_dating  # noqa: E402
 import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
+import temporal_publication  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
 from lifehug_core import (  # noqa: E402
@@ -58,6 +59,7 @@ from lifehug_core import (  # noqa: E402
     ENTITY_ROSTERS_DIR,
     LANDMARKS_FILE,
     MANUAL_SOURCES_DIR,
+    REPO_DIR,
     STATE_DIR,
     TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
@@ -833,9 +835,51 @@ def redraw_landmarks() -> dict:
     (`lifehug_core._data("landmarks")`). The projector derives the file's
     CONTENT and never learns where it lands.
     """
-    drawing = landmark_projection.redraw(_projection_vault_root())
+    root = _projection_vault_root()
+    drawing = landmark_projection.redraw(root)
     write_json(LANDMARKS_STORE, drawing)
+    publish_calculated_timeline(root)
     return drawing
+
+
+def publish_calculated_timeline(vault_root: object = None) -> dict:
+    """Publish wave D's calculated timeline over the same substrate (v231).
+
+    ONE COMPILE, ONE DRAWING, ONE TRUTH. `redraw_landmarks` above already
+    stands at the moment this vault's claim substrate becomes current; the
+    calculated projection is derived from that same substrate, so deriving it
+    anywhere else would be a second answer to "when is the truth current?" —
+    the dual truth the flip (wave B item B3) removed. There is deliberately no
+    second trigger: `system/update.py`'s versioned seat publishes ONCE at
+    upgrade so an existing vault does not wait for its next landmark write, and
+    every write after that comes through here.
+
+    The roster is host context, not substrate, and it is read from the process
+    binding — so it is supplied ONLY when the projection's vault IS the
+    process's vault. `_projection_vault_root`'s docstring names this hazard
+    exactly: a root read from one place and a store read from another puts the
+    drawing in one vault and its evidence in another. A rebound store (every
+    test, and any host holding two vaults) therefore derives from the substrate
+    alone, which is honest — unresolved mentions mint `identity_uncertain` work
+    items rather than borrowing another vault's roster.
+
+    A publication failure RAISES. The projection is a materialized view and its
+    repair path is "delete the files and publish again" (plan §7), which only
+    works if somebody learns it is broken; a queue that silently stops
+    regenerating is the failure this whole wave exists to end. Nothing is lost
+    by raising here: the landmark drawing is already written, and the
+    publication is atomic per file.
+    """
+    root = Path(str(vault_root)) if vault_root is not None else _projection_vault_root()
+    roster: object = ()
+    if root == REPO_DIR:
+        try:
+            import entity_roster as _entity_roster  # noqa: PLC0415
+
+            roster = _entity_roster.load_roster("person")
+        except Exception:  # noqa: BLE001 — a roster problem is "no roster"
+            roster = ()
+    return temporal_publication.publish(root, roster_snapshot=roster)
 
 
 def flip_landmarks_if_needed() -> dict | None:
@@ -3263,6 +3307,32 @@ def timeline_data(evidence: list[dict] | None = None,
     if score is not None:
         data["placement"] = score
         data["counts"]["placement_band"] = score["band"]
+    # v231 (wave D item D3, plan §7): the CALCULATED timeline, additively.
+    #
+    # Everything above this line is the derivation that has served the Timeline
+    # page since v79 — periods, moments, bands, cross-dating. Everything in
+    # `data["calculated"]` is the claim substrate's own projection, PUBLISHED
+    # by `publish_calculated_timeline` and merely read here. The two ride side
+    # by side this wave on purpose: the published projection is what the queue
+    # already consumes (`question_planner.work_items_from_projection`), so
+    # exposing it on the same payload lets a surface compare the two against a
+    # real vault before anything is switched over. REPLACING the derivation
+    # above with the projection below is a deliberate later cutover with its
+    # own contract — it is not a side effect of this key existing.
+    #
+    # Read, never derive: a materialized projection whose page re-derived it
+    # would not be a projection. Guarded like every other derived block here,
+    # and ABSENT is stated rather than faked — `published: False` is not the
+    # same fact as a projection holding no nodes.
+    try:
+        data["calculated"] = temporal_publication.calculated_view(
+            _projection_vault_root()
+        )
+    except Exception:  # noqa: BLE001
+        data["calculated"] = dict(temporal_publication.EMPTY_VIEW)
+    data["counts"]["calculated_nodes"] = data["calculated"]["counts"]["nodes"]
+    data["counts"]["calculated_work_items"] = data["calculated"]["counts"]["work_items"]
+    data["counts"]["projection_generation"] = data["calculated"]["projection_generation"]
     return data
 
 

@@ -45,6 +45,14 @@ shape exists because a ladder row cannot hold what people actually say —
 in 2019"* has no domain, so both were dropped by design, and the audited plan
 (§2.1, §6.4) calls both usable information.
 
+**AND THE PROJECTION MOVES IN THE SAME ACT (v231, wave D item D3).**
+:func:`file_claims` publishes the calculated timeline as its last step,
+through the same `temporal_publication.publish` the landmark seat
+(`timeline.redraw_landmarks`) uses. Before this a conversational claim landed
+in the substrate and waited for an unrelated landmark write before the daily
+queue or Mirror could see it; now saying something out loud and answering a
+ladder row reach those surfaces by the same road, from one publisher.
+
 Pure except for the one injected ``call``: the prompt build, the parse, the
 validation and the lints are all deterministic and separately testable, and a
 host that runs its own model REPLAYs those four and never this module's loop.
@@ -457,9 +465,35 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
     reason this item exists — an event kind, an order against another moment, a
     non-family subject, and the bounded quotation that proves any of it.
 
+    **THE FILING IS NOT DONE UNTIL THE PROJECTION MOVES (v231, wave D item
+    D3).** A receipt nobody derived from is a fact the person cannot see: the
+    calculated timeline is a materialized projection (plan §7), so a claim
+    heard in conversation becomes visible only when that projection is
+    republished. This function therefore publishes as the last step of the
+    same act, through the SAME one publisher `timeline.redraw_landmarks` uses
+    — `temporal_publication.publish` — because two derivations of one truth is
+    the dual truth wave B removed and wave D must not reintroduce. Answering
+    on the ladder and saying it out loud in a sentence now reach the queue and
+    Mirror by the same road.
+
+    The order is the durability rule and it is one way round: promote, receipt,
+    THEN publish. The receipt is evidence and the projection is derived from
+    it, so a crash before the publish loses nothing a re-run cannot rebuild —
+    `file_message_extraction` is idempotent and the publisher's next generation
+    reads the receipt that already landed. A publication failure RAISES for the
+    same reason it does at the landmark seat: the repair path is "publish
+    again", which only works if somebody learns it is needed.
+
+    A host that must not do this work inside a conversation turn (the hosted
+    platform's ADR 0020 — *conversations never wait on the vault*) moves the
+    whole call off the turn. It does not get a second publisher, and it does
+    not get a flag that skips this one.
+
     Returns ``(source_ref, receipt_path)``, or ``None`` when the outcome
     carries no claims — a message that produced nothing files NOTHING, which
-    is the amendment's own rule and not an optimization.
+    is the amendment's own rule and not an optimization. Nothing filed means
+    nothing derived, so a message with no claims publishes no generation
+    either.
     """
     drafts = tuple(getattr(outcome, "claims", None) or
                    (outcome if isinstance(outcome, (list, tuple)) else ()))
@@ -467,13 +501,14 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
                    if isinstance(draft, dict) and draft)
     if not drafts:
         return None
+    from temporal_publication import publish  # noqa: PLC0415
     from temporal_store import file_message_extraction  # noqa: PLC0415
 
     metadata = {"session_ref": session_ref, "turn_ref": turn_ref,
                 "speaker": speaker, "channel": channel,
                 "occurred_at": occurred_at}
     metadata = {key: value for key, value in metadata.items() if value}
-    return file_message_extraction(
+    filed = file_message_extraction(
         vault_root,
         message_text=message_text,
         extractor_version=extractor_version,
@@ -485,6 +520,8 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
         recorder=str(recorder) if recorder else None,
         now=now,
     )
+    publish(vault_root, now=now)
+    return filed
 
 
 def record_answer(*, answer: str, call, domain: str | None = None,
