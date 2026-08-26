@@ -1508,7 +1508,7 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
         value = getattr(args, rung.replace("-", "_"), None)
         if isinstance(value, bool) or value:
             record[rung] = value
-    # v220 (B4): the date arrives WHOLE or not at all. Every one of these
+    # v221 (B4): the date arrives WHOLE or not at all. Every one of these
     # three records used to be rebuilt with `basis="stated"` and an empty
     # provenance, so a date the system calculated from an age was filed as one
     # the person had stated — `chronology.claim_score` then paid it +2.0 it
@@ -2960,7 +2960,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", default="", help="EDTF date for a point landmark")
     p.add_argument("--start", default="", help="EDTF start of a span")
     p.add_argument("--end", default="", help="EDTF end of a span")
-    # v220 (B4): a date without its warrant is a claim with no evidence, and
+    # v221 (B4): a date without its warrant is a claim with no evidence, and
     # an undeclared basis used to be silently filed as `stated`. Each of the
     # three dates carries its own — the two ends of a span are two separate
     # claims and are rarely dated the same way.

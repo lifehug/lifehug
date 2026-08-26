@@ -976,7 +976,7 @@ def reconcile(claims: object) -> dict:
 # Carriage: a record survives the trip through an argv (B4, lifehug#233)
 # --------------------------------------------------------------------------
 #
-# A date is only as good as its BASIS, and until v220 the basis never left the
+# A date is only as good as its BASIS, and until v221 the basis never left the
 # package: `landmarks_interaction.landmark_invocation` serialized the EDTF
 # expression alone and `lifehug.py landmark-record` rebuilt every record with
 # `basis="stated"`. A date the system CALCULATED from an age therefore reached

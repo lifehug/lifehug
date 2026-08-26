@@ -312,7 +312,7 @@ one *plus every alternate*. The page renders the best-supported interval and
 links the others. A disagreement is data about how you have made meaning of
 your past, not a bug to fix.
 
-Since v220 that is true of the landmark store too, and it was not before: a
+Since v221 that is true of the landmark store too, and it was not before: a
 landmark entry merged the ordinary way, so a date you stated in March was
 overwritten in April by one the system worked out from an age, with nothing
 left to show you had ever said it. All three landmark dates now go through
