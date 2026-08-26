@@ -1518,29 +1518,27 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
     # reading of a person typing `--date 1984` at a terminal. Machine callers
     # go through `landmarks_interaction.landmark_invocation`, which always
     # declares.
-    try:
-        for field, value_flag, prefix in (
-            ("date", args.date, ""),
-            ("span_start", args.start, "start_"),
-            ("span_end", args.end, "end_"),
-        ):
+    for bound, given, prefix in (("date", args.date, ""),
+                                 ("start", args.start, "start_"),
+                                 ("end", args.end, "end_")):
+        try:
             parsed = _chrono.date_from_argv(
-                value_flag,
+                given,
                 basis=getattr(args, f"{prefix}basis", None),
                 granularity=getattr(args, f"{prefix}granularity", None),
                 confidence=getattr(args, f"{prefix}confidence", None),
                 anchors=getattr(args, f"{prefix}anchor", None) or (),
                 provenance=getattr(args, f"{prefix}provenance", None) or (),
             )
-            if parsed is None:
-                continue
-            if field == "date":
-                record["date"] = parsed.to_dict()
-            else:
-                record.setdefault("span", {})[field.split("_")[1]] = parsed.to_dict()
-    except _chrono.ChronologyError as exc:
-        print(f"error: {exc}")
-        return 1
+        except _chrono.ChronologyError as exc:
+            print(f"error: --{bound}: {exc}")
+            return 1
+        if parsed is None:
+            continue
+        if bound == "date":
+            record["date"] = parsed.to_dict()
+        else:
+            record.setdefault("span", {})[bound] = parsed.to_dict()
     if args.complete:
         record["chain_complete"] = True
     if getattr(args, "none", False):
