@@ -1671,6 +1671,532 @@ class IdentityRungTests(unittest.TestCase):
                                     row["ask"])
 
 
+
+class CardinalityMetadataTests(unittest.TestCase):
+    """v219 (lifehug-platform#664, audited temporal-claims plan §6.2).
+
+    `chain: true` meant multiplicity, order and list closure at once. Five
+    fields now say five things, and this suite is the pin that no one of them
+    quietly grows a second meaning again.
+    """
+
+    def setUp(self) -> None:
+        self.rows = li.load_questions()
+
+    def test_every_domain_declares_the_whole_cardinality_block(self):
+        for row in self.rows:
+            with self.subTest(domain=row["domain"]):
+                self.assertIn(row["collection"], li.COLLECTIONS)
+                self.assertIn(row["closure"], li.CLOSURES)
+                self.assertTrue(row["date_semantics"])
+                for kind in row["date_semantics"]:
+                    self.assertIn(kind, li.DATE_SEMANTICS)
+                self.assertIsInstance(row["per_entry_ladder"], bool)
+
+    def test_identity_kind_and_identity_rung_agree_both_ways(self):
+        """The one cross-check the loader makes in both directions: a ladder
+        that names a subject must say what that subject IS, and `birth` — the
+        axis, which has no subject — must not claim one."""
+        for row in self.rows:
+            with self.subTest(domain=row["domain"]):
+                if li.identity_rung(row) is None:
+                    self.assertEqual(row["identity_kind"], "")
+                else:
+                    self.assertIn(row["identity_kind"], li.IDENTITY_KINDS)
+
+    def test_the_multi_entry_domains_are_the_ones_that_hold_many_entries(self):
+        """THE DEFECT, as a test. Before v219 this set was the four
+        `chain: true` domains, and `children`, `partnerships`, `losses` and
+        `military` — every one of which holds many entries — were outside it."""
+        multi = {row["domain"] for row in self.rows if li.is_multi_entry(row)}
+        self.assertEqual(multi, {"family", "residences", "schools",
+                                 "partnerships", "children", "work",
+                                 "military", "losses"})
+        self.assertFalse(li.is_multi_entry(li.domain_row("birth")))
+
+    def test_closure_is_a_different_question_from_multiplicity(self):
+        """The two halves of the old flag, pulled apart and pinned apart. The
+        walked lists are closed by the person; a set of children is not a list
+        the system asks the end of."""
+        closed = {row["domain"] for row in self.rows
+                  if li.requires_declared_closure(row)}
+        self.assertEqual(closed, {"family", "residences", "schools", "work"})
+        for domain in ("children", "partnerships", "losses", "military"):
+            with self.subTest(domain=domain):
+                row = li.domain_row(domain)
+                self.assertTrue(li.is_multi_entry(row))
+                self.assertFalse(li.requires_declared_closure(row))
+
+    def test_order_is_its_own_field_and_not_multiplicity(self):
+        walked = {row["domain"] for row in self.rows if li.is_sequence(row)}
+        self.assertEqual(walked, {"residences", "schools", "work"})
+        self.assertEqual(set(li.CHAIN_MORE_TEXTS), walked)
+
+    def test_partnerships_dates_three_distinct_events(self):
+        """Audited plan §2.2: "when this part began" is insufficient when the
+        underlying events differ."""
+        row = li.domain_row("partnerships")
+        self.assertEqual(row["date_semantics"],
+                         ("first_met", "dating_started", "married"))
+        texts = [event["text"] for event in li.event_questions(row, "Katie")]
+        self.assertEqual(texts, [
+            "When did you and Katie first meet?",
+            "When did you and Katie start dating?",
+            "When did you and Katie get married?",
+        ])
+
+    def test_every_enumerating_domain_has_a_text_for_every_event_it_dates(self):
+        for row in self.rows:
+            if not li.enumerates_subjects(row):
+                continue
+            with self.subTest(domain=row["domain"]):
+                events = li.event_questions(row, "Jackie")
+                self.assertEqual([event["event"] for event in events],
+                                 list(row["date_semantics"]))
+                for event in events:
+                    self.assertIn("Jackie", event["text"])
+
+    def test_an_unnamed_subject_gets_no_event_questions(self):
+        self.assertEqual(li.event_questions(li.domain_row("children"), ""), ())
+        self.assertEqual(li.event_questions(li.domain_row("birth"), "me"), ())
+
+    def test_chain_is_derived_backward_and_only_says_closure_now(self):
+        """Kept on the row for hosts pinned to the pre-v219 shape, and it now
+        answers exactly ONE question — the closure one."""
+        for row in self.rows:
+            with self.subTest(domain=row["domain"]):
+                self.assertEqual(row["chain"], li.requires_declared_closure(row))
+
+    def test_no_module_in_system_reads_the_retired_flag(self):
+        """The grep-with-a-parser guard. A read of `chain` anywhere under
+        `system/` is the overloaded flag coming back; the loader's single
+        WRITE is the one thing this must not flag, which is why it is an AST
+        walk and not a grep."""
+        import ast  # noqa: PLC0415
+
+        offenders = []
+        for path in sorted(SYSTEM.glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Subscript)
+                        and isinstance(node.ctx, ast.Load)
+                        and isinstance(node.slice, ast.Constant)
+                        and node.slice.value == "chain"):
+                    offenders.append(f"{path.name}:{node.lineno} [\"chain\"]")
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "get"
+                        and node.args
+                        and isinstance(node.args[0], ast.Constant)
+                        and node.args[0].value == "chain"):
+                    offenders.append(f"{path.name}:{node.lineno} .get(\"chain\")")
+        self.assertEqual(offenders, [], "cardinality is read from `collection`, "
+                                        "`closure` and `per_entry_ladder` now")
+
+    def test_the_question_file_no_longer_declares_the_flag(self):
+        text = (ROOT / "interactions" / "landmarks" / "questions.yaml").read_text(
+            encoding="utf-8")
+        for row in self.rows:
+            with self.subTest(domain=row["domain"]):
+                self.assertNotIn(f"\n{row['domain']}.chain:", text)
+
+
+class CardinalityValidationTests(unittest.TestCase):
+    """A mis-declared domain fails at LOAD, loudly.
+
+    `children` was mis-declared for two releases and the only symptom was a
+    question that would not go away. Every rule that would have caught it is
+    a refusal here.
+    """
+
+    BASE = {
+        "version": "2",
+        "domains": "children",
+        "children.order": "1",
+        "children.onboarding": "true",
+        "children.ask": "Do you have children?",
+        "children.ladder": "happened|who|year|month",
+        "children.complete_at": "month",
+        "children.precision": "month",
+        "children.unlocks": "entity_date",
+        "children.collection": "set",
+        "children.closure": "open",
+        "children.identity_kind": "person",
+        "children.date_semantics": "birth",
+        "children.per_entry_ladder": "true",
+        "children.sensitive": "false",
+        "children.why": "Because.",
+    }
+
+    def _load(self, **overrides):
+        raw = dict(self.BASE)
+        raw.update(overrides)
+        with mock.patch.object(li, "_parse_simple_yaml", return_value=raw):
+            return li.load_questions()
+
+    def test_the_well_formed_row_loads(self):
+        self.assertEqual(self._load()[0]["identity_kind"], "person")
+
+    def test_an_unknown_collection_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.collection": "many"})
+
+    def test_an_unknown_closure_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.closure": "sometimes"})
+
+    def test_an_unknown_date_semantic_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.date_semantics": "birth|graduation"})
+
+    def test_a_domain_with_no_date_semantics_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.date_semantics": ""})
+
+    def test_a_named_subject_with_no_identity_kind_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.identity_kind": ""})
+
+    def test_an_identity_kind_on_a_ladder_that_names_nobody_is_refused(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.ladder": "year|month",
+                          "children.complete_at": "month"})
+
+    def test_a_singleton_cannot_carry_a_per_entry_ladder(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.collection": "singleton"})
+
+    def test_a_singleton_has_no_group_for_the_person_to_close(self):
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.collection": "singleton",
+                          "children.per_entry_ladder": "false",
+                          "children.closure": "user_completable"})
+
+    def test_many_named_entries_without_a_per_entry_ladder_is_refused(self):
+        """THE DEFECT's exact shape: a domain that holds many named people
+        and claims its ladder is walked once for the whole domain."""
+        with self.assertRaises(li.LandmarkInteractionError):
+            self._load(**{"children.per_entry_ladder": "false"})
+
+
+class StandaloneQuestionSubjectTests(unittest.TestCase):
+    """Audited plan §10: no standalone question omits its target.
+
+    A rung question reaches THREE standalone surfaces — the domain row's
+    `next`, a Timeline unknown from `incomplete_subjects`, and the daily
+    queue that can mint one of those. On all three it arrives alone, with no
+    conversational turn before it, so "Do you remember the month?" and
+    "Roughly when was that?" are questions about nothing. Contextual pronouns
+    are for in-session follow-ups, which is a different call site.
+
+    The rendered PRODUCT OBJECT is what is walked here, not the template
+    table: a `{label}` in `RUNG_TEXTS` that `_rung` renders as "that one" is
+    exactly the bug this is guarding against.
+    """
+
+    #: One entry per domain, named and stalled at each rung past identity, so
+    #: every standalone question in the set gets rendered at least once.
+    NAMED = {"family": "Jackie", "residences": "Bell Avenue",
+             "schools": "Lincoln High", "partnerships": "Katie",
+             "children": "Charlee", "work": "the mill",
+             "military": "Navy", "losses": "Grandpa Ray"}
+
+    #: The coarsest date that satisfies each date-grain rung and NOTHING
+    #: finer — a day-precision record satisfies `month` too, which would walk
+    #: the fixture straight past the rung it is meant to stall on.
+    GRAIN = {"birth": "1976", "year": "1976", "month": "1976-04",
+             "day": "1976-04-12"}
+
+    def _entry(self, row: dict, upto: str) -> dict:
+        """An entry filed exactly as far as ``upto``, and no further."""
+        label = self.NAMED[row["domain"]]
+        entry = {"domain": row["domain"], "label": label}
+        for rung in row["ladder"]:
+            if rung == upto:
+                break
+            if rung == li.NONE_OPENER or rung == li.identity_rung(row):
+                continue
+            if rung == "span":
+                entry["span"] = {"start": _date("1984"), "end": _date("1990")}
+            elif rung in self.GRAIN:
+                entry["date"] = _date(self.GRAIN[rung])
+            else:
+                entry[rung] = "filled"
+        return entry
+
+    def _past_identity(self, row: dict) -> list[str]:
+        """The rungs that actually reach a standalone surface: past the
+        identity rung (which asks FOR the name) and at or before
+        `complete_at` (past it, `next_rung` asks nothing at all — `living`
+        and `household` are recorded when stated, never demanded)."""
+        ladder = list(row["ladder"])
+        identity = li.identity_rung(row)
+        if identity is None:
+            return []
+        target = row["complete_at"]
+        stop = ladder.index(target) if target in ladder else len(ladder) - 1
+        return ladder[ladder.index(identity) + 1:stop + 1]
+
+    def test_every_rung_past_the_identity_rung_names_its_subject(self):
+        """Including the ones past `complete_at`: `living` and `household`
+        never reach a standalone surface today, but they are one
+        `complete_at` edit away from it."""
+        for row in li.load_questions():
+            ladder = list(row["ladder"])
+            identity = li.identity_rung(row)
+            if identity is None:
+                continue
+            for rung in ladder[ladder.index(identity) + 1:]:
+                with self.subTest(domain=row["domain"], rung=rung):
+                    self.assertIn("{label}", li.RUNG_TEXTS[(row["domain"], rung)])
+
+    def test_the_rendered_row_question_names_the_subject(self):
+        for row in li.load_questions():
+            if row["domain"] not in self.NAMED:
+                continue
+            for rung in self._past_identity(row):
+                entry = self._entry(row, rung)
+                question = li.next_rung([entry], row)
+                with self.subTest(domain=row["domain"], rung=rung):
+                    self.assertIsNotNone(question)
+                    self.assertIn(self.NAMED[row["domain"]], question["text"])
+                    self.assertNotIn("that one", question["text"])
+
+    def test_every_standalone_unknown_names_its_subject(self):
+        """The rendered unknowns, walked as a product object — key, label,
+        probe text. This is the surface the queue mints from."""
+        for row in li.load_questions():
+            if row["domain"] not in self.NAMED:
+                continue
+            for rung in self._past_identity(row):
+                landmarks = {row["domain"]: [self._entry(row, rung)]}
+                unknowns = li.incomplete_subjects(landmarks)
+                with self.subTest(domain=row["domain"], rung=rung):
+                    self.assertTrue(unknowns, f"{row['domain']}.{rung} "
+                                              f"produced no unknown at all")
+                    for unknown in unknowns:
+                        self.assertIn(self.NAMED[row["domain"]],
+                                      unknown["probe"]["text"])
+                        self.assertNotIn("that one", unknown["probe"]["text"])
+
+    def test_the_identity_rung_itself_is_the_one_exemption(self):
+        """It is asking FOR the name — "Who was that?" is correct there, and
+        the domain opener is the same question with no entry yet."""
+        for row in li.load_questions():
+            identity = li.identity_rung(row)
+            if identity is None:
+                continue
+            with self.subTest(domain=row["domain"]):
+                question = li.next_rung([], row)
+                self.assertEqual(question["text"], row["ask"])
+                self.assertIsNone(question["subject"])
+
+
+
+class CaptureCardinalityAcceptanceTests(unittest.TestCase):
+    """The audited temporal-claims plan §10, "Capture and cardinality".
+
+    These are the release-blocking scenarios stated as tests. The ones this
+    wave (A) can make green are green; the ones that belong to a later wave
+    are skipped BY NAME with the wave that owns them, so the scenario is
+    visible in the suite rather than absent from it.
+
+    THE LIVE FAILURE this reproduces (ADR 0028, the founder's own vault):
+    asked about his children, he named four of them with four exact birth
+    dates. They collapsed into ONE entry carrying a `span` across all four
+    birthdays, and `/timeline` went on asking one aggregate question that no
+    answer could close.
+    """
+
+    NAMES = ("Charlee", "Ivo", "Jonah", "Marisol")
+
+    def _children(self, dated: dict | None = None) -> dict:
+        """The four children, as four entries — one per person."""
+        dates = dated or {}
+        entries = []
+        for name in self.NAMES:
+            entry = {"domain": "children", "label": name, "who": name}
+            if name in dates:
+                entry["date"] = _date(dates[name])
+            entries.append(entry)
+        return {"children": entries}
+
+    # -- Wave A, green -----------------------------------------------------
+
+    def test_four_children_are_four_independently_closable_gaps(self):
+        """§10: "I have four children: A, B, C, and D" yields four distinct
+        entries and no aggregate pseudo-person."""
+        unknowns = li.incomplete_subjects(self._children())
+        self.assertEqual([row["label"] for row in unknowns], list(self.NAMES))
+        self.assertEqual(len({row["key"] for row in unknowns}), 4)
+        self.assertEqual(len({row["anchor"] for row in unknowns}), 4)
+        for row in unknowns:
+            with self.subTest(child=row["label"]):
+                self.assertEqual(row["kind"], li.LANDMARK_SUBJECT_KIND)
+                self.assertEqual(row["identity_kind"], "person")
+                self.assertEqual(row["probe"]["text"],
+                                 f"What year was {row['label']} born?")
+
+    def test_the_aggregate_is_never_asked_as_one_question(self):
+        """No gap names two children, and no gap is the domain's own opener
+        wearing four names."""
+        unknowns = li.incomplete_subjects(self._children())
+        opener = li.domain_row("children")["ask"]
+        for row in unknowns:
+            text = row["probe"]["text"]
+            named = [name for name in self.NAMES if name in text]
+            with self.subTest(child=row["label"]):
+                self.assertEqual(named, [row["label"]])
+                self.assertNotEqual(text, opener)
+
+    def test_answering_one_child_closes_only_that_childs_gap(self):
+        """"Independently closable" is the whole claim: Ivo's birth month
+        closes Ivo's gap and touches none of the other three."""
+        row = li.domain_row("children")
+        # A YEAR moves Ivo one rung; his gap survives, asking the next thing.
+        year_only = li.incomplete_subjects(self._children({"Ivo": "1979"}))
+        by_label = {gap["label"]: gap["probe"]["text"] for gap in year_only}
+        self.assertEqual(set(by_label), set(self.NAMES))
+        self.assertEqual(by_label["Ivo"], "Do you remember the month Ivo was born?")
+        self.assertEqual(by_label["Charlee"], "What year was Charlee born?")
+        # The MONTH is `children`'s `complete_at`, so Ivo's gap closes — and
+        # only Ivo's.
+        closed = li.incomplete_subjects(self._children({"Ivo": "1979-03"}))
+        self.assertEqual([gap["label"] for gap in closed],
+                         ["Charlee", "Jonah", "Marisol"])
+        entry = self._children({"Ivo": "1979-03"})["children"][1]
+        self.assertEqual(li.rung_reached(entry, row), row["complete_at"])
+
+    def test_each_entry_progresses_through_its_own_field_ladder(self):
+        """§10: "Multiple entries in one response can each progress through
+        their own field ladder." Four children at four different rungs get
+        four different questions in the same read."""
+        landmarks = self._children({"Ivo": "1979", "Jonah": "1981-06"})
+        by_label = {row["label"]: row["probe"]["text"]
+                    for row in li.incomplete_subjects(landmarks)}
+        self.assertEqual(by_label, {
+            "Charlee": "What year was Charlee born?",
+            "Ivo": "Do you remember the month Ivo was born?",
+            "Marisol": "What year was Marisol born?",
+        })
+        # Jonah reached `complete_at` on his own and left the list on his own.
+        self.assertNotIn("Jonah", by_label)
+
+    def test_the_domain_row_alone_could_never_have_closed_them(self):
+        """Why the per-subject gap has to exist: the row carries exactly ONE
+        `next` question however many people sit incomplete inside it."""
+        landmarks = self._children()
+        rows = {row["domain"]: row for row in li.landmark_rows(landmarks)}
+        self.assertEqual(rows["children"]["count"], 4)
+        self.assertEqual(rows["children"]["status"], "partial")
+        self.assertEqual(rows["children"]["next"]["text"],
+                         "What year was Charlee born?")
+        self.assertEqual(len(li.incomplete_subjects(landmarks)), 4)
+
+    def test_the_collapsed_aggregate_shape_is_recognized_as_unreadable(self):
+        """The exact live record: one entry, all four names, a span across
+        all four birthdays. `children` has no span rung, so the span is a
+        field no ladder can read — and that is now a named shape rather than
+        a silent one."""
+        aggregate = {"domain": "children", "label": "Charlee, Ivo, Jonah, Marisol",
+                     "span": {"start": _date("1976"), "end": _date("1984")}}
+        row = li.domain_row("children")
+        self.assertIn("span", li.unreadable_fields(aggregate, row))
+        self.assertFalse(li.dates_each_entry(li.domain_row("residences")))
+        self.assertTrue(li.dates_each_entry(row),
+                        "a child is dated by ONE birth, so a second year in "
+                        "one answer is a second child")
+
+    def test_losses_and_partnerships_enumerate_too(self):
+        """The other two domains the flag hid. Both hold people; neither is a
+        walked list; both owe one gap per subject."""
+        landmarks = {
+            "losses": [{"domain": "losses", "label": "Grandpa Ray",
+                        "who": "Grandpa Ray"}],
+            "partnerships": [{"domain": "partnerships", "label": "Katie",
+                              "who": "Katie"}],
+        }
+        by_label = {row["label"]: row for row in li.incomplete_subjects(landmarks)}
+        self.assertEqual(set(by_label), {"Grandpa Ray", "Katie"})
+        self.assertEqual(by_label["Grandpa Ray"]["probe"]["text"],
+                         "Roughly when did you lose Grandpa Ray?")
+        self.assertEqual(by_label["Katie"]["probe"]["text"],
+                         "Roughly when did you and Katie get together?")
+
+    def test_a_loss_gap_is_about_a_named_person_never_loss_discovery(self):
+        """§2.4 / §10: loss DISCOVERY is offer-only and never enters the
+        queue. A per-subject gap is a different question — it is about
+        somebody the person already named, which is exactly why widening the
+        enumeration to `losses` does not widen the discovery prompt. The
+        structure guarantees it: `incomplete_subjects` renders only rungs
+        PAST the identity rung, and only for an entry carrying a name."""
+        row = li.domain_row("losses")
+        opener = row["ask"]
+        gaps = li.incomplete_subjects({"losses": [
+            {"domain": "losses", "label": "Grandpa Ray", "who": "Grandpa Ray"},
+            {"domain": "losses", "skipped": True},
+            {"domain": "losses", "none": True},
+        ]})
+        self.assertEqual([gap["label"] for gap in gaps], ["Grandpa Ray"])
+        self.assertNotEqual(gaps[0]["probe"]["text"], opener)
+        self.assertNotIn("lost someone", gaps[0]["probe"]["text"])
+        # An empty domain mints no gap at all — the opener stays where it is,
+        # on the landmark row, offered rather than asked.
+        self.assertEqual(li.incomplete_subjects({"losses": []}), ())
+        self.assertTrue(row["sensitive"])
+
+    def test_the_three_partnership_events_are_three_distinct_asks(self):
+        """§2.2 / §10: first meeting, the start of dating and the marriage are
+        distinct events. This wave delivers the QUESTIONS; the claim records
+        are Wave C's, and the skipped test below says so."""
+        landmarks = {"partnerships": [{"domain": "partnerships",
+                                       "label": "Katie", "who": "Katie"}]}
+        unknown, = li.incomplete_subjects(landmarks)
+        self.assertEqual([event["event"] for event in unknown["events"]],
+                         ["first_met", "dating_started", "married"])
+        self.assertEqual([event["text"] for event in unknown["events"]], [
+            "When did you and Katie first meet?",
+            "When did you and Katie start dating?",
+            "When did you and Katie get married?",
+        ])
+
+    # -- later waves, named rather than absent -----------------------------
+
+    @unittest.skip("Wave C (semantic capture): a partnership entry carries "
+                   "ONE date today. Per-event claim records — first_met, "
+                   "dating_started and married with independent dates and "
+                   "ranges — need the TemporalClaim substrate from Wave B, "
+                   "and inventing a second storage shape here would be the "
+                   "half-built machine the plan forbids. v219 ships the "
+                   "questions only.")
+    def test_partnership_events_carry_independent_dates(self):
+        raise NotImplementedError
+
+    @unittest.skip("Wave A, sibling item (recorder precedence): "
+                   "'the same focused turn observed by two subsystems yields "
+                   "one canonical semantic write set' is the landmark "
+                   "recorder / general listener boundary, owned outside this "
+                   "PR's file boundaries.")
+    def test_one_canonical_write_set_per_focused_turn(self):
+        raise NotImplementedError
+
+    @unittest.skip("Wave B (truth substrate): 'retrying a successful or "
+                   "uncertain request creates no duplicate claim, person, "
+                   "event, question or correction' needs the idempotency key "
+                   "over conversation/turn/source-revision/recorder/"
+                   "extraction-version, which does not exist yet.")
+    def test_a_retry_creates_no_duplicate_entry(self):
+        raise NotImplementedError
+
+    @unittest.skip("Wave F (queue coordination): 'answering on Timeline "
+                   "closes the corresponding queue/whisper candidate and "
+                   "vice versa' needs one work-item identity across "
+                   "surfaces. v219 gives each gap a stable per-subject key, "
+                   "which is the half of it this wave owes.")
+    def test_one_work_item_identity_across_surfaces(self):
+        raise NotImplementedError
+
+
 class LadderConsistencyTests(unittest.TestCase):
     """The class guard (recurring-defect doctrine, docs/BUILDING.md §7).
 
@@ -1807,6 +2333,51 @@ class LadderConsistencyTests(unittest.TestCase):
         with self.assertRaises(li.LandmarkInteractionError):
             li.rung_satisfiers(li.domain_row("birth"), "who")
 
+    # -- leg 5 (v219): the ladder and the cardinality block agree ----------
+
+    def test_date_semantics_and_the_ladder_agree_about_spans(self):
+        """The two statements of "is one entry's date a stretch?" — the
+        ladder's `span` rung and the `span` date semantic — are one fact, and
+        a domain that declares one without the other is the same defect class
+        as a rung the writer cannot reach. `dates_each_entry` reads the
+        semantic; this is what keeps that honest."""
+        for row in self.rows:
+            with self.subTest(domain=row["domain"]):
+                self.assertEqual("span" in row["date_semantics"],
+                                 "span" in row["ladder"])
+                self.assertEqual(li.dates_each_entry(row),
+                                 "span" not in row["ladder"])
+
+    def test_a_per_entry_ladder_has_rungs_below_its_identity_rung(self):
+        """A domain that says its ladder is walked per entry must have a
+        ladder left to walk once the entry is named."""
+        for row in self.rows:
+            if not row["per_entry_ladder"]:
+                continue
+            ladder = list(row["ladder"])
+            identity = li.identity_rung(row)
+            with self.subTest(domain=row["domain"]):
+                self.assertIsNotNone(identity)
+                self.assertTrue(ladder[ladder.index(identity) + 1:],
+                                f"{row['domain']} claims a per-entry ladder "
+                                f"with nothing past {identity!r}")
+
+    def test_every_event_question_is_declared_and_every_declaration_is_one(self):
+        declared = {(row["domain"], event) for row in self.rows
+                    if li.enumerates_subjects(row)
+                    for event in row["date_semantics"]}
+        self.assertEqual(set(li.EVENT_QUESTION_TEXTS), declared)
+
+    def test_every_event_question_survives_its_own_domains_lints(self):
+        for (domain, event), text in li.EVENT_QUESTION_TEXTS.items():
+            rendered = text.format(label="Jackie")
+            with self.subTest(domain=domain, event=event):
+                self.assertEqual(
+                    li.lint_landmark_reply(
+                        rendered, stage="ask", domain=domain,
+                        sensitive=li.domain_row(domain)["sensitive"]),
+                    [])
+
 
 class LeafShapedAnswerMatrixTests(unittest.TestCase):
     """The certification audit's executed matrix, as the acceptance test.
@@ -1849,9 +2420,9 @@ class LeafShapedAnswerMatrixTests(unittest.TestCase):
         "schools": ("name", "partial", "Where was Lincoln High — what town?"),
         "partnerships": ("month", "complete", None),
         "children": ("who", "partial", "What year was Charlee born?"),
-        "work": ("what", "partial", "Where was that?"),
+        "work": ("what", "partial", "Where were you doing Line cook?"),
         "military": ("span", "complete", None),
-        "losses": ("who", "partial", "Roughly when was that?"),
+        "losses": ("who", "partial", "Roughly when did you lose Grandpa Ray?"),
     }
 
     def test_the_matrix_covers_every_domain_in_the_set(self):
@@ -2590,12 +3161,18 @@ class ManyRecordsTests(unittest.TestCase):
             reply=message, domain="children"))
 
     def test_unrecorded_years_are_evidence_only_where_entries_date_separately(self):
-        """A `span` domain legitimately states two years for ONE entry."""
-        self.assertFalse(li._dates_each_entry(li.domain_row("residences")))  # noqa: SLF001
-        self.assertFalse(li._dates_each_entry(li.domain_row("work")))  # noqa: SLF001
-        for domain in ("children", "family", "losses", "partnerships"):
+        """A `span` domain legitimately states two years for ONE entry.
+
+        v219: the judgment moved off the LADDER and onto `date_semantics`,
+        which is the field that states it — the answers are unchanged and
+        this test is the pin that says so.
+        """
+        self.assertFalse(li.dates_each_entry(li.domain_row("residences")))
+        self.assertFalse(li.dates_each_entry(li.domain_row("work")))
+        self.assertFalse(li.dates_each_entry(li.domain_row("military")))
+        for domain in ("birth", "children", "family", "losses", "partnerships"):
             with self.subTest(domain=domain):
-                self.assertTrue(li._dates_each_entry(li.domain_row(domain)))  # noqa: SLF001
+                self.assertTrue(li.dates_each_entry(li.domain_row(domain)))
         self.assertIsNone(li.records_missing_entries(
             "I was at the mill from 1971 to 1994.",
             [{"domain": "work", "label": "the mill", "what": "the mill",
