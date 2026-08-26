@@ -353,15 +353,18 @@ class ListenerPromptTests(unittest.TestCase):
         self.assertIn("You are not in the conversation", prompt)
 
     def test_the_measured_size_is_pinned(self):
-        """MEASURED, not guessed: 5514 characters with an empty store.
+        """MEASURED, not guessed: 9181 characters with an empty store.
 
-        The focused recorder's leaf pins at 4800 for ONE domain. This one
-        carries nine domain KEY lines (~780 characters) and the person-record
-        rules, and it carries no identity, no behavior, no examples and no
-        transcript — which is the property this pin exists to hold, exactly
-        as `test_the_recorder_has_no_voice_and_no_transcript` holds it there.
+        The focused recorder's leaf pins at 8400 for ONE domain. This one
+        carries nine domain KEY lines (~780 characters), the person-record
+        rules and — from v229 — the same `claims` contract the recorder leaf
+        carries, which is what moved this pin from 5700. It carries no
+        identity, no behavior, no examples and no transcript, which is the
+        property this pin exists to hold, exactly as
+        `test_the_recorder_has_no_voice_and_no_transcript` holds it there.
+        The honest cost of the claims contract is written out at that pin.
         """
-        self.assertLess(len(self._prompt()), 5700)
+        self.assertLess(len(self._prompt()), 9400)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()

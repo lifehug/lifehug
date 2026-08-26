@@ -23,10 +23,15 @@ WHAT THEY WERE TOLD BACK:
 {reply}
 
 Emit exactly one JSON object and nothing else — no prose, no fence, no
-explanation:
+explanation. It has TWO lists and both are always present:
 
-  {"landmarks": [{"domain": "{domain}", ...}, {"domain": "{domain}", ...}]}
-  {"landmarks": []}
+  {"landmarks": [{"domain": "{domain}", ...}], "claims": [{...}]}
+  {"landmarks": [], "claims": []}
+
+`landmarks` is the domain that was asked about. `claims` is every datable
+fact in what they said, whatever domain it belongs to and whether or not it
+belongs to one at all. The two lists overlap on purpose: a fact that is both
+is written twice, once in each shape.
 
 **One record per entry, and every entry they stated.** A single answer often
 carries several: four children, a dozen jobs, three people lost, every place
@@ -85,5 +90,53 @@ date they did not give you to make the list longer.
 - If they truly said nothing about this domain — they changed the subject, or
   answered a different question entirely — emit `{"landmarks": []}`.
   Recording nothing is correct exactly there and nowhere else.
+
+## `claims` — every fact, its own record
+
+A claim is ONE asserted fact about ONE subject. It is not tied to a domain
+and not tied to the question you were asked: if they said it and it fixes
+something in time, it is a claim. This list is where the facts your
+`landmarks` list cannot hold go — and that is most of what people actually
+say.
+
+  {"claim_type": "date", "subject_mention": "Danforth Steel",
+   "event_kind": "job", "temporal_value": "1974",
+   "evidence": "I started at Danforth Steel that fall"}
+
+- `claim_type` is one of: {claim_types}. `date` and `range` carry a date;
+  `age` and `duration` carry a length ("about 12", "eleven years");
+  `relative_order` carries an order against another moment; `identity` says
+  who somebody is and carries no time at all.
+- `subject_mention` is whose fact it is, IN THEIR OWN WORDS — "Danforth
+  Steel", "my sister Ruth", "the house on Elm". Never tidy it, never resolve
+  it to somebody you think you know, and never put more than one subject in
+  it: "Ada, Bo, Cy and Della" is FOUR claims, and one claim naming all four
+  is refused and thrown away.
+- `event_kind` is what happened, from: {event_kinds}. Use another lowercase
+  word when none of those is what they said — the list is a starting set, not
+  a fence. Every claim except `identity` needs one: a date is the date of an
+  EVENT, never of a person.
+- `temporal_value` is the time itself: `"1974"`, `"1974-06"`,
+  `"2 April 1979"` for a date; `"about 12"` or
+  `{"low": 11, "high": 11, "unit": "years", "text": "eleven years"}` for an
+  age or a duration; `{"relation": "after", "anchors": ["Mom died"]}` for an
+  order. `relation` is one of before | after | between | within.
+- `evidence` is a SHORT quotation of the words that say it, copied from what
+  they said. A claim with no quotation is refused: a claim you cannot trace
+  back to the sentence it came from is not evidence of anything.
+- **A person and an event are two records.** "Corinne was born 2 April 1979"
+  is an `identity` claim for Corinne AND a `date` claim with
+  `event_kind: "child_born"`. Naming somebody is not the same fact as dating
+  something that happened to them.
+- **Relative time is kept, not dropped.** "We moved the summer after Mom
+  died", "when I was about 12", "before college" are all real things they
+  said and all belong here — as `relative_order`, or as an `age`. Never turn
+  one into a calendar date, and never leave it out because it has no year:
+  the arithmetic reaches it later, and only if you wrote it down.
+- **Anyone's date counts.** A colleague's birthday, a neighbour's boy, a
+  friend's wedding — every one of them is a claim. The family-only rule is a
+  rule about the family roster, not about what may be heard.
+- Never invent a subject, a date, an event or a quotation to make this list
+  longer, and never split one fact into two claims to do it either.
 
 Never invent a place, a date, a name, or a domain.{reminder}

@@ -24,7 +24,7 @@ its own leaf (:func:`build_listener_prompt`), its own parse
 (:func:`listener_heard_nothing`). The focused mode is untouched.
 
 **Typed lists, never a heterogeneous bag.** The output is
-``{"landmarks": [...], "people": [...]}``:
+``{"landmarks": [...], "people": [...], "claims": [...]}``:
 
 * ``landmarks`` are ordinary landmark records of ANY domain, each through
   BOTH pinned validators exactly as the focused recorder's are. The
@@ -37,6 +37,17 @@ its own leaf (:func:`build_listener_prompt`), its own parse
   validation with a named finding (:data:`DROPPED_NON_FAMILY`), never filed.
   The leaf is taught the rule; this is the guard that does not depend on the
   leaf being obeyed, which is ADR 0028's whole lesson.
+
+* ``claims`` (v229, Wave C item C3) are TEMPORAL CLAIMS in the substrate's
+  own vocabulary (`temporal_claims`), and they are the reason this module
+  changed at all. A landmark record is a ladder row: it belongs to a domain,
+  carries at most one date, and can express neither *"we moved when James was
+  two"* (no date) nor *"my neighbour's boy was born in 2019"* (no domain), so
+  both were dropped by design. The audited plan calls both usable information
+  (§2.1, §6.4). Claims are emitted BESIDE the records, never instead of them,
+  and one message with N facts becomes one promoted vault source, one receipt
+  and N claims (owner amendment 2). See section 6 below for the draft/bind
+  split and why there is one.
 
 There is no ``placements`` list. Moment identity for prose — deciding WHICH
 sentence a date belongs to — is phase 2 and is stated as not-done in ADR
@@ -63,6 +74,7 @@ import chronology as chrono  # noqa: E402
 import conversation_delivery  # noqa: E402
 import cross_dating  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
+import temporal_claims as tc  # noqa: E402
 from lifehug_core import INTERACTIONS_DIR  # noqa: E402
 from recommend_focuses import TIME_PERIOD_PATTERNS  # noqa: E402
 
@@ -232,6 +244,25 @@ THIRD_PERSON_AGE_RES = (
                rf"{_SMALL_AGE}\b"),
     re.compile(rf"\b(?:he|she|they)\s+(?:was|were)\s+{_SMALL_AGE}\s+"
                r"years?\s+old\b", re.IGNORECASE),
+    # v229: the SAME clause in the other order. Every table above — borrowed
+    # and local alike — anchors the age on a leading conjunction ("when I was
+    # twelve"), because that is the order a moment FRAGMENT is written in. A
+    # message is written in either order, and *"I was about twelve when we
+    # left the farm"* fired nothing at all: measured on this branch, filed as
+    # a finding, fixed here rather than left. The `when` is what keeps it from
+    # being a count — "she was nine when it happened" is an age and "there
+    # were three of us" is not — and `i` is lower case because
+    # `_sentence_normalized` folds the opening capital of the very sentence
+    # this shape usually opens.
+    re.compile(rf"\b(?:[Ii]|we|he|she|they|[A-Z][a-z]+)\s+(?:was|were)\s+"
+               r"(?:about\s+|around\s+|almost\s+|nearly\s+|just\s+|"
+               rf"barely\s+)?{_SMALL_AGE}\s+when\b"),
+    # ...and the same subject with an approximator and no `when` at all
+    # ("I was about twelve"). An APPROXIMATOR is doing the work the `when`
+    # does above: nobody hedges a count of their own children with "about"
+    # and then says it was them.
+    re.compile(rf"\b(?:[Ii]|we|he|she|they|[A-Z][a-z]+)\s+(?:was|were)\s+"
+               rf"(?:about|around|almost|nearly)\s+{_SMALL_AGE}\b"),
 )
 
 #: "as a kid", "growing up", "back in those days". Life STAGES with no number
@@ -381,12 +412,12 @@ def may_contain_datable(text: object) -> Verdict:
 #: same double sentence `MANY_RECORDS_REMINDER` carries, for the same reason.
 LISTENING_REMINDER = (
     "You recorded nothing, and there is time in what they said{term_clause}. "
-    "Read it again and emit every datable fact in it: a landmark record for "
-    "each one that belongs to a domain above, and a `people` record for a "
-    "FAMILY member whose birth or death they dated. Record only what they "
-    "actually said — never invent a date, a name or a domain to fill the "
-    "lists out — and if, reading it again, there genuinely is no fact here, "
-    "emit the empty lists and say nothing else."
+    "Read it again and emit every datable fact in it: a `claims` entry for "
+    "each fact, a landmark record for each one that also belongs to a domain "
+    "above, and a `people` record for a FAMILY member whose birth or death "
+    "they dated. Record only what they actually said — never invent a date, a "
+    "name or a domain to fill the lists out — and if, reading it again, there "
+    "genuinely is no fact here, emit the empty lists and say nothing else."
 )
 
 
@@ -439,6 +470,7 @@ def _consumed(term: str, covered: frozenset[str]) -> bool:
 
 def listener_heard_nothing(user_message: object, records: object,
                            people: object = (), *,
+                           claims: object = (),
                            findings: object = (),
                            landmarks: object = (),
                            verdict: object = None,
@@ -465,6 +497,14 @@ def listener_heard_nothing(user_message: object, records: object,
     A DECLINE clears the check outright, through `answer_shape`'s own skip
     rules — one definition of "not now", never a second list of hedges.
 
+    **v229: a CLAIM is a thing heard.** The backstop reads the claims list
+    beside the other two, so a completion that speaks only the substrate's
+    vocabulary — the shape this program is walking toward — clears it exactly
+    as a landmark record does, and a completion that emits NEITHER shape lints
+    exactly as it did before. That is the whole bridge in one line: the
+    question this class asks is *did anything come back*, never *did the old
+    shape come back*.
+
     So does a :data:`DROPPED_NON_FAMILY` finding, and ONLY that one. The
     listener heard a dated person and the owner's family-only rule refused
     the record: that is a DECISION, not a miss, and regenerating would ask
@@ -473,7 +513,7 @@ def listener_heard_nothing(user_message: object, records: object,
     nothing.
     """
     heard = [item for item in
-             (list(records or ()) + list(people or ()))
+             (list(records or ()) + list(people or ()) + list(claims or ()))
              if isinstance(item, dict) and item]
     if heard:
         return None
@@ -683,6 +723,10 @@ def build_listener_prompt(*, answer: str, reply: str = "",
     the focused prompt does not is the nine-line domain digest and the
     family-relation vocabulary; what it drops is the one domain's ask, ladder
     and none-rule, which are in the digest instead.
+
+    v229 adds two more DERIVED substitutions — `temporal_claims.CLAIM_TYPES`
+    and :func:`render_event_kinds` — so the claim vocabulary the leaf offers
+    is the contract's own and cannot drift from it by a hand edit.
     """
     filled = load_listener_leaf(framework_root)
     known = render_all_known_entries(landmarks, framework_root=framework_root)
@@ -692,6 +736,8 @@ def build_listener_prompt(*, answer: str, reply: str = "",
         ("{domains}", render_domain_digest(framework_root)),
         ("{known_entries}", known),
         ("{family_relations}", relations),
+        ("{claim_types}", " | ".join(tc.CLAIM_TYPES)),
+        ("{event_kinds}", render_event_kinds()),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),
         ("{reminder}", f"\n\n{reminder.strip()}" if reminder else ""),
@@ -706,14 +752,24 @@ def build_listener_prompt(*, answer: str, reply: str = "",
 
 @dataclass(frozen=True)
 class Heard:
-    """One listener completion, parsed. Typed lists, never a mixed bag."""
+    """One listener completion, parsed. Typed lists, never a mixed bag.
+
+    v229 (Wave C, item C3) adds a THIRD typed list, :attr:`claims`, and adds
+    it at the END so a caller that built a :class:`Heard` positionally keeps
+    building the same one. It is the same message read into the temporal-claim
+    substrate's own vocabulary (`temporal_claims.TemporalClaim`) rather than
+    into the landmark ladder's, and the two lists are emitted TOGETHER during
+    the transition: the landmark path keeps working unchanged, and the claims
+    are what `landmark_recorder.file_claims` promotes and receipts.
+    """
 
     landmarks: tuple[dict, ...] = ()
     people: tuple[dict, ...] = ()
     findings: tuple[str, ...] = ()
+    claims: tuple[dict, ...] = ()
 
     def __len__(self) -> int:
-        return len(self.landmarks) + len(self.people)
+        return len(self.landmarks) + len(self.people) + len(self.claims)
 
 
 def parse_listener_output(raw: object, *,
@@ -729,6 +785,11 @@ def parse_listener_output(raw: object, *,
 
     ``people`` run :func:`validate_person_record`, whose drops are NAMED in
     :attr:`Heard.findings`.
+
+    ``claims`` (v229) run :func:`validate_claim_draft` — the temporal-claim
+    contract's own door — and their drops are named in the same list through
+    :func:`claim_refused`. The three lists are independent: a refused claim
+    never costs a landmark record and a refused record never costs a claim.
 
     A malformed envelope degrades to an EMPTY :class:`Heard`, never an error.
     """
@@ -768,7 +829,378 @@ def parse_listener_output(raw: object, *,
             people.append(record)
         elif finding:
             findings.append(finding)
-    return Heard(tuple(records), tuple(people), tuple(findings))
+    claims, refusals = parse_claims(data.get("claims"))
+    findings.extend(refusals)
+    return Heard(tuple(records), tuple(people),
+                 tuple(dict.fromkeys(findings)), claims)
+
+
+# --------------------------------------------------------------------------
+# 6. Claims — the ear learns to speak the substrate's language (v229, Wave C)
+# --------------------------------------------------------------------------
+#
+# v220 froze what a temporal interpretation IS (`temporal_claims`) and v221
+# put one on disk (`temporal_store`). Nothing yet SAID one. The landmark
+# record shape the recorder and the listener emit is a ladder row: it belongs
+# to a domain, it carries at most one date, and it cannot express *"we moved
+# when James was two"* or *"my neighbour's boy was born in 2019"* at all —
+# the first has no date and the second belongs to no domain, so both were
+# dropped by design. The audited plan calls both of them usable information
+# (§2.1, §6.4), and dropping them is the defect the whole substrate exists to
+# end.
+#
+# So the two leaves gain a SECOND output list, `claims`, in the contract's own
+# vocabulary. It is emitted BESIDE the landmark records, never instead of
+# them, and the two reach the substrate by different roads: a RECORD still
+# files through `timeline.save_landmark`, which since v225 promotes it to
+# `sources/landmarks/` and converts it by a deterministic rule, while one
+# MESSAGE with N facts becomes one promoted source under
+# `sources/conversations/`, one receipt and N claims (Amendment 2). Two
+# sources, two extractors, one active index — `landmark_recorder.file_claims`
+# states why that is corroboration rather than duplication.
+#
+# THE DRAFT, and why there is one. `temporal_claims.validate_temporal_claim`
+# is the one door a claim goes through, and it requires four fields the EAR
+# cannot know: the vault `source_ref` (the message is not a source until
+# `temporal_store.promote_conversational_source` files it), the
+# `extractor_version` (the host's, not the model's), `created_at`, and the
+# derived `claim_id`, which is a function of the first two. A claim is
+# therefore parsed as a DRAFT — validated through that same door against a
+# NAMED unbound placeholder and then stripped of exactly those four fields —
+# and BOUND at filing time, when the source exists. There is no second
+# validator and no second vocabulary; `test_a_bound_draft_is_the_drafts_own
+# _fields` pins that binding adds the binding and changes nothing else.
+
+#: The keys a leaf may put on ONE claim: the contract's own field names, minus
+#: the four the FILER supplies. Deliberately CLOSED, exactly as
+#: `conversation_delivery._LANDMARK_KEYS` is closed — a key outside this set
+#: is a key nothing reads, and a model told it may write one would be told a
+#: falsehood. `subject_ref`/`event_ref` are absent on purpose: resolution
+#: happens after the claim exists (plan §6.3) and must never re-mint it.
+CLAIM_PROMPT_KEYS = frozenset({
+    "claim_type", "subject_mention", "event_kind", "temporal_value",
+    "evidence", "basis", "confidence",
+})
+
+#: The draft's own field order — stable, so a draft is comparable and a
+#: receipt's bytes do not depend on dict insertion luck.
+CLAIM_DRAFT_KEYS = ("claim_type", "subject_mention", "event_kind",
+                    "temporal_value", "evidence", "basis", "confidence")
+
+#: The fields BINDING supplies and a draft therefore never carries. Named so
+#: the strip is a declaration rather than four literals in a comprehension.
+CLAIM_BINDING_KEYS = ("claim_id", "source_ref", "source_kind",
+                      "extractor_version", "created_at", "schema_version",
+                      "status", "supersedes_claim_ids")
+
+#: The placeholder a draft is validated against. It is a legal `SourceRef` —
+#: `validate_source_ref` is not weakened for this — and it is recognisable on
+#: sight, so a draft that ever escaped into a receipt would be obvious rather
+#: than plausible. `test_no_unbound_placeholder_survives_binding` is the guard.
+UNBOUND_SOURCE_ID = "unbound:draft"
+UNBOUND_REVISION = "sha256:" + "0" * 64
+UNBOUND_EXTRACTOR = "unbound"
+
+#: A claim the ear heard and the contract refused, by name. The person said
+#: it; the record must say why it did not survive. The suffix is one of
+#: `temporal_claims.ERROR_CODES`.
+CLAIM_REFUSED_PREFIX = "claim_refused:"
+
+#: The ONE refusal code this layer raises that the contract does not: the leaf
+#: emitted a key outside :data:`CLAIM_PROMPT_KEYS`, which means the leaf and
+#: this parser disagree about the vocabulary. Every other code comes from
+#: `temporal_claims.ERROR_CODES`.
+CLAIM_UNKNOWN_KEY = "claim_unknown_key"
+
+#: The ear records what was SAID. Anything worked out from an anchor, an age
+#: or the order of things is a later pass's (`cross_dating`, and the fold),
+#: so a claim from this layer whose basis the leaf left unstated is
+#: `explicit` — the contract's own default is `inferred`, which would be the
+#: understatement, and understating provenance is as dishonest as inflating
+#: it. This is a BINDING of `temporal_claims.CLAIM_BASES`, never a second one.
+CAPTURE_BASIS = "explicit"
+
+
+def claim_refused(code: object) -> str:
+    """The named finding a refused claim carries."""
+    return f"{CLAIM_REFUSED_PREFIX}{tc.collapsed_text(code) or 'unknown'}"
+
+
+def validate_claim_draft(value: object) -> tuple[dict | None, str]:
+    """One emitted claim, through the contract's own door. ``(draft, finding)``.
+
+    The draft is what the ear can honestly assert: what kind of claim it is,
+    whose it is in the person's own words, which event, the temporal value in
+    its one legal shape, the bounded quotation that proves it, the basis and
+    the confidence. Everything else is the filer's.
+
+    ``finding`` is ``""`` when the draft is kept and
+    :func:`claim_refused`\\ ``(code)`` when it is not — a NAMED drop, never a
+    silent one, and the code is the contract's own
+    (`temporal_claims.ERROR_CODES`) or the one this layer adds,
+    :data:`CLAIM_UNKNOWN_KEY`. The refusals that matter most are already
+    written there and are not re-decided here: an aggregate subject
+    (*"Ada, Bo, Cy and Della"*) is `aggregate_subject_mention`, a date with no
+    event is `temporal_claim_needs_event_kind`, and a claim with no quotation
+    is `evidence_required`.
+    """
+    if not isinstance(value, dict) or not value:
+        return None, claim_refused("claim_not_a_mapping")
+    if not set(value) <= CLAIM_PROMPT_KEYS:
+        # The closed key set, checked BEFORE the contract sees it: an unknown
+        # key means the leaf and this parser disagree about the vocabulary,
+        # and that is a defect to name rather than a field to ignore.
+        return None, claim_refused(CLAIM_UNKNOWN_KEY)
+    payload = dict(value)
+    payload.setdefault("basis", CAPTURE_BASIS)
+    payload["source_ref"] = {"source_id": UNBOUND_SOURCE_ID,
+                             "revision": UNBOUND_REVISION}
+    payload["source_kind"] = "conversation"
+    payload["extractor_version"] = UNBOUND_EXTRACTOR
+    try:
+        normalized = tc.validate_temporal_claim(payload)
+    except tc.TemporalContractError as exc:
+        return None, claim_refused(getattr(exc, "code", "") or str(exc))
+    draft = {key: normalized[key] for key in CLAIM_DRAFT_KEYS
+             if key in normalized}
+    if "confidence" not in value:
+        # The contract defaults an unstated confidence to 0.0; a draft that
+        # carried it would be asserting "no support" for something the person
+        # said out loud. Calibration is the fold's, so the draft says nothing
+        # and binding restores the contract's own default.
+        draft.pop("confidence", None)
+    return draft, ""
+
+
+def parse_claims(payload: object) -> tuple[tuple[dict, ...], tuple[str, ...]]:
+    """A leaf's ``claims`` list, validated PER CLAIM. ``(drafts, findings)``.
+
+    The same discipline the two record lists already have: each claim runs the
+    validator ALONE, so a refused one drops by itself and never takes a
+    sibling with it — the founder's twelve-job answer must not be lost because
+    the eleventh job named an event kind the contract cannot read — and
+    duplicates collapse. Accepts the singular ``{"claim": {...}}`` shape too,
+    for the same reason `parse_recorder_output` accepts ``{"landmark": ...}``:
+    a model that emits one fact often emits it singular.
+    """
+    if isinstance(payload, dict):
+        payload = [payload]
+    if not isinstance(payload, (list, tuple)):
+        return (), ()
+    drafts: list[dict] = []
+    findings: list[str] = []
+    for candidate in payload:
+        draft, finding = validate_claim_draft(candidate)
+        if draft is not None:
+            if draft not in drafts:
+                drafts.append(draft)
+        elif finding:
+            findings.append(finding)
+    return tuple(drafts), tuple(dict.fromkeys(findings))
+
+
+def bind_claims(drafts: object, *, source_ref: object,
+                extractor_version: object,
+                source_kind: str = "conversation",
+                now: object = None) -> list[dict]:
+    """Bind drafts to the source that was promoted for them. The filing half.
+
+    A draft becomes a claim exactly when there is a vault source to cite
+    (Amendment 2 / option B): the message is promoted first, its
+    :class:`temporal_claims.SourceRef` comes back, and every draft from that
+    message binds to it — one message, one source, N claims, all citing the
+    same revision. The claim id is DERIVED here for the first time, which is
+    why a retry of the same extraction over the same revision mints the same
+    ids and files nothing twice.
+
+    Raises the contract's own error on a draft that will not bind; a draft
+    that survived :func:`validate_claim_draft` binds by construction, so a
+    raise here means the binding itself is wrong.
+    """
+    ref = tc.validate_source_ref(source_ref)
+    version = tc.collapsed_text(extractor_version)
+    bound: list[dict] = []
+    for draft in (drafts or ()):
+        if not isinstance(draft, dict) or not draft:
+            continue
+        payload = {key: value for key, value in draft.items()
+                   if key not in CLAIM_BINDING_KEYS}
+        payload["source_ref"] = ref
+        payload["source_kind"] = source_kind
+        payload["extractor_version"] = version
+        claim = tc.validate_temporal_claim(payload, now=now)
+        if claim not in bound:
+            bound.append(claim)
+    return bound
+
+
+# -- the extractor's own identity ------------------------------------------
+
+#: How much of a leaf's digest names its version. A prompt edit is a NEW
+#: extractor: it lands on a new receipt path beside the old one rather than
+#: rewriting yesterday's reading (`temporal_store.write_receipt`), which is
+#: the §4.2 invariant that makes "a later model is a new interpretation"
+#: true of a later PROMPT as well.
+PROMPT_VERSION_LENGTH = 12
+
+
+def leaf_prompt_version(leaf: object) -> str:
+    """A stable short digest of the leaf text a completion was drawn from."""
+    import hashlib  # noqa: PLC0415
+
+    body = leaf if isinstance(leaf, str) else ""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:PROMPT_VERSION_LENGTH]
+
+
+def claim_extractor(name: str, *, leaf: object, model: object = None) -> dict:
+    """The receipt's structured ``extractor`` block for one capture pass."""
+    block: dict = {"name": tc.collapsed_text(name),
+                   "schema_version": tc.SCHEMA_VERSION,
+                   "prompt_version": leaf_prompt_version(leaf)}
+    if tc.collapsed_text(model):
+        block["model"] = tc.collapsed_text(model)
+    return block
+
+
+def claim_extractor_version(block: object) -> str:
+    """The one canonical spelling of the block above.
+
+    `temporal_claims.extractor_version_string` is the only renderer, so the
+    receipt's structured block and its `extractor_version` string cannot say
+    two different things about which extractor wrote it.
+    """
+    data = block if isinstance(block, dict) else {}
+    return tc.extractor_version_string(
+        data.get("name"),
+        schema_version=data.get("schema_version"),
+        prompt_version=data.get("prompt_version"),
+        model=data.get("model"),
+        rule_version=data.get("rule_version"),
+    )
+
+
+LISTENER_EXTRACTOR = "general_listener"
+
+
+def listener_extractor(*, model: object = DEFAULT_LISTENER_ROLE,
+                       framework_root: str | Path | None = None) -> dict:
+    """This pass's extractor block, versioned by its OWN leaf's bytes."""
+    return claim_extractor(LISTENER_EXTRACTOR,
+                           leaf=load_listener_leaf(framework_root),
+                           model=model)
+
+
+def listener_extractor_version(*, model: object = DEFAULT_LISTENER_ROLE,
+                               framework_root: str | Path | None = None) -> str:
+    return claim_extractor_version(
+        listener_extractor(model=model, framework_root=framework_root))
+
+
+# -- the plurality backstop, read over claims ------------------------------
+
+#: The RETRYABLE claims lint (v229), and deliberately the claims-shaped twin
+#: of `landmarks_interaction.RECORD_EVERY_ENTRY_LINT` rather than a second
+#: severity: it fires on evidence that facts were missed, a host answers it
+#: with ONE regeneration, and then it files what it has. It can never cost the
+#: person a claim that was already made, and it never withholds.
+CLAIMS_MISSING_SUBJECTS_LINT = "landmark_gates.claims_missing_subjects"
+
+#: What a host appends to the ONE regeneration when the lint above fires.
+#: Same double sentence `LISTENING_REMINDER` carries, for the same reason:
+#: name what was missed, and forbid inventing anything to satisfy it.
+EVERY_CLAIM_REMINDER = (
+    "You emitted {count} claim(s) and they stated more than that{term_clause}. "
+    "One claim per asserted fact: every person named is their own claim, "
+    "every date is the date of ONE event, and a fact fixed against another "
+    "moment is a `relative_order` claim rather than a dropped one. Emit them "
+    "all — and add nothing they did not say to make the list longer."
+)
+
+
+def every_claim_reminder(count: object = 0, missed: object = ()) -> str:
+    """:data:`EVERY_CLAIM_REMINDER`, naming what went unclaimed."""
+    names = [" ".join(group) if isinstance(group, (list, tuple)) else str(group)
+             for group in (missed or ())]
+    quoted = ", ".join(f'"{name}"' for name in names[:4])
+    clause = f" — {quoted}" if quoted else ""
+    try:
+        number = int(count)
+    except (TypeError, ValueError):
+        number = 0
+    return EVERY_CLAIM_REMINDER.format(count=number, term_clause=clause)
+
+
+def claims_missing_subjects(user_message: object, claims: object, *,
+                            known_labels: object = ()) -> dict | None:
+    """The one definition of "they asserted more facts than came back".
+
+    v214's class, read over the claims list. It is a BINDING of that class's
+    two decidable primitives, not a second copy of them: the proper-noun
+    grouping is `landmarks_interaction._name_groups` and the coverage test is
+    `landmarks_interaction._record_terms`, both read by name, because a second
+    table of what a name looks like is exactly the recurring defect the
+    package's doctrine forbids (docs/BUILDING.md §7).
+
+    What it does NOT inherit is the domain half — the identity rung, the
+    per-entry dating rule, the none/skip terminals — because a claim has no
+    domain to be complete for. What replaces it is the contract's own
+    cardinality rule: one claim per independently asserted subject/event
+    (plan §5.1), so an uncovered name is a missed claim wherever it appears.
+
+    Returns a finding (``lint`` / ``detail`` / ``missed``) or ``None``, and
+    ``None`` for everything it cannot decide. A false positive costs one
+    haiku-class regeneration and nothing else.
+    """
+    filed = [claim for claim in (claims or ()) if isinstance(claim, dict) and claim]
+    if not filed:
+        # Nothing at all is the backstop's question (`listener_heard_nothing`
+        # / `answer_must_record`), not this one. Two classes, two questions.
+        return None
+    text = user_message if isinstance(user_message, str) else ""
+    if not text.strip():
+        return None
+    known = {str(label).strip().lower() for label in (known_labels or ())
+             if str(label).strip()}
+    covered = li._record_terms(filed) | known  # noqa: SLF001
+    for label in known:
+        covered |= {token.lower()
+                    for token in li._RECORD_TOKEN_RE.findall(label)}  # noqa: SLF001
+    missed = [group for group in li._name_groups(text)  # noqa: SLF001
+              if group[0] not in covered]
+    floor = 1 if len(filed) > 1 else 2
+    detail = ""
+    if len(missed) >= floor:
+        detail = (
+            f"they named {len(missed) + len(filed)} things and {len(filed)} "
+            "claim(s) came back — one claim per asserted fact: "
+            + ", ".join(" ".join(group) for group in missed[:4])
+            + " were not claimed"
+        )
+    else:
+        stated = set(chrono.YEAR_RE.findall(text)) - known
+        dated = sum(1 for claim in filed
+                    if claim.get("claim_type") in tc.DATED_CLAIM_TYPES)
+        if len(stated) >= 2 and dated < len(stated):
+            detail = (
+                f"they stated {len(stated)} separate dates and {dated} "
+                "claim(s) carry one — every date is the date of ONE event"
+            )
+    if not detail:
+        return None
+    return {"lint": CLAIMS_MISSING_SUBJECTS_LINT, "detail": detail,
+            "missed": tuple(" ".join(group) for group in missed[:4])}
+
+
+def render_event_kinds() -> str:
+    """The seed event vocabulary, as the leaf shows it.
+
+    DERIVED from `temporal_claims.EVENT_KINDS` rather than re-typed, so the
+    day a kind joins the contract the leaf offers it without a second edit.
+    The set is a SEED and not a closed one (the contract accepts any lowercase
+    token), which the leaf says out loud — refusing an event the person
+    plainly named would be the drop this whole pass exists to end.
+    """
+    return " | ".join(tc.EVENT_KINDS)
 
 
 # --------------------------------------------------------------------------
@@ -825,6 +1257,12 @@ def main(argv: list[str] | None = None) -> int:
         "status": outcome.status,
         "records": list(outcome.records),
         "people": list(outcome.people),
+        # v229: the claim DRAFTS, unbound. A host binds them to the source it
+        # promotes (`landmark_recorder.file_claims`); printing them bound
+        # would mean promoting a source from a --dry-run-shaped CLI, which is
+        # a write this front door has never made.
+        "claims": list(outcome.claims),
+        "extractor_version": listener_extractor_version(model=args.model),
         "invocations": li.landmark_invocations(outcome.records)
         + person_invocations(outcome.people),
         "attempts": outcome.attempts,

@@ -32,9 +32,24 @@ multi-entry domains: one answer routinely carries many entries, and filing
 one of them is losing the rest. Each record is validated ALONE, so an invalid
 one drops without taking its siblings with it.
 
+**ONE COMPLETION, TWO SHAPES (v229, Wave C item C3).** The same pass now also
+emits TEMPORAL CLAIMS — `temporal_claims.TemporalClaim` drafts, one per
+independently asserted fact — beside the landmark records, and
+:func:`file_claims` promotes the message as a vault source and files ONE
+immutable receipt over it (owner amendment 2). Nothing about the landmark path
+changes: `timeline.save_landmark` keeps its signature and its meaning, every
+pre-v229 stored completion parses exactly as it did, and a completion carrying
+no ``claims`` list yields an empty :attr:`RecorderOutcome.claims`. The claim
+shape exists because a ladder row cannot hold what people actually say —
+*"we moved when James was two"* has no date and *"my neighbour's boy was born
+in 2019"* has no domain, so both were dropped by design, and the audited plan
+(§2.1, §6.4) calls both usable information.
+
 Pure except for the one injected ``call``: the prompt build, the parse, the
 validation and the lints are all deterministic and separately testable, and a
 host that runs its own model REPLAYs those four and never this module's loop.
+:func:`file_claims` is the one exception and the one function here that
+touches a vault.
 """
 
 from __future__ import annotations
@@ -46,6 +61,7 @@ from pathlib import Path
 import conversation_delivery
 import general_listener as gl
 import landmarks_interaction as li
+import temporal_claims as tc
 from lifehug_core import INTERACTIONS_DIR
 
 RECORDER_PROMPT = "recorder.md"
@@ -90,6 +106,16 @@ class RecorderOutcome:
     v212 keeps working unchanged; a caller that files is filing
     :attr:`records`, and `landmarks_interaction.landmark_invocations` turns
     the set into one invocation per entry.
+
+    v229 adds :attr:`claims` BESIDE them, not instead of them, and the two
+    reach the substrate by DIFFERENT ROADS. A record goes on filing through
+    `timeline.save_landmark`, which since v225 promotes it to
+    ``sources/landmarks/`` and converts it by a deterministic RULE
+    (`landmark_projection`); the claims go to ``sources/conversations/``
+    through `temporal_store.file_message_extraction` — one message, one
+    promoted source, one receipt, N claims. Two sources, two extractors, one
+    active index. See :func:`file_claims` for why that is corroboration and
+    not duplication.
     """
 
     status: str
@@ -109,6 +135,15 @@ class RecorderOutcome:
     lint_ids: tuple[str, ...] = ()
     reason: str = ""
     prompts: tuple[str, ...] = field(default=(), repr=False)
+    #: v229 (Wave C, item C3): the TEMPORAL CLAIM DRAFTS the same completion
+    #: emitted — one per independently asserted fact, in the substrate's own
+    #: vocabulary (`temporal_claims`), UNBOUND until a source is promoted for
+    #: the message (`file_claims`). Deliberately the LAST field: a caller that
+    #: built or unpacked this outcome positionally keeps building and
+    #: unpacking the same one, which is what "bridging, not big-bang" costs
+    #: here. Always empty for a completion that emitted no `claims` list, so
+    #: every pre-v229 stored completion parses exactly as it did.
+    claims: tuple[dict, ...] = ()
 
     @property
     def record(self) -> dict | None:
@@ -266,6 +301,8 @@ def build_recorder_prompt(*, domain: str, question_asked: str,
         ("{recordable_keys}", " | ".join(recordable_keys(row))),
         ("{none_allowed}", "yes" if li.domain_accepts_none(row) else "no"),
         ("{known_entries}", known),
+        ("{claim_types}", " | ".join(tc.CLAIM_TYPES)),
+        ("{event_kinds}", gl.render_event_kinds()),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),
         ("{reminder}", f"\n\n{reminder.strip()}" if reminder else ""),
@@ -323,6 +360,133 @@ def parse_recorder_output(raw: object, *,
     return tuple(records)
 
 
+def parse_recorder_claims(raw: object) -> tuple[tuple[dict, ...],
+                                                tuple[str, ...]]:
+    """The focused recorder's ``claims`` list. ``(drafts, findings)``.
+
+    A named door onto `general_listener.parse_claims`, never a second parse:
+    the claim vocabulary is ONE vocabulary and both modes read it with one
+    function, exactly as both modes already validate a landmark record through
+    the same two pinned layers. This exists so a focused call site says what
+    it is doing (`parse_recorder_output` beside it reads the LANDMARK half of
+    the same completion) and so the two halves stay visibly separate: a
+    refused claim never costs a record and a refused record never costs a
+    claim.
+    """
+    if not isinstance(raw, str):
+        return (), ()
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return (), ()
+    if not isinstance(data, dict):
+        return (), ()
+    payload = data.get("claims")
+    if payload is None:
+        payload = data.get("claim")
+    return gl.parse_claims(payload)
+
+
+RECORDER_EXTRACTOR = "landmark_recorder"
+
+
+def recorder_extractor(*, model: object = DEFAULT_RECORDER_ROLE,
+                       framework_root: str | Path | None = None) -> dict:
+    """This pass's extractor block, versioned by its OWN leaf's bytes.
+
+    §4.2 requires a receipt to identify the extractor's prompt, schema and
+    model version. The prompt version is a digest of
+    :func:`load_recorder_leaf`'s text, so EDITING THE LEAF IS A NEW EXTRACTOR:
+    the next extraction lands on a new receipt path beside the old one rather
+    than rewriting yesterday's reading, which is how "a later reading is a new
+    interpretation, never a cache rebuild" stays true of a later PROMPT and
+    not only of a later model.
+    """
+    return gl.claim_extractor(RECORDER_EXTRACTOR,
+                              leaf=load_recorder_leaf(framework_root),
+                              model=model)
+
+
+def recorder_extractor_version(*, model: object = DEFAULT_RECORDER_ROLE,
+                               framework_root: str | Path | None = None) -> str:
+    return gl.claim_extractor_version(
+        recorder_extractor(model=model, framework_root=framework_root))
+
+
+def file_claims(vault_root, outcome: object, *, message_text: str,
+                extractor_version: str, extractor: object = None,
+                session_ref: object = None, turn_ref: object = None,
+                speaker: object = None, channel: object = None,
+                occurred_at: object = None, recorder: object = None,
+                now: object = None):
+    """Promote the message and file ONE receipt carrying every claim.
+
+    The whole write path of item C3, and deliberately three lines of it: the
+    pairing rule, the promotion and the receipt are all
+    `temporal_store.file_message_extraction`'s, and this function exists to
+    bind an outcome to them rather than to re-decide any of it.
+
+    * **Amendment 2 / option B.** The message becomes an ordinary vault source
+      BEFORE anything cites it, so no claim's only citation is a session row.
+      One message with N facts is promoted ONCE and every claim cites the same
+      revision — the source's own content digest.
+    * **One extraction, one receipt, N claims.** The receipt is immutable and
+      idempotent: re-running the same extractor over the same message writes
+      nothing, and re-running a DIFFERENT extractor (a new model, or an edited
+      leaf — see :func:`recorder_extractor`) writes a NEW receipt beside the
+      old one.
+    * **Idempotency** is `temporal_claims.derive_extraction_idempotency_key`
+      over session, turn, source revision, recorder and extractor version.
+      ``session_ref`` and ``turn_ref`` travel here for exactly that reason and
+      for the claim evidence's own ``turn_ref``.
+
+    **TWO ROADS INTO ONE SUBSTRATE, and why that is corroboration.** Since
+    v225 a landmark RECORD is itself promoted (to ``sources/landmarks/``) and
+    converted to claims by a deterministic rule, so a fact stated in a focused
+    landmark turn can reach the active index twice: once as the ladder row a
+    rule read, once as the sentence a model read. They are not duplicates and
+    cannot collide — different source, different revision, different extractor
+    version, therefore different `derive_claim_id`. They are two INTERPRETATIONS
+    of two different sources (plan §4.1), which is exactly the shape the fold
+    is built for: v225 moved `chronology.reconcile` to draw time over the live
+    active set, and two claims that agree strengthen the placement rather than
+    contend for it. What the model's road carries that the rule's cannot is the
+    reason this item exists — an event kind, an order against another moment, a
+    non-family subject, and the bounded quotation that proves any of it.
+
+    Returns ``(source_ref, receipt_path)``, or ``None`` when the outcome
+    carries no claims — a message that produced nothing files NOTHING, which
+    is the amendment's own rule and not an optimization.
+    """
+    drafts = tuple(getattr(outcome, "claims", None) or
+                   (outcome if isinstance(outcome, (list, tuple)) else ()))
+    drafts = tuple(draft for draft in drafts
+                   if isinstance(draft, dict) and draft)
+    if not drafts:
+        return None
+    from temporal_store import file_message_extraction  # noqa: PLC0415
+
+    metadata = {"session_ref": session_ref, "turn_ref": turn_ref,
+                "speaker": speaker, "channel": channel,
+                "occurred_at": occurred_at}
+    metadata = {key: value for key, value in metadata.items() if value}
+    return file_message_extraction(
+        vault_root,
+        message_text=message_text,
+        extractor_version=extractor_version,
+        claims_for=lambda source_ref: gl.bind_claims(
+            drafts, source_ref=source_ref,
+            extractor_version=extractor_version, now=now),
+        metadata=metadata,
+        extractor=extractor,
+        recorder=str(recorder) if recorder else None,
+        now=now,
+    )
+
+
 def record_answer(*, answer: str, call, domain: str | None = None,
                   reply: str = "", question_asked: str = "",
                   landmarks: object = (), known_labels: object = (),
@@ -370,6 +534,20 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     is still 2: a second regeneration would be a loop, and the lints exist to
     make a failure legible, not to keep rolling the dice.
 
+    **v229 adds a THIRD finding to that same single retry, never a fourth
+    attempt.** `general_listener.claims_missing_subjects` reads the CLAIMS the
+    same completion emitted and asks v214's question of them — *did they
+    assert more facts than came back?* — and it is consulted only where the
+    records themselves are complete, so the two never spend two regenerations
+    between them. Like `records_missing_entries` it can never withhold. And in
+    FOCUSED mode `answer_must_record` still reads the records and only the
+    records: the focused recorder is the canonical writer for a focused turn
+    (plan §2.1, §6.1), so a claim heard alongside upgrades the terminal from
+    ``STATUS_NOTHING`` to ``STATUS_RECORDED`` but never excuses a missing
+    record. In LISTENING mode a claim IS a thing heard and clears
+    `listener_heard_nothing` exactly as a landmark record does — there the
+    claim is the point, not a second copy of the domain's answer.
+
     In NO-FOCUS mode the contract reads the same with one substitution:
     `general_listener.listener_heard_nothing` replaces `answer_must_record`
     as the blocking backstop, and it asks a question only a no-focus pass can
@@ -400,6 +578,7 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     finding: dict | None = None
     best: tuple[dict, ...] = ()
     people: tuple[dict, ...] = ()
+    claims: tuple[dict, ...] = ()
     findings: tuple[str, ...] = ()
     for attempt in range(1, MAX_ATTEMPTS + 1):
         prompt = (
@@ -417,9 +596,10 @@ def record_answer(*, answer: str, call, domain: str | None = None,
         try:
             raw = call(prompt, model)
         except Exception as exc:  # noqa: BLE001 — provider failures are data here
-            if best or people:
+            if best or people or claims:
                 return RecorderOutcome(status=STATUS_RECORDED, records=best,
                                        people=people, findings=findings,
+                                       claims=claims,
                                        attempts=attempt, reason=str(exc),
                                        prompts=tuple(prompts))
             return RecorderOutcome(status=STATUS_UNAVAILABLE, attempts=attempt,
@@ -432,49 +612,90 @@ def record_answer(*, answer: str, call, domain: str | None = None,
             heard = gl.parse_listener_output(raw,
                                              framework_root=framework_root)
             findings = tuple(dict.fromkeys(findings + heard.findings))
-            if len(heard) > len(best) + len(people):
-                best, people = heard.landmarks, heard.people
+            if len(heard) > len(best) + len(people) + len(claims):
+                best, people, claims = (heard.landmarks, heard.people,
+                                        heard.claims)
             finding = gl.listener_heard_nothing(
-                answer, best, people, findings=findings,
+                answer, best, people, claims=claims, findings=findings,
                 landmarks=landmarks, verdict=verdict,
                 framework_root=framework_root)
             if finding is None:
-                return RecorderOutcome(
-                    status=(STATUS_RECORDED if (best or people)
-                            else STATUS_NOTHING),
-                    records=best, people=people, findings=findings,
-                    attempts=attempt, prompts=tuple(prompts))
+                # v229: the plurality rung, read over the CLAIMS. Same
+                # severity as `RECORD_EVERY_ENTRY_LINT` and the same single
+                # regeneration: it can never withhold, because a partial set
+                # of claims is worth more than none and the person already
+                # said it once.
+                missed = gl.claims_missing_subjects(answer, claims)
+                if missed is None or attempt == MAX_ATTEMPTS:
+                    return RecorderOutcome(
+                        status=(STATUS_RECORDED if (best or people or claims)
+                                else STATUS_NOTHING),
+                        records=best, people=people, claims=claims,
+                        findings=findings, attempts=attempt,
+                        lint_ids=((gl.CLAIMS_MISSING_SUBJECTS_LINT,) if missed
+                                  else ()),
+                        reason=str((missed or {}).get("detail", "")),
+                        prompts=tuple(prompts))
+                reminder = gl.every_claim_reminder(len(claims),
+                                                   missed.get("missed"))
+                continue
             reminder = gl.listening_reminder(verdict)
             continue
         records = parse_recorder_output(raw, framework_root=framework_root)
+        heard_claims, refusals = parse_recorder_claims(raw)
+        findings = tuple(dict.fromkeys(findings + refusals))
         if len(records) > len(best):
             best = records
+        if len(heard_claims) > len(claims):
+            claims = heard_claims
         if best:
             missed = li.records_missing_entries(
                 answer, best, reply=reply, domain=domain,
                 known_labels=known, framework_root=framework_root,
             )
+            lint_id = li.RECORD_EVERY_ENTRY_LINT
+            regen = li.many_records_reminder(domain, len(best))
+            if missed is None:
+                # The RECORDS are complete; the CLAIMS may not be. One retry
+                # across both findings still (MAX_ATTEMPTS is unchanged), and
+                # this rung never withholds either.
+                missed = gl.claims_missing_subjects(answer, claims,
+                                                    known_labels=known)
+                if missed is not None:
+                    lint_id = gl.CLAIMS_MISSING_SUBJECTS_LINT
+                    regen = gl.every_claim_reminder(len(claims),
+                                                    missed.get("missed"))
             if missed is None or attempt == MAX_ATTEMPTS:
                 return RecorderOutcome(
-                    status=STATUS_RECORDED, records=best, attempts=attempt,
-                    lint_ids=((li.RECORD_EVERY_ENTRY_LINT,) if missed
-                              else ()),
+                    status=STATUS_RECORDED, records=best, claims=claims,
+                    findings=findings, attempts=attempt,
+                    lint_ids=((lint_id,) if missed else ()),
                     reason=str((missed or {}).get("detail", "")),
                     prompts=tuple(prompts),
                 )
-            reminder = li.many_records_reminder(domain, len(best))
+            reminder = regen
             continue
         finding = li.answer_must_record(
             answer, records, reply=reply, domain=domain,
             known_labels=known, framework_root=framework_root,
         )
         if finding is None:
-            return RecorderOutcome(status=STATUS_NOTHING, attempts=attempt,
-                                   prompts=tuple(prompts))
+            # THE FOCUSED GUARANTEE IS UNCHANGED. `answer_must_record` reads
+            # the RECORDS and only the records: the focused recorder is the
+            # canonical writer for a focused turn (plan §2.1, §6.1), and
+            # letting a claim satisfy the domain's own answer would weaken
+            # that backstop during the very transition it has to survive.
+            # A claim heard alongside is still a thing heard, so it upgrades
+            # the terminal from "nothing" to "recorded" and rides out on the
+            # outcome — it just never excuses a missing record.
+            return RecorderOutcome(
+                status=(STATUS_RECORDED if claims else STATUS_NOTHING),
+                claims=claims, findings=findings, attempts=attempt,
+                prompts=tuple(prompts))
         reminder = li.recording_reminder(domain)
     return RecorderOutcome(
         status=STATUS_WITHHELD, attempts=MAX_ATTEMPTS,
-        people=people, findings=findings,
+        people=people, findings=findings, claims=claims,
         lint_ids=((gl.LISTENER_HEARD_NOTHING_LINT,) if listening
                   else (li.ANSWER_MUST_RECORD_LINT,)),
         reason=str((finding or {}).get("detail", "")),
@@ -575,9 +796,15 @@ def main(argv: list[str] | None = None) -> int:
         # a v212 reader of this CLI keeps reading.
         "records": list(outcome.records),
         "record": outcome.record,
+        # v229: the claim DRAFTS, unbound. Binding them means promoting a
+        # vault source for the message, which is `file_claims`' write and not
+        # this front door's.
+        "claims": list(outcome.claims),
+        "extractor_version": recorder_extractor_version(model=args.model),
         "invocations": li.landmark_invocations(outcome.records),
         "attempts": outcome.attempts,
         "lint_ids": list(outcome.lint_ids),
+        "findings": list(outcome.findings),
         "reason": outcome.reason,
     }, indent=2, sort_keys=True))
     return 0 if outcome.status in (STATUS_RECORDED, STATUS_NOTHING) else 1

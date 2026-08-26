@@ -1,0 +1,315 @@
+{
+ "fixture_id": "claims-extraction-01",
+ "note": "v229 / Wave C item C3 — THE EAR SPEAKS CLAIMS. The audited final timeline build plan (docs/design/temporal-claims.md, controlling authority) makes ambient temporal capture a foundation requirement, not a late wave: §2.1 says dates, ranges, durations, ages, seasons, life-stage anchors and relative order stated in ANY conversation are usable information and that capture is not restricted to family; §6.4 says relative phrasings must be RETAINED even when they cannot yet be placed. The landmark record shape cannot express either: it belongs to a domain and carries at most one date, so a relative moment had no shape and a non-family person had no home, and both were dropped BY DESIGN. These cases drive the same one loop (`landmark_recorder.record_answer`, both modes) over completions that carry the new `claims` list beside the old ones, and pin the whole bridge: one extraction, one receipt, N claims, and not one landmark behavior changed. Deliberately NOT in landmark_fixtures.json: these are recorder and listener completions, not reference transcripts.",
+ "cases": [
+  {
+   "case_id": "twelve-jobs-are-twelve-claims-and-never-an-aggregate",
+   "mode": "focused",
+   "domain": "work",
+   "note": "The founder's own 2026-08-25 answer, one wave on: v214 taught the recorder to file twelve ENTRIES, and v229 makes each of them a claim with the event it dates named out loud (`event_kind: job`). Twelve facts, twelve claims, twelve records — and the aggregate the plan forbids (§5.1) is impossible here rather than discouraged, because `temporal_claims.validate_temporal_claim` refuses an enumerated subject_mention by name.",
+   "landmarks": {},
+   "user_message": "Quite a lot, honestly. I bagged groceries at Harlow's in 1962, drove for Kessler from 1965, went to Danforth Steel in 1968, ran the shop at Verity Tool in 1979, did dispatching at Bramwell Freight in 1984, taught shop at Ashby Community College from 1986, then Petrie Hardware in 1990, Calloway Mills in 1992, Straith Brothers in 1995, Redfern Garage in 1998, Ombersley Press in 2001, and I finished at Nyland Transit in 2004.",
+   "reply": "A working life. Danforth was the long one, then.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"work\", \"label\": \"Harlow's\", \"what\": \"work\", \"where\": \"Harlow's\", \"date\": {\"best\": \"1962\"}}, {\"domain\": \"work\", \"label\": \"Kessler\", \"what\": \"work\", \"where\": \"Kessler\", \"date\": {\"best\": \"1965\"}}, {\"domain\": \"work\", \"label\": \"Danforth Steel\", \"what\": \"work\", \"where\": \"Danforth Steel\", \"date\": {\"best\": \"1968\"}}, {\"domain\": \"work\", \"label\": \"Verity Tool\", \"what\": \"work\", \"where\": \"Verity Tool\", \"date\": {\"best\": \"1979\"}}, {\"domain\": \"work\", \"label\": \"Bramwell Freight\", \"what\": \"work\", \"where\": \"Bramwell Freight\", \"date\": {\"best\": \"1984\"}}, {\"domain\": \"work\", \"label\": \"Ashby Community College\", \"what\": \"work\", \"where\": \"Ashby Community College\", \"date\": {\"best\": \"1986\"}}, {\"domain\": \"work\", \"label\": \"Petrie Hardware\", \"what\": \"work\", \"where\": \"Petrie Hardware\", \"date\": {\"best\": \"1990\"}}, {\"domain\": \"work\", \"label\": \"Calloway Mills\", \"what\": \"work\", \"where\": \"Calloway Mills\", \"date\": {\"best\": \"1992\"}}, {\"domain\": \"work\", \"label\": \"Straith Brothers\", \"what\": \"work\", \"where\": \"Straith Brothers\", \"date\": {\"best\": \"1995\"}}, {\"domain\": \"work\", \"label\": \"Redfern Garage\", \"what\": \"work\", \"where\": \"Redfern Garage\", \"date\": {\"best\": \"1998\"}}, {\"domain\": \"work\", \"label\": \"Ombersley Press\", \"what\": \"work\", \"where\": \"Ombersley Press\", \"date\": {\"best\": \"2001\"}}, {\"domain\": \"work\", \"label\": \"Nyland Transit\", \"what\": \"work\", \"where\": \"Nyland Transit\", \"date\": {\"best\": \"2004\"}}], \"claims\": [{\"claim_type\": \"date\", \"subject_mention\": \"Harlow's\", \"event_kind\": \"job\", \"temporal_value\": \"1962\", \"evidence\": \"bagged groceries at Harlow's in 1962\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Kessler\", \"event_kind\": \"job\", \"temporal_value\": \"1965\", \"evidence\": \"drove for Kessler from 1965\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Danforth Steel\", \"event_kind\": \"job\", \"temporal_value\": \"1968\", \"evidence\": \"went to Danforth Steel in 1968\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Verity Tool\", \"event_kind\": \"job\", \"temporal_value\": \"1979\", \"evidence\": \"ran the shop at Verity Tool in 1979\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Bramwell Freight\", \"event_kind\": \"job\", \"temporal_value\": \"1984\", \"evidence\": \"dispatching at Bramwell Freight in 1984\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Ashby Community College\", \"event_kind\": \"job\", \"temporal_value\": \"1986\", \"evidence\": \"taught shop at Ashby Community College from 1986\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Petrie Hardware\", \"event_kind\": \"job\", \"temporal_value\": \"1990\", \"evidence\": \"Petrie Hardware in 1990\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Calloway Mills\", \"event_kind\": \"job\", \"temporal_value\": \"1992\", \"evidence\": \"Calloway Mills in 1992\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Straith Brothers\", \"event_kind\": \"job\", \"temporal_value\": \"1995\", \"evidence\": \"Straith Brothers in 1995\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Redfern Garage\", \"event_kind\": \"job\", \"temporal_value\": \"1998\", \"evidence\": \"Redfern Garage in 1998\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Ombersley Press\", \"event_kind\": \"job\", \"temporal_value\": \"2001\", \"evidence\": \"Ombersley Press in 2001\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Nyland Transit\", \"event_kind\": \"job\", \"temporal_value\": \"2004\", \"evidence\": \"finished at Nyland Transit in 2004\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_claim_count": 12,
+   "expected_claim_subjects": [
+    "Harlow's",
+    "Kessler",
+    "Danforth Steel",
+    "Verity Tool",
+    "Bramwell Freight",
+    "Ashby Community College",
+    "Petrie Hardware",
+    "Calloway Mills",
+    "Straith Brothers",
+    "Redfern Garage",
+    "Ombersley Press",
+    "Nyland Transit"
+   ],
+   "expected_claim_types": [
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date",
+    "date"
+   ],
+   "expected_event_kinds": [
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job",
+    "job"
+   ],
+   "expected_record_count": 12
+  },
+  {
+   "case_id": "four-children-are-four-people-and-four-births",
+   "mode": "focused",
+   "domain": "children",
+   "note": "Plan §5.1: \"I have four children: …\" produces four person/relationship entries, not one aggregate label — and person identity and the event that dates them are DISTINCT records. So four names become four `identity` claims and four `child_born` `date` claims, eight in all, and the four landmark entries v214 already filed are unchanged beside them.",
+   "landmarks": {},
+   "user_message": "Four of them. Corinne was born 1979-04-02, Maddox came along 1981-11-15, then Sela on 1984-06-30, and Ivo on 1990-02-08.",
+   "reply": "Four of them. That's a full house.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"children\", \"label\": \"Corinne\", \"who\": \"Corinne\", \"date\": {\"best\": \"1979-04-02\"}}, {\"domain\": \"children\", \"label\": \"Maddox\", \"who\": \"Maddox\", \"date\": {\"best\": \"1981-11-15\"}}, {\"domain\": \"children\", \"label\": \"Sela\", \"who\": \"Sela\", \"date\": {\"best\": \"1984-06-30\"}}, {\"domain\": \"children\", \"label\": \"Ivo\", \"who\": \"Ivo\", \"date\": {\"best\": \"1990-02-08\"}}], \"claims\": [{\"claim_type\": \"identity\", \"subject_mention\": \"Corinne\", \"evidence\": \"Corinne was born 1979-04-02\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Corinne\", \"event_kind\": \"child_born\", \"temporal_value\": \"1979-04-02\", \"evidence\": \"Corinne was born 1979-04-02\"}, {\"claim_type\": \"identity\", \"subject_mention\": \"Maddox\", \"evidence\": \"Maddox was born 1981-11-15\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Maddox\", \"event_kind\": \"child_born\", \"temporal_value\": \"1981-11-15\", \"evidence\": \"Maddox was born 1981-11-15\"}, {\"claim_type\": \"identity\", \"subject_mention\": \"Sela\", \"evidence\": \"Sela was born 1984-06-30\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Sela\", \"event_kind\": \"child_born\", \"temporal_value\": \"1984-06-30\", \"evidence\": \"Sela was born 1984-06-30\"}, {\"claim_type\": \"identity\", \"subject_mention\": \"Ivo\", \"evidence\": \"Ivo was born 1990-02-08\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Ivo\", \"event_kind\": \"child_born\", \"temporal_value\": \"1990-02-08\", \"evidence\": \"Ivo was born 1990-02-08\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_claim_count": 8,
+   "expected_claim_subjects": [
+    "Corinne",
+    "Corinne",
+    "Maddox",
+    "Maddox",
+    "Sela",
+    "Sela",
+    "Ivo",
+    "Ivo"
+   ],
+   "expected_claim_types": [
+    "identity",
+    "date",
+    "identity",
+    "date",
+    "identity",
+    "date",
+    "identity",
+    "date"
+   ],
+   "expected_event_kinds": [
+    null,
+    "child_born",
+    null,
+    "child_born",
+    null,
+    "child_born",
+    null,
+    "child_born"
+   ],
+   "expected_record_count": 4
+  },
+  {
+   "case_id": "an-aggregate-subject-is-refused-by-name",
+   "mode": "focused",
+   "domain": "children",
+   "note": "The same answer with the pre-claims writer's aggregate sent ALONGSIDE the four real ones. `aggregate_subject_mention` is the contract's own refusal and it is this pass's ally: plan §5.1 says \"I have four children: …\" produces four entries and never one label, and here that rule is a MECHANISM rather than a paragraph — the aggregate cannot be filed, the refusal is NAMED in the findings rather than swallowed, and its four siblings are untouched. A refused claim never costs a sibling.",
+   "landmarks": {},
+   "user_message": "Four of them. Corinne was born 1979-04-02, Maddox came along 1981-11-15, then Sela on 1984-06-30, and Ivo on 1990-02-08.",
+   "reply": "Four of them.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"children\", \"label\": \"Corinne\", \"who\": \"Corinne\", \"date\": {\"best\": \"1979-04-02\"}}, {\"domain\": \"children\", \"label\": \"Maddox\", \"who\": \"Maddox\", \"date\": {\"best\": \"1981-11-15\"}}, {\"domain\": \"children\", \"label\": \"Sela\", \"who\": \"Sela\", \"date\": {\"best\": \"1984-06-30\"}}, {\"domain\": \"children\", \"label\": \"Ivo\", \"who\": \"Ivo\", \"date\": {\"best\": \"1990-02-08\"}}], \"claims\": [{\"claim_type\": \"date\", \"subject_mention\": \"Corinne, Maddox, Sela and Ivo\", \"event_kind\": \"child_born\", \"temporal_value\": \"1979\", \"evidence\": \"Corinne was born 1979-04-02\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Corinne\", \"event_kind\": \"child_born\", \"temporal_value\": \"1979-04-02\", \"evidence\": \"Corinne was born 1979-04-02\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Maddox\", \"event_kind\": \"child_born\", \"temporal_value\": \"1981-11-15\", \"evidence\": \"Maddox was born 1981-11-15\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Sela\", \"event_kind\": \"child_born\", \"temporal_value\": \"1984-06-30\", \"evidence\": \"Sela was born 1984-06-30\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Ivo\", \"event_kind\": \"child_born\", \"temporal_value\": \"1990-02-08\", \"evidence\": \"Ivo was born 1990-02-08\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [
+    "claim_refused:aggregate_subject_mention"
+   ],
+   "expected_claim_count": 4,
+   "expected_claim_subjects": [
+    "Corinne",
+    "Maddox",
+    "Sela",
+    "Ivo"
+   ],
+   "expected_claim_types": [
+    "date",
+    "date",
+    "date",
+    "date"
+   ],
+   "expected_event_kinds": [
+    "child_born",
+    "child_born",
+    "child_born",
+    "child_born"
+   ],
+   "expected_record_count": 4
+  },
+  {
+   "case_id": "we-moved-when-james-was-two",
+   "mode": "listening",
+   "note": "Plan §6.4, and the repeal this item carries. Until v229 the listener leaf said in so many words that \"the summer after we moved\" is NOT a date, leave the record undated and the arithmetic will reach it later — and since a landmark record has no shape for order, \"later\" never came and the sentence was lost. It is now a `relative_order` claim with the anchor in the person's own words, which is a thing the fold can reach the day the anchor is dated. No date is invented to hold it.",
+   "landmarks": {},
+   "user_message": "We moved to Dayton when James was two.",
+   "reply": "Dayton, with James still small.",
+   "attempt": {
+    "raw": "{\"landmarks\": [{\"domain\": \"residences\", \"label\": \"Dayton\", \"city\": \"Dayton\"}], \"people\": [], \"claims\": [{\"claim_type\": \"relative_order\", \"subject_mention\": \"the move to Dayton\", \"event_kind\": \"move\", \"temporal_value\": {\"relation\": \"within\", \"anchors\": [\"when James was two\"]}, \"evidence\": \"We moved to Dayton when James was two\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_claim_count": 1,
+   "expected_claim_subjects": [
+    "the move to Dayton"
+   ],
+   "expected_claim_types": [
+    "relative_order"
+   ],
+   "expected_event_kinds": [
+    "move"
+   ],
+   "expected_record_count": 1,
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "a-neighbours-child-is-a-claim-and-not-a-roster-row",
+   "mode": "listening",
+   "note": "Plan §2.1: capture is NOT restricted to family. The owner's family-only ruling is a rule about the ROSTER and v218 enforces it deterministically (`person_relation_not_family`); it was never a rule about what may be heard. The date is refused as a `people` row and kept as a claim in the same completion — which is the whole point of the two lists being different lists.",
+   "landmarks": {},
+   "user_message": "My neighbour's boy was born in 2019, same year we redid the porch.",
+   "reply": "A busy year on that street.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [{\"name\": \"the neighbour's boy\", \"relation\": \"neighbour\", \"born\": \"2019\", \"basis\": \"stated\"}], \"claims\": [{\"claim_type\": \"date\", \"subject_mention\": \"my neighbour's boy\", \"event_kind\": \"birth\", \"temporal_value\": \"2019\", \"evidence\": \"My neighbour's boy was born in 2019\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [
+    "person_relation_not_family"
+   ],
+   "expected_claim_count": 1,
+   "expected_claim_subjects": [
+    "my neighbour's boy"
+   ],
+   "expected_claim_types": [
+    "date"
+   ],
+   "expected_event_kinds": [
+    "birth"
+   ],
+   "expected_record_count": 0,
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "a-claim-only-completion-clears-the-backstop",
+   "mode": "listening",
+   "note": "The bridge, read the other way. A completion that speaks ONLY the substrate's vocabulary — the shape this program is walking toward — clears `listener_heard_nothing` exactly as a landmark record does, because the question that class asks is *did anything come back*, never *did the old shape come back*. An age is a LENGTH and not a calendar position, so it is stored as one and no interval is fabricated for it (plan §6.4). The message is deliberately the shape v229's own prescreen amendment fixed — before it, this sentence fired nothing and the backstop had nothing to clear.",
+   "landmarks": {},
+   "user_message": "I was about twelve when we left the farm.",
+   "reply": "Twelve, and gone.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [], \"claims\": [{\"claim_type\": \"age\", \"subject_mention\": \"me\", \"event_kind\": \"move\", \"temporal_value\": \"about 12\", \"evidence\": \"I was about twelve when we left the farm\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_claim_count": 1,
+   "expected_claim_subjects": [
+    "me"
+   ],
+   "expected_claim_types": [
+    "age"
+   ],
+   "expected_event_kinds": [
+    "move"
+   ],
+   "expected_record_count": 0,
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "the-backstop-still-withholds-when-neither-shape-comes-back",
+   "mode": "listening",
+   "note": "v218's non-negotiable, unchanged. The prescreen saw a year, all THREE lists came back empty twice, and the outcome is WITHHELD carrying `landmark_gates.listener_heard_nothing` — a state a host sweep can run again. Never silence, and never a fabricated claim to satisfy a lint.",
+   "landmarks": {},
+   "user_message": "We moved to Dayton in 1974 and the whole street smelled of the mill.",
+   "reply": "Dayton, then.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [], \"claims\": []}"
+   },
+   "expected_status": "withheld",
+   "expected_attempts": 2,
+   "expected_lint_ids": [
+    "landmark_gates.listener_heard_nothing"
+   ],
+   "expected_findings": [],
+   "expected_claim_count": 0,
+   "expected_claim_subjects": [],
+   "expected_claim_types": [],
+   "expected_event_kinds": [],
+   "expected_record_count": 0,
+   "prescreen_fires": true
+  },
+  {
+   "case_id": "a-decline-claims-nothing-and-lints-nothing",
+   "mode": "listening",
+   "note": "The terminals are the terminals. A decline clears the backstop through `landmarks_interaction.answer_shape`'s own skip rules — one definition of \"not now\" — and an honest empty claims list on a decline is simply correct.",
+   "landmarks": {},
+   "user_message": "I don't remember when that was, let's leave it.",
+   "reply": "Of course.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [], \"claims\": []}"
+   },
+   "expected_status": "nothing",
+   "expected_attempts": 1,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_claim_count": 0,
+   "expected_claim_subjects": [],
+   "expected_claim_types": [],
+   "expected_event_kinds": [],
+   "expected_record_count": 0,
+   "prescreen_fires": false
+  },
+  {
+   "case_id": "one-claim-for-an-obviously-plural-answer-retries-once",
+   "mode": "listening",
+   "note": "v214's plurality class, read over the claims list (`general_listener.claims_missing_subjects`). Three people are named and one claim comes back; the finding is RETRYABLE and never withholding, so the loop spends its ONE regeneration and then files whatever it has — a partial set of claims is worth more than none, and the person already said it once. MAX_ATTEMPTS is still 2.",
+   "landmarks": {},
+   "user_message": "Needy Beecham died in 1988, Darvin Beecham in 1991, and James Edwin Thorne in 2003.",
+   "reply": "All three of them.",
+   "attempt": {
+    "raw": "{\"landmarks\": [], \"people\": [], \"claims\": [{\"claim_type\": \"date\", \"subject_mention\": \"Needy Beecham\", \"event_kind\": \"death\", \"temporal_value\": \"1988\", \"evidence\": \"Needy Beecham died in 1988\"}]}"
+   },
+   "regenerated": {
+    "raw": "{\"landmarks\": [], \"people\": [], \"claims\": [{\"claim_type\": \"date\", \"subject_mention\": \"Needy Beecham\", \"event_kind\": \"death\", \"temporal_value\": \"1988\", \"evidence\": \"Needy Beecham died in 1988\"}, {\"claim_type\": \"date\", \"subject_mention\": \"Darvin Beecham\", \"event_kind\": \"death\", \"temporal_value\": \"1991\", \"evidence\": \"Darvin Beecham in 1991\"}, {\"claim_type\": \"date\", \"subject_mention\": \"James Edwin Thorne\", \"event_kind\": \"death\", \"temporal_value\": \"2003\", \"evidence\": \"James Edwin Thorne in 2003\"}]}"
+   },
+   "expected_status": "recorded",
+   "expected_attempts": 2,
+   "expected_lint_ids": [],
+   "expected_findings": [],
+   "expected_claim_count": 3,
+   "expected_claim_subjects": [
+    "Needy Beecham",
+    "Darvin Beecham",
+    "James Edwin Thorne"
+   ],
+   "expected_claim_types": [
+    "date",
+    "date",
+    "date"
+   ],
+   "expected_event_kinds": [
+    "death",
+    "death",
+    "death"
+   ],
+   "expected_record_count": 0,
+   "prescreen_fires": true
+  }
+ ]
+}
