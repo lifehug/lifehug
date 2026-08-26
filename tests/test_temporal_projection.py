@@ -1,4 +1,4 @@
-"""v219 — the calculated side (audited timeline build plan §5.3, §5.4, §7).
+"""v220 — the calculated side (audited timeline build plan §5.3, §5.4, §7).
 
 The projection is a materialized view: it can be deleted and rebuilt, it is
 never edited as truth, and it may not quietly erase disagreement. These tests

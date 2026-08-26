@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One fact, one record, one source — the temporal claim contracts (v219).
+"""One fact, one record, one source — the temporal claim contracts (v220).
 
 Every date the system holds is an *interpretation of a source*. This module is
 the single authoritative definition of what such an interpretation looks like:
@@ -177,27 +177,39 @@ RELATION_ANCHOR_ARITY = {
     "within": (1, 1),
 }
 
-#: SEED set, not a closed one — plan §5.1 ends its list with ``...`` and the
-#: nine landmark domains (``interactions/landmarks/questions.yaml``) plus §10's
-#: required relationship distinctions are what seed it. An unknown kind is
-#: accepted when it matches :data:`EVENT_KIND_RE`, because refusing an event
-#: the listener genuinely heard would drop the claim, and dropping claims is
-#: the defect this whole substrate exists to end. Use :func:`is_seed_event_kind`
-#: when a caller wants to know whether it is on the seeded list.
-EVENT_KINDS = (
-    # birth / losses
-    "birth", "death", "loss",
-    # partnerships — six records about the same two people, never one
-    "met", "dating_started", "engaged", "married", "separated",
-    "divorced", "reconciled",
-    # schools
-    "school", "graduation",
-    # residences
-    "move",
-    # work / military
-    "job", "job_ended", "military",
-    # children
-    "child_born",
+#: The events ``interactions/landmarks/questions.yaml`` declares as
+#: ``date_semantics``, spelled IDENTICALLY (ADR 0021's one-definition rule).
+#: The landmark interaction named these events first; a claim that spelled the
+#: same event differently would be a second name for one thing, which is the
+#: defect, not a synonym. Plan §5.1 writes the first-meeting event as ``met``
+#: and this vocabulary writes it ``first_met`` — one binding wins, and it is
+#: the one already in the vault's own metadata.
+#:
+#: ``tests/test_temporal_claims.py`` imports
+#: ``landmarks_interaction.DATE_SEMANTICS`` and asserts equality, so the two
+#: cannot drift: adding a value there fails the build here until it is added.
+#: It is re-stated rather than imported because this module is pure — importing
+#: ``landmarks_interaction`` would pull ``lifehug_core``'s vault paths into a
+#: module that must stay free of I/O and safe to vendor.
+LANDMARK_DATE_SEMANTICS = (
+    "birth", "death", "first_met", "dating_started", "married",
+    "started", "ended", "transition", "span",
+)
+
+#: SEED set, not a closed one — plan §5.1 ends its list with ``...``. It is
+#: :data:`LANDMARK_DATE_SEMANTICS` plus the events §5.1 and §10 name that the
+#: landmark ladders express as a domain rather than as a date semantic. An
+#: unknown kind is accepted when it matches :data:`EVENT_KIND_RE`, because
+#: refusing an event the listener genuinely heard would drop the claim, and
+#: dropping claims is the defect this whole substrate exists to end. Use
+#: :func:`is_seed_event_kind` when a caller wants to know whether it is seeded.
+EVENT_KINDS = LANDMARK_DATE_SEMANTICS + (
+    # losses beyond a death
+    "loss",
+    # partnerships — §10's distinctions, beyond the three the ladder dates
+    "engaged", "separated", "divorced", "reconciled",
+    # the §5.1 examples the ladders express as domains
+    "school", "graduation", "move", "job", "military", "child_born",
 )
 
 EVENT_KIND_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
@@ -1754,6 +1766,7 @@ __all__ = [
     "EVENT_KINDS",
     "EVENT_KIND_RE",
     "IDEMPOTENCY_KEYS",
+    "LANDMARK_DATE_SEMANTICS",
     "MAX_EVIDENCE_QUOTE_CHARS",
     "QUANTITY_CLAIM_TYPES",
     "QUANTITY_UNITS",

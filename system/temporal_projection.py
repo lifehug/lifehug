@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The calculated side: nodes, work items, fingerprints (v219).
+"""The calculated side: nodes, work items, fingerprints (v220).
 
 ``temporal_claims`` holds the *evidence* — what a source said, who extracted
 it, and when. This module holds what the deterministic fold *calculates from*

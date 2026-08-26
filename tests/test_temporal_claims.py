@@ -1,4 +1,4 @@
-"""v219 — the temporal claim contracts (audited timeline build plan §4.2, §5).
+"""v220 — the temporal claim contracts (audited timeline build plan §4.2, §5).
 
 Every rule the module claims to enforce gets a test that would fail if the rule
 were softened: the founder's four children stay four records, a date is the
@@ -93,11 +93,43 @@ class VocabularyTests(unittest.TestCase):
 
     def test_the_event_kind_seed_names_the_plans_examples(self):
         # §5.1's own list, plus §10's required relationship distinctions.
-        for kind in ("met", "dating_started", "married", "school", "move", "job"):
+        # §5.1 writes the first-meeting event "met"; the landmark vocabulary
+        # named it "first_met" first, and one binding wins.
+        for kind in ("first_met", "dating_started", "married", "school", "move", "job"):
             self.assertIn(kind, tc.EVENT_KINDS)
         for kind in ("engaged", "separated", "reconciled"):
             self.assertIn(kind, tc.EVENT_KINDS)
         self.assertTrue(all(tc.EVENT_KIND_RE.fullmatch(k) for k in tc.EVENT_KINDS))
+        self.assertEqual(len(tc.EVENT_KINDS), len(set(tc.EVENT_KINDS)))
+
+    def test_the_landmark_date_semantics_and_the_event_kinds_are_one_binding(self):
+        # ADR 0021: an operation (here, naming an event) is defined once. The
+        # landmark interaction named these events; a claim that spelled the
+        # same event differently would be a second name for one thing. This
+        # test is the anti-drift device the restatement is allowed to exist
+        # under — adding a date_semantics value there fails the build here.
+        from landmarks_interaction import DATE_SEMANTICS
+
+        self.assertEqual(tc.LANDMARK_DATE_SEMANTICS, DATE_SEMANTICS)
+        for kind in DATE_SEMANTICS:
+            with self.subTest(kind=kind):
+                self.assertIn(kind, tc.EVENT_KINDS)
+                self.assertTrue(tc.is_seed_event_kind(kind))
+                self.assertTrue(tc.EVENT_KIND_RE.fullmatch(kind))
+
+    def test_every_landmark_domain_dates_events_this_module_can_carry(self):
+        # The end-to-end version of the same guard: every value any domain in
+        # questions.yaml actually declares must be a valid claim event_kind,
+        # or a landmark answer could not become a claim.
+        from landmarks_interaction import date_semantics, load_questions
+
+        seen = set()
+        for row in load_questions():
+            for kind in date_semantics(row):
+                seen.add(kind)
+                with self.subTest(domain=row.get("domain"), kind=kind):
+                    self.assertIn(kind, tc.EVENT_KINDS)
+        self.assertTrue(seen)
 
     def test_event_kinds_are_a_seed_not_a_closed_set(self):
         # §5.1 ends its list with "...", and refusing an event the listener
@@ -261,7 +293,7 @@ class PersonVersusEventTests(unittest.TestCase):
                 claim(subject_mention="Katie", event_kind=kind, temporal_value=str(year))
             )["claim_id"]
             for kind, year in (
-                ("met", 1994),
+                ("first_met", 1994),
                 ("dating_started", 1995),
                 ("engaged", 1997),
                 ("married", 1998),
@@ -471,7 +503,7 @@ class DeterministicIdTests(unittest.TestCase):
     GOLDEN = (
         ("date/birth/Ada/1984", "claim:e3763c08ccb1e0a53d17e84f"),
         ("date/married/Katie/1998-06", "claim:89439937a05d96cb50dc8786"),
-        ("date/met/Katie/1994", "claim:ae1e35f7eae5f60c7f779cfa"),
+        ("date/first_met/Katie/1994", "claim:05fd4a1a8b4084eb9a9326e8"),
         ("identity/Aunt Della", "claim:37e46c0e41c8833c7a36a4c0"),
         ("relative_order/move", "claim:f7ff48b560a565b5a6ea9fc3"),
     )
@@ -486,8 +518,8 @@ class DeterministicIdTests(unittest.TestCase):
                 claim_type="date", subject_mention="Katie", event_kind="married",
                 temporal_value=tc.normalized_temporal_value("1998-06", claim_type="date"),
             ),
-            "date/met/Katie/1994": dict(
-                claim_type="date", subject_mention="Katie", event_kind="met",
+            "date/first_met/Katie/1994": dict(
+                claim_type="date", subject_mention="Katie", event_kind="first_met",
                 temporal_value=tc.normalized_temporal_value("1994", claim_type="date"),
             ),
             "identity/Aunt Della": dict(
