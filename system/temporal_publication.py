@@ -53,10 +53,15 @@ the calculated projection rides beside it this wave, exposed additively as
 deliberate later cutover with its own contract, not a side effect of learning
 to write a file.
 
-Ordering constraints (what a drag writes) and resolution records (wave C's
-identity verdicts) have no vault storage yet; the derivation accepts both and
-this module passes whatever its caller supplies. When wave E gives them a home,
-the publisher reads them there — the signature already has the seats.
+Ordering constraints — what a drag writes — got their home in v232
+(``temporal_store.load_ordering_constraints``), and the publisher now READS it:
+``constraints=None`` (the default) means "whatever this vault's filed moves
+say", so the drag transaction's republish (plan §8.4 step 7) is the seat that
+already exists rather than a second one. Passing an explicit sequence still
+overrides, and passing ``()`` still means "none" — a test deriving over a
+hand-built substrate is not silently given the vault's. Resolution records
+(wave C's identity verdicts) have no vault storage yet; the derivation accepts
+them and this module passes whatever its caller supplies.
 
 Controlling contract: the audited final timeline build plan §3, §7, §7.1, §10
 ("Rebuild, parity, and operations"), wave D.
@@ -361,7 +366,7 @@ def publish(
     active_index: object = None,
     resolution_records: object = (),
     roster_snapshot: object = (),
-    constraints: object = (),
+    constraints: object = None,
     birth_date: object = None,
     owner_ref: object = None,
     now: object = None,
@@ -375,6 +380,11 @@ def publish(
     ``active_index`` defaults to a fresh fold of this vault's receipts and
     corrections, which is also what re-publishes the index itself; pass one in
     when the caller has already folded and wants exactly that generation.
+
+    ``constraints`` defaults to this vault's filed moves (v232). ``None`` is
+    "read them", an explicit sequence is "use exactly these", and ``()`` is
+    "none" — the distinction matters because a drag's republish must pick up the
+    move that was just filed without every caller remembering to load it.
     """
     started = time.perf_counter()
     timings: dict[str, float] = {}
@@ -386,6 +396,9 @@ def publish(
         else store.rebuild_active_index(vault_root)
     )
     timings["fold"] = time.perf_counter() - mark
+
+    if constraints is None:
+        constraints = store.active_ordering_constraints(vault_root)
 
     generation = next_generation(vault_root)
     result = tt.derive_calculated_timeline(
@@ -516,7 +529,7 @@ def verify(
     *,
     resolution_records: object = (),
     roster_snapshot: object = (),
-    constraints: object = (),
+    constraints: object = None,
     birth_date: object = None,
     owner_ref: object = None,
     now: object = None,
@@ -537,6 +550,8 @@ def verify(
     if published is None:
         return {"published": False, "identical": False, "generation": 0}
     index = store.rebuild_active_index(vault_root)
+    if constraints is None:
+        constraints = store.active_ordering_constraints(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,

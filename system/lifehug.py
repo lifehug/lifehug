@@ -175,6 +175,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     "source-filenames-repair",
     "landmark-record",
     "source-lint", "source-manifest", "timeline-place", "timeline-retire",
+    # v232 (wave E, item E2): a drag files a durable correction source under
+    # sources/corrections/ and republishes the calculated projection. Same
+    # single-transaction vault mutation family as timeline-place.
+    "timeline-move", "timeline-move-undo",
     "timeline-unplace", "unretract",
 })
 
@@ -800,6 +804,66 @@ def cmd_timeline_unplace(args: argparse.Namespace) -> int:
     if record and record.get("correction"):
         message += f" (filed assertion remains: {record['correction']})"
     print(message)
+    return 0
+
+
+def cmd_timeline_move(args: argparse.Namespace) -> int:
+    """Move a node: file the weakest truthful ordering constraint, then republish.
+
+    The whole of the drag transaction that belongs to the vault (plan §8.4 steps
+    4 and 7). What it deliberately does NOT do is invent a date: `after`,
+    `before`, `between` and `within` are the only four things a move may say,
+    and the explanation is optional prose on stdin — the move stands without it.
+    """
+    import temporal_store  # noqa: PLC0415
+    import timeline  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    try:
+        constraint = temporal_store.file_ordering_constraint(
+            REPO_DIR,
+            relation=args.relation,
+            subject_node_id=args.node,
+            anchor_node_ids=args.anchor,
+            reason=reason or None,
+            supersedes_constraint_id=args.supersedes,
+            subject_label=args.label,
+            anchor_labels=args.anchor_label,
+            author=args.author,
+        )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    summary = timeline.publish_calculated_timeline(REPO_DIR)
+    print(f"✓ {constraint['reason']}")
+    print(f"  constraint: {constraint['constraint_id']}")
+    print(f"  source: {constraint['relative_path']}")
+    print(f"  projection generation {summary['generation']}")
+    return 0
+
+
+def cmd_timeline_move_undo(args: argparse.Namespace) -> int:
+    """Undo a move — mark it retracted, keep every byte of it, republish."""
+    import temporal_store  # noqa: PLC0415
+    import timeline  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    try:
+        correction = temporal_store.retract_ordering_constraint(
+            REPO_DIR,
+            args.constraint_id,
+            reason=reason or "Undone on the timeline.",
+            author=args.author,
+        )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    summary = timeline.publish_calculated_timeline(REPO_DIR)
+    print(f"✓ Move {args.constraint_id} undone; its record remains")
+    print(f"  correction: {correction.relative_path}")
+    print(f"  projection generation {summary['generation']}")
     return 0
 
 
@@ -2672,6 +2736,26 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Remove a manual timeline placement (filed assertion remains)")
     p.add_argument("key", help="12-character content placement key")
     p.set_defaults(func=cmd_timeline_unplace)
+
+    p = sub.add_parser("timeline-move",
+                       help="Move a node in the calculated timeline (explanation optional, on stdin)")
+    p.add_argument("node", help="The calculated node id being moved")
+    p.add_argument("--relation", required=True, choices=["before", "after", "between", "within"],
+                   help="The weakest truthful thing the gesture says")
+    p.add_argument("--anchor", action="append", default=[], required=True,
+                   help="Anchor node id (repeatable; two for --relation between)")
+    p.add_argument("--label", help="Display name for the moved node (prose only)")
+    p.add_argument("--anchor-label", dest="anchor_label", action="append", default=[],
+                   help="Display name for an anchor, in --anchor order (prose only)")
+    p.add_argument("--supersedes", help="Constraint id this move replaces (amendment or redo)")
+    p.add_argument("--author", help="Who moved it (source_medium; default owner)")
+    p.set_defaults(func=cmd_timeline_move)
+
+    p = sub.add_parser("timeline-move-undo",
+                       help="Undo a filed move; its record and evidence remain (reason on stdin)")
+    p.add_argument("constraint_id", help="The constraint id the move returned")
+    p.add_argument("--author", help="Who undid it (source_medium; default owner)")
+    p.set_defaults(func=cmd_timeline_move_undo)
 
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")

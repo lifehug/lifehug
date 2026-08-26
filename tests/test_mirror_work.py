@@ -206,6 +206,103 @@ class MirrorWorkTestCase(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
+# A move is a side (v232, plan §2.6)
+# --------------------------------------------------------------------------
+
+
+class MoveContradictionTests(MirrorWorkTestCase):
+    """§2.6: *if the new constraint conflicts with an explicit date, keep both
+    claims and create/update a Mirror contradiction.*
+
+    Before v232 this row was silently dropped: the contradiction cites ONE
+    claim and ONE ordering constraint, and a state derived from active claims
+    alone read "fewer than two, so it is settled".
+    """
+
+    def move_fixture(self) -> dict:
+        claim_id = self.file_claim(
+            "I started college in 1990.",
+            claim("College", "school", "1990", quote="I started college in 1990.",
+                  granularity="year"),
+            turn_ref="t1",
+        )
+        constraint_id = "constraint:" + ("a" * 24)
+        item = tp.validate_temporal_work_item(
+            {
+                "kind": "contradiction",
+                "state": "open",
+                "subject_ref": "College",
+                "event_ref": "event:college",
+                "node_ref": "node:college",
+                "claim_refs": [claim_id, constraint_id],
+                "evidence_refs": [f"claim:{claim_id}"],
+                "prompt_intent": "The order given for College does not fit its date.",
+                "allowed_surfaces": ["mirror", "timeline"],
+            },
+            now=NOW,
+        )
+        self.publish_items(item)
+        return {"item": item, "claim": claim_id, "constraint": constraint_id}
+
+    def test_a_move_against_a_date_renders_one_open_row(self) -> None:
+        fixture = self.move_fixture()
+        rows = mw.load_mirror_rows(self.vault)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row.kind, "contradiction")
+        self.assertEqual(row.state, "open")
+        self.assertIn(fixture["constraint"], row.claim_refs)
+        self.assertIn("moved", row.description)
+        self.assertIn("1990", row.description)
+        self.assertIn("both stay on the record", row.description)
+
+    def test_the_constraint_ref_is_named_as_a_move_and_not_as_a_claim(self) -> None:
+        fixture = self.move_fixture()
+        item = tp.work_item_from_dict(fixture["item"])
+        self.assertEqual(mw.moves_cited(item), (fixture["constraint"],))
+        row = mw.load_mirror_rows(self.vault)[0]
+        # A constraint is not a claim, so it never appears as an ACTIVE claim
+        # ref and never gets a citation it cannot support.
+        self.assertEqual(row.active_claim_refs, (fixture["claim"],))
+        self.assertNotIn(fixture["constraint"], row.active_claim_refs)
+
+    def test_the_row_can_be_played(self) -> None:
+        self.move_fixture()
+        row = mw.load_mirror_rows(self.vault)[0]
+        self.assertIsNotNone(row.play)
+
+    def test_retiring_the_dated_claim_closes_the_row(self) -> None:
+        """One side left is not a disagreement, whichever side it was."""
+        fixture = self.move_fixture()
+        ts.retract_claims(self.vault, [fixture["claim"]], reason="Wrong year.")
+        self.assertEqual(mw.load_mirror_rows(self.vault), [])
+
+    def test_a_contradiction_citing_only_a_move_cannot_be_built(self) -> None:
+        """A constraint with nothing to disagree with is not a disagreement, and
+        the CONTRACT says so before Mirror ever sees it."""
+        with self.assertRaises(tp.TemporalWorkItemError) as caught:
+            tp.validate_temporal_work_item(
+                {
+                    "kind": "contradiction",
+                    "state": "open",
+                    "subject_ref": "College",
+                    "claim_refs": ["constraint:" + ("b" * 24)],
+                    "prompt_intent": "?",
+                    "allowed_surfaces": ["mirror"],
+                },
+                now=NOW,
+            )
+        self.assertEqual(caught.exception.code, "contradiction_needs_two_claims")
+
+    def test_two_dates_with_no_move_read_exactly_as_before(self) -> None:
+        """The claim-vs-claim row is untouched by the new side-counting."""
+        self.contradiction_fixture()
+        row = mw.load_mirror_rows(self.vault)[0]
+        self.assertTrue(row.headline.startswith("Two dates for"))
+        self.assertNotIn("moved", row.description)
+
+
+# --------------------------------------------------------------------------
 # The stable contradiction row
 # --------------------------------------------------------------------------
 

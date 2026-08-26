@@ -81,6 +81,7 @@ import chronology as chrono  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_store as store  # noqa: E402
 from temporal_claims import (  # noqa: E402
+    CONSTRAINT_ID_PREFIX,
     TemporalContractError,
     bounded_quote,
     collapsed_text,
@@ -501,8 +502,45 @@ def _cite(views: list[dict]) -> str:
     return f" ({label}: {', '.join(ids)})"
 
 
-def _describe_contradiction(label: str, view: dict | None, active: list[dict]) -> str:
+def moves_cited(item: TemporalWorkItem) -> tuple[str, ...]:
+    """The ordering constraints a contradiction cites — what a DRAG contributed.
+
+    A contradiction between a filed move and a stated date has one claim on one
+    side and a constraint on the other, so counting active claims alone reads it
+    as a settled row and Mirror silently drops it (plan §2.6: *"if the new
+    constraint conflicts with an explicit date, keep both claims and
+    create/update a Mirror contradiction"*). The refs travel in ``claim_refs``
+    because the projection mints one ref list per item; the ``constraint:``
+    prefix is what separates the two kinds, and it is frozen contract.
+
+    A constraint id only reaches a published work item while the constraint is
+    ACTIVE — the derivation drops superseded and retracted ones before it builds
+    an edge — so a ref appearing here is itself the proof that the move stands.
+    """
+    return tuple(
+        ref for ref in item.claim_refs
+        if collapsed_text(ref).startswith(f"{CONSTRAINT_ID_PREFIX}:")
+    )
+
+
+def _describe_contradiction(
+    label: str, view: dict | None, active: list[dict], *, moves: int = 0
+) -> str:
     """Evidence-grounded prose. Every sentence cites, or it is not written."""
+    if moves and active:
+        if view is not None:
+            best = view["best_supported"]
+            stated = f"{best['display']}{_cite(best['sources'])}"
+        else:
+            stated = ", ".join(
+                f"{collapsed_text(c.get('subject_mention'))}{_cite([_source_view(c)])}"
+                for c in active[:MAX_ALTERNATIVES]
+            )
+        return (
+            f"You moved {label} on the timeline, and the order that gives it "
+            f"doesn't fit what you've said about when it happened: {stated}. "
+            "The move and the date both stay on the record."
+        )
     if view is None:
         cited = ", ".join(
             f"{collapsed_text(c.get('subject_mention'))}{_cite([_source_view(c)])}"
@@ -574,12 +612,17 @@ def row_for(item: object, index: object) -> MirrorWorkRow | None:
     candidates = (
         _candidate_views(active) if normalized.kind == "identity_uncertain" else ()
     )
-    state = derive_row_state(normalized, active, view=view)
+    moves = moves_cited(normalized)
+    state = derive_row_state(normalized, active, view=view, moves=len(moves))
     label = _label(normalized, cited)
 
     if normalized.kind == "contradiction":
-        headline = f"Two dates for {label}" if view else f"A disagreement about {label}"
-        description = _describe_contradiction(label, view, active)
+        headline = (
+            f"A move that doesn't fit {label}"
+            if moves and active
+            else (f"Two dates for {label}" if view else f"A disagreement about {label}")
+        )
+        description = _describe_contradiction(label, view, active, moves=len(moves))
         severity = (
             float(view["conflict"])
             if view is not None and view["conflict"] > 0
@@ -620,7 +663,13 @@ def row_for(item: object, index: object) -> MirrorWorkRow | None:
     return _with_play(row)
 
 
-def derive_row_state(item: TemporalWorkItem, active: list[dict], *, view: dict | None = None) -> str:
+def derive_row_state(
+    item: TemporalWorkItem,
+    active: list[dict],
+    *,
+    view: dict | None = None,
+    moves: int = 0,
+) -> str:
     """``open`` or ``resolved``, decided by the claims and by nothing else.
 
     §2.5: *a contradiction closes only when its active claims no longer
@@ -646,8 +695,13 @@ def derive_row_state(item: TemporalWorkItem, active: list[dict], *, view: dict |
     of truth about claims it does not own.
     """
     if item.kind == "contradiction":
-        if len(active) < 2:
+        # A filed move is a SIDE. `moves` is how many ordering constraints this
+        # item cites (:func:`moves_cited`), and a drag that disagrees with one
+        # stated date is a two-sided row even though only one side is a claim.
+        if len(active) + moves < 2:
             return "resolved"
+        if moves:
+            return "open"
         if view is not None and view["dated_claims"] == len(active) and view["conflict"] <= 0:
             return "resolved"
         return "open"
@@ -990,6 +1044,7 @@ __all__ = [
     "load_mirror_rows",
     "load_work_items",
     "mirror_rows",
+    "moves_cited",
     "play_target",
     "resolve_mirror_item",
     "row_for",

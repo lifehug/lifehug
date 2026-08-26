@@ -809,5 +809,191 @@ class ContractRegistrationTests(unittest.TestCase):
                 self.assertNotIn(forbidden, source)
 
 
+class OrderingConstraints(StoreTestCase):
+    """v232 — the drag's home (plan §2.6, §5.2, §8.4, §10 "Drag and correction").
+
+    Wave E gave a move somewhere to live. These pin the four promises that make
+    it worth having: the weakest truthful thing is what lands, the same gesture
+    twice is one record, an explanation arriving later amends without a second
+    move, and undo marks rather than deletes.
+    """
+
+    def move(self, **kwargs) -> dict:
+        kwargs.setdefault("relation", "after")
+        kwargs.setdefault("subject_node_id", "event:college")
+        kwargs.setdefault("anchor_node_ids", ["event:high-school"])
+        return ts.file_ordering_constraint(self.vault, **kwargs)
+
+    def test_a_move_persists_without_an_explanation(self) -> None:
+        """§10: *dragging College after High School immediately persists an
+        `after` constraint without requiring an explanation*."""
+        constraint = self.move()
+        self.assertEqual(constraint["relation"], "after")
+        self.assertEqual(constraint["subject_node_id"], "event:college")
+        self.assertEqual(constraint["anchor_node_ids"], ["event:high-school"])
+        self.assertEqual(constraint["status"], "active")
+        self.assertTrue(constraint["constraint_id"].startswith("constraint:"))
+        self.assertTrue((self.vault / constraint["relative_path"]).is_file())
+
+    def test_a_move_persists_no_coordinate_index_or_invented_date(self) -> None:
+        """§2.6's prohibition, read off the bytes that landed."""
+        constraint = self.move(subject_label="College", anchor_labels=["High School"])
+        text = (self.vault / constraint["relative_path"]).read_text()
+        self.assertIn("College comes after High School.", text)
+        for forbidden in ("index", "offset", "pixel", " x:", " y:"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, text)
+        # The record says the order and NOTHING about when. The only year in
+        # the file is the filing clock in the frontmatter, never the body.
+        body = ts.split_frontmatter(text)[1]
+        self.assertIsNone(re.search(r"\b(19|20)\d\d\b", body))
+
+    def test_the_same_gesture_twice_is_one_record(self) -> None:
+        """A retried drag, a double tap, an optimistic client that resends."""
+        first = self.move()
+        second = self.move()
+        self.assertEqual(first["constraint_id"], second["constraint_id"])
+        self.assertEqual(first["relative_path"], second["relative_path"])
+        self.assertEqual(len(ts.load_ordering_constraints(self.vault)), 1)
+
+    def test_a_label_changes_the_prose_and_never_the_identity(self) -> None:
+        first = self.move()
+        second = self.move(subject_label="College", anchor_labels=["High School"])
+        self.assertEqual(first["constraint_id"], second["constraint_id"])
+        self.assertEqual(len(ts.load_ordering_constraints(self.vault)), 1)
+
+    def test_an_explanation_arriving_later_amends_without_a_second_move(self) -> None:
+        """§8.4 step 6 and §10: *adding "I started college the fall after
+        graduation" later amends the correction evidence*."""
+        first = self.move()
+        amended = self.move(
+            reason="I started college the fall after graduation.",
+            evidence=[{"quote": "I started college the fall after graduation."}],
+            supersedes_constraint_id=first["constraint_id"],
+        )
+        self.assertEqual(amended["supersedes_constraint_id"], first["constraint_id"])
+        self.assertEqual(len(amended["evidence"]), 1)
+        rows = {row["constraint_id"]: row for row in ts.load_ordering_constraints(self.vault)}
+        self.assertEqual(rows[first["constraint_id"]]["status"], "superseded")
+        self.assertEqual(rows[amended["constraint_id"]]["status"], "active")
+        self.assertEqual(
+            [row["constraint_id"] for row in ts.active_ordering_constraints(self.vault)],
+            [amended["constraint_id"]],
+        )
+        # The amended record still says only what the gesture said.
+        self.assertEqual(amended["relation"], "after")
+        self.assertEqual(amended["anchor_node_ids"], ["event:high-school"])
+
+    def test_undo_marks_the_move_and_keeps_every_byte_of_it(self) -> None:
+        """§2.6: *undo retracts or supersedes the correction while preserving
+        its audit history*."""
+        constraint = self.move()
+        before = (self.vault / constraint["relative_path"]).read_bytes()
+        correction = ts.retract_ordering_constraint(
+            self.vault, constraint["constraint_id"], reason="I mixed those up."
+        )
+        self.assertEqual(correction.scope, ts.CONSTRAINT_CORRECTION_SCOPE)
+        self.assertEqual(
+            (self.vault / constraint["relative_path"]).read_bytes(), before
+        )
+        rows = ts.load_ordering_constraints(self.vault)
+        self.assertEqual([row["status"] for row in rows], ["retracted"])
+        self.assertEqual(rows[0]["marks"][0]["reason"], "I mixed those up.")
+        self.assertEqual(ts.active_ordering_constraints(self.vault), [])
+
+    def test_a_move_back_after_undo_is_a_new_statement_not_a_revival(self) -> None:
+        """Redo names the retracted record, so nothing depends on discovery order."""
+        first = self.move()
+        ts.retract_ordering_constraint(
+            self.vault, first["constraint_id"], reason="Wrong node."
+        )
+        redone = self.move(supersedes_constraint_id=first["constraint_id"])
+        self.assertNotEqual(redone["constraint_id"], first["constraint_id"])
+        self.assertEqual(
+            [row["constraint_id"] for row in ts.active_ordering_constraints(self.vault)],
+            [redone["constraint_id"]],
+        )
+        rows = {row["constraint_id"]: row for row in ts.load_ordering_constraints(self.vault)}
+        self.assertEqual(rows[first["constraint_id"]]["status"], "retracted")
+
+    def test_status_does_not_depend_on_the_order_records_are_discovered(self) -> None:
+        first = self.move()
+        second = self.move(
+            reason="Because I remember the summer between.",
+            supersedes_constraint_id=first["constraint_id"],
+        )
+        ts.retract_ordering_constraint(self.vault, second["constraint_id"], reason="No.")
+        wanted = [(row["constraint_id"], row["status"]) for row in
+                  ts.load_ordering_constraints(self.vault)]
+        for _ in range(5):
+            # Re-touch every file so mtime order shuffles; the answer may not move.
+            for path in sorted((self.vault / tc.CORRECTION_SOURCES_DIR).rglob("*.md")):
+                path.touch()
+            self.assertEqual(
+                [(row["constraint_id"], row["status"])
+                 for row in ts.load_ordering_constraints(self.vault)],
+                wanted,
+            )
+
+    def test_a_move_is_refused_by_name_rather_than_littering_the_vault(self) -> None:
+        cases = {
+            "constraint_relation_unknown": {"relation": "sideways"},
+            "constraint_subject_required": {"subject_node_id": " "},
+        }
+        for code, kwargs in cases.items():
+            with self.subTest(code=code):
+                with self.assertRaises(ts.TemporalStoreError) as caught:
+                    self.move(**kwargs)
+                self.assertEqual(caught.exception.code, code)
+        with self.assertRaises(tc.OrderingConstraintError):
+            self.move(anchor_node_ids=["event:college"])
+        self.assertFalse((self.vault / tc.CORRECTION_SOURCES_DIR).exists())
+
+    def test_every_refusal_code_is_declared(self) -> None:
+        for code in ("constraint_relation_unknown", "constraint_subject_required",
+                     "constraint_target_unsafe"):
+            with self.subTest(code=code):
+                self.assertIn(code, ts.STORE_ERROR_CODES)
+
+    def test_an_unsafe_constraint_id_never_reaches_a_path(self) -> None:
+        for bad in ("../../etc/passwd", "constraint:a/b", "claim:abc"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ts.TemporalStoreError):
+                    ts.retract_ordering_constraint(self.vault, bad, reason="no")
+
+    def test_a_drifted_move_source_is_a_named_failure_not_a_shrug(self) -> None:
+        constraint = self.move()
+        path = self.vault / constraint["relative_path"]
+        path.write_text(path.read_text().replace("comes after", "comes before"))
+        with self.assertRaises(ts.TemporalStoreError) as caught:
+            ts.read_ordering_constraint(self.vault, constraint["relative_path"])
+        self.assertEqual(caught.exception.code, "source_content_drifted")
+
+    def test_no_claim_is_marked_by_a_constraint_retraction(self) -> None:
+        """A `constraint:` id matches no claim, and the fold must not guess.
+
+        The correction is still LISTED — the fold reports every correction it
+        read, which is what makes it explicable — but no claim's status moves.
+        """
+        ref = self.promote("We married in 1978.")
+        self.file_receipt(ref, [claim("Katie", "married", "1978")])
+        before = ts.fold_active_index(self.vault)["claims"]
+        constraint = self.move()
+        ts.retract_ordering_constraint(
+            self.vault, constraint["constraint_id"], reason="Undone."
+        )
+        after = ts.fold_active_index(self.vault)
+        self.assertEqual(after["claims"], before)
+        self.assertEqual([row["status"] for row in after["claims"]], ["active"])
+
+    def test_a_correction_over_a_claim_is_not_read_as_a_move(self) -> None:
+        ref = self.promote("We married in 1978.")
+        self.file_receipt(ref, [claim("Katie", "married", "1978")])
+        claim_id = ts.fold_active_index(self.vault)["claims"][0]["claim_id"]
+        ts.retract_claims(self.vault, [claim_id], reason="Not that year.")
+        self.assertEqual(ts.load_ordering_constraints(self.vault), [])
+
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

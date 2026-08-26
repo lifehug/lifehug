@@ -84,6 +84,8 @@ if str(SYSTEM_DIR) not in sys.path:
 from temporal_claims import (  # noqa: E402
     ACTIVE_INDEX_FILE,
     CLAIM_STATUSES,
+    CONSTRAINT_ID_PREFIX,
+    CONSTRAINT_RELATIONS,
     CORRECTION_SOURCES_DIR,
     RECEIPTS_DIR,
     SCHEMA_VERSION,
@@ -96,7 +98,9 @@ from temporal_claims import (  # noqa: E402
     normalized_timestamp,
     receipt_from_dict,
     receipt_relative_path,
+    validate_evidence_span,
     validate_extraction_receipt,
+    validate_ordering_constraint,
     validate_source_ref,
 )
 from vault_paths import (  # noqa: E402
@@ -173,6 +177,11 @@ FRONTMATTER_ORDER = (
     "correction_kind",
     "claim_ids",
     "correction_scope",
+    "relation",
+    "subject_node_id",
+    "anchor_node_ids",
+    "supersedes_constraint_id",
+    "evidence",
     "promotion_digest",
     "captured_at",
     "visibility",
@@ -202,6 +211,9 @@ STORE_ERROR_CODES = (
     "correction_claim_ids_required",
     "correction_reason_required",
     "correction_target_unsafe",
+    "constraint_relation_unknown",
+    "constraint_subject_required",
+    "constraint_target_unsafe",
     "active_index_unreadable",
 )
 
@@ -942,6 +954,381 @@ def load_temporal_corrections(vault_root: str | Path) -> list[TemporalCorrection
 
 
 # --------------------------------------------------------------------------
+# Ordering constraints — what a drag writes, and where it lives
+# --------------------------------------------------------------------------
+
+#: Frontmatter ``type`` for the source a move files. It sits under
+#: :data:`temporal_claims.CORRECTION_SOURCES_DIR` beside the supersede/retract
+#: records because a move IS a correction — the person is telling the system its
+#: reading of the order was wrong — and a reader opening that directory should
+#: find one kind of thing: statements that the current interpretation is not it.
+ORDERING_CONSTRAINT_TYPE = "ordering_constraint"
+
+#: The ``correction_scope`` a retraction carries when its target is a constraint
+#: rather than a claim. The fold over claims ignores such a row by construction
+#: (a ``constraint:`` id matches no claim), and :func:`load_ordering_constraints`
+#: reads exactly these — one correction machine, two kinds of target.
+CONSTRAINT_CORRECTION_SCOPE = "ordering_constraint"
+
+#: FROZEN. What makes two moves the same move: the gesture's *meaning*, plus the
+#: record it replaces. Deliberately absent are the wall clock, the explanation,
+#: the device, and any idempotency token a host invented — a retried drag, a
+#: double tap and an optimistic client that resends all say the identical thing
+#: and must land on one file. ``supersedes_constraint_id`` is in the set because
+#: "move it back after undoing" is a genuinely NEW statement about the order,
+#: and an amendment that adds evidence is a new record that names the one it
+#: replaces rather than an edit of an immutable source.
+MOVE_IDENTITY_KEYS = (
+    "relation",
+    "subject_node_id",
+    "anchor_node_ids",
+    "supersedes_constraint_id",
+)
+
+#: Cap on the explanation a move carries in its body. The person's words are
+#: evidence, not an essay, and an unbounded field in an immutable source is a
+#: file nobody can review.
+MOVE_REASON_MAX_CHARS = 2000
+
+
+def move_digest(
+    *,
+    relation: object,
+    subject_node_id: object,
+    anchor_node_ids: object,
+    supersedes_constraint_id: object = None,
+) -> str:
+    """The sha256 that identifies one move (:data:`MOVE_IDENTITY_KEYS`).
+
+    A pure function of what the gesture *asserts*, which is what lets a re-filed
+    drag find its existing source without consulting an index that could itself
+    be stale — the same property :func:`promotion_digest` buys for an utterance.
+    """
+    anchors = anchor_node_ids
+    if isinstance(anchors, (str, bytes)):
+        anchors = [anchors]
+    payload = {
+        "relation": collapsed_text(relation).lower(),
+        "subject_node_id": collapsed_text(subject_node_id),
+        "anchor_node_ids": sorted(
+            {collapsed_text(a) for a in (anchors or ()) if collapsed_text(a)}
+        ),
+        "supersedes_constraint_id": collapsed_text(supersedes_constraint_id) or None,
+    }
+    blob = json.dumps(
+        {key: payload[key] for key in MOVE_IDENTITY_KEYS},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def constraint_relative_path(digest: str) -> str:
+    """``sources/corrections/move-<24 hex>.md`` — deterministic, like every other
+    immutable source this module writes."""
+    text = collapsed_text(digest).lower()
+    if not _HEX_DIGEST_RE.fullmatch(text):
+        raise TemporalStoreError(
+            "unsafe_store_path", f"not a sha256 move digest: {digest!r}"
+        )
+    return f"{CORRECTION_SOURCES_DIR}/move-{text[:FILENAME_DIGEST_LENGTH]}.md"
+
+
+def _constraint_id_guard(value: object) -> str:
+    target = collapsed_text(value)
+    if not target.startswith(f"{CONSTRAINT_ID_PREFIX}:") or "/" in target or "\n" in target:
+        raise TemporalStoreError(
+            "constraint_target_unsafe", f"not a constraint id: {value!r}"
+        )
+    return target
+
+
+def _move_sentence(relation: str, subject: str, anchors: Sequence[str]) -> str:
+    """The move, said plainly, for the body of a source that has no explanation.
+
+    It states the gesture and nothing else. Plan §2.6 is explicit that a drag
+    must not persist "a pixel coordinate, array index, or fabricated exact
+    date", and this sentence is held to the same rule: it names the relation and
+    the nodes, so a person reading the correction directory in five years sees
+    what was asserted, and no precision is invented on their behalf.
+    """
+    named = ", ".join(anchors)
+    if relation == "within":
+        return f"{subject} falls within {named}."
+    if relation == "between":
+        return f"{subject} falls between {named}."
+    return f"{subject} comes {relation} {named}."
+
+
+def file_ordering_constraint(
+    vault_root: str | Path,
+    *,
+    relation: str,
+    subject_node_id: str,
+    anchor_node_ids: Iterable[str],
+    reason: str | None = None,
+    evidence: object = (),
+    supersedes_constraint_id: str | None = None,
+    subject_label: str | None = None,
+    anchor_labels: Iterable[str] | None = None,
+    title: str | None = None,
+    author: str | None = None,
+    occurred_at: object = None,
+) -> dict:
+    """File a move as a durable correction source; return the normalized constraint.
+
+    This is the write half of the drag transaction (plan §2.6, §8.4 step 4). It
+    files exactly one thing — the weakest truthful statement the gesture makes —
+    and it is idempotent on that statement, so an optimistic client that resends
+    and a job that replays converge on one record rather than stacking two.
+
+    ``reason`` is OPTIONAL by contract: "the move remains saved if the person
+    closes the conversation or provides no explanation". When it is absent the
+    body states the move itself, so the source is still readable prose and still
+    carries no invented precision.
+
+    ``subject_label``/``anchor_labels`` are display names for the body's prose
+    only — "College comes after High School" reads better in the corrections
+    directory than a pair of node ids. They never touch identity: the digest is
+    over the node ids, so the same move labelled two ways is still one file.
+
+    An explanation that arrives *later* does not require a second gesture
+    (§8.4 step 6): file again with the same relation and anchors, the new
+    ``evidence``, and ``supersedes_constraint_id`` set to the record being
+    amended. The old record keeps its bytes and gains ``superseded``; the new
+    one carries the words. Undo is :func:`retract_ordering_constraint`, which
+    marks without erasing for the same reason.
+    """
+    anchors = anchor_node_ids
+    if isinstance(anchors, (str, bytes)):
+        anchors = [anchors]
+    anchor_list = sorted({collapsed_text(a) for a in (anchors or ()) if collapsed_text(a)})
+    subject = collapsed_text(subject_node_id)
+    verb = collapsed_text(relation).lower()
+    if not subject:
+        raise TemporalStoreError(
+            "constraint_subject_required", "a move names the node it moves"
+        )
+    if verb not in CONSTRAINT_RELATIONS:
+        raise TemporalStoreError(
+            "constraint_relation_unknown",
+            f"a move is {', '.join(CONSTRAINT_RELATIONS)}; got {relation!r}",
+        )
+    supersedes = (
+        _constraint_id_guard(supersedes_constraint_id) if supersedes_constraint_id else None
+    )
+
+    digest = move_digest(
+        relation=verb,
+        subject_node_id=subject,
+        anchor_node_ids=anchor_list,
+        supersedes_constraint_id=supersedes,
+    )
+    relative = constraint_relative_path(digest)
+    labels = [collapsed_text(a) for a in (anchor_labels or ()) if collapsed_text(a)]
+    sentence = _move_sentence(
+        verb,
+        collapsed_text(subject_label) or subject,
+        labels if len(labels) == len(anchor_list) else anchor_list,
+    )
+    prose = collapsed_text(reason)[:MOVE_REASON_MAX_CHARS] or sentence
+    heading = collapsed_text(title) or sentence
+    payload = f"# {heading}\n\n{prose}\n"
+
+    raw_evidence = evidence
+    if isinstance(raw_evidence, (str, dict)) or hasattr(raw_evidence, "to_dict"):
+        raw_evidence = [raw_evidence]
+    spans = [validate_evidence_span(span) for span in (raw_evidence or ())]
+
+    frontmatter: dict = {
+        "title": heading,
+        "type": ORDERING_CONSTRAINT_TYPE,
+        "source_id": f"correction:move-{digest[:FILENAME_DIGEST_LENGTH]}",
+        "source_medium": collapsed_text(author) or "owner",
+        "relation": verb,
+        "subject_node_id": subject,
+        "anchor_node_ids": anchor_list,
+        "evidence": spans,
+        "captured_at": normalized_timestamp(occurred_at, error=TemporalStoreError),
+        "visibility": "owner_only",
+        "status": "raw",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": relative,
+        "content_sha256": payload_sha256(payload),
+    }
+    if supersedes:
+        frontmatter["supersedes_constraint_id"] = supersedes
+
+    # Validate the record the file WOULD carry before a byte lands. An immutable
+    # source that cannot be read back as a constraint is not a bad request, it
+    # is litter — and `_create_or_keep` would keep it forever.
+    validate_ordering_constraint(
+        {
+            "relation": verb,
+            "subject_node_id": subject,
+            "anchor_node_ids": anchor_list,
+            "source_ref": {
+                "source_id": frontmatter["source_id"],
+                "revision": f"sha256:{frontmatter['content_sha256']}",
+                "source_path": relative,
+            },
+            "evidence": spans,
+            "created_at": frontmatter["captured_at"],
+            **({"supersedes_constraint_id": supersedes} if supersedes else {}),
+        }
+    )
+
+    _create_or_keep(
+        vault_root, relative, f"{format_frontmatter(frontmatter)}\n\n{payload}"
+    )
+    constraint = read_ordering_constraint(vault_root, relative)
+    if constraint is None:  # pragma: no cover - the create above guarantees it
+        raise TemporalStoreError(
+            "source_frontmatter_missing", f"{relative} vanished during filing"
+        )
+    return constraint
+
+
+def read_ordering_constraint(vault_root: str | Path, relative: str) -> dict | None:
+    """Read one move source back as a normalized constraint; ``None`` when the
+    file is not one of ours.
+
+    The ``source_ref`` is rebuilt from the file's own bytes, so the constraint id
+    a reader derives is pinned to the words on disk — the same guarantee
+    :func:`read_source_ref` gives a claim's citation, and the reason a drifted
+    source is a named failure here rather than a silently different id.
+    """
+    content = _read_text(vault_root, relative)
+    if content is None:
+        return None
+    metadata, body = split_frontmatter(content)
+    if collapsed_text(metadata.get("type")) != ORDERING_CONSTRAINT_TYPE:
+        return None
+    source_ref = _source_ref_from_metadata(metadata, relative)
+    actual = payload_sha256(body)
+    if actual != source_ref.revision.split(":", 1)[1]:
+        raise TemporalStoreError(
+            "source_content_drifted",
+            f"{relative} no longer matches the revision its frontmatter declares",
+            detail={"declared": source_ref.revision, "actual": f"sha256:{actual}"},
+        )
+    row: dict = {
+        "relation": metadata.get("relation"),
+        "subject_node_id": metadata.get("subject_node_id"),
+        "anchor_node_ids": metadata.get("anchor_node_ids"),
+        "source_ref": source_ref.to_dict(),
+        "evidence": metadata.get("evidence") or [],
+        "created_at": metadata.get("captured_at"),
+    }
+    if metadata.get("supersedes_constraint_id"):
+        row["supersedes_constraint_id"] = metadata.get("supersedes_constraint_id")
+    try:
+        normalized = validate_ordering_constraint(row)
+    except TemporalContractError:
+        return None
+    normalized["relative_path"] = relative
+    normalized["reason"] = _correction_reason(body)
+    return normalized
+
+
+def retract_ordering_constraint(
+    vault_root: str | Path,
+    constraint_id: str,
+    *,
+    reason: str,
+    title: str | None = None,
+    author: str | None = None,
+    occurred_at: object = None,
+) -> TemporalCorrection:
+    """Undo a move — mark it retracted, keep every byte of it (plan §2.6).
+
+    Undo is a *statement*, not a delete: the move's source stays on disk with
+    its evidence, and this record explains that it no longer stands. It rides
+    the correction machine that already exists, scoped to
+    :data:`CONSTRAINT_CORRECTION_SCOPE` so the claim fold — which would find no
+    claim by this id anyway — is not asked to guess what kind of thing was
+    retracted.
+    """
+    target = _constraint_id_guard(constraint_id)
+    return file_temporal_correction(
+        vault_root,
+        kind="retract",
+        claim_ids=[target],
+        reason=reason,
+        scope=CONSTRAINT_CORRECTION_SCOPE,
+        title=title or f"Undo move {target}",
+        author=author,
+        occurred_at=occurred_at,
+    )
+
+
+def load_ordering_constraints(vault_root: str | Path) -> list[dict]:
+    """Every filed move, with its status resolved. Pure, and order-independent.
+
+    Status comes from *marks over an unordered set* exactly as
+    :func:`fold_active_index` resolves a claim's: a constraint named by an
+    active constraint's ``supersedes_constraint_id`` is superseded, one named by
+    a scoped retraction is retracted, and the strongest mark wins. Nothing here
+    consults a clock or a file's mtime, so deleting the vault's caches and
+    reading again yields the same list in the same order.
+
+    The rows are what :func:`temporal_publication.publish` passes to the
+    derivation — plan §8.4 step 7's republish, reading the home this function
+    gives constraints.
+    """
+    root = _vault_root(vault_root)
+    base = store_path(root, CORRECTION_SOURCES_DIR)
+    if not base.is_dir():
+        return []
+
+    rows: dict[str, dict] = {}
+    for path in sorted(base.rglob("move-*.md")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        row = read_ordering_constraint(root, path.relative_to(root).as_posix())
+        if row is not None:
+            rows.setdefault(row["constraint_id"], row)
+
+    marks: dict[str, list[dict]] = {}
+    for correction in load_temporal_corrections(root):
+        if correction.scope != CONSTRAINT_CORRECTION_SCOPE:
+            continue
+        status = STATUS_BY_CORRECTION_KIND.get(correction.kind)
+        if not status:
+            continue
+        for target in correction.claim_ids:
+            marks.setdefault(target, []).append(
+                _mark(status, correction.reason, correction.correction_id)
+            )
+
+    for row in rows.values():
+        superseded = row.get("supersedes_constraint_id")
+        if superseded and superseded in rows:
+            marks.setdefault(superseded, []).append(
+                _mark("superseded", "a later move replaced it", row["constraint_id"])
+            )
+
+    resolved: list[dict] = []
+    for constraint_id in sorted(rows):
+        row = dict(rows[constraint_id])
+        own = sorted(
+            {_mark_key(mark): mark for mark in marks.get(constraint_id, ())}.values(),
+            key=_mark_key,
+        )
+        row["status"] = _strongest(own)
+        row["marks"] = own
+        resolved.append(row)
+    return resolved
+
+
+def active_ordering_constraints(vault_root: str | Path) -> list[dict]:
+    """The moves a projection must honour — status ``active``, in id order."""
+    return [row for row in load_ordering_constraints(vault_root) if row["status"] == "active"]
+
+
+# --------------------------------------------------------------------------
 # The fold
 # --------------------------------------------------------------------------
 
@@ -1197,12 +1584,16 @@ def file_message_extraction(
 
 
 __all__ = [
+    "CONSTRAINT_CORRECTION_SCOPE",
     "CONVERSATION_SOURCES_DIR",
     "CONVERSATION_SOURCE_TYPE",
     "CORRECTION_IDENTITY_KEYS",
     "CORRECTION_ID_PREFIX",
     "CORRECTION_KINDS",
     "FRONTMATTER_ORDER",
+    "MOVE_IDENTITY_KEYS",
+    "MOVE_REASON_MAX_CHARS",
+    "ORDERING_CONSTRAINT_TYPE",
     "INDEX_VERSION",
     "PROMOTION_IDENTITY_KEYS",
     "STATUS_BY_CORRECTION_KIND",
@@ -1213,22 +1604,28 @@ __all__ = [
     "TemporalStoreError",
     "active_claims",
     "active_index_bytes",
+    "active_ordering_constraints",
     "active_index_path",
+    "constraint_relative_path",
     "conversation_source_relative_path",
     "correction_relative_path",
     "derive_correction_id",
     "dispute_claims",
     "file_message_extraction",
+    "file_ordering_constraint",
     "file_temporal_correction",
     "fold_active_index",
     "format_frontmatter",
+    "load_ordering_constraints",
     "load_receipts",
     "load_temporal_corrections",
     "normalize_payload",
     "payload_sha256",
+    "move_digest",
     "promote_conversational_source",
     "promotion_digest",
     "read_active_index",
+    "read_ordering_constraint",
     "read_receipt",
     "read_source_ref",
     "read_temporal_correction",
@@ -1237,6 +1634,7 @@ __all__ = [
     "receipt_relative_paths",
     "receipt_sort_key",
     "retract_claims",
+    "retract_ordering_constraint",
     "split_frontmatter",
     "store_path",
     "supersede_claims",

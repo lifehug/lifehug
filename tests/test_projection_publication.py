@@ -578,6 +578,100 @@ class ConversationExtractionEndToEndTests(VaultTestCase):
         self.assertTrue((self.vault / relative).is_file())
 
 
+# --------------------------------------------------------------------------
+# Wave E item E2 — the drag has a home, and the publisher reads it
+# --------------------------------------------------------------------------
+
+
+def schooling() -> list[dict]:
+    """High school with a date, college with none: the §10 drag scenario."""
+    return [
+        claim(claim_type="date", subject_mention="High School", event_kind="school",
+              temporal_value="1994", source="src-hs", seed="hs"),
+        claim(claim_type="date", subject_mention="College", event_kind="school",
+              temporal_value="1990", source="src-col", seed="col"),
+    ]
+
+
+class DragCorrectionSeamTests(VaultTestCase):
+    """v232: a move is a durable correction source, and the projection reads it.
+
+    §8.4's transaction ends "rebuild and atomically publish". The publisher's
+    ``constraints`` seat is no longer something every caller must remember to
+    fill — it defaults to what this vault's filed moves say — so the republish
+    is the seat that already exists.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.file_claims(schooling())
+        pub.publish(self.vault, now=NOW)
+        self.nodes = {
+            row["provenance_summary"] and row["node_id"]: row
+            for row in self.published()["nodes"]
+        }
+        by_subject = {row["subject_refs"][0]: row["node_id"]
+                      for row in self.published()["nodes"] if row["subject_refs"]}
+        self.college = by_subject["College"]
+        self.high_school = by_subject["High School"]
+
+    def move(self, **kwargs) -> dict:
+        kwargs.setdefault("relation", "after")
+        kwargs.setdefault("subject_node_id", self.college)
+        kwargs.setdefault("anchor_node_ids", [self.high_school])
+        return ts.file_ordering_constraint(self.vault, **kwargs)
+
+    def test_the_publisher_reads_the_vaults_filed_moves_by_default(self) -> None:
+        """§8.4 step 7, with nobody remembering to load anything."""
+        constraint = self.move()
+        pub.publish(self.vault, now=NOW)
+        node = next(row for row in self.published()["nodes"]
+                    if row["node_id"] == self.college)
+        self.assertIn(constraint["constraint_id"], node["input_constraint_refs"])
+
+    def test_an_explicit_empty_sequence_still_means_none(self) -> None:
+        """A test deriving over a hand-built substrate is not silently given
+        the vault's — ``()`` is "none" and ``None`` is "read them"."""
+        self.move()
+        pub.publish(self.vault, constraints=(), now=NOW)
+        node = next(row for row in self.published()["nodes"]
+                    if row["node_id"] == self.college)
+        self.assertEqual(node["input_constraint_refs"], [])
+
+    def test_moving_against_an_explicit_date_preserves_both_and_opens_mirror(self) -> None:
+        """§10: *moving against an explicit incompatible date preserves both and
+        creates/updates a Mirror contradiction*."""
+        self.move()
+        pub.publish(self.vault, now=NOW)
+        node = next(row for row in self.published()["nodes"]
+                    if row["node_id"] == self.college)
+        # The date the person actually stated is still the node's own value.
+        self.assertEqual(node["best_temporal_value"]["best"], "1990")
+        self.assertEqual(node["conflict_state"], "contradicted")
+        rows = mirror_work.load_mirror_rows(self.vault)
+        self.assertIn("contradiction", {row.kind for row in rows})
+
+    def test_undo_republishes_without_the_move(self) -> None:
+        constraint = self.move()
+        pub.publish(self.vault, now=NOW)
+        ts.retract_ordering_constraint(
+            self.vault, constraint["constraint_id"], reason="I mixed those up."
+        )
+        pub.publish(self.vault, now=NOW)
+        node = next(row for row in self.published()["nodes"]
+                    if row["node_id"] == self.college)
+        self.assertEqual(node["input_constraint_refs"], [])
+        self.assertNotEqual(node["conflict_state"], "contradicted")
+
+    def test_the_rebuild_oracle_reads_the_same_home(self) -> None:
+        """§10's *"deleting active index/projection and rebuilding produces the
+        same semantic result"* has to include the moves, or a corrected vault
+        would report itself unreproducible."""
+        self.move()
+        pub.publish(self.vault, now=NOW)
+        self.assertTrue(pub.verify(self.vault, now=NOW)["identical"])
+
+
 class RecorderSeatTests(VaultTestCase):
     """C3's filing seat publishes too: a claim heard in conversation becomes a
     visible projection change in the SAME act.
