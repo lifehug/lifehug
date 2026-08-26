@@ -133,6 +133,39 @@
    "note": "a capitalized name is the subject"
   },
   {
+   "text": "I was about twelve when we left the farm.",
+   "fires": true,
+   "reason": "third_person_age",
+   "note": "v229: the SAME clause in the other order. Every table here anchored the age on a leading conjunction, because that is the order a moment FRAGMENT is written in — and a MESSAGE is written in either order, so this exact sentence fired nothing at all. Measured on the claims-extraction branch, filed as a finding, fixed rather than left"
+  },
+  {
+   "text": "She was nine when it happened.",
+   "fires": true,
+   "reason": "third_person_age",
+   "note": "the `when` is what makes the number an age rather than a count"
+  },
+  {
+   "text": "I was about twelve.",
+   "fires": true,
+   "reason": "third_person_age",
+   "note": "and with no `when` at all, an APPROXIMATOR does the same work: nobody hedges a count with \"about\" and then says it was them"
+  },
+  {
+   "text": "There were three of us.",
+   "fires": false,
+   "note": "the negative that pattern has to survive — a count of people is not an age, and there is no `when` and no approximator to say otherwise"
+  },
+  {
+   "text": "It was about 12 dollars.",
+   "fires": false,
+   "note": "and neither is a price; the subject must be a person"
+  },
+  {
+   "text": "The box was almost 3 feet wide.",
+   "fires": false,
+   "note": "nor a measurement"
+  },
+  {
    "text": "As a kid I hated it.",
    "fires": true,
    "reason": "life_stage",

@@ -26,10 +26,17 @@ WHAT THEY WERE TOLD BACK:
 {reply}
 
 Emit exactly one JSON object and nothing else — no prose, no fence, no
-explanation:
+explanation. It has THREE lists and all three are always present:
 
-  {"landmarks": [{"domain": "...", ...}], "people": [{"name": "...", ...}]}
-  {"landmarks": [], "people": []}
+  {"landmarks": [{"domain": "...", ...}], "people": [{"name": "...", ...}],
+   "claims": [{...}]}
+  {"landmarks": [], "people": [], "claims": []}
+
+`claims` is the widest of the three and the one to fill first: every datable
+fact in what they said goes there, whether or not it belongs to a domain and
+whether or not the person is family. The other two lists are the narrower
+stores that a fact may ALSO belong to. They overlap on purpose: a fact that
+is both is written twice, once in each shape.
 
 ## `landmarks` — the facts
 
@@ -57,8 +64,8 @@ carries several, and they need not share a domain.
 - A date goes in `date` and a stretch in `span`, and ONLY where those are
   listed and ONLY when they gave you one. Never derive, never estimate,
   never round a decade into a year. "The summer after we moved" is a real
-  thing they said and it is NOT a date — leave the record undated and the
-  arithmetic will reach it later.
+  thing they said and it is NOT a date — leave THIS record undated, and put
+  what they said in `claims`, where relative time has a shape of its own.
 - Never fold several entries into one object with a joined name or a span
   covering all of them, and never go the other way: never split one entry in
   two, and never add an entry, a name or a date they did not give you.
@@ -83,9 +90,10 @@ relation is required.
      "basis": "stated"}]}
 
 - `relation` must be one of: {family_relations}. **A person who is not family
-  is not a `people` record.** A colleague's birthday, a friend's, a neighbour's
-  — leave them out entirely. It is not a judgment about the person; this list
-  is the family roster, and a stranger does not belong on it.
+  is not a `people` record.** A colleague's birthday, a friend's, a
+  neighbour's — leave them out of THIS list and put them in `claims`, where
+  anyone's date belongs. It is not a judgment about the person; this list is
+  the family roster, and a stranger does not belong on it.
 - Dates go in plainly: `1948`, `1948-04`, `2 April 1948`, `1948-04-02`.
   Never estimate one, and never turn "a couple of years before me" into a
   year.
@@ -94,10 +102,57 @@ relation is required.
   another date — that is not yours to do, and the record does not belong here.
 - The same person named twice is one record.
 
+## `claims` — every fact, its own record
+
+A claim is ONE asserted fact about ONE subject. It is tied to no domain and
+no roster: if they said it and it fixes something in time, it is a claim.
+This list is where everything the two lists above cannot hold goes — and that
+is most of what people actually say.
+
+  {"claim_type": "date", "subject_mention": "Danforth Steel",
+   "event_kind": "job", "temporal_value": "1974",
+   "evidence": "I started at Danforth Steel that fall"}
+
+- `claim_type` is one of: {claim_types}. `date` and `range` carry a date;
+  `age` and `duration` carry a length ("about 12", "eleven years");
+  `relative_order` carries an order against another moment; `identity` says
+  who somebody is and carries no time at all.
+- `subject_mention` is whose fact it is, IN THEIR OWN WORDS — "Danforth
+  Steel", "my sister Ruth", "the house on Elm". Never tidy it, never resolve
+  it to somebody you think you know, and never put more than one subject in
+  it: "Ada, Bo, Cy and Della" is FOUR claims, and one claim naming all four
+  is refused and thrown away.
+- `event_kind` is what happened, from: {event_kinds}. Use another lowercase
+  word when none of those is what they said — the list is a starting set, not
+  a fence. Every claim except `identity` needs one: a date is the date of an
+  EVENT, never of a person.
+- `temporal_value` is the time itself: `"1974"`, `"1974-06"`,
+  `"2 April 1979"` for a date; `"about 12"` or
+  `{"low": 11, "high": 11, "unit": "years", "text": "eleven years"}` for an
+  age or a duration; `{"relation": "after", "anchors": ["Mom died"]}` for an
+  order. `relation` is one of before | after | between | within.
+- `evidence` is a SHORT quotation of the words that say it, copied from what
+  they said. A claim with no quotation is refused: a claim you cannot trace
+  back to the sentence it came from is not evidence of anything.
+- **A person and an event are two records.** "My sister Ruth was born in
+  1948" is an `identity` claim for Ruth AND a `date` claim with
+  `event_kind: "birth"`. Naming somebody is not the same fact as dating
+  something that happened to them.
+- **Relative time is kept, not dropped.** "We moved the summer after Mom
+  died", "when I was about 12", "before college" are all real things they
+  said and all belong here — as `relative_order`, or as an `age`. Never turn
+  one into a calendar date, and never leave it out because it has no year:
+  the arithmetic reaches it later, and only if you wrote it down.
+- **Anyone's date counts.** A colleague's birthday, a neighbour's boy, a
+  friend's wedding — every one of them is a claim. The family-only rule above
+  is a rule about the roster, not about what may be heard.
+- Never invent a subject, a date, an event or a quotation to make this list
+  longer, and never split one fact into two claims to do it either.
+
 ## When there is nothing
 
 If they truly said nothing datable — no year, no age, no month, nothing fixed
-against anything else — emit `{"landmarks": [], "people": []}`. Recording
-nothing is correct exactly there and nowhere else.
+against anything else — emit `{"landmarks": [], "people": [], "claims": []}`.
+Recording nothing is correct exactly there and nowhere else.
 
 Never invent a place, a date, a name, a relation, or a domain.{reminder}

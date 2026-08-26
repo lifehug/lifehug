@@ -49,8 +49,14 @@ budget.examples: 1400
 budget.landmarks: 900
 budget.conversation: 1600
 budget.turn_instructions: 1400
-budget.recorder: 900
+# v229: the recorder leaf gained the whole `claims` contract (the claim types,
+# the seed event vocabulary, the raw-mention and quotation rules, and the two
+# repeals — relative time is kept, anyone's date counts), so the honest
+# allowance roughly doubles. tests/test_landmarks.py pins the measured
+# character ceiling and writes the cost out in full.
+budget.recorder: 2100
 # The listener leaf carries nine domain lines and the person-record rules
-# where the recorder carries one domain's; still no identity, no behavior, no
-# examples and no transcript, which is the property the size pin holds.
-budget.listener: 1500
+# where the recorder carries one domain's, plus the same v229 claims contract;
+# still no identity, no behavior, no examples and no transcript, which is the
+# property the size pin holds.
+budget.listener: 2400

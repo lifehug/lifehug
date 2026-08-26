@@ -2737,19 +2737,27 @@ class LandmarkRecorderTests(unittest.TestCase):
                        "## SESSION"):
             self.assertNotIn(absent, prompt)
         self.assertIn("You are not in the conversation", prompt)
-        # v216 moves this ceiling from 4400 (v214 moved it from 4000 for the
-        # worked multi-entry example). The leaf gained the never-re-record
-        # rule — the actionable half of a heading it has carried since v212 —
-        # which is ~250 characters of prose, and every domain's prompt with an
-        # EMPTY already-filed block now lands between 4582 and 4699. It is
-        # still a leaf with no identity, no behavior and no transcript, which
-        # is the property this pin exists to hold.
-        self.assertLess(len(prompt), 4800)
+        # v229 moves this ceiling from 4800 (v216 moved it from 4400, v214
+        # from 4000). The leaf gained the whole `claims` contract — the claim
+        # types, the seed event vocabulary, the raw-mention rule, the
+        # quotation requirement, and the two repeals (relative time is kept,
+        # anyone's date counts) — and every domain's prompt with an EMPTY
+        # already-filed block now lands between 8007 and 8125.
+        #
+        # THE COST, stated rather than buried: this is ~2000 tokens where
+        # v216's was ~1150, so the second completion roughly doubled. It is
+        # still an order of magnitude under the conversation prompt (whose
+        # own budgets sum past 8000 tokens BEFORE the transcript), and it is
+        # still a leaf with NO identity, no behavior, no examples and no
+        # transcript — which is the property this pin exists to hold and the
+        # only one it has ever held. A ceiling that forced the contract to be
+        # incomplete would be buying tokens with dropped facts.
+        self.assertLess(len(prompt), 8400)
         for row in li.load_questions():
             with self.subTest(domain=row["domain"]):
                 self.assertLess(len(self._prompt(domain=row["domain"],
                                                  question_asked=row["ask"])),
-                                4800)
+                                8400)
 
     def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
         military = self._prompt()

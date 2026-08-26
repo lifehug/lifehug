@@ -103,15 +103,44 @@ repealing it rejected its own proposal. But nobody has to ask a landmark
 question for someone to say a datable thing. *"We moved to Dayton the summer
 after Mom died"* is a residence, a relative date and a death year, said in a
 conversation about a house. So the recorder gained a SECOND TRIGGER — the
-same loop with no domain — that listens to one message and returns two typed
-lists: landmark records of any domain, and person DATES. Person dates are
-**family only**, by owner ruling, and the rule is enforced at validation
-rather than in the prompt, because ADR 0028's whole lesson is that prompt
-prose alone cannot be certified. For the same reason the mode ships with its
-own deterministic floor: a table-driven prescreen decides whether there could
-be time in the message at all, and a listener that comes back empty when there
-was is a blocking lint, one regeneration, and then a WITHHELD record a sweep
-can re-run. Never silence.
+same loop with no domain — that listens to one message and returns typed
+lists: landmark records of any domain, person DATES, and — from v229 —
+temporal CLAIMS. Person dates are **family only**, by owner ruling, and the
+rule is enforced at validation rather than in the prompt, because ADR 0028's
+whole lesson is that prompt prose alone cannot be certified. For the same
+reason the mode ships with its own deterministic floor: a table-driven
+prescreen decides whether there could be time in the message at all, and a
+listener that comes back empty when there was is a blocking lint, one
+regeneration, and then a WITHHELD record a sweep can re-run. Never silence.
+
+**Claims — every fact, one record, one receipt** (v229, the audited timeline
+build plan §2.1/§6.1/§6.4 and owner amendment 2). Both passes — the focused
+recorder and the listener — now also emit TEMPORAL CLAIMS in
+`temporal_claims`' own vocabulary, beside the landmark records and never
+instead of them. The reason is that a landmark record is a ladder row: it
+belongs to a domain and carries at most one date, so *"we moved when James was
+two"* had no shape and *"my neighbour's boy was born in 2019"* had no home,
+and the listener leaf used to say so out loud — leave the record undated and
+the arithmetic will reach it later. The arithmetic never reached it. A claim
+carries a raw `subject_mention`, an `event_kind`, one temporal value (a date,
+a length, or an order against another moment) and a bounded quotation without
+which it is refused; one claim per independently asserted fact, so four
+children are four `identity` claims and four `child_born` dated claims and
+never one aggregate. The message that produced them is promoted to
+`sources/conversations/` first and the claims are filed as ONE immutable
+receipt over it, so no claim's only citation is a session row. The focused
+recorder's LANDMARK list is still locked to the asked domain; its CLAIMS list
+hears the whole message, because a focused turn has one canonical recorder and
+one semantic write set.
+
+Note how this sits beside v225's flip. That wave made the landmark ENTRY a
+promoted source (`sources/landmarks/`) converted to claims by a deterministic
+rule; this one makes the MESSAGE a promoted source (`sources/conversations/`)
+read by a model. Two roads into one active index, and a fact said in a focused
+landmark turn can travel both. They cannot collide — different source,
+different revision, different extractor version, therefore different claim id
+— and two claims that agree corroborate a placement rather than contend for
+it, which is exactly what reconciliation at draw time is for.
 
 **Never ask for a year — except a person's birthday.** A birth date is
 overlearned, not reconstructed, and every fielded life-history instrument takes
@@ -387,8 +416,11 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Its prescreen (v218) | `general_listener.may_contain_datable` over `PRESCREEN_TABLES` — `chronology.YEAR_RE`/`MONTH_NAMES`/`NUMBER_WORDS`, `cross_dating.AGE_STATEMENT_RES`/`AGE_BAND_AGES`, `recommend_focuses.TIME_PERIOD_PATTERNS`, plus `DECADE_RE`, `DURATION_RES`, `BECOMING_RES`, `THIRD_PERSON_AGE_RES`, `ANCHOR_RELATIVE_RES` |
 | Its backstop (v218) | `general_listener.LISTENER_HEARD_NOTHING_LINT`, `listener_heard_nothing`, `listening_reminder`, `store_terms` |
 | Its person dates (v218) | `general_listener.validate_person_record`, `person_invocations`; `landmarks_interaction.person_date_relations`, `NON_FAMILY_RELATIONS`, `person_slug`, `date_flags` |
+| Claims, both passes (v229) | `general_listener.CLAIM_PROMPT_KEYS`, `validate_claim_draft`, `parse_claims`, `bind_claims`, `render_event_kinds`, `claim_refused`; `landmark_recorder.parse_recorder_claims`, `RecorderOutcome.claims`. The contract is `system/temporal_claims.py` — one door, one vocabulary |
+| Their retryable lint (v229) | `general_listener.CLAIMS_MISSING_SUBJECTS_LINT`, `claims_missing_subjects`, `every_claim_reminder` — a BINDING of v214's `_name_groups`/`_record_terms`, never a second copy |
+| Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py` |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py` |
 
 ## 8. Decisions
 
