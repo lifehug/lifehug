@@ -80,7 +80,7 @@ Split the doctrine: **asking stays anchor-first; storage gains real dates.**
    destructive edit the mission forbids and which throws away the thing
    Portelli says is most worth having.
 
-   **Amended v221 (wave B, item B4).** This ruling was written and then had
+   **Amended v222 (wave B, item B4).** This ruling was written and then had
    no production caller for twenty-four releases, while
    `landmarks_interaction.merge_landmark_entry` resolved every date collision
    with `{**prior, **incoming}` — which is precisely the write-time

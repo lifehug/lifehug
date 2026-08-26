@@ -381,7 +381,7 @@ class YearHelperTests(unittest.TestCase):
 class CarriageTests(unittest.TestCase):
     """B4: a record survives an argv WHOLE, or the trip fails loudly.
 
-    Until v221 `landmark_invocation` serialized the EDTF expression alone and
+    Until v222 `landmark_invocation` serialized the EDTF expression alone and
     `lifehug.py landmark-record` rebuilt it with ``basis="stated"`` — so a
     date the system CALCULATED from an age was filed as one the person had
     STATED. These pin the two halves as exact inverses.
