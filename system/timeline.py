@@ -48,6 +48,7 @@ if str(_SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import cross_dating  # noqa: E402
+import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
@@ -786,25 +787,99 @@ def load_landmarks() -> dict:
             for key, value in domains.items() if isinstance(value, list)}
 
 
+#: The two directories the landmark store can sit in. `lifehug_core._data`
+#: resolves `state/landmarks.json` for an external-layout vault and
+#: `system/landmarks.json` for an embedded one (the framework checkout, which
+#: IS its own vault), and :func:`_projection_vault_root` inverts exactly that.
+LANDMARK_STORE_PARENTS = ("state", "system")
+
+
+def _projection_vault_root():
+    """The vault the landmark store belongs to, derived FROM the store's path.
+
+    ONE definition of "which vault", never two. The obvious implementation is
+    `lifehug_core.REPO_DIR` — the process binding — and it is wrong in a way
+    that is silent and destructive: `LANDMARKS_STORE` is the seam every caller
+    and every test rebinds to point at another vault, and it is deliberately
+    NOT in `VAULT_ROOT_NAMES`, so `vault_roots()` does not rebind it either.
+    A root read from the process binding while the store is read from the
+    rebound path puts the drawing in one vault and its evidence in another —
+    the same half-and-half split the `vault_roots()` comment above was written
+    to end, and it writes real files into whichever vault the process happened
+    to import from.
+
+    Deriving the root from the store's own path makes that split impossible to
+    express: rebind the store and the substrate follows it, every time.
+    """
+    store = Path(str(LANDMARKS_STORE))
+    parent = store.parent
+    if parent.name in LANDMARK_STORE_PARENTS:
+        return parent.parent
+    return parent
+
+
+def redraw_landmarks() -> dict:
+    """Redraw the landmark store from the claim substrate. THE ONE WRITER.
+
+    Owner amendment 1 (2026-08-26), wave B item B3. Every other path that used
+    to write this file now records evidence and calls this, and
+    `tests/test_landmark_projection.py::test_only_one_writer_of_the_landmark_store`
+    walks the AST of every module in `system/` to keep the count at one. A
+    second writer is not untidiness: it is the dual truth the flip removed,
+    coming back.
+
+    The store's PATH stays here, in `LANDMARKS_STORE`, because that is where
+    the embedded/external layout difference is already resolved
+    (`lifehug_core._data("landmarks")`). The projector derives the file's
+    CONTENT and never learns where it lands.
+    """
+    drawing = landmark_projection.redraw(_projection_vault_root())
+    write_json(LANDMARKS_STORE, drawing)
+    return drawing
+
+
+def flip_landmarks_if_needed() -> dict | None:
+    """Convert a pre-flip vault's entries into claims, once. ``None`` if done.
+
+    Detection is "entries exist and no legacy-import receipt does", which is
+    idempotent by CONTENT rather than by a marker file — the house pattern
+    (`update.migrate_vault_to_v120`). Deliberately not keyed on a receipt id:
+    a receipt id binds to a source revision, redrawing changes the file's
+    bytes, and a revision-bound check would re-import the whole vault on the
+    second call. See `landmark_projection.legacy_import_done`.
+    """
+    root = _projection_vault_root()
+    summary = landmark_projection.flip_if_needed(root, load_landmarks())
+    if summary is None:
+        return None
+    redraw_landmarks()
+    return summary
+
+
 def save_landmark(domain: str, record: object) -> dict:
     """Add or replace ONE landmark entry, keyed by its identity in a domain.
 
-    Replacement is by identity because the ladder revisits the same subject —
-    a city today, an address next week, a span after that — and each pass adds
-    rungs to the SAME entry rather than making a second one. HOW the two
-    records combine is `landmarks_interaction.merge_landmark_entry` — one
-    definition, so the none terminal supersedes and is superseded here exactly
-    as it does everywhere else.
+    The signature, the return value and the MEANING are v214's. What changed in
+    v224 is where the answer goes: the record is promoted to a durable vault
+    source and its temporal assertions are filed as claims with a receipt, and
+    then the store is REDRAWN from the substrate. Nothing writes an entry into
+    the file any more.
 
-    v214 (lifehug#227) changes WHICH identity, and adds the one cross-entry
-    rule. The key was ``label`` alone, which collapses a whole multi-entry
-    answer the moment the writer files a name under the domain's own rung
-    instead: four children filed as ``who`` all keyed on ``""`` and became one
-    aggregate entry. It is now `landmarks_interaction.landmark_entry_key` —
-    the READ side's own identity order, label then name then the domain's
-    identity rung — and `entry_superseded_by` retires the two shapes a new
-    entry legitimately replaces (a standing none/skip, and exactly that
-    unidentified aggregate). Entries the person named are never touched.
+    Replacement is by identity because the ladder revisits the same subject —
+    a city today, an address next week, a span after that, each pass adding
+    rungs to the SAME entry rather than making a second one. HOW two records
+    combine is still `landmarks_interaction.merge_landmark_entry`, and it is
+    still the only definition; it simply runs in
+    `landmark_projection.project_landmark_entries` at DRAW time instead of
+    here at write time. That is why the flip is invisible: the same function
+    folds the same records in the same order and gets the same entry.
+
+    The one cross-entry rule (`landmarks_interaction.entry_superseded_by` — a
+    none retires its domain, a substantive answer clears a standing terminal,
+    a clean record retires the collapsed aggregate) is now expressed as a
+    durable CORRECTION rather than as an entry quietly not copied forward. The
+    retired entry keeps its evidence and gains a record of why it stopped
+    standing.
     """
     if not isinstance(record, dict):
         raise ValueError("a landmark record must be an object")
@@ -817,27 +892,42 @@ def save_landmark(domain: str, record: object) -> dict:
         # A domain the question set does not declare still files, keyed on
         # the identity fields alone — degrade, never refuse a write.
         row = None
-    data = read_json(LANDMARKS_STORE, default=None)
-    if not isinstance(data, dict):
-        data = {}
-    data.setdefault("version", LANDMARKS_SCHEMA_VERSION)
-    domains = data.setdefault("domains", {})
-    if not isinstance(domains, dict):
-        domains = data["domains"] = {}
-    entries = [e for e in (domains.get(key) or []) if isinstance(e, dict)]
+
+    root = _projection_vault_root()
+    # A vault that has not been converted yet is converted before its first
+    # post-upgrade write, so a record can never land in a half-flipped vault.
+    landmark_projection.flip_if_needed(root, load_landmarks())
+
     entry_key = landmarks_interaction.landmark_entry_key(record, row)
-    merged = landmarks_interaction.merge_landmark_entry(None, record)
-    surviving = []
-    for existing in entries:
+    for existing in load_landmarks().get(key) or ():
         if landmarks_interaction.landmark_entry_key(existing, row) == entry_key:
-            merged = landmarks_interaction.merge_landmark_entry(existing, record)
             continue
         if landmarks_interaction.entry_superseded_by(existing, record, row):
-            continue
-        surviving.append(existing)
-    domains[key] = surviving + [merged]
-    write_json(LANDMARKS_STORE, data)
-    return merged
+            landmark_projection.retire_entry(
+                root,
+                domain=key,
+                entry_key=landmarks_interaction.landmark_entry_key(existing, row),
+                reason=(
+                    f"superseded by a later {key} answer "
+                    "(landmarks_interaction.entry_superseded_by)"
+                ),
+            )
+
+    filed = dict(record)
+    filed.setdefault("domain", key)
+    landmark_projection.file_landmark_record(
+        root,
+        key,
+        filed,
+        ordinal=landmark_projection.next_ordinal(root),
+        extractor_version=landmark_projection.LIVE_EXTRACTOR,
+    )
+
+    drawn = redraw_landmarks()
+    for entry in (drawn.get("domains") or {}).get(key) or ():
+        if landmarks_interaction.landmark_entry_key(entry, row) == entry_key:
+            return entry
+    return landmarks_interaction.merge_landmark_entry(None, record)
 
 
 def save_landmarks(domain: str, records: object) -> list[dict]:

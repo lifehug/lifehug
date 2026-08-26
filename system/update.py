@@ -773,6 +773,41 @@ def run_migrations(target_version, current_version):
         except Exception as exc:  # never let a migration break the update
             print(f"  Note: Focus terminology migration deferred (run `python3 system/focus_migration.py`): {exc}")
 
+    if target_version >= 224 and current_version < 224:
+        # v224: the entry-store flip (owner amendment 1, wave B item B3).
+        # `state/landmarks.json` stops being a place anything is written by
+        # hand and becomes a projection of the temporal claim substrate. Every
+        # existing entry is promoted to a durable vault source and read into
+        # claims by a deterministic rule — no model call — and the file is then
+        # redrawn from them. The redraw is value-identical to what was there,
+        # so nothing a reader can observe changes.
+        #
+        # This block runs LAST for the same reason the v15/v21 blocks do: it
+        # imports `timeline`, which reaches `lifehug_core`, whose import BINDS
+        # the interpreter to one vault root and refuses an unrepaired vault.
+        # The v120 contract repair above must have run first.
+        #
+        # Idempotent by content, never by a marker file: the flip is skipped
+        # when the vault already holds a legacy-import receipt. Vaults that
+        # never run `update` heal on their first write instead — see
+        # `timeline.save_landmark`.
+        try:
+            from timeline import flip_landmarks_if_needed  # local import; same dir
+            summary = flip_landmarks_if_needed()
+            if summary:
+                print(
+                    f"  Converted {summary['entries']} landmark entr"
+                    f"{'y' if summary['entries'] == 1 else 'ies'} into "
+                    f"{summary['claims']} temporal claims across "
+                    f"{summary['receipts']} receipts; state/landmarks.json is now "
+                    f"a projection of them."
+                )
+        except Exception as exc:  # never let a migration break the update
+            print(
+                "  Note: landmark projection flip deferred (it will run on the "
+                f"next landmark write): {exc}"
+            )
+
 
 def apply_version(version):
     """Apply a specific version by extracting framework files from its tag."""

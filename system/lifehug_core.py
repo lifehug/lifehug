@@ -161,6 +161,13 @@ CORRECTION_SOURCES_DIR = _data("correction_sources")
 # v221: a claim-bearing conversational message is promoted to a durable source
 # before any temporal claim cites it (owner amendment 2 / option B).
 CONVERSATION_SOURCES_DIR = _data("conversation_sources")
+# v224: a filed landmark record is promoted to a durable source before any
+# temporal claim cites it, and `state/landmarks.json` is redrawn from those
+# claims (owner amendment 1 / the entry-store flip). The binding lives here so
+# the path table stays complete; `landmark_projection` is told which vault on
+# every call and resolves the directory against THAT root, exactly as
+# `temporal_store` does for the two source directories above.
+LANDMARK_SOURCES_DIR = _data("landmark_sources")
 ARTIFACT_SOURCES_DIR = _data("artifact_sources")
 CANDIDATE_RESEARCH_SOURCES_DIR = _data("candidate_research_sources")
 QUESTION_CANDIDATES_FILE = _data("question_candidates")
