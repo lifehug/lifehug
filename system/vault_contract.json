@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 225,
-    "revision": "vault-contract-v9",
-    "content_digest": "sha256:f3eb3aabfd4d4c6f6edc9a79eae7cb7713d753d2c2e57507d05f75c0331eaeb5"
+    "framework_version": 231,
+    "revision": "vault-contract-v10",
+    "content_digest": "sha256:3b22ee548901752e4fcd675e3e5a16a2c511f27d6dd09b1aa7cc3d35e81c8c27"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -741,6 +741,32 @@
     },
     "temporal_active_index": {
       "path": "state/temporal_claims/active-index.json",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {
+        "format": "json",
+        "version_field": "version",
+        "supported": [
+          1
+        ]
+      }
+    },
+    "temporal_calculated_timeline": {
+      "path": "state/temporal_claims/calculated-timeline.json",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {
+        "format": "json",
+        "version_field": "version",
+        "supported": [
+          1
+        ]
+      }
+    },
+    "temporal_work_items": {
+      "path": "state/temporal_claims/work-items.json",
       "kind": "file",
       "required": false,
       "tracked": true,

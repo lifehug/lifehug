@@ -86,6 +86,8 @@ EXPECTED_DATA_PATHS = {
     "state",
     "synthesis",
     "temporal_active_index",
+    "temporal_calculated_timeline",
+    "temporal_work_items",
     "temporal_claims_state",
     "temporal_receipts",
     "timeline_placements",
@@ -201,7 +203,7 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(vault_paths.FRAMEWORK_PATHS, exported["framework_paths"])
         self.assertEqual(list(exported["data_paths"]), sorted(exported["data_paths"]))
         self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
-        self.assertEqual(exported["identity"]["framework_version"], 225)
+        self.assertEqual(exported["identity"]["framework_version"], 231)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

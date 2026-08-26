@@ -183,6 +183,13 @@ CLASSIFICATIONS_DIR = _data("classifications")
 TEMPORAL_CLAIMS_DIR = _data("temporal_claims_state")
 TEMPORAL_RECEIPTS_DIR = _data("temporal_receipts")
 TEMPORAL_ACTIVE_INDEX_FILE = _data("temporal_active_index")
+# v231: the two published projections over that substrate — the whole
+# calculated timeline and the queue's work-item slice of the same
+# generation. Both are materialized views with the same repair path as the
+# active index: delete them and publish again
+# (system/temporal_publication.py owns every write).
+TEMPORAL_CALCULATED_TIMELINE_FILE = _data("temporal_calculated_timeline")
+TEMPORAL_WORK_ITEMS_FILE = _data("temporal_work_items")
 NEIGHBORHOODS_FILE = _data("neighborhoods")
 FOCUS_RECS_FILE = _data("focus_recommendations")
 LEGACY_FOCUS_RECS_FILE = _data("legacy_focus_recommendations")
