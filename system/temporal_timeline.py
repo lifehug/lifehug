@@ -1,0 +1,1902 @@
+#!/usr/bin/env python3
+"""The calculated timeline: pure, whole, explainable (wave D, items D1 + D2).
+
+``temporal_claims`` froze what a temporal interpretation *is*; ``temporal_store``
+put it on disk so the active set can be rebuilt from its evidence;
+``identity_resolution`` answered who a mention is and which episode a claim
+belongs to. This module is the step those three were building toward — the one
+that turns a pile of claims into **the chronology a person sees**, and into the
+typed questions that chronology still wants answered.
+
+It is a **whole projection**, not an incremental one. The audited final timeline
+build plan is explicit about this (§1.2, §7, §7.1): build a correct, pure, full
+derivation backed by versioned evidence and stable semantic identities; keep the
+stable node ids, the input edges and the fingerprints that make incremental
+recomputation *possible*; and do **not** put a persisted node-level
+dirty/invalidation scheduler on the critical path. There is no dirty-node
+scheduler here, and adding one is gated on measurement (§7.1) rather than on
+taste. :func:`derive_calculated_timeline` returns its own phase timings so that
+gate has a number from the first day rather than an argument.
+
+The pipeline, in the order it runs
+----------------------------------
+
+1. **Active claims.** The claims whose status is ``active`` in the folded index
+   — the losing interpretations are still on disk, and this projection simply
+   does not calculate from them.
+2. **Identity and episode resolution.** ``identity_resolution``'s deterministic
+   layers, taken as *records* the caller may supply or as a resolution run
+   against a roster snapshot. An uncertain mention is never dropped: it keeps
+   its claim, and it becomes an ``identity_uncertain`` work item (§6.3, §2.5).
+3. **Grouping.** Claims about the same subject's same event become one node.
+   Episode *splitting* is the recorder's job, not the fold's — see "Two stints"
+   below.
+4. **Reconciliation.** ``chronology.reconcile`` per node, in the pure
+   derivation and never as a mutating write authority (§6.5). The best-supported
+   value is what Timeline shows; every rival survives as an alternate; the
+   conflict strength is what mints a Mirror row.
+5. **Interval and partial-order calculation.** Exact dates pass through. Ages
+   and durations become intervals *only where an anchor exists*.
+   ``relative_order`` claims and ``OrderingConstraint``s (the drag's semantic
+   residue) narrow intervals through a bounded fixpoint. An order cycle emits a
+   contradiction and never hangs.
+6. **Work items.** Typed instances of one shape — missing anchors, precision
+   gaps, contradictions, uncertain identities — carrying one stable id across
+   Timeline, Mirror, whispers and the daily queue (§5.4, §2.3).
+
+What this module refuses to do
+------------------------------
+
+**It never renders false precision.** An inferred interval is an interval. §10's
+case is verbatim: *"I was about 12"* produces a fuzzy interval with a calibrated
+basis, not an exact birthday-derived day. The conversion from a
+:class:`~temporal_claims.TemporalQuantity` to a calendar interval lives here —
+where the anchor is known — exactly as v220 intended when it refused to let a
+fabricated interval reach storage at claim time.
+
+**It never erases disagreement.** Two incompatible explicit dates are both
+preserved; Timeline shows the best-supported one and signals the conflict; a
+``contradiction`` work item names both claims. An unresolved contradiction
+blocks nothing else — every other node is calculated exactly as it would have
+been (§2.5, §10).
+
+**It never invents an episode split.** *Two stints at the same employer are two
+episodes* (§6.3) — and what makes them two is the recorder minting two
+``event_ref``s through :func:`identity_resolution.derive_episode_ref` at capture
+time. When claims arrive with no ``event_ref``, nothing in them distinguishes a
+second stint from a disagreement about the first, so the fold groups them as one
+node with alternates and a visible conflict rather than guessing. Guessing would
+be a silent merge on one side and a silent split on the other; showing the
+disagreement is correctable, and a stable node id is what makes the correction
+land.
+
+**It never writes anything.** No I/O, no model, no vault, no clock it did not
+receive except the two the caller may pass (``now`` for work-item stamps) and
+``time.perf_counter`` for the timings, which §7 names as *explicitly excluded
+runtime metadata*. :func:`structural_signature` is the comparison key that
+excludes them, so "rebuild twice and compare" is a real test rather than a
+slogan.
+
+Where this connects
+-------------------
+
+``timeline.timeline_data()`` consuming this projection is the wiring PR, and is
+deliberately not here — this module exports clean entry points and touches no
+existing derivation. Publication of the whole projection (§7's atomic
+generation swap) is likewise its own step; what this module owns is the pure
+function from evidence to chronology.
+
+Controlling contract: the audited final timeline build plan §5.3, §5.4, §6.4,
+§6.5, §7, §7.1, §8.5, §10, and owner amendments 1 and 2 (2026-08-26).
+"""
+
+from __future__ import annotations
+
+import math
+import sys
+import time
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+
+SYSTEM_DIR = Path(__file__).resolve().parent
+if str(SYSTEM_DIR) not in sys.path:
+    sys.path.insert(0, str(SYSTEM_DIR))
+
+import chronology as chrono  # noqa: E402
+import identity_resolution as ident  # noqa: E402
+import temporal_claims as tc  # noqa: E402
+import temporal_projection as tp  # noqa: E402
+from temporal_claims import (  # noqa: E402
+    TemporalContractError,
+    collapsed_text,
+    normalized_mention_key,
+    optional_text,
+)
+
+# --------------------------------------------------------------------------
+# Versioned rules
+# --------------------------------------------------------------------------
+
+#: Stamped on every node as ``calculation_rule_version`` and folded into every
+#: input fingerprint. Bump it whenever a rule in this module changes what the
+#: same claims calculate to — that is what makes a stale projection detectable
+#: rather than merely wrong (§5.3, §7).
+CALCULATION_RULE_VERSION = "timeline-rules:1"
+
+#: The combined-score formula's own version, separate from the rules above
+#: because scoring is recalibrated on a different cadence from the arithmetic.
+#: **The weights below are deliberately simple and deliberately uncalibrated.**
+#: Wave F owns calibration (§8.5); what wave D owes it is the raw components and
+#: one stable identity per item, both of which are here.
+SCORE_FORMULA_VERSION = "temporal-score:1"
+
+#: How hard two surviving claims must contradict each other before the node is
+#: ``contradicted`` and Mirror gets a row. ``chronology.conflict_strength``
+#: returns how well supported the best *disjoint* rival is relative to the
+#: winner, so ``0.5`` means "a rival at least half as well supported as the
+#: claim we are showing". Below it the node is ``alternatives``: the reading is
+#: divided, but not materially so.
+MATERIAL_CONFLICT = 0.5
+
+#: The bounded fixpoint's round cap. Narrowing is monotone so the fixpoint
+#: converges long before this; the cap exists so that a rule change can never
+#: turn a derivation into a hang, and reaching it is reported in
+#: ``diagnostics`` rather than swallowed.
+MAX_PROPAGATION_ROUNDS = 16
+
+#: Reach saturates: an anchor that would place five unplaced nodes is already
+#: as valuable as this release knows how to say. The raw count travels in
+#: :attr:`CalculatedTimeline.reach` for wave F to calibrate against.
+REACH_SATURATION = 5
+
+#: The precision an event's date is worth asking to (§2.2 — *ask at the
+#: precision appropriate to the event*, never demand false precision). Anything
+#: not named here targets :data:`DEFAULT_PRECISION_TARGET`, and a node already
+#: at or finer than its target mints no gap at all.
+PRECISION_TARGETS = {
+    "birth": "day",
+    "death": "day",
+    "married": "day",
+    "child_born": "day",
+    "first_met": "month",
+    "dating_started": "month",
+    "graduation": "month",
+}
+DEFAULT_PRECISION_TARGET = "year"
+
+#: Coarsest first — the same ordering ``chronology.GRANULARITIES`` uses, read
+#: from it rather than re-listed, so a new granularity cannot drift.
+_GRANULARITY_RANK = {name: index for index, name in enumerate(chrono.GRANULARITIES)}
+
+#: Loss is offer-only (§2.4). A temporal question about a loss whose subject is
+#: not a specific named person is discovery, and discovery never enters the
+#: daily queue. Once the person names who died, the ordinary surfaces apply.
+LOSS_EVENT_KINDS = ("loss", "death")
+
+#: Where each kind of work may appear. ``timeline`` is universal — Timeline is
+#: the place a person voluntarily visits to improve the portrait, and an open
+#: item there is an invitation rather than a debt (§2.3, §8.1).
+SURFACES_BY_KIND = {
+    "missing_anchor": ("timeline", "whisper", "daily_question"),
+    "precision_gap": ("timeline", "whisper", "daily_question"),
+    "contradiction": ("timeline", "mirror"),
+    "identity_uncertain": tuple(ident.IDENTITY_WORK_SURFACES),
+}
+
+#: Surfaces a loss-discovery item may use. Timeline only: the system may OFFER
+#: the Losses area, and must not put a generic loss prompt in the queue.
+LOSS_DISCOVERY_SURFACES = ("timeline",)
+
+#: Per-kind starting points for the §8.5 components this release can state
+#: deterministically. ``system_value`` is *not* here: it is calculated from
+#: reach and conflict severity, which is the whole point of computing it in the
+#: derivation rather than guessing it at selection time.
+WORK_ITEM_VALUE_DEFAULTS = {
+    "missing_anchor": {"person_value": 0.5, "interaction_cost": 0.3, "context_fit": 0.5},
+    "precision_gap": {"person_value": 0.45, "interaction_cost": 0.2, "context_fit": 0.5},
+    "contradiction": {"person_value": 0.6, "interaction_cost": 0.5, "context_fit": 0.4},
+    "identity_uncertain": {"person_value": 0.5, "interaction_cost": 0.4, "context_fit": 0.4},
+}
+
+#: How sensitive asking about this event is, before any per-person signal. A
+#: death or a loss is not a neutral date question and never scores like one.
+SENSITIVITY_BY_EVENT_KIND = {
+    "death": 0.8,
+    "loss": 0.8,
+    "separated": 0.6,
+    "divorced": 0.6,
+}
+DEFAULT_SENSITIVITY = 0.1
+
+#: The uncalibrated weights of :data:`SCORE_FORMULA_VERSION`. Positive terms are
+#: reasons to ask; negative terms are reasons to wait.
+SCORE_WEIGHTS = {
+    "person_value": 0.35,
+    "system_value": 0.35,
+    "context_fit": 0.15,
+    "interaction_cost": -0.15,
+    "sensitivity": -0.20,
+}
+
+#: The vault owner's handle in a relationship edge. *"I married Katie"* is a
+#: fact about the edge between two people (§6.3), and the edge needs both ends;
+#: callers with a real owner entity ref pass ``owner_ref=`` and get that.
+DEFAULT_OWNER_REF = "self"
+
+#: The phases §7.1 asks to instrument *within* the pure derivation. Extraction,
+#: the claim fold and projection publication are measured by their own owners;
+#: what this module can honestly report is what it does.
+TIMING_PHASES = ("resolve", "group", "reconcile", "propagate", "work_items", "total")
+
+#: The highest ``chronology.claim_score`` any single claim can reach, computed
+#: from chronology's own weights so the normalizer cannot drift from them.
+MAX_CLAIM_SCORE = (
+    max(chrono.BASIS_WEIGHT.values())
+    + max(chrono.CONFIDENCE_WEIGHT.values())
+    + chrono.MAX_CONSILIENCE_SOURCES * chrono.CONSILIENCE_WEIGHT
+)
+
+#: Days in a mean Gregorian year — the one conversion this module performs on
+#: durations, and the reason a duration in weeks or days still lands on a whole
+#: number of years rather than pretending to a precision it never had.
+DAYS_PER_YEAR = 365.2425
+
+
+class TemporalTimelineError(TemporalContractError):
+    """A derivation could not proceed on the inputs it was given."""
+
+
+#: Every finding this module raises or reports, in one place (the substrate's
+#: convention). ``derivation_*`` are raised; the rest are diagnostic keys.
+ERROR_CODES = (
+    "active_index_unusable",
+    "propagation_cap_reached",
+    "order_cycle",
+    "anchor_unresolved",
+    "anchor_undated",
+    "age_without_birth_anchor",
+    "duration_without_start",
+    "constraint_contradicts_date",
+    "quantity_band_unrepresentable",
+)
+
+
+# --------------------------------------------------------------------------
+# The result
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CalculatedTimeline:
+    """One whole projection, plus what it noticed on the way.
+
+    Unpacks as ``nodes, work_items = derive_calculated_timeline(...)`` because
+    those two are the contract; the rest is what wave E, wave F and wave H each
+    need and would otherwise have to recompute.
+
+    ``timings`` and the work items' ``created_at``/``updated_at`` are §7's
+    *explicitly excluded runtime metadata* — :func:`structural_signature` is the
+    comparison key that drops them.
+    """
+
+    nodes: tuple[dict, ...] = ()
+    work_items: tuple[dict, ...] = ()
+    timings: dict = field(default_factory=dict)
+    score_components: dict = field(default_factory=dict)
+    reach: dict = field(default_factory=dict)
+    diagnostics: dict = field(default_factory=dict)
+    calculation_rule_version: str = CALCULATION_RULE_VERSION
+    score_formula_version: str = SCORE_FORMULA_VERSION
+    projection_generation: int = 0
+
+    def __iter__(self):
+        yield self.nodes
+        yield self.work_items
+
+    def node(self, node_id: object) -> dict | None:
+        """One node by id — the lookup every surface would otherwise re-write."""
+        wanted = collapsed_text(node_id)
+        for row in self.nodes:
+            if row.get("node_id") == wanted:
+                return row
+        return None
+
+    def to_dict(self) -> dict:
+        return {
+            "calculation_rule_version": self.calculation_rule_version,
+            "score_formula_version": self.score_formula_version,
+            "projection_generation": self.projection_generation,
+            "nodes": [dict(row) for row in self.nodes],
+            "work_items": [dict(row) for row in self.work_items],
+            "reach": dict(self.reach),
+            "score_components": {k: dict(v) for k, v in self.score_components.items()},
+            "diagnostics": dict(self.diagnostics),
+        }
+
+
+def structural_signature(result: object) -> dict:
+    """The projection minus its runtime metadata — the rebuild oracle's key.
+
+    §7: *"Rebuilding twice from identical receipts, corrections, rules, and
+    versions produces structurally identical output apart from explicitly
+    excluded runtime metadata."* This function names the exclusions rather than
+    leaving each caller to guess them: the phase timings, and the wall-clock
+    stamps a work item carries because a queue needs them.
+    """
+    current = result if isinstance(result, CalculatedTimeline) else None
+    if current is None:
+        raise TemporalTimelineError(
+            "active_index_unusable", "structural_signature takes a CalculatedTimeline"
+        )
+    items = []
+    for row in current.work_items:
+        trimmed = {k: v for k, v in row.items() if k not in ("created_at", "updated_at")}
+        items.append(trimmed)
+    return {
+        "calculation_rule_version": current.calculation_rule_version,
+        "score_formula_version": current.score_formula_version,
+        "nodes": [dict(row) for row in current.nodes],
+        "work_items": items,
+        "reach": dict(current.reach),
+        "diagnostics": dict(current.diagnostics),
+    }
+
+
+# --------------------------------------------------------------------------
+# Reading the substrate
+# --------------------------------------------------------------------------
+
+
+def active_claim_rows(active_index: object) -> list[dict]:
+    """The claims a projection may calculate from — ``status: active``, id-ordered.
+
+    Accepts the folded index mapping (``temporal_store.fold_active_index``'s
+    return), its ``claims`` list, or a bare list of claim mappings, because the
+    hosted platform reads the published file and a test builds the list by hand
+    and both are the same question.
+
+    This is deliberately the *same predicate* as
+    ``temporal_store.active_claims``; ``tests/test_temporal_timeline.py`` pins
+    the two against each other rather than trusting the coincidence, which is
+    what the recurring-defect doctrine asks for when one fact has two readers.
+    """
+    rows = active_index
+    if isinstance(active_index, dict):
+        rows = active_index.get("claims")
+    if isinstance(rows, dict) or rows is None:
+        rows = ()
+    if not isinstance(rows, (list, tuple)):
+        raise TemporalTimelineError(
+            "active_index_unusable", f"cannot read claims from {type(active_index).__name__}"
+        )
+    active = [row for row in rows if isinstance(row, dict) and row.get("status") == "active"]
+    return sorted(active, key=lambda row: collapsed_text(row.get("claim_id")))
+
+
+def _source_key(claim: dict) -> str:
+    """``source_id@revision`` — the evidence handle a work item cites."""
+    ref = claim.get("source_ref")
+    if not isinstance(ref, dict):
+        return ""
+    return f"{collapsed_text(ref.get('source_id'))}@{collapsed_text(ref.get('revision'))}"
+
+
+def _subject_handle(claim: dict) -> str:
+    """The resolved ref when identity landed, the raw mention when it did not.
+
+    §2.5's "never dropped" has to survive exactly where identity is hardest, so
+    an unresolved subject still carries its events. The raw mention remains on
+    the claim either way — resolution is data *about* a claim, never an edit of
+    one.
+    """
+    return collapsed_text(claim.get("subject_ref")) or collapsed_text(
+        claim.get("subject_mention")
+    )
+
+
+def _node_kind_for(event_kind: object) -> str:
+    """``episode`` for anything a life can hold more than one of, else ``event``.
+
+    Read off ``identity_resolution``'s own two predicates so this module and
+    :func:`identity_resolution.derive_episode_ref` cannot disagree about a node
+    id's own payload — ``node_kind`` is *inside* the digest, so a disagreement
+    here would silently mint two ids for one thing.
+    """
+    if ident.is_relationship_event(event_kind) or ident.is_repeatable_event(event_kind):
+        return "episode"
+    return "event"
+
+
+def _mint_node_id(*, event_kind: str, subject: str, owner_ref: str) -> str:
+    """The node id for a subject's event, through the substrate's one minter.
+
+    Relationship transitions go through :func:`~identity_resolution.derive_episode_ref`
+    with the owner as counterpart, so *"married Katie"* attaches to the edge
+    between the two people and gives the same id whichever end is named the
+    subject. A repeatable kind arriving with no ``event_ref`` and therefore no
+    discriminator is refused by that function — correctly, because minting one
+    would be a guess — so this falls back to the undiscriminated node id and the
+    fold shows the claims as one node with alternates. See the module docstring,
+    "It never invents an episode split".
+    """
+    relationship = ident.is_relationship_event(event_kind)
+    try:
+        return ident.derive_episode_ref(
+            event_kind=event_kind,
+            subject_ref=subject,
+            counterpart_ref=owner_ref if relationship else None,
+        )
+    except ident.IdentityResolutionError:
+        subjects = [subject, owner_ref] if relationship else [subject]
+        return tp.derive_node_id(
+            node_kind=_node_kind_for(event_kind),
+            event_kind=event_kind,
+            subject_refs=subjects,
+        )
+
+
+# --------------------------------------------------------------------------
+# Identity, applied
+# --------------------------------------------------------------------------
+
+
+def _resolution_index(records: object) -> dict:
+    """Resolution records by mention key, latest-per-key, deterministically.
+
+    A caller may hand over a ledger holding several decisions about one mention
+    (a resolution, its reversal, a later owner verdict). The one that counts is
+    the last by ``created_at``, ties broken by the record's own reason so the
+    answer never depends on list order.
+    """
+    index: dict[str, dict] = {}
+    for value in records or ():
+        record = value if isinstance(value, ident.ResolutionRecord) else ident.record_from_dict(value)
+        if record is None:
+            continue
+        key = record.mention_key or normalized_mention_key(record.mention)
+        current = index.get(key)
+        if current is None or (record.created_at, record.reason) >= (
+            current["record"].created_at,
+            current["record"].reason,
+        ):
+            index[key] = {"record": record}
+    return {key: value["record"] for key, value in index.items()}
+
+
+def _resolve_subjects(claims, *, resolution_records, roster_snapshot, now):
+    """Attach identity to every claim, keeping the ones that will not resolve.
+
+    Three layers, in order, each of them ``identity_resolution``'s and none of
+    them re-implemented here:
+
+    1. a claim that already carries ``subject_ref`` is left alone — the recorder
+       resolved it, and re-deciding would make the projection disagree with the
+       evidence;
+    2. a supplied :class:`~identity_resolution.ResolutionRecord` for the
+       mention wins next, because it may carry a model rung's or an owner's
+       verdict that no deterministic rule can reach;
+    3. otherwise the deterministic resolver runs against the roster snapshot.
+
+    Returns ``(resolved_claims, records_by_mention_key, claim_ids_by_mention_key)``.
+    The third is what turns one ambiguous mention into ONE Mirror row citing
+    every claim that ever said it (§5.4's answer-once).
+    """
+    supplied = _resolution_index(resolution_records)
+    records: dict[str, ident.ResolutionRecord] = dict(supplied)
+    by_mention: dict[str, list[str]] = {}
+    resolved: list[dict] = []
+
+    for claim in claims:
+        mention = collapsed_text(claim.get("subject_mention"))
+        key = normalized_mention_key(mention)
+        by_mention.setdefault(key, []).append(collapsed_text(claim.get("claim_id")))
+        if collapsed_text(claim.get("subject_ref")):
+            resolved.append(claim)
+            continue
+        record = records.get(key)
+        if record is None:
+            record = ident.resolve_mention(
+                mention,
+                roster=roster_snapshot,
+                evidence_ref=_source_key(claim) or collapsed_text(claim.get("claim_id")),
+                now=now,
+            )
+            records[key] = record
+        try:
+            resolved.append(ident.apply_resolution(claim, record, now=now))
+        except TemporalContractError:
+            # A resolution that cannot be attached is a resolution we do not
+            # apply — never a claim we drop.
+            resolved.append(claim)
+    return resolved, records, by_mention
+
+
+# --------------------------------------------------------------------------
+# Claims to date records
+# --------------------------------------------------------------------------
+
+
+def age_text_for_band(low: float, high: float, approximate: bool) -> str | None:
+    """A phrase ``chronology.parse_age`` reads back as exactly this band.
+
+    ``chronology.from_age`` is the package's one age→interval rule and it takes
+    the *phrase*, because the phrase is what was asserted. A stored
+    :class:`~temporal_claims.TemporalQuantity` has already been through
+    ``parse_age`` and kept the band, so getting back to the interval means
+    getting back to a phrase — and the honest way to do that is to build one and
+    then **verify it round-trips**, rather than to re-derive the arithmetic here
+    and have two age rules in the package.
+
+    ``None`` when no phrase reproduces the band (a hand-built quantity with a
+    fractional or out-of-range age), which the caller reports as
+    ``quantity_band_unrepresentable`` instead of inventing an interval.
+    """
+    if low != int(low) or high != int(high) or low < 0 or high > 120 or high < low:
+        return None
+    lo, hi = int(low), int(high)
+    if approximate:
+        # `parse_age` widens a hedged band by a year on each side, so the phrase
+        # must name the band BEFORE widening: the stored low/high are already
+        # the parsed band, and re-parsing the hedge must reproduce them.
+        candidate = f"about {lo}" if lo == hi else f"about {lo} or {hi}"
+    else:
+        candidate = f"{lo}" if lo == hi else f"{lo} or {hi}"
+    parsed = chrono.parse_age(candidate)
+    if parsed != (lo, hi, approximate):
+        return None
+    return candidate
+
+
+def duration_years_band(quantity: object) -> tuple[int, int] | None:
+    """A duration in any unit as a whole-year band, rounded OUTWARD.
+
+    *"We lived there three years"* bounds a span; *"about eight months"* bounds
+    it to within a year. Rounding outward is the rule that keeps a duration from
+    manufacturing precision: a band is only ever widened by the conversion,
+    never tightened.
+
+    This arithmetic does not exist in ``chronology`` yet. It is a candidate for
+    promotion there beside :func:`chronology.from_age` — noted in this PR's body
+    rather than done here, because ``chronology`` is another branch's file this
+    cycle.
+    """
+    if not isinstance(quantity, dict):
+        return None
+    unit = collapsed_text(quantity.get("unit")) or "years"
+    try:
+        low = float(quantity.get("low"))
+        high = float(quantity.get("high"))
+    except (TypeError, ValueError):
+        return None
+    if low < 0 or high < low:
+        return None
+    per_year = {"years": 1.0, "months": 12.0, "weeks": DAYS_PER_YEAR / 7.0, "days": DAYS_PER_YEAR}
+    divisor = per_year.get(unit)
+    if divisor is None:
+        return None
+    if bool(quantity.get("approximate")):
+        low, high = max(low - 1, 0.0), high + 1
+    return math.floor(low / divisor), math.ceil(high / divisor)
+
+
+def _claim_provenance(claim: dict) -> dict:
+    """The provenance entry a claim contributes to the record it dates.
+
+    ``chronology.claim_score`` counts DISTINCT provenance ``source`` values as
+    consilience, so two independent sources saying the same thing corroborate
+    and one source saying it twice does not. The claim id rides along because a
+    person looking at a contradiction should be able to get from the displayed
+    date back to the sentence that produced it.
+    """
+    entry = {"source": _source_key(claim), "claim_id": collapsed_text(claim.get("claim_id"))}
+    return {key: value for key, value in entry.items() if value}
+
+
+def _record_for_dated_claim(claim: dict) -> chrono.DateRecord | None:
+    """A ``date``/``range`` claim's stored value, carrying its source."""
+    record = chrono.from_dict(claim.get("temporal_value"))
+    if record is None:
+        return None
+    entry = _claim_provenance(claim)
+    if entry and entry not in [dict(p) for p in record.provenance]:
+        record = replace(record, provenance=record.provenance + (entry,))
+    return record
+
+
+def _record_for_age_claim(claim: dict, birth: object) -> tuple[chrono.DateRecord | None, str]:
+    """An ``age`` claim as an interval — only where the birth anchor exists.
+
+    §10 verbatim: *"I was about 12"* produces a fuzzy interval and a calibrated
+    basis, not an exact birthday-derived day. Without a birth anchor there is no
+    interval to produce and the honest answer is to say which anchor is missing,
+    which is what the second element of the return is for.
+    """
+    quantity = claim.get("temporal_value")
+    if not isinstance(quantity, dict):
+        return None, "quantity_band_unrepresentable"
+    if birth is None:
+        return None, "age_without_birth_anchor"
+    text = optional_text(quantity.get("text")) or age_text_for_band(
+        float(quantity.get("low") or 0.0),
+        float(quantity.get("high") or 0.0),
+        bool(quantity.get("approximate")),
+    )
+    if not text:
+        return None, "quantity_band_unrepresentable"
+    record = chrono.from_age(birth, text)
+    if record is None:
+        return None, "quantity_band_unrepresentable"
+    entry = _claim_provenance(claim)
+    if entry:
+        record = replace(record, provenance=record.provenance + (entry,))
+    return record, ""
+
+
+# --------------------------------------------------------------------------
+# Grouping: claims about the same subject's same event are one node
+# --------------------------------------------------------------------------
+
+
+def _event_words(event_kind: object) -> str:
+    return collapsed_text(event_kind).replace("_", " ")
+
+
+def _node_label(subject_display: str, event_kind: object) -> str:
+    """What the node is called before Timeline styles it (wave E owns the page)."""
+    words = _event_words(event_kind)
+    return f"{subject_display} — {words}" if subject_display and words else (
+        subject_display or words
+    )
+
+
+def _subject_display(subject: str, claims: list[dict], roster_names: dict) -> str:
+    """The roster's name for a resolved subject; the raw mention otherwise.
+
+    A display label is never a primary key — the node id is — so this is free to
+    prefer whatever reads best without anything downstream depending on it.
+    """
+    named = roster_names.get(subject)
+    if named:
+        return named
+    for claim in claims:
+        mention = collapsed_text(claim.get("subject_mention"))
+        if mention:
+            return mention
+    return subject
+
+
+def _roster_names(roster_snapshot: object) -> dict:
+    """``ref -> display name`` from the roster snapshot, or an empty map."""
+    try:
+        index = ident.roster_index(roster_snapshot)
+    except TemporalContractError:
+        return {}
+    return {ref: name or ref for ref, name in index.refs.items()}
+
+
+def _group_claims(claims: list[dict], *, owner_ref: str) -> dict:
+    """Claims → ``node_id -> group``, in one deterministic pass.
+
+    The grouping key is the claim's own ``event_ref`` when the recorder minted
+    one, and the derived node id otherwise. ``identity`` claims form no node:
+    they assert *who*, not *when*, and their contribution to the projection is
+    the resolution they feed, not a row on the page.
+    """
+    groups: dict[str, dict] = {}
+    for claim in claims:
+        if claim.get("claim_type") == "identity":
+            continue
+        event_kind = collapsed_text(claim.get("event_kind"))
+        subject = _subject_handle(claim)
+        if not event_kind or not subject:
+            continue
+        node_id = collapsed_text(claim.get("event_ref")) or _mint_node_id(
+            event_kind=event_kind, subject=subject, owner_ref=owner_ref
+        )
+        group = groups.get(node_id)
+        if group is None:
+            group = {
+                "node_id": node_id,
+                "event_kind": event_kind,
+                "node_kind": _node_kind_for(event_kind),
+                "subject": subject,
+                "subjects": [],
+                "resolved": False,
+                "claims": [],
+            }
+            groups[node_id] = group
+        if subject not in group["subjects"]:
+            group["subjects"].append(subject)
+        if collapsed_text(claim.get("subject_ref")):
+            group["resolved"] = True
+        group["claims"].append(claim)
+    for group in groups.values():
+        group["claims"].sort(key=lambda row: collapsed_text(row.get("claim_id")))
+        group["subjects"].sort()
+    return groups
+
+
+# --------------------------------------------------------------------------
+# Reconciliation: the best-supported reading, with every rival kept
+# --------------------------------------------------------------------------
+
+
+def _reconcile_group(group: dict, *, birth: object, diagnostics: list) -> dict:
+    """One node's claims → ``{best, alternates, conflict, ...}``. Never destructive.
+
+    §6.5: reconciliation runs in the deterministic derivation, returns the
+    best-supported value *and* every materially supported alternative *and*
+    enough provenance to mint a stable Mirror row — and never deletes the losing
+    claim merely because another currently ranks higher.
+    """
+    records: list[chrono.DateRecord] = []
+    relations: list[dict] = []
+    durations: list[dict] = []
+    for claim in group["claims"]:
+        claim_type = collapsed_text(claim.get("claim_type"))
+        if claim_type in tc.DATED_CLAIM_TYPES:
+            record = _record_for_dated_claim(claim)
+            if record is not None:
+                records.append(record)
+            continue
+        if claim_type == "age":
+            record, finding = _record_for_age_claim(claim, birth)
+            if record is not None:
+                records.append(record)
+            elif finding:
+                diagnostics.append(
+                    {
+                        "finding": finding,
+                        "node_id": group["node_id"],
+                        "claim_id": collapsed_text(claim.get("claim_id")),
+                    }
+                )
+            continue
+        if claim_type == "duration":
+            durations.append(claim)
+            continue
+        if claim_type == "relative_order":
+            value = claim.get("temporal_value")
+            if isinstance(value, dict):
+                relations.append({"claim": claim, "relation": value})
+    outcome = chrono.reconcile(records)
+    return {
+        "best": outcome["best_supported"],
+        "alternates": list(outcome["alternates"]),
+        "conflict": float(outcome["conflict"]),
+        "relations": relations,
+        "durations": durations,
+    }
+
+
+def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> None:
+    """A duration bounds the far end of a span it has a start for (§6.4).
+
+    *"We lived there three years"* says nothing at all until something says when
+    it began; once a start exists, the duration says where the span ends, and
+    the result is an interval rather than a date because that is what was
+    asserted. With no start bound the claim is retained and the missing anchor
+    is reported — never filled in.
+    """
+    best = calculated.get("best")
+    for claim in calculated.get("durations") or ():
+        band = duration_years_band(claim.get("temporal_value"))
+        if band is None:
+            diagnostics.append(
+                {
+                    "finding": "quantity_band_unrepresentable",
+                    "node_id": group["node_id"],
+                    "claim_id": collapsed_text(claim.get("claim_id")),
+                }
+            )
+            continue
+        start_year = chrono.year_of(best) if best is not None else None
+        if start_year is None:
+            diagnostics.append(
+                {
+                    "finding": "duration_without_start",
+                    "node_id": group["node_id"],
+                    "claim_id": collapsed_text(claim.get("claim_id")),
+                }
+            )
+            continue
+        earliest = best.earliest or str(start_year)
+        latest = str(start_year + band[1])
+        if best.latest and best.latest >= latest:
+            continue
+        entry = _claim_provenance(claim)
+        calculated["best"] = chrono.DateRecord(
+            best=f"{earliest}/{latest}",
+            earliest=earliest,
+            latest=latest,
+            granularity="range",
+            confidence=max((best.confidence, "inferred"), key=chrono.CONFIDENCES.index),
+            basis="anchor",
+            anchors=best.anchors,
+            provenance=best.provenance + ((entry,) if entry else ()),
+        )
+        best = calculated["best"]
+
+
+# --------------------------------------------------------------------------
+# Partial order: relative claims and drags, without inventing precision
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Edge:
+    """One ordering statement, with both ends resolved to node ids."""
+
+    subject: str
+    relation: str
+    anchors: tuple[str, ...]
+    claim_refs: tuple[str, ...] = ()
+    constraint_refs: tuple[str, ...] = ()
+
+    def sort_key(self) -> tuple:
+        return (self.subject, self.relation, self.anchors, self.claim_refs, self.constraint_refs)
+
+
+def _anchor_index(groups: dict, displays: dict) -> dict:
+    """``key -> node ids`` for every handle an ordering anchor might name.
+
+    Exact keys and a uniqueness gate, exactly as ``identity_resolution`` does
+    it: no containment, no edit distance. A key two nodes answer to resolves to
+    neither — an anchor that might mean either of two things has not been
+    understood, and pretending otherwise is the silent merge the prior audit
+    rejected.
+    """
+    index: dict[str, list[str]] = {}
+
+    def add(key: object, node_id: str) -> None:
+        cleaned = normalized_mention_key(key)
+        if not cleaned:
+            return
+        index.setdefault(cleaned, [])
+        if node_id not in index[cleaned]:
+            index[cleaned].append(node_id)
+
+    for node_id, group in groups.items():
+        index.setdefault(node_id, [node_id])
+        display = displays.get(node_id, "")
+        words = _event_words(group["event_kind"])
+        add(display, node_id)
+        add(_node_label(display, group["event_kind"]), node_id)
+        add(f"{display} {words}", node_id)
+        add(words, node_id)
+        for claim in group["claims"]:
+            add(claim.get("subject_mention"), node_id)
+    return {key: tuple(value) for key, value in index.items()}
+
+
+def _resolve_anchor(text: object, index: dict) -> str:
+    """One node id, or ``""`` when the anchor is unknown or ambiguous."""
+    raw = collapsed_text(text)
+    if raw in index and len(index[raw]) == 1:
+        return index[raw][0]
+    matches = index.get(normalized_mention_key(raw)) or ()
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _build_edges(groups: dict, calculated: dict, constraints: object, index: dict):
+    """Ordering claims and drag constraints → resolved edges + what did not resolve.
+
+    A relative claim whose anchor names nothing the substrate knows is **kept**:
+    the node stays retained-but-unplaced, its relation stays visible in the
+    node's provenance summary, and the missing anchor becomes a work item. §6.4
+    is explicit that *"the summer after we moved"* must be retained even when it
+    cannot yet be placed.
+    """
+    edges: list[_Edge] = []
+    unresolved: list[dict] = []
+
+    for node_id in sorted(groups):
+        for entry in calculated[node_id]["relations"]:
+            relation = entry["relation"]
+            claim_id = collapsed_text(entry["claim"].get("claim_id"))
+            anchors: list[str] = []
+            missing: list[str] = []
+            for anchor in relation.get("anchors") or ():
+                resolved = _resolve_anchor(anchor, index)
+                if resolved and resolved != node_id:
+                    anchors.append(resolved)
+                else:
+                    missing.append(collapsed_text(anchor))
+            if missing or not anchors:
+                unresolved.append(
+                    {
+                        "finding": "anchor_unresolved",
+                        "node_id": node_id,
+                        "claim_id": claim_id,
+                        "relation": collapsed_text(relation.get("relation")),
+                        "anchors": missing or [collapsed_text(a) for a in relation.get("anchors") or ()],
+                    }
+                )
+                continue
+            edges.append(
+                _Edge(
+                    subject=node_id,
+                    relation=collapsed_text(relation.get("relation")),
+                    anchors=tuple(anchors),
+                    claim_refs=(claim_id,) if claim_id else (),
+                )
+            )
+
+    for value in constraints or ():
+        try:
+            row = tc.validate_ordering_constraint(value)
+        except TemporalContractError:
+            continue
+        if row["status"] != "active":
+            continue
+        subject = row["subject_node_id"]
+        anchors = tuple(a for a in row["anchor_node_ids"] if a in groups)
+        if subject not in groups or len(anchors) != len(row["anchor_node_ids"]):
+            unresolved.append(
+                {
+                    "finding": "anchor_unresolved",
+                    "node_id": subject,
+                    "constraint_id": row["constraint_id"],
+                    "relation": row["relation"],
+                    "anchors": [a for a in row["anchor_node_ids"] if a not in groups],
+                }
+            )
+            continue
+        edges.append(
+            _Edge(
+                subject=subject,
+                relation=row["relation"],
+                anchors=anchors,
+                constraint_refs=(row["constraint_id"],),
+            )
+        )
+
+    edges.sort(key=_Edge.sort_key)
+    return edges, unresolved
+
+
+def _strict_arcs(edge: _Edge) -> tuple[tuple[str, str], ...]:
+    """The earlier→later arcs an edge asserts. ``within`` asserts none."""
+    if edge.relation == "before":
+        return ((edge.subject, edge.anchors[0]),)
+    if edge.relation == "after":
+        return ((edge.anchors[0], edge.subject),)
+    if edge.relation == "between" and len(edge.anchors) == 2:
+        return ((edge.anchors[0], edge.subject), (edge.subject, edge.anchors[1]))
+    return ()
+
+
+def _order_cycles(edges) -> list[tuple[str, ...]]:
+    """Every cycle in the strict-order graph, each as a sorted node-id tuple.
+
+    A cycle is a contradiction the person stated — *"A after B"* and *"B after
+    A"* cannot both hold — and it must become a Mirror row rather than a
+    divergent loop. The walk is a deterministic depth-first search over sorted
+    ids, so the same claims always report the same cycles.
+    """
+    graph: dict[str, list[str]] = {}
+    for edge in edges:
+        for start, end in _strict_arcs(edge):
+            graph.setdefault(start, [])
+            if end not in graph[start]:
+                graph[start].append(end)
+    for arcs in graph.values():
+        arcs.sort()
+
+    found: set[tuple[str, ...]] = set()
+    state: dict[str, int] = {}
+    stack: list[str] = []
+
+    def walk(node: str) -> None:
+        state[node] = 1
+        stack.append(node)
+        for neighbour in graph.get(node, ()):
+            colour = state.get(neighbour, 0)
+            if colour == 0:
+                walk(neighbour)
+            elif colour == 1:
+                cut = stack.index(neighbour)
+                found.add(tuple(sorted(stack[cut:])))
+        stack.pop()
+        state[node] = 2
+
+    for node in sorted(graph):
+        if state.get(node, 0) == 0:
+            walk(node)
+    return sorted(found)
+
+
+def _bound_from_edge(edge: _Edge, bounds: dict) -> chrono.DateRecord | None:
+    """What this edge says about its subject, given where its anchors sit.
+
+    Every conversion goes through :func:`chronology.from_anchor` — a relation
+    plus a landmark yields BOUNDS, never a named date, which is §2.6's rule that
+    a move must not persist a fabricated exact date, applied to reading as well
+    as to writing.
+    """
+    anchors = [bounds.get(ref) for ref in edge.anchors]
+    if any(record is None for record in anchors):
+        return None
+    if edge.relation == "before":
+        return chrono.from_anchor(anchors[0], "before")
+    if edge.relation == "after":
+        return chrono.from_anchor(anchors[0], "after")
+    if edge.relation == "within":
+        return chrono.from_anchor(anchors[0], "during")
+    if edge.relation == "between" and len(anchors) == 2:
+        forward = chrono.intersect(
+            chrono.from_anchor(anchors[0], "after"), chrono.from_anchor(anchors[1], "before")
+        )
+        if forward is not None:
+            return forward
+        # "Between A and B" does not promise A came first.
+        return chrono.intersect(
+            chrono.from_anchor(anchors[1], "after"), chrono.from_anchor(anchors[0], "before")
+        )
+    return None
+
+
+def _credit(contributions: dict, edge: _Edge) -> None:
+    """Record that this edge's anchors (and theirs) placed its subject."""
+    bucket = contributions.setdefault(edge.subject, set())
+    for anchor in edge.anchors:
+        bucket.add(anchor)
+        bucket |= contributions.get(anchor, set())
+    bucket.discard(edge.subject)
+
+
+def _propagate(edges, bounds: dict, *, diagnostics: list, rejected: dict, contributions: dict) -> dict:
+    """Narrow every node's interval by every edge, to a bounded fixpoint.
+
+    Narrowing is monotone — an interval only ever shrinks — so the loop settles;
+    :data:`MAX_PROPAGATION_ROUNDS` is the guarantee that a future rule change
+    cannot turn "settles" into "hangs", and reaching it is reported rather than
+    swallowed. Edges inside an order cycle are excluded before the walk begins:
+    a contradiction is shown, not chased.
+
+    An edge whose bound is DISJOINT from a value the node already holds is the
+    §2.6/§10 case — a move against an explicit incompatible date. Both are kept,
+    the explicit date keeps the display, and the conflict becomes a work item.
+
+    ``contributions`` collects, per node, every anchor node that actually moved
+    its bounds — transitively, because an anchor may itself have been placed by
+    another. That is what lets the node's ``input_claim_refs`` name the evidence
+    that placed it rather than only the claims that mention it, and therefore
+    what lets ``input_fingerprint`` change when a *new anchor* tightens the
+    interval (§6.4's "a new anchor can tighten affected calculated intervals",
+    §7's fingerprint contract).
+    """
+    cycles = _order_cycles(edges)
+    in_cycle = {node for cycle in cycles for node in cycle}
+    for cycle in cycles:
+        diagnostics.append({"finding": "order_cycle", "node_ids": list(cycle)})
+
+    live = [
+        edge
+        for edge in edges
+        if edge.subject not in in_cycle and not any(a in in_cycle for a in edge.anchors)
+    ]
+
+    placed = dict(bounds)
+    settled = False
+    for _ in range(MAX_PROPAGATION_ROUNDS):
+        changed = False
+        for edge in live:
+            derived = _bound_from_edge(edge, placed)
+            if derived is None:
+                continue
+            current = placed.get(edge.subject)
+            if current is None:
+                placed[edge.subject] = derived
+                _credit(contributions, edge)
+                changed = True
+                continue
+            merged = chrono.intersect(current, derived)
+            if merged is None:
+                # Both are kept. The explicit date keeps the display; the order
+                # this edge asserts becomes an ALTERNATE on the node, so the
+                # disagreement is visible on Timeline and actionable in Mirror
+                # rather than silently discarded (§2.6, §10).
+                bucket = rejected.setdefault(edge.subject, [])
+                if all(record.to_dict() != derived.to_dict() for record in bucket):
+                    bucket.append(derived)
+                    diagnostics.append(
+                        {
+                            "finding": "constraint_contradicts_date",
+                            "node_id": edge.subject,
+                            "relation": edge.relation,
+                            "anchors": list(edge.anchors),
+                            "claim_refs": list(edge.claim_refs),
+                            "constraint_refs": list(edge.constraint_refs),
+                        }
+                    )
+                continue
+            if (merged.earliest, merged.latest) == (current.earliest, current.latest):
+                continue
+            placed[edge.subject] = merged
+            _credit(contributions, edge)
+            changed = True
+        if not changed:
+            settled = True
+            break
+    if not settled:
+        diagnostics.append({"finding": "propagation_cap_reached", "rounds": MAX_PROPAGATION_ROUNDS})
+    return placed
+
+
+# --------------------------------------------------------------------------
+# Nodes
+# --------------------------------------------------------------------------
+
+
+def _provenance_summary(group: dict, calculated: dict, best: object) -> str:
+    """One sentence a person could read: how many claims, from how many sources.
+
+    A node that could not be placed says what it is waiting for, because §6.4
+    requires *"the summer after we moved"* to stay visible as a relation rather
+    than disappear into an empty row.
+    """
+    claims = group["claims"]
+    sources = sorted({_source_key(claim) for claim in claims if _source_key(claim)})
+    parts = [f"{len(claims)} claim{'s' if len(claims) != 1 else ''}"]
+    if sources:
+        parts.append(f"from {len(sources)} source{'s' if len(sources) != 1 else ''}")
+    record = chrono.from_dict(best) if best is not None else None
+    if record is not None:
+        parts.append(f"best: {record.basis} ({record.confidence})")
+    else:
+        relations = calculated.get("relations") or ()
+        if relations:
+            spoken = sorted(
+                {
+                    f"{collapsed_text(entry['relation'].get('relation'))} "
+                    f"{', '.join(collapsed_text(a) for a in entry['relation'].get('anchors') or ())}".strip()
+                    for entry in relations
+                }
+            )
+            parts.append("unplaced: " + "; ".join(spoken))
+        else:
+            parts.append("unplaced: no date claimed")
+    alternates = calculated.get("alternates") or ()
+    if alternates:
+        parts.append(f"{len(alternates)} alternate{'s' if len(alternates) != 1 else ''}")
+    return "; ".join(parts)
+
+
+def _node_confidence(best: object, conflict: float) -> float:
+    """Calibrated support in ``0..1``, damped by how hard the rivals disagree.
+
+    ``chronology.claim_score`` is the package's one measure of how well a dating
+    claim is held; this normalizes it by the highest score that function can
+    return and then halves it toward zero as the conflict approaches a dead tie.
+    Confidence is never a substitute for provenance — it sits beside the
+    alternates and the claim refs, which are what a person actually checks.
+    """
+    if best is None:
+        return 0.0
+    raw = chrono.claim_score(best) / MAX_CLAIM_SCORE if MAX_CLAIM_SCORE else 0.0
+    return max(0.0, min(1.0, raw * (1.0 - 0.5 * max(0.0, min(1.0, conflict)))))
+
+
+def _conflict_state(*, alternates, conflict: float, contradicted: bool) -> str:
+    if contradicted or conflict >= MATERIAL_CONFLICT:
+        return "contradicted"
+    return "alternatives" if alternates else "none"
+
+
+def _node_dict(
+    group: dict,
+    calculated: dict,
+    *,
+    best: object,
+    extra_alternates,
+    extra_claim_refs,
+    contradicted: bool,
+    constraint_refs,
+    label: str,
+    generation: int,
+) -> dict:
+    """One validated :class:`~temporal_projection.CalculatedTimelineNode`.
+
+    Every claim in the group is an input, including the ones that produced no
+    interval: a ``relative_order`` claim that could not be placed and a
+    ``duration`` waiting for a start are both part of what this node was
+    calculated from, and leaving them out of ``input_claim_refs`` would make the
+    fingerprint lie about what would change the answer. So are the claims that
+    placed an ANCHOR this node was calculated against: *"the summer after we
+    moved"* is calculated from the move's date, and a node that did not cite it
+    would keep a stale fingerprint on the day that date arrives.
+    """
+    own = [collapsed_text(c.get("claim_id")) for c in group["claims"]]
+    own.extend(collapsed_text(ref) for ref in extra_claim_refs)
+    claim_refs = tuple(ref for ref in dict.fromkeys(own) if ref)
+    constraints = tuple(dict.fromkeys(collapsed_text(c) for c in constraint_refs if collapsed_text(c)))
+    alternates = [record.to_dict() for record in (calculated.get("alternates") or ())]
+    alternates.extend(record.to_dict() for record in extra_alternates)
+    conflict = float(calculated.get("conflict") or 0.0)
+    state = _conflict_state(alternates=alternates, conflict=conflict, contradicted=contradicted)
+    basis = tc.CLAIM_BASIS_BY_DATE_BASIS.get(
+        chrono.from_dict(best).basis if best is not None else "", "inferred"
+    )
+    return tp.validate_calculated_timeline_node(
+        {
+            "node_id": group["node_id"],
+            "node_kind": group["node_kind"],
+            "subject_refs": list(group["subjects"]),
+            "event_kind": group["event_kind"],
+            "label": label,
+            "best_temporal_value": best.to_dict() if best is not None else None,
+            "alternate_values": alternates,
+            "input_claim_refs": list(claim_refs),
+            "input_constraint_refs": list(constraints),
+            "input_fingerprint": tp.derive_input_fingerprint(
+                claim_ids=claim_refs,
+                constraint_ids=constraints,
+                calculation_rule_version=CALCULATION_RULE_VERSION,
+            ),
+            "basis": basis,
+            "confidence": _node_confidence(best, conflict),
+            "calculation_rule_version": CALCULATION_RULE_VERSION,
+            "projection_generation": generation,
+            "conflict_state": state,
+            "provenance_summary": _provenance_summary(group, calculated, best),
+        }
+    )
+
+
+def _node_sort_key(row: dict) -> tuple:
+    """Best-supported order: placed nodes chronologically, unplaced after.
+
+    ISO bounds sort correctly as text at every granularity, and the node id is
+    the final tiebreak so two things dated the same day never swap between
+    rebuilds.
+    """
+    value = row.get("best_temporal_value")
+    if not isinstance(value, dict):
+        return (1, "", "", row.get("node_id") or "")
+    return (0, value.get("earliest") or "", value.get("latest") or "", row.get("node_id") or "")
+
+
+# --------------------------------------------------------------------------
+# Work items
+# --------------------------------------------------------------------------
+
+
+def _is_loss_discovery(event_kind: object, subject_ref: object, resolved: bool) -> bool:
+    """§2.4: a loss question with nobody named in it is discovery, not a question.
+
+    Discovery is offer-only — the system may offer the Losses area and must
+    never put a generic loss prompt into the daily queue. The moment the person
+    names who died, the subject *resolves to a roster entity* and the ordinary
+    surfaces apply, which is exactly what §2.4 says should happen.
+
+    "Resolved" is the caller's fact, not a guess from the string: a raw mention
+    and an entity ref are both text, and inferring which is which from a slash
+    would make the loss rule depend on typography.
+    """
+    if collapsed_text(event_kind) not in LOSS_EVENT_KINDS:
+        return False
+    ref = collapsed_text(subject_ref)
+    return not resolved or not ref or ident.is_unresolved_ref(ref)
+
+
+def _score_components(
+    kind: str, *, system_value: float, event_kind: object, subject_ref: object, resolved: bool
+) -> dict:
+    """§8.5's raw components, plus the versioned combination of them.
+
+    The weights are simple on purpose. What wave F needs from wave D is the
+    *components* — reach, severity, sensitivity — computed where the evidence
+    is, and one stable work-item id to hang a calibrated score on later. A
+    plausible-looking calibrated number invented here would be the harder thing
+    to replace.
+    """
+    base = dict(WORK_ITEM_VALUE_DEFAULTS.get(kind, {}))
+    base["system_value"] = max(0.0, min(1.0, system_value))
+    base["sensitivity"] = SENSITIVITY_BY_EVENT_KIND.get(
+        collapsed_text(event_kind), DEFAULT_SENSITIVITY
+    )
+    if _is_loss_discovery(event_kind, subject_ref, resolved):
+        base["sensitivity"] = max(base["sensitivity"], 0.9)
+    combined = sum(SCORE_WEIGHTS[name] * base.get(name, 0.0) for name in SCORE_WEIGHTS)
+    base["combined_score"] = round(max(0.0, min(1.0, combined)), 6)
+    return base
+
+
+def _surfaces_for(kind: str, *, event_kind: object, subject_ref: object, resolved: bool) -> tuple[str, ...]:
+    if _is_loss_discovery(event_kind, subject_ref, resolved):
+        return LOSS_DISCOVERY_SURFACES
+    return SURFACES_BY_KIND.get(kind, ("timeline",))
+
+
+def _mint_work_item(
+    sink: dict,
+    components: dict,
+    *,
+    kind: str,
+    event_kind: object = None,
+    subject_ref: object = None,
+    event_ref: object = None,
+    node_ref: object = None,
+    requested_field: object = None,
+    prompt_intent: object = None,
+    claim_refs=(),
+    evidence_refs=(),
+    system_value: float = 0.0,
+    subject_resolved: bool = False,
+    now: object = None,
+) -> str:
+    """Validate one item into the sink, merging on a repeated identity.
+
+    Two derivation paths can reach the same question — a coarse date is both the
+    node's own precision gap and the reason a relative claim cannot be placed —
+    and because the id is a pure function of what is being asked, that is ONE
+    row with the union of the evidence rather than two rows competing (§5.4,
+    §2.3). The higher system value wins, since the merged item is asking for
+    both reasons at once.
+    """
+    scores = _score_components(
+        kind,
+        system_value=system_value,
+        event_kind=event_kind,
+        subject_ref=subject_ref,
+        resolved=subject_resolved,
+    )
+    payload = {
+        "kind": kind,
+        "state": "open",
+        "subject_ref": subject_ref,
+        "event_ref": event_ref,
+        "node_ref": node_ref,
+        "requested_field": requested_field,
+        "prompt_intent": prompt_intent,
+        "claim_refs": list(claim_refs),
+        "evidence_refs": list(evidence_refs),
+        "allowed_surfaces": list(
+            _surfaces_for(
+                kind, event_kind=event_kind, subject_ref=subject_ref, resolved=subject_resolved
+            )
+        ),
+    }
+    payload.update(scores)
+    try:
+        row = tp.validate_temporal_work_item(payload, now=now)
+    except TemporalContractError:
+        return ""
+    key = row["work_item_id"]
+    current = sink.get(key)
+    if current is None:
+        sink[key] = row
+        components[key] = scores
+        return key
+    merged = dict(current)
+    for field_name in ("claim_refs", "evidence_refs"):
+        merged[field_name] = sorted(set(current.get(field_name) or ()) | set(row.get(field_name) or ()))
+    if row.get("system_value", 0.0) > current.get("system_value", 0.0):
+        for name in tp.WORK_ITEM_SCORE_FIELDS:
+            if name in row:
+                merged[name] = row[name]
+        components[key] = scores
+    sink[key] = tp.validate_temporal_work_item(merged, now=now)
+    return key
+
+
+def _precision_target(event_kind: object) -> str:
+    return PRECISION_TARGETS.get(collapsed_text(event_kind), DEFAULT_PRECISION_TARGET)
+
+
+def _wants_precision(best: object, event_kind: object) -> bool:
+    """Is this node coarser than its event is worth asking about (§2.2)?
+
+    A node already at or finer than its target mints nothing: Timeline is an
+    invitation, not a backlog, and re-asking for a day when the year is what the
+    event deserves is exactly the false precision §2.2 forbids.
+    """
+    if best is None:
+        return True
+    record = chrono.from_dict(best)
+    if record is None:
+        return True
+    target = _precision_target(event_kind)
+    return _GRANULARITY_RANK.get(record.granularity, 99) > _GRANULARITY_RANK.get(target, 0)
+
+
+def _dated_claim_refs(group: dict) -> list[str]:
+    """The claims that actually asserted a date — the ones a conflict is between."""
+    return [
+        collapsed_text(claim.get("claim_id"))
+        for claim in group["claims"]
+        if collapsed_text(claim.get("claim_type")) in tc.DATED_CLAIM_TYPES + tc.QUANTITY_CLAIM_TYPES
+        and collapsed_text(claim.get("claim_id"))
+    ]
+
+
+def _evidence_refs(group: dict) -> list[str]:
+    return sorted({_source_key(claim) for claim in group["claims"] if _source_key(claim)})
+
+
+# --------------------------------------------------------------------------
+# The derivation
+# --------------------------------------------------------------------------
+
+
+def derive_calculated_timeline(
+    active_index: object,
+    *,
+    resolution_records: object = (),
+    roster_snapshot: object = (),
+    constraints: object = (),
+    birth_date: object = None,
+    owner_ref: object = None,
+    projection_generation: int = 0,
+    now: object = None,
+) -> CalculatedTimeline:
+    """Active claims in, a whole calculated timeline out. Pure and deterministic.
+
+    ``active_index`` is ``temporal_store.fold_active_index``'s mapping (or its
+    ``claims`` list, or a bare list of claim mappings). ``constraints`` are the
+    :class:`~temporal_claims.OrderingConstraint` records a drag wrote.
+    ``birth_date`` is the anchor ages are measured from; when it is not supplied
+    and the substrate holds exactly one ``birth`` node, that node's own
+    best-supported value is used, and when neither exists ages stay unplaced and
+    say so.
+
+    Determinism is a property of every step: claims are read in id order, groups
+    and edges are sorted, the fixpoint is bounded, and nothing consults a clock
+    except the work-item stamps and the phase timings, both of which
+    :func:`structural_signature` excludes. Two runs over the same inputs in any
+    input order produce the same projection.
+
+    Nothing here writes, publishes, or mutates. Wiring this into
+    ``timeline.timeline_data()`` and publishing the generation atomically are
+    separate steps by design (§7).
+    """
+    clock = time.perf_counter
+    started = clock()
+    timings: dict[str, float] = {}
+    diagnostics: list[dict] = []
+    owner = collapsed_text(owner_ref) or DEFAULT_OWNER_REF
+
+    claims = active_claim_rows(active_index)
+
+    mark = clock()
+    resolved, records, by_mention = _resolve_subjects(
+        claims,
+        resolution_records=resolution_records,
+        roster_snapshot=roster_snapshot,
+        now=now,
+    )
+    timings["resolve"] = clock() - mark
+
+    mark = clock()
+    groups = _group_claims(resolved, owner_ref=owner)
+    roster_names = _roster_names(roster_snapshot)
+    displays = {
+        node_id: _subject_display(group["subject"], group["claims"], roster_names)
+        for node_id, group in groups.items()
+    }
+    labels = {
+        node_id: _node_label(displays[node_id], group["event_kind"])
+        for node_id, group in groups.items()
+    }
+    timings["group"] = clock() - mark
+
+    mark = clock()
+    # Ages need the birth anchor, and the birth anchor is itself a node, so the
+    # dated claims settle first and the quantities read the result.
+    birth = chrono.from_dict(birth_date) if birth_date is not None else None
+    if birth is None:
+        births = [
+            group
+            for group in groups.values()
+            if group["event_kind"] == "birth"
+            and normalized_mention_key(group["subject"]) == normalized_mention_key(owner)
+        ]
+        if len(births) != 1:
+            births = [group for group in groups.values() if group["event_kind"] == "birth"]
+        if len(births) == 1:
+            seeded = _reconcile_group(births[0], birth=None, diagnostics=[])
+            birth = seeded["best"]
+
+    calculated = {
+        node_id: _reconcile_group(group, birth=birth, diagnostics=diagnostics)
+        for node_id, group in sorted(groups.items())
+    }
+    for node_id, group in sorted(groups.items()):
+        _apply_durations(group, calculated[node_id], diagnostics=diagnostics)
+    timings["reconcile"] = clock() - mark
+
+    mark = clock()
+    anchor_index = _anchor_index(groups, displays)
+    edges, unresolved_anchors = _build_edges(groups, calculated, constraints, anchor_index)
+    diagnostics.extend(unresolved_anchors)
+    seeds = {node_id: calculated[node_id]["best"] for node_id in sorted(groups)}
+    rejected: dict[str, list] = {}
+    contributions: dict[str, set] = {}
+    placed = _propagate(
+        edges,
+        seeds,
+        diagnostics=diagnostics,
+        rejected=rejected,
+        contributions=contributions,
+    )
+    anchor_claim_refs = {
+        node_id: [
+            collapsed_text(claim.get("claim_id"))
+            for anchor in sorted(anchors)
+            for claim in (groups.get(anchor) or {}).get("claims", ())
+        ]
+        for node_id, anchors in contributions.items()
+    }
+    timings["propagate"] = clock() - mark
+
+    cycle_nodes = {
+        node
+        for row in diagnostics
+        if row.get("finding") == "order_cycle"
+        for node in row.get("node_ids") or ()
+    }
+    contradicted_nodes = cycle_nodes | {
+        row.get("node_id")
+        for row in diagnostics
+        if row.get("finding") == "constraint_contradicts_date"
+    }
+
+    constraints_by_node: dict[str, list[str]] = {}
+    for edge in edges:
+        for ref in edge.constraint_refs:
+            constraints_by_node.setdefault(edge.subject, []).append(ref)
+
+    nodes = [
+        _node_dict(
+            groups[node_id],
+            calculated[node_id],
+            best=placed.get(node_id),
+            extra_alternates=rejected.get(node_id, ()),
+            extra_claim_refs=anchor_claim_refs.get(node_id, ()),
+            contradicted=node_id in contradicted_nodes,
+            constraint_refs=constraints_by_node.get(node_id, ()),
+            label=labels[node_id],
+            generation=projection_generation,
+        )
+        for node_id in sorted(groups)
+    ]
+    nodes.sort(key=_node_sort_key)
+
+    mark = clock()
+    items, components, reach = _derive_work_items(
+        groups=groups,
+        calculated=calculated,
+        placed=placed,
+        edges=edges,
+        diagnostics=diagnostics,
+        records=records,
+        by_mention=by_mention,
+        displays=displays,
+        owner=owner,
+        now=now,
+    )
+    timings["work_items"] = clock() - mark
+    timings["total"] = clock() - started
+
+    return CalculatedTimeline(
+        nodes=tuple(nodes),
+        work_items=tuple(items),
+        timings={phase: round(timings.get(phase, 0.0), 9) for phase in TIMING_PHASES},
+        score_components=components,
+        reach=reach,
+        diagnostics={
+            "findings": diagnostics,
+            "claims": len(claims),
+            "nodes": len(nodes),
+            "edges": len(edges),
+            "unplaced": sorted(
+                node_id for node_id in groups if placed.get(node_id) is None
+            ),
+        },
+        projection_generation=projection_generation,
+    )
+
+
+def _derive_work_items(
+    *, groups, calculated, placed, edges, diagnostics, records, by_mention, displays, owner, now
+):
+    """Everything the substrate currently implies a question about (§5.4, D2).
+
+    Four typed kinds out of one shape, each with the identity that makes
+    "answer once, update everywhere" mechanical rather than aspirational.
+    Scoring calibration belongs to wave F; what this produces is the raw value
+    components §8.5 lists — above all **reach**, the number of unplaced nodes an
+    anchor would place, which is the number that makes a keystone win on merit
+    rather than on its type (§2.3).
+    """
+    items: dict[str, dict] = {}
+    components: dict[str, dict] = {}
+    reach: dict[str, int] = {}
+
+    unplaced = {node_id for node_id in groups if placed.get(node_id) is None}
+
+    node_reach: dict[str, int] = {}
+    for edge in edges:
+        if edge.subject not in unplaced:
+            continue
+        for anchor in edge.anchors:
+            node_reach[anchor] = node_reach.get(anchor, 0) + 1
+
+    handle_reach: dict[str, set] = {}
+    handle_claims: dict[str, set] = {}
+    handle_text: dict[str, str] = {}
+    for row in diagnostics:
+        if row.get("finding") != "anchor_unresolved":
+            continue
+        for anchor in row.get("anchors") or ():
+            key = normalized_mention_key(anchor)
+            if not key:
+                continue
+            handle_text.setdefault(key, collapsed_text(anchor))
+            handle_reach.setdefault(key, set()).add(row.get("node_id"))
+            if row.get("claim_id"):
+                handle_claims.setdefault(key, set()).add(row["claim_id"])
+
+    # -- identity ---------------------------------------------------------
+    for key in sorted(records):
+        record = records[key]
+        refs = sorted(set(by_mention.get(key, ())))
+        row = ident.identity_work_item(record, claim_refs=refs, now=now)
+        if row is None:
+            continue
+        raw = len(refs)
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="identity_uncertain",
+            subject_ref=row.get("subject_ref"),
+            requested_field=row.get("requested_field"),
+            prompt_intent=row.get("prompt_intent"),
+            claim_refs=row.get("claim_refs") or (),
+            evidence_refs=row.get("evidence_refs") or (),
+            system_value=min(1.0, raw / REACH_SATURATION),
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = raw
+
+    # -- missing anchors: an ordering anchor the substrate does not know --
+    for key in sorted(handle_text):
+        raw = len(handle_reach.get(key, ()))
+        text = handle_text[key]
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="missing_anchor",
+            subject_ref=ident.unresolved_subject_ref(text),
+            requested_field="date",
+            prompt_intent=f"When was {text}?",
+            claim_refs=sorted(handle_claims.get(key, ())),
+            system_value=min(1.0, raw / REACH_SATURATION),
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = raw
+
+    # -- missing anchors: an age with no birthday to measure it from ------
+    age_claims = sorted(
+        {
+            row.get("claim_id")
+            for row in diagnostics
+            if row.get("finding") == "age_without_birth_anchor" and row.get("claim_id")
+        }
+    )
+    if age_claims:
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="missing_anchor",
+            subject_ref=owner,
+            event_kind="birth",
+            requested_field="birth_date",
+            subject_resolved=True,
+            prompt_intent=(
+                "What is your date of birth? "
+                f"{len(age_claims)} thing{'s' if len(age_claims) != 1 else ''} "
+                "you dated by age can be placed once it is known."
+            ),
+            claim_refs=age_claims,
+            system_value=min(1.0, len(age_claims) / REACH_SATURATION),
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = len(age_claims)
+
+    # -- missing anchors: a duration with no start ------------------------
+    for row in sorted(
+        (r for r in diagnostics if r.get("finding") == "duration_without_start"),
+        key=lambda r: (r.get("node_id") or "", r.get("claim_id") or ""),
+    ):
+        node_id = row.get("node_id")
+        group = groups.get(node_id)
+        if group is None:
+            continue
+        _mint_work_item(
+            items,
+            components,
+            kind="missing_anchor",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="start_date",
+            subject_resolved=group["resolved"],
+            prompt_intent=f"When did {displays.get(node_id, group['subject'])} begin?",
+            claim_refs=[row.get("claim_id")] if row.get("claim_id") else [],
+            evidence_refs=_evidence_refs(group),
+            system_value=min(1.0, node_reach.get(node_id, 0) / REACH_SATURATION),
+            now=now,
+        )
+
+    # -- precision gaps ---------------------------------------------------
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        best = placed.get(node_id)
+        if not _wants_precision(best, group["event_kind"]):
+            continue
+        raw = node_reach.get(node_id, 0)
+        display = displays.get(node_id, group["subject"])
+        target = _precision_target(group["event_kind"])
+        intent = (
+            f"When did {display} — {_event_words(group['event_kind'])} — happen?"
+            if best is None
+            else f"Do you know the {target} for {display} — {_event_words(group['event_kind'])}?"
+        )
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="precision_gap",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="date",
+            subject_resolved=group["resolved"],
+            prompt_intent=intent,
+            claim_refs=_dated_claim_refs(group),
+            evidence_refs=_evidence_refs(group),
+            system_value=min(1.0, raw / REACH_SATURATION),
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = raw
+
+    # -- contradictions ---------------------------------------------------
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        conflict = float(calculated[node_id].get("conflict") or 0.0)
+        if conflict < MATERIAL_CONFLICT:
+            continue
+        refs = _dated_claim_refs(group)
+        if len(refs) < 2:
+            continue
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="contradiction",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="date",
+            subject_resolved=group["resolved"],
+            prompt_intent=(
+                f"Two dates are claimed for {displays.get(node_id, group['subject'])} — "
+                f"{_event_words(group['event_kind'])}. Which is right?"
+            ),
+            claim_refs=refs,
+            evidence_refs=_evidence_refs(group),
+            system_value=conflict,
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = len(refs)
+
+    for row in diagnostics:
+        if row.get("finding") == "order_cycle":
+            cycle = list(row.get("node_ids") or ())
+            refs = sorted(
+                {
+                    ref
+                    for edge in edges
+                    if edge.subject in cycle
+                    for ref in edge.claim_refs + edge.constraint_refs
+                }
+            )
+            if len(cycle) < 2 or len(refs) < 2:
+                continue
+            head = groups.get(cycle[0])
+            _mint_work_item(
+                items,
+                components,
+                kind="contradiction",
+                event_ref=cycle[0],
+                node_ref=cycle[0],
+                event_kind=head["event_kind"] if head else None,
+                subject_ref=head["subject"] if head else None,
+                requested_field="order",
+                prompt_intent=(
+                    "These cannot all be in the order they were given: "
+                    + ", ".join(displays.get(n, n) for n in cycle)
+                ),
+                claim_refs=refs,
+                system_value=1.0,
+                now=now,
+            )
+            continue
+        if row.get("finding") != "constraint_contradicts_date":
+            continue
+        node_id = row.get("node_id")
+        group = groups.get(node_id)
+        if group is None:
+            continue
+        refs = sorted(
+            set(_dated_claim_refs(group))
+            | set(row.get("claim_refs") or ())
+            | set(row.get("constraint_refs") or ())
+        )
+        if len(refs) < 2:
+            continue
+        _mint_work_item(
+            items,
+            components,
+            kind="contradiction",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="date",
+            prompt_intent=(
+                f"The order given for {displays.get(node_id, group['subject'])} does not fit "
+                "the date claimed for it."
+            ),
+            claim_refs=refs,
+            evidence_refs=_evidence_refs(group),
+            system_value=1.0,
+            now=now,
+        )
+
+    ordered = sorted(
+        items.values(),
+        key=lambda row: (
+            -float(row.get("combined_score") or 0.0),
+            row.get("kind") or "",
+            row.get("work_item_id") or "",
+        ),
+    )
+    return ordered, components, reach
+
+
+__all__ = [
+    "CALCULATION_RULE_VERSION",
+    "DEFAULT_OWNER_REF",
+    "DEFAULT_PRECISION_TARGET",
+    "DEFAULT_SENSITIVITY",
+    "ERROR_CODES",
+    "LOSS_DISCOVERY_SURFACES",
+    "LOSS_EVENT_KINDS",
+    "MATERIAL_CONFLICT",
+    "MAX_CLAIM_SCORE",
+    "MAX_PROPAGATION_ROUNDS",
+    "PRECISION_TARGETS",
+    "REACH_SATURATION",
+    "SCORE_FORMULA_VERSION",
+    "SCORE_WEIGHTS",
+    "SENSITIVITY_BY_EVENT_KIND",
+    "SURFACES_BY_KIND",
+    "TIMING_PHASES",
+    "WORK_ITEM_VALUE_DEFAULTS",
+    "CalculatedTimeline",
+    "TemporalTimelineError",
+    "active_claim_rows",
+    "age_text_for_band",
+    "derive_calculated_timeline",
+    "duration_years_band",
+    "structural_signature",
+]
