@@ -891,9 +891,26 @@ _LANDMARK_DATE_KEYS = frozenset({
     "best", "earliest", "latest", "granularity", "confidence", "basis",
     "anchors", "provenance",
 })
+#: A provenance entry is a small flat object — `{"claim", "basis", "source"}`
+#: and the witness's `{"name", "said_at"}` (`chronology.witness_provenance`).
+#: Bounded exactly as the anchor list is: this is a structural layer, and a
+#: structural layer that accepts an unbounded nested object is an injection
+#: surface, not a parser.
+_LANDMARK_MAX_PROVENANCE = 6
+_LANDMARK_PROVENANCE_MAX_CHARS = 160
 
 
 def _parse_landmark_date(raw: object) -> dict | None:
+    """Structural layer of a landmark's date — interval AND warrant.
+
+    v219 (B4): ``anchors`` and ``provenance`` were in :data:`_LANDMARK_DATE_KEYS`
+    from the start — a payload carrying them PASSED the subset check — and then
+    the copy loop below read only the six string keys and dropped them on the
+    floor. A date the recorder had anchored on the person's birth and quoted
+    ("you said you were about five") arrived at the writer as a bare interval,
+    which is how the warrant went missing before anything even reached an argv.
+    Both now survive, bounded the way `_parse_placed` bounds its anchors.
+    """
     if not isinstance(raw, dict) or not raw or not set(raw) <= _LANDMARK_DATE_KEYS:
         return None
     parsed: dict = {}
@@ -909,7 +926,57 @@ def _parse_landmark_date(raw: object) -> dict | None:
         parsed[key] = value
     if not any(parsed.get(key) for key in ("best", "earliest", "latest")):
         return None
+    anchors = raw.get("anchors")
+    if anchors is not None:
+        if isinstance(anchors, str):
+            anchors = [anchors]
+        if not isinstance(anchors, list):
+            return None
+        cleaned = [item.strip() for item in anchors
+                   if isinstance(item, str) and item.strip()
+                   and len(item.strip()) <= _PLACED_ANCHOR_MAX_CHARS]
+        if cleaned:
+            parsed["anchors"] = cleaned[:_PLACED_MAX_ANCHORS]
+    provenance = raw.get("provenance")
+    if provenance is not None:
+        if isinstance(provenance, dict):
+            provenance = [provenance]
+        # Same shape rule the anchor list above uses: a warrant of the wrong
+        # TYPE rejects the whole date, junk WITHIN the list is filtered.
+        if not isinstance(provenance, list):
+            return None
+        cleaned = _parse_landmark_provenance(provenance)
+        if cleaned:
+            parsed["provenance"] = cleaned
     return parsed
+
+
+def _parse_landmark_provenance(raw: list) -> list[dict]:
+    """A bounded list of flat, short-stringed provenance objects."""
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict) or not item:
+            continue
+        entry: dict = {}
+        for key, value in item.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            # A provenance value is a short string or a plain number —
+            # `{"source": "A12"}`, `{"confidence": 0.8}`. `bool` is an `int`,
+            # so a stated flag passes here too.
+            if isinstance(value, (int, float)):
+                entry[key.strip()] = value
+                continue
+            if not isinstance(value, str):
+                continue
+            text = value.strip()
+            if text and len(text) <= _LANDMARK_PROVENANCE_MAX_CHARS:
+                entry[key.strip()] = text
+        if entry:
+            out.append(entry)
+        if len(out) >= _LANDMARK_MAX_PROVENANCE:
+            break
+    return out
 
 
 def _parse_landmark(raw: object) -> dict | None:

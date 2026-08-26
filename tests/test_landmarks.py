@@ -3605,3 +3605,203 @@ class KnownEntriesTests(unittest.TestCase):
             "interactions/landmarks/evals/goldens/"
             "landmark-known-entries-01.json",
             manifest["framework_files"])
+
+
+class ProvenanceSurvivesTests(unittest.TestCase):
+    """B4: basis, anchors and provenance survive the WHOLE path.
+
+    The traced defect chain, closed end to end:
+    ``conversation_delivery._parse_landmark_date`` allowlisted ``anchors`` and
+    ``provenance`` and then dropped them; ``landmark_invocation`` serialized
+    the EDTF expression alone; ``lifehug.cmd_landmark_record`` rebuilt every
+    date with ``basis="stated"`` and an empty provenance. A date the system
+    CALCULATED from an age therefore reached the vault claiming the person had
+    STATED it — and `chronology.claim_score` paid it for the difference.
+    """
+
+    def setUp(self):
+        self.calculated = chrono.DateRecord(
+            best="1984", earliest="1984", latest="1984", granularity="year",
+            confidence="approximate", basis="age", anchors=("birth",),
+            provenance=({"claim": "about five", "basis": "age",
+                         "source": "A12"},),
+        ).to_dict()
+
+    def _file(self, store, entry):
+        """Run the package's own invocation through the real CLI."""
+        import lifehug  # noqa: PLC0415
+        import timeline  # noqa: PLC0415
+
+        argv = li.landmark_invocation(entry)
+        self.assertIsNotNone(argv)
+        args = lifehug.build_parser().parse_args(argv)
+        with mock.patch.object(timeline, "LANDMARKS_STORE", store):
+            self.assertEqual(lifehug.cmd_landmark_record(args), 0)
+            return timeline.load_landmarks()
+
+    # -- the round trip ---------------------------------------------------
+
+    def test_a_calculated_date_reaches_the_store_byte_faithfully(self):
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        filed = self._file(store, {"domain": "residences", "label": "Mesa",
+                                   "city": "Mesa", "date": self.calculated})
+        self.assertEqual(filed["residences"][0]["date"], self.calculated)
+
+    def test_each_end_of_a_span_keeps_its_own_warrant(self):
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        moved_out = _date("1991", basis="stated")
+        filed = self._file(store, {
+            "domain": "residences", "label": "Bell Avenue", "city": "Mesa",
+            "span": {"start": self.calculated, "end": moved_out}})
+        span = filed["residences"][0]["span"]
+        self.assertEqual(span["start"], self.calculated)
+        self.assertEqual(span["end"], moved_out)
+        self.assertEqual(span["start"]["basis"], "age")
+        self.assertEqual(span["end"]["basis"], "stated")
+
+    def test_the_recorder_output_carries_the_warrant_to_the_writer(self):
+        """`_parse_landmark_date` used to allowlist these and drop them."""
+        parsed = engine._parse_landmark({
+            "domain": "residences", "label": "Mesa", "city": "Mesa",
+            "date": self.calculated})
+        self.assertEqual(parsed["date"]["anchors"], ["birth"])
+        self.assertEqual(parsed["date"]["provenance"],
+                         [{"claim": "about five", "basis": "age",
+                           "source": "A12"}])
+        self.assertEqual(li.validate_landmark(parsed)["date"], self.calculated)
+
+    def test_an_over_long_or_malformed_warrant_degrades_and_never_errors(self):
+        base = {"best": "1984", "earliest": "1984", "latest": "1984"}
+        for bad in ({"provenance": "not a list"}, {"anchors": {"a": 1}}):
+            with self.subTest(**bad):
+                self.assertIsNone(engine._parse_landmark_date({**base, **bad}))
+        loose = engine._parse_landmark_date(
+            {**base, "provenance": [{"claim": "x" * 500}, {}, "junk"]})
+        self.assertEqual(loose.get("provenance"), None)
+
+    def test_every_warrant_flag_the_invocation_emits_is_a_real_cli_flag(self):
+        import lifehug  # noqa: PLC0415
+
+        argv = li.landmark_invocation({
+            "domain": "residences", "label": "Mesa", "city": "Mesa",
+            "date": self.calculated,
+            "span": {"start": self.calculated, "end": _date("1991")}})
+        args = lifehug.build_parser().parse_args(argv)
+        self.assertEqual(args.basis, "age")
+        self.assertEqual(args.anchor, ["birth"])
+        self.assertEqual(args.start_basis, "age")
+        self.assertEqual(args.end_basis, "stated")
+
+    # -- the inflation, pinned dead ---------------------------------------
+
+    def test_a_calculated_date_can_no_longer_masquerade_as_stated(self):
+        """The incident: +2.0 of `claim_score` the claim had not earned.
+
+        Filed pre-v219, this record came back ``basis="stated",
+        confidence="certain"`` — 10.0 — and outscored the very claim it was
+        derived FROM. It now lands at its own 8.0, and a genuinely stated
+        rival beats it, which is the whole point of a basis.
+        """
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        filed = self._file(store, {"domain": "residences", "label": "Mesa",
+                                   "city": "Mesa", "date": self.calculated})
+        landed = filed["residences"][0]["date"]
+        self.assertEqual(chrono.claim_score(landed),
+                         chrono.claim_score(self.calculated))
+        masquerade = dict(landed, basis="stated", confidence="certain")
+        self.assertGreater(chrono.claim_score(masquerade),
+                           chrono.claim_score(landed))
+        stated_rival = _date("1986", basis="stated")
+        self.assertEqual(chrono.reconcile([landed, stated_rival])["best_supported"],
+                         chrono.from_dict(stated_rival))
+
+    # -- reconcile's seat in the fold --------------------------------------
+
+    def test_a_conflicting_re_record_retains_both_claims(self):
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        self._file(store, {"domain": "residences", "label": "Mesa",
+                           "city": "Mesa", "date": self.calculated})
+        stated = _date("1986", basis="stated")
+        filed = self._file(store, {"domain": "residences", "label": "Mesa",
+                                   "address": "12 Bell Ave", "date": stated})
+        entry = filed["residences"][0]
+        self.assertEqual(len(filed["residences"]), 1)
+        # The better-supported claim displays...
+        self.assertEqual(entry["date"], stated)
+        # ...and the one it beat is still THERE, not overwritten.
+        self.assertEqual(entry[li.DATE_ALTERNATES_KEY], [self.calculated])
+        # The ordinary dict merge is untouched for everything else.
+        self.assertEqual(entry["city"], "Mesa")
+        self.assertEqual(entry["address"], "12 Bell Ave")
+        read = li.landmark_date(entry)
+        self.assertEqual(read["best_supported"], stated)
+        self.assertEqual(read["alternates"], [self.calculated])
+        self.assertGreater(read["conflict"], 0.0)
+
+    def test_the_losing_claim_is_never_deleted_by_a_later_pass(self):
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        self._file(store, {"domain": "residences", "label": "Mesa",
+                           "city": "Mesa", "date": self.calculated})
+        self._file(store, {"domain": "residences", "label": "Mesa",
+                           "date": _date("1986", basis="stated")})
+        filed = self._file(store, {"domain": "residences", "label": "Mesa",
+                                   "address": "12 Bell Ave"})
+        entry = filed["residences"][0]
+        self.assertEqual(entry["date"]["best"], "1986")
+        self.assertEqual(entry[li.DATE_ALTERNATES_KEY], [self.calculated])
+
+    def test_refiling_the_same_claim_does_not_accumulate_alternates(self):
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        for _ in range(4):
+            filed = self._file(store, {"domain": "residences", "label": "Mesa",
+                                       "city": "Mesa", "date": self.calculated})
+        entry = filed["residences"][0]
+        self.assertEqual(entry["date"], self.calculated)
+        self.assertNotIn(li.DATE_ALTERNATES_KEY, entry)
+
+    def test_a_refinement_replaces_rather_than_fights_its_coarser_claim(self):
+        store = root_parent_tmp(self, ROOT) / "landmarks.json"
+        self._file(store, {"domain": "residences", "label": "Mesa",
+                           "city": "Mesa", "date": _date("1986")})
+        filed = self._file(store, {"domain": "residences", "label": "Mesa",
+                                   "date": _date("1986-06-14")})
+        entry = filed["residences"][0]
+        self.assertEqual(entry["date"]["best"], "1986-06-14")
+        self.assertEqual(li.landmark_date(entry)["conflict"], 0.0)
+
+    def test_silence_about_a_date_is_not_a_correction(self):
+        merged = li.merge_landmark_entry(
+            {"domain": "residences", "label": "Mesa", "date": self.calculated},
+            {"domain": "residences", "label": "Mesa", "city": "Mesa"})
+        self.assertEqual(merged["date"], self.calculated)
+        self.assertEqual(merged["city"], "Mesa")
+
+    def test_a_none_still_replaces_the_whole_entry(self):
+        merged = li.merge_landmark_entry(
+            {"domain": "military", "label": "Army", "date": self.calculated},
+            {"domain": "military", "none": True})
+        self.assertEqual(merged, {"domain": "military", "none": True})
+
+    def test_the_alternates_keys_are_bookkeeping_no_rung_can_read(self):
+        """Unnamed, they would feed `entry_superseded_by` and RETIRE entries."""
+        for key in (li.DATE_ALTERNATES_KEY, li.SPAN_ALTERNATES_KEY):
+            with self.subTest(key):
+                self.assertIn(key, li.NON_RUNG_FIELDS)
+        row = li.domain_row("residences")
+        entry = {"domain": "residences", "label": "Mesa", "city": "Mesa",
+                 "date": self.calculated,
+                 li.DATE_ALTERNATES_KEY: [_date("1986")],
+                 li.SPAN_ALTERNATES_KEY: {"start": [_date("1986")]}}
+        self.assertEqual(li.unreadable_fields(entry, row), ())
+        self.assertFalse(li.entry_superseded_by(
+            entry, {"domain": "residences", "label": "Mesa", "city": "Mesa"}, row))
+
+    def test_reading_a_date_off_an_entry_that_has_no_alternates(self):
+        read = li.landmark_date({"domain": "residences", "date": self.calculated})
+        self.assertEqual(read["best_supported"], self.calculated)
+        self.assertEqual(read["alternates"], [])
+        self.assertEqual(read["conflict"], 0.0)
+        empty = li.landmark_date(None)
+        self.assertIsNone(empty["best_supported"])
+        self.assertIsNone(li.landmark_date({"domain": "residences"},
+                                           bound="start")["best_supported"])

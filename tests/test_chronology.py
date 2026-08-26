@@ -313,8 +313,9 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(ch.to_edtf(first["best_supported"]), "1983")
 
     def test_empty_and_unusable_inputs(self):
-        self.assertEqual(ch.reconcile([]), {"best_supported": None, "alternates": []})
-        self.assertEqual(ch.reconcile(None), {"best_supported": None, "alternates": []})
+        empty = {"best_supported": None, "alternates": [], "conflict": 0.0}
+        self.assertEqual(ch.reconcile([]), empty)
+        self.assertEqual(ch.reconcile(None), empty)
         self.assertIsNone(ch.reconcile(["nonsense"])["best_supported"])
 
 
@@ -375,6 +376,185 @@ class YearHelperTests(unittest.TestCase):
         self.assertEqual(ch.year_of(record, end=True), 1990)
         self.assertEqual(ch.year_of("1998-06-12"), 1998)
         self.assertIsNone(ch.year_of(None))
+
+
+class CarriageTests(unittest.TestCase):
+    """B4: a record survives an argv WHOLE, or the trip fails loudly.
+
+    Until v219 `landmark_invocation` serialized the EDTF expression alone and
+    `lifehug.py landmark-record` rebuilt it with ``basis="stated"`` — so a
+    date the system CALCULATED from an age was filed as one the person had
+    STATED. These pin the two halves as exact inverses.
+    """
+
+    def setUp(self):
+        self.calculated = ch.DateRecord(
+            best="1984", earliest="1984", latest="1984", granularity="year",
+            confidence="approximate", basis="age", anchors=("birth",),
+            provenance=({"claim": "about five", "basis": "age", "source": "A12"},),
+        )
+
+    def _round_trip(self, record, *, meta_prefix=""):
+        argv = ch.date_argv(record, value_flag="--date", meta_prefix=meta_prefix)
+        names = ch.date_flag_names(meta_prefix)
+        single = {name: argv[argv.index(names[name]) + 1]
+                  for name in ("basis", "granularity", "confidence")
+                  if names[name] in argv}
+        repeated = {name: [argv[i + 1] for i, token in enumerate(argv)
+                           if token == names[name]]
+                    for name in ("anchor", "provenance")}
+        return ch.date_from_argv(argv[argv.index("--date") + 1],
+                                 anchors=repeated["anchor"],
+                                 provenance=repeated["provenance"], **single)
+
+    def test_a_calculated_date_survives_the_argv_byte_faithfully(self):
+        self.assertEqual(self._round_trip(self.calculated).to_dict(),
+                         self.calculated.to_dict())
+
+    def test_every_warrant_field_is_carried(self):
+        """The EDTF expression cannot say any of these; the flags must."""
+        argv = ch.date_argv(self.calculated, value_flag="--date")
+        bare = ch.parse_edtf(argv[argv.index("--date") + 1])
+        carried = self._round_trip(self.calculated)
+        for name in ch.WARRANT_FIELDS:
+            with self.subTest(name):
+                self.assertEqual(getattr(carried, name),
+                                 getattr(self.calculated, name))
+        # Everything the bare expression gets WRONG on its own — the exact
+        # loss `landmark-record` used to file: basis, confidence, and the two
+        # evidence lists.
+        for name in ("basis", "confidence", "anchors", "provenance"):
+            with self.subTest(f"lost without carriage: {name}"):
+                self.assertNotEqual(getattr(bare, name),
+                                    getattr(self.calculated, name))
+
+    def test_the_two_ends_of_a_span_keep_separate_warrants(self):
+        start = ch.date_argv(self.calculated, value_flag="--start",
+                             meta_prefix="start-")
+        end = ch.date_argv(ch.parse_edtf("1991", basis="stated"),
+                           value_flag="--end", meta_prefix="end-")
+        self.assertIn("--start-basis", start)
+        self.assertIn("--end-basis", end)
+        flags = {token for token in start if token.startswith("--")}
+        self.assertEqual(flags & {token for token in end if token.startswith("--")},
+                         set())
+        self.assertEqual(self._round_trip(self.calculated,
+                                          meta_prefix="start-").to_dict(),
+                         self.calculated.to_dict())
+
+    def test_a_record_with_no_readable_date_carries_nothing(self):
+        self.assertEqual(ch.date_argv(None, value_flag="--date"), [])
+        self.assertEqual(ch.date_argv("not a date", value_flag="--date"), [])
+        self.assertIsNone(ch.date_from_argv(""))
+        self.assertIsNone(ch.date_from_argv(None))
+
+    def test_an_undeclared_warrant_is_only_ever_the_terminal_default(self):
+        """`stated` is honest for a person typing a date; nothing else."""
+        typed = ch.date_from_argv("1984")
+        self.assertEqual(typed.basis, "stated")
+        self.assertEqual(ch.date_from_argv("1984", basis="age").basis, "age")
+        # And the machine path always declares, so it never sees the default.
+        argv = ch.date_argv(self.calculated, value_flag="--date")
+        self.assertIn("--basis", argv)
+
+    def test_an_unusable_warrant_fails_loudly_rather_than_going_missing(self):
+        for kwargs in ({"basis": "guessed"}, {"granularity": "fortnight"},
+                       {"confidence": "pretty sure"},
+                       {"provenance": ["not json"]},
+                       {"provenance": ["[1, 2]"]}, {"provenance": [""]}):
+            with self.subTest(**kwargs), self.assertRaises(ch.ChronologyError):
+                ch.date_from_argv("1984", **kwargs)
+        with self.assertRaises(ch.ChronologyError):
+            ch.date_from_argv("the year I turned five")
+
+    def test_provenance_survives_as_compact_json(self):
+        entry = {"claim": "about five", "basis": "age"}
+        self.assertEqual(ch.parse_provenance_arg(ch.provenance_arg(entry)), entry)
+        self.assertIsNone(ch.provenance_arg({}))
+        self.assertIsNone(ch.provenance_arg("not an object"))
+
+
+class ClaimFoldTests(unittest.TestCase):
+    """B4: repeat tellings corroborate; rivals stay rivals; refinements win."""
+
+    def test_the_same_claim_told_twice_folds_and_keeps_both_sources(self):
+        first = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                              basis="stated", confidence="certain",
+                              anchors=("birth",),
+                              provenance=({"source": "A1"},))
+        again = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                              basis="stated", confidence="certain",
+                              anchors=("move",), provenance=({"source": "A2"},))
+        folded = ch.merge_claims([first, again])
+        self.assertEqual(len(folded), 1)
+        self.assertEqual(folded[0].anchors, ("birth", "move"))
+        self.assertEqual([p["source"] for p in folded[0].provenance], ["A1", "A2"])
+        self.assertGreater(ch.claim_score(folded[0]), ch.claim_score(first))
+
+    def test_refiling_the_identical_record_is_a_no_op(self):
+        record = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                               basis="stated", provenance=({"source": "A1"},))
+        self.assertEqual(ch.merge_claims([record, record, record]), [record])
+
+    def test_the_same_interval_on_a_different_basis_is_a_different_claim(self):
+        said = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                             basis="stated")
+        worked_out = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                                   basis="age")
+        self.assertEqual(len(ch.merge_claims([said, worked_out])), 2)
+
+    def test_a_refinement_outranks_the_coarser_claim_it_refines(self):
+        coarse = ch.DateRecord(best="2001", earliest="2001", latest="2001",
+                               granularity="year", basis="stated",
+                               confidence="certain")
+        fine = ch.DateRecord(best="2001-06-14", earliest="2001-06-14",
+                             latest="2001-06-14", granularity="day",
+                             basis="stated", confidence="certain")
+        result = ch.reconcile([coarse, fine])
+        self.assertEqual(result["best_supported"], fine)
+        self.assertEqual(result["alternates"], [coarse])
+        self.assertEqual(result["conflict"], 0.0)
+
+    def test_better_support_still_beats_a_finer_grain(self):
+        printed = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                                granularity="year", basis="document",
+                                confidence="certain")
+        guessed = ch.DateRecord(best="1984-06-12", earliest="1984-06-12",
+                                latest="1984-06-12", granularity="day",
+                                basis="order", confidence="conjectural")
+        self.assertEqual(ch.reconcile([guessed, printed])["best_supported"], printed)
+
+
+class ConflictStrengthTests(unittest.TestCase):
+    def test_claims_that_can_both_be_true_are_not_in_conflict(self):
+        year = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                             basis="stated", confidence="certain")
+        month = ch.DateRecord(best="1984-06", earliest="1984-06", latest="1984-06",
+                              granularity="month", basis="stated",
+                              confidence="certain")
+        self.assertEqual(ch.reconcile([year, month])["conflict"], 0.0)
+
+    def test_a_dead_tie_between_contradictory_claims_is_total_conflict(self):
+        one = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                            basis="stated", confidence="certain")
+        other = ch.DateRecord(best="1987", earliest="1987", latest="1987",
+                              basis="stated", confidence="certain")
+        self.assertEqual(ch.reconcile([one, other])["conflict"], 1.0)
+
+    def test_a_weakly_supported_rival_is_a_weak_conflict(self):
+        stated = ch.DateRecord(best="1984", earliest="1984", latest="1984",
+                               basis="stated", confidence="certain")
+        guessed = ch.DateRecord(best="1990", earliest="1990", latest="1990",
+                                basis="order", confidence="conjectural")
+        result = ch.reconcile([stated, guessed])
+        self.assertEqual(result["best_supported"], stated)
+        self.assertGreater(result["conflict"], 0.0)
+        self.assertLess(result["conflict"], 1.0)
+
+    def test_a_lone_claim_conflicts_with_nothing(self):
+        lone = ch.DateRecord(best="1984", earliest="1984", latest="1984")
+        self.assertEqual(ch.reconcile([lone])["conflict"], 0.0)
+        self.assertEqual(ch.conflict_strength(None, [lone]), 0.0)
 
 
 if __name__ == "__main__":

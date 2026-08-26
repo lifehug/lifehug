@@ -312,6 +312,16 @@ one *plus every alternate*. The page renders the best-supported interval and
 links the others. A disagreement is data about how you have made meaning of
 your past, not a bug to fix.
 
+Since v219 that is true of the landmark store too, and it was not before: a
+landmark entry merged the ordinary way, so a date you stated in March was
+overwritten in April by one the system worked out from an age, with nothing
+left to show you had ever said it. All three landmark dates now go through
+`reconcile` and keep what they beat (`landmarks_interaction.landmark_date`).
+Telling us the same thing twice does **not** make a second claim — repeat
+tellings fold, and the extra source counts as corroboration. Telling us
+something *finer* — "June 14th" after "2001" — replaces rather than fights
+the coarser claim, because a refinement is not a rival.
+
 **How the spine gets its order.** Dated eras anchor at their earliest year;
 undated eras are interpolated between their nearest dated neighbours in the
 old order; the result is dense-ranked into `chrono`. With nothing dated, the

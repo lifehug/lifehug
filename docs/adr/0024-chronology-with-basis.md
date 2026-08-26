@@ -79,6 +79,28 @@ Split the doctrine: **asking stays anchor-first; storage gains real dates.**
    *Alternative rejected*: resolving to one date at write time, which is the
    destructive edit the mission forbids and which throws away the thing
    Portelli says is most worth having.
+
+   **Amended v219 (wave B, item B4).** This ruling was written and then had
+   no production caller for twenty-four releases, while
+   `landmarks_interaction.merge_landmark_entry` resolved every date collision
+   with `{**prior, **incoming}` — which is precisely the write-time
+   resolution the paragraph above rejects, doing it silently. `reconcile` now
+   holds that seat: all three landmark date fields (`date`, `span.start`,
+   `span.end`) go through it, and the claims it does not pick are kept beside
+   the winner (`DATE_ALTERNATES_KEY`, `SPAN_ALTERNATES_KEY`), read back by
+   `landmarks_interaction.landmark_date`. Two additions the seat required.
+   `merge_claims` runs in FRONT of it, folding repeat tellings of one claim —
+   same interval, same basis — into a single record with anchors and
+   provenance unioned, because an entry re-filed twenty times must not
+   accumulate twenty alternates and a second telling is corroboration, not a
+   rival. `conflict` comes back BEHIND it (`conflict_strength`): `0.0` unless
+   a surviving rival cannot be true at the same time as the winner, `1.0` for
+   a dead tie between two that contradict. And the ORDER gained a grain rung
+   between score and text, because a refinement is not a rival — without it
+   `2001` and `2001-06-14` tie on support, break on text, and the day the
+   person just gave you loses to the year they gave you last month.
+   Rendering alternates and conflict to the person is wave D/E; what this
+   amendment settles is that the losing claim still exists to be rendered.
 4. **Order is derived from dates where they exist.** `timeline.derive_chrono`
    anchors dated periods at their `date.earliest`, interpolates undated ones
    between their nearest dated neighbours in the old order, and dense-ranks.

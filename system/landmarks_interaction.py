@@ -606,11 +606,26 @@ def identity_named(entry: object, row: object) -> str | None:
     return None
 
 
+#: Where the claims a date OUTRANKED are kept (v219, B4). Never overwritten,
+#: never deleted: a person who said something once said it, and a system that
+#: files a better-supported date over theirs owes them the record that it did.
+#: `merge_landmark_entry` writes them, :func:`landmark_date` reads them.
+DATE_ALTERNATES_KEY = "date_alternates"
+#: The same, per span bound — ``{"start": [...], "end": [...]}``.
+SPAN_ALTERNATES_KEY = "span_alternates"
+
 #: Fields a landmark record carries that are NOT ladder rungs and never will
 #: be: the bookkeeping keys plus the free-text descriptors. Named so the
 #: ladder-consistency guard can tell "not a rung" from "a rung the writer
 #: cannot reach", which is the shape of every defect in this class so far.
-NON_RUNG_FIELDS = _NON_ANSWER_KEYS | frozenset({"place", "subject", "birth_order"})
+#: The two alternates keys are bookkeeping in the strictest sense — a rung
+#: that could "read" a superseded claim would be asking the person to answer
+#: a question they already answered — and naming them here is load-bearing:
+#: `unreadable_fields` feeds `entry_superseded_by`'s rule 3, so an unnamed
+#: field on a stored entry would start RETIRING entries the person named.
+NON_RUNG_FIELDS = _NON_ANSWER_KEYS | frozenset({
+    "place", "subject", "birth_order", DATE_ALTERNATES_KEY, SPAN_ALTERNATES_KEY,
+})
 
 #: Fields :func:`validate_landmark` stores on EVERY domain, because the record
 #: shape is domain-agnostic — so a domain with no matching rung files them and
@@ -1712,6 +1727,25 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
 
     One definition, so the store and every future caller agree
     (recurring-defect doctrine).
+
+    **The DATE fields are the exception to the dict merge** (v219, B4).
+    ``{**prior, **incoming}`` is right for a city and an address — a later
+    rung is a fuller answer to the same question — and it was quietly wrong
+    for a date, because two dates for one entry are not a fuller answer, they
+    are two CLAIMS. Last-writer-wins deleted the loser silently: a date the
+    person stated in March was overwritten in April by one the system inferred
+    from an age, with nothing left to show it had ever been said. So each of
+    the three dates (``date``, ``span.start``, ``span.end``) now goes through
+    `chronology.reconcile`, which picks the best-supported claim by
+    `chronology.claim_score` and **keeps every loser** as an alternate beside
+    it (:data:`DATE_ALTERNATES_KEY`, :data:`SPAN_ALTERNATES_KEY`). Repeat
+    tellings of one claim fold rather than accumulate
+    (`chronology.merge_claims`), so an entry re-filed twenty times holds one
+    claim, not twenty.
+
+    Reading them back is :func:`landmark_date`. Surfacing the disagreement to
+    the person is Wave D/E and deliberately not here — what is here is that
+    the losing claim still EXISTS to be surfaced.
     """
     incoming = dict(record) if isinstance(record, dict) else {}
     prior = dict(existing) if isinstance(existing, dict) else {}
@@ -1720,7 +1754,95 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
     merged = {**prior, **incoming}
     merged.pop("none", None)
     merged.pop("skipped", None)
+
+    best, alternates = _reconciled_date(
+        prior.get("date"), _alternates_of(prior, DATE_ALTERNATES_KEY), incoming.get("date"))
+    _set_or_drop(merged, "date", best)
+    _set_or_drop(merged, DATE_ALTERNATES_KEY, alternates or None)
+
+    prior_span = prior.get("span") if isinstance(prior.get("span"), dict) else {}
+    incoming_span = incoming.get("span") if isinstance(incoming.get("span"), dict) else {}
+    prior_span_alternates = prior.get(SPAN_ALTERNATES_KEY)
+    if not isinstance(prior_span_alternates, dict):
+        prior_span_alternates = {}
+    span: dict = {}
+    span_alternates: dict = {}
+    for bound in ("start", "end"):
+        bound_best, bound_alternates = _reconciled_date(
+            prior_span.get(bound),
+            _alternates_of(prior_span_alternates, bound),
+            incoming_span.get(bound),
+        )
+        if bound_best:
+            span[bound] = bound_best
+        if bound_alternates:
+            span_alternates[bound] = bound_alternates
+    _set_or_drop(merged, "span", span or None)
+    _set_or_drop(merged, SPAN_ALTERNATES_KEY, span_alternates or None)
     return merged
+
+
+
+def _alternates_of(holder: object, key: object) -> list:
+    value = holder.get(key) if isinstance(holder, dict) else None
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _set_or_drop(target: dict, key: str, value: object) -> None:
+    if value:
+        target[key] = value
+    else:
+        target.pop(key, None)
+
+
+def _reconciled_date(prior_best: object, prior_alternates: object,
+                     incoming: object) -> tuple[dict | None, list[dict]]:
+    """One date field's claims, reconciled: ``(best, alternates)``.
+
+    An incoming record with nothing to say about this date leaves the standing
+    claims untouched — silence is not a correction.
+    """
+    prior_alternates = list(prior_alternates or ())
+    if not incoming:
+        return (prior_best if isinstance(prior_best, dict) else None), prior_alternates
+    claims = [c for c in (prior_best, *prior_alternates, incoming) if c]
+    result = chrono.reconcile(claims)
+    best = result["best_supported"]
+    if best is None:
+        return (prior_best if isinstance(prior_best, dict) else None), prior_alternates
+    return best.to_dict(), [record.to_dict() for record in result["alternates"]]
+
+
+def landmark_date(entry: object, *, bound: object = None) -> dict:
+    """Every claim standing for ONE of an entry's dates, best-supported first.
+
+    ``{"best_supported": dict|None, "alternates": [dict, ...], "conflict": float}``
+    — `chronology.reconcile`'s own shape, re-derived from what
+    :func:`merge_landmark_entry` stored rather than stored a second time.
+    ``bound`` is ``"start"`` or ``"end"`` for a span; ``None`` for the entry's
+    own ``date``.
+
+    The read side's single seat. Wave D/E renders the alternates and the
+    conflict; today the point is that both are ANSWERABLE — before v219 the
+    losing claim did not exist to ask about.
+    """
+    if not isinstance(entry, dict):
+        return {"best_supported": None, "alternates": [], "conflict": 0.0}
+    if bound in ("start", "end"):
+        span = entry.get("span") if isinstance(entry.get("span"), dict) else {}
+        best = span.get(bound)
+        alternates = _alternates_of(entry.get(SPAN_ALTERNATES_KEY), bound)
+    else:
+        best = entry.get("date")
+        alternates = _alternates_of(entry, DATE_ALTERNATES_KEY)
+    claims = [c for c in (best, *alternates) if c]
+    result = chrono.reconcile(claims)
+    return {
+        "best_supported": result["best_supported"].to_dict()
+        if result["best_supported"] is not None else None,
+        "alternates": [record.to_dict() for record in result["alternates"]],
+        "conflict": result["conflict"],
+    }
 
 
 def entry_name(entry: object, row: object) -> str | None:
@@ -1848,6 +1970,28 @@ def landmark_invocation(record: object) -> list[str] | None:
 
     A **skip** files nothing — it is not an answer. A **none** files, because
     it is: it is the answer that finishes the domain.
+
+    v219 (B4): a date crosses to the writer WHOLE. This function used to
+    serialize the EDTF expression alone (``--date 1984``), and
+    `lifehug.py landmark-record` rebuilt what arrived with ``basis="stated"``
+    — so a date the system CALCULATED from an age was filed as one the person
+    had STATED, worth +2.0 of `chronology.claim_score` it had not earned and
+    enough to beat a genuinely stated rival. Basis, anchors and provenance now
+    ride along on flags (`chronology.date_argv`), and each end of a span keeps
+    its own warrant under a ``start-``/``end-`` prefix, because the two ends
+    are two separate claims: "we moved in when I was five" and "we moved out
+    in 1991" are not dated the same way.
+
+    Flags rather than a stdin payload, deliberately, and the precedent chose
+    it: `timeline_interaction.place_invocation` — the `PlaceInvocation(argv,
+    stdin_text)` case — puts ``--basis`` and its anchors on ARGV and reserves
+    ``stdin_text`` for the free prose `timeline-place` reads off stdin.
+    `landmark-record` reads nothing on stdin (`reading_room.filing_invocations`
+    says so and wraps this argv as ``PlaceInvocation(argv, "")``), and this
+    function's bare-argv return is JSON-serialized into the ``invocations``
+    field of two CLI contracts hosts already consume (`landmark_recorder`,
+    `general_listener`). A stdin payload would change that returned shape in
+    three modules and split "how a landmark files" into two recipes.
     """
     if not isinstance(record, dict) or record.get("skipped"):
         return None
@@ -1869,14 +2013,13 @@ def landmark_invocation(record: object) -> list[str] | None:
     birth_order = str(record.get("birth_order") or "").strip()
     if birth_order:
         argv += ["--birth-order", birth_order]
-    edtf = chrono.to_edtf(chrono.from_dict(date)) if date else None
-    if edtf:
-        argv += ["--date", edtf]
+    if date:
+        argv += chrono.date_argv(date, value_flag="--date")
     span = record.get("span") if isinstance(record.get("span"), dict) else {}
     for bound in ("start", "end"):
-        value = chrono.to_edtf(chrono.from_dict(span.get(bound))) if span.get(bound) else None
-        if value:
-            argv += [f"--{bound}", value]
+        if span.get(bound):
+            argv += chrono.date_argv(span.get(bound), value_flag=f"--{bound}",
+                                     meta_prefix=f"{bound}-")
     for rung in ("city", "address", "household", "name", "grades",
                  "happened", "who", "what", "where", "branch",
                  "relation", "year", "month", "day"):
@@ -2283,6 +2426,18 @@ def date_flags(flag: str, record: object) -> list[str]:
     misrepresent a derived claim as a stated one: `entity_verdict`'s
     precedence rule (`_preferred_date`) reads exactly this to decide whether a
     later claim may replace an earlier one.
+
+    **This is the PERSON-ROSTER carriage, and it is narrower than the landmark
+    one on purpose — for now.** v219 made `chronology.date_argv` /
+    `date_from_argv` the one definition of a `DateRecord` crossing a process
+    boundary, carrying all five of `chronology.WARRANT_FIELDS`; this pair of
+    flags carries the basis alone because `lifehug.py entity-verdict` accepts
+    only `--<flag>-basis`, so a person's `born`/`died` still arrives with its
+    anchors, provenance, granularity and confidence stripped. Widening that
+    CLI is its own change against its own surface. What must NOT happen is a
+    THIRD carriage: a new caller wanting the whole warrant reaches for
+    `chronology.date_argv`, and this function becomes a binding on it the day
+    `entity-verdict` grows the flags.
     """
     edtf = chrono.to_edtf(record)
     if not edtf:

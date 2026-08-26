@@ -31,6 +31,7 @@ Decision: ``docs/adr/0024-chronology-with-basis.md``.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import dataclass, field, replace
@@ -856,8 +857,82 @@ def claim_score(record: object) -> float:
     )
 
 
+def claim_identity(record: object) -> tuple[str, str] | None:
+    """``(edtf, basis)`` — WHICH claim this is, for folding corroboration.
+
+    Two records saying the same interval on the same basis are ONE claim told
+    twice, not two rival claims: the second telling is corroboration, and
+    :func:`claim_score` already counts distinct provenance ``source`` values as
+    consilience. Anchors and confidence are deliberately NOT part of the
+    identity — they are how well the one claim is held, not which claim it is.
+    """
+    parsed = _as_record(record)
+    if parsed is None:
+        return None
+    return (to_edtf(parsed) or "", parsed.basis)
+
+
+def merge_claims(claims: object) -> list[DateRecord]:
+    """Fold repeat tellings of the SAME claim into one, in first-seen order.
+
+    The fold :func:`reconcile` wants in front of it, and the reason a landmark
+    entry re-filed twenty times does not accumulate twenty alternates. Same
+    :func:`claim_identity` → one record, its anchors unioned and its
+    provenance unioned (duplicate provenance entries collapse, so re-filing
+    the identical record is a no-op and cannot manufacture consilience).
+    """
+    folded: dict[tuple[str, str], DateRecord] = {}
+    for claim in (claims or ()):
+        parsed = _as_record(claim)
+        if parsed is None:
+            continue
+        key = claim_identity(parsed)
+        if key is None:
+            continue
+        prior = folded.get(key)
+        if prior is None:
+            folded[key] = parsed
+            continue
+        anchors = prior.anchors + tuple(a for a in parsed.anchors if a not in prior.anchors)
+        seen = [json.dumps(item, sort_keys=True, default=str) for item in prior.provenance]
+        provenance = prior.provenance
+        for item in parsed.provenance:
+            if json.dumps(item, sort_keys=True, default=str) not in seen:
+                provenance += (item,)
+                seen.append(json.dumps(item, sort_keys=True, default=str))
+        confidence = min((prior.confidence, parsed.confidence), key=CONFIDENCES.index)
+        folded[key] = replace(prior, anchors=anchors, provenance=provenance,
+                              confidence=confidence)
+    return list(folded.values())
+
+
+def conflict_strength(best: object, alternates: object) -> float:
+    """How hard the surviving claims CONTRADICT the winner, in ``0.0``–``1.0``.
+
+    An alternate that merely bounds the winner more loosely (``1984`` beside
+    ``1980/1990``) is not a conflict — it INTERSECTS, which is corroboration
+    at a coarser grain. A conflict is an alternate that cannot be true at the
+    same time as the winner, and its strength is how well supported that rival
+    is relative to the winner: ``1.0`` is a dead tie between two claims that
+    cannot both be right, and ``0.0`` is "no surviving claim contradicts this".
+
+    Derived, never stored — a caller holding the claim list can always ask.
+    """
+    winner = _as_record(best)
+    if winner is None:
+        return 0.0
+    top = claim_score(winner)
+    if top <= 0:
+        return 0.0
+    rivals = [r for r in (_as_record(a) for a in (alternates or ())) if r is not None]
+    disputed = [r for r in rivals if intersect(winner, r) is None]
+    if not disputed:
+        return 0.0
+    return min(1.0, max(claim_score(r) for r in disputed) / top)
+
+
 def reconcile(claims: object) -> dict:
-    """``{"best_supported": DateRecord|None, "alternates": [...]}`` — ruling 3.
+    """``{"best_supported", "alternates", "conflict"}`` — ruling 3.
 
     Historians corroborate and prefer convergence from independent origins;
     oral historians (Portelli) treat the disagreement itself as data. So this
@@ -866,16 +941,181 @@ def reconcile(claims: object) -> dict:
     deterministically by EDTF text and then insertion order. Nothing is
     overwritten, and no AI-side silent pick is possible — the caller renders
     the best-supported interval and links the alternates.
+
+    Repeat tellings of one claim are folded first (:func:`merge_claims`), so
+    the alternates are RIVALS rather than echoes, and ``conflict`` says how
+    hard the surviving rivals contradict the winner
+    (:func:`conflict_strength`) — the number a caller needs to decide whether
+    to show the disagreement or simply date the thing.
+
+    Order is score, then GRAIN, then EDTF text, then insertion. Grain is in
+    there because a REFINEMENT is not a rival: "June 14th, 2001" beside
+    "2001" is the same claim said better, and on equal support the finer one
+    is the answer. Without that rung the two tie on score and break on text,
+    where ``"2001"`` sorts before ``"2001-06-14"`` and the day the person
+    just gave you loses to the year they gave you last month.
     """
-    parsed = [r for r in (_as_record(c) for c in (claims or ())) if r is not None]
+    parsed = merge_claims(claims)
     if not parsed:
-        return {"best_supported": None, "alternates": []}
+        return {"best_supported": None, "alternates": [], "conflict": 0.0}
     ordered = sorted(
         enumerate(parsed),
-        key=lambda pair: (-claim_score(pair[1]), to_edtf(pair[1]) or "", pair[0]),
+        key=lambda pair: (-claim_score(pair[1]),
+                          GRANULARITIES.index(pair[1].granularity),
+                          to_edtf(pair[1]) or "", pair[0]),
     )
     records = [record for _, record in ordered]
-    return {"best_supported": records[0], "alternates": records[1:]}
+    return {
+        "best_supported": records[0],
+        "alternates": records[1:],
+        "conflict": conflict_strength(records[0], records[1:]),
+    }
+
+
+# --------------------------------------------------------------------------
+# Carriage: a record survives the trip through an argv (B4, lifehug#233)
+# --------------------------------------------------------------------------
+#
+# A date is only as good as its BASIS, and until v219 the basis never left the
+# package: `landmarks_interaction.landmark_invocation` serialized the EDTF
+# expression alone and `lifehug.py landmark-record` rebuilt every record with
+# `basis="stated"`. A date the system CALCULATED from an age therefore reached
+# the vault claiming the person had stated it — worth +2.0 of `claim_score`
+# it had not earned, and enough to beat a genuinely stated rival. These two
+# functions are the one definition of how a `DateRecord` crosses a process
+# boundary, so the two halves can never drift apart again.
+
+#: The record's fields an EDTF expression CANNOT carry, in flag order.
+#: `granularity` and `confidence` are in here for the same reason `basis` is:
+#: `to_edtf` renders the interval and nothing else, so an `approximate` claim
+#: rebuilt from its own expression comes back `certain` — worth another +1.0
+#: of `claim_score` on top of the basis's +2.0. `anchors` and `provenance` are
+#: the repeatable ones. PUBLIC so a caller can ask what carriage covers.
+WARRANT_FIELDS = ("basis", "granularity", "confidence", "anchors", "provenance")
+
+#: The closed vocabulary each single-valued warrant flag is checked against —
+#: one lookup, so no caller re-lists the values (recurring-defect doctrine).
+WARRANT_VOCABULARIES = {
+    "basis": BASES,
+    "granularity": GRANULARITIES,
+    "confidence": CONFIDENCES,
+}
+
+
+def date_flag_names(meta_prefix: str = "") -> dict:
+    """The warrant flag names under one bound prefix.
+
+    ``""`` for `--date`; ``start-``/``end-`` for the two ends of a span, which
+    are two SEPARATE claims ("we moved in when I was five", "we moved out in
+    1991") and are rarely dated the same way. PUBLIC so the CLI's parser and
+    the invocation builder read the SAME strings and can never drift.
+    """
+    prefix = str(meta_prefix or "")
+    names = {name: f"--{prefix}{name}" for name in ("basis", "granularity", "confidence")}
+    names["anchor"] = f"--{prefix}anchor"
+    names["provenance"] = f"--{prefix}provenance"
+    return names
+
+
+def provenance_arg(item: object) -> str | None:
+    """One provenance entry as the compact JSON a flag can carry."""
+    if not isinstance(item, dict) or not item:
+        return None
+    try:
+        return json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_provenance_arg(text: object) -> dict:
+    """The inverse of :func:`provenance_arg`; raises on anything unusable.
+
+    Loud, not degrading: a provenance entry that does not survive the trip is
+    evidence that has silently gone missing, and silently-missing evidence is
+    the whole defect this section exists to close.
+    """
+    if isinstance(text, dict):
+        return dict(text)
+    if not isinstance(text, str) or not text.strip():
+        raise ChronologyError("a provenance entry cannot be empty")
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError) as exc:
+        raise ChronologyError(f"unreadable provenance {text!r}") from exc
+    if not isinstance(value, dict) or not value:
+        raise ChronologyError(f"a provenance entry must be an object: {text!r}")
+    return value
+
+
+def date_argv(record: object, *, value_flag: str, meta_prefix: str = "") -> list[str]:
+    """The argv fragment that carries ONE record whole — value AND warrant.
+
+    ``value_flag`` is where the EDTF expression goes (``--date``, ``--start``,
+    ``--end``); ``meta_prefix`` namespaces the three warrant flags so the two
+    ends of a span each keep their own basis (they are separate claims —
+    "we moved in when I was five" and "we moved out in 1991").
+
+    Empty when there is no readable date: a warrant with nothing to warrant is
+    not a fragment worth emitting.
+    """
+    parsed = _as_record(record)
+    edtf = to_edtf(parsed) if parsed is not None else None
+    if parsed is None or not edtf:
+        return []
+    names = date_flag_names(meta_prefix)
+    argv = [str(value_flag), edtf]
+    for name in ("basis", "granularity", "confidence"):
+        argv += [names[name], getattr(parsed, name)]
+    for anchor in parsed.anchors:
+        argv += [names["anchor"], anchor]
+    for item in parsed.provenance:
+        encoded = provenance_arg(item)
+        if encoded:
+            argv += [names["provenance"], encoded]
+    return argv
+
+
+def _declared(name: str, value: object) -> str:
+    """One warrant word, checked against its own closed vocabulary. Loud."""
+    text = str(value).strip() if isinstance(value, str) else ""
+    if not text:
+        return ""
+    allowed = WARRANT_VOCABULARIES[name]
+    if text not in allowed:
+        raise ChronologyError(f"unknown {name} {text!r} — one of {', '.join(allowed)}")
+    return text
+
+
+def date_from_argv(edtf: object, *, basis: object = None, granularity: object = None,
+                   confidence: object = None, anchors: object = (),
+                   provenance: object = (), default_basis: str = "stated") -> DateRecord | None:
+    """The inverse of :func:`date_argv`: the flags a CLI parsed, back to a record.
+
+    ``default_basis`` is what the record is when the CALLER DECLARED NOTHING —
+    a person typing ``--date 1984`` at a terminal is stating it, which is the
+    only reading under which ``stated`` is honest. Every machine caller goes
+    through :func:`date_argv`, which always declares, so the default is never
+    what a derived date lands as. ``None`` when there is no date; raises
+    :class:`ChronologyError` when a flag is unusable — a warrant that does not
+    survive the trip is evidence gone silently missing, which is the whole
+    defect this pair exists to close.
+    """
+    text = edtf if isinstance(edtf, str) else ""
+    if not text.strip():
+        return None
+    declared_basis = _declared("basis", basis)
+    declared_granularity = _declared("granularity", granularity)
+    declared_confidence = _declared("confidence", confidence)
+    parsed = parse_edtf(text, basis=declared_basis or default_basis)
+    if parsed is None:
+        raise ChronologyError(f"unreadable date {text!r}")
+    anchor_list = tuple(str(a).strip() for a in (anchors or ()) if str(a).strip())
+    entries = tuple(parse_provenance_arg(item) for item in (provenance or ()))
+    return replace(parsed,
+                   basis=declared_basis or parsed.basis,
+                   granularity=declared_granularity or parsed.granularity,
+                   confidence=declared_confidence or parsed.confidence,
+                   anchors=anchor_list, provenance=entries)
 
 
 # --------------------------------------------------------------------------
