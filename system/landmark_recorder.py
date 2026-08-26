@@ -156,7 +156,10 @@ def recordable_keys(row: object) -> tuple[str, ...]:
 
     * ``skipped`` — always; a decline is an answer this pass can record.
     * ``none`` — where `domain_accepts_none` allows the terminal.
-    * ``chain_complete`` — where the domain is a chain.
+    * ``chain_complete`` — where the domain's `closure` is
+      `user_completable`, i.e. where only the person can say the list is
+      finished (v219: read off `closure`, never off the retired `chain`
+      flag, which also meant multiplicity and order).
     * ``subject`` and ``birth_order`` — free-text descriptors
       `landmark_invocation` passes through to the writer. ``subject``
       describes a NAMED subject, so it is offered exactly where
@@ -182,7 +185,7 @@ def recordable_keys(row: object) -> tuple[str, ...]:
     keys.append("skipped")
     if li.domain_accepts_none(row):
         keys.append("none")
-    if row.get("chain"):
+    if li.requires_declared_closure(row):
         keys.append("chain_complete")
     domain = str(row.get("domain") or "")
     return tuple(key for key in dict.fromkeys(keys) if _survives(domain, key))

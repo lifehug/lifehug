@@ -82,8 +82,118 @@ class LandmarkInteractionError(ValueError):
 QUESTIONS_FILE = "questions.yaml"
 
 #: Every field a domain row carries, and how it is coerced.
-_BOOL_FIELDS = ("onboarding", "chain", "sensitive")
-_LIST_FIELDS = ("ladder", "unlocks")
+_TEXT_FIELDS = ("ask", "complete_at", "precision", "why",
+                "collection", "closure", "identity_kind")
+_BOOL_FIELDS = ("onboarding", "sensitive", "per_entry_ladder")
+_LIST_FIELDS = ("ladder", "unlocks", "date_semantics")
+
+# --------------------------------------------------------------------------
+# Cardinality is DATA, not a flag (v219, lifehug-platform#664; audited
+# temporal-claims plan §6.2)
+# --------------------------------------------------------------------------
+#
+# THE DEFECT, stated once. Until v219 a single boolean — `chain` — meant
+# multiplicity ("this domain holds many entries"), order ("walked to the
+# present") and closure ("finished when the person says so") simultaneously.
+# `children`, `partnerships` and `losses` hold many entries by construction
+# and were declared `chain: false`, because they are not WALKED — so every
+# consumer that asked the multiplicity question through `chain` got the
+# closure answer. :func:`incomplete_subjects` skipped all three, and the
+# founder's four named children produced ONE aggregate gap ("What year was
+# [all four] born?") instead of four independently closable ones.
+#
+# Four fields now say the four things, and none of them says two:
+# `collection` (how many, and whether order is part of the fact), `closure`
+# (what ends the GROUP — `complete_at` already says what ends one ENTRY),
+# `identity_kind` (what one entry IS) and `date_semantics` (which events it
+# dates). `per_entry_ladder` says whether the rungs below identity are walked
+# once per entry. Every consumer below derives from these; `chain` is derived
+# BACKWARD onto the row for hosts pinned to the old shape, and a guard test
+# fails the build on any read of it inside `system/`.
+
+#: How many entries a domain holds, and whether their order is part of the
+#: fact. A `sequence` is walked forward in time (the residence chain, the job
+#: history); a `set` is a group with no walk (your children, your losses); a
+#: `singleton` is one entry with no subject of its own (your birthday).
+COLLECTIONS = ("singleton", "set", "sequence")
+
+#: What ends the GROUP — a different question from what completes one entry.
+#: `user_completable`: the person declares the list finished (`chain_complete`
+#: or the none terminal), and until they do the domain is `partial` no matter
+#: how complete its entries are. `open`: the set is never declared closed and
+#: the domain completes exactly when its entries reach `complete_at`.
+CLOSURES = ("open", "user_completable")
+
+#: What ONE entry is. Declared exactly where the ladder has an
+#: :func:`identity_rung`, and empty where it has none.
+IDENTITY_KINDS = ("person", "organization", "place", "relationship_edge",
+                  "episode")
+
+#: The events a domain dates. `span` is the only one that is a STRETCH rather
+#: than a point, which is why :func:`dates_each_entry` can read this field
+#: instead of re-deriving the same judgment from the ladder.
+DATE_SEMANTICS = ("birth", "death", "first_met", "dating_started", "married",
+                  "started", "ended", "transition", "span")
+
+
+def is_multi_entry(row: object) -> bool:
+    """True when one domain holds many entries — the MULTIPLICITY question.
+
+    The one definition, and the one `chain` used to answer wrongly for
+    `children`, `partnerships`, `losses` and `military`. Order is
+    :func:`is_sequence`'s question and closure is
+    :func:`requires_declared_closure`'s; neither is asked here.
+    """
+    return (isinstance(row, dict)
+            and str(row.get("collection") or "") in ("set", "sequence"))
+
+
+def is_sequence(row: object) -> bool:
+    """True when the entries' ORDER is part of the fact (the walked lists)."""
+    return isinstance(row, dict) and str(row.get("collection") or "") == "sequence"
+
+
+def requires_declared_closure(row: object) -> bool:
+    """True when only the PERSON can say the list is finished.
+
+    The closure half of the old `chain` flag, alone. `residences` is complete
+    when the person says that was the last house; `children` is a set with no
+    declared end, so it completes when its entries do — the system never asks
+    "any more children?" and never will.
+    """
+    return (isinstance(row, dict)
+            and str(row.get("closure") or "") == "user_completable")
+
+
+def enumerates_subjects(row: object) -> bool:
+    """True when this domain's gaps are PER SUBJECT, not per domain.
+
+    The Wave A exit criterion (audited plan §9) in one predicate, and the
+    reason v219 exists: a domain that holds many named entries, each walking
+    its own ladder, owes ONE independently closable gap per incomplete entry.
+    Eight of the nine domains qualify; `birth` is the singleton axis and
+    cannot.
+    """
+    return (is_multi_entry(row) and bool(row.get("per_entry_ladder"))
+            and identity_rung(row) is not None)
+
+
+def date_semantics(row: object) -> tuple[str, ...]:
+    """The events this domain dates, in declared order."""
+    return tuple(row.get("date_semantics") or ()) if isinstance(row, dict) else ()
+
+
+def dates_each_entry(row: object) -> bool:
+    """True when one entry of this domain carries ONE date, not a stretch.
+
+    v219 moves this off the ladder and onto `date_semantics`, which is the
+    field that actually says it: a `span` semantic is a stretch and one
+    entry's stretch legitimately states two years ("1984 to 1990"), so a year
+    count is no evidence there. Everything else — a birth, a death, a
+    marriage — is one point per entry, and then the count IS evidence.
+    """
+    kinds = date_semantics(row)
+    return bool(kinds) and "span" not in kinds
 
 
 def _questions_path(framework_root: str | Path | None = None) -> Path:
@@ -104,9 +214,11 @@ def load_questions(framework_root: str | Path | None = None) -> tuple[dict, ...]
     """The ordered question set as rows.
 
     Each row: ``{domain, order, onboarding, ask, ladder, complete_at,
-    precision, unlocks, chain, sensitive, why}``. Order is the file's
-    ``domains`` line, not dictionary order, so the set's sequence is one
-    edit in one place.
+    precision, unlocks, sensitive, why}`` plus v219's cardinality block
+    ``{collection, closure, identity_kind, date_semantics,
+    per_entry_ladder}`` and the derived, deprecated ``chain``. Order is the
+    file's ``domains`` line, not dictionary order, so the set's sequence is
+    one edit in one place.
     """
     raw = _parse_simple_yaml(_questions_path(framework_root))
     if not raw:
@@ -117,7 +229,7 @@ def load_questions(framework_root: str | Path | None = None) -> tuple[dict, ...]
     rows: list[dict] = []
     for index, domain in enumerate(domains, start=1):
         row: dict = {"domain": domain, "order": index}
-        for field in ("ask", "complete_at", "precision", "why"):
+        for field in _TEXT_FIELDS:
             row[field] = str(raw.get(f"{domain}.{field}") or "").strip()
         for field in _BOOL_FIELDS:
             row[field] = _as_bool(raw.get(f"{domain}.{field}"))
@@ -130,8 +242,64 @@ def load_questions(framework_root: str | Path | None = None) -> tuple[dict, ...]
                 f"landmark domain {domain!r} completes at {row['complete_at']!r}, "
                 "which is not on its ladder"
             )
+        _validate_cardinality(row)
+        # v219: DERIVED BACKWARD and deprecated. `chain` used to be the
+        # declaration; it is now one consequence of `closure`, kept on the row
+        # so a host pinned to the pre-v219 shape still reads the same four
+        # domains. Nothing in `system/` may read it — the AST guard in
+        # `tests/test_landmarks.py` fails the build on a read — and the next
+        # release that can drop the key drops it.
+        row["chain"] = row["closure"] == "user_completable"
         rows.append(row)
     return tuple(rows)
+
+
+def _validate_cardinality(row: dict) -> None:
+    """Every cardinality field is declared, in vocabulary, and consistent.
+
+    Loud at LOAD time, because the whole point of v219 is that a domain can
+    no longer be silently mis-declared: `children` was wrong for two releases
+    and the only symptom was a question that would not go away.
+    """
+    domain = row["domain"]
+
+    def _refuse(detail: str) -> None:
+        raise LandmarkInteractionError(f"landmark domain {domain!r} {detail}")
+
+    if row["collection"] not in COLLECTIONS:
+        _refuse(f"declares collection {row['collection']!r}, "
+                f"which is not one of {COLLECTIONS}")
+    if row["closure"] not in CLOSURES:
+        _refuse(f"declares closure {row['closure']!r}, "
+                f"which is not one of {CLOSURES}")
+    if not row["date_semantics"]:
+        _refuse("declares no date_semantics")
+    unknown = [kind for kind in row["date_semantics"]
+               if kind not in DATE_SEMANTICS]
+    if unknown:
+        _refuse(f"declares date_semantics {unknown!r}, "
+                f"which are not in {DATE_SEMANTICS}")
+
+    # identity_kind and identity_rung are two views of the same fact, so they
+    # are cross-checked BOTH ways: a domain whose ladder names a subject must
+    # say what that subject is, and `birth` — whose ladder is three date
+    # grains and whose entry has no subject — must not pretend it has one.
+    named = identity_rung(row) is not None
+    if named and row["identity_kind"] not in IDENTITY_KINDS:
+        _refuse(f"names a subject at rung {identity_rung(row)!r} but declares "
+                f"identity_kind {row['identity_kind']!r}")
+    if not named and row["identity_kind"]:
+        _refuse(f"declares identity_kind {row['identity_kind']!r} but its "
+                "ladder names no subject")
+
+    # The three consistency rules that make the fields non-overlapping.
+    if row["collection"] == "singleton":
+        if row["per_entry_ladder"]:
+            _refuse("is a singleton and cannot have a per-entry ladder")
+        if row["closure"] == "user_completable":
+            _refuse("is a singleton and has no group for the person to close")
+    elif not row["per_entry_ladder"] and named:
+        _refuse("holds many named entries but declares no per-entry ladder")
 
 
 def domain_row(domain: object, *, framework_root: str | Path | None = None) -> dict:
@@ -229,6 +397,16 @@ def asserts_happened(entry: object) -> bool:
 
 #: What each rung asks for, per domain. `{label}` is the subject when there is
 #: one (a place, a school, a person); the bare form opens the domain.
+#:
+#: v219 — NO STANDALONE QUESTION OMITS ITS TARGET (audited plan §10,
+#: "Questions and surfaces"). Every rung PAST the domain's
+#: :func:`identity_rung` names its subject, because those are exactly the
+#: rungs that reach a standalone surface: `incomplete_subjects` renders them
+#: as their own Timeline unknown and the queue can mint one as the day's
+#: question, where "Do you remember the month?" is a question about nothing.
+#: The identity rung and the domain opener are the exemption, and the only
+#: one — they are asking FOR the name. `test_no_standalone_question_omits_its
+#: _subject` walks the rendered product objects, not the table.
 RUNG_TEXTS = {
     ("birth", "year"): "What year were you born?",
     ("birth", "month"): "What month?",
@@ -251,22 +429,71 @@ RUNG_TEXTS = {
     ("schools", "span"): "Roughly when did you start and finish at {label}?",
     ("partnerships", "happened"): "Have you ever been married, or had a long partnership?",
     ("partnerships", "who"): "Who was that?",
-    ("partnerships", "year"): "Roughly when did that begin?",
-    ("partnerships", "month"): "Do you remember the month?",
+    ("partnerships", "year"): "Roughly when did you and {label} get together?",
+    ("partnerships", "month"): "Do you remember the month you and {label} got together?",
     ("children", "happened"): "Do you have children?",
     ("children", "who"): "What are their names?",
     ("children", "year"): "What year was {label} born?",
-    ("children", "month"): "Do you remember the month?",
+    ("children", "month"): "Do you remember the month {label} was born?",
     ("work", "what"): "What work have you done?",
-    ("work", "where"): "Where was that?",
+    ("work", "where"): "Where were you doing {label}?",
     ("work", "span"): "Roughly what years were you at {label}?",
     ("military", "happened"): "Did you serve?",
     ("military", "branch"): "Which branch?",
-    ("military", "span"): "When did you go in, and when did you come out?",
+    ("military", "span"): "When did you go into the {label}, and when did you come out?",
     ("losses", "happened"): "Is there someone you have lost that belongs on this?",
     ("losses", "who"): "Who was that?",
-    ("losses", "year"): "Roughly when was that?",
+    ("losses", "year"): "Roughly when did you lose {label}?",
 }
+
+#: The DISTINCT events a domain dates, as distinct asks (audited plan §2.2).
+#: One rung cannot say three things: "when did this part begin?" is
+#: insufficient for a partnership, whose first meeting, start of dating and
+#: marriage are three events with three independent dates. `date_semantics`
+#: declares which events a domain has; this table gives each of them its own
+#: subject-named question, and the ladder-consistency guard requires a text
+#: for every declared semantic of every enumerating domain.
+#:
+#: Question TEXT only in v219. Per-event claim RECORDS are Wave C's — a
+#: partnership entry still carries one date today, and inventing a second
+#: storage shape here would be the half-built machine the plan forbids.
+EVENT_QUESTION_TEXTS = {
+    ("family", "birth"): "What year was {label} born?",
+    ("residences", "span"):
+        "When did you move into {label}, and when did you leave?",
+    ("schools", "span"): "Roughly when did you start and finish at {label}?",
+    ("partnerships", "first_met"): "When did you and {label} first meet?",
+    ("partnerships", "dating_started"): "When did you and {label} start dating?",
+    ("partnerships", "married"): "When did you and {label} get married?",
+    ("children", "birth"): "What year was {label} born?",
+    ("work", "span"): "Roughly what years were you at {label}?",
+    ("military", "span"):
+        "When did you go into the {label}, and when did you come out?",
+    ("losses", "death"): "Roughly when did you lose {label}?",
+}
+
+
+def event_questions(row: object, label: object) -> tuple[dict, ...]:
+    """One precise, subject-named ask per event this domain dates.
+
+    ``({"event": "first_met", "text": "When did you and Katie first meet?"},
+    ...)`` — empty for a domain that does not enumerate subjects, and for a
+    label nobody named. A single-event domain returns exactly one row, so a
+    caller never special-cases `partnerships`: the split is data.
+    """
+    name = str(label or "").strip()
+    if not name or not enumerates_subjects(row):
+        return ()
+    domain = str(row.get("domain") or "")
+    rows: list[dict] = []
+    for event in date_semantics(row):
+        text = EVENT_QUESTION_TEXTS.get((domain, event))
+        if text is None:
+            raise LandmarkInteractionError(
+                f"no event question for {domain}.{event}")
+        rows.append({"event": event, "text": text.format(label=name)})
+    return tuple(rows)
+
 
 #: A rung the person has not reached costs more to ask than one they have.
 #: The ladder is walked one rung at a time, never skipped ahead.
@@ -509,8 +736,10 @@ def status_for_domain(entries: object, row: object) -> str:
 
     ``open``     nothing filed at all.
     ``partial``  filed, but at least one entry is below ``complete_at``.
-    ``complete`` every entry has reached ``complete_at``, and — for a chain
-                 domain — the person has said the list is finished. A domain
+    ``complete`` every entry has reached ``complete_at``, and — for a
+                 ``closure: user_completable`` domain — the person has said
+                 the list is finished (v219: the CLOSURE half of the old
+                 `chain` flag, read on its own). A domain
                  answered with the none terminal is complete: "I never
                  served" is a finished answer, not a partial one.
     """
@@ -526,8 +755,8 @@ def status_for_domain(entries: object, row: object) -> str:
         reached = rung_reached(entry, row)
         if reached is None or ladder.index(reached) < target_index:
             return "partial"
-    if row.get("chain") and not any(e.get("chain_complete")
-                                    or is_none_entry(e, row) for e in rows):
+    if requires_declared_closure(row) and not any(
+            e.get("chain_complete") or is_none_entry(e, row) for e in rows):
         return "partial"
     return "complete"
 
@@ -558,8 +787,8 @@ def next_rung(entries: object, row: object) -> dict | None:
             # one".
             return _rung(domain, ladder[index + 1],
                          identity_named(entry, row) or entry.get("label"))
-    if row.get("chain") and not any(e.get("chain_complete")
-                                    or is_none_entry(e, row) for e in rows):
+    if requires_declared_closure(row) and not any(
+            e.get("chain_complete") or is_none_entry(e, row) for e in rows):
         if domain == "family":
             # v202: which TIER is missing decides the question (see
             # FAMILY_TIER_TEXTS) — a fixed chain-more line would ask for more
@@ -1249,19 +1478,6 @@ def _record_terms(records: object) -> set[str]:
     return terms
 
 
-def _dates_each_entry(row: object) -> bool:
-    """True when this domain's ladder dates every entry on its own.
-
-    Derived from the ladder, never listed: a `span` rung is a STRETCH, and
-    one entry's stretch legitimately states two years ("1984 to 1990"), so a
-    year count says nothing there. A date-grain rung with no span is one
-    year per entry, and then the count is evidence.
-    """
-    ladder = tuple(row.get("ladder") or ()) if isinstance(row, dict) else ()
-    return "span" not in ladder and any(rung in _DATE_GRAIN_RUNGS
-                                        for rung in ladder)
-
-
 def records_missing_entries(user_message: object, records: object, *,
                             reply: object = "", domain: object = None,
                             known_labels: object = (),
@@ -1316,7 +1532,7 @@ def records_missing_entries(user_message: object, records: object, *,
             + ", ".join(" ".join(group) for group in missed[:4])
             + " were not recorded"
         )
-    elif _dates_each_entry(row):
+    elif dates_each_entry(row):
         stated = {year for year in _ECHO_YEAR_RE.findall(text)} - known
         dated = sum(1 for record in filed if record.get("date"))
         if len(stated) >= 2 and dated < len(stated):
@@ -2143,19 +2359,28 @@ def incomplete_subjects(landmarks: object, *,
     those subjects is separately answerable, so each becomes its own unknown,
     NAMED — "What year was Jackie born?", never a generic re-ask.
 
-    An **enumeration domain** is one with ``chain: true`` — family, residences,
-    schools, work. That is what `chain` already means; a second hand-written
-    list of "domains that enumerate" is the duplicate definition the
-    recurring-defect doctrine forbids (contract deviation 4).
+    An **enumeration domain** is :func:`enumerates_subjects` — a domain whose
+    `collection` holds many entries, each walking its own ladder under a name.
+    v219 (lifehug-platform#664): until this release the test was
+    ``chain: true``, and `chain` answered the CLOSURE question, not the
+    multiplicity one. `children`, `partnerships`, `losses` and `military` hold
+    many entries and are not walked lists, so all four were declared
+    ``chain: false`` and skipped here — the founder named four children with
+    four birth dates and got ONE aggregate gap that no answer could close.
+    Eight domains enumerate; `birth` is the singleton axis and does not.
 
     The probe text is `next_rung`'s own rendering for that entry, so there is
     ONE definition of "the next question for this subject" and the domain row
-    and the unknown can never disagree.
+    and the unknown can never disagree. Where a domain dates several DISTINCT
+    events (`partnerships`: first meeting, the start of dating, the marriage —
+    audited plan §2.2), the row also carries ``events``: one precise, subject-
+    named ask per declared date semantic. Those are question TEXT only in this
+    release; per-event claim records are Wave C's.
     """
     filed = landmarks if isinstance(landmarks, dict) else {}
     rows: list[dict] = []
     for row in load_questions(framework_root):
-        if not row.get("chain"):
+        if not enumerates_subjects(row):
             continue
         domain = row["domain"]
         ladder = list(row.get("ladder") or ())
@@ -2186,7 +2411,9 @@ def incomplete_subjects(landmarks: object, *,
                            else _anchor_key(domain, label, position)),
                 "domain": domain,
                 "rung": question["rung"],
+                "identity_kind": row["identity_kind"],
                 "landmark": {"domain": domain, "label": label},
+                "events": event_questions(row, label),
                 "probe": {"step": _LANDMARK_SUBJECT_STEP,
                           "cost": question["cost"],
                           "text": question["text"]},

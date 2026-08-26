@@ -1849,9 +1849,9 @@ class LeafShapedAnswerMatrixTests(unittest.TestCase):
         "schools": ("name", "partial", "Where was Lincoln High — what town?"),
         "partnerships": ("month", "complete", None),
         "children": ("who", "partial", "What year was Charlee born?"),
-        "work": ("what", "partial", "Where was that?"),
+        "work": ("what", "partial", "Where were you doing Line cook?"),
         "military": ("span", "complete", None),
-        "losses": ("who", "partial", "Roughly when was that?"),
+        "losses": ("who", "partial", "Roughly when did you lose Grandpa Ray?"),
     }
 
     def test_the_matrix_covers_every_domain_in_the_set(self):
@@ -2590,12 +2590,18 @@ class ManyRecordsTests(unittest.TestCase):
             reply=message, domain="children"))
 
     def test_unrecorded_years_are_evidence_only_where_entries_date_separately(self):
-        """A `span` domain legitimately states two years for ONE entry."""
-        self.assertFalse(li._dates_each_entry(li.domain_row("residences")))  # noqa: SLF001
-        self.assertFalse(li._dates_each_entry(li.domain_row("work")))  # noqa: SLF001
-        for domain in ("children", "family", "losses", "partnerships"):
+        """A `span` domain legitimately states two years for ONE entry.
+
+        v219: the judgment moved off the LADDER and onto `date_semantics`,
+        which is the field that states it — the answers are unchanged and
+        this test is the pin that says so.
+        """
+        self.assertFalse(li.dates_each_entry(li.domain_row("residences")))
+        self.assertFalse(li.dates_each_entry(li.domain_row("work")))
+        self.assertFalse(li.dates_each_entry(li.domain_row("military")))
+        for domain in ("birth", "children", "family", "losses", "partnerships"):
             with self.subTest(domain=domain):
-                self.assertTrue(li._dates_each_entry(li.domain_row(domain)))  # noqa: SLF001
+                self.assertTrue(li.dates_each_entry(li.domain_row(domain)))
         self.assertIsNone(li.records_missing_entries(
             "I was at the mill from 1971 to 1994.",
             [{"domain": "work", "label": "the mill", "what": "the mill",

@@ -1,0 +1,1 @@
+{"recorded_at": "2026-08-26T18:51:57Z", "component": "question_planner", "operation": "mint_keystone_questions", "error": "'object' object has no attribute 'anchor_rows_for_prompt'"}

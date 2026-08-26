@@ -20,9 +20,52 @@
 #   precision    the grain we expect and store — asking finer manufactures
 #                false precision (landmarks.md §2.4)
 #   unlocks      the arithmetic this landmark makes possible
-#   chain        true when the answer is a LIST walked to the present
 #   sensitive    true when the domain is offered, never asked
 #   why          the one-line sourced reason this domain is here
+#
+# CARDINALITY IS DATA, NOT A FLAG (lifehug-platform#664 wave A, audited plan
+# §6.2). Until v219 one boolean — `chain` — meant THREE different things at
+# once: how many entries a domain holds, whether they are ordered, and what
+# closes the list. `children`, `partnerships` and `losses` are multi-entry
+# domains by construction and were declared `chain: false`, so every consumer
+# that asked "does this domain enumerate?" answered NO for them — and the
+# founder's four children became ONE aggregate gap asking "What year was
+# [all four] born?" instead of four independently closable ones. No field
+# below may mean two things:
+#
+#   collection      singleton | set | sequence — HOW MANY entries, and
+#                   whether their order is part of the fact. `sequence` is a
+#                   list walked forward in time (the residence chain);
+#                   `set` is a group with no walk (your children);
+#                   `singleton` is one entry and no subject (your birthday).
+#   closure         open | user_completable — what ends the GROUP, which is a
+#                   different question from what completes one entry
+#                   (`complete_at` is that one). `user_completable` means the
+#                   person declares the list finished (`chain_complete`) and
+#                   the domain is `partial` until they do; `open` means the
+#                   set is never declared closed and completes when its
+#                   entries do.
+#   identity_kind   person | organization | place | relationship_edge |
+#                   episode — WHAT one entry is. Declared exactly where the
+#                   ladder has an identity rung, and empty where it has none
+#                   (`birth` names no subject); the loader checks both ways.
+#   date_semantics  which EVENTS this domain dates, pipe-separated:
+#                   birth | death | first_met | dating_started | married |
+#                   started | ended | transition | span. Several where the
+#                   domain has several — `partnerships` dates first meeting,
+#                   the start of dating and the marriage as DISTINCT askable
+#                   events (audited plan §2.2), which one `year` rung could
+#                   never say. `span` is the one that is a stretch rather
+#                   than a point, and it is what tells the missing-entry
+#                   lint that two years in one answer are one entry.
+#   per_entry_ladder  true when the rungs below the identity rung are walked
+#                   PER ENTRY — one ladder per child, per house, per job —
+#                   rather than once for the domain.
+#
+# `chain` is GONE from this file. `load_questions` still derives a deprecated
+# `chain` key onto each row for hosts pinned to the old shape, and no code in
+# `system/` may read it: `tests/test_landmarks.py` walks the AST of every
+# module and fails the build on a read.
 #
 # THE NONE TERMINAL (owner ruling 6, 2026-08-24) is DERIVED from this file
 # rather than declared in it: a domain whose `ladder` OPENS at `happened`
@@ -33,9 +76,10 @@
 # moving a ladder's first rung to or from `happened` moves the terminal with
 # it, which is the point. `family` opens at `who` and is therefore OUTSIDE the
 # terminal by derivation, correctly: it enumerates people, and "no siblings"
-# is not an empty family — a chain finishes with `chain_complete`.
+# is not an empty family — a `user_completable` list finishes with
+# `chain_complete`.
 
-version: 1
+version: 2
 domains: birth|family|residences|schools|partnerships|children|work|military|losses
 
 birth.order: 1
@@ -45,7 +89,11 @@ birth.ladder: year|month|day
 birth.complete_at: day
 birth.precision: day
 birth.unlocks: age_arithmetic|grade_arithmetic
-birth.chain: false
+birth.collection: singleton
+birth.closure: open
+birth.identity_kind:
+birth.date_semantics: birth
+birth.per_entry_ladder: false
 birth.sensitive: false
 birth.why: The axis. Every age statement becomes a year; the one legitimate date opener.
 
@@ -65,7 +113,11 @@ family.ladder: who|relation|birth|living
 family.complete_at: birth
 family.precision: year
 family.unlocks: sibling_interval|span_containment|witness_supply
-family.chain: true
+family.collection: set
+family.closure: user_completable
+family.identity_kind: person
+family.date_semantics: birth
+family.per_entry_ladder: true
 family.sensitive: false
 family.why: A third closed list, and the only one made of people — siblings date childhood, elders are the witnesses.
 
@@ -76,7 +128,11 @@ residences.ladder: city|address|span|household
 residences.complete_at: span
 residences.precision: year
 residences.unlocks: span_containment|parallel_cue|reference_intervals
-residences.chain: true
+residences.collection: sequence
+residences.closure: user_completable
+residences.identity_kind: place
+residences.date_semantics: span
+residences.per_entry_ladder: true
 residences.sensitive: false
 residences.why: A closed list that tiles the whole timeline; the LHC's first row.
 
@@ -87,7 +143,11 @@ schools.ladder: name|place|grades|span
 schools.complete_at: span
 schools.precision: academic_year
 schools.unlocks: grade_arithmetic|birth_year_corroboration
-schools.chain: true
+schools.collection: sequence
+schools.closure: user_completable
+schools.identity_kind: organization
+schools.date_semantics: span
+schools.per_entry_ladder: true
 schools.sensitive: false
 schools.why: The second closed list, and the only domain with an external calendar grid.
 
@@ -98,7 +158,11 @@ partnerships.ladder: happened|who|year|month
 partnerships.complete_at: month
 partnerships.precision: month
 partnerships.unlocks: span_containment|entity_date
-partnerships.chain: false
+partnerships.collection: set
+partnerships.closure: open
+partnerships.identity_kind: relationship_edge
+partnerships.date_semantics: first_met|dating_started|married
+partnerships.per_entry_ladder: true
 partnerships.sensitive: false
 partnerships.why: Reported to the exact month in the LHC's validation data (26 of 28).
 
@@ -109,7 +173,11 @@ children.ladder: happened|who|year|month
 children.complete_at: month
 children.precision: month
 children.unlocks: span_containment|entity_date
-children.chain: false
+children.collection: set
+children.closure: open
+children.identity_kind: person
+children.date_semantics: birth
+children.per_entry_ladder: true
 children.sensitive: false
 children.why: Month-exact in validation (9 of 10), and dates another person's whole page.
 
@@ -120,7 +188,11 @@ work.ladder: what|where|span
 work.complete_at: span
 work.precision: year
 work.unlocks: parallel_cue
-work.chain: true
+work.collection: sequence
+work.closure: user_completable
+work.identity_kind: organization
+work.date_semantics: span
+work.per_entry_ladder: true
 work.sensitive: false
 work.why: Dense but churny — 72% agreement across the full spectrum; year grain only.
 
@@ -131,7 +203,11 @@ military.ladder: happened|branch|span
 military.complete_at: span
 military.precision: month
 military.unlocks: span_containment
-military.chain: false
+military.collection: set
+military.closure: open
+military.identity_kind: episode
+military.date_semantics: span
+military.per_entry_ladder: true
 military.sensitive: false
 military.why: Sharply bounded and institutionally dated.
 
@@ -142,6 +218,10 @@ losses.ladder: happened|who|year
 losses.complete_at: year
 losses.precision: year
 losses.unlocks: terminus_ante_quem
-losses.chain: false
+losses.collection: set
+losses.closure: open
+losses.identity_kind: person
+losses.date_semantics: death
+losses.per_entry_ladder: true
 losses.sensitive: true
 losses.why: A common terminus ante quem — offered, never asked, never at onboarding.
