@@ -559,14 +559,42 @@ def write_receipt(
     if created:
         return path
     existing = _read_text(root, relative)
-    if existing == content:
-        return path
+    if existing is not None:
+        try:
+            stored = json.loads(existing)
+        except json.JSONDecodeError:
+            stored = None
+        if isinstance(stored, dict) and _assertion_view(stored) == _assertion_view(normalized):
+            # The same interpretation, filed again. The bytes already on disk
+            # win — including their original timestamps — because a retry is
+            # later, not different.
+            return path
     raise TemporalStoreError(
         "receipt_immutable_conflict",
         f"{relative} already holds a different interpretation; "
         "re-extraction writes a new receipt, it never rewrites one",
         detail={"receipt_id": normalized["receipt_id"]},
     )
+
+
+def _assertion_view(receipt: dict) -> dict:
+    """A receipt with every clock removed — what it ASSERTS, not when it was filed.
+
+    A re-run of the same extraction stamps a fresh ``created_at`` on the receipt
+    and on each claim. That is annotation, exactly as it is for
+    :func:`temporal_claims.derive_claim_id`, and treating it as a difference
+    would turn "file this again" — the retry every idempotent caller depends on
+    — into a corruption error the moment the second attempt crossed a one-second
+    boundary. Everything else must match, so a genuinely different reading at the
+    same path is still refused.
+    """
+    view = {key: value for key, value in receipt.items() if key != "created_at"}
+    view["claims"] = [
+        {key: value for key, value in claim.items() if key != "created_at"}
+        for claim in (receipt.get("claims") or ())
+        if isinstance(claim, dict)
+    ]
+    return view
 
 
 def receipt_relative_paths(vault_root: str | Path) -> list[str]:

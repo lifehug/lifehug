@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -59,8 +60,14 @@ def claim(
     quote: str = "they said so",
     turn_ref: str = "turn-1",
     granularity: str = "day",
+    created_at: str = "2026-08-26T09:00:00Z",
 ) -> dict:
-    """A claim with everything the contract requires and nothing it does not."""
+    """A claim with everything the contract requires and nothing it does not.
+
+    ``created_at`` is pinned rather than left to default, so a test that compares
+    two vaults built from the same evidence is testing the fold and not the
+    second the machine happened to be in.
+    """
     return {
         "claim_type": "date",
         "source_kind": "conversation",
@@ -70,6 +77,7 @@ def claim(
         "evidence": [{"quote": quote, "turn_ref": turn_ref}],
         "basis": "explicit",
         "confidence": 0.9,
+        "created_at": created_at,
     }
 
 
@@ -232,6 +240,29 @@ class ReceiptStoreTests(StoreTestCase):
         with self.assertRaises(ts.TemporalStoreError) as caught:
             self.file_receipt(ref, [claim("Ada", "birth", "1979", granularity="year")])
         self.assertEqual(caught.exception.code, "receipt_immutable_conflict")
+
+    def test_refiling_with_a_later_clock_is_still_a_no_op(self) -> None:
+        """A retry stamps a fresh created_at. That is annotation, not a conflict.
+
+        Caught by the order-independence property test: without this, "file this
+        again" became a corruption error the moment the second attempt crossed a
+        one-second boundary, and every idempotent caller was quietly a coin flip.
+        """
+        ref = self.promote("Ada was born in 1978.", session_ref="s1", turn_ref="t1")
+        first = self.file_receipt(
+            ref,
+            [claim("Ada", "birth", "1978", granularity="year", created_at="2026-08-26T10:00:00Z")],
+            created_at="2026-08-26T10:00:00Z",
+        )
+        original = first.read_bytes()
+        second = self.file_receipt(
+            ref,
+            [claim("Ada", "birth", "1978", granularity="year", created_at="2026-08-27T23:59:59Z")],
+            created_at="2026-08-27T23:59:59Z",
+        )
+        self.assertEqual(first, second)
+        # The bytes already on disk win: a receipt is written once.
+        self.assertEqual(second.read_bytes(), original)
 
     def test_a_receipt_may_not_cite_a_source_that_is_not_in_the_vault(self) -> None:
         ref = tc.SourceRef(
@@ -518,7 +549,12 @@ class RebuildInvariantTests(StoreTestCase):
         # it from the raw input would pass while pointing at nothing.
         seeded = ts.fold_active_index(vault)
         bo = [row for row in seeded["claims"] if row["subject_mention"] == "Bo"][0]
-        ts.dispute_claims(vault, [bo["claim_id"]], reason="Two sources disagree about Bo.")
+        ts.dispute_claims(
+            vault,
+            [bo["claim_id"]],
+            reason="Two sources disagree about Bo.",
+            occurred_at="2026-08-26T12:00:00Z",
+        )
 
     def test_deleting_the_index_and_rebuilding_is_byte_identical(self) -> None:
         self.seed(self.vault)
@@ -553,6 +589,21 @@ class RebuildInvariantTests(StoreTestCase):
                 else:
                     self.assertEqual(rendered, reference)
         assert reference is not None
+        # Every timestamp in the index came off disk, not off the clock. This is
+        # the direct form of the invariant: byte-comparing vaults built
+        # milliseconds apart would agree by luck even if a clock had leaked in.
+        self.assertEqual(
+            set(re.findall(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", reference)),
+            {
+                "2026-08-21T10:00:00Z",
+                "2026-08-22T10:00:00Z",
+                "2026-08-23T10:00:00Z",
+                "2026-08-24T10:00:00Z",
+                "2026-08-26T09:00:00Z",
+                "2026-08-26T10:00:00Z",
+                "2026-08-26T12:00:00Z",
+            },
+        )
         index = json.loads(reference)
         self.assertEqual(index["version"], ts.INDEX_VERSION)
         self.assertEqual(index["counts"]["claims"], 5)
