@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 199,
-    "revision": "vault-contract-v7",
-    "content_digest": "sha256:0f5f0a78e31395b5c5f40888c7d14273e945866dab462fe894b370539283d6ac"
+    "framework_version": 223,
+    "revision": "vault-contract-v8",
+    "content_digest": "sha256:2e7e7cba39d1b4cdf65d586ed2a448e538620eb2ca62e51d718035ef3e5da3ad"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -93,6 +93,13 @@
     "sources": {"path": "sources", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "manual_sources": {"path": "sources/manual", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "import_sources": {"path": "sources/imports", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
+    "conversation_sources": {
+      "path": "sources/conversations",
+      "kind": "directory",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}
+    },
     "correction_sources": {"path": "sources/corrections", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "artifact_sources": {"path": "sources/artifacts", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
     "candidate_research_sources": {"path": "sources/candidate-research", "kind": "directory", "required": false, "tracked": true, "schema": {"format": "markdown_family", "version_field": "schema_version", "supported": [1]}},
@@ -189,6 +196,27 @@
     },
     "focus_merges": {
       "path": "state/focus_merges.json",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "json", "version_field": "version", "supported": [1]}
+    },
+    "temporal_claims_state": {
+      "path": "state/temporal_claims",
+      "kind": "directory",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "json_family", "version_field": null, "supported": []}
+    },
+    "temporal_receipts": {
+      "path": "state/temporal_claims/receipts",
+      "kind": "directory",
+      "required": false,
+      "tracked": true,
+      "schema": {"format": "json_family", "version_field": "schema_version", "supported": [1]}
+    },
+    "temporal_active_index": {
+      "path": "state/temporal_claims/active-index.json",
       "kind": "file",
       "required": false,
       "tracked": true,

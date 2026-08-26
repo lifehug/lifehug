@@ -158,6 +158,9 @@ SOURCES_DIR = _data("sources")
 MANUAL_SOURCES_DIR = _data("manual_sources")
 IMPORT_SOURCES_DIR = _data("import_sources")
 CORRECTION_SOURCES_DIR = _data("correction_sources")
+# v221: a claim-bearing conversational message is promoted to a durable source
+# before any temporal claim cites it (owner amendment 2 / option B).
+CONVERSATION_SOURCES_DIR = _data("conversation_sources")
 ARTIFACT_SOURCES_DIR = _data("artifact_sources")
 CANDIDATE_RESEARCH_SOURCES_DIR = _data("candidate_research_sources")
 QUESTION_CANDIDATES_FILE = _data("question_candidates")
@@ -167,6 +170,12 @@ SOURCE_MANIFEST_FILE = _data("source_manifest")
 SOURCE_LINT_FINDINGS_FILE = _data("source_lint_findings")
 LEARNING_FAILURES_FILE = _data("learning_failures")
 CLASSIFICATIONS_DIR = _data("classifications")
+# v221: the temporal claim substrate. The receipts are evidence; the active
+# index is a materialized view that can be deleted and rebuilt from them
+# (system/temporal_store.py owns every write and the fold).
+TEMPORAL_CLAIMS_DIR = _data("temporal_claims_state")
+TEMPORAL_RECEIPTS_DIR = _data("temporal_receipts")
+TEMPORAL_ACTIVE_INDEX_FILE = _data("temporal_active_index")
 NEIGHBORHOODS_FILE = _data("neighborhoods")
 FOCUS_RECS_FILE = _data("focus_recommendations")
 LEGACY_FOCUS_RECS_FILE = _data("legacy_focus_recommendations")
