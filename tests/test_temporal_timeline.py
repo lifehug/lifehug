@@ -829,11 +829,55 @@ class OneDefinition(unittest.TestCase):
         self.assertIsNone(tt.age_text_for_band(12.5, 12.5, False))
         self.assertIsNone(tt.age_text_for_band(200, 200, False))
 
+    def test_the_band_door_and_the_phrase_door_agree(self):
+        """The pin between the path this module took and the path it takes.
+
+        Until v230 a stored age band became an interval by rebuilding a phrase
+        (:func:`temporal_timeline.age_text_for_band`), verifying it re-parsed,
+        and handing it to ``chronology.from_age``. It now goes straight in
+        through ``chronology.from_age_band``. Both paths still exist, so this
+        sweeps EVERY band the old one could express and demands the two agree
+        record-for-record — the guarantee that promoting the arithmetic into
+        ``chronology`` moved it rather than changed it.
+        """
+        birth = "1979"
+        covered = 0
+        for approximate in (False, True):
+            for low in range(121):
+                for high in range(low, 121):
+                    text = tt.age_text_for_band(low, high, approximate)
+                    if text is None:
+                        self.assertIsNone(
+                            chrono.from_age_band(
+                                birth, low, high, approximate=approximate
+                            ),
+                            (low, high, approximate),
+                        )
+                        continue
+                    covered += 1
+                    self.assertEqual(chrono.parse_age(text), (low, high, approximate))
+                    self.assertEqual(
+                        chrono.from_age(birth, text),
+                        chrono.from_age_band(
+                            birth, low, high, approximate=approximate, claim=text
+                        ),
+                        (low, high, approximate),
+                    )
+        self.assertGreater(covered, 1000)
+
+    def test_a_band_outside_the_age_parsers_domain_is_reported_never_invented(self):
+        """The two doors also refuse the same bands, so the finding is unchanged."""
+        for low, high in ((12.5, 12.5), (200, 200), (6, 5)):
+            self.assertIsNone(tt.age_text_for_band(low, high, False))
+            self.assertIsNone(chrono.from_age_band("1979", low, high))
+
     def test_durations_round_outward_in_every_unit(self):
-        self.assertEqual(tt.duration_years_band({"low": 3, "high": 3, "unit": "years"}), (3, 3))
-        self.assertEqual(tt.duration_years_band({"low": 8, "high": 8, "unit": "months"}), (0, 1))
-        self.assertEqual(tt.duration_years_band({"low": 30, "high": 30, "unit": "days"}), (0, 1))
-        self.assertIsNone(tt.duration_years_band({"low": 1, "high": 1, "unit": "fortnights"}))
+        """The conversion moved to ``chronology`` — one home for date arithmetic."""
+        self.assertEqual(chrono.duration_years_band({"low": 3, "high": 3, "unit": "years"}), (3, 3))
+        self.assertEqual(chrono.duration_years_band({"low": 8, "high": 8, "unit": "months"}), (0, 1))
+        self.assertEqual(chrono.duration_years_band({"low": 30, "high": 30, "unit": "days"}), (0, 1))
+        self.assertIsNone(chrono.duration_years_band({"low": 1, "high": 1, "unit": "fortnights"}))
+        self.assertFalse(hasattr(tt, "duration_years_band"))
 
     def test_every_declared_finding_is_one_the_module_can_report(self):
         """The sibling modules' AST pin: a vocabulary nobody emits is a lie."""
