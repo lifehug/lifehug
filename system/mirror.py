@@ -18,6 +18,16 @@ beneath the synthesis.
 
 Keyless path mirrors classify_story: ``--emit-task DIR`` writes the prompt +
 manifest for agent completion via ``--from-response PATH``.
+
+Mirror has a second half as of v224. The page above is what the classifier
+*noticed*; ``mirror_work`` is what the temporal substrate cannot settle on its
+own — contradictions and unplaced identities, each an actionable row with
+**Play now** (the audited timeline plan §2.5, §8.2). The two halves are
+deliberately separate: the synthesis is a weekly reading with a model in it,
+the rows are derived from claims with no model anywhere, and neither one may
+quietly become the other. The bound entry points are at the bottom of this
+file; the read model, the Play target and the resolution write live in
+``system/mirror_work.py``.
 """
 
 from __future__ import annotations
@@ -26,9 +36,11 @@ import argparse
 import sys
 from pathlib import Path
 
+import mirror_work
 from lifehug_core import (
     CLASSIFICATIONS_DIR,
     MIRROR_RESPONSES_FILE,
+    REPO_DIR,
     WIKI_DIR,
     load_config,
     now_utc,
@@ -36,6 +48,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from mirror_work import MIRROR_ROW_CAP, MirrorResolution, MirrorWorkRow
 
 MIRROR_PAGE_REL = Path("self") / "mirror.md"
 
@@ -379,6 +392,62 @@ def compile_mirror(model: str | None = None, dry_run: bool = False) -> int:
         return 1
     write_mirror_page(body, dry_run=dry_run)
     return 0
+
+
+# --------------------------------------------------------------------------
+# The actionable half — contradictions and identities, bound to this vault
+# --------------------------------------------------------------------------
+#
+# `mirror_work` is told which vault on every call, because the temporal store
+# is (the platform runs many vaults in one process and the OSS package runs
+# one). The three functions below are the local binding for the single vault
+# this process resolved at import, and they are the whole of Mirror's
+# actionable surface as far as the CLI, the viewer and the skills are
+# concerned.
+#
+# Nothing here touches the synthesis above. The page's frontmatter counts the
+# classifier's signals and only those: an actionable row is a thing to answer,
+# not a number to display somewhere else, and §2.5's "quiet" is a promise that
+# Mirror never nags from another surface.
+
+
+def load_actionable_rows(
+    *, cap: int = MIRROR_ROW_CAP, include_resolved: bool = False
+) -> list[MirrorWorkRow]:
+    """The contradiction and identity rows for THIS vault, hardest first.
+
+    Each row carries its own Play target. Open/resolved is derived from the
+    current active claims on every read — see ``mirror_work.derive_row_state``
+    — so there is no row state to keep, migrate or repair.
+    """
+    return mirror_work.load_mirror_rows(
+        REPO_DIR, cap=cap, include_resolved=include_resolved
+    )
+
+
+def resolve_actionable_item(item: object, resolution_text: str, **kwargs: object
+                            ) -> MirrorResolution:
+    """File a Play conversation's resolution against THIS vault.
+
+    A thin binding over ``mirror_work.resolve_mirror_item``: the person's words
+    become a durable source, replacements arrive as new claims through a new
+    receipt, and the losing claims are retired by a correction. An empty answer
+    writes nothing — see :func:`abandon_actionable_item`, whose underlying
+    function cannot write at all.
+    """
+    return mirror_work.resolve_mirror_item(
+        REPO_DIR, item=item, resolution_text=resolution_text, **kwargs  # type: ignore[arg-type]
+    )
+
+
+def abandon_actionable_item(item: object, reason: str = "") -> MirrorResolution:
+    """The Play conversation ended without settling anything — write nothing.
+
+    Bound here for symmetry only: ``mirror_work.abandon_mirror_item`` takes no
+    vault root at all, which is what makes "no correction is invented" a
+    property of the code rather than a promise in a docstring.
+    """
+    return mirror_work.abandon_mirror_item(item, reason=reason)
 
 
 def main(argv: list[str] | None = None) -> int:
