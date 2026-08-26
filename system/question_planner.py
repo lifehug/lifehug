@@ -92,6 +92,14 @@ DEFAULT_LANE_POLICY = {
     # and starred while never asking for a date — the defect in
     # lifehug/lifehug-platform#586. A keystone is asked as itself now.
     "timeline_leverage_per_story": 6,
+    # Wave F (plan §2.3, §8.5): the queue admission threshold for a temporal
+    # WORK ITEM, in combined-score units (0..1). It is the whole of "ordinary
+    # low-value gaps remain on Timeline and do not crowd out the daily
+    # experience" — above it an item may be minted into the bank and compete
+    # for the day, below it the item stays a Timeline invitation and nothing
+    # else. It replaces nothing: `timeline_leverage_per_story` still sets the
+    # weight a minted question carries once it IS in the bank.
+    "work_item_queue_threshold": 0.45,
     "expansion_floor": 0.02,       # research-expansion residual when there's room
     "expansion_onset": 0.60,       # global fullness where expansion urgency starts
 }
@@ -742,6 +750,11 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
             "question_id": probe.get("question_id"),
             "anchor": probe.get("anchor"),
             "leverage": leverage,
+            # Wave F: the identity the whisper lane suppresses against. Derived
+            # here when the caller's probe index does not carry one, so an
+            # injected index behaves exactly like the vault's own.
+            "work_item_id": str(probe.get("work_item_id")
+                                or timeline_work_item_id(anchor=probe.get("anchor")) or ""),
         }
         question["timeline_boost"] = (leverage / per_story) if per_story > 0 else 0.0
 
@@ -781,7 +794,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         ]
         if selected.get("objective"):
             reason_parts.append(f"objective: {selected['objective']}")
-        queue.append({
+        entry = {
             "question_id": selected["id"],
             "category": cat,
             "group": str(selected["group"]),
@@ -792,7 +805,14 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
             "objective": selected.get("objective"),
             "status": "queued",
             "reason": "; ".join(reason_parts),
-        })
+        }
+        # Wave F: a timeline-origin entry carries its work-item identity into
+        # the week, which is what lets `arc_planner` refuse to whisper the very
+        # item the day is already asking (plan §2.3).
+        work_item_id = str((selected.get("timeline_probe") or {}).get("work_item_id") or "")
+        if work_item_id:
+            entry["work_item_id"] = work_item_id
+        queue.append(entry)
 
     def eligible(q: dict, *, enforce_arc: bool = True, enforce_story: bool = True) -> bool:
         fid = q.get("focus")
@@ -914,6 +934,14 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
                     if str(item.get("group")) == "timeline"
                 ),
             },
+            "work_items": {
+                "score_version": WORK_ITEM_SCORE_VERSION,
+                "threshold": policy.get("work_item_queue_threshold"),
+                "weights": dict(DEFAULT_WORK_ITEM_WEIGHTS),
+                "queued": sorted(
+                    str(item["work_item_id"]) for item in queue if item.get("work_item_id")
+                ),
+            },
             "expansion": {
                 "urgency": round(urgency, 3),
                 "recommended": urgency >= 0.5,
@@ -937,54 +965,688 @@ def current_timeline_probes() -> dict:
     try:
         import timeline_interaction  # noqa: PLC0415
 
-        return timeline_interaction.timeline_probe_index(read_text(QUESTIONS_FILE))
+        text = read_text(QUESTIONS_FILE)
+        index = timeline_interaction.timeline_probe_index(text)
+        # Wave F: the same rows, plus the work-item identity the whisper lane
+        # matches on. A pre-wave-F row has no `work_item:` marker and its id is
+        # DERIVED from the anchor it does carry, so the suppression rule works
+        # on a bank minted by any version.
+        markers = {row["bank_id"]: row["work_item_id"] for row in bank_work_items(text).values()}
+        for bank_id, row in index.items():
+            identity = markers.get(bank_id) or timeline_work_item_id(anchor=row.get("anchor"))
+            if identity:
+                row["work_item_id"] = identity
+        return index
     except Exception:  # noqa: BLE001
         return {}
 
 
-def mint_keystone_questions(*, dry_run: bool = False) -> list[dict]:
-    """Mint this vault's earned keystones into the bank — GUARDED.
+# ---------------------------------------------------------------------------
+# The work-item queue adapter (wave F — plan §2.3, §2.4, §8.5)
+#
+# v196 gave the timeline exactly ONE way into the daily question: a keystone,
+# gated on leverage. That gate is a CLASS privilege wearing a number — it asks
+# "is this a keystone?" before it asks "is this worth a day of the person's
+# attention?", and everything that was not a keystone had no route at all.
+#
+# Wave F replaces the class gate with a VALUE gate. Any `TemporalWorkItem`
+# whose `allowed_surfaces` includes `daily_question` is a queue CANDIDATE, and
+# what earns it the slot is the §8.5 combined score. A keystone still usually
+# wins — because reach and placement gain are two of the components and a
+# keystone is a high-reach item by construction — but it wins by SCORING
+# HIGHEST, never by being a keystone. Owner ethos, verbatim: "something of high
+# value has a slot".
+#
+# Three properties are load-bearing here:
+#
+# **One identity, every surface.** The `work_item_id` from
+# `temporal_projection.derive_work_item_id` travels into the minted bank row's
+# provenance comment beside the `tl:` keystone id, and into the arc card's
+# whisper intent. That is what makes "the same item must not be today's
+# question AND today's whisper" a set operation, and what lets an answer on any
+# surface close the item on the others.
+#
+# **The queue is normalized, not maximized.** Cadence, diversity and the group
+# caps are NOT part of the score — they are admission policy applied after
+# scoring, so `GROUP_CAPS["timeline"]` still bounds the whole lane at one
+# question a week no matter how many items clear the threshold (§8.5: "change
+# only from evidence").
+#
+# **Protections are refusals, not weights.** A generic loss-discovery opener is
+# refused by name however it is scored (§2.4), because "offer-only" is a
+# product rule and a rule you can outbid is not a rule.
+# ---------------------------------------------------------------------------
 
-    Runs at `planner-queue` time ONLY, before the queue is built, so a minted
-    question is an ordinary pending question by the time anything scores it.
-    A keystone is minted when its leverage clears `timeline_leverage_per_story`
-    and it has no live (unanswered) row already: asked once, answered once,
-    never re-asked — the bank's own mechanism, not a second one.
+#: Bumped whenever the formula below changes meaning. Every scored candidate
+#: carries it, so a queue built under an older formula is recognizable rather
+#: than silently comparable.
+WORK_ITEM_SCORE_VERSION = 1
+
+#: The components, in the order §8.5 lists them. Each is normalized `0.0..1.0`
+#: BEFORE weighting, so a weight is readable as "how much of the decision is
+#: this" rather than as an unbounded nudge.
+WORK_ITEM_SCORE_COMPONENTS = (
+    "person_value",
+    "placement_gain",
+    "downstream_reach",
+    "context_fit",
+    "interaction_cost",
+    "sensitivity",
+)
+
+#: A deliberately SIMPLE first cut (§8.5: "simple first cut, components exposed
+#: for tuning"). The four positive weights sum to 1.0, so a perfect item scores
+#: 1.0 before costs; the two costs subtract, so an expensive or sensitive item
+#: has to be genuinely valuable to survive them. These are a dict, not
+#: constants folded into the arithmetic, precisely so tuning is an edit to one
+#: readable table and the components stay individually inspectable.
+DEFAULT_WORK_ITEM_WEIGHTS = {
+    "person_value": 0.35,
+    "placement_gain": 0.25,
+    "downstream_reach": 0.25,
+    "context_fit": 0.15,
+    "interaction_cost": -0.15,
+    "sensitivity": -0.20,
+}
+
+#: Placement gain by work-item kind — what answering settles about THIS node: a
+#: missing anchor PLACES it, a precision gap only sharpens one already placed,
+#: and a contradiction settles a node the person can currently see is wrong.
+#:
+#: This is deliberately NOT read from `system_value`. v224's derivation computes
+#: `system_value` as `reach / REACH_SATURATION` — it is the DOWNSTREAM component,
+#: what the answer settles about OTHER nodes — so scoring it as placement gain
+#: too would count reach twice and leave placement gain unexpressed. An item may
+#: still override this with an explicit `placement_gain`.
+WORK_ITEM_PLACEMENT_GAIN = {
+    "missing_anchor": 0.8,
+    "precision_gap": 0.4,
+    "contradiction": 0.7,
+    "identity_uncertain": 0.5,
+}
+
+#: What an item is worth when it says nothing. Neutral on value and fit, mildly
+#: costly (a temporal ask always spends some of a conversation), never sensitive
+#: by default — sensitivity is a claim the minter makes, not one we assume.
+WORK_ITEM_SCORE_DEFAULTS = {
+    "person_value": 0.5,
+    "context_fit": 0.5,
+    "interaction_cost": 0.3,
+    "sensitivity": 0.0,
+}
+
+#: How much RAW reach saturates the reach component, for the items that arrive
+#: carrying a raw count instead of a normalized one. Quoted in the SAME currency
+#: as `timeline_leverage_per_story` — twice the exchange rate — so the one
+#: timeline dial keeps governing both minting and scoring: an item whose answer
+#: would place 2× what one ordinary story answer is worth has maxed the component
+#: out, and everything below scales linearly.
+#:
+#: v224's derivation normalizes reach ITSELF, against its own
+#: `temporal_timeline.REACH_SATURATION`, and hands the result over as
+#: `system_value` with the raw count beside it in `CalculatedTimeline.reach`.
+#: That number is taken as given — "computed where the evidence is" is the whole
+#: argument for wave D doing it — so this factor governs only v196's keystone
+#: leverage. The two scales are honestly different quantities (unplaced NODES vs
+#: timeline unknowns) and both raw counts stay visible on every score, which is
+#: precisely what a later calibration pass needs.
+WORK_ITEM_REACH_SATURATION_FACTOR = 2.0
+
+DAILY_QUESTION_SURFACE = "daily_question"
+WHISPER_SURFACE = "whisper"
+
+#: §2.4, hard: loss discovery is OFFER-ONLY. The generic "have you lost
+#: someone?" opener may live on Timeline and may be offered; it never becomes a
+#: daily question, no matter what it scores and no matter what surfaces its
+#: minter listed. Once a person NAMES someone who died, that item is about a
+#: named subject and is an ordinary contextual question again — which is why
+#: the refusal keys off the generic intent and the un-named subject, never off
+#: the word "loss" appearing anywhere.
+LOSS_DISCOVERY_INTENTS = frozenset({"loss_discovery", "losses_discovery", "loss_offer"})
+LOSS_DISCOVERY_SUBJECTS = frozenset({
+    "losses", "loss", "area:losses", "landmark:losses", "landmark/losses",
+})
+
+#: The field a timeline gap is missing. One string, used by every derivation of
+#: a timeline work-item id, so the keystone lane and the whisper lane cannot
+#: drift into two identities for one question.
+TIMELINE_REQUESTED_FIELD = "temporal_anchor"
+
+#: The bank provenance marker that carries the work-item identity. It is
+#: APPENDED to v196's `timeline_probe:` comment rather than replacing it: the
+#: comment stays a `timeline_probe` row for every existing reader
+#: (`timeline_interaction.timeline_probe_index`, the conversation's keystone
+#: match, the host), and gains one field.
+WORK_ITEM_BANK_MARKER = "work_item"
+
+_WORK_ITEM_BANK_ROW_RE = re.compile(r"^- \[( |x)\] (?P<qid>[A-Z]\d+[a-z]*): (?P<text>.+)$")
+_WORK_ITEM_TAG_RE = re.compile(
+    r"^\s*<!--\s*timeline_probe:\s*(?P<keystone_id>\S+);\s*anchor:\s*(?P<anchor>[^;]+);"
+    r"\s*leverage:\s*(?P<leverage>\d+)"
+)
+_WORK_ITEM_MARKER_RE = re.compile(
+    WORK_ITEM_BANK_MARKER + r":\s*(?P<work_item_id>[A-Za-z0-9:._-]+)"
+)
+
+
+def _clamp_unit(value: object, default: float = 0.0) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return float(default)
+    if math.isnan(number):
+        return float(default)
+    return max(0.0, min(1.0, number))
+
+
+def timeline_work_item_id(*, anchor: object = "", unknown_key: object = "",
+                          kind: str = "missing_anchor",
+                          requested_field: str = TIMELINE_REQUESTED_FIELD) -> str:
+    """The ONE work-item identity for a timeline ask — GUARDED.
+
+    A keystone names an ANCHOR; a whisper is chosen for a GAP that some anchor
+    would resolve. Both derive the id from the anchor when there is one, so the
+    keystone question and the whisper about the gap it resolves are provably
+    the same item (plan §2.3, §5.4). A gap with no resolving anchor falls back
+    to its own unknown key, which is still stable across rebuilds.
+
+    Returns `""` when there is nothing to be about — an id derived from nothing
+    would collide every anchorless gap into one item, which is worse than
+    having no id at all.
     """
+    subject = str(anchor or "").strip()
+    event = str(unknown_key or "").strip()
+    if not subject and not event:
+        return ""
+    try:
+        import temporal_projection  # noqa: PLC0415
+
+        return temporal_projection.derive_work_item_id(
+            kind=kind,
+            subject_ref=subject or None,
+            event_ref=None if subject else event,
+            requested_field=requested_field,
+        )
+    except Exception:  # noqa: BLE001 — a projection problem never breaks the queue
+        return ""
+
+
+def work_item_from_keystone(keystone: object, *, now: str | None = None) -> dict | None:
+    """One keystone -> one `TemporalWorkItem` dict — the generalization seam.
+
+    This is where v196's keystone stops being a privileged class and becomes an
+    ordinary candidate: its leverage becomes `downstream_reach`, its probe
+    becomes `prompt_intent`, and from here on it competes on the same score as
+    anything else the substrate implies.
+    """
+    row = keystone if isinstance(keystone, dict) else {}
+    anchor = str(row.get("anchor") or "").strip()
+    probe = row.get("probe") if isinstance(row.get("probe"), dict) else {}
+    text = " ".join(str(probe.get("text") or "").split())
+    if not anchor or not text:
+        return None
+    payload = {
+        "kind": "missing_anchor",
+        "state": "open",
+        "subject_ref": anchor,
+        "requested_field": TIMELINE_REQUESTED_FIELD,
+        "prompt_intent": text,
+        "allowed_surfaces": ["timeline", WHISPER_SURFACE, DAILY_QUESTION_SURFACE],
+        "created_at": now or now_utc(),
+    }
+    try:
+        import temporal_projection  # noqa: PLC0415
+
+        item = temporal_projection.validate_temporal_work_item(payload)
+    except Exception:  # noqa: BLE001
+        return None
+    item["downstream_reach"] = int(row.get("leverage") or 0)
+    item["keystone"] = dict(row)
+    return item
+
+
+def current_work_items(*, timeline_payload: object = None) -> list[dict]:
+    """Every work item this vault currently implies — GUARDED, deduped by id.
+
+    Two sources today, in precedence order:
+
+    1. `state/temporal_claims/work-items.json`, wave D's published projection.
+       Nothing writes it yet — D1 mints work items from the calculated timeline
+       and the stitch that publishes them is a follow-up — so this read is
+       normally empty and is deliberately written to tolerate that.
+    2. the timeline's own keystones, which is the whole supply today.
+
+    The projection wins a tie because it is the richer record: it knows the
+    claims behind the item and the person value of the subject, where a
+    keystone knows only reach.
+    """
+    return _dedupe_work_items(_published_work_items() + _keystone_work_items(timeline_payload))
+
+
+def work_items_from_projection(payload: object) -> list[dict]:
+    """Wave D's published projection -> queue-ready work items.
+
+    Consumes `temporal_timeline.CalculatedTimeline.to_dict()` exactly as it is
+    written: `{"work_items": [...], "reach": {work_item_id: count}, ...}`. A
+    bare list is accepted too, for a host that publishes only the items.
+
+    Three things travel across the seam and each is deliberate:
+
+    * the item itself, re-validated through v220's own door, because a stored
+      envelope is re-read against the CURRENT classes and a projection written
+      by an older release must fail as one bad row rather than as a broken week;
+    * `reach`, the RAW count the derivation kept beside its normalized
+      `system_value` precisely so wave F could calibrate against it — it is
+      annotation here, not an input the score double-counts;
+    * `combined_score`, preserved as `derivation_score`. Wave F owns the queue's
+      number (§8.5) and overwrites `combined_score`, but throwing wave D's away
+      would make a disagreement between the two invisible, and a disagreement
+      between two scorers is the thing worth being able to see.
+    """
+    rows = payload.get("work_items") if isinstance(payload, dict) else payload
+    reach = payload.get("reach") if isinstance(payload, dict) else None
+    reach = reach if isinstance(reach, dict) else {}
+    items: list[dict] = []
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict):
+            continue
+        item = _validated_work_item(row)
+        if item is None:
+            continue
+        identity = str(item.get("work_item_id") or "")
+        if identity in reach:
+            item["downstream_reach"] = reach[identity]
+        for key in ("downstream_reach", "leverage", "placement_gain", "keystone"):
+            if row.get(key) is not None:
+                item[key] = row[key]
+        if row.get("combined_score") is not None:
+            item["derivation_score"] = row["combined_score"]
+        items.append(item)
+    return items
+
+
+def _published_work_items() -> list[dict]:
+    """Wave D's `work-items.json`, or `[]` — one bad row never hides the rest."""
+    try:
+        import temporal_projection  # noqa: PLC0415
+
+        published = read_json(REPO_DIR / temporal_projection.WORK_ITEMS_FILE, None)
+    except Exception:  # noqa: BLE001
+        return []
+    return work_items_from_projection(published)
+
+
+def _validated_work_item(row: dict) -> dict | None:
+    try:
+        import temporal_projection  # noqa: PLC0415
+
+        return temporal_projection.validate_temporal_work_item(row, now=now_utc())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _keystone_work_items(timeline_payload: object = None) -> list[dict]:
+    """This vault's keystones, adapted into ordinary work items, or `[]`."""
     try:
         import timeline  # noqa: PLC0415
+
+        payload = timeline_payload if isinstance(timeline_payload, dict) else timeline.timeline_data()
+        keystones = timeline.keystones(payload) or ()
+    except Exception:  # noqa: BLE001 — a timeline problem is "no timeline items"
+        return []
+    adapted = [work_item_from_keystone(keystone) for keystone in keystones]
+    return [item for item in adapted if item]
+
+
+def _dedupe_work_items(items: list[dict]) -> list[dict]:
+    deduped: dict[str, dict] = {}
+    for item in items:
+        deduped.setdefault(str(item.get("work_item_id") or ""), item)
+    deduped.pop("", None)
+    return list(deduped.values())
+
+
+def is_loss_discovery(item: object) -> bool:
+    """Is this the generic loss-discovery opener? (§2.4 — offer-only.)
+
+    True only for the GENERIC prompt: a named person who died is an ordinary
+    subject and an ordinary contextual question.
+    """
+    row = item if isinstance(item, dict) else {}
+    intent = str(row.get("prompt_intent") or "").strip().lower()
+    if intent in LOSS_DISCOVERY_INTENTS:
+        return True
+    subject = str(row.get("subject_ref") or "").strip().lower()
+    event = str(row.get("event_ref") or "").strip().lower()
+    return (subject in LOSS_DISCOVERY_SUBJECTS and not event) or (
+        event in LOSS_DISCOVERY_SUBJECTS and not subject
+    )
+
+
+def work_item_reach(item: object) -> int:
+    """How many uncertain things one answer would constrain.
+
+    Source order — explicit annotation, then v196's `leverage` under its old
+    name, then the keystone the item was adapted from, then zero. A work item
+    with no reach is not disqualified; it simply earns nothing from the reach
+    component.
+    """
+    row = item if isinstance(item, dict) else {}
+    for key in ("downstream_reach", "leverage"):
+        if row.get(key) is not None:
+            try:
+                return max(0, int(row[key]))
+            except (TypeError, ValueError):
+                return 0
+    keystone = row.get("keystone")
+    if isinstance(keystone, dict):
+        try:
+            return max(0, int(keystone.get("leverage") or 0))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def score_work_item(item: object, *, weights: object = None, policy: object = None,
+                    reach: object = None) -> dict:
+    """The §8.5 combined score for one work item — pure, versioned, inspectable.
+
+    Returns the components as well as the number, because a queue nobody can
+    explain is a queue nobody can tune: the weekly queue's own metadata carries
+    these, and every future adjustment is a change to
+    :data:`DEFAULT_WORK_ITEM_WEIGHTS` with a bump to
+    :data:`WORK_ITEM_SCORE_VERSION`, not a new special case somewhere.
+
+    Cadence, diversity and the group caps are deliberately ABSENT: they bound
+    admission after the ranking (`GROUP_CAPS["timeline"]`), and folding them in
+    here would make an item's own worth depend on what else happened to be
+    queued that week.
+
+    One honest gap, named rather than papered: for a CONTRADICTION the
+    derivation states `system_value` as conflict severity, not reach, so this
+    function would read severity under the reach component's name. It is inert
+    today — `temporal_timeline.SURFACES_BY_KIND["contradiction"]` lists
+    `mirror`, never `daily_question`, because Mirror's daily convergence is
+    deferred (§2.5, lifehug/lifehug-platform#663) — so no contradiction is ever
+    a queue candidate. When that lands, severity earns its own component and
+    :data:`WORK_ITEM_SCORE_VERSION` bumps; a test pins the exclusion until then.
+    """
+    row = item if isinstance(item, dict) else {}
+    lane = {**DEFAULT_LANE_POLICY, **(policy if isinstance(policy, dict) else {})}
+    table = {**DEFAULT_WORK_ITEM_WEIGHTS, **(weights if isinstance(weights, dict) else {})}
+    per_story = float(lane.get("timeline_leverage_per_story",
+                               DEFAULT_LANE_POLICY["timeline_leverage_per_story"]) or 0)
+    saturation = max(1.0, per_story * WORK_ITEM_REACH_SATURATION_FACTOR)
+    measured_reach = work_item_reach(row) if reach is None else max(0, int(reach))
+
+    kind = str(row.get("kind") or "")
+    placement = row.get("placement_gain")
+    if placement is None:
+        placement = WORK_ITEM_PLACEMENT_GAIN.get(kind, 0.5)
+
+    # Reach, from whoever normalized it. The derivation states `system_value` as
+    # `reach / REACH_SATURATION` and is believed; a keystone states a raw
+    # leverage count and is normalized here. `reach_source` is on the score so a
+    # week is readable rather than merely reproducible.
+    if row.get("system_value") is not None:
+        reach_component = _clamp_unit(row.get("system_value"))
+        reach_source = "derivation"
+    elif measured_reach:
+        reach_component = _clamp_unit(measured_reach / saturation)
+        reach_source = "leverage"
+    else:
+        reach_component = 0.0
+        reach_source = "none"
+
+    components = {
+        "person_value": _clamp_unit(row.get("person_value"),
+                                    WORK_ITEM_SCORE_DEFAULTS["person_value"]),
+        "placement_gain": _clamp_unit(placement, 0.5),
+        "downstream_reach": reach_component,
+        "context_fit": _clamp_unit(row.get("context_fit"),
+                                   WORK_ITEM_SCORE_DEFAULTS["context_fit"]),
+        "interaction_cost": _clamp_unit(row.get("interaction_cost"),
+                                        WORK_ITEM_SCORE_DEFAULTS["interaction_cost"]),
+        "sensitivity": _clamp_unit(row.get("sensitivity"),
+                                   WORK_ITEM_SCORE_DEFAULTS["sensitivity"]),
+    }
+    combined = sum(float(table.get(name, 0.0)) * components[name]
+                   for name in WORK_ITEM_SCORE_COMPONENTS)
+    return {
+        "work_item_id": str(row.get("work_item_id") or ""),
+        "kind": kind,
+        "score_version": WORK_ITEM_SCORE_VERSION,
+        "reach": measured_reach,
+        "reach_source": reach_source,
+        "components": {name: round(components[name], 4) for name in WORK_ITEM_SCORE_COMPONENTS},
+        "weights": {name: float(table.get(name, 0.0)) for name in WORK_ITEM_SCORE_COMPONENTS},
+        "combined_score": round(_clamp_unit(combined), 4),
+    }
+
+
+def bank_work_items(question_bank_text: object) -> dict:
+    """`{work_item_id: row}` for every timeline-origin question in the bank.
+
+    Reads the bank's own provenance comment. A row minted before wave F carries
+    no `work_item:` field — its identity is DERIVED from the anchor it does
+    carry, by the same function everything else uses, so the pre-wave-F bank
+    dedupes and closes exactly like a post-wave-F one and no migration exists.
+    """
+    text = str(question_bank_text or "")
+    rows: dict[str, dict] = {}
+    lines = text.splitlines()
+    for position, line in enumerate(lines):
+        bank_row = _WORK_ITEM_BANK_ROW_RE.match(line)
+        if not bank_row or position + 1 >= len(lines):
+            continue
+        tag = _WORK_ITEM_TAG_RE.match(lines[position + 1])
+        if not tag:
+            continue
+        marker = _WORK_ITEM_MARKER_RE.search(lines[position + 1])
+        anchor = tag.group("anchor").strip()
+        work_item_id = (marker.group("work_item_id") if marker
+                        else timeline_work_item_id(anchor=anchor))
+        if not work_item_id:
+            continue
+        rows.setdefault(work_item_id, {
+            "work_item_id": work_item_id,
+            "bank_id": bank_row.group("qid"),
+            "question_id": tag.group("keystone_id"),
+            "anchor": anchor,
+            "leverage": int(tag.group("leverage")),
+            "text": bank_row.group("text").strip(),
+            "answered": bank_row.group(1) == "x",
+        })
+    return rows
+
+
+def work_item_states_from_bank(question_bank_text: object) -> dict:
+    """`{work_item_id: state}` — the deterministic cross-surface linkage.
+
+    This is the answer-once half of plan §2.3: a bank row that is checked means
+    the person answered that item, wherever they answered it, so the queue
+    candidate is `answered` and the whisper for the same id is gone. The state
+    lives in the bank, which is durable and already the thing "asked once,
+    answered once" is expressed in — no second ledger, no second truth.
+    """
+    return {
+        work_item_id: ("answered" if row["answered"] else "offered")
+        for work_item_id, row in bank_work_items(question_bank_text).items()
+    }
+
+
+def close_answered_work_items(items: object, *, question_bank_text: object = None) -> list[dict]:
+    """Stamp each item with the state the bank proves it is in.
+
+    Items the bank has never seen are returned untouched: absence of a row is
+    "not asked yet", never "answered".
+    """
+    text = read_text(QUESTIONS_FILE) if question_bank_text is None else question_bank_text
+    states = work_item_states_from_bank(text)
+    closed: list[dict] = []
+    for item in items or ():
+        if not isinstance(item, dict):
+            continue
+        state = states.get(str(item.get("work_item_id") or ""))
+        closed.append({**item, "state": state} if state else dict(item))
+    return closed
+
+
+def queue_candidates(items: object = None, *, question_bank_text: object = None,
+                     policy: object = None, weights: object = None) -> list[dict]:
+    """The eligible, scored, ranked work items — highest combined score first.
+
+    The admission ladder, in order, and each rung is a REFUSAL with a name:
+
+    * `loss_discovery` — §2.4, offer-only, checked before anything else so no
+      score can buy the slot;
+    * `surface_not_allowed` — the item does not list `daily_question`, which is
+      how a Timeline-only item stays Timeline-only;
+    * `already_answered` / `already_asked` — the bank already holds a live or
+      checked row for this identity ("asked once, answered once", the bank's
+      own mechanism rather than a second one);
+    * `below_threshold` — §2.3's "ordinary low-value gaps remain on Timeline
+      and do not crowd out the daily experience", expressed as one number.
+
+    Ties break on `work_item_id` so the ranking is total and a rebuild produces
+    the same order.
+    """
+    lane = {**DEFAULT_LANE_POLICY, **(policy if isinstance(policy, dict) else {})}
+    threshold = float(lane.get("work_item_queue_threshold",
+                               DEFAULT_LANE_POLICY["work_item_queue_threshold"]) or 0)
+    rows = list(items) if isinstance(items, (list, tuple)) else current_work_items()
+    text = read_text(QUESTIONS_FILE) if question_bank_text is None else question_bank_text
+    known = bank_work_items(text)
+    candidates: list[dict] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        if is_loss_discovery(item):
+            continue
+        surfaces = item.get("allowed_surfaces") or ()
+        if DAILY_QUESTION_SURFACE not in surfaces:
+            continue
+        if str(item.get("state") or "open") not in ("open", "offered"):
+            continue
+        identity = str(item.get("work_item_id") or "")
+        if not identity or identity in known:
+            continue
+        score = score_work_item(item, weights=weights, policy=lane)
+        if score["combined_score"] < threshold:
+            continue
+        candidate = {**item, "score": score, "combined_score": score["combined_score"]}
+        if item.get("combined_score") is not None and "derivation_score" not in candidate:
+            # Wave D scored it too, under its own formula. Wave F's number wins
+            # (§8.5), but the other one is kept visible rather than overwritten.
+            candidate["derivation_score"] = item["combined_score"]
+        candidates.append(candidate)
+    candidates.sort(key=lambda row: (-row["combined_score"], str(row["work_item_id"])))
+    return candidates
+
+
+def mint_work_item_question(item: object, *, next_question_id: object,
+                            minted_at: str | None = None) -> dict | None:
+    """One work item -> one bank ROW carrying BOTH identities (pure).
+
+    The row is minted by `timeline_interaction.mint_keystone_question` — one
+    row minter, not two — and the work-item id is appended to the provenance
+    comment it produced. Every existing reader still sees a `timeline_probe`
+    row with an anchor and a leverage; the new field is additive, which is why
+    no reader had to change.
+    """
+    row = item if isinstance(item, dict) else {}
+    text = " ".join(str(row.get("prompt_intent") or "").split())
+    if not text:
+        return None
+    keystone = row.get("keystone") if isinstance(row.get("keystone"), dict) else None
+    try:
         import timeline_interaction  # noqa: PLC0415
+
+        if keystone is None:
+            anchor = str(row.get("subject_ref") or row.get("event_ref") or "").strip()
+            if not anchor:
+                return None
+            keystone = {
+                "anchor": anchor,
+                "question_id": timeline_interaction.keystone_question_id(anchor),
+                "label": anchor,
+                "leverage": work_item_reach(row),
+                "probe": {"text": text, "step": ""},
+                "unknown_keys": [],
+                "anchors": [],
+            }
+        minted = timeline_interaction.mint_keystone_question(
+            keystone, next_question_id=next_question_id, minted_at=minted_at)
+    except Exception:  # noqa: BLE001
+        return None
+    if not minted:
+        return None
+    identity = str(row.get("work_item_id") or "")
+    if identity:
+        minted["work_item_id"] = identity
+        minted["line"] = minted["line"].replace(
+            " -->", f"; {WORK_ITEM_BANK_MARKER}: {identity} -->", 1)
+    minted["combined_score"] = row.get("combined_score")
+    return minted
+
+
+def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
+                         question_bank_text: object = None) -> list[dict]:
+    """Mint every work item that EARNED a slot into the bank — GUARDED.
+
+    Runs at `planner-queue` time only, before the queue is built, so a minted
+    question is an ordinary pending bank question by the time anything scores
+    it as a question. What changed in wave F is which items may be minted: not
+    "the keystones whose leverage clears the exchange rate" but "the work items
+    whose combined score clears the queue threshold" — a keystone reaches the
+    bank through exactly the same door as a high-value ordinary landmark gap,
+    and reaches the daily question through the same weekly `timeline` group cap
+    it always did.
+
+    Every failure mode still degrades to "no timeline questions this week": the
+    weekly queue must never be able to break on a timeline problem.
+    """
+    try:
         from question_candidates import next_question_id  # noqa: PLC0415
 
         policy = {**DEFAULT_LANE_POLICY, **load_planner_state().get("lane_policy", {})}
-        per_story = float(policy.get("timeline_leverage_per_story", 0) or 0)
-        if per_story <= 0:
+        text = read_text(QUESTIONS_FILE) if question_bank_text is None else str(question_bank_text)
+        candidates = queue_candidates(work_items, question_bank_text=text, policy=policy)
+        if not candidates:
             return []
-        keystones = timeline.keystones(timeline.timeline_data())
-        if not keystones:
-            return []
-        text = read_text(QUESTIONS_FILE)
-        live = {row["question_id"] for row in timeline_interaction.timeline_probe_index(text).values()
-                if not row.get("answered")}
+        import timeline_interaction  # noqa: PLC0415
+
         minted: list[dict] = []
-        for keystone in keystones:
-            if int(keystone.get("leverage") or 0) < per_story:
+        seen = set(bank_work_items(text))
+        for candidate in candidates:
+            if str(candidate.get("work_item_id")) in seen:
                 continue
-            if str(keystone.get("question_id") or "") in live:
-                continue
-            row = timeline_interaction.mint_keystone_question(
-                keystone, next_question_id=lambda category: next_question_id(text, category))
+            row = mint_work_item_question(
+                candidate,
+                next_question_id=lambda category: next_question_id(text, category))
             if not row:
                 continue
             text = timeline_interaction.insert_keystone_question(text, row)
-            live.add(row["question_id"])
+            seen.add(str(candidate.get("work_item_id")))
             minted.append(row)
-        if minted and not dry_run:
+        if minted and not dry_run and question_bank_text is None:
             write_text(QUESTIONS_FILE, text)
         return minted
     except Exception as exc:  # noqa: BLE001
-        record_learning_failure("question_planner", "mint_keystone_questions", exc)
+        record_learning_failure("question_planner", "mint_queue_questions", exc)
         return []
+
+
+def mint_keystone_questions(*, dry_run: bool = False) -> list[dict]:
+    """v196's name for what is now the general path — kept, delegating.
+
+    A keystone has no separate minting route any more: it is adapted into a
+    work item and minted if, and only if, its combined score earns the slot.
+    The name survives because the CLI, the platform's weekly maintenance and
+    v196's own tests all call it, and because "mint the timeline's questions"
+    is still exactly what it does.
+    """
+    return mint_queue_questions(dry_run=dry_run)
 
 
 def queue_is_stale(queue_data: dict) -> bool:

@@ -644,6 +644,17 @@ def _timeline_gap_intent(item: dict, material: dict, used: dict) -> list[dict]:
     gaps = material.get("timeline_gaps") or []
     if not gaps:
         return []
+    # Wave F (plan §2.3): an item presented as the main daily question must not
+    # ALSO be whispered in the same interaction. The queue entry carries the
+    # work-item identity of the question it is asking, and a gap's identity is
+    # derived by the SAME function, so "is this the same item?" is an equality
+    # check rather than a phrasing heuristic — the whole reason one id travels
+    # across surfaces.
+    asking = str(item.get("work_item_id") or "")
+    if asking:
+        gaps = [gap for gap in gaps if _gap_work_item_id(gap) != asking]
+        if not gaps:
+            return []
     era_hints = {str(item.get("focus") or "").lower(), _category_of(item).lower()}
     era_hints.discard("")
 
@@ -669,6 +680,23 @@ def _timeline_gap_intent(item: dict, material: dict, used: dict) -> list[dict]:
     return []
 
 
+def _gap_work_item_id(gap: dict) -> str:
+    """The work-item identity of one timeline gap — GUARDED, one definition.
+
+    Delegated to `question_planner.timeline_work_item_id` rather than derived
+    here: the keystone that a gap's anchor resolves and the gap itself are the
+    same question, and two derivations of "the same question" is exactly the
+    drift plan §2.3 exists to forbid.
+    """
+    try:
+        from question_planner import timeline_work_item_id  # noqa: PLC0415
+
+        return timeline_work_item_id(anchor=gap.get("anchor") or "",
+                                     unknown_key=gap.get("unknown_key") or "")
+    except Exception:  # noqa: BLE001 — no identity is still a valid whisper
+        return ""
+
+
 def _whisper_intent(gap: dict) -> dict:
     """One gap -> the arc card's timeline intent (the whisper payload).
 
@@ -680,6 +708,14 @@ def _whisper_intent(gap: dict) -> dict:
               "period": gap.get("period"), "note": _gap_note(gap),
               "leverage": int(gap.get("leverage") or 0),
               "unknown_keys": [gap.get("unknown_key")] if gap.get("unknown_key") else []}
+    # Wave F: the whisper carries the SAME work-item id the daily queue and
+    # Timeline use, so answering it on any surface closes it on all of them.
+    # Stamped BEFORE the probe work below — `whisper_from_keystone` names no
+    # such field, so the keystone's payload enriches the whisper without ever
+    # being able to change which item it is about.
+    work_item_id = _gap_work_item_id(gap)
+    if work_item_id:
+        intent["work_item_id"] = work_item_id
     try:
         import timeline_interaction  # noqa: PLC0415
 
