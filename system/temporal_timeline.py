@@ -92,7 +92,6 @@ Controlling contract: the audited final timeline build plan §5.3, §5.4, §6.4,
 
 from __future__ import annotations
 
-import math
 import sys
 import time
 from dataclasses import dataclass, field, replace
@@ -235,12 +234,6 @@ MAX_CLAIM_SCORE = (
     + max(chrono.CONFIDENCE_WEIGHT.values())
     + chrono.MAX_CONSILIENCE_SOURCES * chrono.CONSILIENCE_WEIGHT
 )
-
-#: Days in a mean Gregorian year — the one conversion this module performs on
-#: durations, and the reason a duration in weeks or days still lands on a whole
-#: number of years rather than pretending to a precision it never had.
-DAYS_PER_YEAR = 365.2425
-
 
 class TemporalTimelineError(TemporalContractError):
     """A derivation could not proceed on the inputs it was given."""
@@ -519,17 +512,21 @@ def _resolve_subjects(claims, *, resolution_records, roster_snapshot, now):
 def age_text_for_band(low: float, high: float, approximate: bool) -> str | None:
     """A phrase ``chronology.parse_age`` reads back as exactly this band.
 
-    ``chronology.from_age`` is the package's one age→interval rule and it takes
-    the *phrase*, because the phrase is what was asserted. A stored
-    :class:`~temporal_claims.TemporalQuantity` has already been through
-    ``parse_age`` and kept the band, so getting back to the interval means
-    getting back to a phrase — and the honest way to do that is to build one and
-    then **verify it round-trips**, rather than to re-derive the arithmetic here
-    and have two age rules in the package.
+    The band→phrase direction: what a stored
+    :class:`~temporal_claims.TemporalQuantity` would have to have said to mean
+    what it means, for any surface that wants to quote a band back in words.
+
+    It was also, briefly, how this module got from a stored band to an
+    interval: build a phrase, verify it re-parses, hand it to
+    ``chronology.from_age``. That round trip is gone —
+    ``chronology.from_age_band`` takes the band directly — and this function's
+    remaining load-bearing job is to be the OLD path the new one is pinned
+    against, so the two can never silently disagree
+    (``test_the_band_door_and_the_phrase_door_agree``).
 
     ``None`` when no phrase reproduces the band (a hand-built quantity with a
-    fractional or out-of-range age), which the caller reports as
-    ``quantity_band_unrepresentable`` instead of inventing an interval.
+    fractional or out-of-range age) — the same domain
+    ``chronology.from_age_band`` refuses.
     """
     if low != int(low) or high != int(high) or low < 0 or high > 120 or high < low:
         return None
@@ -545,38 +542,6 @@ def age_text_for_band(low: float, high: float, approximate: bool) -> str | None:
     if parsed != (lo, hi, approximate):
         return None
     return candidate
-
-
-def duration_years_band(quantity: object) -> tuple[int, int] | None:
-    """A duration in any unit as a whole-year band, rounded OUTWARD.
-
-    *"We lived there three years"* bounds a span; *"about eight months"* bounds
-    it to within a year. Rounding outward is the rule that keeps a duration from
-    manufacturing precision: a band is only ever widened by the conversion,
-    never tightened.
-
-    This arithmetic does not exist in ``chronology`` yet. It is a candidate for
-    promotion there beside :func:`chronology.from_age` — noted in this PR's body
-    rather than done here, because ``chronology`` is another branch's file this
-    cycle.
-    """
-    if not isinstance(quantity, dict):
-        return None
-    unit = collapsed_text(quantity.get("unit")) or "years"
-    try:
-        low = float(quantity.get("low"))
-        high = float(quantity.get("high"))
-    except (TypeError, ValueError):
-        return None
-    if low < 0 or high < low:
-        return None
-    per_year = {"years": 1.0, "months": 12.0, "weeks": DAYS_PER_YEAR / 7.0, "days": DAYS_PER_YEAR}
-    divisor = per_year.get(unit)
-    if divisor is None:
-        return None
-    if bool(quantity.get("approximate")):
-        low, high = max(low - 1, 0.0), high + 1
-    return math.floor(low / divisor), math.ceil(high / divisor)
 
 
 def _claim_provenance(claim: dict) -> dict:
@@ -610,20 +575,24 @@ def _record_for_age_claim(claim: dict, birth: object) -> tuple[chrono.DateRecord
     basis, not an exact birthday-derived day. Without a birth anchor there is no
     interval to produce and the honest answer is to say which anchor is missing,
     which is what the second element of the return is for.
+
+    The STORED BAND is what the arithmetic reads — ``chronology.from_age_band``
+    — and the stored phrase rides along as provenance. The band is the parsed,
+    validated value; re-parsing the phrase here would be a second reading of an
+    assertion that has already been read once.
     """
     quantity = claim.get("temporal_value")
     if not isinstance(quantity, dict):
         return None, "quantity_band_unrepresentable"
     if birth is None:
         return None, "age_without_birth_anchor"
-    text = optional_text(quantity.get("text")) or age_text_for_band(
-        float(quantity.get("low") or 0.0),
-        float(quantity.get("high") or 0.0),
-        bool(quantity.get("approximate")),
+    record = chrono.from_age_band(
+        birth,
+        quantity.get("low"),
+        quantity.get("high"),
+        approximate=bool(quantity.get("approximate")),
+        claim=optional_text(quantity.get("text")),
     )
-    if not text:
-        return None, "quantity_band_unrepresentable"
-    record = chrono.from_age(birth, text)
     if record is None:
         return None, "quantity_band_unrepresentable"
     entry = _claim_provenance(claim)
@@ -772,6 +741,11 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list) -> dict:
 def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> None:
     """A duration bounds the far end of a span it has a start for (§6.4).
 
+    The arithmetic is ``chronology.from_duration``'s — one home for date
+    arithmetic — and what belongs here is which finding to report when it
+    declines: an unconvertible quantity and a span with no start are different
+    problems, and only the second one is a question worth asking a person.
+
     *"We lived there three years"* says nothing at all until something says when
     it began; once a start exists, the duration says where the span ends, and
     the result is an interval rather than a date because that is what was
@@ -780,8 +754,8 @@ def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> Non
     """
     best = calculated.get("best")
     for claim in calculated.get("durations") or ():
-        band = duration_years_band(claim.get("temporal_value"))
-        if band is None:
+        quantity = claim.get("temporal_value")
+        if chrono.duration_years_band(quantity) is None:
             diagnostics.append(
                 {
                     "finding": "quantity_band_unrepresentable",
@@ -790,8 +764,8 @@ def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> Non
                 }
             )
             continue
-        start_year = chrono.year_of(best) if best is not None else None
-        if start_year is None:
+        span = chrono.from_duration(best, quantity) if best is not None else None
+        if span is None:
             diagnostics.append(
                 {
                     "finding": "duration_without_start",
@@ -800,20 +774,13 @@ def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> Non
                 }
             )
             continue
-        earliest = best.earliest or str(start_year)
-        latest = str(start_year + band[1])
-        if best.latest and best.latest >= latest:
+        if best.latest and best.latest >= span.latest:
+            # The span already reaches at least that far: a duration widens a
+            # span and never shortens one.
             continue
         entry = _claim_provenance(claim)
-        calculated["best"] = chrono.DateRecord(
-            best=f"{earliest}/{latest}",
-            earliest=earliest,
-            latest=latest,
-            granularity="range",
-            confidence=max((best.confidence, "inferred"), key=chrono.CONFIDENCES.index),
-            basis="anchor",
-            anchors=best.anchors,
-            provenance=best.provenance + ((entry,) if entry else ()),
+        calculated["best"] = replace(
+            span, provenance=span.provenance + ((entry,) if entry else ())
         )
         best = calculated["best"]
 
@@ -1897,6 +1864,5 @@ __all__ = [
     "active_claim_rows",
     "age_text_for_band",
     "derive_calculated_timeline",
-    "duration_years_band",
     "structural_signature",
 ]

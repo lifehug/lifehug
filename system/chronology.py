@@ -635,7 +635,7 @@ def intersect(*records: object) -> DateRecord | None:
     bases = {r.basis for r in usable}
     basis = bases.pop() if len(bases) == 1 else "anchor"
     confidence = max((r.confidence for r in usable), key=CONFIDENCES.index)
-    confidence = _at_most(confidence, "inferred")
+    confidence = at_most(confidence, "inferred")
     granularity = max((r.granularity for r in usable), key=GRANULARITIES.index)
     anchors: tuple[str, ...] = ()
     provenance: tuple[dict, ...] = ()
@@ -649,9 +649,21 @@ def intersect(*records: object) -> DateRecord | None:
                       confidence=confidence, basis=basis, anchors=anchors, provenance=provenance)
 
 
-def _at_most(confidence: str, floor: str) -> str:
-    """The weaker of two confidences (CONFIDENCES is best-first)."""
+def at_most(confidence: str, floor: str) -> str:
+    """The weaker of two confidences (CONFIDENCES is best-first).
+
+    The rule every calculation here obeys: a value the system worked out is
+    never held more firmly than the weakest thing it was worked out from. It
+    is public because callers outside this module do the same arithmetic —
+    re-spelling it as a ``max(..., key=CONFIDENCES.index)`` at a call site is
+    a second copy of a rule that must only ever have one (recurring-defect
+    doctrine).
+    """
     return confidence if CONFIDENCES.index(confidence) >= CONFIDENCES.index(floor) else floor
+
+
+#: The private spelling this rule shipped under, kept so no caller breaks.
+_at_most = at_most
 
 
 def _as_record(value: object) -> DateRecord | None:
@@ -708,13 +720,40 @@ def parse_age(age_text: object) -> tuple[int, int, bool] | None:
     return min(ages), max(ages), hedged
 
 
-def from_age(birth_date: object, age_text: object, *, claim: str | None = None) -> DateRecord | None:
-    """Birthday + a stated age → a dated interval (basis ``age``).
+def _age_band(low: object, high: object) -> tuple[int, int] | None:
+    """``(min_age, max_age)`` when the pair is a band :func:`parse_age` could
+    itself have produced — whole years, ``0..120``, low end first. Anything
+    else is ``None``: a band no phrase could have asserted gets no interval.
+    """
+    try:
+        lo, hi = float(low), float(high)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        return None
+    if lo != int(lo) or hi != int(hi) or lo < 0 or hi > 120 or hi < lo:
+        return None
+    return int(lo), int(hi)
 
-    The owner's own example: a birthday plus "about 5" gives ``1984~`` with
-    the window the hedge earns. Someone who is age *a* occupies the window
-    ``[birth_year + a, birth_year + a + 1]``; a hedge widens it by one year
-    on each side; "5 or 6" takes the union before hedging.
+
+def from_age_band(birth_date: object, low: object, high: object, *,
+                  approximate: bool = False, claim: str | None = None) -> DateRecord | None:
+    """Birthday + a stored age BAND → a dated interval (basis ``age``).
+
+    The same one rule as :func:`from_age`, entered from the other end.
+    :func:`from_age` takes the *phrase*, because the phrase is what a person
+    asserted; a stored quantity (``temporal_claims.TemporalQuantity``) has
+    already been through :func:`parse_age` and kept the band, and it enters
+    HERE. The alternative — rebuilding a phrase from the band and hoping it
+    re-parses — is a second age rule wearing a disguise, and the package has
+    one age rule (recurring-defect doctrine).
+
+    Someone who is age *a* occupies ``[birth_year + a, birth_year + a + 1]``;
+    an ``approximate`` band is a rounded one, so it widens by a year on each
+    side (Huttenlocher, Hedges & Bradburn 1990); a band spanning two ages
+    takes the union before widening. The band's own domain is
+    :func:`parse_age`'s (see :func:`_age_band`), so a band that parser could
+    never have produced comes back ``None`` rather than an invented interval.
     """
     birth = _as_record(birth_date)
     if birth is None:
@@ -722,30 +761,135 @@ def from_age(birth_date: object, age_text: object, *, claim: str | None = None) 
     birth_year = year_of(birth)
     if birth_year is None:
         return None
+    band = _age_band(low, high)
+    if band is None:
+        return None
+    min_age, max_age = band
+    lo = birth_year + min_age
+    hi = birth_year + max_age + 1
+    if approximate:
+        lo -= 1
+        hi += 1
+    lo = max(lo, birth_year)
+    mid = (lo + hi) // 2
+    return DateRecord(
+        best=f"{mid}~",
+        earliest=str(lo),
+        latest=str(hi),
+        granularity="year" if lo == hi else "range",
+        confidence="approximate" if approximate else "inferred",
+        basis="age",
+        anchors=("birth",),
+        provenance=({"claim": claim, "basis": "age"},) if claim else (),
+    )
+
+
+def from_age(birth_date: object, age_text: object, *, claim: str | None = None) -> DateRecord | None:
+    """Birthday + a stated age → a dated interval (basis ``age``).
+
+    The owner's own example: a birthday plus "about 5" gives ``1984~`` with
+    the window the hedge earns. This is the door a *phrase* comes in through:
+    :func:`parse_age` reads it — the package's one age parser — and
+    :func:`from_age_band` does the arithmetic. The phrase itself is kept as
+    the record's provenance, because it is what was actually said.
+    """
     parsed = parse_age(age_text)
     if parsed is None:
         return None
     min_age, max_age, hedged = parsed
-    low = birth_year + min_age
-    high = birth_year + max_age + 1
-    if hedged:
-        low -= 1
-        high += 1
-    low = max(low, birth_year)
-    mid = (low + high) // 2
-    granularity = "year" if low == high else "range"
-    provenance = ({"claim": str(age_text).strip(), "basis": "age"},) if age_text else ()
-    if claim:
-        provenance = ({"claim": claim, "basis": "age"},)
+    return from_age_band(
+        birth_date, min_age, max_age, approximate=hedged,
+        claim=claim or (str(age_text).strip() or None),
+    )
+
+
+# --------------------------------------------------------------------------
+# Durations: a span's far end, once something says where it began
+# --------------------------------------------------------------------------
+
+#: Days in a mean Gregorian year — the constant the unit conversions lean on,
+#: and the reason a duration in weeks or days still lands on a whole number of
+#: years rather than a precision it never had.
+DAYS_PER_YEAR = 365.2425
+
+#: How many of each unit make one year. The keys are exactly
+#: ``temporal_claims.QUANTITY_UNITS`` (a test pins the two together); an
+#: unrecognized unit converts to ``None``, never to a guess.
+DURATION_UNITS_PER_YEAR = {
+    "years": 1.0,
+    "months": 12.0,
+    "weeks": DAYS_PER_YEAR / 7.0,
+    "days": DAYS_PER_YEAR,
+}
+
+
+def duration_years_band(quantity: object) -> tuple[int, int] | None:
+    """A duration in any known unit as a whole-year band, rounded OUTWARD.
+
+    *"We lived there three years"* bounds a span; *"about eight months"*
+    bounds it to within a year. Outward is the only honest direction: a unit
+    conversion may WIDEN a duration and may never tighten one, so the low end
+    floors and the high end ceils, and an ``approximate`` quantity first
+    widens by one of its own units on each side.
+
+    Takes the stored quantity mapping (``temporal_claims.TemporalQuantity``'s
+    ``to_dict``, or the object itself). ``None`` for an unknown unit or for a
+    pair that is not a band.
+    """
+    if hasattr(quantity, "to_dict"):
+        quantity = quantity.to_dict()
+    if not isinstance(quantity, dict):
+        return None
+    unit = " ".join(str(quantity.get("unit") or "years").split()) or "years"
+    divisor = DURATION_UNITS_PER_YEAR.get(unit)
+    if divisor is None:
+        return None
+    try:
+        low, high = float(quantity.get("low")), float(quantity.get("high"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(low) and math.isfinite(high)) or low < 0 or high < low:
+        return None
+    if bool(quantity.get("approximate")):
+        low, high = max(low - 1, 0.0), high + 1
+    return math.floor(low / divisor), math.ceil(high / divisor)
+
+
+def from_duration(start_date: object, quantity: object, *,
+                  claim: str | None = None) -> DateRecord | None:
+    """A start bound + a stated duration → the span it closes (basis ``anchor``).
+
+    A duration says nothing at all until something says when the span began:
+    *"we lived there three years"* is not a date. Given a start it says where
+    the span ENDS, and the result is an interval rather than a date because an
+    interval is what was asserted.
+
+    The far end moves out from the start by the high end of
+    :func:`duration_years_band` — outward-rounded, so the span is never
+    shorter than what was said — while the near end stays where the start put
+    it. Confidence follows :func:`at_most`: never firmer than the start's, and
+    never better than ``inferred``, because this end was calculated.
+    """
+    start = _as_record(start_date)
+    if start is None:
+        return None
+    band = duration_years_band(quantity)
+    if band is None:
+        return None
+    start_year = year_of(start)
+    if start_year is None:
+        return None
+    earliest = start.earliest or str(start_year)
+    latest = str(start_year + band[1])
     return DateRecord(
-        best=f"{mid}~",
-        earliest=str(low),
-        latest=str(high),
-        granularity=granularity,
-        confidence="approximate" if hedged else "inferred",
-        basis="age",
-        anchors=("birth",),
-        provenance=provenance,
+        best=f"{earliest}/{latest}",
+        earliest=earliest,
+        latest=latest,
+        granularity="range",
+        confidence=at_most(start.confidence, "inferred"),
+        basis="anchor",
+        anchors=start.anchors,
+        provenance=start.provenance + (({"claim": claim, "basis": "anchor"},) if claim else ()),
     )
 
 
@@ -776,7 +920,7 @@ def from_anchor(anchor_date_record: object, relation: str, grain: str = "range",
                           granularity=grain, confidence="inferred", basis="anchor",
                           anchors=anchors, provenance=anchor.provenance)
     return DateRecord(best=anchor.best, earliest=anchor.earliest, latest=anchor.latest,
-                      granularity=grain, confidence=_at_most(anchor.confidence, "inferred"),
+                      granularity=grain, confidence=at_most(anchor.confidence, "inferred"),
                       basis="anchor", anchors=anchors, provenance=anchor.provenance)
 
 
@@ -812,7 +956,7 @@ def widen_for_elapsed(record: object, *, as_of: object = None) -> DateRecord | N
     latest = str(high + widen) if high is not None and parsed.latest else parsed.latest
     index = GRANULARITIES.index(parsed.granularity)
     granularity = GRANULARITIES[min(index + 1, GRANULARITIES.index("range"))]
-    confidence = _at_most(parsed.confidence, "inferred")
+    confidence = at_most(parsed.confidence, "inferred")
     best = f"{earliest or '..'}/{latest or '..'}"
     return DateRecord(best=best, earliest=earliest, latest=latest, granularity=granularity,
                       confidence=confidence, basis=parsed.basis, anchors=parsed.anchors,

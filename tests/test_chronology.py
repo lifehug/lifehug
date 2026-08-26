@@ -182,6 +182,50 @@ class AgeArithmeticTests(unittest.TestCase):
         self.assertIsNone(ch.from_age("not a date", "5"))
 
 
+class AgeBandTests(unittest.TestCase):
+    """The band door: a stored quantity enters the ONE age rule directly."""
+
+    def test_the_owners_own_example_through_the_band_door(self):
+        record = ch.from_age_band("1979", 5, 5, approximate=True)
+        self.assertEqual(record.best, "1984~")
+        self.assertEqual((record.earliest, record.latest), ("1983", "1986"))
+        self.assertEqual(record.basis, "age")
+        self.assertEqual(record.confidence, "approximate")
+        self.assertEqual(record.anchors, ("birth",))
+
+    def test_the_two_doors_open_on_the_same_arithmetic(self):
+        """Every phrase `parse_age` reads lands where its band lands."""
+        for phrase in ("5", "about 5", "5 or 6", "about 5 or 6", "twelve",
+                       "roughly 12", "about 0", "119 or 120"):
+            low, high, hedged = ch.parse_age(phrase)
+            self.assertEqual(
+                ch.from_age("1979", phrase),
+                ch.from_age_band("1979", low, high, approximate=hedged, claim=phrase),
+                phrase,
+            )
+
+    def test_a_stored_band_arrives_as_floats_and_is_still_a_band(self):
+        self.assertEqual(
+            ch.from_age_band("1979", 12.0, 12.0, approximate=True),
+            ch.from_age_band("1979", 12, 12, approximate=True),
+        )
+
+    def test_the_phrase_is_provenance_and_a_bandonly_quantity_has_none(self):
+        self.assertEqual(
+            ch.from_age_band("1979", 12, 12, claim="I was twelve").provenance,
+            ({"claim": "I was twelve", "basis": "age"},),
+        )
+        self.assertEqual(ch.from_age_band("1979", 12, 12).provenance, ())
+
+    def test_a_band_no_phrase_could_have_asserted_is_refused(self):
+        for low, high in ((12.5, 12.5), (200, 200), (-1, 4), (6, 5), ("x", 5), (None, 5)):
+            self.assertIsNone(ch.from_age_band("1979", low, high), (low, high))
+
+    def test_no_birthday_is_none_here_too(self):
+        self.assertIsNone(ch.from_age_band(None, 5, 5))
+        self.assertIsNone(ch.from_age_band("not a date", 5, 5))
+
+
 class AnchorArithmeticTests(unittest.TestCase):
     def setUp(self):
         self.mesa = ch.parse_edtf("1984/1990")
@@ -211,6 +255,89 @@ class AnchorArithmeticTests(unittest.TestCase):
         # an anchor with no earliest bound cannot yield a terminus ante quem
         self.assertIsNone(ch.from_anchor(ch.parse_edtf("../1984"), "before"))
         self.assertIsNone(ch.from_anchor(ch.parse_edtf("1984/.."), "after"))
+
+
+class DurationArithmeticTests(unittest.TestCase):
+    """A duration closes a span it has a start for — outward, never inward."""
+
+    def test_every_unit_rounds_outward_to_whole_years(self):
+        self.assertEqual(ch.duration_years_band({"low": 3, "high": 3, "unit": "years"}), (3, 3))
+        self.assertEqual(ch.duration_years_band({"low": 8, "high": 8, "unit": "months"}), (0, 1))
+        self.assertEqual(ch.duration_years_band({"low": 30, "high": 30, "unit": "days"}), (0, 1))
+        self.assertEqual(ch.duration_years_band({"low": 60, "high": 60, "unit": "weeks"}), (1, 2))
+        self.assertEqual(ch.duration_years_band({"low": 2, "high": 2}), (2, 2))
+
+    def test_an_approximate_duration_widens_by_one_of_its_own_units_first(self):
+        self.assertEqual(
+            ch.duration_years_band({"low": 3, "high": 3, "unit": "years", "approximate": True}),
+            (2, 4),
+        )
+        # …and never below zero: "about a month" cannot become negative time.
+        self.assertEqual(
+            ch.duration_years_band({"low": 1, "high": 1, "unit": "months", "approximate": True}),
+            (0, 1),
+        )
+
+    def test_an_unknown_unit_or_a_non_band_converts_to_nothing(self):
+        self.assertIsNone(ch.duration_years_band({"low": 1, "high": 1, "unit": "fortnights"}))
+        self.assertIsNone(ch.duration_years_band({"low": 6, "high": 2}))
+        self.assertIsNone(ch.duration_years_band({"low": -1, "high": 2}))
+        self.assertIsNone(ch.duration_years_band({"low": "many", "high": "many"}))
+        self.assertIsNone(ch.duration_years_band("three years"))
+        self.assertIsNone(ch.duration_years_band(None))
+
+    def test_a_quantity_object_is_read_through_its_own_to_dict(self):
+        class Quantity:
+            def to_dict(self):
+                return {"kind": "duration", "low": 3, "high": 3, "unit": "years"}
+
+        self.assertEqual(ch.duration_years_band(Quantity()), (3, 3))
+
+    def test_the_units_are_exactly_the_ones_a_claim_may_carry(self):
+        """One vocabulary: a unit `temporal_claims` accepts, this converts."""
+        import temporal_claims as tc
+
+        self.assertEqual(set(tc.QUANTITY_UNITS), set(ch.DURATION_UNITS_PER_YEAR))
+
+    def test_a_start_plus_three_years_is_a_span_not_a_date(self):
+        span = ch.from_duration("1990", {"low": 3, "high": 3, "unit": "years"})
+        self.assertEqual(span.best, "1990/1993")
+        self.assertEqual((span.earliest, span.latest), ("1990", "1993"))
+        self.assertEqual(span.granularity, "range")
+        self.assertEqual(span.basis, "anchor")
+
+    def test_the_calculated_end_never_claims_better_than_inferred(self):
+        stated = ch.DateRecord(best="1990", earliest="1990", latest="1990",
+                               basis="stated", confidence="certain", anchors=("move",))
+        span = ch.from_duration(stated, {"low": 3, "high": 3, "unit": "years"})
+        self.assertEqual(span.confidence, "inferred")
+        self.assertEqual(span.anchors, ("move",))
+        weaker = ch.from_duration(
+            ch.DateRecord(best="1990", earliest="1990", confidence="conjectural"),
+            {"low": 3, "high": 3, "unit": "years"},
+        )
+        self.assertEqual(weaker.confidence, "conjectural")
+
+    def test_a_duration_with_nothing_to_start_from_says_nothing(self):
+        self.assertIsNone(ch.from_duration(None, {"low": 3, "high": 3, "unit": "years"}))
+        self.assertIsNone(ch.from_duration("not a date", {"low": 3, "high": 3}))
+        self.assertIsNone(ch.from_duration("1990", {"low": 1, "high": 1, "unit": "fortnights"}))
+
+    def test_the_phrase_rides_along_as_provenance(self):
+        span = ch.from_duration("1990", {"low": 3, "high": 3}, claim="we lived there three years")
+        self.assertEqual(
+            span.provenance, ({"claim": "we lived there three years", "basis": "anchor"},)
+        )
+
+
+class ConfidenceFloorTests(unittest.TestCase):
+    def test_the_weaker_of_two_confidences_wins(self):
+        self.assertEqual(ch.at_most("certain", "inferred"), "inferred")
+        self.assertEqual(ch.at_most("conjectural", "inferred"), "conjectural")
+        self.assertEqual(ch.at_most("inferred", "inferred"), "inferred")
+
+    def test_the_private_spelling_is_the_same_function(self):
+        self.assertIs(ch._at_most, ch.at_most)
 
 
 class IntersectTests(unittest.TestCase):
