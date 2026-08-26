@@ -39,6 +39,13 @@ holding alternates while claiming to be settled is refused by name
 and the losing claim is never deleted merely because another currently ranks
 higher.
 
+``landmarks.json`` becomes a projection over these nodes in wave B (owner
+amendment Q1, 2026-08-26). It is named here because that is what "the schemas
+it will be projected FROM" means concretely: a landmark is a
+:class:`CalculatedTimelineNode` with its ``input_claim_refs`` pointing back at
+the claims that placed it, and the file stops being a place anything is
+written by hand.
+
 Schema version and compatibility: :data:`temporal_claims.SCHEMA_VERSION` covers
 this module too, under the same additive-only rule stated in that module's
 docstring. :data:`NODE_IDENTITY_KEYS` and :data:`WORK_ITEM_IDENTITY_KEYS` are
