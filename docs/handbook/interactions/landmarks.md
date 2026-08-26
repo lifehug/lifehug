@@ -46,7 +46,8 @@ military: the row leaves the open list and is never offered again. This is the
 mirror of the rule above, and it is the difference between an instrument and a
 form (owner ruling 6, 2026-08-24; `landmarks.md` §5.2). `family` is *not* one
 of the four — its ladder opens at `who`, and "no siblings" does not mean there
-was no family. An enumeration domain is finished the way every chain is.
+was no family. A `user_completable` list is finished by the person saying
+so, which is a different fact from never having happened.
 
 **Recording is not replying** (v212, ADR 0028). Until v209 one model
 completion did two jobs on a landmark turn — be good company, and file a fact
@@ -69,8 +70,8 @@ ambiguity must never punish a good turn.
 the same class arrived a day later, and it was not about tone at all: someone
 answers *"what work have you done"* with a whole working life, or names four
 children with four birthdays, and one record comes back. Most of these domains
-are multi-entry by construction — four are declared `chain: true` and two more
-enumerate people — so the recorder now emits a LIST, each record is validated
+are multi-entry by construction — v219 declares eight of the nine
+`collection: set` or `collection: sequence` — so the recorder now emits a LIST, each record is validated
 on its own so a bad one never costs a good one, and a second, RETRYABLE lint
 (`landmark_gates.record_every_entry`) spends the same single regeneration when
 the person plainly stated more entries than came back. That branch never
@@ -131,11 +132,12 @@ with it `None` the turn's output contract is byte-identical to v196.
 | **Domain** | one landmark family — `birth`, `family`, `residences`, `schools`, `partnerships`, `children`, `work`, `military`, `losses` |
 | **Ladder** | the specificity rungs inside a domain, coarse to fine (residence: city → address → span → household) |
 | **Rung** | one step on a ladder, and the one question that asks for it |
-| **Status** | `open` (nothing filed) · `partial` (filed, below target) · `complete` (at target, and for a chain, the person said it's finished) |
+| **Status** | `open` (nothing filed) · `partial` (filed, below target) · `complete` (at target, and — where `closure` is `user_completable` — the person said the list is finished) |
 | **Entailment** | `happened` is the one rung nobody states outright. It is satisfied by anything else the entry carries (`landmarks_interaction.asserts_happened`) — you cannot name your children without having children. Without it the first rung of all four yes/no domains was unreachable, and a fully answered domain read as if nothing had been said |
 | **Identity rung** (v211) | the rung whose answer IS what the entry is called — `who` for the people domains, `city`/`name`/`what`/`branch` for the rest, and nothing at all for `birth`. DERIVED as the first rung that is neither `happened` nor a date grain (`landmarks_interaction.identity_rung`), and satisfied by the name the writer files under `label` (`identity_named`). The turn contract tells the model to put "the school in `label`", so before lifehug#219 **seven of the nine domains re-asked their own opening question after a perfect answer** — the founder's four labelled children were asked "What are their names?" forever. Same class as the `span` fallback (v199) and the date grains (lifehug#207): the ladder could not read what the writer writes |
 | **None terminal** | `{"domain": …, "none": true}` — the answer "that never happened". Reports the domain's `complete_at` rung, so the domain is `complete` by the same definition every other answer uses. Available only where the ladder opens at `happened` (`landmarks_interaction.domain_accepts_none`), so `partnerships`/`children`/`military`/`losses` and nothing else: `{"domain": "birth", "none": true}` would complete the axis with no date, and `family` is an enumeration, not a yes/no |
-| **Chain** | a domain that is a LIST walked to the present — family, residences, schools, work. `chain: true` is also what "an **enumeration domain**" means, the domains whose half-filled subjects each become their own unknown (v202) |
+| **Cardinality block** (v219) | five fields where one boolean stood. `collection` (`singleton` · `set` · `sequence`) says HOW MANY entries and whether their order is part of the fact; `closure` (`open` · `user_completable`) says what ends the GROUP, which `complete_at` never said — it ends one ENTRY; `identity_kind` says what one entry IS (`person` · `organization` · `place` · `relationship_edge` · `episode`); `date_semantics` says which EVENTS it dates; `per_entry_ladder` says the rungs below identity are walked once per entry. The retired `chain: true` meant multiplicity, order and closure at once, so `children`, `partnerships`, `losses` and `military` — multi-entry but not walked lists — were declared `chain: false` and every consumer asking the multiplicity question got the closure answer |
+| **Enumeration domain** | `landmarks_interaction.enumerates_subjects` — a domain holding many named entries, each walking its own ladder. Eight of the nine; `birth` is the singleton axis. These are the domains whose half-filled subjects each become their own unknown (v202), and v219 is what finally makes that true of the four the flag hid |
 | **Anchor** | what a dated landmark becomes: a row in `timeline.anchor_index` that every later probe resolves through |
 | **Keystone** | the ★ — the landmark domain that would supply the current highest-leverage anchor. With no birthday filed the star is always `birth`, because with no axis the arithmetic cannot run at all |
 | **Cross-dating** | the name of the mechanic (`go-deep.md` §7): dating an undated sequence by matching it against an already-dated one. The landmarks are the dated sequence |
@@ -206,7 +208,8 @@ And three things become possible that were not before:
    asked before, because it did not know the place existed.
 
 Ladder status through those three commands: `open` → `partial` (city only) →
-`partial` (still, because the chain has not been declared finished).
+`partial` (still, because the list has not been declared finished —
+`residences` is `closure: user_completable`).
 
 Now the same person is asked "did you serve?" and says they never did:
 
