@@ -747,6 +747,286 @@ def age_band_span(name: object, birth_date: object) -> Derivation | None:
         label="your birthday", provenance=provenance)
 
 
+# ---------------------------------------------------------------------------
+# Age frames — the permanent calculated coordinate system (eras design §3.3).
+# ---------------------------------------------------------------------------
+
+#: The two named bands, and where the decades take over. `childhood [0,13)`
+#: and `teens [13,20)` are the design's own words; everything after is
+#: `[10k, 10k+10)` for every REACHED k ≥ 2, with **no maximum**.
+AGE_FRAME_FIXED_BANDS = (("childhood", 0, 13), ("teens", 13, 20))
+AGE_FRAME_DECADE_FLOOR = 20
+AGE_FRAME_DECADE = 10
+
+#: What each band is CALLED. A decade names itself ("My 20s").
+AGE_FRAME_LABELS = {"childhood": "Childhood", "teens": "Teen years"}
+
+#: The one sentence a frame shows for where it came from.
+AGE_FRAME_PROVENANCE = "from your birthday"
+
+#: Re-exported so a caller reading frames does not have to know that the clamp
+#: rule is minted one module down. There is one name for it, and this is it.
+AGE_FRAME_CLAMP_RULE = chrono.AGE_FRAME_CLAMP_RULE
+
+#: How a record sits against a frame. `within` is one frame containing the
+#: whole interval; `overlaps` is every frame a wider or boundary-straddling
+#: interval touches — and NOTHING picks a winner among them (design §2.4).
+FRAME_RELATIONS = ("within", "overlaps")
+
+_OPEN_LOW = (-9999, 1, 1)
+_OPEN_HIGH = (9999, 12, 31)
+
+
+@dataclass(frozen=True)
+class AgeFrame:
+    """One age frame: the interval, how it is bounded, and where life stops.
+
+    ``end`` is EXCLUSIVE — the thirtieth birthday belongs to My 30s — while
+    ``value`` is the same interval closed, at the birth's own grain, because a
+    closed interval is what a `chronology.DateRecord` stores and what every
+    reader already knows how to compare.
+    """
+
+    band: str
+    label: str
+    low: int
+    high: int
+    start: chrono.DateRecord
+    end: chrono.DateRecord
+    value: chrono.DateRecord
+    current: bool
+    life_clip_end: str
+
+    def to_dict(self) -> dict:
+        return {
+            "band": self.band,
+            "label": self.label,
+            "ages": [self.low, self.high],
+            "definition_span": {"start": self.start.to_dict(), "end": self.end.to_dict()},
+            "value": self.value.to_dict(),
+            "current": self.current,
+            "life_clip_end": self.life_clip_end,
+        }
+
+
+def age_frame_label(band: object) -> str:
+    """A band key as the person reads it."""
+    key = str(band or "").strip()
+    return AGE_FRAME_LABELS.get(key) or (f"My {key}" if key else "")
+
+
+def age_frame_ladder(max_age: object) -> tuple[tuple[str, int, int], ...]:
+    """Every band whose FLOOR is at or below ``max_age``: `(band, low, high)`.
+
+    The ladder is generated, not tabulated, which is what "no maximum" means:
+    there is no last row to forget to add when somebody turns 100.
+    """
+    try:
+        ceiling = int(max_age)
+    except (TypeError, ValueError):
+        return ()
+    rows = [row for row in AGE_FRAME_FIXED_BANDS if row[1] <= ceiling]
+    age = AGE_FRAME_DECADE_FLOOR
+    while age <= ceiling:
+        rows.append((f"{age}s", age, age + AGE_FRAME_DECADE))
+        age += AGE_FRAME_DECADE
+    return tuple(rows)
+
+
+#: The canonical band NAMES a roster mints, per frame — the design's own
+#: "`Childhood`, `My Teens`, `My 20s`…" (§3.5). Everything else is generated
+#: from :data:`AGE_BAND_AGES`, which is the legacy table those very rows were
+#: named from, so the two can never drift into two vocabularies.
+AGE_FRAME_CANONICAL_NAMES = {"childhood": ("childhood",)}
+
+
+def age_frame_slug(name: object) -> str:
+    """A period name as the roster's own slug — lowercase, hyphenated."""
+    return "-".join(re.findall(r"[a-z0-9]+", str(name or "").lower()))
+
+
+def age_frame_legacy_slugs() -> dict:
+    """`{band: (slug, …)}` — every legacy period slug that IS an age frame.
+
+    Built from :data:`AGE_BAND_AGES`' own keys (so `my-20s`, `my-twenties`,
+    `my-teens`, `my-teenage-years` all arrive without a second list) plus the
+    bare spellings and `childhood`, which the legacy band table never held
+    because it had no `[0,13)` rung. A band name whose ages do not match this
+    ladder's is deliberately absent: `My 50s` is a frame the moment it is
+    reached, and `AGE_BAND_AGES`' 50s row agrees with the ladder, so it maps.
+    """
+    ladder = {band: (low, high) for band, low, high in age_frame_ladder(200)}
+    slugs: dict[str, list[str]] = {}
+    for band, names in AGE_FRAME_CANONICAL_NAMES.items():
+        slugs[band] = [age_frame_slug(name) for name in names]
+    for label, ages in AGE_BAND_AGES.items():
+        band = next((key for key, span in ladder.items() if span == ages), None)
+        if band is None:
+            continue
+        for spelling in (f"my {label}", label):
+            slug = age_frame_slug(spelling)
+            if slug and slug not in slugs.setdefault(band, []):
+                slugs[band].append(slug)
+    return {band: tuple(values) for band, values in slugs.items()}
+
+
+def age_frame_band_of(name: object) -> str | None:
+    """The band a legacy period NAME or slug means, or ``None``.
+
+    ``None`` for anything that is not an age band — `College`, `the Mission`.
+    A named era is E3's identity and guessing one here would be exactly the
+    wrong join ADR 0026 ranks above a miss.
+    """
+    slug = age_frame_slug(name)
+    if not slug:
+        return None
+    for band, slugs in age_frame_legacy_slugs().items():
+        if slug in slugs:
+            return band
+    return None
+
+
+def _bounds(record: object) -> tuple[tuple, tuple] | None:
+    """A record as a comparable closed `(low, high)`; open ends run to ±9999."""
+    parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+    if parsed is None:
+        return None
+    low = chrono._ordinal(parsed.earliest, end=False) or _OPEN_LOW  # noqa: SLF001
+    high = chrono._ordinal(parsed.latest, end=True) or _OPEN_HIGH  # noqa: SLF001
+    if parsed.earliest is None and parsed.latest is None:
+        return None
+    return low, high
+
+
+def _as_of_bound(value: object) -> tuple | None:
+    """`as_of` — an ISO day, a date record, or anything either parses."""
+    if value is None:
+        return None
+    text = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    text = text.split("T")[0].strip()
+    ordinal = chrono._ordinal(text, end=False)  # noqa: SLF001
+    if ordinal is not None:
+        return ordinal
+    bounds = _bounds(chrono.from_dict(value))
+    return bounds[0] if bounds else None
+
+
+def _frame_provenance(*records: chrono.DateRecord) -> tuple[dict, ...]:
+    """The frame's own sentence, plus any calendar rule the shift had to use."""
+    entries: list[dict] = [{"claim": AGE_FRAME_PROVENANCE, "basis": "anchor",
+                            "source": f"{PROVENANCE_SOURCE}:{BIRTH_KEY}"}]
+    for record in records:
+        for row in record.provenance:
+            if row.get("source") == AGE_FRAME_CLAMP_RULE and row not in entries:
+                entries.append(dict(row))
+    return tuple(entries)
+
+
+def age_frames(birth: object, *, as_of: object,
+               death: object = None) -> tuple[AgeFrame, ...]:
+    """The reached age frames of one life. ONE definition (design §3.3).
+
+    Pure arithmetic over the birth origin: `start_k = add_years(birth, low)`,
+    `end_k = add_years(birth, high)` exclusive, for every band whose start is
+    at or before ``as_of`` (or before a given ``death``). Disjoint on age by
+    construction, so no frame needs to know about any other.
+
+    What this function deliberately does NOT decide: whether the origin is
+    ``explicit`` or ``calculated``. That is a *claim* basis with exactly one
+    definition already — `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS` — and
+    importing the substrate here to re-answer it would be a second copy of that
+    table inside a module whose whole value is that it is pure.
+    """
+    origin = birth if isinstance(birth, chrono.DateRecord) else chrono.from_dict(birth)
+    if origin is None:
+        return ()
+    limit = _as_of_bound(as_of)
+    if limit is None:
+        return ()
+    death_record = death if isinstance(death, chrono.DateRecord) else chrono.from_dict(death)
+    death_bound = _as_of_bound(death) if death_record is not None else None
+    clipped_by_death = death_bound is not None and death_bound <= limit
+    if clipped_by_death:
+        limit = death_bound
+
+    confidence = _inherited_confidence(origin)
+    day_grain = origin.granularity == "day"
+    rows: list[tuple[str, int, int, chrono.DateRecord, chrono.DateRecord]] = []
+    age = 0
+    while True:
+        ladder = age_frame_ladder(age)
+        if not ladder:
+            break
+        band, low, high = ladder[-1]
+        start = chrono.add_years(origin, low)
+        end = chrono.add_years(origin, high)
+        if start is None or end is None:
+            break
+        start_bound = _bounds(start)
+        if start_bound is None or start_bound[0] > limit:
+            break
+        rows.append((band, low, high, start, end))
+        age = high
+
+    frames: list[AgeFrame] = []
+    for index, (band, low, high, start, end) in enumerate(rows):
+        earliest = start.earliest or start.best
+        latest = chrono.day_before(end.earliest) if day_grain else (end.latest or end.best)
+        if not earliest or not latest:
+            continue
+        value = chrono.DateRecord(
+            best=f"{earliest}/{latest}", earliest=earliest, latest=latest,
+            granularity="range", confidence=confidence, basis="anchor",
+            anchors=(BIRTH_KEY,), provenance=_frame_provenance(start, end),
+        )
+        last = index == len(rows) - 1
+        if last and clipped_by_death:
+            clip = (death_record.earliest or death_record.best) if death_record else latest
+            frames.append(AgeFrame(band, age_frame_label(band), low, high, start, end,
+                                   value, False, str(clip)))
+        elif last:
+            frames.append(AgeFrame(band, age_frame_label(band), low, high, start, end,
+                                   value, True, "present"))
+        else:
+            frames.append(AgeFrame(band, age_frame_label(band), low, high, start, end,
+                                   value, False, latest))
+    return tuple(frames)
+
+
+def frames_touching(frames: object, record: object) -> tuple[tuple[str, str], ...]:
+    """Every frame a record touches, and how — `within` once, `overlaps` else.
+
+    This is the whole of age-frame membership (design §2.4): arithmetic, not
+    judgment. A fuzzy interval that crosses three frames keeps all three, and
+    nothing here picks a winner — which frame a row RENDERS in is a display
+    role, and display roles are E2's.
+    """
+    bounds = _bounds(record)
+    if bounds is None:
+        return ()
+    low, high = bounds
+    touched: list[tuple[str, tuple, tuple]] = []
+    for frame in frames or ():
+        span = _bounds(getattr(frame, "value", None))
+        if span is None:
+            continue
+        if low <= span[1] and span[0] <= high:
+            touched.append((frame.band, span[0], span[1]))
+    if len(touched) == 1:
+        band, span_low, span_high = touched[0]
+        if span_low <= low and high <= span_high:
+            return ((band, "within"),)
+    return tuple((band, "overlaps") for band, _, _ in touched)
+
+
+def frame_for(frames: object, record: object) -> str | None:
+    """The ONE frame a record lies inside, or ``None``. Same body as above."""
+    for band, relation in frames_touching(frames, record):
+        if relation == "within":
+            return band
+    return None
+
+
 def band_span(period: object, *, places: object = (), moments: object = (),
               birth_date: object = None) -> Derivation | None:
     """The one derivation for one undated band, :data:`BAND_RULES` in order."""
