@@ -184,6 +184,74 @@ def _anchor_rows(anchors: object) -> list[dict]:
     return [row for row in rows if row["key"]]
 
 
+#: O-E0a (lifehug-platform#686): the eligible anchor KINDS for the two unknown
+#: kinds that must never sort against the person's own birth — a residence or
+#: an era is never honestly asked "before or after you were born"; only a bare
+#: MOMENT may legitimately predate the person (a family story is older than
+#: they are). `era_gap`/`residence_gap` are untouched here — their opener
+#: names the two dated neighbours the row already carries (`between`), never
+#: `{anchor}`, so they never reach this function at all.
+_RELATIONAL_ELIGIBLE_KINDS = frozenset({"residence", "period", "landmark"})
+#: The two unknown kinds this rule governs.
+_RELATIONAL_KINDS = frozenset({"place_span", "period_bound"})
+
+
+def anchor_for_probe(unknown: object, anchor_rows: object) -> dict | None:
+    """The anchor whose RELATIONSHIP to this unknown makes it honest to name.
+
+    `choose_probe` used to hand every anchored opener ``anchor_rows[0]`` — and
+    `_anchor_rows` sorts birth first, because it dates everything else by
+    arithmetic — so any residence or era unknown asked to sort itself against
+    the person's own birth: *"Were you living in Mexico before or after when
+    you were born?"* (lifehug-platform#686 defect 1, executed against the
+    founder's own vault).
+
+    `unknown["kind"]` decides the eligible set:
+
+    * `place_span` (a residence) and `period_bound` (an era) — `residence`,
+      `period`, `landmark`; **never `birth`**, and `period_bound` additionally
+      never the era's OWN anchor row (`unknown["slug"]`/`["period"]`/`["key"]`).
+    * every other kind (`moment`, `date_contradiction`, `era_gap`,
+      `residence_gap`, and any future kind) — unchanged: the nearest row in
+      `anchor_rows`' own order, birth included. A moment may legitimately sort
+      against the birthday; a residence or an era never can.
+
+    Within the eligible set: nearest by year to the unknown's own `years`
+    hint (`[start, end]`, `timeline.unknown_years`) when present; otherwise
+    `anchor_rows`' own order already IS residence → period → landmark, then
+    year, then key (`_anchor_rows`'s sort), so the first eligible row already
+    satisfies the tie-break with no second sort needed.
+    """
+    row = unknown if isinstance(unknown, dict) else {}
+    rows = anchor_rows if isinstance(anchor_rows, list) else list(anchor_rows or ())
+    kind = str(row.get("kind") or "")
+    if kind not in _RELATIONAL_KINDS:
+        return rows[0] if rows else None
+    own_key = str(row.get("slug") or row.get("period") or row.get("key") or "").strip()
+    eligible = [r for r in rows
+               if r.get("kind") in _RELATIONAL_ELIGIBLE_KINDS
+               and (not own_key or r.get("key") != own_key)]
+    if not eligible:
+        return None
+    hint_year = None
+    years = row.get("years")
+    if isinstance(years, (list, tuple)):
+        for value in years:
+            try:
+                hint_year = int(value)
+                break
+            except (TypeError, ValueError):
+                continue
+    if hint_year is None:
+        return eligible[0]
+    return min(
+        eligible,
+        key=lambda r: (abs((chrono.year_of(r["date"]) if r.get("date") else 9999)
+                           - hint_year),
+                       r["key"]),
+    )
+
+
 def anchors_for_person(*, birth_date: object = None, periods: object = (),
                        places: object = (), events: object = (),
                        landmarks: object = None, people: object = ()) -> tuple[dict, ...]:
@@ -300,7 +368,12 @@ def choose_probe(unknown: object, *, anchors: object = (),
     if opener is not None and opener["step"] not in asked \
             and opener.get("anchored_step", opener["step"]) not in asked:
         between = [str(x) for x in (row.get("between") or [])]
-        anchored = bool(anchor_label) and "anchored" in opener
+        # O-E0a: the OPENER's anchor is chosen by relationship to this
+        # unknown, never by `anchor_rows`' own rank — a residence or an era
+        # never sorts against the person's own birth (`anchor_for_probe`).
+        opener_anchor = anchor_for_probe(row, anchor_rows)
+        opener_anchor_label = opener_anchor["label"] if opener_anchor else ""
+        anchored = bool(opener_anchor_label) and "anchored" in opener
         text = opener["anchored"] if anchored else opener["text"]
         return {
             "step": opener["anchored_step"] if anchored and "anchored_step" in opener
@@ -308,7 +381,7 @@ def choose_probe(unknown: object, *, anchors: object = (),
             "cost": opener["anchored_cost"] if anchored and "anchored_cost" in opener
                     else opener["cost"],
             "text": text.format(
-                label=label, anchor=anchor_label or "that move",
+                label=label, anchor=opener_anchor_label or "that move",
                 between_first=(between[0].replace("-", " ") if between else "then"),
                 between_second=(between[1].replace("-", " ")
                                 if len(between) > 1 else "now"),
@@ -338,15 +411,20 @@ def keystone_probe(anchor_key: object, *, label: str, anchors: object = ()) -> d
     `keystones()` rows are the highest-leverage anchors in the vault; each one
     needs a question of its own, naming the anchor, or the star means nothing
     to the person looking at it.
+
+    O-E0a: a `period` keystone (an era) is governed by the same
+    never-birth-never-itself rule as an ordinary `period_bound` unknown,
+    through the same `anchor_for_probe` — an era never sorts against the
+    person's own birth or against itself. `entity`/`event` keystones are
+    unchanged: a person or a moment may legitimately anchor on the birthday.
     """
     kind = str(anchor_key or "").split(":", 1)[0]
     template = KEYSTONE_PROBES.get(kind, KEYSTONE_PROBES["event"])
     rows = _anchor_rows(anchors)
-    anchor_label = ""
-    for row in rows:
-        if row["key"] and row["key"] not in str(anchor_key):
-            anchor_label = row["label"]
-            break
+    own_key = str(anchor_key or "").split(":", 1)[-1]
+    probe_kind = "period_bound" if kind == "period" else "moment"
+    anchor_row = anchor_for_probe({"kind": probe_kind, "key": own_key}, rows)
+    anchor_label = anchor_row["label"] if anchor_row else ""
     text = template["anchored"] if anchor_label else template["text"]
     return {
         "step": template["step"],
@@ -962,8 +1040,52 @@ class PlaceInvocation(NamedTuple):
     stdin_text: str
 
 
+#: O-E0c (lifehug-platform#686, defect 3): an era's own bounds have no
+#: legitimate writer until E3's `era-record` exists. Filing a `period_bound`
+#: answer through `timeline-place` is a WRONG JOIN — it lands on whatever
+#: undated moment happens to sit in that era's lineup — and ADR 0026 ranks a
+#: wrong join above a miss. The one typed reason a host logs for the refusal.
+PLACE_REFUSED_NO_ERA_WRITER = "place_refused_no_era_writer"
+
+
+def place_refusal(placed: object, item: object) -> str | None:
+    """Why `place_invocation` would refuse to file this item, or `None`.
+
+    Pure, and checked BEFORE the ordinary shape checks so a REFUSAL (an era's
+    bounds, which has no writer yet) is never confused with an ordinary
+    "nothing to file" (a missing source/period/description). `item` is
+    whatever `timeline_item_for_turn` handed the turn — three shapes reach
+    here today, and all three are covered:
+
+    * a concrete `period_bound` unknown row (`item["kind"] == "period_bound"`,
+      `timeline.unknowns`) — the direct case, and what the test plan
+      constructs;
+    * a whisper (`arc_planner._whisper_intent`), whose own `kind` is always
+      the fixed `"timeline_gap"` but whose `gap_kind` carries the unknown's
+      real kind;
+    * a minted keystone question (`timeline_item_for_session`'s
+      `kind == "keystone_question"`), whose identity is `item["anchor"]` —
+      `"period:<slug>"` for an era keystone, `"entity:"`/`"event:"` for the
+      two kinds that DO have a moment to write onto.
+
+    `placed` is accepted (and unused past its presence) so the signature
+    reads the same as every other placed-shaped check in this module, and so
+    a future rule that inspects the accepted record itself is not a second
+    call shape.
+    """
+    row = item if isinstance(item, dict) else {}
+    if str(row.get("kind") or "") == "period_bound":
+        return PLACE_REFUSED_NO_ERA_WRITER
+    if str(row.get("gap_kind") or "") == "period_bound":
+        return PLACE_REFUSED_NO_ERA_WRITER
+    if str(row.get("anchor") or "").startswith("period:"):
+        return PLACE_REFUSED_NO_ERA_WRITER
+    return None
+
+
 def place_invocation(placed: object, *, source: str, description: str,
-                     period: str, placement_key: str = "") -> PlaceInvocation | None:
+                     period: str, placement_key: str = "",
+                     item: object = None) -> PlaceInvocation | None:
     """The exact `lifehug.py timeline-place` call for an accepted placement.
 
     The package NAMES the date; the host WRITES it — the same split every
@@ -988,7 +1110,16 @@ def place_invocation(placed: object, *, source: str, description: str,
     and the CLI stores it verbatim. Absent it the CLI derives the key from
     source + description exactly as it always has — which is right for the
     viewer's own placement form, where the description IS the event's.
+
+    `item` is O-E0c's addition: passed through to `place_refusal` so this
+    function refuses a `period_bound` item on its own, defense-in-depth for
+    any future caller that does not check `place_refusal` itself. The one
+    caller today (`conversation_delivery._file_placement`) checks it
+    separately first, so it can log the typed reason before ever reaching
+    here.
     """
+    if place_refusal(placed, item) is not None:
+        return None
     if not isinstance(placed, dict):
         return None
     record = chrono.from_dict(placed)
