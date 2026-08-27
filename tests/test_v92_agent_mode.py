@@ -150,12 +150,19 @@ class EmitPromptsTests(unittest.TestCase):
         args = parser.parse_args(
             ["--classify-all", "--unclassified", "--emit-prompts", str(self.out)]
         )
+        # v237: a real emission advances the durable cursor — the keyless
+        # branch is the one that starved without it. Keep that write inside
+        # the fixture; the suite must leave the checkout clean (lifehug#225).
+        cursor = self.tmp / "classify_cursor.json"
         with mock.patch.object(cs, "all_source_files",
                                return_value=[self.src_a, self.src_b]), \
+             mock.patch.object(cs, "CLASSIFY_CURSOR_FILE", cursor), \
              mock.patch.object(cs, "is_classified", return_value=False):
             rc = cs.cmd_classify_all(args)
         self.assertEqual(rc, 0)
         self.assertTrue((self.out / "manifest.json").exists())
+        self.assertEqual(json.loads(cursor.read_text(encoding="utf-8"))["run_id"],
+                         "emit-prompts")
 
     def test_no_pending_sources_short_circuits_before_emission(self):
         parser = cs.build_parser()
