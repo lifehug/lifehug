@@ -1790,6 +1790,65 @@ def _file_placement(item: dict, placed: dict, *, session_id: str,
         return False
 
 
+def _work_item_context_block(target: object) -> str:
+    """The `{work_item}` block, appended exactly like ``_story_context_block``.
+
+    Gated on the caller having a target and on nothing else: absent one this
+    returns ``""`` and the prompt an ordinary turn builds does not move by a
+    byte (pinned by
+    ``test_the_work_item_block_is_empty_without_a_target``). The body is
+    `timeline_interaction.render_work_item`'s — bounded evidence, the readings
+    that disagree, and the person's own words — because the disagreement is
+    the package's to describe and the prompt is the host's to assemble.
+    """
+    try:
+        import timeline_interaction as _ti  # noqa: PLC0415
+
+        body = _ti.render_work_item(target)
+    except Exception:  # noqa: BLE001 — a work-item problem never costs a turn
+        return ""
+    return f"\n\n## WORK ITEM\n\n{body}\n" if body else ""
+
+
+def _file_work_item_resolution(target: object, placed: object, *,
+                               answer_text: str, session_id: str,
+                               vault_root: str | Path | None = None) -> bool:
+    """Settle a contradiction through the seam that already settles them.
+
+    The package DECIDES (`timeline_interaction.work_item_resolution` — pure,
+    and `None` for §2.5's quiet case) and `mirror_work.resolve_mirror_item`
+    WRITES: the person's words become a durable source, and the reading they
+    did not choose is retired by a correction that deletes nothing. There is
+    no second resolution path and this function adds none — it looks the
+    published work item up by the identity the target already carries and
+    hands it over.
+
+    Never raises: the message is already delivered. A vault whose projection
+    has not published the item yet is a diagnostic, not a lost turn.
+    """
+    try:
+        import mirror_work  # noqa: PLC0415
+        import timeline_interaction as _ti  # noqa: PLC0415
+
+        kwargs = _ti.work_item_resolution(target, placed, resolution_text=answer_text)
+        if kwargs is None:
+            return False
+        wanted = str(kwargs.pop("work_item_id"))
+        root = vault_root if vault_root is not None else VAULT_ROOT
+        item = next(
+            (row for row in mirror_work.load_work_items(root)
+             if isinstance(row, dict) and str(row.get("work_item_id") or "") == wanted),
+            None,
+        )
+        if item is None:
+            _diagnostic("work_item_resolve", "work_item_not_published", session_id)
+            return False
+        return mirror_work.resolve_mirror_item(root, item=item, **kwargs).wrote_correction
+    except Exception:  # noqa: BLE001
+        _diagnostic("work_item_resolve", "resolve_failed", session_id)
+        return False
+
+
 def run_post_answer_turn(
     *,
     source_id: str,
@@ -1811,6 +1870,7 @@ def run_post_answer_turn(
     followup_minter: Callable[[str, list[str]], list[tuple[str, str]]] | None = None,
     rotation_updater: Callable[[str], None] | None = None,
     fallback: Callable[..., None] | None = None,
+    work_item: object = None,
 ) -> TurnOutcome:
     """Run ONE conversation turn for a durable answer, or degrade to today.
 
@@ -1935,16 +1995,34 @@ def run_post_answer_turn(
     # ONLY thing that puts the `placed` key in the output contract, so an
     # ordinary answer's prompt does not move by one byte.
     timeline_item = timeline_item_for_turn(session, question_id, vault_root=vault_root)
-    if timeline_item is not None:
+    # v234 (lifehug-platform#664): the WORK-ITEM stage. A `work_item` target
+    # means the person opened THIS conversation from Play on THIS gap, so it
+    # wins over an ambient whisper outright — §2.3's "an item presented as the
+    # main question must not also appear as a whisper in the same interaction"
+    # is a precedence rule here rather than a thing to remember. The stage adds
+    # no output key of its own: `placed` is the lane's existing one, and the
+    # claims come from the general listener hearing the same message.
+    work_item_row = None
+    if work_item is not None:
+        import timeline_interaction as _ti  # noqa: PLC0415
+
+        work_item_row = _ti.work_item_target(work_item)
+        if work_item_row is not None:
+            timeline_item = None
+    if timeline_item is not None or work_item_row is not None:
         import timeline_interaction as _ti  # noqa: PLC0415
 
         shape = replace(
             shape,
-            timeline_stage=_ti.timeline_stage_for_session(session),
+            timeline_stage=_ti.timeline_stage_for_session(session, work_item=work_item_row),
         )
     builder = prompt_builder or conversation.build_turn_prompt
     try:
-        prompt = builder({"session": session}) + _output_contract_block(shape)
+        prompt = (
+            builder({"session": session})
+            + _work_item_context_block(work_item_row)
+            + _output_contract_block(shape)
+        )
         generated = (ai_call or call_ai)(prompt, model)
     except AIProviderError as exc:
         reason = _fixed_provider_reason(exc)
@@ -2065,7 +2143,17 @@ def run_post_answer_turn(
     # is what makes "at most one timeline ask per conversation" checkable
     # without a new state file.
     placed_record = None
-    if timeline_item is not None:
+    if work_item_row is not None:
+        lifehug_turn["work_item_id"] = work_item_row["work_item_id"]
+        try:
+            import timeline_interaction as _ti  # noqa: PLC0415
+
+            placed_record = _ti.answer_timeline_probe(work_item_row, parsed)
+        except Exception:  # noqa: BLE001 — never costs a delivered turn
+            placed_record = None
+        if placed_record:
+            lifehug_turn["placed"] = placed_record
+    elif timeline_item is not None:
         lifehug_turn["timeline_probe_id"] = str(timeline_item.get("question_id") or "")
         try:
             import timeline_interaction as _ti  # noqa: PLC0415
@@ -2101,7 +2189,15 @@ def run_post_answer_turn(
     )
     if parsed["insight_receipts"]:
         _record_insight_receipts(state_path, key, parsed["insight_receipts"])
-    if placed_record and timeline_item is not None:
+    if work_item_row is not None:
+        # The quiet case is the common one and it writes nothing at all:
+        # `work_item_resolution` returns None unless the person named one of
+        # the readings already on the table (§2.5).
+        _file_work_item_resolution(
+            work_item_row, placed_record, answer_text=answer_text,
+            session_id=session_id, vault_root=vault_root,
+        )
+    elif placed_record and timeline_item is not None:
         _file_placement(
             timeline_item, placed_record, session_id=session_id,
             question_id=question_id, question_text=question_text,

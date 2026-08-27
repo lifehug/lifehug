@@ -33,6 +33,13 @@ REQUIRED_GOLDEN_IDS = frozenset({
     "timeline-whisper-fits-and-files",
     "timeline-whisper-does-not-fit",
     "timeline-whisper-partial-range",
+    # v234 (lifehug-platform#664): the work-item stage. One gap, one
+    # conversation — the contradiction that settles and files a correction,
+    # the "I don't know" that files nothing and leaves the item standing, and
+    # the precision gap that produces a date claim.
+    "timeline-work-item-contradiction-settles",
+    "timeline-work-item-i-dont-know-files-nothing",
+    "timeline-work-item-precision-gap-dates-it",
 })
 #: The one-question and never-invent rules hold on every turn; the others are
 #: scoped to the stage or the playbook rung the turn is actually on.
@@ -56,7 +63,13 @@ def _applicable(stage: str, probe_step: str | None,
     if probe_step == "defer" or stage == "close":
         applicable.add("accepts_defer")
     # v196: only a turn that could ask again can be judged on asking again.
-    if int(timeline_asks_so_far or 0) >= 1 and probe_step not in (None, "convergence", "defer"):
+    # v234: and never in the work-item stage — the person opened THAT
+    # conversation, so §2.2's several-questions allowance applies and the
+    # ambient once-per-conversation rule does not (mirrors the same carve-out
+    # in `timeline_interaction.lint_timeline_reply`).
+    if (stage != timeline_interaction.WORK_ITEM_STAGE
+            and int(timeline_asks_so_far or 0) >= 1
+            and probe_step not in (None, "convergence", "defer")):
         applicable.add("one_per_conversation")
     return frozenset(applicable)
 
@@ -107,7 +120,8 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
         # v196: `context` is optional prose about the conversation a whisper
         # golden lives in — additive, so every v195 fixture stays valid.
         if not isinstance(row, dict) or not {"fixture_id", "unknown", "turns"} <= set(row) \
-                or not set(row) <= {"fixture_id", "unknown", "turns", "context"}:
+                or not set(row) <= {"fixture_id", "unknown", "turns", "context",
+                                    "work_item"}:
             errors.append(f"fixture[{index}] keys invalid")
             continue
         fixture_id = row["fixture_id"]
@@ -134,6 +148,13 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
         ):
             errors.append(f"fixture[{index}] known_years invalid")
             continue
+        # v234: a work-item golden carries the Play target the stage opens on.
+        # It must survive `work_item_target` — a target this stage would refuse
+        # at runtime is not a golden, it is a fixture that proves nothing.
+        target = row.get("work_item")
+        if "work_item" in row and timeline_interaction.work_item_target(target) is None:
+            errors.append(f"fixture[{index}] work_item is not a usable Play target")
+            continue
         turns = row["turns"]
         if not isinstance(turns, list) or not turns:
             errors.append(f"fixture[{index}] turns must be non-empty")
@@ -143,10 +164,22 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
                 "stage", "probe_step", "expected_placed",
             } <= set(turn) or not set(turn) <= {
                 "stage", "probe_step", "expected_placed",
-                "timeline_asks_so_far", "expected_raised",
+                "timeline_asks_so_far", "expected_raised", "expected_retire",
             }:
                 errors.append(f"fixture[{index}].turns[{position}] keys invalid")
                 continue
+            if "expected_retire" in turn:
+                if target is None:
+                    errors.append(
+                        f"fixture[{index}].turns[{position}] "
+                        "expected_retire without a work_item"
+                    )
+                elif not isinstance(turn["expected_retire"], list) or any(
+                    not isinstance(ref, str) for ref in turn["expected_retire"]
+                ):
+                    errors.append(
+                        f"fixture[{index}].turns[{position}] expected_retire invalid"
+                    )
             if turn["stage"] not in timeline_interaction.VALID_TIMELINE_STAGES:
                 errors.append(f"fixture[{index}].turns[{position}] stage invalid")
             step = turn["probe_step"]
@@ -189,6 +222,8 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
     field_total = 0
     raised_correct = 0
     raised_total = 0
+    retire_correct = 0
+    retire_total = 0
     unmatched: list[str] = []
     for fixture in fixtures:
         prediction = by_id.get(fixture["fixture_id"])
@@ -224,12 +259,25 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
             )
             field_total += 1
             field_correct += validated == turn["expected_placed"]
+            # v234: the filing DECISION is scored beside the field, because a
+            # work-item conversation that reads the right date and retires the
+            # wrong claim is not a pass. `work_item_retire_ids` is pure, so the
+            # golden asserts it directly from the same validated record a real
+            # caller would hand it.
+            if "expected_retire" in turn:
+                retire_total += 1
+                retire_correct += list(
+                    timeline_interaction.work_item_retire_ids(
+                        fixture.get("work_item"), validated
+                    )
+                ) == list(turn["expected_retire"])
     scores: dict[str, object] = {
         f"{name}.compliance": (values[0] / values[1] if values[1] else 1.0)
         for name, values in counts.items()
     }
     scores["_placed_accuracy"] = field_correct / field_total if field_total else 0.0
     scores["_raised_accuracy"] = raised_correct / raised_total if raised_total else 1.0
+    scores["_retire_accuracy"] = retire_correct / retire_total if retire_total else 1.0
     scores["_unmatched_fixtures"] = unmatched
     return scores
 

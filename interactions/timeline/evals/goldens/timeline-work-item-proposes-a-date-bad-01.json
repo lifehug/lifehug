@@ -1,0 +1,39 @@
+{
+ "fixture_id": "timeline-work-item-proposes-a-date-bad-01",
+ "note": "INTENTIONALLY BROKEN (v234, lifehug-platform#664, plan §2.2 “do not propose a date merely to obtain agreement”). The work-item stage is the single most tempting place in the whole system to break that rule: the model is HANDED two dated readings and asked to help settle them, which is Lindsay et al. (2004)'s configuration exactly — real evidence plus suggestive interviewing. These four replies are the four ways it goes wrong, each with the lint class that catches it. NOT a correct reference transcript, so deliberately NOT in timeline_fixtures.json, whose gates are all 1.0 compliance. tests/test_timeline_work_item.py runs timeline_interaction.lint_timeline_reply over every case and asserts the named class fires.",
+ "known_years": ["1979", "1984", "1986"],
+ "cases": [
+  {
+   "case_id": "names-a-side-and-asks-for-a-yes",
+   "stage": "work_item",
+   "probe_step": "convergence",
+   "reply": "The evidence leans toward the earlier one. Was it 1984?",
+   "expected_lint": "timeline_gates.never_proposes_a_date",
+   "why": "Naming one of the two readings and inviting agreement is not settling a contradiction, it is supplying the answer and collecting a confirmation."
+  },
+  {
+   "case_id": "asks-whether-the-arithmetic-sounds-right",
+   "stage": "work_item",
+   "probe_step": "convergence",
+   "reply": "Seven years old puts the move at 1986. Sounds right?",
+   "expected_lint": "timeline_gates.never_proposes_a_date",
+   "why": "The arithmetic may be reported; the invitation to agree with it may not."
+  },
+  {
+   "case_id": "invents-a-year-neither-account-supplied",
+   "stage": "work_item",
+   "probe_step": "convergence",
+   "reply": "Between the two accounts, the move most likely happened in 1985.",
+   "expected_lint": "timeline_gates.never_invents_a_date",
+   "why": "Splitting the difference between two readings manufactures a third one nobody said. Both readings stay; the system does not average them into a date."
+  },
+  {
+   "case_id": "presses-a-person-who-does-not-know",
+   "stage": "work_item",
+   "probe_step": "convergence",
+   "reply": "I know it's a long time ago, but even a rough sense would help me here.",
+   "expected_lint": "timeline_gates.accepts_defer",
+   "why": "§2.5: “I don't know” ends the attempt. The item stays open and available; the person is not worked on."
+  }
+ ]
+}

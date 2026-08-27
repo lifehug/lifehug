@@ -228,5 +228,54 @@
         "raised": true
       }
     ]
+  },
+  {
+    "fixture_id": "timeline-work-item-contradiction-settles",
+    "turns": [
+      {
+        "message": "Two things you've told me put the Dayton move in different places in time — the summer after your mother died, which was 1984, and being seven when you landed, which would be 1986. Both of them are still on the record. Which of those feels right to you?",
+        "placed": null
+      },
+      {
+        "message": "The summer after your mother died, then. I'll let the other reading go and keep the record of you having said it.",
+        "placed": {
+          "best": "1984",
+          "earliest": "1984",
+          "latest": "1984",
+          "granularity": "year",
+          "confidence": "certain",
+          "basis": "anchor",
+          "anchors": [
+            "mom-died"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-work-item-i-dont-know-files-nothing",
+    "turns": [
+      {
+        "message": "That's alright. Both accounts can sit there — nothing about this has to be settled today, and I'll leave it exactly as you left it.",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-work-item-precision-gap-dates-it",
+    "turns": [
+      {
+        "message": "You've told me Harvey came into the world in 1948. Do you know the day, or is somewhere in that summer more honest?",
+        "placed": {
+          "best": "1948-06",
+          "earliest": "1948-06",
+          "latest": "1948-06",
+          "granularity": "month",
+          "confidence": "approximate",
+          "basis": "stated",
+          "anchors": []
+        }
+      }
+    ]
   }
 ]

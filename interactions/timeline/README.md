@@ -40,6 +40,22 @@ disagreement itself as data (Portelli). `chronology.reconcile` scores claims
 and returns `{best_supported, alternates}` — and never drops one (owner
 ruling 3).
 
+**One gap, one conversation** (v234, lifehug-platform#664). A temporal
+contradiction, an identity the resolver could not place, and a precision gap
+are all things the system is confused about and only the person can settle —
+and settling one IS dating work. So Play on any of them opens THIS
+interaction's fourth stage, `work_item`, rather than a seventh child of
+Conversation: the Play kind and the stage name are the same word
+(`mirror_work.PLAY_TARGET_KIND` == `timeline_interaction.WORK_ITEM_STAGE`), so
+one gap opens one conversation no matter which surface the person saw it on
+(plan §2.3). The stage reuses everything: the target and its bounded evidence
+are `mirror_work.play_target`'s, the output is the same optional `placed`
+field with no new key beside it, further facts in the same breath are heard by
+the general listener as in any conversation, and a settled contradiction files
+through `mirror_work.resolve_mirror_item` — the person's words become a source
+and the reading they did not choose is retired by a correction that deletes
+nothing. "I don't know" writes nothing at all and the item stays (§2.5).
+
 **Passive users are untouched.** The daily single question keeps working
 exactly as it did; this Interaction runs only when an unknown is Played.
 Mechanically: `TurnShape.timeline_stage` defaults to `None` and the output
@@ -54,7 +70,10 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The date record | `chronology.DateRecord`; `chronology.GRANULARITIES\|CONFIDENCES\|BASES` |
 | Serialize / parse / render | `chronology.to_edtf`, `chronology.parse_edtf`, `chronology.from_dict`, `chronology.display_date` |
 | The arithmetic | `chronology.from_age`, `chronology.from_anchor`, `chronology.intersect`, `chronology.widen_for_elapsed`, `chronology.reconcile` |
-| The `{timeline_stage}` this turn is in | `timeline_interaction.timeline_stage_for_session(session, user_leaving=…, placement_settled=…, no_new_bound_streak=…)` |
+| The `{timeline_stage}` this turn is in | `timeline_interaction.timeline_stage_for_session(session, user_leaving=…, placement_settled=…, no_new_bound_streak=…, work_item=…)`; `timeline_interaction.VALID_TIMELINE_STAGES` |
+| The work-item stage's target | `timeline_interaction.work_item_target(play_target_or_item)` — `None` refuses, never raises; `timeline_interaction.WORK_ITEM_STAGE`, `WORK_ITEM_KINDS` |
+| Its probe and its `{work_item}` block | `timeline_interaction.work_item_probe(target, anchors=…)`, `timeline_interaction.render_work_item(target)`, `timeline_interaction.work_item_known_years(target)`; host side `conversation_delivery._work_item_context_block` |
+| What a work-item answer settles | `timeline_interaction.work_item_retire_ids(target, placed)` → `timeline_interaction.work_item_resolution(target, placed, resolution_text=…)`, whose kwargs go straight to `mirror_work.resolve_mirror_item` (`mirror.resolve_actionable_item` for the bound single vault). `None` means write nothing |
 | The person's landmarks and the `{anchors}` block | `timeline_interaction.anchors_for_person(...)`, `timeline_interaction.render_anchors(anchors)` |
 | The next question to ask | `timeline_interaction.choose_probe(unknown, anchors=…, precision_so_far=…, asked_steps=…)`; `timeline_interaction.PLAYBOOK_STEPS` |
 | `{precision_so_far}` | `timeline_interaction.precision_so_far(session)` |
@@ -67,7 +86,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | This turn's timeline item | `timeline_interaction.timeline_item_for_session`, `timeline_interaction.timeline_asks_so_far`, `conversation_delivery.timeline_item_for_turn` |
 | The reply to a timeline ask | `timeline_interaction.answer_timeline_probe(entry, reply, anchors=…)` |
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`, the SAME definition `reading_room.placement_gain_sentence` says. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
-| The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{timeline_stage}`, `{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}`, `{filing_gain}` |
+| The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{timeline_stage}`, `{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}`, `{filing_gain}`, `{work_item}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --timeline [--era <slug>] [--json]` |
 | The write verb | `lifehug.py timeline-place <source> --period <slug> [--date <edtf>] [--basis <basis>] [--anchor <key>]… [--placement-key <12-hex>]` |
 
