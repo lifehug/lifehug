@@ -90,6 +90,32 @@ from temporal_claims import (  # noqa: E402
 #: repeated school or job into one incompatible span.
 NODE_KINDS = ("event", "period", "episode")
 
+#: The event kinds a ``period`` node holds. ``age_frame`` is E1's calculated
+#: coordinate system; ``named_era`` is E3's person-made era. One tuple, read by
+#: the fold's ``_node_kind_for`` and by this module, so "is this a period?"
+#: cannot be answered two ways (eras design §2.1-2.2).
+PERIOD_EVENT_KINDS = ("age_frame", "named_era")
+
+#: The event kind of an age frame, spelled once.
+AGE_FRAME_EVENT_KIND = "age_frame"
+
+#: Where a node sits against the life clip (eras design §2.6). E1 assigns
+#: exactly these two — an event dated after ``as_of`` is a plan, not lived
+#: history inside a frame. ``contradictory`` and ``unresolved`` need the
+#: occurrence-subject machinery and arrive with E2, which extends this tuple.
+LIFE_VIEWS = ("lived", "future_plan")
+
+#: How an age frame's origin was arrived at: the person's stated birthday, or
+#: the interval calculated from age statements (E-BO). It is a CLAIM basis, and
+#: ``temporal_claims.CLAIM_BASIS_BY_DATE_BASIS`` is the one mapping onto it.
+ORIGIN_BASES = ("explicit", "calculated")
+
+#: How a member sits inside an era or a frame (eras design §2.2).
+MEMBERSHIP_RELATIONS = ("within", "overlaps", "starts_in", "associated_with")
+
+#: Which container a member RENDERS in. Display only — never chronology.
+MEMBERSHIP_DISPLAY_ROLES = ("primary", "secondary", "none")
+
 #: What the node's inputs currently say about each other. ``alternatives``
 #: means materially supported readings coexist; ``contradicted`` means two
 #: claims cannot both be true and Mirror owns a row for it (plan §2.5, §8.2).
@@ -132,6 +158,23 @@ WORK_ITEMS_FILE = f"{TEMPORAL_STATE_DIR}/work-items.json"
 NODE_ID_PREFIX = "node"
 WORK_ITEM_ID_PREFIX = "work"
 FINGERPRINT_PREFIX = "fp"
+MEMBERSHIP_ID_PREFIX = "membership"
+
+#: An age frame's id is READABLE on purpose: it is the ``?play=frame:`` key,
+#: the zoom key and the alias target `timeline.legacy_period_ref` resolves
+#: legacy slugs onto (eras design §3.5, §5.4). A digest would be stable too and
+#: unreadable in every one of those places.
+AGE_FRAME_ID_PREFIX = "age"
+
+#: The CALCULATED PROJECTION's own schema version (eras design §7.8).
+#:
+#: It is deliberately NOT :data:`temporal_claims.SCHEMA_VERSION`, which stamps
+#: every claim, constraint, receipt and the active index: v2 adds optional
+#: fields to a NODE, and moving the receipt store's version for a node-shape
+#: change would be the opposite of additive. Readers are tolerant of both — a
+#: v1 node simply lacks the v2 keys — and the writer is the platform's flag to
+#: turn off (§7.8 step 3).
+PROJECTION_SCHEMA_VERSION = 2
 
 #: FROZEN for schema version 1.
 NODE_IDENTITY_KEYS = ("node_kind", "event_kind", "subject_keys", "discriminator")
@@ -160,6 +203,14 @@ ERROR_CODES = (
     "node_hides_alternatives",
     "node_value_unusable",
     "node_needs_rule_version",
+    "unknown_origin_basis",
+    "unknown_life_view",
+    "membership_not_a_mapping",
+    "membership_needs_member",
+    "membership_needs_era",
+    "unknown_membership_relation",
+    "unknown_membership_display_role",
+    "membership_without_evidence",
     "work_item_not_a_mapping",
     "unknown_work_item_kind",
     "unknown_work_item_state",
@@ -208,6 +259,48 @@ def derive_node_id(
     return digest_id(NODE_ID_PREFIX, {key: payload[key] for key in NODE_IDENTITY_KEYS})
 
 
+def age_frame_node_id(band: object, *, subject: object = "self") -> str:
+    """``age:<subject>:<band>`` — an age frame's identity (eras design §3.5).
+
+    The one place the string is built. It is not a digest, and that is the
+    decision: this id is the ``?play=frame:`` key, the per-vault zoom key and
+    the target every legacy period slug aliases onto, and all three are read by
+    humans. The identity is nonetheless exactly the tuple
+    :func:`derive_node_id` would digest — ``(period, age_frame, subject, band)``
+    — which :func:`age_frame_identity` states so a test can pin it.
+    """
+    return "{}:{}:{}".format(
+        AGE_FRAME_ID_PREFIX,
+        normalized_mention_key(subject) or "self",
+        collapsed_text(band),
+    )
+
+
+def age_frame_identity(band: object, *, subject: object = "self") -> dict:
+    """The identity tuple behind :func:`age_frame_node_id`, spelled out."""
+    return {
+        "node_kind": "period",
+        "event_kind": AGE_FRAME_EVENT_KIND,
+        "subject_keys": [normalized_mention_key(subject) or "self"],
+        "discriminator": collapsed_text(band) or None,
+    }
+
+
+def derive_membership_id(*, member_node_id: object, era_node_id: object,
+                         relation: object) -> str:
+    """``membership:<24 hex>`` — one calculated membership, semantically.
+
+    Two independent assertions that a moment sits inside College are ONE
+    membership carrying two evidence refs (design §2.4, T-M-09), which is what
+    keying the identity on the pair plus the relation buys.
+    """
+    return digest_id(MEMBERSHIP_ID_PREFIX, {
+        "member_node_id": collapsed_text(member_node_id),
+        "era_node_id": collapsed_text(era_node_id),
+        "relation": collapsed_text(relation),
+    })
+
+
 def derive_work_item_id(
     *,
     kind: object,
@@ -238,6 +331,7 @@ def derive_input_fingerprint(
     claim_ids: object = (),
     constraint_ids: object = (),
     calculation_rule_version: object = "",
+    epoch: object = None,
 ) -> str:
     """``fp:<24 hex>`` — exactly what this node was calculated from.
 
@@ -258,6 +352,15 @@ def derive_input_fingerprint(
         "constraint_ids": sorted({collapsed_text(c) for c in (constraints or ()) if collapsed_text(c)}),
         "calculation_rule_version": collapsed_text(calculation_rule_version),
     }
+    # An age frame is calculated from the birthday AND from which frames the
+    # person has reached — crossing a boundary changes the answer on unchanged
+    # claims (eras design §3.4, §7 row "Age frame node"). The key is added ONLY
+    # when an epoch is supplied, so every fingerprint already on disk stays
+    # byte-identical: `digest_id` is canonical JSON, and an always-present key
+    # would move all of them.
+    epoch_key = collapsed_text(epoch)
+    if epoch_key:
+        payload["epoch"] = epoch_key
     return digest_id(FINGERPRINT_PREFIX, payload)
 
 
@@ -294,7 +397,18 @@ class CalculatedTimelineNode:
     model_version: str | None = None
     projection_generation: int = 0
     conflict_state: str = "none"
-    schema_version: int = SCHEMA_VERSION
+    #: v2, additive (eras design §2.2). A ``period`` node's own interval, with
+    #: an EXCLUSIVE end; where the life clip stops (``present`` is a view token
+    #: resolved at read time, never a stored date); how the origin was arrived
+    #: at; the legacy slugs that alias onto this node; and where the node sits
+    #: against the clip. Absent on every v1 node and on every node that is not
+    #: a frame — absent means unchanged.
+    definition_span: dict | None = None
+    life_clip_end: str | None = None
+    origin_basis: str | None = None
+    legacy_refs: tuple[str, ...] = ()
+    life_view: str | None = None
+    schema_version: int = PROJECTION_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
         payload: dict = {
@@ -318,9 +432,15 @@ class CalculatedTimelineNode:
             ("label", self.label),
             ("provenance_summary", self.provenance_summary),
             ("model_version", self.model_version),
+            ("definition_span", self.definition_span),
+            ("life_clip_end", self.life_clip_end),
+            ("origin_basis", self.origin_basis),
+            ("life_view", self.life_view),
         ):
             if value is not None:
                 payload[key] = value
+        if self.legacy_refs:
+            payload["legacy_refs"] = list(self.legacy_refs)
         return payload
 
 
@@ -413,9 +533,23 @@ def validate_calculated_timeline_node(value: object) -> dict:
     except (TypeError, ValueError):
         generation = 0
 
+    origin_basis = collapsed_text(value.get("origin_basis"))
+    if origin_basis and origin_basis not in ORIGIN_BASES:
+        raise TimelineNodeError("unknown_origin_basis", f"unknown origin_basis: {origin_basis!r}")
+    life_view = collapsed_text(value.get("life_view"))
+    if life_view and life_view not in LIFE_VIEWS:
+        raise TimelineNodeError("unknown_life_view", f"unknown life_view: {life_view!r}")
+    span = value.get("definition_span")
+    definition_span = None
+    if isinstance(span, dict):
+        definition_span = {
+            "start": _normalized_node_value(span.get("start")),
+            "end": _normalized_node_value(span.get("end")),
+        }
+
     normalized: dict = {
         "node_id": node_id,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": PROJECTION_SCHEMA_VERSION,
         "node_kind": node_kind,
         "subject_refs": list(_ref_tuple(value.get("subject_refs"))),
         "best_temporal_value": best,
@@ -429,10 +563,20 @@ def validate_calculated_timeline_node(value: object) -> dict:
         "projection_generation": max(0, generation),
         "conflict_state": conflict_state,
     }
-    for key in ("event_kind", "label", "provenance_summary", "model_version"):
+    for key in ("event_kind", "label", "provenance_summary", "model_version",
+                "life_clip_end"):
         cleaned = optional_text(value.get(key))
         if cleaned:
             normalized[key] = cleaned
+    if definition_span is not None:
+        normalized["definition_span"] = definition_span
+    if origin_basis:
+        normalized["origin_basis"] = origin_basis
+    if life_view:
+        normalized["life_view"] = life_view
+    legacy_refs = _ref_tuple(value.get("legacy_refs"))
+    if legacy_refs:
+        normalized["legacy_refs"] = list(legacy_refs)
     return normalized
 
 
@@ -466,7 +610,146 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         model_version=normalized.get("model_version"),
         projection_generation=normalized["projection_generation"],
         conflict_state=normalized["conflict_state"],
-        schema_version=int(normalized.get("schema_version") or SCHEMA_VERSION),
+        definition_span=normalized.get("definition_span"),
+        life_clip_end=normalized.get("life_clip_end"),
+        origin_basis=normalized.get("origin_basis"),
+        legacy_refs=tuple(normalized.get("legacy_refs") or ()),
+        life_view=normalized.get("life_view"),
+        schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
+    )
+
+
+# --------------------------------------------------------------------------
+# CalculatedMembership
+# --------------------------------------------------------------------------
+
+
+class CalculatedMembershipError(TemporalContractError):
+    """A membership cannot say what evidence puts a thing inside a container."""
+
+
+@dataclass(frozen=True)
+class CalculatedMembership:
+    """One thing inside one era or frame, and why (eras design §2.2, §2.4).
+
+    **The schema lands in E1 and E2 writes the rows.** It is here now because
+    the projection's key set is what a tolerant reader is written against: E2
+    adds memberships, not a new top-level key nobody's reader knows about.
+
+    ``relation`` is arithmetic for a frame (``within`` when the interval is
+    inside one frame, ``overlaps`` per frame a wider interval touches) and
+    evidence-backed for a named era. ``evidence_refs`` is never empty: date
+    overlap alone yields no named-era membership, and a membership that cannot
+    cite a receipt, a constraint or a declared rule is a fabrication in exactly
+    the sense ``node_without_inputs`` names for a node. ``display_role`` is
+    rendering ONLY — it never changes chronology.
+    """
+
+    membership_id: str
+    member_node_id: str
+    era_node_id: str
+    relation: str
+    evidence_refs: tuple[str, ...]
+    basis: str = "inferred"
+    confidence: float = 0.0
+    display_role: str = "none"
+    input_fingerprint: str | None = None
+    schema_version: int = PROJECTION_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        payload = {
+            "membership_id": self.membership_id,
+            "schema_version": self.schema_version,
+            "member_node_id": self.member_node_id,
+            "era_node_id": self.era_node_id,
+            "relation": self.relation,
+            "evidence_refs": list(self.evidence_refs),
+            "basis": self.basis,
+            "confidence": self.confidence,
+            "display_role": self.display_role,
+        }
+        if self.input_fingerprint is not None:
+            payload["input_fingerprint"] = self.input_fingerprint
+        return payload
+
+
+def validate_calculated_membership(value: object) -> dict:
+    """Normalize a membership or raise :class:`CalculatedMembershipError`.
+
+    The id is always RE-DERIVED, like a work item's: a supplied id is
+    annotation, and identity is what the three keys say it is.
+    """
+    if isinstance(value, CalculatedMembership):
+        value = value.to_dict()
+    if not isinstance(value, dict):
+        raise CalculatedMembershipError(
+            "membership_not_a_mapping", "a membership must be a mapping"
+        )
+    member = collapsed_text(value.get("member_node_id"))
+    if not member:
+        raise CalculatedMembershipError(
+            "membership_needs_member", "a membership needs the node it is about"
+        )
+    era = collapsed_text(value.get("era_node_id"))
+    if not era:
+        raise CalculatedMembershipError(
+            "membership_needs_era", "a membership needs the era or frame it is inside"
+        )
+    relation = collapsed_text(value.get("relation"))
+    if relation not in MEMBERSHIP_RELATIONS:
+        raise CalculatedMembershipError(
+            "unknown_membership_relation", f"unknown relation: {relation!r}"
+        )
+    display_role = collapsed_text(value.get("display_role")) or "none"
+    if display_role not in MEMBERSHIP_DISPLAY_ROLES:
+        raise CalculatedMembershipError(
+            "unknown_membership_display_role", f"unknown display_role: {display_role!r}"
+        )
+    basis = collapsed_text(value.get("basis")) or "inferred"
+    if basis not in CLAIM_BASES:
+        raise CalculatedMembershipError("unknown_claim_basis", f"unknown basis: {basis!r}")
+    evidence = _ref_tuple(value.get("evidence_refs"))
+    if not evidence:
+        raise CalculatedMembershipError(
+            "membership_without_evidence",
+            f"{member} in {era} cites nothing; date overlap alone is not a membership",
+        )
+    normalized = {
+        "membership_id": derive_membership_id(
+            member_node_id=member, era_node_id=era, relation=relation
+        ),
+        "schema_version": PROJECTION_SCHEMA_VERSION,
+        "member_node_id": member,
+        "era_node_id": era,
+        "relation": relation,
+        "evidence_refs": list(evidence),
+        "basis": basis,
+        "confidence": unit_score(value.get("confidence"), error=CalculatedMembershipError),
+        "display_role": display_role,
+    }
+    fingerprint = collapsed_text(value.get("input_fingerprint"))
+    if fingerprint:
+        normalized["input_fingerprint"] = fingerprint
+    return normalized
+
+
+def membership_from_dict(value: object) -> CalculatedMembership | None:
+    """Tolerant reader — ``None`` rather than an exception."""
+    try:
+        normalized = validate_calculated_membership(value)
+    except TemporalContractError:
+        return None
+    return CalculatedMembership(
+        membership_id=normalized["membership_id"],
+        member_node_id=normalized["member_node_id"],
+        era_node_id=normalized["era_node_id"],
+        relation=normalized["relation"],
+        evidence_refs=tuple(normalized["evidence_refs"]),
+        basis=normalized["basis"],
+        confidence=normalized["confidence"],
+        display_role=normalized["display_role"],
+        input_fingerprint=normalized.get("input_fingerprint"),
+        schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
     )
 
 
@@ -689,7 +972,14 @@ def surfaces_conflict(items: object) -> tuple[str, ...]:
 
 
 __all__ = [
+    "AGE_FRAME_EVENT_KIND",
     "CONFLICT_STATES",
+    "LIFE_VIEWS",
+    "MEMBERSHIP_DISPLAY_ROLES",
+    "MEMBERSHIP_RELATIONS",
+    "ORIGIN_BASES",
+    "PERIOD_EVENT_KINDS",
+    "PROJECTION_SCHEMA_VERSION",
     "ERROR_CODES",
     "NODE_IDENTITY_KEYS",
     "NODE_KINDS",
@@ -700,15 +990,22 @@ __all__ = [
     "WORK_ITEM_SCORE_FIELDS",
     "WORK_ITEM_STATES",
     "WORK_ITEM_SURFACES",
+    "CalculatedMembership",
+    "CalculatedMembershipError",
     "CalculatedTimelineNode",
     "TemporalWorkItem",
     "TemporalWorkItemError",
     "TimelineNodeError",
+    "age_frame_identity",
+    "age_frame_node_id",
     "derive_input_fingerprint",
+    "derive_membership_id",
     "derive_node_id",
     "derive_work_item_id",
+    "membership_from_dict",
     "node_from_dict",
     "surfaces_conflict",
+    "validate_calculated_membership",
     "validate_calculated_timeline_node",
     "validate_temporal_work_item",
     "work_item_from_dict",

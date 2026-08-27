@@ -295,5 +295,215 @@ class BandTableParityTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class DefinitionSpanTests(VaultTestCase):
+    """T-AF-13 — `best_temporal_value` is the definition span at the birth's grain."""
+
+    def test_every_grain_keeps_its_own_edges(self) -> None:
+        cases = [
+            ("1981-07-11", "day", "2001-07-11", "2011-07-11", "2001-07-11", "2011-07-10"),
+            ("1981-07", "month", "2001-07", "2011-07", "2001-07", "2011-07"),
+            ("1981", "year", "2001", "2011", "2001", "2011"),
+            ("1981-22", "season", "2001-22", "2011-22", "2001-06", "2011-08"),
+        ]
+        for birth, grain, start, end, earliest, latest in cases:
+            with self.subTest(grain=grain):
+                twenties = band(frames(birth, granularity=grain), "20s")
+                self.assertEqual(twenties.start.best, start)
+                self.assertEqual(twenties.end.best, end)
+                self.assertEqual(twenties.value.earliest, earliest)
+                self.assertEqual(twenties.value.latest, latest)
+
+    def test_a_decade_grain_origin_widens_rather_than_faking_a_decade(self) -> None:
+        rows = frames("197X", granularity="era", as_of="2026-08-26")
+        teens = band(rows, "teens")
+        self.assertEqual(teens.start.granularity, "range")
+        self.assertEqual(teens.start.best, "1983/1992")
+        twenties = band(rows, "20s")
+        self.assertEqual(twenties.start.best, "199X")
+        self.assertEqual(twenties.start.granularity, "era")
+
+    def test_the_value_is_never_the_start_and_never_the_clock(self) -> None:
+        self.file_claims([owner_birth()])
+        node = self.frame_nodes(self.fold())[-1]
+        value = node["best_temporal_value"]
+        self.assertNotEqual(value.get("best"), value.get("earliest"))
+        self.assertNotIn(AS_OF, json.dumps(node))
+
+
+class FrameNodeTests(VaultTestCase):
+    """T-AF-14 — what a frame node declares."""
+
+    def test_the_fold_mints_a_period_node_per_reached_frame(self) -> None:
+        self.file_claims([owner_birth()])
+        rows = self.frame_nodes(self.fold())
+        self.assertEqual([row["node_id"] for row in rows],
+                         ["age:self:childhood", "age:self:teens", "age:self:20s",
+                          "age:self:30s", "age:self:40s"])
+        for row in rows:
+            self.assertEqual(row["node_kind"], "period")
+            self.assertEqual(row["subject_refs"], ["self"])
+            self.assertEqual(row["origin_basis"], "explicit")
+
+    def test_node_kind_for_learns_period(self) -> None:
+        self.assertEqual(tt._node_kind_for("age_frame"), "period")  # noqa: SLF001
+        self.assertEqual(tt._node_kind_for("graduation"), "event")  # noqa: SLF001
+
+    def test_the_twenties_node_carries_its_span_clip_and_legacy_refs(self) -> None:
+        self.file_claims([owner_birth()])
+        node = next(row for row in self.frame_nodes(self.fold())
+                    if row["node_id"] == "age:self:20s")
+        self.assertEqual(node["label"], "My 20s")
+        self.assertEqual(node["definition_span"]["start"]["best"], "2001-07-11")
+        self.assertEqual(node["definition_span"]["end"]["best"], "2011-07-11")
+        self.assertEqual(node["life_clip_end"], "2011-07-10")
+        self.assertIn("period:my-20s", node["legacy_refs"])
+        self.assertIn("tl:my-20s", node["legacy_refs"])
+        self.assertIn("band:my-20s", node["legacy_refs"])
+
+    def test_a_frame_cites_the_birth_claims_it_was_calculated_from(self) -> None:
+        birth = owner_birth()
+        self.file_claims([birth])
+        node = self.frame_nodes(self.fold())[0]
+        self.assertEqual(node["input_claim_refs"], [birth["claim_id"]])
+
+    def test_somebody_elses_birth_is_not_the_owners_and_the_fold_says_so(self) -> None:
+        """The founder's own incident (design §1 item 5), as a diagnostic."""
+        self.file_claims([dated("Charlee", "2010-12-21", event_kind="birth")])
+        result = self.fold()
+        self.assertEqual(self.frame_nodes(result), [])
+        findings = {row.get("finding") for row in result.diagnostics["findings"]}
+        self.assertIn("age_frames_without_birth_anchor", findings)
+
+    def test_a_vault_with_no_birth_at_all_mints_no_frames_and_no_noise(self) -> None:
+        """No birthday is not a surprise: the `missing_anchor` item says it."""
+        self.file_claims([dated("Katie", "1998-06-20", event_kind="married")])
+        result = self.fold()
+        self.assertEqual(self.frame_nodes(result), [])
+        findings = {row.get("finding") for row in result.diagnostics["findings"]}
+        self.assertNotIn("age_frames_without_birth_anchor", findings)
+
+    def test_two_owner_births_refuse_rather_than_pick_one(self) -> None:
+        self.file_claims([owner_birth(),
+                          claim(claim_type="date", subject_mention="self",
+                                event_kind="birth", source="src-b", seed="b",
+                                temporal_value=chrono.DateRecord(
+                                    best="1981-07-11", earliest="1981-07-11",
+                                    latest="1981-07-11", granularity="day",
+                                    confidence="certain", basis="stated").to_dict())])
+        result = self.fold()
+        # One SUBJECT, one node: two receipts for one birth reconcile (O-E0b).
+        self.assertTrue(self.frame_nodes(result))
+
+    def test_frames_are_never_work_and_never_unplaced(self) -> None:
+        self.file_claims([owner_birth()])
+        result = self.fold()
+        self.assertTrue(self.frame_nodes(result))
+        ids = {row["node_id"] for row in self.frame_nodes(result)}
+        for item in result.work_items:
+            self.assertNotIn(item.get("node_ref"), ids)
+        self.assertFalse(ids & set(result.diagnostics["unplaced"]))
+        self.assertFalse(ids & set(result.reach))
+
+
+class LifeViewTests(VaultTestCase):
+    """T-AF-10 — an event after `as_of` is a future plan, never lived."""
+
+    def test_an_event_after_as_of_is_a_future_plan(self) -> None:
+        self.file_claims([owner_birth(), dated("the reunion", "2030-06-01")])
+        result = self.fold()
+        row = next(node for node in result.nodes
+                   if node.get("label", "").startswith("the reunion"))
+        self.assertEqual(row["life_view"], "future_plan")
+
+    def test_an_event_before_as_of_is_lived(self) -> None:
+        self.file_claims([owner_birth(), dated("the wedding", "2007-01-11")])
+        result = self.fold()
+        row = next(node for node in result.nodes
+                   if node.get("label", "").startswith("the wedding"))
+        self.assertEqual(row["life_view"], "lived")
+
+    def test_e1_assigns_exactly_two_life_views(self) -> None:
+        self.assertEqual(tp.LIFE_VIEWS, ("lived", "future_plan"))
+
+
+class RuleVersionAndFingerprintTests(VaultTestCase):
+    """T-AF-16 — the rule version moves, the epoch rides the fingerprint."""
+
+    def test_the_calculation_rule_version_is_two(self) -> None:
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:2")
+
+    def test_a_fingerprint_without_an_epoch_is_byte_identical_to_v1s(self) -> None:
+        self.assertEqual(
+            tp.derive_input_fingerprint(
+                claim_ids=("claim:a", "claim:b"),
+                constraint_ids=(),
+                calculation_rule_version="timeline-rules:1",
+            ),
+            "fp:49aead6f48b69c1b25275731",
+        )
+
+    def test_the_epoch_moves_the_frame_fingerprint_on_unchanged_claims(self) -> None:
+        self.file_claims([owner_birth()])
+        before = {row["node_id"]: row["input_fingerprint"]
+                  for row in self.frame_nodes(self.fold(now="2026-08-26T12:00:00Z"))}
+        after = {row["node_id"]: row["input_fingerprint"]
+                 for row in self.frame_nodes(self.fold(now="2031-08-26T12:00:00Z"))}
+        shared = set(before) & set(after)
+        self.assertTrue(shared)
+        for node_id in sorted(shared):
+            self.assertNotEqual(before[node_id], after[node_id], node_id)
+
+
+# ---------------------------------------------------------------------------
+# Schema v2 (§7.8)
+# ---------------------------------------------------------------------------
+
+
+class PlacementScoreTests(unittest.TestCase):
+    """T-AF-11 — age frames are excluded from the placement score."""
+
+    def payload(self) -> dict:
+        return {
+            "anchors": {"birth": {"date": chrono.parse_edtf(BIRTH_DAY).to_dict()}},
+            "periods": [{"slug": "college", "name": "College",
+                         "date": chrono.parse_edtf("2001/2005").to_dict()}],
+            "event_lineup": {"college": [
+                {"source": "s1", "source_short": "s1", "description": "a moment",
+                 "when_hint": "", "date": chrono.parse_edtf("2003-05-01").to_dict()},
+            ]},
+            "unplaced_events": [],
+            "bands": [{"kind": "period", "ref": "college", "label": "College",
+                       "periods": ["college"], "places": []}],
+        }
+
+    def frame_nodes(self) -> list[dict]:
+        return [{"node_id": f"age:self:{row.band}", "node_kind": "period",
+                 "event_kind": "age_frame",
+                 "best_temporal_value": row.value.to_dict()} for row in frames()]
+
+    def test_frames_in_the_calculated_projection_move_neither_score_nor_population(self) -> None:
+        plain = self.payload()
+        withframes = self.payload()
+        withframes["calculated"] = {"nodes": self.frame_nodes()}
+        life = timeline.life_span(plain)
+        self.assertEqual(
+            [thing["key"] for thing in timeline._scored_things(withframes, life)],  # noqa: SLF001
+            [thing["key"] for thing in timeline._scored_things(plain, life)],  # noqa: SLF001
+        )
+        self.assertEqual(timeline.placement_score(withframes),
+                         timeline.placement_score(plain))
+
+    def test_the_guard_is_sensitive_a_frame_in_periods_would_move_it(self) -> None:
+        """A guard proven to fire: the exclusion is what keeps the score still."""
+        plain = self.payload()
+        injected = self.payload()
+        injected["periods"].append({
+            "slug": "my-20s", "name": "My 20s",
+            "date": chrono.parse_edtf("2001-07-11/2011-07-10").to_dict(),
+        })
+        self.assertNotEqual(timeline.placement_score(injected),
+                            timeline.placement_score(plain))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
