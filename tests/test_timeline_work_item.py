@@ -8,7 +8,8 @@ those sentences and the behavior the plan spells out for the conversation
 itself:
 
 * the Play kind names the WORK ITEM, never the surface — `work_item`, with
-  v227's `mirror_item` accepted on the read side for exactly one version;
+  v227's `mirror_item` accepted on the read side for exactly one version (v234) and
+  deleted in v235;
 * the conversation is a STAGE of the existing `timeline` child, not an
   eighth child of Conversation (ADR 0024's 2026-08-26 amendment), so it adds
   no output vocabulary, no filing path and no lints of its own;
@@ -104,24 +105,23 @@ class PlayKindTests(unittest.TestCase):
         self.assertEqual(mw.PLAY_TARGET_KIND, ti.WORK_ITEM_STAGE)
         self.assertIn(ti.WORK_ITEM_STAGE, ti.VALID_TIMELINE_STAGES)
 
-    def test_the_retired_alias_is_accepted_on_the_read_side(self):
-        self.assertEqual(mw.LEGACY_PLAY_TARGET_KIND, "mirror_item")
-        self.assertTrue(mw.is_play_target_kind("mirror_item"))
+    def test_the_v227_alias_is_gone(self):
+        """v234 promised its own deprecation would end in v235. It did."""
+        self.assertFalse(hasattr(mw, "LEGACY_PLAY_TARGET_KIND"))
+        self.assertEqual(mw.PLAY_TARGET_KINDS, (mw.PLAY_TARGET_KIND,))
         self.assertTrue(mw.is_play_target_kind(mw.PLAY_TARGET_KIND))
-        self.assertEqual(mw.PLAY_TARGET_KINDS,
-                         (mw.PLAY_TARGET_KIND, mw.LEGACY_PLAY_TARGET_KIND))
+        self.assertFalse(mw.is_play_target_kind("mirror_item"))
 
     def test_nothing_else_is_a_play_kind(self):
-        for value in ("timeline", "mirror", "", None, 17, "work_items"):
+        for value in ("timeline", "mirror", "mirror_item", "", None, 17, "work_items"):
             with self.subTest(value=value):
                 self.assertFalse(mw.is_play_target_kind(value))
 
-    def test_a_v227_target_still_opens_the_stage(self):
-        """The whole point of the alias: a stored target minted before the
-        rename keeps working for one version without being rewritten."""
-        legacy = target(kind=mw.LEGACY_PLAY_TARGET_KIND)
-        self.assertIsNotNone(ti.work_item_target(legacy))
-        self.assertEqual(ti.work_item_target(legacy)["kind"], ti.WORK_ITEM_STAGE)
+    def test_a_v227_target_no_longer_opens_the_stage(self):
+        """The one-version grace is over: a target still holding the old word
+        is not silently rewritten, it is refused — a miss, never a wrong join."""
+        legacy = target(kind="mirror_item")
+        self.assertIsNone(ti.work_item_target(legacy))
 
     def test_the_evidence_caps_are_one_number(self):
         self.assertEqual(ti.MAX_WORK_ITEM_EVIDENCE, mw.MAX_PLAY_EVIDENCE)
