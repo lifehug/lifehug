@@ -330,6 +330,38 @@ class DefinitionSpanTests(VaultTestCase):
         self.assertNotIn(AS_OF, json.dumps(node))
 
 
+class PresentTests(VaultTestCase):
+    """T-AF-07 — a finite span plus `life_clip_end: present`; `as_of` unpersisted."""
+
+    def test_the_current_frame_persists_a_finite_span_and_the_view_token(self) -> None:
+        rows = frames()
+        current = rows[-1]
+        self.assertTrue(current.current)
+        self.assertEqual(current.life_clip_end, "present")
+        self.assertEqual(current.start.best, "2021-07-11")
+        self.assertEqual(current.end.best, "2031-07-11")
+
+    def test_a_past_frame_carries_its_own_end(self) -> None:
+        twenties = band(frames(), "20s")
+        self.assertFalse(twenties.current)
+        self.assertEqual(twenties.life_clip_end, "2011-07-10")
+
+    def test_as_of_is_never_written_to_either_published_file(self) -> None:
+        self.file_claims([owner_birth()])
+        pub.publish(self.vault, now=NOW)
+        for path in (pub.projection_path(self.vault), pub.work_items_path(self.vault)):
+            self.assertNotIn("as_of", path.read_text(encoding="utf-8"))
+        # `published_at` legitimately carries today's date; no FRAME does.
+        for node in self.published()["nodes"]:
+            if node.get("event_kind") == "age_frame":
+                self.assertNotIn(AS_OF, json.dumps(node))
+
+
+# ---------------------------------------------------------------------------
+# The fold (§2.2, §7 row "Age frame node")
+# ---------------------------------------------------------------------------
+
+
 class FrameNodeTests(VaultTestCase):
     """T-AF-14 — what a frame node declares."""
 
@@ -456,6 +488,120 @@ class RuleVersionAndFingerprintTests(VaultTestCase):
 
 # ---------------------------------------------------------------------------
 # Schema v2 (§7.8)
+# ---------------------------------------------------------------------------
+
+
+class SchemaVersionTests(VaultTestCase):
+    """T-AF-15 — additive, tolerant readers, membership shape only."""
+
+    def test_a_node_is_v2_while_a_claim_stays_v1(self) -> None:
+        self.assertEqual(tp.PROJECTION_SCHEMA_VERSION, 2)
+        self.assertEqual(tc.SCHEMA_VERSION, 1)
+        self.file_claims([owner_birth()])
+        for row in self.fold().nodes:
+            self.assertEqual(row["schema_version"], 2)
+
+    def test_calculated_view_reads_a_v1_payload_and_a_v2_payload(self) -> None:
+        self.file_claims([owner_birth()])
+        pub.publish(self.vault, now=NOW)
+        v2 = pub.calculated_view(self.vault)
+        self.assertEqual(v2["schema_version"], 2)
+        self.assertTrue(v2["nodes"])
+        payload = copy.deepcopy(self.published())
+        payload.pop("projection_schema_version", None)
+        payload.pop("memberships", None)
+        payload.pop("reached_frame_epoch", None)
+        for node in payload["nodes"]:
+            node["schema_version"] = 1
+            for key in ("definition_span", "life_clip_end", "origin_basis",
+                        "legacy_refs", "life_view"):
+                node.pop(key, None)
+        pub.projection_path(self.vault).write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+        v1 = pub.calculated_view(self.vault)
+        self.assertEqual(v1["schema_version"], 1)
+        self.assertEqual(len(v1["nodes"]), len(v2["nodes"]))
+
+    def test_memberships_ride_the_projection_as_an_empty_list(self) -> None:
+        self.file_claims([owner_birth()])
+        pub.publish(self.vault, now=NOW)
+        self.assertEqual(self.published()["memberships"], [])
+        self.assertEqual(pub.calculated_view(self.vault)["memberships"], ())
+
+    def test_a_membership_without_evidence_is_refused_by_name(self) -> None:
+        with self.assertRaises(tp.CalculatedMembershipError) as caught:
+            tp.validate_calculated_membership({
+                "member_node_id": "node:aaa", "era_node_id": "age:self:20s",
+                "relation": "within", "evidence_refs": [],
+            })
+        self.assertEqual(caught.exception.code, "membership_without_evidence")
+
+    def test_a_membership_id_is_the_digest_of_its_three_identity_keys(self) -> None:
+        row = tp.validate_calculated_membership({
+            "member_node_id": "node:aaa", "era_node_id": "age:self:20s",
+            "relation": "within", "evidence_refs": ["assert:1"],
+        })
+        self.assertEqual(
+            row["membership_id"],
+            tp.derive_membership_id(member_node_id="node:aaa",
+                                    era_node_id="age:self:20s", relation="within"),
+        )
+        self.assertEqual(row["display_role"], "none")
+
+
+# ---------------------------------------------------------------------------
+# Publication (§3.4)
+# ---------------------------------------------------------------------------
+
+
+class PublicationEpochTests(VaultTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.file_claims([owner_birth()])
+
+    def test_two_publishes_inside_one_epoch_write_nothing(self) -> None:
+        """T-AF-08."""
+        first = pub.publish(self.vault, now=NOW)
+        self.assertFalse(first["unchanged"])
+        path = pub.projection_path(self.vault)
+        before_bytes, before_mtime = path.read_bytes(), path.stat().st_mtime_ns
+        second = pub.publish(self.vault, now="2026-08-27T12:00:00Z")
+        self.assertTrue(second["unchanged"])
+        self.assertEqual(second["generation"], first["generation"])
+        self.assertEqual(path.read_bytes(), before_bytes)
+        self.assertEqual(path.stat().st_mtime_ns, before_mtime)
+
+    def test_crossing_a_boundary_publishes_exactly_once(self) -> None:
+        """T-AF-09."""
+        pub.publish(self.vault, now="2031-07-10T12:00:00Z")
+        self.assertEqual(pub.published_generation(self.vault), 1)
+        crossed = pub.publish(self.vault, now="2031-07-11T12:00:00Z")
+        self.assertFalse(crossed["unchanged"])
+        self.assertEqual(crossed["generation"], 2)
+        self.assertTrue(pub.publish(self.vault, now="2031-07-12T12:00:00Z")["unchanged"])
+        self.assertEqual(pub.published_generation(self.vault), 2)
+
+    def test_the_epoch_rides_the_envelope_and_therefore_the_signature(self) -> None:
+        pub.publish(self.vault, now=NOW)
+        payload = self.published()
+        self.assertEqual(payload["reached_frame_epoch"], {"count": 5, "current": "40s"})
+        self.assertIn("reached_frame_epoch", pub.rebuild_signature(payload))
+
+    def test_a_torn_pair_is_never_a_no_op(self) -> None:
+        pub.publish(self.vault, now=NOW)
+        payload = pub.read_work_items(self.vault)
+        payload["projection_generation"] = 9
+        pub.work_items_path(self.vault).write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+        summary = pub.publish(self.vault, now=NOW)
+        self.assertFalse(summary["unchanged"])
+        self.assertEqual(summary["generation"], 10)
+
+
+# ---------------------------------------------------------------------------
+# The placement score and the alias map
 # ---------------------------------------------------------------------------
 
 
