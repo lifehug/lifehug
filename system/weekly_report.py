@@ -83,21 +83,27 @@ def _failure_label(row: dict) -> str:
 
 
 def classification_section(since: datetime) -> list[str]:
+    import classify_story  # noqa: PLC0415
+
     classified = 0
-    if CLASSIFICATIONS_DIR.exists():
-        for path in CLASSIFICATIONS_DIR.glob("*.json"):
-            data = read_json(path, default={}) or {}
-            at = _parse_iso(data.get("classified_at"))
-            if at and at >= since:
-                classified += 1
+    for _path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
+        at = _parse_iso(data.get("classified_at"))
+        if at and at >= since:
+            classified += 1
+    # v237: a stale classification is withheld from every reader, so counting
+    # it as a week's success would report work the product cannot use. It is
+    # named separately instead — the number the owner reads names the hole.
+    stale = len(classify_story.stale_classification_files(CLASSIFICATIONS_DIR))
     failures = [
         row for row in read_learning_failures(limit=50, since_days=None)
         if "classify" in str(row.get("operation", ""))
         and (_parse_iso(row.get("recorded_at")) or since) >= since
     ]
-    if not classified and not failures:
+    if not classified and not failures and not stale:
         return []
     line = f"Classification: {classified} ✅"
+    if stale:
+        line += f" {stale} stale (reclassification pending)"
     if failures:
         line += f" {len(failures)} ❌"
     lines = [line]

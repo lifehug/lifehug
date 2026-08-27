@@ -32,11 +32,12 @@ def _classifier_output_suggestions(limit: int = 5) -> list[tuple[str, str]]:
     """possible_outputs the weekly classifier extracted from real answers —
     write-only until v69. Deduped, most recent classifications win."""
     seen: set[str] = set()
+    import classify_story  # noqa: PLC0415
+
     rows: list[tuple[str, str]] = []
-    if not CLASSIFICATIONS_DIR.exists():
-        return rows
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json"), reverse=True):
-        data = read_json(path, default={}) or {}
+    # v237: newest-first over CURRENT classifications only.
+    for _path, data in classify_story.current_classification_files(
+            CLASSIFICATIONS_DIR, reverse=True):
         for item in data.get("possible_outputs", []) or []:
             if not isinstance(item, dict):
                 continue

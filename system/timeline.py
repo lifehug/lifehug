@@ -468,11 +468,14 @@ def _short_source(source: str) -> str:
 
 def load_events() -> list[dict]:
     """All classifier-extracted events with their source and era hints."""
+    import classify_story  # noqa: PLC0415 — avoids an import cycle at load
+
     out: list[dict] = []
-    if not CLASSIFICATIONS_DIR.exists():
-        return out
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-        data = read_json(path, default={}) or {}
+    # v237: the ONE reader gate. A classification marked stale (a correction
+    # was filed against its source) leaves the Timeline — and, through
+    # wiki_compile's export, the wiki — the moment it is marked. The module's
+    # OWN root is passed so `vault_roots()` rebinds keep working.
+    for path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
         source = str(data.get("source_path", path.stem))
         eras = [str(tp.get("era", "")).lower()
                 for tp in (data.get("time_periods") or []) if isinstance(tp, dict)]

@@ -298,14 +298,12 @@ def _load_source_texts() -> list[str]:
 
 def _load_classifications() -> list[dict]:
     """Load all classification JSON files."""
-    results: list[dict] = []
-    if not CLASSIFICATIONS_DIR.exists():
-        return results
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-        data = read_json(path, default={})
-        if data:
-            results.append(data)
-    return results
+    import classify_story  # noqa: PLC0415
+
+    # v237: stale classifications never recommend a focus.
+    return [data for _path, data
+            in classify_story.current_classification_files(CLASSIFICATIONS_DIR)
+            if data]
 
 
 def _existing_focus_names(md_text: str) -> set[str]:

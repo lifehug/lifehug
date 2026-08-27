@@ -177,6 +177,11 @@ SOURCE_MANIFEST_FILE = _data("source_manifest")
 SOURCE_LINT_FINDINGS_FILE = _data("source_lint_findings")
 LEARNING_FAILURES_FILE = _data("learning_failures")
 CLASSIFICATIONS_DIR = _data("classifications")
+# v237: where the classification batch got to. Derived operational memory —
+# rebuildable, deletable, never authority — so a missing or malformed cursor
+# means "start at the head", never an error (system/classify_story.py owns
+# every read and write).
+CLASSIFY_CURSOR_FILE = _data("classify_cursor")
 # v221: the temporal claim substrate. The receipts are evidence; the active
 # index is a materialized view that can be deleted and rebuilt from them
 # (system/temporal_store.py owns every write and the fold).

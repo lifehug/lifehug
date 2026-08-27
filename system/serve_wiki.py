@@ -1385,11 +1385,12 @@ def _hub_card_chapter():
 def _reflection_pool() -> list[tuple[str, str, str]]:
     """(kind, text, source) for every classifier-extracted contradiction and
     self-understanding insight — the raw material the Mirror synthesizes."""
+    import classify_story  # noqa: PLC0415
+
     pool: list[tuple[str, str, str]] = []
-    if not CLASSIFICATIONS_DIR.exists():
-        return pool
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-        data = read_json(path, default={}) or {}
+    # v237: the ONE reader gate — stale readings never reach the Mirror's
+    # raw material.
+    for path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
         source = str(data.get("source_path", path.stem))
         for c in data.get("contradictions") or []:
             if isinstance(c, str) and c.strip():

@@ -95,11 +95,12 @@ def _load_scene_slots() -> dict[str, dict[str, bool]]:
     id. Missing files, missing slots, and pre-v70 classifications all read as
     all-empty — never crashes, never lies about depth.
     """
+    import classify_story  # noqa: PLC0415
+
     out: dict[str, dict[str, bool]] = {}
-    if not CLASSIFICATIONS_DIR.exists():
-        return out
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-        data = read_json(path, default={}) or {}
+    # v237: a stale classification's scene slots are withheld — depth is never
+    # claimed from a reading the vault already knows is wrong.
+    for _path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
         # source_path looks like "answers/D9.md" — stem is the question id.
         src = str(data.get("source_path", "")).strip()
         if not src.startswith("answers/") or not src.endswith(".md"):

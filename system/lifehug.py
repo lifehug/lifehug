@@ -2189,13 +2189,24 @@ def loop_health_checks() -> int:
     except Exception as exc:  # noqa: BLE001
         warn("zombie-focus check unavailable", str(exc)[:80])
 
-    # Classification coverage — the learning loop starves without it.
-    classified = len(list(CLASSIFICATIONS_DIR.glob("*.json"))) if CLASSIFICATIONS_DIR.exists() else 0
+    # Classification coverage — the learning loop starves without it. v237:
+    # current / stale / unclassified are reported SEPARATELY, because a stale
+    # classification is withheld from every derived reader and folding it into
+    # one total hid exactly the hole the owner needed to see.
+    import classify_story as _cs  # noqa: PLC0415
+
+    counts = _cs.classification_counts()
+    classified = counts["current"]
     answers = len(list(ANSWERS_DIR.glob("*.md"))) if ANSWERS_DIR.exists() else 0
     if answers and not classified:
-        warn("no sources classified", f"{answers} answers, 0 classifications — the learning loop has never run")
+        warn("no sources classified", f"{answers} answers, 0 current classifications — the learning loop has never run")
     elif answers:
-        check("classification coverage", True, f"{classified}/{answers} sources classified")
+        check("classification coverage", True,
+              f"{classified} current / {counts['stale']} stale / "
+              f"{counts['unclassified']} unclassified")
+    if counts["stale"]:
+        warn(f"{counts['stale']} classification(s) {_cs.WITHHELD_STALE_REASON}",
+             "run: lifehug classify-story --classify-all --unclassified --stale-first")
 
     return failures
 
