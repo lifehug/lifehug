@@ -325,9 +325,25 @@ def record_learning_failure(
     *,
     context: dict[str, object] | None = None,
     exit_code: int | None = None,
-    path: Path = LEARNING_FAILURES_FILE,
+    path: Path | None = None,
+    vault_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
-    """Append a non-blocking learning-loop failure for later doctor review."""
+    """Append a non-blocking learning-loop failure for later doctor review.
+
+    ``vault_root`` scopes the ledger to THAT vault — the one definition of
+    the root-scoped ledger path (issue #225), so a run against a synthetic
+    vault (tests, a second checkout) appends to the vault it ran against and
+    never to the process-bound checkout's ``state/``. The default still
+    resolves to ``REPO_DIR``, exactly as every other state writer's does.
+    Never wrap ``REPO_DIR`` in ``Path()`` — that strips its VaultPath
+    authority (v120 runtime guard); compare the string forms instead.
+    """
+    if path is None:
+        if vault_root is not None and os.fspath(vault_root) != os.fspath(REPO_DIR):
+            path = Path(vault_data_path("learning_failures", vault_root=vault_root,
+                                        framework_system_dir=SYSTEM_DIR))
+        else:
+            path = LEARNING_FAILURES_FILE
     record: dict[str, object] = {
         "recorded_at": now_utc(),
         "component": component,

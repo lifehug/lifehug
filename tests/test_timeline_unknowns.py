@@ -14,6 +14,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -497,7 +498,13 @@ class PlannerTimelineTests(unittest.TestCase):
 
     def test_the_guarded_reads_never_raise(self):
         original = sys.modules.get("timeline_interaction")
-        sys.modules["timeline_interaction"] = object()  # no index, no minter
+        # No index, no minter — but the pure read helper every timeline walk
+        # uses is present. A bare object() invented a failure mode the real
+        # module cannot produce (`anchor_rows_for_prompt` missing), and the
+        # recorded AttributeError leaked into the checkout's own
+        # state/learning_failures.jsonl (issue #225).
+        sys.modules["timeline_interaction"] = types.SimpleNamespace(
+            anchor_rows_for_prompt=lambda anchors, **kwargs: [])
         try:
             self.assertEqual(self.qp.current_timeline_probes(), {})
             self.assertEqual(self.qp.mint_keystone_questions(), [])

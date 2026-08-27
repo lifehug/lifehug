@@ -19,6 +19,12 @@ state/jobs/
 # the next --check/--apply.
 state/update_check.json
 state/last_update.json
+# The learning-failure ledger is per-vault runtime state. A test or dev run
+# against the checkout must never end up committing one (issue #225 — the
+# suite once wrote it via a stubbed timeline_interaction, and `git add -A`
+# picked it up). Defense in depth: the suite is also guarded to leave the
+# checkout clean (tests/test_learning_failures_leak.py).
+state/learning_failures.jsonl
 # Connector secrets (v106). The ledger JSONL itself IS committed — it is
 # owner-only metadata state like the rest of state/. The body cache is
 # committed too (v108 — owner relaxed raw storage); only secrets stay ignored.

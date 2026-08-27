@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -420,7 +421,13 @@ class MintingTests(unittest.TestCase):
 
     def test_every_guarded_read_degrades_to_no_timeline_questions(self):
         original = sys.modules.get("timeline_interaction")
-        sys.modules["timeline_interaction"] = object()  # no index, no minter
+        # No index, no minter — but the pure read helper every timeline walk
+        # uses is present. A bare object() invented a failure mode the real
+        # module cannot produce (`anchor_rows_for_prompt` missing), and the
+        # recorded AttributeError leaked into the checkout's own
+        # state/learning_failures.jsonl (issue #225).
+        sys.modules["timeline_interaction"] = types.SimpleNamespace(
+            anchor_rows_for_prompt=lambda anchors, **kwargs: [])
         try:
             self.assertEqual(qp.current_timeline_probes(), {})
             self.assertEqual(qp.mint_keystone_questions(), [])
