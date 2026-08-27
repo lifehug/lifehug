@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 242,
+    "framework_version": 244,
     "revision": "vault-contract-v11",
-    "content_digest": "sha256:20fb3eec9fbd4276c602b8d411950c3840ce54b12ceee98fef9a81f07cd76333"
+    "content_digest": "sha256:PLACEHOLDER"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -799,6 +799,19 @@
       "schema": {
         "format": "json_family",
         "version_field": "schema_version",
+        "supported": [
+          1
+        ]
+      }
+    },
+    "classify_cursor": {
+      "path": "state/classify_cursor.json",
+      "kind": "file",
+      "required": false,
+      "tracked": true,
+      "schema": {
+        "format": "json",
+        "version_field": "version",
         "supported": [
           1
         ]

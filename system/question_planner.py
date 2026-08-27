@@ -302,7 +302,14 @@ def _count_all_sources() -> dict[str, int]:
 
 
 def _count_classified(source_type: str) -> int:
-    """Count classified sources for a given type."""
+    """Count CURRENT classified sources for a given type.
+
+    v237: a stale classification is withheld from every derived reader, so
+    counting it here would tell the planner the loop has coverage it cannot
+    actually use. `classify_story.classification_is_current` takes the PATH,
+    so this module keeps resolving candidates against its own roots."""
+    import classify_story  # noqa: PLC0415
+
     if not CLASSIFICATIONS_DIR.exists():
         return 0
     count = 0
@@ -315,7 +322,7 @@ def _count_classified(source_type: str) -> int:
             CLASSIFICATIONS_DIR / f"{rel_key}.json",
             CLASSIFICATIONS_DIR / f"{path.stem}.json",
         ]
-        if any(candidate.exists() for candidate in candidates):
+        if any(classify_story.classification_is_current(c) for c in candidates):
             count += 1
     return count
 

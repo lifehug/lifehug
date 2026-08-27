@@ -639,14 +639,14 @@ def load_classified_self_signals(limit: int = 12) -> list[str]:
     they now ground the self-arc in observed patterns instead of generic
     introspection ('You say no one is coming to save you, but you list four
     people who saved you' beats 'what contradictions do you carry?')."""
-    from lifehug_core import CLASSIFICATIONS_DIR  # noqa: PLC0415
+    import classify_story  # noqa: PLC0415
 
     signals: list[str] = []
     seen: set[str] = set()
-    if not CLASSIFICATIONS_DIR.exists():
-        return signals
-    for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-        data = read_json(path, default={}) or {}
+    # v237: the ONE reader gate. (The local `from lifehug_core import
+    # CLASSIFICATIONS_DIR` that used to sit here shadowed this module's own
+    # root, so a caller rebinding it was silently ignored.)
+    for _path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
         for key, prefix in (("contradictions", "contradiction"), ("self_understanding_insights", "insight")):
             for item in data.get(key, []) or []:
                 text = str(item.get("description", item) if isinstance(item, dict) else item).strip()

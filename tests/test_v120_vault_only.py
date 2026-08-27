@@ -92,6 +92,7 @@ EXPECTED_DATA_PATHS = {
     "temporal_active_index",
     "temporal_calculated_timeline",
     "temporal_work_items",
+    "classify_cursor",
     "temporal_claims_state",
     "temporal_receipts",
     "timeline_placements",
@@ -208,12 +209,12 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(list(exported["data_paths"]), sorted(exported["data_paths"]))
         self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
         # Moves only when the CONTRACT moves, which is why it lags the
-        # framework version: v231 published the projection, and E3 (eras) is
-        # the next change to the path table — `sources/eras` and
-        # `state/temporal_claims/resolutions`. The release commit that takes
-        # this branch's version slot moves both this number and
-        # `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 242)
+        # framework version: v231 published the projection, E3 (eras) added
+        # `sources/eras` and `state/temporal_claims/resolutions`, and O-C
+        # (stale-first classification) added `state/classify_cursor.json`.
+        # The release commit that takes this branch's version slot moves
+        # both this number and `vault_contract.json`'s together.
+        self.assertEqual(exported["identity"]["framework_version"], 244)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

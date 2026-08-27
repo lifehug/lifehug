@@ -9,6 +9,8 @@ Modes
 --classify <source_path>          Classify a single file via AI.
 --prompt <source_path>            Print the prompt only (no API call).
 --classify-all [--unclassified]   Batch classify all (or only unclassified) sources.
+--stale-first                     With --classify-all: stale targets first, then
+                                  newest-first, resuming after the durable cursor.
 --dry-run                         Preview actions without model calls or writes.
 
 Examples
@@ -16,6 +18,7 @@ Examples
 python3 system/classify_story.py --classify sources/manual/arizona.md
 python3 system/classify_story.py --prompt sources/manual/arizona.md
 python3 system/classify_story.py --classify-all --unclassified
+python3 system/classify_story.py --classify-all --unclassified --stale-first --limit 5
 python3 system/classify_story.py --classify-all --unclassified --dry-run
 python3 system/classify_story.py --classify sources/manual/arizona.md --model claude-opus-4-20250514
 """
@@ -26,6 +29,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 # ── path bootstrapping so the script is importable from anywhere ──────────────
@@ -39,6 +43,7 @@ from ai_provider import AIResponseError, failure_metadata, normalize_question_re
 from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
+    CLASSIFY_CURSOR_FILE,
     MANUAL_SOURCES_DIR,
     MISSION_FILE,
     QUESTION_CANDIDATES_FILE,
@@ -180,21 +185,136 @@ def classification_paths(source_path: Path) -> list[Path]:
     return paths
 
 
+# ── the two predicates, side by side (v237, O-C) ──────────────────────────────
+#
+# They answer DIFFERENT questions and there is never a third:
+#
+#   is_classified(source)  — "does this source still need a classification
+#                            RUN?"  The BATCH question.
+#   is_current(source)     — "is this source's classification safe to READ?"
+#                            The ONE reader gate.
+#
+# A `stale: true` classification (a correction was filed against its source,
+# v103 -> `mark_stale`) answers YES to the first and NO to the second: the
+# batch must re-derive it, and until it does no derived surface may show it.
+
+WITHHELD_STALE_REASON = "withheld: stale, reclassification pending"
+
+# Process-local diagnostic: which classification files `current_classification_files`
+# actually withheld this run. Bounded by the number of classification files;
+# read it with `withheld_stale()`, clear it with `reset_withheld_stale()`.
+_WITHHELD_STALE: set[str] = set()
+
+
+def withheld_stale() -> list[str]:
+    """Sorted paths this process withheld from readers as stale."""
+    return sorted(_WITHHELD_STALE)
+
+
+def reset_withheld_stale() -> None:
+    _WITHHELD_STALE.clear()
+
+
 def is_classified(source_path: Path) -> bool:
-    """Classified AND current. A classification carrying `stale: true` (a
-    correction was filed against its source, v103) counts as unclassified so
-    the weekly batch re-derives it — the classify prompt already injects
-    corrections as authoritative, so the re-derivation asserts the corrected
-    facts. The stale classification stays on disk (and keeps feeding the
-    timeline/wiki) until the fresh one overwrites it."""
+    """Does this source still need a classification RUN? — the BATCH question.
+
+    A classification carrying `stale: true` (a correction was filed against
+    its source, v103) counts as unclassified so the weekly batch re-derives
+    it — the classify prompt already injects corrections as authoritative, so
+    the re-derivation asserts the corrected facts. This is deliberately NOT
+    the reader gate: see `is_current` below."""
     for path in classification_paths(source_path):
         if path.exists():
             return not _is_stale(path)
     return False
 
 
+def is_current(source_path: Path) -> bool:
+    """Is this source's classification safe to READ? — the ONE reader gate.
+
+    Classified AND not stale. A stale classification leaves every derived
+    reader IMMEDIATELY (the Timeline, the Mirror, the Book, progress,
+    research, focus recommendations, the wiki): the file stays on disk
+    because it is the batch's target and the person's history, but a reading
+    the vault already knows is wrong never feeds the product while the fresh
+    one is pending. Compile proceeds without it; a model outage never
+    restores a known-stale interpretation."""
+    return any(classification_is_current(path)
+               for path in classification_paths(source_path))
+
+
+def classification_is_current(path: Path) -> bool:
+    """The per-file half of `is_current`, for a reader that already holds the
+    classification JSON path."""
+    return path.exists() and not _is_stale(path)
+
+
+def current_classification_files(
+    directory: Path | None = None, *, reverse: bool = False
+) -> Iterator[tuple[Path, dict]]:
+    """Yield `(path, data)` for every CURRENT classification in `directory`
+    (default `CLASSIFICATIONS_DIR`), path-sorted — THE ONE ITERATOR.
+
+    Every derived reader goes through here, so the staleness gate exists in
+    exactly one place and a ninth reader cannot re-glob by accident
+    (`tests/test_classify_story_current.py` fails the build on any
+    `CLASSIFICATIONS_DIR.glob` outside this module).
+
+    `directory` is a parameter, not a module global read, because callers own
+    their own vault roots — `timeline.vault_roots()` rebinds its caller's
+    `CLASSIFICATIONS_DIR`, and a reader that passed nothing would silently
+    split one call across two vaults."""
+    root = CLASSIFICATIONS_DIR if directory is None else Path(directory)
+    if not root.exists():
+        return
+    for path in sorted(root.glob("*.json"), reverse=reverse):
+        data = read_json(path, default={}) or {}
+        if _is_stale_data(data):
+            _WITHHELD_STALE.add(str(path))
+            continue
+        yield path, data
+
+
+def stale_classification_files(directory: Path | None = None) -> list[Path]:
+    """Path-sorted classifications currently withheld from every reader."""
+    root = CLASSIFICATIONS_DIR if directory is None else Path(directory)
+    if not root.exists():
+        return []
+    return [p for p in sorted(root.glob("*.json")) if _is_stale(p)]
+
+
+def classification_counts() -> dict[str, int]:
+    """`{current, stale, unclassified}` over this vault's sources — the number
+    the owner reads names the hole instead of hiding it inside one total."""
+    counts = {"current": 0, "stale": 0, "unclassified": 0}
+    for source in all_source_files():
+        paths = [p for p in classification_paths(source) if p.exists()]
+        if not paths:
+            counts["unclassified"] += 1
+        elif any(classification_is_current(p) for p in paths):
+            counts["current"] += 1
+        else:
+            counts["stale"] += 1
+    return counts
+
+
+def _is_stale_data(data: dict) -> bool:
+    """The ONE staleness definition; `_is_stale` is its file-reading form."""
+    return bool(data.get("stale"))
+
+
 def _is_stale(path: Path) -> bool:
-    return bool((read_json(path, default=None) or {}).get("stale"))
+    return _is_stale_data(read_json(path, default=None) or {})
+
+
+def _stale_at(source_path: Path) -> str:
+    for path in classification_paths(source_path):
+        if not path.exists():
+            continue
+        data = read_json(path, default=None) or {}
+        if _is_stale_data(data):
+            return str(data.get("stale_at") or "")
+    return ""
 
 
 def mark_stale(source_path: Path, reason: str = "") -> bool:
@@ -214,16 +334,182 @@ def mark_stale(source_path: Path, reason: str = "") -> bool:
     return marked
 
 
+CORRECTION_TYPE = "source_correction"
+CORRECTIONS_SUBDIR = "corrections"
+
+
+def _frontmatter_of(path: Path) -> dict:
+    """Frontmatter of `path`, or `{}` when it has none or cannot be read.
+
+    Reads through `Path.read_text` like every other source read in this
+    module — a bare `.open()` bypasses the no-follow vault I/O authority
+    (`vault_paths.py`) and `tests/test_v120_vault_only.py` fails the build
+    on it, for reads exactly as much as for writes."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    if not content.startswith("---"):
+        return {}
+    fm, _body = parse_frontmatter(content)
+    return fm
+
+
+def is_correction_document(path: Path) -> bool:
+    """A correction is never a classification TARGET (auditor response 3
+    §4.5). Recognised by where it lives AND by what it says it is, so a
+    correction filed outside `sources/corrections/` is caught too."""
+    if CORRECTIONS_SUBDIR in path.parts and SOURCES_DIR.name in path.parts:
+        return True
+    return str(_frontmatter_of(path).get("type", "")).strip() == CORRECTION_TYPE
+
+
+def classify_target_for(path: Path) -> Path | None:
+    """The source a correction document corrects, or `None` for anything that
+    is not a correction.
+
+    "A correction source should cause reclassification of the corrected
+    target, not accidental classification of the correction document itself."
+    The join is the same one `corrections_for` reads from the other end
+    (`corrects_path`, or `corrects: answer:<stem>`); the platform's enqueuer
+    calls THIS helper through the pin so there is one definition and two
+    hosts."""
+    fm = _frontmatter_of(path)
+    if str(fm.get("type", "")).strip() != CORRECTION_TYPE:
+        return None
+    corrects_path = str(fm.get("corrects_path", "")).strip()
+    if corrects_path:
+        target = Path(corrects_path)
+        return target if target.is_absolute() else REPO_DIR / target
+    corrects = str(fm.get("corrects", "")).strip()
+    if corrects.startswith("answer:"):
+        stem = corrects.split(":", 1)[1].strip()
+        if stem:
+            return ANSWERS_DIR / f"{stem}.md"
+    return None
+
+
 def all_source_files() -> list[Path]:
-    """Return all source and answer files across the repo."""
+    """Return all classifiable source and answer files across the repo.
+
+    Correction documents are excluded (v237): a correction is filed ABOUT a
+    source, so classifying it would mint people/places/events out of an
+    erratum and leave the corrected source's own stale classification
+    standing. `classify_target_for` is how a correction reaches the batch."""
     files: list[Path] = []
     for directory in (SOURCES_DIR, ANSWERS_DIR):
         if directory.exists():
             files.extend(
                 p for p in directory.rglob("*.md")
                 if not p.name.startswith(".")
+                and not is_correction_document(p)
             )
     return sorted(files)
+
+
+# ── batch ordering: --stale-first and the durable cursor (v237) ───────────────
+
+CLASSIFY_CURSOR_VERSION = 1
+
+
+def source_key(source_path: Path) -> str:
+    """The cursor's key for a source — the same stable stem its classification
+    file is named after, so the cursor survives a rename of nothing else."""
+    return classify_stem(source_path)
+
+
+def read_classify_cursor() -> str:
+    """The last source key this vault successfully filed, or `""`.
+
+    A missing or malformed cursor is NEVER an error — it means "start at the
+    head", which is exactly the pre-v237 behavior."""
+    try:
+        data = read_json(CLASSIFY_CURSOR_FILE, default=None)
+    except (OSError, ValueError):
+        # Malformed operational memory is not an error condition — it is a
+        # cursor we do not have. Start at the head.
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    key = data.get("last_source_key")
+    return key if isinstance(key, str) else ""
+
+
+def write_classify_cursor(source_path: Path, *, run_id: str = "") -> None:
+    """Advance the cursor to `source_path`. Derived operational memory:
+    rebuildable, deletable, never authority."""
+    CLASSIFY_CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
+    write_json(CLASSIFY_CURSOR_FILE, {
+        "version": CLASSIFY_CURSOR_VERSION,
+        "last_source_key": source_key(source_path),
+        "updated_at": now_utc(),
+        "run_id": run_id,
+    })
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _resume_after(ordered: list[Path], cursor: str) -> list[Path]:
+    """Rotate `ordered` to start just after `cursor`.
+
+    A rotation, not a truncation: nothing is skipped, the head simply stops
+    being where every run begins. When the cursor's source is no longer a
+    candidate it has been filed — progress happened — and the head is
+    genuinely new, so falling back to the head is correct."""
+    if not cursor:
+        return ordered
+    for index, path in enumerate(ordered):
+        if source_key(path) == cursor:
+            return ordered[index + 1:] + ordered[: index + 1]
+    return ordered
+
+
+def order_targets(
+    sources: list[Path],
+    *,
+    stale_first: bool = False,
+    cursor: str = "",
+) -> list[Path]:
+    """The batch's candidate order — pure, so it is unit-tested without a model.
+
+    Without `--stale-first` this is the historical alphabetical sweep, rotated
+    past the cursor. With it:
+
+      1. STALE first, oldest `stale_at` first. A stale classification is a
+         known-wrong reading the product is already refusing to show, so it
+         is the most valuable thing the batch can spend a call on. Stale
+         ordering deliberately IGNORES the cursor: being passed over means it
+         failed, and a failed target is not a served one.
+      2. Then never-classified, NEWEST SOURCE FIRST — the answer filed
+         yesterday reaches the Timeline before a 2011 email — rotated past
+         the cursor so the tail is still reached.
+      3. Then everything already current (only reachable without
+         `--unclassified`).
+
+    Deterministic given the same tree."""
+    stale: list[Path] = []
+    never: list[Path] = []
+    current: list[Path] = []
+    for source in sources:
+        existing = [p for p in classification_paths(source) if p.exists()]
+        if not existing:
+            never.append(source)
+        elif any(classification_is_current(p) for p in existing):
+            current.append(source)
+        else:
+            stale.append(source)
+
+    if not stale_first:
+        return _resume_after(sorted(sources), cursor)
+
+    stale.sort(key=lambda p: (_stale_at(p), source_key(p)))
+    never.sort(key=lambda p: (-_mtime(p), source_key(p)))
+    return stale + _resume_after(never, cursor) + sorted(current)
 
 
 # ── prompt construction ───────────────────────────────────────────────────────
@@ -792,6 +1078,15 @@ def cmd_classify(args: argparse.Namespace) -> int:
     source_path = Path(args.classify)
     if not source_path.is_absolute():
         source_path = REPO_DIR / source_path
+    target = classify_target_for(source_path)
+    if target is not None:
+        print(
+            f"Error: classify_target_is_correction: {_relative_path(source_path)} "
+            f"is a correction, not a classification target — its target is "
+            f"{_relative_path(target)}",
+            file=sys.stderr,
+        )
+        return 1
     model = get_model(args)
     return classify_file(
         source_path,
@@ -887,6 +1182,9 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
 
     if args.unclassified:
         sources = [s for s in sources if not is_classified(s)]
+    stale_first = bool(getattr(args, "stale_first", False))
+    sources = order_targets(
+        sources, stale_first=stale_first, cursor=read_classify_cursor())
     if args.limit is not None:
         sources = sources[: max(0, args.limit)]
 
@@ -898,7 +1196,13 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
         out_dir = Path(args.emit_prompts)
         if not out_dir.is_absolute():
             out_dir = REPO_DIR / out_dir
-        return emit_prompts(sources, out_dir)
+        rc = emit_prompts(sources, out_dir)
+        # The keyless path is the one that actually starved: nothing is filed
+        # here, so without advancing the cursor the same first-N heads are
+        # re-emitted every week forever and the tail is never reached.
+        if rc == 0 and not args.dry_run:
+            write_classify_cursor(sources[-1], run_id="emit-prompts")
+        return rc
 
     action = "Previewing" if args.dry_run else "Classifying"
     print(f"{action} {len(sources)} source file(s) with model={model}")
@@ -915,6 +1219,8 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
         )
         if rc != 0:
             errors.append(str(source_path))
+        elif not args.dry_run:
+            write_classify_cursor(source_path, run_id="classify-all")
 
     if errors:
         print(f"\n✗ {len(errors)} file(s) failed:")
@@ -971,9 +1277,17 @@ def build_parser() -> argparse.ArgumentParser:
              "pending source plus a manifest.json instead of calling AI.",
     )
     parser.add_argument(
+        "--stale-first",
+        action="store_true",
+        help="With --classify-all: run stale classifications first (oldest "
+             "first), then never-classified newest-source-first, resuming "
+             "after state/classify_cursor.json so the tail is never starved.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
-        help="With --classify-all: maximum files to classify.",
+        help="With --classify-all: maximum files to classify. With "
+             "--stale-first the cap is spent on stale files first.",
     )
     parser.add_argument(
         "--dry-run",
