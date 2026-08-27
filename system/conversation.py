@@ -370,7 +370,17 @@ def append_turn(
     # question_id as a HELD pick from asking_supply, not an ordinary minted
     # follow-up — the decline-detection rule (Scope 4) reads this back to
     # know which turns' offers are even eligible to be "declined".
-    for optional in ("router", "model", "question_id", "source_path", "asked_from_supply"):
+    # "placed" / "timeline_probe_id" (v196) and "work_item_id" (v234): the
+    # timeline lane's additive turn fields. They were written by
+    # `conversation_delivery.run_post_answer_turn` and dropped HERE, silently,
+    # because this allowlist never learned them — so `precision_so_far` read
+    # an empty ladder on every OSS session and the placement a person named
+    # left no trace on the turn that carried it. Additive and absent by
+    # default, exactly like the four above (pinned by
+    # `test_the_lanes_additive_turn_fields_survive_the_append`).
+    for optional in ("router", "model", "question_id", "source_path",
+                     "asked_from_supply", "placed", "timeline_probe_id",
+                     "work_item_id"):
         if turn.get(optional) is not None:
             new_turn[optional] = turn[optional]
     doc["turns"] = [*turns, new_turn]

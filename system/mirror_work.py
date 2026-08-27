@@ -149,7 +149,46 @@ DEFAULT_IDENTITY_SEVERITY = 0.5
 #: The Play target's kind. One verb with a TARGET: Play on a Mirror row opens
 #: a conversation grounded in *this* work item, exactly as Play on a timeline
 #: unknown opens one grounded in that unknown.
-PLAY_TARGET_KIND = "mirror_item"
+#:
+#: **ONE GAP, ONE CONVERSATION (v234).** The kind names the WORK ITEM, never
+#: the surface the person happened to see it on. §2.3's cross-surface identity
+#: — *"answering or resolving a temporal work item on any surface closes or
+#: updates the same work item everywhere"* — is only true if the thing Play
+#: opens is the same thing on Timeline, in Mirror, and in the daily queue. The
+#: v227 spelling ``mirror_item`` baked one surface into that identity, so a
+#: host binding Play would have had to grow a second kind the day a Timeline
+#: gap got the same verb, and the two kinds would then have been two
+#: conversations about one gap. The stage this target opens is
+#: ``timeline_interaction.WORK_ITEM_STAGE``, and the two strings are the same
+#: string on purpose (pinned by
+#: ``test_the_play_kind_and_the_stage_are_one_word``).
+PLAY_TARGET_KIND = "work_item"
+
+#: DEPRECATED, READ SIDE ONLY, ONE VERSION. ``mirror_item`` is what v227–v233
+#: emitted, so a stored target, a queued job, or a host that has not shipped
+#: the rename yet is still holding the old word. :func:`is_play_target_kind`
+#: accepts it; nothing EMITS it any more (pinned by
+#: ``test_play_target_emits_only_the_canonical_kind``). Removed in v235 —
+#: delete this constant, drop it from :data:`PLAY_TARGET_KINDS`, and the alias
+#: test goes with it.
+LEGACY_PLAY_TARGET_KIND = "mirror_item"
+
+#: Every kind string a Play target may ARRIVE as. Canonical first; the alias
+#: is here so a reader can see the whole deprecation in one place instead of
+#: discovering it inside a comparison.
+PLAY_TARGET_KINDS = (PLAY_TARGET_KIND, LEGACY_PLAY_TARGET_KIND)
+
+
+def is_play_target_kind(value: object) -> bool:
+    """Is this the Play kind — canonically, or as v227's retired alias?
+
+    The read side is forgiving for exactly one version and the write side is
+    not forgiving at all: :func:`play_target` emits
+    :data:`PLAY_TARGET_KIND` and nothing else. That asymmetry is the whole
+    deprecation — old targets keep opening, new targets stop teaching the old
+    word to anybody.
+    """
+    return collapsed_text(value) in PLAY_TARGET_KINDS
 
 #: What :func:`resolve_mirror_item` can report. ``corrected`` means durable
 #: evidence was written; it deliberately does NOT mean "closed", because
@@ -1031,7 +1070,9 @@ __all__ = [
     "MIRROR_SURFACE",
     "MIRROR_WORK_ERROR_CODES",
     "MIRROR_WORK_ITEM_KINDS",
+    "LEGACY_PLAY_TARGET_KIND",
     "PLAY_TARGET_KIND",
+    "PLAY_TARGET_KINDS",
     "RESOLUTION_OUTCOMES",
     "ROW_STATES",
     "MirrorResolution",
@@ -1040,6 +1081,7 @@ __all__ = [
     "abandon_mirror_item",
     "derive_row_state",
     "is_mirror_kind",
+    "is_play_target_kind",
     "load_active_index",
     "load_mirror_rows",
     "load_work_items",

@@ -538,5 +538,297 @@
         "expected_raised": true
       }
     ]
+  },
+  {
+    "fixture_id": "timeline-work-item-contradiction-settles",
+    "context": "A conversation the person opened from Play on a Mirror contradiction. Both readings go up in one sentence; the person names the one that is right; the losing claim is retired by correction and NOTHING is deleted.",
+    "unknown": {
+      "kind": "date_contradiction",
+      "label": "the move to Dayton",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mom-died",
+          "label": "when your mother died",
+          "kind": "landmark",
+          "date": "1984"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1986"
+      ]
+    },
+    "work_item": {
+      "kind": "work_item",
+      "ref": "work:dayton-move",
+      "work_item_id": "work:dayton-move",
+      "item_kind": "contradiction",
+      "label": "the move to Dayton",
+      "description": "Two things you've said about the move to Dayton can't both be true.",
+      "best_supported": {
+        "display": "1984",
+        "edtf": "1984",
+        "basis": "anchor",
+        "confidence": "certain",
+        "score": 0.82,
+        "claim_refs": [
+          "claim:dayton-1984"
+        ],
+        "sources": [
+          {
+            "claim_id": "claim:dayton-1984",
+            "source_id": "msg-dayton-a",
+            "status": "active",
+            "quote": "We moved to Dayton the summer after Mom died."
+          }
+        ]
+      },
+      "alternatives": [
+        {
+          "display": "1986",
+          "edtf": "1986",
+          "basis": "inferred",
+          "confidence": "approximate",
+          "score": 0.41,
+          "claim_refs": [
+            "claim:dayton-1986"
+          ],
+          "sources": [
+            {
+              "claim_id": "claim:dayton-1986",
+              "source_id": "msg-dayton-b",
+              "status": "active",
+              "quote": "I was seven when we landed in Dayton."
+            }
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "claim_id": "claim:dayton-1984",
+          "source_id": "msg-dayton-a",
+          "quote": "We moved to Dayton the summer after Mom died."
+        },
+        {
+          "claim_id": "claim:dayton-1986",
+          "source_id": "msg-dayton-b",
+          "quote": "I was seven when we landed in Dayton."
+        }
+      ],
+      "resolvable_claim_ids": [
+        "claim:dayton-1984",
+        "claim:dayton-1986"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "work_item",
+        "probe_step": "convergence",
+        "expected_placed": null,
+        "timeline_asks_so_far": 0,
+        "expected_retire": []
+      },
+      {
+        "stage": "work_item",
+        "probe_step": "convergence",
+        "expected_placed": {
+          "best": "1984",
+          "earliest": "1984",
+          "latest": "1984",
+          "granularity": "year",
+          "confidence": "certain",
+          "basis": "anchor",
+          "anchors": [
+            "mom-died"
+          ],
+          "provenance": []
+        },
+        "timeline_asks_so_far": 1,
+        "expected_retire": [
+          "claim:dayton-1986"
+        ]
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-work-item-i-dont-know-files-nothing",
+    "context": "The same contradiction, and the person does not know. Plan §2.5: no correction is invented, the item stays available, and the reply does not press.",
+    "unknown": {
+      "kind": "date_contradiction",
+      "label": "the move to Dayton",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        },
+        {
+          "key": "mom-died",
+          "label": "when your mother died",
+          "kind": "landmark",
+          "date": "1984"
+        }
+      ],
+      "known_years": [
+        "1979",
+        "1984",
+        "1986"
+      ]
+    },
+    "work_item": {
+      "kind": "work_item",
+      "ref": "work:dayton-move",
+      "work_item_id": "work:dayton-move",
+      "item_kind": "contradiction",
+      "label": "the move to Dayton",
+      "description": "Two things you've said about the move to Dayton can't both be true.",
+      "best_supported": {
+        "display": "1984",
+        "edtf": "1984",
+        "basis": "anchor",
+        "confidence": "certain",
+        "score": 0.82,
+        "claim_refs": [
+          "claim:dayton-1984"
+        ],
+        "sources": [
+          {
+            "claim_id": "claim:dayton-1984",
+            "source_id": "msg-dayton-a",
+            "status": "active",
+            "quote": "We moved to Dayton the summer after Mom died."
+          }
+        ]
+      },
+      "alternatives": [
+        {
+          "display": "1986",
+          "edtf": "1986",
+          "basis": "inferred",
+          "confidence": "approximate",
+          "score": 0.41,
+          "claim_refs": [
+            "claim:dayton-1986"
+          ],
+          "sources": [
+            {
+              "claim_id": "claim:dayton-1986",
+              "source_id": "msg-dayton-b",
+              "status": "active",
+              "quote": "I was seven when we landed in Dayton."
+            }
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "claim_id": "claim:dayton-1984",
+          "source_id": "msg-dayton-a",
+          "quote": "We moved to Dayton the summer after Mom died."
+        },
+        {
+          "claim_id": "claim:dayton-1986",
+          "source_id": "msg-dayton-b",
+          "quote": "I was seven when we landed in Dayton."
+        }
+      ],
+      "resolvable_claim_ids": [
+        "claim:dayton-1984",
+        "claim:dayton-1986"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "work_item",
+        "probe_step": "convergence",
+        "expected_placed": null,
+        "timeline_asks_so_far": 1,
+        "expected_retire": []
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-work-item-precision-gap-dates-it",
+    "context": "A precision gap opened from the queue, not from Mirror — the same Play kind and the same stage. The answer files a finer claim and retires nothing: a month inside the year nobody disputed is new evidence, not a rival being settled.",
+    "unknown": {
+      "kind": "precision_gap",
+      "label": "when Harvey was born",
+      "anchors": [
+        {
+          "key": "birth",
+          "label": "when you were born",
+          "kind": "birth",
+          "date": "1979"
+        }
+      ],
+      "known_years": [
+        "1948",
+        "1979"
+      ]
+    },
+    "work_item": {
+      "kind": "work_item",
+      "ref": "work:harvey-born",
+      "work_item_id": "work:harvey-born",
+      "item_kind": "precision_gap",
+      "label": "when Harvey was born",
+      "requested_field": "day",
+      "prompt_intent": "Harvey's birth is placed to the year and no closer.",
+      "best_supported": {
+        "display": "1948",
+        "edtf": "1948",
+        "basis": "stated",
+        "confidence": "certain",
+        "score": 0.7,
+        "claim_refs": [
+          "claim:harvey-1948"
+        ],
+        "sources": [
+          {
+            "claim_id": "claim:harvey-1948",
+            "source_id": "msg-harvey",
+            "status": "active",
+            "quote": "Grandpa Harvey was born in 1948."
+          }
+        ]
+      },
+      "alternatives": [],
+      "evidence": [
+        {
+          "claim_id": "claim:harvey-1948",
+          "source_id": "msg-harvey",
+          "quote": "Grandpa Harvey was born in 1948."
+        }
+      ],
+      "resolvable_claim_ids": [
+        "claim:harvey-1948"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "work_item",
+        "probe_step": "bounds",
+        "expected_placed": {
+          "best": "1948-06",
+          "earliest": "1948-06",
+          "latest": "1948-06",
+          "granularity": "month",
+          "confidence": "approximate",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        },
+        "timeline_asks_so_far": 0,
+        "expected_retire": []
+      }
+    ]
   }
 ]

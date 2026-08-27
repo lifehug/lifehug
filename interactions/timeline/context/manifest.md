@@ -31,6 +31,21 @@ the cheapest rung of the playbook still worth asking. `{precision_so_far}` is
 the finest record this episode has already established, so the model can see
 when the ladder should stop.
 
+`{work_item}` (v234) is `timeline_interaction.render_work_item` over the Play
+target the person opened this conversation from — the work item's kind, what it
+is about, every reading that currently stands with the source that supports it,
+the candidate set when the confusion is an identity, and up to
+`timeline_interaction.MAX_WORK_ITEM_EVIDENCE` of their own quoted words. It is
+the empty string on every turn that is not a work-item turn, and the block is
+then not assembled at all, so an ordinary placement turn's prompt is unchanged
+to the byte. The stage it accompanies is `work_item`, the fourth
+`{timeline_stage}` value — resolving a contradiction, an unplaced identity or a
+precision gap is dating work, so it is a stage of THIS interaction and not an
+eighth child of Conversation. There is no extra output field for it: the answer
+is an ordinary message, `placed` is the same optional field, and any further
+temporal facts in the same breath are heard by the general listener exactly as
+they are in any other conversation.
+
 The complete exact transcript is caller-held. Prompt trimming never changes
 which unknown is being placed, what the anchors are, or what a placement files
 against.

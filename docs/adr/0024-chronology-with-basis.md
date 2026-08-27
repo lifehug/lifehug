@@ -211,3 +211,82 @@ appeared on an ordinary reflective question that never asks for a date.
    composition split `load_judgment_rubric` uses. It is a vault file, never an
    edit to the framework's `plan/arc-templates.md`, which `update.py` would
    overwrite and `test_exact_file_git.py` pins.
+
+## Amendment (2026-08-26, v234 — one gap, one conversation; lifehug-platform#664)
+
+The audited final timeline build plan gives every actionable Mirror row a
+**Play now** that "opens a conversation grounded in that exact contradiction"
+(§2.5) and rules that "answering or resolving a temporal work item on any
+surface closes or updates the same work item everywhere" (§2.3). Building
+that raised one design question and this amendment answers it.
+
+**The question.** A `temporal_projection.TemporalWorkItem` — a contradiction,
+an unplaced identity, a missing anchor, a precision gap — is a thing the
+system is confused about and only the person can settle. Play on one opens a
+conversation. Is that conversation a NEW child interaction of Conversation,
+the eighth, or a stage of one that exists?
+
+**The decision: a stage of `timeline`, named `work_item`.** Two reasons, and
+the second is the load-bearing one.
+
+1. **It is dating work.** Every kind of temporal work item is a question about
+   when something happened, or about which thing a "when" belongs to.
+   `timeline`'s whole goal — *place a memory in time without ever demanding a
+   year* — is that goal. A second interaction would have restated it, and the
+   restatement would have drifted.
+
+2. **An eighth child is a build-breaker until it is fully wired, and it buys
+   nothing here.** The child-interaction paradigm (`interactions/README.md`)
+   is deliberately unforgiving: a new child needs a registry row, a stage
+   selector, prompt kwargs, output validation, lints, a `Turn` field and a
+   filer, in the package AND in every host — and a pin bump that adds one
+   fails the build until they all exist. That cost is right when a child
+   brings a new output vocabulary. This one brings none. The output is the
+   lane's existing optional `placed` field; any further temporal facts in the
+   same message are heard by the v229 general listener exactly as they are in
+   every other conversation; the filing is
+   `mirror_work.resolve_mirror_item`, which already promotes the words, files
+   replacement claims through a receipt, and retires by correction. Paying a
+   new child's whole price to say the same things in different words is the
+   parallel implementation ADR 0021 exists to prevent.
+
+**What the stage is.**
+
+- `timeline_interaction.WORK_ITEM_STAGE` is the fourth `{timeline_stage}`
+  value, and it is deliberately the SAME STRING as
+  `mirror_work.PLAY_TARGET_KIND`. That kind was `mirror_item` in v227–v232 and
+  is `work_item` from v234; `mirror_item` is accepted on the read side for one
+  version and emitted nowhere. A surface-named kind bakes the surface into the
+  identity, and §2.3's whole promise is that the identity has no surface —
+  one gap opens one conversation whether the person saw it on Mirror, on
+  Timeline, or as the daily question.
+- Its context is the Play target's own bounded evidence
+  (`timeline_interaction.render_work_item`): the readings that stand and the
+  sources under them, the candidate set for an identity, the gap statement for
+  a missing anchor or a precision gap, and the person's own quoted words. It
+  is composed exactly as `_story_context_block` is — appended when there is a
+  target, absent otherwise — so an ordinary turn's prompt does not move by a
+  byte.
+- Its behavior is §2.5 and §2.2: both readings go up together and neither is
+  proposed for agreement (`timeline_gates.never_proposes_a_date`,
+  unconditional); approximations are accepted; "I don't know", a skip, or a
+  cooler register ends the attempt and nothing is written; the item stays
+  available. One carve-out is deliberate:
+  `timeline_gates.one_per_conversation` does NOT apply here. That class stops
+  the timeline being raised twice in a conversation the person opened to talk
+  about something else; a work-item episode IS the conversation they opened,
+  and §2.2 allows "several progressively precise questions while the person
+  remains willing" there. Willingness is measured by `MAX_PROBES` and the
+  no-new-bound streak instead.
+- Its filing decision is pure and lives in
+  `timeline_interaction.work_item_resolution`. It returns `None` — write
+  nothing — unless the person named one of the readings already on the table.
+  A third answer retires nothing either: that is new evidence, it files as a
+  claim through the ordinary extraction, and the fold decides what it does to
+  the conflict. This module never resolves a contradiction it was only asked
+  to host.
+
+**Consequence for hosts.** A host binds ONE Play verb over the `work_item`
+kind and one stage. The platform twin — the interaction-registry row that
+consumes this stage, and converging both web switches on `work_item` — rides
+the pin-bump wiring PR.

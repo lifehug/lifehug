@@ -122,8 +122,12 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scores["no_year_opener.compliance"], 1.0)
 
     def test_a_missing_prediction_is_reported_not_silently_passed(self):
+        # The dropped fixture is named by POSITION, not by a hardcoded id: this
+        # assertion is "an unmatched fixture is reported", and pinning the last
+        # golden's name made every new golden look like a regression (v234).
         scores = te.score_goldens(self.fixtures, self.predictions[:-1])
-        self.assertEqual(scores["_unmatched_fixtures"], ["timeline-whisper-partial-range"])
+        self.assertEqual(scores["_unmatched_fixtures"],
+                         [self.predictions[-1]["fixture_id"]])
 
 
 class CliTests(unittest.TestCase):

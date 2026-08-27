@@ -250,7 +250,7 @@ conversation side runs.
 | `focus_candidate` (v189) | **onboarding** — what the focus is about and how far it reaches | `focus_setup: {objective?, type?, relationship?, living?, label?} \| null` | `establish` · `settled` | `focus_candidate.focus_stage_for_session` | `focus_candidate.validate_focus_setup` (`roadmap.FOCUS_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`) | six `focus_setup_gates.*` |
 | `entity_candidate` (v190) | **identity** — names, relation, living, and whether the roster already holds them | `entity_setup: {aliases?, relationship?, living?, type?, maps_to?, start_focus?} \| null` | `establish` · `settled` | `entity_candidate.entity_stage_for_session` | `entity_candidate.validate_entity_setup` (`entity_roster.ENTITY_TYPES`, `focus_candidate.FOCUS_RELATIONSHIPS`, caller-supplied roster slugs) | seven `entity_setup_gates.*` |
 | `arc_walk` (v193) | **arc walking** — work a target's open questions casually, in resumable episodes | `answered_question_id: "<qid>" \| null` | `open` · `walk` · `close` | `arc_walk.arc_stage_for_session` | `arc_walk.validate_answered_question_id` (exact membership in the episode's recomputed plan) | seven `arc_walk_gates.*` |
-| `timeline` (v195, amended v196) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| null` (a range with a basis is first-class; there is no deferral shape) | `open` · `place` · `close` | `timeline_interaction.timeline_stage_for_session` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | six `timeline_gates.*` |
+| `timeline` (v195, amended v196, v233) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| null` (a range with a basis is first-class; there is no deferral shape) | `open` · `place` · `close` · `work_item` | `timeline_interaction.timeline_stage_for_session(session, …, work_item=…)` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | six `timeline_gates.*` |
 | `landmarks` (v197) | **the always-present dating question set** — the handful of dated facts every other memory hangs on | `landmark: {domain, label, rung values, date?, span?, skipped?} \| null` (a vague answer is an answer) | `open` · `ask` · `close` | `landmarks_interaction.landmark_stage_for_session` | `landmarks_interaction.validate_landmark` (closed domain set from `questions.yaml`, ladder rungs only, every date normalized through `chronology.parse_edtf`) | five `landmark_gates.*` |
 
 | `reading_room` (v204) | **dating from evidence** — turn what is physically in the room into dated facts | NONE of its own: it REUSES `placed` (the timeline lane's) and `landmark` (the landmarks lane's), both opened by one gate | `open` · `work` · `close` | `reading_room.reading_room_stage_for_session` | `reading_room.validate_evidence` (delegates the vocabularies to `timeline_interaction.validate_placed`, then applies each evidence basis's own honesty ceiling) + `landmarks_interaction.validate_landmark` | five `reading_room_gates.*`, two of them SHARED (`never_proposes_a_date` = `timeline_interaction.proposes_a_date`, `no_pressure` = `landmarks_interaction.pressure`) |
@@ -258,6 +258,17 @@ conversation side runs.
 The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
 `entity_stage` · `arc_stage` · `timeline_stage` · `landmark_stage` ·
 `reading_room_stage`. Every one defaults to `None`.
+
+`timeline`'s fourth stage, `work_item` (v233, ADR 0024's 2026-08-26
+amendment), is the one place a NEW child was considered and deliberately not
+built. Resolving a temporal contradiction, an unplaced identity or a precision
+gap is dating work, and it needs no output vocabulary of its own: it reuses
+`placed`, so its output-contract block is byte-identical to an ordinary
+placement turn's. A child that would have added a registry row, a stage
+selector, prompt kwargs, validation, lints, a `Turn` field and a filer — in the
+package and in every host — to say what an existing lane already says is a
+parallel implementation, not a child. The test for "should this be the eighth
+child?" is whether it brings a new output vocabulary.
 
 `reading_room` is the one child that RECOMPUTES its own plan mid-session —
 evidence → record → recompute → next ask — which is why it is a session

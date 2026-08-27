@@ -380,7 +380,19 @@ def _precise_enough(precision_so_far: object, kind: object) -> bool:
 # --------------------------------------------------------------------------
 
 #: The three `{timeline_stage}` values the leaf is keyed on.
-VALID_TIMELINE_STAGES = frozenset({"open", "place", "close"})
+#: The stage a WORK-ITEM conversation runs in — one gap, one conversation
+#: (lifehug-platform#664, plan §2.5/§2.2). Resolving a temporal contradiction,
+#: an identity the resolver could not place, or a precision gap IS dating
+#: work, so it is a STAGE of this child rather than an eighth child of
+#: Conversation: the registry's own paradigm makes a new child a build-breaker
+#: until every row is wired, and a seventh interaction would have bought a new
+#: output vocabulary, a new filer and a new set of lints to say the thing this
+#: lane already says. The string is deliberately the same string as
+#: ``mirror_work.PLAY_TARGET_KIND`` — the Play kind and the stage it opens are
+#: one word, pinned by ``test_the_play_kind_and_the_stage_are_one_word``.
+WORK_ITEM_STAGE = "work_item"
+
+VALID_TIMELINE_STAGES = frozenset({"open", "place", "close", WORK_ITEM_STAGE})
 
 #: Playbook stop rule §6.10 — "stop when two probes in a row return no new
 #: bound". The caller counts; this module decides.
@@ -392,7 +404,8 @@ MAX_PROBES = 4
 
 def timeline_stage_for_session(session: object, *, user_leaving: bool = False,
                                placement_settled: bool = False,
-                               no_new_bound_streak: int = 0) -> str:
+                               no_new_bound_streak: int = 0,
+                               work_item: object = None) -> str:
     """Derive `{timeline_stage}` from the transcript plus two caller facts.
 
     The caller facts mirror `arc_walk.arc_stage_for_session`'s `user_leaving`
@@ -400,6 +413,22 @@ def timeline_stage_for_session(session: object, *, user_leaving: bool = False,
     whether the placement it already accepted is good enough, and how many
     probes in a row produced no new bound). Everything else is read off the
     turns; no new session field is stored.
+
+    **`work_item` is the fourth caller fact and it selects the stage, not a
+    rung.** A conversation the person deliberately opened on a Play target
+    (:func:`work_item_target`) is in :data:`WORK_ITEM_STAGE` for its whole
+    working life. There is no `open`-then-`place` progression there because
+    there is nothing to warm up to: the deep link already said which
+    disagreement this is about, and the first reply's job is to put the two
+    readings in front of the person — plan §2.5's *"Play opens a conversation
+    grounded in that exact contradiction"*.
+
+    Every close rule above still wins, and in the same order: leaving, a
+    settled placement, two probes with no new bound, and the probe ceiling all
+    end a work-item episode exactly as they end a placement episode. §2.2
+    permits *"several progressively precise questions while the person remains
+    willing"* in a conversation they opened — `MAX_PROBES` is what "willing"
+    is measured against, and it is deliberately not raised here.
     """
     if user_leaving or placement_settled:
         return "close"
@@ -410,12 +439,15 @@ def timeline_stage_for_session(session: object, *, user_leaving: bool = False,
     if streak >= STOP_AFTER_UNPRODUCTIVE_PROBES:
         return "close"
     turns = (session or {}).get("turns") or [] if isinstance(session, dict) else []
-    if not any(isinstance(turn, dict) and turn.get("role") == "lifehug" for turn in turns):
+    target = work_item_target(work_item)
+    if not target and not any(
+        isinstance(turn, dict) and turn.get("role") == "lifehug" for turn in turns
+    ):
         return "open"
     user_turns = sum(1 for turn in turns if isinstance(turn, dict) and turn.get("role") == "user")
     if user_turns >= MAX_PROBES:
         return "close"
-    return "place"
+    return WORK_ITEM_STAGE if target else "place"
 
 
 def precision_so_far(session: object) -> object:
@@ -430,6 +462,437 @@ def precision_so_far(session: object) -> object:
                             < chrono.GRANULARITIES.index(best.granularity)):
             best = record
     return best
+
+
+# --------------------------------------------------------------------------
+# The work-item stage (v234) — one gap, one conversation
+# --------------------------------------------------------------------------
+#
+# Plan §2.5 gives every actionable Mirror row a **Play now** that "opens a
+# conversation grounded in that exact contradiction", and §2.3 says resolving
+# a temporal work item on ANY surface closes it everywhere. Those two
+# sentences together describe a conversation whose subject is a
+# `temporal_projection.TemporalWorkItem`, not a surface — which is why the
+# Play kind is `work_item` and why this stage lives here rather than in a
+# seventh child of Conversation.
+#
+# Everything the stage needs already exists and none of it is re-decided here:
+#
+# * the TARGET and its bounded evidence are `mirror_work.play_target`'s
+#   (claim readings and their sources for a contradiction, the candidate set
+#   for an identity, the gap statement for a missing anchor or a precision
+#   gap);
+# * the OUTPUT is the lane's own `placed` record — no new vocabulary — plus
+#   whatever the v229 general listener hears in the same message, because the
+#   person's answer is just a message and the extraction is already listening
+#   to messages;
+# * the FILING is `mirror_work.resolve_mirror_item` (bound per vault as
+#   `mirror.resolve_actionable_item`), which promotes the words, files
+#   replacement claims through a receipt, and retires by correction.
+#
+# What this section adds is the join: which probe, which context, which
+# claims a placement actually settles, and the refusal that keeps §2.5's
+# quiet case quiet.
+
+#: The work item kinds this stage can run a conversation about — the whole of
+#: `temporal_projection.WORK_ITEM_KINDS`. Mirror renders only two of them
+#: (`mirror_work.MIRROR_WORK_ITEM_KINDS`) because §2.3 keeps routine
+#: incompleteness off that page; Play is not a page and has no such rule, so a
+#: precision gap the queue surfaced opens the same conversation a
+#: contradiction does.
+WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
+                   "missing_anchor", "precision_gap")
+
+#: How many quoted spans a work-item context block carries. The same number as
+#: `mirror_work.MAX_PLAY_EVIDENCE` and pinned equal to it
+#: (`test_the_evidence_caps_are_one_number`): the target is built there and
+#: rendered here, and two caps would mean the renderer silently dropped
+#: evidence the target went to the trouble of bounding.
+MAX_WORK_ITEM_EVIDENCE = 6
+
+#: How many rival readings the context block shows beside the best-supported
+#: one. Mirrors `mirror_work.MAX_ALTERNATIVES` for the same reason.
+MAX_WORK_ITEM_READINGS = 5
+
+#: The probe per work-item kind. `step` is the playbook rung the lints score
+#: against, so these are not free choices: a contradiction converges (both
+#: readings are already on the table), an identity asks what the person meant,
+#: a missing anchor is an ordinary placement opening, and a precision gap
+#: OFFERS bounds — `timeline_gates.offers_bounds` then holds the reply to
+#: §2.2's "never demand false precision" mechanically.
+WORK_ITEM_PROBES = {
+    "contradiction": {
+        "step": "convergence", "cost": 4,
+        "text": "Two things you've told me put {label} in different places in "
+                "time \u2014 {readings}. Which of those feels right to you?",
+        "anchored": "Two things you've told me disagree about {label} \u2014 "
+                    "was that before or after {anchor}?",
+    },
+    "identity_uncertain": {
+        "step": "content", "cost": 1,
+        "text": "When you said {label}, which one did you mean \u2014 "
+                "{candidates}?",
+        "anchored": "When you said {label}, which one did you mean \u2014 "
+                    "{candidates}?",
+    },
+    "missing_anchor": {
+        "step": "content", "cost": 1,
+        "anchored_step": "sequence", "anchored_cost": 5,
+        "text": "Tell me about {label} \u2014 just the moment itself, however "
+                "it comes.",
+        "anchored": "{label} \u2014 was that before or after {anchor}?",
+    },
+    "precision_gap": {
+        "step": "bounds", "cost": 2,
+        "text": "You've told me about {label} \u2014 do you know {field} any "
+                "closer, or is somewhere in that stretch more honest?",
+        "anchored": "You've told me about {label} \u2014 do you know {field} "
+                    "any closer, or is somewhere around {anchor} more honest?",
+    },
+}
+
+#: How a `requested_field` reads inside a precision probe. An unlisted field
+#: falls back to the neutral "it", never to the raw key: a probe that says
+#: "do you know earliest_bound any closer" is the abstraction v196 already
+#: ruled out of the ladder ("I have no idea what that means").
+FIELD_DISPLAY = {
+    "day": "the day",
+    "month": "the month",
+    "season": "the time of year",
+    "year": "the year",
+    "start": "when it started",
+    "end": "when it ended",
+    "range": "the stretch",
+}
+DEFAULT_FIELD_DISPLAY = "it"
+
+
+def _play_target_kinds() -> tuple[str, ...]:
+    """The kind strings a Play target may ARRIVE as — `mirror_work`'s own set.
+
+    Imported lazily and defaulted defensively. `mirror_work` pulls the whole
+    temporal store in behind it and a target's kind is not worth that cost on
+    every import of this module; and if the store cannot be imported at all,
+    the fallback is the canonical kind ALONE — degrading toward the new word,
+    never toward v227's retired alias.
+    """
+    try:
+        import mirror_work  # noqa: PLC0415
+
+        return tuple(mirror_work.PLAY_TARGET_KINDS)
+    except Exception:  # noqa: BLE001
+        return (WORK_ITEM_STAGE,)
+
+
+def _reading_view(value: object) -> dict | None:
+    """One rival dating, as `mirror_work._reading` already shaped it."""
+    if not isinstance(value, dict):
+        return None
+    display = str(value.get("display") or "").strip()
+    edtf = str(value.get("edtf") or "").strip()
+    if not display and not edtf:
+        return None
+    refs = [str(ref).strip() for ref in (value.get("claim_refs") or ()) if str(ref).strip()]
+    # `sources` arrives as `mirror_work`'s citation dicts the first time and
+    # as the flattened ids this function produced on any later pass, so both
+    # are read — normalizing a normalized target must be a no-op.
+    sources = [
+        str(row.get("source_id") or row.get("claim_id") or "").strip()
+        if isinstance(row, dict) else str(row).strip()
+        for row in (value.get("sources") or ())
+    ]
+    return {
+        "display": display or edtf,
+        "edtf": edtf,
+        "basis": str(value.get("basis") or "").strip(),
+        "confidence": str(value.get("confidence") or "").strip(),
+        "claim_refs": refs,
+        "sources": [s for s in sources if s],
+    }
+
+
+def work_item_target(value: object) -> dict | None:
+    """Normalize a Play target (or a bare work item) for this stage, or `None`.
+
+    Two shapes arrive and both are legitimate. A **Play target** is
+    `mirror_work.play_target`'s output: `kind` is the Play kind, `item_kind`
+    is the work item's kind, and the bounded evidence is already on it. A
+    **bare work item** is the projection's own row, where `kind` IS the work
+    item kind and there is no evidence — what a queue-minted gap has before
+    anything rendered it.
+
+    Refusal is by returning `None`, never by raising: a target this stage
+    cannot read must degrade to an ordinary turn, exactly as a missing
+    timeline item does. An unrecognized kind, a missing id, and a plain string
+    all take that door.
+    """
+    if not isinstance(value, dict) or not value:
+        return None
+    kind = str(value.get("kind") or "").strip()
+    item_kind = str(value.get("item_kind") or "").strip()
+    if kind in _play_target_kinds():
+        pass
+    elif kind in WORK_ITEM_KINDS:
+        item_kind = item_kind or kind
+    else:
+        return None
+    if item_kind not in WORK_ITEM_KINDS:
+        return None
+    work_item_id = str(value.get("work_item_id") or value.get("ref") or "").strip()
+    if not work_item_id:
+        return None
+
+    # Idempotent: a target that has already been through here carries its
+    # rivals as one `readings` list, and re-normalizing it must not lose them.
+    # (It did once, silently, and `work_item_resolution` then retired nothing
+    # for every caller that normalized before filing.)
+    readings: list[dict] = []
+    if isinstance(value.get("readings"), list):
+        for row in value["readings"][:MAX_WORK_ITEM_READINGS + 1]:
+            view = _reading_view(row)
+            if view is not None:
+                readings.append(view)
+    else:
+        best = _reading_view(value.get("best_supported"))
+        if best is not None:
+            readings.append(best)
+        for row in (value.get("alternatives") or ())[:MAX_WORK_ITEM_READINGS]:
+            alt = _reading_view(row)
+            if alt is not None:
+                readings.append(alt)
+
+    evidence: list[dict] = []
+    for row in (value.get("evidence") or ())[:MAX_WORK_ITEM_EVIDENCE]:
+        if not isinstance(row, dict):
+            continue
+        quote = str(row.get("quote") or "").strip()
+        if not quote:
+            continue
+        evidence.append({
+            "claim_id": str(row.get("claim_id") or "").strip(),
+            "source_id": str(row.get("source_id") or "").strip(),
+            "quote": quote,
+        })
+
+    candidates: list[dict] = []
+    for row in (value.get("candidates") or ()):
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or row.get("ref") or "").strip()
+        if name:
+            candidates.append({"ref": str(row.get("ref") or "").strip(), "name": name})
+
+    target = {
+        "kind": WORK_ITEM_STAGE,
+        "work_item_id": work_item_id,
+        "item_kind": item_kind,
+        "label": str(value.get("label") or value.get("headline") or work_item_id).strip(),
+        "readings": readings[:MAX_WORK_ITEM_READINGS + 1],
+        "candidates": candidates,
+        "evidence": evidence,
+        # The person's own landmarks travel WITH the target, exactly as they
+        # travel with a timeline item, so `answer_timeline_probe`'s closed
+        # anchor check means the same thing on this path as on that one.
+        "anchors": _anchor_rows(value.get("anchors")),
+        "resolvable_claim_ids": [
+            str(ref).strip()
+            for ref in (value.get("resolvable_claim_ids") or value.get("claim_refs") or ())
+            if str(ref).strip()
+        ],
+    }
+    for key in ("prompt_intent", "description", "requested_field",
+                "subject_ref", "event_ref", "node_ref"):
+        text = str(value.get(key) or "").strip()
+        if text:
+            target[key] = text
+    return target
+
+
+def _work_item_has_material(row: dict) -> bool:
+    """Does the target itself carry what its own probe needs to be asked?
+
+    A contradiction needs both readings, an identity needs its candidates, a
+    precision gap needs the field or the reading it is refining. A missing
+    anchor, by definition, needs the thing it does not have — which is why it
+    is the one kind that always prefers the anchored fallback.
+    """
+    kind = row["item_kind"]
+    if kind == "contradiction":
+        return len(row["readings"]) >= 2
+    if kind == "identity_uncertain":
+        return bool(row["candidates"])
+    if kind == "precision_gap":
+        return bool(row["readings"]) or bool(row.get("requested_field"))
+    return False
+
+
+def work_item_probe(target: object, *, anchors: object = ()) -> dict:
+    """The probe this work item opens with — `{probe}`'s value for the leaf.
+
+    Same return shape as :func:`choose_probe` (`step`, `cost`, `text`), because
+    the leaf, the lints and the eval harness all read that shape and a second
+    one would be a second contract for the same slot.
+
+    The probe NAMES what it is about, like every rung of the ladder does, and
+    it never proposes a date to be agreed with: a contradiction puts BOTH
+    readings in the same sentence and asks which, which is the opposite move
+    from naming one and inviting a yes (`go-deep.md` §4.3).
+    """
+    row = work_item_target(target)
+    if row is None:
+        raise TimelineInteractionError("work item target is unusable")
+    spec = WORK_ITEM_PROBES[row["item_kind"]]
+    anchor_rows = _anchor_rows(anchors) or row["anchors"]
+    anchor_label = str(anchor_rows[0].get("label") or "") if anchor_rows else ""
+    readings = " and ".join(r["display"] for r in row["readings"]) or "two different times"
+    candidates = " or ".join(c["name"] for c in row["candidates"]) or "which one"
+    field = FIELD_DISPLAY.get(row.get("requested_field", ""), DEFAULT_FIELD_DISPLAY)
+    # The anchored variant is a FALLBACK, not an upgrade: converting a
+    # contradiction whose two readings are right there into a before/after
+    # against an unrelated landmark throws away the only thing that makes the
+    # question answerable. It is used when the target's own material is
+    # missing and a landmark is the next best handle.
+    anchored = (bool(anchor_label) and bool(spec.get("anchored"))
+                and not _work_item_has_material(row))
+    text = (spec["anchored"] if anchored else spec["text"]).format(
+        label=row["label"], anchor=anchor_label,
+        readings=readings, candidates=candidates, field=field,
+    )
+    return {
+        "step": spec.get("anchored_step", spec["step"]) if anchored else spec["step"],
+        "cost": spec.get("anchored_cost", spec["cost"]) if anchored else spec["cost"],
+        "text": text,
+    }
+
+
+def work_item_known_years(target: object) -> tuple[str, ...]:
+    """Every year the TARGET itself supplies — the years the reply may repeat.
+
+    `timeline_gates.never_invents_a_date` allows a reply to assert only years
+    the person has already supplied. A contradiction conversation must repeat
+    both rival readings back or it cannot ask the question at all, so the
+    readings and the quoted evidence are exactly that supply — and nothing
+    else is. A year that appears in neither is still an invention here.
+    """
+    row = work_item_target(target)
+    if row is None:
+        return ()
+    years: list[str] = []
+    haystacks = [r["display"] for r in row["readings"]]
+    haystacks += [r["edtf"] for r in row["readings"]]
+    haystacks += [e["quote"] for e in row["evidence"]]
+    haystacks += [str(row.get("description") or ""), str(row.get("prompt_intent") or "")]
+    for text in haystacks:
+        for match in _YEAR_RE.finditer(text or ""):
+            if match.group(0) not in years:
+                years.append(match.group(0))
+    return tuple(years)
+
+
+def render_work_item(target: object, *, limit: int = MAX_WORK_ITEM_EVIDENCE) -> str:
+    """The `{work_item}` block: what conflicts, said in the person's own words.
+
+    Bounded on purpose (§12: model context is bounded). It carries the two
+    things a grounded conversation needs — the disagreement and the sentences
+    it came from — and never a transcript, never a claim id the person has no
+    use for, and never a count of anything.
+    """
+    row = work_item_target(target)
+    if row is None:
+        return ""
+    lines = [f"kind: {row['item_kind']}", f"about: {row['label']}"]
+    statement = row.get("description") or row.get("prompt_intent") or ""
+    if statement:
+        lines.append(f"what is open: {statement}")
+    if row["readings"]:
+        lines.append("readings (all of them stand until you settle it):")
+        for reading in row["readings"]:
+            detail = ", ".join(x for x in (reading["confidence"], reading["basis"]) if x)
+            sources = ", ".join(reading["sources"])
+            suffix = f" [{detail}]" if detail else ""
+            suffix += f" (source: {sources})" if sources else ""
+            lines.append(f"  - {reading['display']}{suffix}")
+    if row["candidates"]:
+        lines.append("candidates: " + ", ".join(c["name"] for c in row["candidates"]))
+    quotes = row["evidence"][:max(0, int(limit))]
+    if quotes:
+        lines.append("their own words:")
+        for span in quotes:
+            source = f" ({span['source_id']})" if span["source_id"] else ""
+            lines.append(f"  - \u201c{span['quote']}\u201d{source}")
+    return "\n".join(lines)
+
+
+def work_item_retire_ids(target: object, placed: object) -> tuple[str, ...]:
+    """The claims this placement actually settles — often none, and that is fine.
+
+    A reading is retired when the person named a DIFFERENT one of the readings
+    already on the table. Three refusals, each of them §2.5 made mechanical:
+
+    * **Nothing placed retires nothing.** "I don't know", a skip, a closed
+      tab: no correction is invented and the item stays.
+    * **A THIRD answer retires nothing.** If the placement matches none of the
+      readings, the person has supplied new evidence rather than picked a
+      side; it files as a claim through the ordinary extraction and the fold
+      decides what that does to the conflict. Retiring both rivals here would
+      be this module resolving a contradiction it was only asked to host.
+    * **Nothing outside the row.** The result is intersected with the
+      target's `resolvable_claim_ids`, so a conversation cannot reach past its
+      own disagreement even if a reading cites something it should not.
+    """
+    row = work_item_target(target)
+    if row is None:
+        return ()
+    record = chrono.from_dict(placed) if placed else None
+    chosen = chrono.to_edtf(record) if record is not None else None
+    if not chosen:
+        return ()
+    readings = row["readings"]
+    if not any(r["edtf"] == chosen for r in readings):
+        return ()
+    allowed = set(row["resolvable_claim_ids"])
+    retire: list[str] = []
+    for reading in readings:
+        if reading["edtf"] == chosen:
+            continue
+        for ref in reading["claim_refs"]:
+            if ref in allowed and ref not in retire:
+                retire.append(ref)
+    return tuple(retire)
+
+
+def work_item_resolution(target: object, placed: object, *,
+                         resolution_text: str) -> dict | None:
+    """The kwargs for `mirror.resolve_actionable_item`, or `None` to write nothing.
+
+    The whole filing decision, in one pure function, so the host that writes
+    is not also the host that judges. `None` means §2.5's quiet case — the
+    person said nothing that settles anything — and a host that receives it
+    calls `mirror_work.abandon_mirror_item`, which cannot write at all, or
+    simply does nothing.
+
+    A non-`None` result carries the person's own words as `resolution_text`
+    and the `retire_claim_ids` :func:`work_item_retire_ids` derived. It never
+    carries `claims_for`: replacement claims come from the v229 general
+    listener hearing the same message, on the path that already hears every
+    other message, and asserting them twice would be the dual write wave B
+    removed.
+    """
+    row = work_item_target(target)
+    if row is None:
+        return None
+    text = " ".join(str(resolution_text or "").split())
+    if not text:
+        return None
+    retire = work_item_retire_ids(row, placed)
+    if not retire:
+        return None
+    return {
+        "work_item_id": row["work_item_id"],
+        "resolution_text": text,
+        "retire_claim_ids": list(retire),
+        "correction_kind": "supersede",
+    }
 
 
 # --------------------------------------------------------------------------
@@ -962,9 +1425,12 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
 
     Pure — no model, no I/O. `stage` is the same `{timeline_stage}` the leaf
     receives; an unrecognized stage is treated as `"place"` (fail toward the
-    strictest ordinary rule). `known_years` are the years the person or their
-    anchors have already supplied — the only years a reply is allowed to
-    assert (ruling 1's other half: record what was said, never invent).
+    strictest ordinary rule). :data:`WORK_ITEM_STAGE` is scored exactly like
+    `place` with ONE carve-out, marked below: the once-per-conversation rule
+    is an ambient rule and a work-item episode is not ambient. `known_years`
+    are the years the person or their anchors have already supplied — the only
+    years a reply is allowed to assert (ruling 1's other half: record what was
+    said, never invent).
 
     Findings share `conversation_lints.lint_turn`'s shape so a caller can
     merge them with the inherited Conversation findings uniformly.
@@ -1023,7 +1489,14 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
         asked_already = int(timeline_asks_so_far)
     except (TypeError, ValueError):
         asked_already = 0
-    if asked_already >= 1 and "?" in body and probe_step not in (None, "convergence", "defer"):
+    # `one_per_conversation` is an AMBIENT rule: it stops the timeline being
+    # raised twice in a conversation the person opened to talk about something
+    # else. A work-item episode IS the conversation they opened, and §2.2
+    # allows "several progressively precise questions while the person remains
+    # willing" there — so the class does not apply, and the willingness is
+    # measured by `MAX_PROBES` and the no-new-bound streak instead.
+    if (stage != WORK_ITEM_STAGE and asked_already >= 1 and "?" in body
+            and probe_step not in (None, "convergence", "defer")):
         findings.append({
             "lint": "timeline_gates.one_per_conversation",
             "detail": "the timeline is raised once per conversation, where it "
