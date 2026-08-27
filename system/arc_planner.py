@@ -1368,18 +1368,14 @@ def _record_failure(operation: str, exc: BaseException, *, root: Path | None = N
     """Record a non-blocking learning-loop failure IN THE PLANNED VAULT.
 
     Scoped to ``root`` so a run against a synthetic vault (tests, a second
-    checkout) never appends to the process-bound vault's ledger — the default
-    resolves to REPO_DIR exactly as every other caller's does.
+    checkout) never appends to the process-bound vault's ledger. The path
+    arithmetic lives in ``record_learning_failure(vault_root=...)`` itself —
+    the one definition of the root-scoped ledger path (issue #225).
     """
     try:
-        from lifehug_core import LEARNING_FAILURES_FILE, record_learning_failure  # noqa: PLC0415
-        path = LEARNING_FAILURES_FILE
-        # Never wrap REPO_DIR in Path() — that strips its VaultPath authority
-        # (v120 runtime guard); compare the string forms instead.
-        if root is not None and os.fspath(root) != os.fspath(REPO_DIR):
-            path = _data_path("learning_failures", Path(root))
+        from lifehug_core import record_learning_failure  # noqa: PLC0415
         record_learning_failure("arc_planner", operation,
-                                f"{exc.__class__.__name__}: {exc}", path=path)
+                                f"{exc.__class__.__name__}: {exc}", vault_root=root)
     except Exception:  # noqa: BLE001 — never let bookkeeping raise on a fallback path
         pass
 

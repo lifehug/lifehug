@@ -1633,7 +1633,12 @@ def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
             write_text(QUESTIONS_FILE, text)
         return minted
     except Exception as exc:  # noqa: BLE001
-        record_learning_failure("question_planner", "mint_queue_questions", exc)
+        # Ledger only a run bound to the process vault (issue #225): an
+        # injected-bank run is vault-less — the SAME seam that already gates
+        # the bank write above — so a test never appends to the checkout's
+        # own state/learning_failures.jsonl.
+        if question_bank_text is None:
+            record_learning_failure("question_planner", "mint_queue_questions", exc)
         return []
 
 
