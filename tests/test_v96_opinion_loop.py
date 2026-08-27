@@ -90,12 +90,14 @@ class SelfArcGroundingTests(unittest.TestCase):
                 ],
                 "contradictions": ["grieves the reversion he argues we should honor"],
             }))
-            original = lifehug_core.CLASSIFICATIONS_DIR
-            lifehug_core.CLASSIFICATIONS_DIR = cls_dir
+            # v237: the reader consults its OWN root, not a re-read of
+            # lifehug_core's (the local shadow import is gone).
+            original = research.CLASSIFICATIONS_DIR
+            research.CLASSIFICATIONS_DIR = cls_dir
             try:
                 signals = research.load_classified_self_signals()
             finally:
-                lifehug_core.CLASSIFICATIONS_DIR = original
+                research.CLASSIFICATIONS_DIR = original
         joined = "\n".join(signals)
         self.assertIn("position: parents who wore the mantle", joined)
         self.assertIn("[contradiction]", joined)
