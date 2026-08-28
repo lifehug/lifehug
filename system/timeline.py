@@ -625,9 +625,18 @@ _PERIOD_KEYWORDS = {
 # The timeline is a validation surface; when the owner drags an unplaced
 # moment into a period (or corrects a wrong one), that decision persists here
 # and wins over every heuristic. Raw sources stay immutable — a placement is
-# an overlay keyed by CONTENT (sha of source + description), so a
-# reclassification that rewrites the description automatically orphans the
-# placement (surfaced as `stale_placements`, never silently misapplied).
+# an overlay keyed by CONTENT (sha of source + description).
+#
+# v253 (lifehug#276): that content key is not stable, and this comment used to
+# end by calling the consequence correct — "a reclassification that rewrites
+# the description automatically orphans the placement (surfaced as
+# `stale_placements`, never silently misapplied)". Rewriting descriptions is
+# the classifier's ordinary weekly job, so that sentence described a pin
+# quietly dying every time the loop did its work. `resolve_placements` now
+# carries a THIRD rung that re-keys such a pin to the one live moment its
+# source mints, and `rekey_orphaned_placements` persists that repair.
+# "Never silently misapplied" survives intact: several candidates, or none,
+# and the pin stays orphaned under a named diagnostic.
 #
 # v103: the pin is display-only; the INFORMATION lives in the date-kind
 # correction the viewer files alongside it (record's `correction` field).
@@ -751,31 +760,33 @@ def legacy_title_key(event: dict) -> str:
     return "" if legacy == placement_key(event) else legacy
 
 
-def resolve_placements(placements: dict | None,
-                       events: list[dict]) -> list[tuple[dict, str]]:
-    """Every stored placement paired with the live event key it joins, in store
-    order — `""` when it joins nothing.
+#: How a stored placement found its live moment — which rung of the join
+#: fired. `resolve_placements_with_rung` reports it and
+#: `rekey_orphaned_placements` reads it, because exactly one rung's repair is
+#: DURABLE and the other two must never touch the store.
+PLACEMENT_JOIN_EXACT = "exact"
+PLACEMENT_JOIN_LEGACY_TITLE = "legacy_title"
+PLACEMENT_JOIN_SOURCE_REKEY = "source_rekey"
 
-    ONE join, read by `place_events` (which pins the moment), `timeline_data`
-    (which counts what is still orphaned) and `retire_redundant_placements`.
+#: The one named diagnostic for a pin the source rung could not repair —
+#: either its source mints no live moment at all, or it mints SEVERAL and
+#: picking one would file the person's date onto the wrong moment. Named, and
+#: carried on `timeline_data()`, because the alternative is a silent zero.
+PLACEMENT_ORPHANED_AMBIGUOUS = "placement_orphaned_ambiguous"
 
-    Two ways a row resolves:
 
-    1. its stored key IS a live event's `placement_key` — every placement the
-       viewer and the CLI ever filed; and
-    2. its stored key is the pre-v215 `legacy_title_key` of exactly one live
-       event — the deterministic REPAIR, so a date captured in conversation
-       between v213 and v215 joins on the next compile with no migration, no
-       state file and no model call.
+def _resolve_placements(placements: dict | None, events: list[dict],
+                        ) -> tuple[list[tuple[dict, str, str]], list[dict]]:
+    """`([(row, key, rung), ...], [diagnostic, ...])` — the whole join, once.
 
-    The row keeps its stored `key`: a repaired pin renders, retires and
-    unplaces under the identity the store actually holds. Ambiguity never
-    guesses — two live events sharing one legacy key resolve neither, and a
-    second row claiming a key some earlier row already took stays orphaned.
+    Private because there is exactly ONE join and every public reader below is
+    a projection of this: `resolve_placements` drops the rung,
+    `resolve_placements_with_rung` keeps it, `placement_orphan_diagnostics`
+    takes the second half.
     """
     rows = ((placements or {}).get("placements") or [])
     if not rows:
-        return []
+        return [], []
     live: dict[str, dict] = {}
     for event in events:
         live.setdefault(placement_key(event), event)
@@ -785,17 +796,112 @@ def resolve_placements(placements: dict | None,
         if not alias or alias in live:
             continue
         legacy[alias] = None if alias in legacy and legacy[alias] != key else key
-    resolved: list[tuple[dict, str]] = []
+    # Rung 3's candidate set: the live moments each SOURCE mints. Two moments
+    # of one source is not a tie to break, it is a repair that must not run.
+    by_source: dict[str, list[str]] = {}
+    for key, event in live.items():
+        source = str(event.get("source") or "").strip()
+        if source:
+            by_source.setdefault(source, []).append(key)
+    resolved: list[tuple[dict, str, str]] = []
+    diagnostics: list[dict] = []
     taken: set[str] = set()
     for row in rows:
         key = str(row.get("key") or "")
-        target = key if key in live else (legacy.get(key) or "")
+        target, rung = "", ""
+        if key in live:
+            target, rung = key, PLACEMENT_JOIN_EXACT
+        elif legacy.get(key):
+            target, rung = str(legacy[key]), PLACEMENT_JOIN_LEGACY_TITLE
+        else:
+            source = str(row.get("source") or "").strip()
+            candidates = by_source.get(source, []) if source else []
+            if len(candidates) == 1:
+                target, rung = candidates[0], PLACEMENT_JOIN_SOURCE_REKEY
+            else:
+                diagnostics.append({
+                    "diagnostic": PLACEMENT_ORPHANED_AMBIGUOUS,
+                    "key": key, "source": source,
+                    "description": str(row.get("description") or ""),
+                    "candidates": list(candidates),
+                })
         if not target or target in taken:
-            resolved.append((row, ""))
+            resolved.append((row, "", ""))
             continue
         taken.add(target)
-        resolved.append((row, target))
-    return resolved
+        resolved.append((row, target, rung))
+    return resolved, diagnostics
+
+
+def resolve_placements_with_rung(placements: dict | None,
+                                 events: list[dict]) -> list[tuple[dict, str, str]]:
+    """`resolve_placements` plus the rung that joined each row (`""` when the
+    row joined nothing) — the only reader that needs the rung is the durable
+    re-key, which must persist rung 3's repair and NEVER rung 2's."""
+    return _resolve_placements(placements, events)[0]
+
+
+def placement_orphan_diagnostics(placements: dict | None,
+                                 events: list[dict]) -> list[dict]:
+    """One `placement_orphaned_ambiguous` record per pin the source rung
+    refused to repair. Fail LOUD: a pin that cannot be re-keyed says so with a
+    name, a source and the candidate keys it declined to choose between."""
+    return _resolve_placements(placements, events)[1]
+
+
+def resolve_placements(placements: dict | None,
+                       events: list[dict]) -> list[tuple[dict, str]]:
+    """Every stored placement paired with the live event key it joins, in store
+    order — `""` when it joins nothing.
+
+    ONE join, read by `place_events` (which pins the moment), `timeline_data`
+    (which counts what is still orphaned) and `retire_redundant_placements`.
+
+    Three ways a row resolves:
+
+    1. its stored key IS a live event's `placement_key` — every placement the
+       viewer and the CLI ever filed;
+    2. its stored key is the pre-v215 `legacy_title_key` of exactly one live
+       event — the deterministic REPAIR for the one asymmetric recipe that ever
+       shipped, so a date captured in conversation between v213 and v215 joins
+       on the next compile with no migration, no state file and no model call;
+       and
+    3. v253 (lifehug#276): its stored key joins nothing AND the row's own
+       `source` mints EXACTLY ONE live moment — the reclassification repair.
+
+    Rung 3 exists because the identity is content-addressed and the content is
+    not stable. `placement_key` hashes the moment's DESCRIPTION, and rewriting
+    descriptions is the classifier's ordinary weekly job, so every
+    reclassification orphaned the pin of every moment it touched: the person
+    named a date, the date is on disk, and the moment renders undated. The
+    comment this module has carried since v102 called that orphaning correct
+    ("never silently misapplied") — right instinct, wrong conclusion. The pin
+    carries its own `source`, and a source that mints exactly one live moment
+    is not a guess.
+
+    It IS a guess the moment the source mints two, so it does not run: rung 3
+    refuses zero candidates and refuses several, emitting
+    `PLACEMENT_ORPHANED_AMBIGUOUS` instead — filing the person's date onto the
+    wrong moment is worse than leaving it stranded, which is the rule rung 2
+    has always followed. The one trade-off it does accept, stated plainly: if a
+    source's only surviving moment is not the moment the pin was about (its own
+    moment was deleted, not rewritten), the pin lands on the survivor. That is
+    the price of a content-addressed identity, and the end of it is an opaque
+    minted placement id, not a cleverer heuristic.
+
+    Rungs 1 and 2 keep the row's stored `key` — a repaired pin renders, retires
+    and unplaces under the identity the store actually holds. Rung 3 does not:
+    its repair is persisted by `rekey_orphaned_placements` on the pin-
+    maintenance pass, with `rekeyed_from` provenance, because a repair that
+    lives only in memory proves the substrate is right and says nothing about
+    the file the product reads. The read heals immediately; the store heals on
+    the next pass.
+
+    Ambiguity never guesses at any rung — two live events sharing one legacy
+    key resolve neither, and a second row claiming a key some earlier row
+    already took stays orphaned.
+    """
+    return [(row, key) for row, key, _ in _resolve_placements(placements, events)[0]]
 
 
 def load_placements() -> dict:
@@ -1314,6 +1420,49 @@ def sort_period_events(rows: list[dict]) -> list[dict]:
                              chrono.year_of(e.get("date")) or 0,
                              not e["when_hint"], e["source_short"]))
     return rows
+
+
+def rekey_orphaned_placements(dry_run: bool = False) -> list[dict]:
+    """THE DURABLE HALF of rung 3 (v253, lifehug#276) — the store heals.
+
+    `resolve_placements` re-keys an orphaned pin IN MEMORY, so the moment the
+    classifier rewrites a description the page still renders the person's
+    date. That is the read. This is the WRITE, and it has to exist separately:
+    a repair that only recomputes proves the substrate is right and says
+    nothing about the file the product reads (the `simulate_repair.py` lesson,
+    2026-08-26). Until the store holds the live key, `remove_placement` and
+    every host that posts a key back still name an identity nothing joins.
+
+    Only rung 3 persists. Rung 2's legacy repair deliberately leaves the stored
+    key alone — that identity is what the viewer's own remove button posts, and
+    v215 pinned that behavior by test.
+
+    Each rewritten row keeps its provenance: `rekeyed_from` is the key the
+    person's pin was filed under, `rekeyed_at` is when the repair ran. Nothing
+    is deleted, and a row is never rewritten twice to the same key (the second
+    pass joins at rung 1 and this returns `[]` — the pass is idempotent, which
+    is the property a runbook step has to have).
+
+    Returns the rewritten records. `dry_run` computes them and writes nothing.
+    """
+    data = load_placements()
+    if not data["placements"]:
+        return []
+    events = load_events()
+    joined = {id(row): (key, rung)
+              for row, key, rung in resolve_placements_with_rung(data, events)}
+    rekeyed: list[dict] = []
+    for row in data["placements"]:
+        key, rung = joined.get(id(row), ("", ""))
+        if rung != PLACEMENT_JOIN_SOURCE_REKEY or not key or key == row.get("key"):
+            continue
+        row["rekeyed_from"] = str(row.get("key") or "")
+        row["key"] = key
+        row["rekeyed_at"] = now_utc()
+        rekeyed.append(dict(row))
+    if rekeyed and not dry_run:
+        write_json(PLACEMENTS_FILE, data)
+    return rekeyed
 
 
 def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
@@ -3435,6 +3584,11 @@ def timeline_data(evidence: list[dict] | None = None,
                         if not key or row.get("period") not in period_slugs]
     rejoined_placements = sum(1 for row, key in resolved_placements
                               if key and key != str(row.get("key") or ""))
+    # v253: the pins rung 3 REFUSED to re-key, each naming its source and the
+    # candidates it declined to choose between. `rejoined_placements` above
+    # already counts rung 3's successes — an in-memory repair the read applies
+    # immediately and `rekey_orphaned_placements` persists on the next pass.
+    orphan_diagnostics = placement_orphan_diagnostics(placements, events)
 
     chapters = align_chapters(load_chapters(), periods)
     chapters_by_period: dict[str, list[dict]] = {}
@@ -3483,6 +3637,7 @@ def timeline_data(evidence: list[dict] | None = None,
         "unplaced_entities": unplaced_entities,
         "unplaced_events": unplaced_events,
         "stale_placements": stale_placements,
+        "placement_diagnostics": orphan_diagnostics,
         "gaps_by_period": gaps_by_period,
         "global_gaps": global_gaps,
         "corroboration": corroboration,
@@ -3509,6 +3664,7 @@ def timeline_data(evidence: list[dict] | None = None,
             # silent again.
             "stale_placements": len(stale_placements),
             "placements_rejoined": rejoined_placements,
+            "placements_orphaned_ambiguous": len(orphan_diagnostics),
             # eras O-E2 (Transitional dependencies): `O-C`'s withheld-stale
             # count, read through one shim — see `_stale_classifications_withheld`.
             "stale_classifications_withheld": _stale_classifications_withheld(),

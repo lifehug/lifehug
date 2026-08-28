@@ -3,9 +3,18 @@
 Once the re-derived classification places a pinned moment in its period by
 itself, the weekly `timeline-retire` step removes the pin (moving it to the
 placements file's `retired` list, correction link intact). The filed date
-assertion is the durable information; nothing is lost. Orphaned pins (event
-rewritten, period gone) never auto-retire — they stay surfaced as stale
-notices for the owner.
+assertion is the durable information; nothing is lost. Orphaned pins never
+auto-retire — they stay surfaced as stale notices for the owner.
+
+v253 (lifehug#276) narrowed what "orphaned" means, and this file records the
+change. Until v253 a pin whose moment had merely been RECLASSIFIED counted as
+orphaned forever, because the identity is content-addressed and the classifier
+rewrites descriptions every week. `resolve_placements`' third rung re-keys such
+a pin to the one live moment its source mints, so the pin is now judged like
+any other: it retires when the loop has caught up with it and stays when the
+owner is still overriding the heuristic. Genuinely orphaned pins — the source
+mints no live moment, or it mints several and the repair refuses to guess, or
+the period page is gone — still never retire.
 """
 
 import sys
@@ -75,11 +84,49 @@ class RetireRedundantPlacementsTests(unittest.TestCase):
         self.assertEqual(self._retire([e]), [])
         self.assertEqual(len(tl.load_placements()["placements"]), 1)
 
-    def test_orphaned_pin_never_retires(self):
+    def test_a_reclassified_moment_is_re_keyed_and_then_judged_normally(self):
+        """v253: a rewritten description is not an orphan. The pin re-keys to
+        the one live moment its source mints, and then the ordinary rule
+        applies — here the heuristic agrees with the pin, so the loop has
+        caught up and the pin retires with its correction intact. Before v253
+        this pin survived every weekly pass forever, pinning nothing."""
+        e = event("The old description", when_hint="in college")
+        key = self._pin(e, "college")
+        rewritten = event("A rewritten description", when_hint="in college")
+        self.assertNotEqual(tl.placement_key(rewritten), key,
+                            "the fixture must actually move the key")
+        retired = self._retire([rewritten])
+        self.assertEqual([r["description"] for r in retired],
+                         ["The old description"])
+        self.assertEqual(retired[0]["correction"], "sources/corrections/c1.md")
+        self.assertEqual(tl.load_placements()["placements"], [])
+
+    def test_a_reclassified_pin_the_owner_still_overrides_stays(self):
+        """Re-keying is not retirement. A pin whose period still disagrees with
+        the heuristic keeps doing its job under its moment's new identity."""
+        e = event("The old description", when_hint="in college")
+        self._pin(e, "childhood")
+        rewritten = event("A rewritten description", when_hint="in college")
+        self.assertEqual(self._retire([rewritten]), [])
+        self.assertEqual(len(tl.load_placements()["placements"]), 1)
+
+    def test_an_ambiguous_orphan_never_retires(self):
+        """Two live moments of one source: the repair refuses to guess, so the
+        pin is still orphaned and still never auto-retires."""
         e = event("The old description", when_hint="in college")
         self._pin(e, "college")
         rewritten = event("A rewritten description", when_hint="in college")
-        self.assertEqual(self._retire([rewritten]), [])
+        other = event("Something else entirely", when_hint="in college")
+        self.assertEqual(self._retire([rewritten, other]), [])
+        self.assertEqual(len(tl.load_placements()["placements"]), 1)
+
+    def test_a_pin_whose_source_is_gone_never_retires(self):
+        """Nothing to re-key to at all — the v105 shape, unchanged."""
+        e = event("The old description", when_hint="in college")
+        self._pin(e, "college")
+        survivor = event("A moment from another answer", source="answers/Q9.md",
+                         when_hint="in college")
+        self.assertEqual(self._retire([survivor]), [])
         self.assertEqual(len(tl.load_placements()["placements"]), 1)
 
     def test_pin_on_vanished_period_never_retires(self):

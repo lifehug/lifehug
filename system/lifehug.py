@@ -707,10 +707,29 @@ def cmd_second_voice_ack(args: argparse.Namespace) -> int:
 
 
 def cmd_timeline_retire(args: argparse.Namespace) -> int:
+    """The weekly PIN-MAINTENANCE pass: heal first, then retire.
+
+    v253 (lifehug#276): `rekey_orphaned_placements` runs before the retirement
+    because this step is seated immediately after `classify-story` in
+    `weekly_maintenance.sh` — the very pass that rewrites descriptions and so
+    orphans pins. Healing first means a pin the classifier just orphaned AND
+    caught up with is re-keyed and retired in one pass, instead of surviving as
+    a stale notice for a week. The order is the reason both live here; neither
+    function knows about the other.
+    """
     import timeline  # noqa: PLC0415
+    rekeyed = timeline.rekey_orphaned_placements(dry_run=args.dry_run)
+    if rekeyed:
+        verb = "would re-key" if args.dry_run else "Re-keyed"
+        print(f"✓ {verb} {len(rekeyed)} orphaned pin(s) — their moment was "
+              f"reclassified, not lost:")
+        for pin in rekeyed:
+            print(f"  🔑 {pin.get('description', '?')}: "
+                  f"{pin.get('rekeyed_from', '?')} → {pin.get('key', '?')}")
     retired = timeline.retire_redundant_placements(dry_run=args.dry_run)
     if not retired:
-        print("No caught-up pins to retire.")
+        if not rekeyed:
+            print("No caught-up pins to retire.")
         return 0
     verb = "would retire" if args.dry_run else "Retired"
     print(f"✓ {verb} {len(retired)} pin(s) — the loop caught up, they place themselves:")
@@ -733,6 +752,28 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
     if not description:
         print("Error: timeline description must be provided on stdin", file=sys.stderr)
         return 1
+    # v253 (lifehug#276): a supplied identity is CHECKED before anything
+    # durable happens. `--placement-key` exists so identity travels whole from
+    # the host that knows the moment (v215); a key no live moment mints is a
+    # pin that is dead on arrival — it renders nowhere and the date the person
+    # named is gone at exit 0, which is lifehug#228's exact failure shape. The
+    # CLI can see that the key is dead, so it refuses instead of filing. The
+    # DERIVED key (no flag) is deliberately not checked here: v213-shaped
+    # records still mint one and `resolve_placements`' repair rungs are what
+    # rejoin them.
+    key = str(getattr(args, "placement_key", "") or "").strip()
+    if key:
+        if not _re.fullmatch(r"[0-9a-f]{12}", key):
+            print(f"Error: --placement-key must be 12 hex characters: {key!r}",
+                  file=sys.stderr)
+            return 1
+        live_keys = {timeline.placement_key(event) for event in timeline.load_events()}
+        if key not in live_keys:
+            print(f"Error: placement_key_not_live: --placement-key {key} matches no "
+                  f"live moment. Nothing joins it, so the pin would render nowhere. "
+                  f"Mint the key from the moment (timeline.placement_key) against a "
+                  f"compiled vault.", file=sys.stderr)
+            return 1
     period_label = next(
         (period["name"] for period in timeline.load_periods() if period["slug"] == args.period),
         args.period.replace("-", " ").title(),
@@ -790,10 +831,6 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
     # under the key `place_events` joins on. Absent the flag the key is derived
     # from source + description exactly as it always has been — the viewer's
     # placement form posts the event's real description and needs nothing else.
-    key = str(getattr(args, "placement_key", "") or "").strip()
-    if key and not _re.fullmatch(r"[0-9a-f]{12}", key):
-        print(f"Error: --placement-key must be 12 hex characters: {key!r}", file=sys.stderr)
-        return 1
     key = key or timeline.placement_key({"source": args.source, "description": description})
     timeline.save_placement(
         key,
