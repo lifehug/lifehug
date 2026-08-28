@@ -329,6 +329,10 @@ def work_items_payload(result: tt.CalculatedTimeline, *, published_at: str,
     payload = _envelope(result, published_at=published_at, input_digest=input_digest,
                         timings=timings)
     payload["work_items"] = [dict(row) for row in result.work_items]
+    # O-E6: the alias map travels with the items in the SAME generation, so a
+    # reader that resolves a stored id can never be holding a map that
+    # describes a different set. Atomic publish already gives it the pairing.
+    payload["work_item_aliases"] = dict(result.work_item_aliases)
     payload["reach"] = dict(result.reach)
     payload["score_components"] = {
         key: dict(value) for key, value in result.score_components.items()
@@ -589,6 +593,7 @@ EMPTY_VIEW = {
     "work_items": (),
     "memberships": (),
     "chapter_overlays": (),
+    "work_item_aliases": {},
     "reach": {},
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "claims": 0, "unplaced": 0},
@@ -689,6 +694,7 @@ def calculated_view(vault_root: str | Path) -> dict:
         "work_items": tuple(payload.get("work_items") or ()),
         "memberships": tuple(payload.get("memberships") or ()),
         "chapter_overlays": tuple(payload.get("chapter_overlays") or ()),
+        "work_item_aliases": dict(payload.get("work_item_aliases") or {}),
         "reach": dict(payload.get("reach") or {}),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None

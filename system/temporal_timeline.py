@@ -108,6 +108,7 @@ import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 from temporal_claims import (  # noqa: E402
     TemporalContractError,
     collapsed_text,
@@ -133,7 +134,12 @@ CALCULATION_RULE_VERSION = "timeline-rules:2"
 #: **The weights below are deliberately simple and deliberately uncalibrated.**
 #: Wave F owns calibration (§8.5); what wave D owes it is the raw components and
 #: one stable identity per item, both of which are here.
-SCORE_FORMULA_VERSION = "temporal-score:1"
+#:
+#: O-E6 moved it to ``temporal-score:2``: the birth origin's ``system_value`` is
+#: no longer reach alone (`temporal_work_items.birth_origin_system_value`).
+#: Defined there, with the rule it names, so the envelope and the item's own
+#: ``score_rule`` cannot disagree.
+SCORE_FORMULA_VERSION = twi.SCORE_FORMULA_VERSION
 
 #: How hard two surviving claims must contradict each other before the node is
 #: ``contradicted`` and Mirror gets a row. ``chronology.conflict_strength``
@@ -151,8 +157,11 @@ MAX_PROPAGATION_ROUNDS = 16
 
 #: Reach saturates: an anchor that would place five unplaced nodes is already
 #: as valuable as this release knows how to say. The raw count travels in
-#: :attr:`CalculatedTimeline.reach` for wave F to calibrate against.
-REACH_SATURATION = 5
+#: :attr:`CalculatedTimeline.reach` for wave F to calibrate against. Defined in
+#: `temporal_work_items` — it is a property of what a work item is worth, and
+#: the birth-origin rule needs the same number — and re-exported here under the
+#: name every caller already imports.
+REACH_SATURATION = twi.REACH_SATURATION
 
 #: The precision an event's date is worth asking to (§2.2 — *ask at the
 #: precision appropriate to the event*, never demand false precision). Anything
@@ -225,8 +234,10 @@ SCORE_WEIGHTS = {
 
 #: The vault owner's handle in a relationship edge. *"I married Katie"* is a
 #: fact about the edge between two people (§6.3), and the edge needs both ends;
-#: callers with a real owner entity ref pass ``owner_ref=`` and get that.
-DEFAULT_OWNER_REF = "self"
+#: callers with a real owner entity ref pass ``owner_ref=`` and get that. One
+#: spelling of "me", defined beside the work-item vocabulary that has to
+#: recognize it in a stored reference.
+DEFAULT_OWNER_REF = twi.OWNER_SUBJECT_REF
 
 #: The phases §7.1 asks to instrument *within* the pure derivation. Extraction,
 #: the claim fold and projection publication are measured by their own owners;
@@ -287,6 +298,10 @@ class CalculatedTimeline:
     #: reasoning as ``memberships`` and the same phase discipline: the key
     #: lands declared and empty in E1/`O-E1b`, E3 fills the rows.
     chapter_overlays: tuple[dict, ...] = ()
+    #: ``{legacy_work_item_id: canonical_work_item_id}`` — O-E6's derived
+    #: migration map, so a bank marker, a session or a Play target minted under
+    #: an older identity still resolves to the item it was always about.
+    work_item_aliases: dict = field(default_factory=dict)
     timings: dict = field(default_factory=dict)
     score_components: dict = field(default_factory=dict)
     reach: dict = field(default_factory=dict)
@@ -316,6 +331,7 @@ class CalculatedTimeline:
             "work_items": [dict(row) for row in self.work_items],
             "memberships": [dict(row) for row in self.memberships],
             "chapter_overlays": [dict(row) for row in self.chapter_overlays],
+            "work_item_aliases": dict(self.work_item_aliases),
             "reach": dict(self.reach),
             "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "diagnostics": dict(self.diagnostics),
@@ -347,6 +363,9 @@ def structural_signature(result: object) -> dict:
         "work_items": items,
         "memberships": [dict(row) for row in current.memberships],
         "chapter_overlays": [dict(row) for row in current.chapter_overlays],
+        # Derived from the items above, so a rebuild reproduces it exactly and
+        # a drift between the map and the set it describes is a signature diff.
+        "work_item_aliases": dict(current.work_item_aliases),
         "reach": dict(current.reach),
         "diagnostics": dict(current.diagnostics),
     }
@@ -1573,9 +1592,7 @@ def _node_dict(
     alternates.extend(record.to_dict() for record in extra_alternates)
     conflict = float(calculated.get("conflict") or 0.0)
     state = _conflict_state(alternates=alternates, conflict=conflict, contradicted=contradicted)
-    basis = tc.CLAIM_BASIS_BY_DATE_BASIS.get(
-        chrono.from_dict(best).basis if best is not None else "", "inferred"
-    )
+    basis = twi.node_claim_basis(best)
     return tp.validate_calculated_timeline_node(
         {
             "node_id": group["node_id"],
@@ -1773,6 +1790,7 @@ def _mint_work_item(
     evidence_refs=(),
     system_value: float = 0.0,
     subject_resolved: bool = False,
+    score_rule: object = None,
     now: object = None,
 ) -> str:
     """Validate one item into the sink, merging on a repeated identity.
@@ -1808,6 +1826,11 @@ def _mint_work_item(
         ),
     }
     payload.update(scores)
+    if collapsed_text(score_rule):
+        # Which arithmetic minted `system_value`. The envelope carries the
+        # release's own `SCORE_FORMULA_VERSION`; this is the item saying it for
+        # itself, so a row read alone is still readable (O-E6, design §7).
+        payload["score_rule"] = collapsed_text(score_rule)
     try:
         row = tp.validate_temporal_work_item(payload, now=now)
     except TemporalContractError:
@@ -1822,7 +1845,7 @@ def _mint_work_item(
     for field_name in ("claim_refs", "evidence_refs"):
         merged[field_name] = sorted(set(current.get(field_name) or ()) | set(row.get(field_name) or ()))
     if row.get("system_value", 0.0) > current.get("system_value", 0.0):
-        for name in tp.WORK_ITEM_SCORE_FIELDS:
+        for name in (*tp.WORK_ITEM_SCORE_FIELDS, "score_rule"):
             if name in row:
                 merged[name] = row[name]
         components[key] = scores
@@ -2138,6 +2161,12 @@ def derive_calculated_timeline(
     return CalculatedTimeline(
         nodes=tuple(nodes),
         work_items=tuple(items),
+        # Derived, never stored (O-E6, design §7 row 6): every id these items
+        # have ever been addressed by, mapped onto the id they are addressed by
+        # now. Computed here so it is published in the SAME generation as the
+        # items it describes — a reader can never hold a map for a different
+        # set — and so deleting the file and rebuilding is byte-identical.
+        work_item_aliases=twi.work_item_aliases(items),
         timings={phase: round(timings.get(phase, 0.0), 9) for phase in TIMING_PHASES},
         score_components=components,
         reach=reach,
@@ -2152,6 +2181,31 @@ def derive_calculated_timeline(
         },
         projection_generation=projection_generation,
     )
+
+
+def _has_explicit_owner_birth(groups: dict, placed: dict, owner: object) -> bool:
+    """Does this vault hold a birth for the OWNER that somebody actually stated?
+
+    §3.1's compatibility rule read as a predicate: an owner birth is a group
+    whose `event_kind` is `birth` and whose subject is the owner — under the
+    canonical `self` or under the legacy domain-word mention `"birth"` that
+    pre-O-E0b extraction minted, both of which resolve to the same person.
+
+    §3.2's rule read as the second half: the node's published class must be
+    ``explicit``. A **provisional origin calculated from age statements is not
+    a birthday**, so it leaves the ask open; that is the whole reason this is a
+    basis check rather than an existence check.
+    """
+    wanted = normalized_mention_key(owner)
+    for node_id, group in groups.items():
+        if collapsed_text(group.get("event_kind")) != twi.BIRTH_ORIGIN_EVENT_KIND:
+            continue
+        subject = group.get("subject")
+        if normalized_mention_key(subject) != wanted and not twi.is_birth_anchor(subject):
+            continue
+        if twi.is_explicit_origin(placed.get(node_id)):
+            return True
+    return False
 
 
 def _derive_work_items(
@@ -2235,7 +2289,18 @@ def _derive_work_items(
         if item_id:
             reach[item_id] = raw
 
-    # -- missing anchors: an age with no birthday to measure it from ------
+    # -- the birth origin: the coordinate system, open until somebody says it -
+    #
+    # O-E6 (`eras.md` §3, §7). Two things changed and both are the same
+    # correction: this item used to exist only when an age claim had already
+    # tripped over its absence, and it used to be worth its reach alone. The
+    # birth origin is what every age frame is DERIVED from, so a vault with no
+    # birthday and nothing yet dated by age is precisely the vault that needs
+    # the question — and scored it zero.
+    #
+    # Closure is by the published CLASS of the owner's birth, never by the
+    # presence of a node: §3.2's provisional origin arrives as ``calculated``
+    # and deliberately does not close the explicit-birthday ask.
     age_claims = sorted(
         {
             row.get("claim_id")
@@ -2243,26 +2308,30 @@ def _derive_work_items(
             if row.get("finding") == "age_without_birth_anchor" and row.get("claim_id")
         }
     )
-    if age_claims:
+    if not _has_explicit_owner_birth(groups, placed, owner):
+        counted = len(age_claims)
+        placeable = (
+            f" {counted} thing{'s' if counted != 1 else ''} "
+            "you dated by age can be placed once it is known."
+            if counted
+            else ""
+        )
         item_id = _mint_work_item(
             items,
             components,
-            kind="missing_anchor",
+            kind=twi.BIRTH_ORIGIN_KIND,
             subject_ref=owner,
-            event_kind="birth",
-            requested_field="birth_date",
+            event_kind=twi.BIRTH_ORIGIN_EVENT_KIND,
+            requested_field=twi.REQUESTED_FIELD_BIRTH_DATE,
             subject_resolved=True,
-            prompt_intent=(
-                "What is your date of birth? "
-                f"{len(age_claims)} thing{'s' if len(age_claims) != 1 else ''} "
-                "you dated by age can be placed once it is known."
-            ),
+            prompt_intent=f"What is your date of birth?{placeable}",
             claim_refs=age_claims,
-            system_value=min(1.0, len(age_claims) / REACH_SATURATION),
+            system_value=twi.birth_origin_system_value(counted),
+            score_rule=twi.BIRTH_ORIGIN_SCORE_RULE,
             now=now,
         )
         if item_id:
-            reach[item_id] = len(age_claims)
+            reach[item_id] = counted
 
     # -- missing anchors: a duration with no start ------------------------
     for row in sorted(

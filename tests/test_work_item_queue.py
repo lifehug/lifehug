@@ -34,6 +34,7 @@ import temporal_projection as tp  # noqa: E402
 import temporal_store as ts  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 import timeline_interaction as ti  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 
 
 def load(name):
@@ -55,6 +56,11 @@ qp = load("question_planner")
 ap = load("arc_planner")
 
 NOW = "2026-08-26T00:00:00Z"
+
+#: O-E6: every birthless vault carries the birth-origin item, because the birth
+#: origin is the coordinate system rather than one gap among others. Tests about
+#: a SPECIFIC gap name it here and exclude it.
+BIRTH_ORIGIN_ID = twi.birth_origin_work_item_id()
 EMPTY_BANK = "# Questions\n\n## A: Origins\n\n- [ ] A1: Where does your story start?\n"
 
 #: A keystone the way `timeline.keystones()` hands one over.
@@ -595,7 +601,8 @@ class WaveDSeamTests(unittest.TestCase):
         result = derive(*waiting_on_an_anchor(5))
         items = qp.work_items_from_projection(result.to_dict())
         [candidate] = [row for row in qp.queue_candidates(items, question_bank_text=EMPTY_BANK)
-                       if row["kind"] == "missing_anchor"]
+                       if row["kind"] == "missing_anchor"
+                       and row["work_item_id"] != BIRTH_ORIGIN_ID]
         derived = next(row for row in result.work_items
                        if row["work_item_id"] == candidate["work_item_id"])
         self.assertEqual(candidate["derivation_score"], derived["combined_score"])
