@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 241,
+    "framework_version": 240,
     "revision": "vault-contract-v11",
-    "content_digest": "sha256:a18c8e784e153a0ab470b51b9f168f337c75fde230b18f6eaed9ec53c295b9ab"
+    "content_digest": "sha256:715bbbfff964fe776b8b91ddb7ee7f9951794ca77eb4db3d47f34aae7a88f234"
   },
   "special_file_policy": {
     "regular_files": "allow",
