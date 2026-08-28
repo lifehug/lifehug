@@ -651,5 +651,51 @@ class PlacementScoreTests(unittest.TestCase):
                             timeline.placement_score(plain))
 
 
+class LegacyPeriodRefTests(unittest.TestCase):
+    """T-AF-12 — one alias map."""
+
+    def test_every_prefixed_spelling_of_the_twenties_resolves(self) -> None:
+        for ref in ("period:my-20s", "tl:my-20s", "band:my-20s", "my-20s",
+                    "period:my-twenties", "My 20s"):
+            with self.subTest(ref=ref):
+                self.assertEqual(timeline.legacy_period_ref(ref), "age:self:20s")
+
+    def test_childhood_and_the_teens_resolve(self) -> None:
+        self.assertEqual(timeline.legacy_period_ref("childhood"), "age:self:childhood")
+        self.assertEqual(timeline.legacy_period_ref("period:my-teens"), "age:self:teens")
+
+    def test_a_named_era_resolves_to_nothing(self) -> None:
+        for ref in ("period:college", "band:the-mission", "high-school", "", None):
+            with self.subTest(ref=ref):
+                self.assertIsNone(timeline.legacy_period_ref(ref))
+
+
+class RosterAliasOnlyTests(VaultTestCase):
+    """T-AF-12 — a roster row named like a band contributes aliases only."""
+
+    def test_a_roster_band_row_changes_exactly_the_alias_set(self) -> None:
+        self.file_claims([owner_birth()])
+        without = {row["node_id"]: dict(row) for row in self.frame_nodes(self.fold())}
+        roster = ({"type": "period", "entities": [
+            {"name": "My Twenties", "slug": "twenties-era", "aliases": [],
+             "page_eligible": True},
+        ]},)
+        with_roster = tt.derive_calculated_timeline(
+            ts.rebuild_active_index(self.vault), roster_snapshot=roster,
+            projection_generation=1, now=NOW,
+        )
+        after = {row["node_id"]: dict(row) for row in self.frame_nodes(with_roster)}
+        self.assertEqual(sorted(without), sorted(after))
+        for node_id in sorted(without):
+            before_row, after_row = dict(without[node_id]), dict(after[node_id])
+            self.assertEqual(before_row.pop("legacy_refs") != after_row.pop("legacy_refs"),
+                             node_id == "age:self:20s")
+            before_row.pop("input_fingerprint", None)
+            after_row.pop("input_fingerprint", None)
+            self.assertEqual(before_row, after_row)
+        self.assertIn("period:twenties-era", after["age:self:20s"]["legacy_refs"])
+        self.assertNotIn("period:twenties-era", without["age:self:20s"]["legacy_refs"])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

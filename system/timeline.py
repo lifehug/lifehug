@@ -50,6 +50,7 @@ import chronology as chrono  # noqa: E402
 import cross_dating  # noqa: E402
 import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
+import temporal_projection  # noqa: E402
 import temporal_publication  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
@@ -154,6 +155,42 @@ def _page_sources(text: str) -> set[str]:
 def _frontmatter_value(text: str, key: str, default: str = "") -> str:
     match = re.search(rf'^{re.escape(key)}:\s*["\']?(.+?)["\']?\s*$', text, re.MULTILINE)
     return match.group(1).strip() if match else default
+
+
+# ---------------------------------------------------------------------------
+# Legacy period identity: the ONE alias map onto the age frames (eras §3.5).
+# ---------------------------------------------------------------------------
+
+#: The prefixes a legacy period reference is written with across the product —
+#: `?play=` keys, the per-vault zoom keys, a session plan's
+#: `unknowns[].period` / `moments[].period`, and pins. One tuple, so a caller
+#: never has to know which surface minted the string it is holding.
+LEGACY_PERIOD_PREFIXES = ("period", "tl", "band")
+
+
+def legacy_period_ref(ref: object) -> str | None:
+    """A legacy period slug or prefixed reference → an age frame node id.
+
+    `period:my-20s`, `tl:my-20s`, `band:my-20s`, the bare slug `my-20s` and the
+    roster's own name `My 20s` are five spellings of one thing, and the thing
+    they name is now a calculated node: `age:self:20s`. This is the single map
+    (design §3.5) the platform re-exports, so a deep link, a stored zoom key, a
+    session plan and a pin all resolve identically or all fail identically.
+
+    ``None`` for anything that is not an age band. `College` and `the Mission`
+    are NAMED ERAS — E3's opaque identities — and guessing one of those here
+    would be precisely the wrong join ADR 0026 ranks above a miss.
+    """
+    text = " ".join(str(ref or "").split())
+    if not text:
+        return None
+    prefix, sep, rest = text.partition(":")
+    if sep and prefix.strip().lower() in LEGACY_PERIOD_PREFIXES:
+        text = rest
+    band = cross_dating.age_frame_band_of(text)
+    if band is None:
+        return None
+    return temporal_projection.age_frame_node_id(band)
 
 
 # ---------------------------------------------------------------------------
