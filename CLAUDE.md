@@ -994,10 +994,20 @@ contradict the curated view.
 is allowed only for dismissal (`second-voice-ack`) and rendering caches, and
 a cache must be derivable from filed sources.
 
-- Placing a timeline moment **always files the assertion** — `"<moment>"
-  happened during <Period>[, <when-hint>]` — as a `--kind date` correction
-  (no opt-in checkbox; the period is stated in the author's vocabulary, never
-  an inferred year). The pin in `state/timeline_placements.json` is a
+- Placing a timeline moment **always files the assertion** — composed by the
+  ONE definition `timeline.placement_assertion` as `"<moment>" happened
+  <date>[ (anchored on …)][, <when-hint>]` — as a `--kind date --role
+  placement` correction (no opt-in checkbox). **v251: the body states the
+  DATE DECISION and never the era.** Until v251 it opened `happened during
+  <Period>`, one sentence carrying both a date and an era: per v244/O-C2 a
+  placement is a date decision about a moment the person accepts, and per the
+  Eras design §5.1 the period is DERIVED from the date by frame arithmetic, so
+  re-asserting it as prose gave a computed name the authority of a stated date
+  inside an immutable record — and `classify_story.corrections_for` then hands
+  that prose to the next classification as authoritative. The era stays as
+  `period` on the row in `state/timeline_placements.json`, where rung 0 reads
+  it. A period-only pin (no date, no hint) says so out loud rather than
+  naming the era. The pin in `state/timeline_placements.json` is a
   display-only overlay that records the correction it filed. Unpinning keeps
   the assertion — if the *fact* was wrong, retract the correction from its
   source-actions page.
