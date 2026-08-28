@@ -302,12 +302,15 @@ second, conflicting one.
 `owner_timeline_relation`, `origin_basis`, and `legacy_refs`.
 `CalculatedMembership` is a new top-level key carrying `relation`
 (`within | overlaps | starts_in | associated_with`), `basis`, `confidence`,
-`evidence_refs`, and `display_role` — the shape the schema reserves for
-membership; no fold yet populates it, since no membership writer exists.
+`evidence_refs`, and `display_role` — populated by O-E2's fold: frame
+arithmetic (`cross_dating.frames_touching`) for age frames, the union of
+active `era_membership` receipts for named eras, and one `display_role`
+decided over both.
 The calculation rule version moves to
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:2 -->
-`timeline-rules:2` so a reader can tell, from the payload alone, whether it
-is looking at the pre- or post-Eras shape.
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:3 -->
+`timeline-rules:3` so a reader can tell, from the payload alone, whether it
+is looking at the pre-Eras, age-frames-only, or membership-and-relevance
+shape.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*
