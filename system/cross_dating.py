@@ -463,6 +463,16 @@ _AGE_VALUE = rf"(?:\d{{1,2}}|{_AGE_WORD})"
 AGE_STATEMENT_RES = (
     re.compile(rf"\bwhen (?:i|we) (?:was|were)\s+({_HEDGE}\s+)?({_AGE_VALUE}(?:\s+or\s+{_AGE_VALUE})?)\b",
                re.IGNORECASE),
+    # eras/E-BO: the SAME clause in the other order — "I was thirty when I
+    # started there" — which `general_listener.THIRD_PERSON_AGE_RES` already
+    # covers for every subject (that table's own v229 note: "a message is
+    # written in either order"). This table's job is telling first person
+    # apart from everyone else, so it needs the reverse order too, or a
+    # first-person statement written this way reads as third-person's to
+    # anything that treats "matches THIRD_PERSON_AGE_RES, doesn't match this"
+    # as its veto (`birth_origin._reads_as_someone_else`) — found by T-BO-06.
+    re.compile(rf"\b(?:i|we) (?:was|were)\s+({_HEDGE}\s+)?({_AGE_VALUE}(?:\s+or\s+{_AGE_VALUE})?)\s+when\b",
+               re.IGNORECASE),
     re.compile(rf"\b(?:i|we) (?:was|were)\s+({_HEDGE}\s+)?({_AGE_VALUE}(?:\s+or\s+{_AGE_VALUE})?)\s+years old\b",
                re.IGNORECASE),
     re.compile(rf"\b({_HEDGE}\s+)?({_AGE_VALUE})[\s-]years?[\s-]old\b", re.IGNORECASE),

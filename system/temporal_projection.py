@@ -108,6 +108,16 @@ NAMED_ERA_EVENT_KIND = "named_era"
 #: occurrence-subject machinery and arrive with E2, which extends this tuple.
 LIFE_VIEWS = ("lived", "future_plan")
 
+#: Where a node sits on the calendar (eras design §2.2). ``unplaced`` has no
+#: supported value; ``partial`` has one that is materially wider than the event
+#: deserves; ``placed`` is at or finer than its precision target;
+#: ``contradictory`` means the supporting evidence cannot all be true and the
+#: node's readings are in ``alternate_values``. E-BO assigns exactly two of
+#: them — a provisional birth origin is ``partial``, or ``contradictory`` when
+#: the age evidence is disjoint; E2 assigns the rest. Absent means a phase that
+#: does not yet answer the question has not guessed at it.
+TEMPORAL_STATES = ("unplaced", "partial", "placed", "contradictory")
+
 #: How an age frame's origin was arrived at: the person's stated birthday, or
 #: the interval calculated from age statements (E-BO). It is a CLAIM basis, and
 #: ``temporal_claims.CLAIM_BASIS_BY_DATE_BASIS`` is the one mapping onto it.
@@ -207,6 +217,7 @@ ERROR_CODES = (
     "node_value_unusable",
     "node_needs_rule_version",
     "unknown_origin_basis",
+    "unknown_temporal_state",
     "unknown_life_view",
     "membership_not_a_mapping",
     "membership_needs_member",
@@ -420,6 +431,10 @@ class CalculatedTimelineNode:
     origin_basis: str | None = None
     legacy_refs: tuple[str, ...] = ()
     life_view: str | None = None
+    #: v2, additive (eras design §2.2, E-BO). Where the node sits on the
+    #: calendar; see :data:`TEMPORAL_STATES`. Absent on every node written so
+    #: far, and absent means unchanged.
+    temporal_state: str | None = None
     schema_version: int = PROJECTION_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -449,6 +464,7 @@ class CalculatedTimelineNode:
             ("life_clip_end", self.life_clip_end),
             ("origin_basis", self.origin_basis),
             ("life_view", self.life_view),
+            ("temporal_state", self.temporal_state),
         ):
             if value is not None:
                 payload[key] = value
@@ -552,6 +568,11 @@ def validate_calculated_timeline_node(value: object) -> dict:
     life_view = collapsed_text(value.get("life_view"))
     if life_view and life_view not in LIFE_VIEWS:
         raise TimelineNodeError("unknown_life_view", f"unknown life_view: {life_view!r}")
+    temporal_state = collapsed_text(value.get("temporal_state"))
+    if temporal_state and temporal_state not in TEMPORAL_STATES:
+        raise TimelineNodeError(
+            "unknown_temporal_state", f"unknown temporal_state: {temporal_state!r}"
+        )
     span = value.get("definition_span")
     definition_span = None
     if isinstance(span, dict):
@@ -590,6 +611,8 @@ def validate_calculated_timeline_node(value: object) -> dict:
         normalized["origin_basis"] = origin_basis
     if life_view:
         normalized["life_view"] = life_view
+    if temporal_state:
+        normalized["temporal_state"] = temporal_state
     legacy_refs = _ref_tuple(value.get("legacy_refs"))
     if legacy_refs:
         normalized["legacy_refs"] = list(legacy_refs)
@@ -632,6 +655,7 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         origin_basis=normalized.get("origin_basis"),
         legacy_refs=tuple(normalized.get("legacy_refs") or ()),
         life_view=normalized.get("life_view"),
+        temporal_state=normalized.get("temporal_state"),
         schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
     )
 
@@ -998,6 +1022,7 @@ __all__ = [
     "ORIGIN_BASES",
     "PERIOD_EVENT_KINDS",
     "PROJECTION_SCHEMA_VERSION",
+    "TEMPORAL_STATES",
     "ERROR_CODES",
     "NODE_IDENTITY_KEYS",
     "NODE_KINDS",

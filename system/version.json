@@ -1,7 +1,7 @@
 {
   "version": 239,
   "released": "2026-08-27",
-  "changelog": "v239: an era is an identity — era-record, the binder, and the era stage (lifehug#261, contract docs/pr-specs/eras-o-e3-era-record.md, ADR 0030, the Eras controlling design §2.3/§4/§5.4). WHY: the founder's eras were dated by whatever got sorted into them and identified by their labels, so a rename minted a new era and a long answer cited on one era page dragged every moment along. NOW: an era has ONE opaque immutable `era_id = digest(\"era\", creation_operation_id)`; label, aliases and kind are separate content-addressed decision records under `sources/eras/` (`era_identity`, `era_label`, `era_kind`); rename never mints; the legacy roster migrates as identity + label only with a dry-run report. DATES ONLY FROM WHAT THE PERSON SAID: the listener and recorder emit `event_mention` (ADR 0029 amendment — never `event_ref`), a deterministic binder writes a separate superseding `event_resolution` record (`event-binding:1`), two eras sharing an alias bind nothing and mint `identity_uncertain`, a second active resolution without `supersedes` is a loud fold refusal, and `period_started`/`period_ended` compose into ONE span (`_era_span`) instead of arguing with each other under `reconcile`. ONE ATOMIC WRITER: `lifehug era-record` takes one JSON payload and in one vault-mutation job ensures identity → label/kind → binds + files claims → `within` constraint → memberships → publish, replaying as a no-op at every step. `within(frame)` now resolves because frames compute before group nodes render. THE ERA STAGE: `VALID_TIMELINE_STAGES` gains `era`, an era-scoped plan with the explicit ladder (bounds → residence chain → highest-leverage undated moment → precision only while cheap), recorder leaf `interactions/timeline/prompt/recorder.md` on the ADR 0028 loop reusing purpose `date_record`, and the no-era moment's \"Talk about this\" entry; lifehug#253 closed as a class (no leaf heading carries a `{…}` token). Seven design deviations recorded in the contract. TESTS: `tests/test_eras_e3.py`, 77 cases / 35 subtests, every shared-file change proven red alone. WHAT YOU'LL NOTICE: \"I think of 2007 through 2011 as my College years\" becomes one era with two bound dates, renaming it changes nothing but the name, and ▸ on an era asks the one question that would place the most.",
+  "changelog": "v241: a provisional birth origin from what the person said — intersected, never averaged (lifehug#264, contract docs/pr-specs/eras-o-bo-birth-origin.md, the Eras controlling design §3.2, E-BO). WHY: without a stated birthday the age frames had no origin, so every \"I was thirty when I started there\" the person had already said bounded nothing. NOW: `chronology.birth_origin_from_age(event, age)` runs `from_age_band` backwards at the event's own grain (rule `birth-origin:1`, Feb-29 widening, `approximate` via Huttenlocher rounding); `system/birth_origin.py` gathers every owner `age` claim on a dated owner event, vetoes third-person phrasing against every carried phrase, orders evidence deterministically (tighter → finer grain → stated → better-held → claim id) and INTERSECTS — compatible evidence tightens into ONE provisional birth node (`basis: calculated`, `origin_basis: calculated`, `input_claim_refs`), disjoint evidence is partitioned into maximal compatible readings with no winner picked (`best_temporal_value: None`, `conflict_state: contradicted`, `temporal_state: contradictory`, frames withheld, one `contradiction` work item labelled \"your birthday\"). `temporal_state` (unplaced|partial|placed|contradictory) lands additively on `CalculatedTimelineNode`. The explicit-birthday question is never suppressed; the birth node's own `origin_basis` flips to explicit the moment a stated birthday exists (`_origin_basis_of`, one mapping). Rebased onto v239's E3 fold (frames before group nodes): the provisional node joins `nodes` after the group nodes render, so `within(frame)` still resolves. Found along the way: `cross_dating.AGE_STATEMENT_RES` lacked the reverse-order first-person pattern the v229 third-person fix already had. TESTS: `tests/test_eras_e_bo.py`, T-BO-02..T-BO-10, every negative seen red first. WHAT YOU'LL NOTICE: your frames appear from what you already said about your age, and if two things you said cannot both be true, the Timeline asks about your birthday instead of guessing.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -279,6 +279,7 @@
     "system/arc_walk_evals.py",
     "system/artifact.py",
     "system/ask.py",
+    "system/birth_origin.py",
     "system/book.py",
     "system/candidate_promotion.py",
     "system/candidate_research.py",
@@ -493,6 +494,7 @@
     "system/event_binding.py",
     "interactions/timeline/prompt/recorder.md",
     "sources/eras/.gitkeep",
-    "tests/test_eras_e3.py"
+    "tests/test_eras_e3.py",
+    "tests/test_eras_e_bo.py"
   ]
 }
