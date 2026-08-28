@@ -445,12 +445,39 @@ class MintingTests(unittest.TestCase):
             else:
                 sys.modules["timeline_interaction"] = original
 
-    def test_a_broken_projection_never_breaks_the_identity_derivation(self):
-        original = sys.modules.get("temporal_projection")
-        sys.modules["temporal_projection"] = object()
+    def test_an_unusable_vocabulary_never_breaks_the_identity_derivation(self):
+        """O-E6: the guarded seam moved, and it still degrades to "no id".
+
+        Identity derivation reaches the temporal package through
+        `temporal_work_items` now, so THAT is the module a broken package
+        breaks. Shadowed, both doors return their honest empty rather than
+        raising into the weekly queue.
+        """
+        original = sys.modules.get("temporal_work_items")
+        sys.modules["temporal_work_items"] = object()
         try:
             self.assertEqual(qp.timeline_work_item_id(anchor="period:mesa"), "")
             self.assertIsNone(qp.work_item_from_keystone(KEYSTONE, now=NOW))
+            self.assertEqual(qp.resolve_work_item_id("work:abc"), "work:abc")
+        finally:
+            if original is None:
+                sys.modules.pop("temporal_work_items", None)
+            else:
+                sys.modules["temporal_work_items"] = original
+
+    def test_a_late_shadow_of_the_projection_no_longer_reaches_it(self):
+        """Stated rather than left as a silent behaviour change.
+
+        `temporal_work_items` binds `temporal_projection` at ITS OWN import, so
+        replacing the entry in `sys.modules` afterwards cannot reach a
+        derivation that is already wired. The property that matters — a
+        package that will not IMPORT yields no id — is the test above; this one
+        pins the mechanism so the two can never be confused again.
+        """
+        original = sys.modules.get("temporal_projection")
+        sys.modules["temporal_projection"] = object()
+        try:
+            self.assertTrue(qp.timeline_work_item_id(anchor="period:mesa"))
         finally:
             if original is None:
                 sys.modules.pop("temporal_projection", None)

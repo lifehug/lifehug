@@ -80,6 +80,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_store as store  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 from temporal_claims import (  # noqa: E402
     CONSTRAINT_ID_PREFIX,
     TemporalContractError,
@@ -262,6 +263,47 @@ def load_work_items(vault_root: str | Path) -> list[dict]:
     raise MirrorWorkError(
         "work_items_unreadable", f"{WORK_ITEMS_FILE} holds neither a list nor a mapping"
     )
+
+
+def load_work_item_aliases(vault_root: str | Path) -> dict:
+    """`{legacy_work_item_id: canonical_work_item_id}`, or `{}` (O-E6).
+
+    Read from the SAME published file as the items themselves, so the map and
+    the set it describes are one generation by construction — atomic
+    publication already pairs them, and a second, separately-read table would
+    be the drift this map exists to prevent.
+
+    Absent is `{}`: a projection published before O-E6 has no map, and every id
+    in it is then its own canonical id, which is exactly right.
+    """
+    root = _root(vault_root)
+    path = store.store_path(root, WORK_ITEMS_FILE)
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(read_vault_text(path, vault_root=root))
+    except (OSError, ValueError):
+        # `load_work_items` is the reader that refuses an unreadable file by
+        # name. Refusing twice for the same byte would turn one honest error
+        # into two, so the map degrades and the items raise.
+        return {}
+    aliases = payload.get("work_item_aliases") if isinstance(payload, dict) else None
+    if not isinstance(aliases, dict):
+        return {}
+    return {
+        collapsed_text(old): collapsed_text(new)
+        for old, new in aliases.items()
+        if collapsed_text(old) and collapsed_text(new)
+    }
+
+
+def resolve_work_item_id(ref: object, *, aliases: object = None) -> str:
+    """One stored reference to the id it is addressed by now — the ONE lookup.
+
+    Re-exported from `temporal_work_items` so Mirror has a single door and no
+    caller writes `aliases.get(ref, ref)` by hand.
+    """
+    return twi.resolve_work_item_id(ref, aliases=aliases)
 
 
 def load_active_index(vault_root: str | Path) -> dict:
@@ -628,7 +670,8 @@ def _describe_identity(label: str, candidates: tuple[dict, ...], active: list[di
     )
 
 
-def row_for(item: object, index: object) -> MirrorWorkRow | None:
+def row_for(item: object, index: object, *,
+            aliases: object = None) -> MirrorWorkRow | None:
     """Render ONE work item as a Mirror row against the current claim index.
 
     ``None`` — not an exception — for anything Mirror does not show: a kind
@@ -685,7 +728,11 @@ def row_for(item: object, index: object) -> MirrorWorkRow | None:
         )
 
     row = MirrorWorkRow(
-        work_item_id=normalized.work_item_id,
+        # O-E6: a published generation written before the vocabulary converged
+        # holds legacy ids, and a Play target minted from one has to keep
+        # opening. Resolution decides what a row IS the same as; it never
+        # rewrites what the item itself says.
+        work_item_id=resolve_work_item_id(normalized.work_item_id, aliases=aliases),
         kind=normalized.kind,
         state=state,
         headline=headline,
@@ -848,6 +895,7 @@ def mirror_rows(
     *,
     cap: int = MIRROR_ROW_CAP,
     include_resolved: bool = False,
+    aliases: object = None,
 ) -> list[MirrorWorkRow]:
     """Every actionable row, hardest first, capped. Pure — no vault, no clock.
 
@@ -858,7 +906,7 @@ def mirror_rows(
     """
     rows: list[MirrorWorkRow] = []
     for item in work_items or ():
-        row = row_for(item, index)
+        row = row_for(item, index, aliases=aliases)
         if row is None:
             continue
         if not include_resolved and row.state != "open":
@@ -881,6 +929,7 @@ def load_mirror_rows(
         load_active_index(vault_root),
         cap=cap,
         include_resolved=include_resolved,
+        aliases=load_work_item_aliases(vault_root),
     )
 
 
@@ -1092,11 +1141,13 @@ __all__ = [
     "is_play_target_kind",
     "load_active_index",
     "load_mirror_rows",
+    "load_work_item_aliases",
     "load_work_items",
     "mirror_rows",
     "moves_cited",
     "play_target",
     "resolve_mirror_item",
+    "resolve_work_item_id",
     "row_for",
     "row_sort_key",
 ]
