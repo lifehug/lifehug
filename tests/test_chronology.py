@@ -226,6 +226,53 @@ class AgeBandTests(unittest.TestCase):
         self.assertIsNone(ch.from_age_band("not a date", 5, 5))
 
 
+class DayPreciseAgeArithmeticTests(unittest.TestCase):
+    """A day-precise birth keeps its calendar precision through age arithmetic
+    (v255): "at 39" is the single frame `[birthday_39, birthday_40)`, never a
+    year-only span that can straddle a later decade boundary."""
+
+    def test_at_39_is_one_calendar_year_not_a_straddling_pair(self):
+        record = ch.from_age("1981-07-11", "39")
+        self.assertEqual((record.earliest, record.latest), ("2020-07-11", "2021-07-10"))
+        self.assertEqual(record.confidence, "inferred")
+        self.assertEqual(record.basis, "age")
+        self.assertEqual(record.anchors, ("birth",))
+        self.assertIn(record.best, ("2020~", "2021~"))
+
+    def test_when_i_was_19(self):
+        record = ch.from_age("1981-07-11", "19")
+        self.assertEqual((record.earliest, record.latest), ("2000-07-11", "2001-07-10"))
+
+    def test_hedged_widens_by_a_year_on_each_side_of_the_calendar_span(self):
+        record = ch.from_age("1981-07-11", "about 39")
+        self.assertEqual((record.earliest, record.latest), ("2019-07-11", "2022-07-10"))
+        self.assertEqual(record.confidence, "approximate")
+
+    def test_two_ages_take_the_union_before_widening(self):
+        record = ch.from_age("1981-07-11", "8 or 9")
+        self.assertEqual((record.earliest, record.latest), ("1989-07-11", "1991-07-10"))
+
+    def test_a_29_february_birthday_clamps_like_add_years_does(self):
+        record = ch.from_age("1980-02-29", "1")
+        # 1981 has no 29 February; the birthday clamps to the 28th, exactly
+        # as `add_years` clamps it — this is that same clamp, not a new one.
+        self.assertEqual(record.earliest, "1981-02-28")
+        self.assertTrue(
+            any(p.get("source") == ch.AGE_FRAME_CLAMP_RULE for p in record.provenance),
+            record.provenance,
+        )
+
+    def test_a_month_only_birth_keeps_the_year_level_approximation(self):
+        # No day to build a calendar span from — falls back to the existing
+        # year-only rule rather than inventing day precision it doesn't have.
+        record = ch.from_age("1981-07", "39")
+        self.assertEqual((record.earliest, record.latest), ("2020", "2021"))
+
+    def test_a_bare_year_birth_is_unaffected(self):
+        record = ch.from_age("1981", "39")
+        self.assertEqual((record.earliest, record.latest), ("2020", "2021"))
+
+
 class AnchorArithmeticTests(unittest.TestCase):
     def setUp(self):
         self.mesa = ch.parse_edtf("1984/1990")

@@ -215,7 +215,15 @@ class RelativeAndInferredTime(unittest.TestCase):
         self.assertEqual(value["basis"], "age")
         self.assertEqual(value["confidence"], "approximate")
         # A band, and a wide one: the hedge earns a year on each side.
-        self.assertEqual((value["earliest"], value["latest"]), ("1983", "1986"))
+        # v255: the birthday here (1972-03-08) is day-precise, so the band's
+        # BOUNDS are now the exact calendar span around it rather than the
+        # old bare-year "1983".."1986" — that year-only pair could straddle
+        # a later frame boundary a day-precise birthday never needs to
+        # straddle. The test's own point survives unweakened: `best` still
+        # stays a fuzzy `~` YEAR, never a derived day (the assertion right
+        # below), which is what "never a birthday-derived day" means here.
+        self.assertEqual((value["earliest"], value["latest"]),
+                         ("1983-03-08", "1986-03-07"))
         self.assertNotRegex(value["best"] or "", r"^\d{4}-\d{2}-\d{2}$")
 
     def test_an_age_without_a_birthday_stays_unplaced_and_asks_for_the_anchor(self):

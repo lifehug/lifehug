@@ -767,10 +767,28 @@ def from_age_band(birth_date: object, low: object, high: object, *,
     re-parses — is a second age rule wearing a disguise, and the package has
     one age rule (recurring-defect doctrine).
 
-    Someone who is age *a* occupies ``[birth_year + a, birth_year + a + 1]``;
-    an ``approximate`` band is a rounded one, so it widens by a year on each
+    Someone who is age *a* occupies ``[birthday_a, birthday_(a+1))`` — the
+    span from the birthday on which they turned *a* up to (not including) the
+    birthday on which they turn *a + 1*. When the birth record only carries a
+    YEAR (or a month), that span is approximated at year grain —
+    ``[birth_year + a, birth_year + a + 1]`` — because there is no day to
+    build a calendar span from. But when the birth record carries day
+    precision, the year-only approximation is wrong in a way that matters: it
+    can straddle a later frame boundary that the true, day-precise span never
+    crosses (a person born 1981-07-11 who is "39" is entirely within
+    2020-07-11..2021-07-10, never touching 2021-07-11 onward, but the
+    year-only arithmetic reports 2020..2021 as if it might). So a day-precise
+    birth computes the span by calendar arithmetic on the birthday itself,
+    via :func:`add_years` — the package's other, grain-preserving age
+    arithmetic — rather than by year subtraction. A month-only birth keeps
+    the year-level approximation: a month cannot anchor a day-precise span
+    any more than a bare year can, and the extra complexity of a month-grain
+    span buys nothing no caller needs today.
+
+    An ``approximate`` band is a rounded one, so it widens by a year on each
     side (Huttenlocher, Hedges & Bradburn 1990); a band spanning two ages
-    takes the union before widening. The band's own domain is
+    takes the union before widening. The widened (or day-precise) earliest
+    bound is never allowed before the birth itself. The band's own domain is
     :func:`parse_age`'s (see :func:`_age_band`), so a band that parser could
     never have produced comes back ``None`` rather than an invented interval.
     """
@@ -784,6 +802,66 @@ def from_age_band(birth_date: object, low: object, high: object, *,
     if band is None:
         return None
     min_age, max_age = band
+
+    day_precise = (
+        birth.granularity == "day"
+        and bool(birth.earliest)
+        and len(str(birth.earliest).split("-")) == 3
+    )
+    earliest_token: str | None = None
+    latest_token: str | None = None
+    extra_provenance: tuple[dict, ...] = ()
+    if day_precise:
+        turned_min = add_years(birth, min_age)
+        turned_next = add_years(birth, max_age + 1)
+        if turned_min is None or turned_next is None or not (
+            turned_min.earliest and turned_next.earliest
+        ):
+            day_precise = False
+        else:
+            earliest_token = turned_min.earliest
+            latest_token = day_before(turned_next.earliest)
+            if latest_token is None:
+                day_precise = False
+            else:
+                for rec in (turned_min, turned_next):
+                    for prov in rec.provenance:
+                        if prov not in extra_provenance:
+                            extra_provenance += (prov,)
+                if approximate:
+                    shifted_lo, hit_lo = _shift_iso(earliest_token, -1)
+                    shifted_hi, hit_hi = _shift_iso(latest_token, 1)
+                    if shifted_lo is not None:
+                        earliest_token = shifted_lo
+                    if shifted_hi is not None:
+                        latest_token = shifted_hi
+                    if (hit_lo or hit_hi) and not any(
+                        prov.get("source") == AGE_FRAME_CLAMP_RULE for prov in extra_provenance
+                    ):
+                        extra_provenance += (
+                            {"claim": _CLAMP_CLAIM, "basis": "age", "source": AGE_FRAME_CLAMP_RULE},
+                        )
+                if earliest_token < birth.earliest:
+                    earliest_token = birth.earliest
+
+    provenance = ({"claim": claim, "basis": "age"},) if claim else ()
+    provenance = provenance + extra_provenance
+
+    if day_precise and earliest_token is not None and latest_token is not None:
+        lo_year = int(earliest_token[:4])
+        hi_year = int(latest_token[:4])
+        mid = (lo_year + hi_year) // 2
+        return DateRecord(
+            best=f"{mid}~",
+            earliest=earliest_token,
+            latest=latest_token,
+            granularity="year" if earliest_token == latest_token else "range",
+            confidence="approximate" if approximate else "inferred",
+            basis="age",
+            anchors=("birth",),
+            provenance=provenance,
+        )
+
     lo = birth_year + min_age
     hi = birth_year + max_age + 1
     if approximate:
@@ -799,7 +877,7 @@ def from_age_band(birth_date: object, low: object, high: object, *,
         confidence="approximate" if approximate else "inferred",
         basis="age",
         anchors=("birth",),
-        provenance=({"claim": claim, "basis": "age"},) if claim else (),
+        provenance=provenance,
     )
 
 

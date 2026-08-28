@@ -661,6 +661,17 @@ the highest-yield rule in the system because age statements are the most
 common way people volunteer time ("I was about five," "in my twenties") and
 because it costs nothing after the birth date is known.
 
+> **2026-08-28 (v255) precision note:** the year-only span above is what a
+> bare-year or month-only birthday still gets — there is no day to build a
+> calendar span from. A DAY-precise birthday now occupies the exact calendar
+> span `[birthday_a, birthday_(a+1))` instead: the year-only approximation
+> could straddle a later decade boundary the true span never crosses (a
+> person born 1981-07-11 who is "39" is entirely within
+> 2020-07-11..2021-07-10, but the year-only arithmetic reported 2020..2021 as
+> if it might reach into 2021-07-11 onward) — found on the founder's own
+> vault (lifehug#280). See `chronology.from_age_band`'s docstring for the
+> exact rule.
+
 ### 3.2 Grade → year (from schooling), worked
 
 This is the owner's example and it deserves the arithmetic in full. Given a
