@@ -201,6 +201,22 @@ question/id shapes, instead of every module guessing the alphabet).
 Per-instance regression tests stop regressions; only a centralized
 definition stops the next module from guessing wrong.
 
+### Model tiering (owner-set, 2026-08-28)
+
+Builders use the LOWEST model that will do the task accurately with ≥90% confidence. **Haiku** — pure mechanics: CI re-dispatch, opening a PR from a finished branch, rebases whose only conflicts are `scripts/ci/api_shards.json` / the Makefile `.PHONY` line, background CI watchers, evidence comments from a written report. **Sonnet** — bounded code work with a spec and tests to check against: test fixes, fixture regeneration, runbook/doc edits, rebases with code conflicts, small already-contracted features. **Opus** — only where a wrong answer is expensive to detect: fold/validator/substrate logic, root-causing unknown failures, anything that writes to the founder vault. Fable orchestrates and never builds. Keep at most two builders running concurrently when usage matters. Use free background shell watchers to wait on CI instead of polling; the orchestrator reads a verdict once and merges. (Supersedes the earlier "Opus plans, Haiku/Sonnet implement" note where they conflict.)
+
+
+### Waiting on CI (owner-set, 2026-08-28)
+
+Never poll CI from the model. Start a background shell watcher (`run_in_background`) that sleeps and checks `gh run list` itself, and wakes the orchestrator only when a run reaches a verdict; the orchestrator then reads that verdict ONCE and merges or re-dispatches. Agents do not watch CI at all — they dispatch and report; only the orchestrator cancels runs.
+
+
+### Model tiering (owner-set, 2026-08-28)
+
+Builders use the LOWEST model that will do the task accurately with ≥90% confidence. **Haiku** — pure mechanics: CI re-dispatch, opening a PR from a finished branch, rebases whose only conflicts are `scripts/ci/api_shards.json` / the Makefile `.PHONY` line, background CI watchers, evidence comments from a written report. **Sonnet** — bounded code work with a spec and tests to check against: test fixes, fixture regeneration, runbook/doc edits, rebases with code conflicts, small already-contracted features. **Opus** — only where a wrong answer is expensive to detect: fold/validator/substrate logic, root-causing unknown failures, anything that writes to the founder vault. Fable orchestrates and never builds. Keep at most two builders running concurrently when usage matters. Use free background shell watchers to wait on CI instead of polling; the orchestrator reads a verdict once and merges. (Supersedes the earlier "Opus plans, Haiku/Sonnet implement" note where they conflict.)
+
+
+
 ## Cross-Medium Parity (owner-set, 2026-08-05)
 
 Lifehug is one product in multiple mediums: this local companion, the hosted
