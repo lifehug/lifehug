@@ -1,9 +1,11 @@
 """v195 / ADR 0024 — unknowns, leverage, keystones, and the deferred memory.
 
 Every gap becomes a Play-able unknown carrying the playbook's cheapest probe;
-a dated hole between dated eras is the new `era_gap` kind; leverage counts
-what one anchor would resolve; keystones are capped at two; and a deferred
-unknown goes quiet without ever being counted as outstanding.
+leverage counts what one anchor would resolve; keystones are capped at two;
+and a deferred unknown goes quiet without ever being counted as outstanding.
+`era_gap` (a dated hole between dated eras) is RETIRED (eras design O-E2,
+§5.2) along with the source-membership era-dating it was measured against —
+see `tests/test_eras_e2.py`.
 
 Synthetic data only; NEVER references ~/Workspace/dave.
 """
@@ -105,6 +107,10 @@ class UnknownsFixture(unittest.TestCase):
             ]}), encoding="utf-8")
         (root / "state" / "classifications" / "answers-a1.json").write_text(json.dumps({
             "source_path": "answers/A1.md",
+            # eras O-E2: the classifier's OWN era tag (rung 2) is what places
+            # these two moments in Childhood now — the retired source-membership
+            # mechanism (citing A1 on the era page) is no longer consulted.
+            "time_periods": [{"era": "childhood"}],
             "events": [
                 {"title": "The move to Mesa", "description": "We moved to Mesa.",
                  "when_hint": "", "anchor": None, "date": {"stated": "1984"}},
@@ -205,36 +211,26 @@ class UnknownRecordTests(UnknownsFixture):
         self.assertEqual(len(offered), 3)
         self.assertEqual(tl.UNKNOWNS_PAGE_CAP, 30)
 
-    def test_an_era_gap_is_emitted_between_two_dated_eras(self):
+    def test_era_gap_is_retired(self):
+        """eras O-E2, §5.2: the mechanism, the kind, and the function are all
+        gone — never a silent re-introduction."""
+        self.assertNotIn("era_gap", tl.UNKNOWN_KINDS)
+        self.assertFalse(hasattr(tl, "era_gaps"))
+        self.assertFalse(hasattr(tl, "MIN_ERA_GAP_YEARS"))
         keys = {row["key"] for row in self.data["unknowns"]}
-        self.assertIn("era_gap:childhood:my-30s", keys)
-        row = next(r for r in self.data["unknowns"] if r["key"] == "era_gap:childhood:my-30s")
-        self.assertEqual(row["years"], [1991, 2001])
-        self.assertIn("1991–2001", row["label"])
-
-    def test_no_era_gap_when_a_neighbour_is_undated(self):
-        periods = [{"slug": "a", "name": "A", "date": chrono.parse_edtf("1984/1990")},
-                   {"slug": "b", "name": "B", "date": None}]
-        self.assertEqual(tl.era_gaps(periods, {}), [])
-
-    def test_no_era_gap_when_the_eras_touch(self):
-        periods = [{"slug": "a", "name": "A", "date": chrono.parse_edtf("1984/1990")},
-                   {"slug": "b", "name": "B", "date": chrono.parse_edtf("1991/1999")}]
-        self.assertEqual(tl.era_gaps(periods, {}), [])
-
-    def test_an_occupied_hole_is_not_a_gap(self):
-        periods = [{"slug": "a", "name": "A", "date": chrono.parse_edtf("1984/1990")},
-                   {"slug": "b", "name": "B", "date": chrono.parse_edtf("2002/2012")}]
-        lineup = {"a": [{"date": chrono.parse_edtf("1995"), "source_short": "A9"}]}
-        self.assertEqual(tl.era_gaps(periods, lineup), [])
+        self.assertFalse({k for k in keys if k.startswith("era_gap:")})
 
 
 class LeverageTests(UnknownsFixture):
     def test_a_period_anchor_resolves_its_own_unknowns_and_the_eras_it_touches(self):
+        """eras O-E2, §5.2: `era_gap` reach is retired along with the kind —
+        `period:childhood` is still a real dependency-index anchor, and its
+        leverage is HONESTLY zero once its own two moments are already dated
+        (v205: a dated moment bounds no other moment, and there is no longer
+        an `era_gap` hole for it to close)."""
         index = tl.dependency_index(self.data)
         self.assertIn("period:childhood", index)
-        self.assertIn("era_gap:childhood:my-30s", index["period:childhood"])
-        self.assertGreater(tl.leverage("period:childhood", index), 0)
+        self.assertEqual(tl.leverage("period:childhood", index), 0)
 
     def test_leverage_of_an_unknown_anchor_is_zero(self):
         self.assertEqual(tl.leverage("period:nowhere", tl.dependency_index(self.data)), 0)
@@ -297,14 +293,10 @@ class ProbeGoldenTests(unittest.TestCase):
             "Were you living in the house on Third Street before or after the "
             "move to San Diego?",
         ),
-        "era_gap": (
-            {"kind": "era_gap", "label": "1991–2001 — nothing placed here yet.",
-             "between": ["the-yucaipa-years", "the-denver-years"]},
-            "What was going on in your life in the stretch between the yucaipa "
-            "years and the denver years?",
-            "Between the yucaipa years and the denver years — where were you "
-            "living by then?",
-        ),
+        # `era_gap` is RETIRED from `UNKNOWN_KINDS` (eras design O-E2, §5.2);
+        # `timeline_interaction.KIND_OPENERS["era_gap"]` stays as a dormant
+        # template (a generic dict-kind exercise other suites still probe),
+        # but it is no longer a live unknown kind and has no golden here.
         "date_contradiction": (
             {"kind": "date_contradiction", "label": "the christening photograph"},
             "Two accounts put the christening photograph in different places in "

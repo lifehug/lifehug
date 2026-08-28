@@ -153,9 +153,13 @@ Whatever came next.
             encoding="utf-8")
 
     def write_classifications(self, events=None):
+        # eras O-E2: `time_periods` is the classifier's OWN era tag (rung 2)
+        # that places these moments now — the retired source-membership
+        # mechanism (citing A1/A2/A4 on an era page) is no longer consulted.
         payloads = {
             "answers-a1.json": {
                 "source_path": "answers/A1.md",
+                "time_periods": [{"era": "childhood"}],
                 "events": events if events is not None else [
                     {"title": "Grandpa's two-page letter",
                      "description": "Grandpa sent a two-page letter about the farm.",
@@ -168,6 +172,7 @@ Whatever came next.
             },
             "answers-a2.json": {
                 "source_path": "answers/A2.md",
+                "time_periods": [{"era": "childhood"}],
                 "events": [
                     {"title": "The bike with no brakes",
                      "description": "I rode a bike with no brakes down the hill.",
@@ -176,6 +181,7 @@ Whatever came next.
             },
             "answers-a4.json": {
                 "source_path": "answers/A4.md",
+                "time_periods": [{"era": "My 30s"}],
                 "events": [
                     {"title": "The coast house",
                      "description": "We bought the coast house.",

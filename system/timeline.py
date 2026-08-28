@@ -47,6 +47,7 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
+import classify_story  # noqa: E402
 import cross_dating  # noqa: E402
 import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
@@ -591,61 +592,31 @@ def resolve_event_dates(events: list[dict], anchors: dict | None = None,
     return events
 
 
-# Era keywords per period slug, for placing events whose classification names
-# an era ("early childhood", "high school", "my 20s"...). Membership via the
-# source answer's period sources is tried FIRST; this is the fallback.
+# Era keywords per period slug, for placing an UNDATED event whose
+# classification names an era ("early childhood", "high school", "my 20s"...).
+# This is rung 3 — the last resort, tried only when the event carries no date
+# and names no active era by name (eras design §5.1). `my-20s`'s `"mission"`
+# row and `my-40s`'s `"present"`/`"today"`/`"current"` rows are DELETED (O-E2):
+# they are era NAMES and deixis, not era language, and they were two of the
+# founder's own mis-placements (design §1 item 1).
 _PERIOD_KEYWORDS = {
     "childhood": ("childhood", "child", "kid", "elementary", "young boy", "young girl"),
     "my-teens": ("teen", "middle school", "junior high", "adolescen"),
     "high-school": ("high school",),
     "college": ("college", "university", "school of business", "student"),
-    "my-20s": ("20s", "twenties", "mission", "newlywed", "early adult"),
+    "my-20s": ("20s", "twenties", "newlywed", "early adult"),
     "my-30s": ("30s", "thirties"),
-    "my-40s": ("40s", "forties", "midlife", "present", "today", "current"),
+    "my-40s": ("40s", "forties", "midlife"),
 }
 
-
-_ERA_STOPWORDS = {
-    "the", "a", "an", "of", "in", "at", "to", "and", "or", "era", "years",
-    "year", "period", "time", "his", "her", "their", "my", "early", "late",
-    "mid", "days", "life", "stage", "approximately", "approx", "around",
-}
-
-
-def _era_tokens(text: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9]+", text.lower())
-            if len(t) > 2 and t not in _ERA_STOPWORDS}
-
-
-def learned_era_vocabulary(periods: list[dict], events: list[dict]) -> dict[str, set[str]]:
-    """Each period's era-language, LEARNED from the classifications of its own
-    member sources — the classifier described answers/H1.md with era 'founding
-    Etherfuse', and H1 belongs to a period page, so that period now understands
-    'founding'/'etherfuse'. Fully generic (no hardcoded user terms) and it gets
-    smarter as more sources classify."""
-    by_source: dict[str, set[str]] = {}
-    for event in events:
-        tokens = set()
-        for era in event["eras"]:
-            tokens |= _era_tokens(era)
-        if tokens:
-            by_source.setdefault(event["source"], set()).update(tokens)
-    vocab: dict[str, set[str]] = {}
-    for period in periods:
-        tokens = _era_tokens(period["name"])
-        for source in period["sources"]:
-            tokens |= by_source.get(source, set())
-        vocab[period["slug"]] = tokens
-    # Distinctiveness filter: a token appearing in several periods' vocabularies
-    # is era-ambiguous (an arc-spanning answer poisons every period that cites
-    # it) — only tokens UNIQUE to one period count as placement evidence.
-    token_owners: dict[str, int] = {}
-    for tokens in vocab.values():
-        for token in tokens:
-            token_owners[token] = token_owners.get(token, 0) + 1
-    for slug in vocab:
-        vocab[slug] = {t for t in vocab[slug] if token_owners[t] == 1}
-    return vocab
+#: `learned_era_vocabulary` / `_era_tokens` / `_ERA_STOPWORDS` and the
+# source-membership rung (`event["source"] in period["sources"]`) are GONE
+# (eras design O-E2, §1 items 1-2). Both were a membership rule with no
+# stated fact behind it: an era silently learned the vocabulary of whatever
+# the classifier said about ANY source cited on its page, and a moment
+# entered an era because its SOURCE was cited there, whether or not the
+# moment's own words ever named that era. `tests/test_eras_e2.py` guards
+# against either name reappearing anywhere in `system/`.
 
 
 # ---------------------------------------------------------------------------
@@ -784,13 +755,36 @@ def save_placement(key: str, source: str, description: str, period: str,
     placement's own dated claim, stored beside the pin so the timeline can
     render a chip without waiting for reclassification. Absent `date` the
     record is byte-identical to v194's.
+
+    eras O-E2 (design §5.1, rung 0): a pin whose OWN date cannot be inside
+    the age frame its `period` maps to is refused at filing —
+    `ValueError("placement_outside_frame: ...")` — never stored silently
+    contradicting the arithmetic the fold trusts completely. `period` is
+    checked against `cross_dating.age_frame_band_of`; a period that is not an
+    age frame (a named era) is unaffected — that containment is E3's.
     """
+    parsed = chrono.from_dict(date) if date is not None else None
+    if parsed is not None:
+        band = cross_dating.age_frame_band_of(period)
+        if band is not None:
+            birth = None
+            with contextlib.suppress(Exception):
+                birth = landmark_birth_date()
+            if birth is not None:
+                frames = ()
+                with contextlib.suppress(Exception):
+                    frames = cross_dating.age_frames(birth, as_of=now_utc())
+                frame = next((f for f in frames if f.band == band), None)
+                if frame is not None and not cross_dating.frames_touching((frame,), parsed):
+                    raise ValueError(
+                        f"placement_outside_frame: {description!r} ({date!r}) "
+                        f"does not fall inside {period}'s age frame"
+                    )
     data = load_placements()
     data["placements"] = [p for p in data["placements"] if p.get("key") != key]
     record = {"key": key, "source": source, "description": description,
               "period": period, "when_hint": when_hint, "note": note,
               "correction": correction, "placed_at": now_utc()}
-    parsed = chrono.from_dict(date) if date is not None else None
     if parsed is not None:
         record["date"] = parsed.to_dict()
     data["placements"].append(record)
@@ -1059,46 +1053,143 @@ def _keyword_slot(haystack: str, periods: list[dict]) -> str | None:
     return None
 
 
-def heuristic_slot(event: dict, periods: list[dict],
-                   vocab: dict[str, set[str]]) -> str | None:
-    """Where the system would place this event WITHOUT a manual pin.
-      1. The event's OWN when_hint is the most specific signal — an
-         arc-spanning answer contributes events across many eras, so the
-         per-event time-words outrank the answer's period membership
-         ("a month before I graduated college" → college, even when the
-         source answer sits on the high-school page).
-      2. Source membership: the answer belongs to a period page.
-      3. The classification's era text.
-      4. Learned distinctive era-vocabulary (≥2 shared tokens)."""
-    slot = _keyword_slot(event["when_hint"].lower(), periods) if event["when_hint"] else None
-    if slot is None:
-        for period in periods:
-            if event["source"] in period["sources"]:
-                slot = period["slug"]
-                break
-    if slot is None:
-        slot = _keyword_slot(" ".join(event["eras"]), periods)
-    if slot is None:
-        event_tokens = _era_tokens(" ".join(event["eras"] + [event["when_hint"].lower()]))
-        best_slug, best_overlap = None, 1
-        for period in periods:
-            overlap = len(event_tokens & vocab.get(period["slug"], set()))
-            if overlap > best_overlap:
-                best_slug, best_overlap = period["slug"], overlap
-        slot = best_slug
-    return slot
+def _era_label_match(haystack: str, periods: list[dict], eras: object = ()) -> str | None:
+    """The most specific ACTIVE era label/alias the event's own language names.
+
+    Whole-word only (the same conservatism as `cross_dating._names`), so
+    "college" inside "collegial" never matches, and the LONGEST matching label
+    wins when more than one does ("high school" over an alias that is merely
+    "school"). `eras` is O-E3's forward seam for the named-era container
+    records that do not exist yet; `periods` (the legacy roster) is what
+    actually carries labels today, and matching is identical either way.
+    """
+    best_slug, best_len = None, 0
+
+    def consider(label: object, slug: object) -> None:
+        nonlocal best_slug, best_len
+        text = str(label or "").strip()
+        slug_text = str(slug or "").strip()
+        if len(text) < 3 or not slug_text:
+            return
+        if re.search(rf"(?<!\w){re.escape(text.lower())}(?!\w)", haystack):
+            if len(text) > best_len:
+                best_slug, best_len = slug_text, len(text)
+
+    for period in periods:
+        consider(period.get("name"), period.get("slug"))
+        for alias in period.get("aliases") or ():
+            consider(alias, period.get("slug"))
+    for era in eras or ():
+        if not isinstance(era, dict):
+            continue
+        consider(era.get("name"), era.get("slug"))
+        for alias in era.get("aliases") or ():
+            consider(alias, era.get("slug"))
+    return best_slug
+
+
+def heuristic_slot(event: dict, periods: list[dict], *, frames: object = (),
+                   eras: object = (), anchors: dict | None = None,
+                   birth_date: object = None) -> tuple[str | None, dict]:
+    """Where the system would place this event WITHOUT a manual pin, and WHY
+    (eras design §5.1). Four rungs, and the two removed mechanisms — source
+    membership and the learned era-vocabulary — do not come back:
+
+      1. DATED — `cross_dating.frame_for` reads the event's own date against
+         the age frames; the roster slug that aliases onto the winning band
+         places it. ONE definition, shared with the fold (`O-E2f` parity).
+      2. NAMED-ERA MEMBERSHIP — the event's OWN language (`when_hint`, then
+         the classifier's `eras`) names an active era label or alias,
+         whole-word, with the subject veto.
+      3. UNDATED — an era-text keyword match (`_PERIOD_KEYWORDS`), same veto.
+      4. unplaced.
+
+    `anchors` / `birth_date` are accepted for the caller's convenience (a
+    future per-subject age-arithmetic join reads them) and are not consulted
+    by this function today; the subject veto below already stops an ownerless
+    age statement from seeding a placement off the owner's birthday.
+
+    Returns `(slug | None, placement_reason)`. `placement_reason` always
+    carries `rung` (`None` when nothing fired) and `evidence`; `frame_by` /
+    `era_by` / `subject_check` appear only where they applied.
+    """
+    del anchors, birth_date  # accepted, not yet consulted — see docstring
+    text = str(event.get("when_hint") or "")
+    subject_blocked = cross_dating.age_statement_is_third_person(text)
+
+    # Rung 1 — dated: frame arithmetic decides the band. Never source
+    # membership, never vocabulary.
+    date = event.get("date")
+    if date is not None and frames:
+        band = cross_dating.frame_for(frames, date)
+        if band is not None:
+            live_slugs = {p["slug"] for p in periods}
+            slug = next(
+                (s for s in cross_dating.age_frame_legacy_slugs().get(band, ())
+                 if s in live_slugs),
+                None,
+            )
+            if slug is not None:
+                return slug, {"rung": 1, "evidence": "date", "frame_by": "date"}
+
+    haystack = " ".join([text, " ".join(event.get("eras") or ())]).lower()
+
+    # Rung 2 — named-era membership: the event's OWN language, with the veto.
+    if not subject_blocked:
+        slug = _era_label_match(haystack, periods, eras)
+        if slug is not None:
+            return slug, {"rung": 2, "evidence": "era_language",
+                          "era_by": "event_language"}
+
+    # Rung 3 — undated era text, same veto.
+    if not subject_blocked:
+        slug = _keyword_slot(haystack, periods)
+        if slug is not None:
+            return slug, {"rung": 3, "evidence": "era_text", "era_by": "era_text"}
+
+    reason = {"rung": None, "evidence": None}
+    if subject_blocked:
+        reason["subject_check"] = "third_person_age"
+    return None, reason
+
+
+def _placement_provenance_summary(reason: dict) -> str:
+    """One sentence for the expanded card / eye pane (eras design §5.1) naming
+    WHY a row landed where it did — every legacy row carries one, placed or
+    not."""
+    rung = reason.get("rung")
+    if rung == 0:
+        return "You placed this moment yourself."
+    if rung == 1:
+        return "Placed by its own date, against your age frames."
+    if rung == 2:
+        return "Placed because the moment names this era in its own words."
+    if rung == 3:
+        return "Placed by era language in its classification."
+    if reason.get("subject_check") == "third_person_age":
+        return "Not placed — the age statement names someone else, not you."
+    return "Not placed yet — no date, era language, or pin points anywhere."
 
 
 def place_events(events: list[dict], periods: list[dict],
-                 placements: dict | None = None) -> tuple[dict[str, list[dict]], list[dict]]:
+                 placements: dict | None = None, *, frames: object = (),
+                 eras: object = (), anchors: dict | None = None,
+                 birth_date: object = None,
+                 ) -> tuple[dict[str, list[dict]], list[dict]]:
     """({period_slug: [events...]}, unplaced). Placement order:
-      0. the owner's manual placement (content-keyed overlay) — always wins
-      1-4. `heuristic_slot` (when_hint keywords → source membership → era
-         text → learned era-vocabulary), then an explicit unplaced bucket —
-         never forced."""
+      0. the owner's manual placement (content-keyed overlay) — always wins,
+         and is validated against the frames at FILING time (`save_placement`
+         refuses a pin whose date cannot be inside its period's frame), never
+         re-checked here.
+      1-3. `heuristic_slot` (date → frame arithmetic; named-era language; era
+         text), then an explicit unplaced bucket — never forced.
+
+    Every row carries `placement_reason` (the rung that fired, its evidence,
+    and — for a manual row — `rung: 0`) and a one-sentence
+    `provenance_summary`; `O-E2f`'s parity test reads exactly this field.
+    """
     placed: dict[str, list[dict]] = {p["slug"]: [] for p in periods}
     unplaced: list[dict] = []
-    vocab = learned_era_vocabulary(periods, events)
     # v215: the join is `resolve_placements` — the ONE pairing of a stored
     # placement with the live event it is about, repair included.
     manual_by_key = {}
@@ -1106,6 +1197,10 @@ def place_events(events: list[dict], periods: list[dict],
         manual_by_key = {key: row
                          for row, key in resolve_placements(placements, events)
                          if key and row.get("period") in placed}
+
+    def auto_slot(event: dict) -> tuple[str | None, dict]:
+        return heuristic_slot(event, periods, frames=frames, eras=eras,
+                              anchors=anchors, birth_date=birth_date)
 
     for event in events:
         # 0) The owner said so — manual placement outranks every heuristic.
@@ -1115,7 +1210,7 @@ def place_events(events: list[dict], periods: list[dict],
                 # Redundancy check runs on the ORIGINAL event: once the
                 # classification itself places it here (the loop caught up),
                 # the pin retires on the next weekly pass (v105).
-                redundant = heuristic_slot(event, periods, vocab) == manual["period"]
+                redundant = auto_slot(event)[0] == manual["period"]
                 event = dict(event)
                 event["placement"] = "manual"
                 event["placement_key"] = manual["key"]
@@ -1129,9 +1224,15 @@ def place_events(events: list[dict], periods: list[dict],
                         event["date"] = pinned
                 if manual.get("note"):
                     event["placement_note"] = manual["note"]
+                event["placement_reason"] = {"rung": 0, "evidence": "manual"}
+                event["provenance_summary"] = _placement_provenance_summary(
+                    event["placement_reason"])
                 placed[manual["period"]].append(event)
                 continue
-        slot = heuristic_slot(event, periods, vocab)
+        slot, reason = auto_slot(event)
+        event = dict(event)
+        event["placement_reason"] = reason
+        event["provenance_summary"] = _placement_provenance_summary(reason)
         if slot is None:
             unplaced.append(event)
         else:
@@ -1169,7 +1270,13 @@ def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
         return []
     periods = load_periods()
     events = load_events()
-    vocab = learned_era_vocabulary(periods, events)
+    birth_date = None
+    with contextlib.suppress(Exception):
+        birth_date = landmark_birth_date()
+    frames = ()
+    if birth_date is not None:
+        with contextlib.suppress(Exception):
+            frames = cross_dating.age_frames(birth_date, as_of=now_utc())
     events_by_key = {placement_key(e): e for e in events}
     # v215: the same join every other reader uses, so a repaired pin retires
     # when the loop catches up with it instead of hanging around forever.
@@ -1179,8 +1286,11 @@ def retire_redundant_placements(dry_run: bool = False) -> list[dict]:
     retired: list[dict] = []
     for pin in data["placements"]:
         event = events_by_key.get(joined.get(id(pin)) or "")
+        auto_slot = (heuristic_slot(event, periods, frames=frames,
+                                    birth_date=birth_date)[0]
+                    if event is not None else None)
         if (event is not None and pin.get("period") in period_slugs
-                and heuristic_slot(event, periods, vocab) == pin["period"]):
+                and auto_slot == pin["period"]):
             retired.append({**pin, "retired_at": now_utc(),
                             "retired_reason": "loop caught up — places itself"})
         else:
@@ -1227,51 +1337,16 @@ def compute_gaps(periods: list[dict],
     if unplaced_entities:
         gaps.append({"kind": "unplaced_entities", "period": None,
                      "message": f"{len(unplaced_entities)} page(s) share no sources with any period."})
-    gaps.extend(era_gaps(periods, event_lineup))
     return gaps
 
 
-#: An era gap has to be a real hole, not two eras that touch.
-MIN_ERA_GAP_YEARS = 1
-
-
-def era_gaps(periods: list[dict], event_lineup: dict[str, list[dict]]) -> list[dict]:
-    """Dated holes BETWEEN dated eras — "2000–2006 · nothing placed here yet".
-
-    The one genuinely new gap kind (ADR 0024). It can only exist once eras
-    carry dates, which is why it could not exist before v195: with no dates
-    there is no measurable hole, only an unordered list. Emitted when two
-    ADJACENT eras are both dated, the hole between them is at least
-    :data:`MIN_ERA_GAP_YEARS` wide, and no dated moment sits inside it.
-    """
-    dated = [p for p in periods if chrono.year_of(p.get("date")) is not None]
-    out: list[dict] = []
-    for previous, following in zip(dated, dated[1:]):
-        last = chrono.year_of(previous.get("date"), end=True)
-        first = chrono.year_of(following.get("date"))
-        if last is None or first is None:
-            continue
-        start, end = last + 1, first - 1
-        if end - start + 1 < MIN_ERA_GAP_YEARS:
-            continue
-        occupied = any(
-            start <= (chrono.year_of(event.get("date")) or -9999) <= end
-            for rows in event_lineup.values() for event in rows
-        )
-        if occupied:
-            continue
-        span = f"{start}" if start == end else f"{start}–{end}"
-        out.append({
-            "kind": "era_gap",
-            "period": None,
-            "between": [previous["slug"], following["slug"]],
-            "years": [start, end],
-            "message": f"{span} — nothing placed here yet, between "
-                       f"{previous['name']} and {following['name']}.",
-            "hint": "Anchor it against something already dated — where were you "
-                    "living, what work were you doing — never a calendar year first.",
-        })
-    return out
+# `era_gaps` / `MIN_ERA_GAP_YEARS` are RETIRED (eras design O-E2, §5.2). A
+# dated hole between two named eras was a gap kind measured against the same
+# era-dates the founder's own eras were wrongly dated by (source membership,
+# §1 item 1) — retiring the mechanism that dated eras from their members makes
+# the hole it measured unmeasurable the same way, and `residence_gap` (the
+# tiling chain in `landmarks_interaction.residence_gaps`) is untouched: it
+# never depended on this.
 
 
 # ---------------------------------------------------------------------------
@@ -1400,7 +1475,8 @@ UNKNOWN_KINDS = (
     "moment",
     "period_bound",
     "place_span",
-    "era_gap",
+    # `era_gap` is RETIRED (eras design O-E2, §5.2) with `era_gaps()` above —
+    # `residence_gap` below is a different tiling chain and is untouched.
     "date_contradiction",
     # v202 (family-landmark, owner rulings 4 and 5): the landmark set's own
     # concrete unknowns — ONE half-filled subject ("What year was Jackie
@@ -1429,8 +1505,6 @@ UNKNOWNS_PAGE_CAP = 30
 def unknown_key(gap: dict) -> str:
     """A stable, content-derived key for one unknown or gap row."""
     kind = str(gap.get("kind") or "unknown")
-    if kind == "era_gap":
-        return f"era_gap:{':'.join(str(x) for x in (gap.get('between') or []))}"
     if kind == "moment":
         return f"moment:{gap.get('period') or ''}:{gap.get('source_short') or ''}"
     if kind in ("period_bound", "place_span"):
@@ -1533,10 +1607,10 @@ def _band_span(data: dict, ref: object) -> list[int] | None:
 def _spine_hole(data: dict, slug: object) -> list[int] | None:
     """The hole an UNDATED era occupies between its dated neighbours.
 
-    `era_gaps`' own arithmetic, read for ONE era instead of between two: the
-    stretch after the last dated era before it and before the first dated era
-    after it. ``None`` when either neighbour is missing, or when the two
-    abut.
+    The retired `era_gaps`'s own arithmetic, read for ONE era instead of
+    between two: the stretch after the last dated era before it and before
+    the first dated era after it. ``None`` when either neighbour is missing,
+    or when the two abut.
     """
     periods = list(data.get("periods") or ())
     index = next((n for n, row in enumerate(periods)
@@ -1557,9 +1631,8 @@ def _spine_hole(data: dict, slug: object) -> list[int] | None:
 def _own_years(row: dict) -> list[int] | None:
     """The interval a row already carries, coerced to two ints.
 
-    `era_gap` mints its own (`era_gaps`, above) and `residence_gap` mints its
-    own as strings (`landmarks_interaction.residence_gaps`); both are the
-    honest answer for their kind and neither is recomputed here.
+    `residence_gap` mints its own (`landmarks_interaction.residence_gaps`);
+    that is the honest answer for its kind and is not recomputed here.
     """
     years = row.get("years")
     if not isinstance(years, (list, tuple)) or len(years) != 2:
@@ -1587,7 +1660,6 @@ def unknown_years(row: dict, data: dict, *, life: tuple[int, int] | None) -> lis
     | `moment` in an undated era, or unplaced | `life` — the honest floor |
     | `period_bound` | the era's derived span, else the hole between its dated neighbours on the spine, else `life` |
     | `place_span` | its band's span, else `life` |
-    | `era_gap` | unchanged — it already carries its own |
     | `date_contradiction` | the union of the disputed claims' intervals |
     | `landmark_subject`, `residence_gap` | the row's own interval where the ladder named one, else `life` |
 
@@ -1600,7 +1672,7 @@ def unknown_years(row: dict, data: dict, *, life: tuple[int, int] | None) -> lis
         return []
     floor = [int(life[0]), int(life[1])] if life else []
     kind = str(row.get("kind") or "")
-    if kind in ("era_gap", "residence_gap", "date_contradiction", "landmark_subject"):
+    if kind in ("residence_gap", "date_contradiction", "landmark_subject"):
         return _own_years(row) or floor
     if kind == "moment":
         return _band_span(data, row.get("period")) or floor
@@ -1684,13 +1756,16 @@ def unknowns(data: dict, landmarks: object = None) -> list[dict]:
             row["key"] = unknown_key(row)
             add(row)
 
-    # 4. The dated holes and the contradictions — already one subject each.
+    # 4. The contradictions — already one subject each. `era_gap` is RETIRED
+    # (eras design O-E2, §5.2): a dated hole measured against era dates that
+    # were themselves the founder's own mis-placements is not a fact worth
+    # asking about.
     gaps = list(data.get("global_gaps") or [])
     for period_gaps in (data.get("gaps_by_period") or {}).values():
         gaps.extend(period_gaps)
     for gap in gaps:
         kind = str(gap.get("kind") or "")
-        if kind not in ("era_gap", "date_contradiction"):
+        if kind not in ("date_contradiction",):
             continue
         row = {
             "kind": kind,
@@ -1767,15 +1842,13 @@ def unknown_anchor(row: object) -> str | None:
     | `place_span` | `entity:<slug>` |
     | `moment` | `event:<period>:<source_short>` |
     | `landmark_subject` | the landmark anchor key its ladder mints (`family:sibling-james:birth`, `residences-mesa`) |
-    | unplaced `moment`, `era_gap`, `date_contradiction`, `residence_gap` | ``None`` — self-only |
+    | unplaced `moment`, `date_contradiction`, `residence_gap` | ``None`` — self-only |
 
-    Two of those are deliberate honesty rather than omission. An **unplaced**
-    moment has no `event:` key to become: dating it places itself, and it may
-    close an `era_gap` it turns out to occupy — which `dependency_index`
-    already records under the event key ONCE it is placed. And a
+    One of those is deliberate honesty rather than omission. A
     **residence gap**'s answer mints a residence anchor whose slug nobody
     knows yet; naming a key for a place the person has not named would be a
-    promise with no delivery behind it.
+    promise with no delivery behind it. An **unplaced** moment has no
+    `event:` key to become either — dating it places itself.
     """
     if not isinstance(row, dict):
         return None
@@ -1865,11 +1938,11 @@ def dependency_index(data: dict) -> dict[str, set[str]]:
     * a **person** entity no longer claims the moments that share its sources
       (an arrival bounds nothing).
 
-    Each keeps the claims that ARE definitional: an era's own bounds, the
-    `era_gap`s an era or a dated moment inside it would close, the `place_span`
-    rows that fall out of a dated era's moments (`_place_span` derives a
-    residence's span from the moments that happened there), and a place's own
-    span.
+    Each keeps the claims that ARE definitional: an era's own bounds, and the
+    `place_span` rows that fall out of a dated era's moments (`_place_span`
+    derives a residence's span from the moments that happened there), and a
+    place's own span. `era_gap` is RETIRED (eras design O-E2, §5.2) along
+    with the reach it used to contribute here.
 
     v196: the keys on both sides are the CONCRETE unknown keys `unknowns()`
     emits, so leverage counts real answerable things rather than aggregate rows.
@@ -1878,12 +1951,9 @@ def dependency_index(data: dict) -> dict[str, set[str]]:
     rows = unknowns(data)
     live = {row["key"] for row in rows}
     by_period: dict[str, set[str]] = {}
-    era_touch: dict[str, set[str]] = {}
     for row in rows:
         if row.get("period"):
             by_period.setdefault(str(row["period"]), set()).add(row["key"])
-        for slug in (row.get("between") or []):
-            era_touch.setdefault(str(slug), set()).add(row["key"])
 
     event_lineup = data.get("event_lineup") or {}
     entity_lineup = data.get("entity_lineup") or {}
@@ -1908,17 +1978,16 @@ def dependency_index(data: dict) -> dict[str, set[str]]:
         # exactly what containment would bound.
         definitional = {row for row in by_period.get(slug, set())
                         if not row.startswith("moment:")}
-        index[key] = definitional | derivable.get(key, set()) | set(era_touch.get(slug, set()))
+        index[key] = definitional | derivable.get(key, set())
 
     for slug, rows_here in event_lineup.items():
         for event in rows_here:
             if event.get("date") is None:
                 continue
             key = f"event:{slug}:{event.get('source_short') or ''}"
-            # v205: a dated moment bounds no other moment. What pinning it
-            # DOWN can still do is occupy — and so close — a hole between two
-            # dated eras (`era_gaps` skips an occupied hole).
-            index[key] = set(era_touch.get(slug, set()))
+            # v205: a dated moment bounds no other moment (`era_gap` reach is
+            # retired along with the gap kind it used to close).
+            index[key] = set()
 
     place_slugs = {
         str(row.get("slug"))
@@ -2151,6 +2220,14 @@ def _scored_things(data: dict, life: tuple[int, int]) -> list[dict]:
         moment(event, None)
 
     for period in data.get("periods") or ():
+        # eras O-E2 (design §5.2): an age frame is the COORDINATE SYSTEM
+        # placement is measured against, not a thing whose OWN placement is in
+        # question — scoring it would drop the level by counting the ruler as
+        # unplaced. Legacy `periods` never carries one today (they are
+        # calculated nodes, not roster rows); the guard is explicit anyway so
+        # it stays true if that ever changes.
+        if str(period.get("kind") or period.get("event_kind") or "") == "age_frame":
+            continue
         row = dict(period)
         row.update({"kind": "period_bound", "slug": period.get("slug"),
                     "period": period.get("slug")})
@@ -2492,7 +2569,6 @@ PRECISION_TARGET_BY_KIND = {
     "person": "day",
     "event": "day",
     "moment": "day",
-    "era_gap": "year",
     "date_contradiction": "month",
 }
 
@@ -2808,11 +2884,6 @@ def witness_question(row: object) -> str:
         return f"What years did we live at {label}?"
     if kind == "period_bound":
         return f"When did {label} start, and when did it end?"
-    if kind == "era_gap":
-        between = [str(slug).replace("-", " ") for slug in (row.get("between") or ())]
-        if len(between) == 2:
-            return f"What happened between {between[0]} and {between[1]}?"
-        return "What happened in the years in between?"
     if kind == "date_contradiction":
         return f"Which came first — {label}?"
     return f"What year was {label}?"
@@ -3156,6 +3227,27 @@ def _place_refusal_diagnostics() -> dict:
     return {"place_refused_no_era_writer": count}
 
 
+def _stale_classifications_withheld() -> int:
+    """`O-C`'s withheld-stale count, read through ONE TRANSITIONAL shim.
+
+    `classify_story.withheld_stale` belongs to `feat/eras-o-c-stale-first`
+    (lifehug issue #256) and is not yet on `main` (contract
+    eras-o-e2-memberships.md, "Transitional dependencies"). Until it lands
+    this is a named seam, not a silent guess: absent the function this reads
+    `0` rather than importing something that does not exist, and the shim is
+    deleted the moment `O-C` and `O-E2` are both merged. The legacy placement
+    pass never re-globs `CLASSIFICATIONS_DIR` itself either way — staleness is
+    O-C's own gate, upstream of this pass, applied once.
+    """
+    withheld_stale = getattr(classify_story, "withheld_stale", None)
+    if withheld_stale is None:
+        return 0
+    try:
+        return int(withheld_stale())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def timeline_data(evidence: list[dict] | None = None,
                   birth_date: object = None) -> dict:
     # v197 (landmarks): the store is read ONCE here and threaded through, and
@@ -3200,7 +3292,21 @@ def timeline_data(evidence: list[dict] | None = None,
     anchors = anchor_index(periods, entities, events, birth_date=birth_date,
                            landmarks=landmark_anchors)
     placements = load_placements()
-    event_lineup, unplaced_events = place_events(events, periods, placements)
+    # eras O-E2 (design §5.1): rung 1 of the legacy pass is frame arithmetic,
+    # the SAME `cross_dating.age_frames` the fold computes — one definition,
+    # parity-tested (`O-E2f`). No birth landmark means no frames, which is the
+    # honest floor: a dated event still stays a row, it just cannot reach
+    # rung 1 without an origin to measure it from.
+    frames = ()
+    if birth_date is not None:
+        try:
+            frames = cross_dating.age_frames(birth_date, as_of=now_utc())
+        except Exception:  # noqa: BLE001
+            frames = ()
+    event_lineup, unplaced_events = place_events(
+        events, periods, placements, frames=frames, anchors=landmark_anchors,
+        birth_date=birth_date,
+    )
 
     # v205 (ADR 0026): CROSS-DATING. `keystones` has promised leverage since
     # v196 and nothing ever delivered it — a filed birthday left "Born in
@@ -3342,6 +3448,9 @@ def timeline_data(evidence: list[dict] | None = None,
             # silent again.
             "stale_placements": len(stale_placements),
             "placements_rejoined": rejoined_placements,
+            # eras O-E2 (Transitional dependencies): `O-C`'s withheld-stale
+            # count, read through one shim — see `_stale_classifications_withheld`.
+            "stale_classifications_withheld": _stale_classifications_withheld(),
         },
     }
     # v196: concrete unknowns, leverage-ordered and capped for a page; the

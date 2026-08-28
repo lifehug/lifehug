@@ -394,7 +394,13 @@ class VaultFixture(unittest.TestCase):
                   "The letter about the farm", "The hill behind the house")
         for ref, title in zip(self.REFS, titles):
             (root / "state" / "classifications" / f"answers-{ref.lower()}.json").write_text(
-                json.dumps({"source_path": f"answers/{ref}.md", "events": [
+                json.dumps({"source_path": f"answers/{ref}.md",
+                           # eras O-E2: the classifier's OWN era tag — rung 2's
+                           # signal, replacing the retired source-membership
+                           # mechanism these four moments used to enter
+                           # Childhood by.
+                           "time_periods": [{"era": "childhood"}],
+                           "events": [
                     {"title": title, "description": f"{title}.", "when_hint": "",
                      "anchor": None, "date": None}]}), encoding="utf-8")
 

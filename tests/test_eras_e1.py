@@ -455,14 +455,22 @@ class LifeViewTests(VaultTestCase):
         self.assertEqual(row["life_view"], "lived")
 
     def test_e1_assigns_exactly_two_life_views(self) -> None:
-        self.assertEqual(tp.LIFE_VIEWS, ("lived", "future_plan"))
+        """E1 minted exactly ``lived``/``future_plan``; eras O-E2 extends the
+        SAME tuple with ``contradictory``/``unresolved`` (§2.6) rather than
+        replacing it — E1's own docstring named this as the extension point."""
+        self.assertEqual(tp.LIFE_VIEWS[:2], ("lived", "future_plan"))
+        self.assertEqual(set(tp.LIFE_VIEWS), {"lived", "future_plan",
+                                              "contradictory", "unresolved"})
 
 
 class RuleVersionAndFingerprintTests(VaultTestCase):
     """T-AF-16 — the rule version moves, the epoch rides the fingerprint."""
 
     def test_the_calculation_rule_version_is_two(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:2")
+        """eras O-E2 takes the NEXT rule-version slot (`timeline-rules:3`) for
+        memberships/occurrence-scope, rather than renumbering E1's own —
+        the design named `:2` for the whole of E1+E2 and E1 took it first."""
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:3")
 
     def test_a_fingerprint_without_an_epoch_is_byte_identical_to_v1s(self) -> None:
         self.assertEqual(
@@ -523,11 +531,14 @@ class SchemaVersionTests(VaultTestCase):
         self.assertEqual(v1["schema_version"], 1)
         self.assertEqual(len(v1["nodes"]), len(v2["nodes"]))
 
-    def test_memberships_ride_the_projection_as_an_empty_list(self) -> None:
+    def test_memberships_ride_the_projection_as_a_list(self) -> None:
+        """E1 shipped the empty key; eras O-E2 is the fold that populates it
+        (frame arithmetic over the owner's own birth here) — `memberships` is
+        additive either way, never a schema change a v1 reader chokes on."""
         self.file_claims([owner_birth()])
         pub.publish(self.vault, now=NOW)
-        self.assertEqual(self.published()["memberships"], [])
-        self.assertEqual(pub.calculated_view(self.vault)["memberships"], ())
+        self.assertIsInstance(self.published()["memberships"], list)
+        self.assertIsInstance(pub.calculated_view(self.vault)["memberships"], tuple)
 
     def test_a_membership_without_evidence_is_refused_by_name(self) -> None:
         with self.assertRaises(tp.CalculatedMembershipError) as caught:

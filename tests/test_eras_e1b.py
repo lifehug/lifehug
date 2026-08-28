@@ -341,7 +341,12 @@ class LifeViewAndDefinitionSpanConfirmationTests(VaultTestCase):
         self.assertTrue(rendered.endswith("present"))
 
     def test_life_view_is_a_closed_vocabulary(self) -> None:
-        self.assertEqual(tp.LIFE_VIEWS, ("lived", "future_plan"))
+        # eras O-E2 extends E1's two-value tuple with `contradictory` /
+        # `unresolved` (§2.6) rather than replacing it — the vocabulary is
+        # still closed, just no longer only these two.
+        self.assertEqual(tp.LIFE_VIEWS[:2], ("lived", "future_plan"))
+        self.assertEqual(set(tp.LIFE_VIEWS),
+                         {"lived", "future_plan", "contradictory", "unresolved"})
         with self.assertRaises(tp.TimelineNodeError) as caught:
             tp.validate_calculated_timeline_node({
                 "node_id": "node:aaa", "node_kind": "event", "label": "x",

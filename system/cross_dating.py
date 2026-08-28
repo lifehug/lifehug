@@ -243,12 +243,27 @@ _BIRTH_SELF_RES = (
     re.compile(r"\bmy (?:own )?birth\b(?!day\b)", re.IGNORECASE),
 )
 
+#: The relation/possessive vocabulary that marks a sentence as being about
+#: somebody OTHER than the owner. ONE typing, promoted (recurring-defect
+#: doctrine) rather than re-typed a second time for the age veto below —
+#: `_BIRTH_OTHER_RE` and `THIRD_PERSON_AGE_RES` are two applications of the
+#: same vocabulary, not two vocabularies. `grandma`/`grandmother`/`grandpa`/
+#: `grandfather` join the list here (eras design O-E2, §5.1's own example,
+#: "Grandma was 30 years old in 1951") — the pre-E2 birth veto never needed
+#: them because nobody states "grandma was born" about anyone but grandma.
+_THIRD_PARTY_RELATION_WORDS = (
+    "brother", "sister", "sibling", "son", "daughter", "mom", "mother",
+    "grandma", "grandmother", "dad", "father", "grandpa", "grandfather",
+    "wife", "husband", "partner", "child", "children", "baby", "twin",
+    "cousin", "nephew", "niece", "grandson", "granddaughter", "grandchild",
+    "uncle", "aunt", "friend", "dog", "cat",
+)
+_THIRD_PARTY_RELATION_FRAGMENT = "|".join(_THIRD_PARTY_RELATION_WORDS)
+
 #: The veto. Somebody ELSE's birth in the same moment kills the join outright —
 #: a miss is fine, a wrong join is not.
 _BIRTH_OTHER_RE = re.compile(
-    r"\b(?:brother|sister|sibling|son|daughter|mom|mother|dad|father|wife|"
-    r"husband|partner|child|children|baby|twin|cousin|nephew|niece|grandson|"
-    r"granddaughter|grandchild|uncle|aunt|friend|dog|cat)\b[^.]{0,40}?"
+    rf"\b(?:{_THIRD_PARTY_RELATION_FRAGMENT})\b[^.]{{0,40}}?"
     r"\b(?:was|were|is|are|got)\s+born\b",
     re.IGNORECASE,
 )
@@ -489,6 +504,45 @@ AGE_STATEMENT_RES = (
 #: the alias this module's own reader uses; there is no second tuple.
 _AGE_STATEMENT_RES = AGE_STATEMENT_RES
 
+#: A possessive/relation word sitting near an age statement — "Grandma was 30
+#: years old", "my brother turned 19" — is evidence the age names somebody
+#: ELSE, not the owner. `AGE_STATEMENT_RES` patterns 1-2 already require
+#: "i"/"we" and never reach this veto; patterns 3-5 ("30 years old", "at the
+#: age of 30", "at 19") have NO subject at all, so without this veto
+#: `from_age_statement` dates any such fragment off the owner's OWN birthday
+#: (eras design O-E2, §5.1). Built from the SAME relation vocabulary
+#: `_BIRTH_OTHER_RE` uses — promoted, not re-typed.
+THIRD_PERSON_AGE_RES = (
+    re.compile(
+        rf"\b(?:{_THIRD_PARTY_RELATION_FRAGMENT})\b[^.]{{0,40}}?"
+        rf"\b(?:was|were|is|are|turned|turns|will be)\s+"
+        rf"({_HEDGE}\s+)?({_AGE_VALUE})\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:{_THIRD_PARTY_RELATION_FRAGMENT})(?:'s)?\s+"
+        r"(\d{1,2})(?:st|nd|rd|th)\s+birthday\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def age_statement_is_third_person(text: object) -> bool:
+    """Does this fragment/sentence name somebody ELSE's age?
+
+    Applied over the moment's own text — never just the matched age
+    fragment — because the relation word ("Grandma") and the age
+    ("30 years old") sit in the same sentence but not necessarily the same
+    substring `AGE_STATEMENT_RES` captured. `E-BO`'s `birth_origin_from_age`
+    (not built by this contract) calls the same predicate; it is exported for
+    that (eras design O-E2, §5.1).
+    """
+    value = str(text or "")
+    if not value:
+        return False
+    return any(pattern.search(value) for pattern in THIRD_PERSON_AGE_RES)
+
+
 def age_statement(event: object) -> str | None:
     """The age fragment a moment states in the person's own words, or ``None``."""
     text = moment_text(event)
@@ -506,8 +560,16 @@ def age_statement(event: object) -> str | None:
 
 
 def from_age_statement(event: object, birth_date: object) -> Derivation | None:
-    """Rule 2 — an explicit age plus the birthday, through `chronology.from_age`."""
+    """Rule 2 — an explicit age plus the birthday, through `chronology.from_age`.
+
+    eras O-E2 (design §5.1): vetoed when the moment's own text names somebody
+    ELSE's age (`age_statement_is_third_person`) — "Grandma was 30 years old
+    in 1951" never seeds the owner's axis off the owner's birthday.
+    """
     if birth_date is None:
+        return None
+    text = moment_text(event)
+    if age_statement_is_third_person(text):
         return None
     fragment = age_statement(event)
     if fragment is None:
