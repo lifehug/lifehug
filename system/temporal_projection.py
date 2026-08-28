@@ -172,6 +172,7 @@ NODE_ID_PREFIX = "node"
 WORK_ITEM_ID_PREFIX = "work"
 FINGERPRINT_PREFIX = "fp"
 MEMBERSHIP_ID_PREFIX = "membership"
+CHAPTER_OVERLAY_ID_PREFIX = "overlay"
 
 #: An age frame's id is READABLE on purpose: it is the ``?play=frame:`` key,
 #: the zoom key and the alias target `timeline.legacy_period_ref` resolves
@@ -225,6 +226,9 @@ ERROR_CODES = (
     "unknown_membership_relation",
     "unknown_membership_display_role",
     "membership_without_evidence",
+    "overlay_not_a_mapping",
+    "overlay_needs_chapter",
+    "overlay_without_frames",
     "work_item_not_a_mapping",
     "unknown_work_item_kind",
     "unknown_work_item_state",
@@ -312,6 +316,19 @@ def derive_membership_id(*, member_node_id: object, era_node_id: object,
         "member_node_id": collapsed_text(member_node_id),
         "era_node_id": collapsed_text(era_node_id),
         "relation": collapsed_text(relation),
+    })
+
+
+def derive_chapter_overlay_id(*, chapter_node_id: object) -> str:
+    """``overlay:<24 hex>`` — one chapter's overlay across the frames.
+
+    Keyed on the CHAPTER alone, not on the frames it happens to cover: a
+    chapter that grows to touch a fourth frame is the same overlay with a
+    longer ``frame_node_ids``, and giving it a new identity every time its
+    span moved would make "the same chapter" undetectable.
+    """
+    return digest_id(CHAPTER_OVERLAY_ID_PREFIX, {
+        "chapter_node_id": collapsed_text(chapter_node_id),
     })
 
 
@@ -795,6 +812,119 @@ def membership_from_dict(value: object) -> CalculatedMembership | None:
 
 
 # --------------------------------------------------------------------------
+# ChapterOverlay
+# --------------------------------------------------------------------------
+
+
+class ChapterOverlayError(TemporalContractError):
+    """An overlay cannot say which chapter it is, or what it covers."""
+
+
+@dataclass(frozen=True)
+class ChapterOverlay:
+    """One chapter drawn ACROSS the age frames it covers (eras design §5.2).
+
+    §5.2's rendering reads "period nodes; every frame is a band; chapters as
+    ``chapter_overlays``". A chapter is not a band — it is a stripe laid over
+    however many frames its span reaches — so it is a TOP-LEVEL row of the
+    projection, keyed on the chapter, and not a list repeated on every frame
+    node it touches. Repeating it per frame would write one chapter's identity
+    five times with no single place to correct it, which is precisely the
+    parallel-definition shape ADR 0021 exists to stop (`O-E1b` finding 3).
+
+    **The schema lands here and E3 writes the rows**, for the same reason
+    :class:`CalculatedMembership` landed empty in E1: a tolerant reader is
+    written against a key set, and a phase that adds rows to a declared key is
+    a data change, while a phase that adds the key is a schema change every
+    host has to learn again.
+    """
+
+    overlay_id: str
+    chapter_node_id: str
+    frame_node_ids: tuple[str, ...]
+    label: str | None = None
+    span: dict | None = None
+    schema_version: int = PROJECTION_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        payload: dict = {
+            "overlay_id": self.overlay_id,
+            "schema_version": self.schema_version,
+            "chapter_node_id": self.chapter_node_id,
+            "frame_node_ids": list(self.frame_node_ids),
+        }
+        for key, value in (("label", self.label), ("span", self.span)):
+            if value is not None:
+                payload[key] = value
+        return payload
+
+
+#: The overlay's field names, as DATA, so a host's wire contract and a parity
+#: guard read them instead of re-typing them (ADR 0021).
+CHAPTER_OVERLAY_FIELDS = (
+    "overlay_id",
+    "schema_version",
+    "chapter_node_id",
+    "frame_node_ids",
+    "label",
+    "span",
+)
+
+
+def validate_chapter_overlay(value: object) -> dict:
+    """Normalize an overlay or raise :class:`ChapterOverlayError`.
+
+    An overlay covering NO frame is refused for the reason
+    ``membership_without_evidence`` refuses an uncited membership: a stripe
+    across nothing is not a rendering instruction, it is a row that would make
+    a page draw an empty band a person never lived in.
+    """
+    if isinstance(value, ChapterOverlay):
+        value = value.to_dict()
+    if not isinstance(value, dict):
+        raise ChapterOverlayError("overlay_not_a_mapping", "an overlay must be a mapping")
+    chapter = collapsed_text(value.get("chapter_node_id"))
+    if not chapter:
+        raise ChapterOverlayError(
+            "overlay_needs_chapter", "an overlay needs the chapter it draws"
+        )
+    frames = _ref_tuple(value.get("frame_node_ids"))
+    if not frames:
+        raise ChapterOverlayError(
+            "overlay_without_frames", f"{chapter} covers no frame; an overlay draws across frames"
+        )
+    normalized: dict = {
+        "overlay_id": derive_chapter_overlay_id(chapter_node_id=chapter),
+        "schema_version": PROJECTION_SCHEMA_VERSION,
+        "chapter_node_id": chapter,
+        "frame_node_ids": list(frames),
+    }
+    label = optional_text(value.get("label"))
+    if label:
+        normalized["label"] = label
+    span = _normalized_node_value(value.get("span"))
+    if span is not None:
+        normalized["span"] = span
+    return normalized
+
+
+def chapter_overlay_from_dict(value: object) -> ChapterOverlay | None:
+    """Tolerant reader — ``None`` rather than an exception."""
+    try:
+        normalized = validate_chapter_overlay(value)
+    except TemporalContractError:
+        return None
+    return ChapterOverlay(
+        overlay_id=normalized["overlay_id"],
+        chapter_node_id=normalized["chapter_node_id"],
+        frame_node_ids=tuple(normalized["frame_node_ids"]),
+        label=normalized.get("label"),
+        span=normalized.get("span"),
+        schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
+    )
+
+
+# --------------------------------------------------------------------------
 # TemporalWorkItem
 # --------------------------------------------------------------------------
 
@@ -1035,6 +1165,10 @@ __all__ = [
     "WORK_ITEM_SURFACES",
     "CalculatedMembership",
     "CalculatedMembershipError",
+    "CHAPTER_OVERLAY_FIELDS",
+    "CHAPTER_OVERLAY_ID_PREFIX",
+    "ChapterOverlay",
+    "ChapterOverlayError",
     "CalculatedTimelineNode",
     "TemporalWorkItem",
     "TemporalWorkItemError",
@@ -1049,6 +1183,9 @@ __all__ = [
     "node_from_dict",
     "surfaces_conflict",
     "validate_calculated_membership",
+    "validate_chapter_overlay",
+    "chapter_overlay_from_dict",
+    "derive_chapter_overlay_id",
     "validate_calculated_timeline_node",
     "validate_temporal_work_item",
     "work_item_from_dict",

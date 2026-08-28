@@ -283,6 +283,10 @@ class CalculatedTimeline:
     #: Calculated memberships (eras design §2.2). The KEY lands in E1 so a
     #: tolerant reader is written once; E2 fills the rows.
     memberships: tuple[dict, ...] = ()
+    #: Chapters drawn ACROSS the frames they cover (eras design §5.2). Same
+    #: reasoning as ``memberships`` and the same phase discipline: the key
+    #: lands declared and empty in E1/`O-E1b`, E3 fills the rows.
+    chapter_overlays: tuple[dict, ...] = ()
     timings: dict = field(default_factory=dict)
     score_components: dict = field(default_factory=dict)
     reach: dict = field(default_factory=dict)
@@ -311,6 +315,7 @@ class CalculatedTimeline:
             "nodes": [dict(row) for row in self.nodes],
             "work_items": [dict(row) for row in self.work_items],
             "memberships": [dict(row) for row in self.memberships],
+            "chapter_overlays": [dict(row) for row in self.chapter_overlays],
             "reach": dict(self.reach),
             "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "diagnostics": dict(self.diagnostics),
@@ -341,6 +346,7 @@ def structural_signature(result: object) -> dict:
         "nodes": [dict(row) for row in current.nodes],
         "work_items": items,
         "memberships": [dict(row) for row in current.memberships],
+        "chapter_overlays": [dict(row) for row in current.chapter_overlays],
         "reach": dict(current.reach),
         "diagnostics": dict(current.diagnostics),
     }
