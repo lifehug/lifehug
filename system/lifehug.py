@@ -751,9 +751,16 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
             assertion += f" (anchored on {', '.join(record.anchors)})"
     if args.when_hint:
         assertion += f", {args.when_hint}"
+    # v237 (O-C2): `--role placement`. The durable half of a placement is a
+    # date DECISION about a moment the person already accepts — not a claim
+    # that the source's text is wrong — so it must not mark the target's
+    # classification stale. It used to, and under v237's `is_current` reader
+    # gate that withheld the moment the person had just dated, which is the
+    # opposite of lifehug#224's guarantee. Contract:
+    # `docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md`.
     result = subprocess.run(
         [sys.executable, str(script("source_integrity.py")), "correct", args.source,
-         "--kind", "date", "--source", "fix"],
+         "--kind", "date", "--role", "placement", "--source", "fix"],
         input=assertion,
         text=True,
         capture_output=True,

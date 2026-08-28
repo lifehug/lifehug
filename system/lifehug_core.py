@@ -872,6 +872,60 @@ def answer_body(content: str) -> str:
     return target.strip()
 
 
+# ── what a correction IS: its ROLE (v237, O-C2) ───────────────────────────────
+#
+# Every correction source says WHAT it corrects (`correction_kind`: factual,
+# date, name, …). Only this says WHAT IT IS TO THE READING it is filed
+# against, and there are exactly two answers:
+#
+#   content    — the person says the source's text got a fact wrong. The
+#                derived classification was extracted from the uncorrected
+#                text, so it is now a reading the vault knows is wrong:
+#                `mark_stale`, and every derived reader drops it until the
+#                batch re-derives it (v103 -> v237's `is_current` gate).
+#   placement  — the person says WHEN a moment they already accept happened.
+#                `timeline-place` files this. It is a DATE DECISION about a
+#                moment, not a refutation of the source's content: the
+#                classification stays CURRENT, and the placement overlay
+#                (`state/timeline_placements.json`) is what moves the date on
+#                read. Marking it stale would withhold the very moment the
+#                person just dated — lifehug#224's guarantee is that "the
+#                proof ends where the person looks: the moment, in its
+#                period, dated".
+#
+# A CLOSED vocabulary on purpose: an unknown role is a refusal, never a
+# silent default, so a third correction shape has to be ruled on rather than
+# guessed at. `docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md`.
+CORRECTION_ROLES = ("content", "placement")
+DEFAULT_CORRECTION_ROLE = "content"
+# The one place the two are told apart. Both hosts — `source_integrity`
+# (which writes the record) and `classify_story` (which marks the staleness) —
+# ask THIS, so the rule cannot drift between them.
+ROLES_THAT_MARK_STALE = frozenset({"content"})
+
+
+def normalize_correction_role(value: object) -> str:
+    """The declared role, or `DEFAULT_CORRECTION_ROLE` when nothing is said.
+
+    Raises `ValueError` for anything outside the closed vocabulary — an
+    unrecognised role must never fall through to "content" and silently
+    withhold a moment, nor to "placement" and silently keep a wrong reading
+    alive."""
+    if value is None or value == "":
+        return DEFAULT_CORRECTION_ROLE
+    role = str(value).strip()
+    if role not in CORRECTION_ROLES:
+        raise ValueError(
+            f"unknown correction_role {role!r}; expected one of "
+            f"{', '.join(CORRECTION_ROLES)}")
+    return role
+
+
+def correction_role_marks_stale(value: object) -> bool:
+    """Does a correction in this role invalidate the target's classification?"""
+    return normalize_correction_role(value) in ROLES_THAT_MARK_STALE
+
+
 def status_emoji(answered: int, total: int) -> str:
     if total == 0:
         return "⚪"

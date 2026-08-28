@@ -44,6 +44,7 @@ from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
     CLASSIFY_CURSOR_FILE,
+    DEFAULT_CORRECTION_ROLE,
     MANUAL_SOURCES_DIR,
     MISSION_FILE,
     QUESTION_CANDIDATES_FILE,
@@ -52,6 +53,7 @@ from lifehug_core import (
     SOURCES_DIR,
     STORY_FUNCTIONS,
     answer_body,
+    correction_role_marks_stale,
     load_config,
     load_mission,
     now_utc,
@@ -317,9 +319,24 @@ def _stale_at(source_path: Path) -> str:
     return ""
 
 
-def mark_stale(source_path: Path, reason: str = "") -> bool:
+def mark_stale(
+    source_path: Path,
+    reason: str = "",
+    *,
+    correction_role: object = DEFAULT_CORRECTION_ROLE,
+) -> bool:
     """Flag an existing classification for re-derivation (v103). Returns True
-    if a classification file was found (already-stale counts)."""
+    if a classification file was found (already-stale counts).
+
+    `correction_role` is the closed vocabulary from `lifehug_core` (v237,
+    O-C2). A role that does not mark stale — `placement` — returns False and
+    writes NOTHING: a person dating a moment is making a DATE DECISION about
+    it, not refuting the text it was read out of, and under v237's
+    `is_current` gate marking it stale would withhold the very moment they
+    just placed. An unknown role raises rather than guessing which of those
+    two it meant."""
+    if not correction_role_marks_stale(correction_role):
+        return False
     marked = False
     for path in classification_paths(source_path):
         if not path.exists():

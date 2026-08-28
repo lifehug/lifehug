@@ -114,33 +114,6 @@ def build_vault(root: Path, *, title: str = DESCRIPTION) -> None:
         encoding="utf-8")
 
 
-def reclassified(vault: Path) -> None:
-    """Stand in for the reclassification the stale-first batch performs.
-
-    v237 (O-C) withholds a source's classification from every derived reader
-    the moment a correction marks it stale — and `timeline-place` files a
-    correction as its own durable half, so a test that places a date and reads
-    the Timeline in the same breath is reading it BEFORE the batch has run.
-    Every test that calls this is about placement IDENTITY (lifehug#228 / v213
-    / v215), not about the currency gate, and each would otherwise be
-    re-purposed into a proof of something it was never written to say.
-
-    The product-level collision this papers over in THESE tests — placing a
-    date withholds the moment you just placed until a model re-derives it — is
-    real, is NOT resolved here, and is pinned as its own named test in
-    `tests/test_classify_story_current.py::PlacementWithholdsItsOwnMomentTests`
-    and reported against `docs/pr-specs/eras-o-c-stale-first-cursor.md`.
-    """
-    directory = vault / "state" / "classifications"
-    for path in sorted(directory.glob("*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if data.pop("stale", None) is None:
-            continue
-        data.pop("stale_reason", None)
-        data.pop("stale_at", None)
-        path.write_text(json.dumps(data), encoding="utf-8")
-
-
 class FilePlacementTests(unittest.TestCase):
     """`conversation_delivery._file_placement`, executed for real."""
 
@@ -216,7 +189,6 @@ class FilePlacementTests(unittest.TestCase):
         different coat, so the proof ends where the person looks: the moment,
         in its period, dated."""
         self.assertTrue(self.file_placement())
-        reclassified(self.vault)
         with tl.vault_roots(**timeline_roots(self.vault)):
             data = tl.timeline_data()
         moments = data["event_lineup"][PERIOD]
@@ -299,7 +271,6 @@ class TitleKeyedPlacementTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def timeline_data(self) -> dict:
-        reclassified(self.vault)
         with tl.vault_roots(**timeline_roots(self.vault)):
             return tl.timeline_data()
 
@@ -315,7 +286,6 @@ class TitleKeyedPlacementTests(unittest.TestCase):
         return dict(rows[0], period=PERIOD)
 
     def live_key(self) -> str:
-        reclassified(self.vault)
         with tl.vault_roots(**timeline_roots(self.vault)):
             events = tl.load_events()
         self.assertEqual(len(events), 1)
@@ -432,7 +402,6 @@ class TitleKeyedPlacementTests(unittest.TestCase):
         orphan = self.file_a_v213_shaped_orphan()
         self.assertEqual(self.timeline_data()["event_lineup"][PERIOD][0]["placement_key"],
                          orphan)
-        reclassified(self.vault)
         with tl.vault_roots(**timeline_roots(self.vault)):
             self.assertTrue(tl.remove_placement(orphan))
         data = self.timeline_data()
