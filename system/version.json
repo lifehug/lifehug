@@ -487,6 +487,12 @@
     "tests/walkthrough_lib.py",
     "wiki/SCHEMA.md",
     "tests/test_eras_e0a.py",
-    "tests/test_eras_e1.py"
+    "tests/test_eras_e1.py",
+    "system/era_identity.py",
+    "system/era_record.py",
+    "system/event_binding.py",
+    "interactions/timeline/prompt/recorder.md",
+    "sources/eras/.gitkeep",
+    "tests/test_eras_e3.py"
   ]
 }

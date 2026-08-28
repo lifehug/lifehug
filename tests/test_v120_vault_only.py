@@ -50,6 +50,10 @@ EXPECTED_DATA_PATHS = {
     "conversation_sources",
     "landmark_sources",
     "correction_sources",
+    # E3 (eras): the era identity/label/kind records, and the event
+    # resolutions that bind a claim's `event_mention` to one of them.
+    "era_sources",
+    "temporal_resolutions",
     "coverage",
     "entity_rosters",
     "focus_curation_state",
@@ -203,7 +207,13 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(vault_paths.FRAMEWORK_PATHS, exported["framework_paths"])
         self.assertEqual(list(exported["data_paths"]), sorted(exported["data_paths"]))
         self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
-        self.assertEqual(exported["identity"]["framework_version"], 231)
+        # Moves only when the CONTRACT moves, which is why it lags the
+        # framework version: v231 published the projection, and E3 (eras) is
+        # the next change to the path table — `sources/eras` and
+        # `state/temporal_claims/resolutions`. The release commit that takes
+        # this branch's version slot moves both this number and
+        # `vault_contract.json`'s together.
+        self.assertEqual(exported["identity"]["framework_version"], 238)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

@@ -25,6 +25,7 @@ import era_identity as ei  # noqa: E402
 import era_record as er  # noqa: E402
 import event_binding as eb  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
+import timeline_interaction as ti  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_store as ts  # noqa: E402
 from tempdirs import root_parent_tmp  # noqa: E402
@@ -959,6 +960,186 @@ class StretchOrThreadTests(unittest.TestCase):
             (root / "state" / "focus_recommendations.json").read_text()
         )
         self.assertEqual(len(state["recommendations"]), 1)
+
+
+# --------------------------------------------------------------------------
+# S6 — the `era` stage
+# --------------------------------------------------------------------------
+
+
+class EraStageTests(unittest.TestCase):
+    """§5.4 — Play lives on eras, and the ladder is written down."""
+
+    TARGET = {"kind": "era", "ref": "era:" + "a" * 24, "label": "College Years",
+              "era_kind": "stretch", "aliases": ["College"]}
+
+    def test_the_stage_is_declared(self):
+        self.assertIn(ti.ERA_STAGE, ti.VALID_TIMELINE_STAGES)
+        self.assertEqual(ti.ERA_STAGE, "era")
+
+    def test_an_era_target_selects_the_stage_for_the_whole_conversation(self):
+        session = {"turns": []}
+        self.assertEqual(
+            ti.timeline_stage_for_session(session, era=self.TARGET), ti.ERA_STAGE
+        )
+        session = {"turns": [{"role": "lifehug"}, {"role": "user"}]}
+        self.assertEqual(
+            ti.timeline_stage_for_session(session, era=self.TARGET), ti.ERA_STAGE
+        )
+
+    def test_every_close_rule_still_wins(self):
+        session = {"turns": [{"role": "user"}] * ti.MAX_PROBES}
+        for kwargs in ({"user_leaving": True}, {"placement_settled": True},
+                       {"no_new_bound_streak": ti.STOP_AFTER_UNPRODUCTIVE_PROBES},
+                       {}):
+            with self.subTest(**kwargs):
+                self.assertEqual(
+                    ti.timeline_stage_for_session({"turns": session["turns"]},
+                                                  era=self.TARGET, **kwargs),
+                    "close",
+                )
+
+    def test_a_work_item_outranks_an_era(self):
+        # A work item is a specific disagreement; the era is the room it is in.
+        work_item = {"kind": "work_item", "item_kind": "contradiction",
+                     "work_item_id": "wi-1", "label": "two dates"}
+        self.assertEqual(
+            ti.timeline_stage_for_session({"turns": []}, work_item=work_item,
+                                          era=self.TARGET),
+            ti.WORK_ITEM_STAGE,
+        )
+
+    def test_an_unreadable_target_degrades_instead_of_raising(self):
+        for bad in ("era:abc", {}, {"kind": "focus", "ref": "x"}, {"kind": "era"}):
+            with self.subTest(bad=bad):
+                self.assertIsNone(ti.era_target(bad))
+                self.assertEqual(
+                    ti.timeline_stage_for_session({"turns": []}, era=bad), "open"
+                )
+
+    def test_the_ladder_asks_for_the_end_first(self):
+        rung = ti.era_ladder_rung(self.TARGET, rows=[])
+        self.assertEqual(rung["rung"], "bounds")
+
+    def test_a_thread_is_never_asked_when_it_ended(self):
+        # §4.5's whole kind distinction exists to stop asking this.
+        thread = {**self.TARGET, "era_kind": "thread"}
+        rung = ti.era_ladder_rung(thread, rows=[])
+        self.assertNotEqual((rung or {}).get("rung"), "bounds")
+
+    def test_the_ladder_walks_residence_then_leverage_then_precision(self):
+        bounded = {**self.TARGET, "bounded": True}
+        residence = {"kind": "place_span", "label": "the house on Elm", "key": "p1"}
+        moment = {"kind": "moment", "label": "the letter", "key": "m1"}
+        self.assertEqual(
+            ti.era_ladder_rung(bounded, rows=[moment, residence])["rung"],
+            "residence",
+        )
+        self.assertEqual(
+            ti.era_ladder_rung(bounded, rows=[moment])["rung"], "leverage"
+        )
+        self.assertEqual(ti.era_ladder_rung(bounded, rows=[])["rung"], "precision")
+
+    def test_precision_stops_the_moment_a_rung_is_held(self):
+        bounded = {**self.TARGET, "bounded": True}
+        self.assertIsNone(
+            ti.era_ladder_rung(bounded, rows=[], precision_so_far="month")
+        )
+
+    def test_the_precision_rungs_are_the_stated_four(self):
+        self.assertEqual(ti.ERA_PRECISION_RUNGS,
+                         ("era", "year", "season", "month"))
+        self.assertEqual(ti.ERA_LADDER,
+                         ("bounds", "residence", "leverage", "precision"))
+
+    def test_a_no_era_moment_opens_on_the_open_question(self):
+        # T-CV-13. Never "before or after you were born".
+        target = ti.no_era_moment_target(
+            {"key": "m1", "label": "Charlee's letter", "event_ref": "event:abc"}
+        )
+        self.assertIsNone(target["era_id"])
+        self.assertEqual(target["rung"]["rung"], ti.NO_ERA_FIRST_RUNG)
+        self.assertEqual(target["rung"]["rung"], "parallel_domain")
+        self.assertNotIn("born", target["rung"]["text"])
+        self.assertNotIn("before or after", target["rung"]["text"])
+        # And a date said there files on the MOMENT's own event_ref.
+        self.assertEqual(target["moment"]["event_ref"], "event:abc")
+        # A row with no label at all is not something to open a conversation
+        # about: the opener names the moment, and there is nothing to name.
+        self.assertIsNone(ti.no_era_moment_target({}))
+        self.assertIsNone(ti.no_era_moment_target({"label": "  "}))
+
+
+class TimelineLeafTests(unittest.TestCase):
+    """The leaf a host substitutes into, and lifehug#253."""
+
+    LEAF = ROOT / "interactions" / "timeline" / "prompt" / "turn-instructions.md"
+
+    def test_no_heading_carries_a_substituted_token(self):
+        # lifehug#253: the host substitutes `{timeline_stage}` everywhere,
+        # including inside a heading, so `## When {timeline_stage} is
+        # work_item` renders as `## When place is work_item` over a section
+        # addressed to somebody who never opened one. A heading is structure
+        # and structure does not vary with a value.
+        for line in self.LEAF.read_text().splitlines():
+            if line.startswith("#"):
+                with self.subTest(heading=line):
+                    self.assertNotIn("{", line)
+
+    def test_the_leaf_names_every_valid_stage(self):
+        text = self.LEAF.read_text()
+        for stage in sorted(ti.VALID_TIMELINE_STAGES):
+            with self.subTest(stage=stage):
+                self.assertIn(f"`{stage}`", text)
+
+    def test_the_era_section_exists_and_refuses_the_thread_question(self):
+        text = self.LEAF.read_text()
+        self.assertIn("## The `era` stage", text)
+        self.assertIn("A thread has no end and you never ask for one", text)
+        self.assertIn("never ask whether it", text)
+        self.assertIn("was before or after they were born", text)
+
+
+class EraRecorderLeafTests(unittest.TestCase):
+    """§5.4 — the ADR 0028 loop, and `date_record` REUSED."""
+
+    def test_the_purpose_is_reused_and_not_a_third_name(self):
+        import general_listener as gl  # noqa: PLC0415
+
+        self.assertEqual(ti.ERA_RECORDER_PURPOSE, gl.DATE_RECORD_PURPOSE)
+
+    def test_the_prompt_substitutes_every_token(self):
+        prompt = ti.build_era_recorder_prompt(
+            target=EraStageTests.TARGET,
+            question_asked="When did College end?",
+            answer="It ended in 2011.",
+            reply="2011 then.",
+            known=["starts 2007"],
+        )
+        import re  # noqa: PLC0415
+
+        # `{"claims": ...}` is literal JSON in the leaf and stays; a bare
+        # `{token}` is a substitution that did not happen.
+        self.assertEqual(re.findall(r"\{[a-z_]+\}", prompt), [])
+        self.assertIn("College Years", prompt)
+        self.assertIn("stretch", prompt)
+        self.assertIn("starts 2007", prompt)
+
+    def test_it_has_no_voice_and_no_transcript(self):
+        prompt = ti.build_era_recorder_prompt(
+            target=EraStageTests.TARGET, question_asked="q", answer="a")
+        for absent in ("## IDENTITY", "## BEHAVIOR", "## EXAMPLES", "## SESSION"):
+            self.assertNotIn(absent, prompt)
+        self.assertIn("You are not in the conversation", prompt)
+        # MEASURED, not guessed.
+        self.assertLess(len(prompt), 4200)
+
+    def test_the_leaf_teaches_the_two_bound_kinds_and_the_mention(self):
+        text = ti.load_era_recorder_leaf()
+        self.assertIn("`period_started` and `period_ended`", text)
+        self.assertIn("event_mention", text)
+        self.assertNotIn("event_ref", text)
+        self.assertIn("Things inside an era are not the era", text)
 
 
 class VaultContractTests(unittest.TestCase):

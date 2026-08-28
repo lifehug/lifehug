@@ -470,7 +470,21 @@ def _precise_enough(precision_so_far: object, kind: object) -> bool:
 #: one word, pinned by ``test_the_play_kind_and_the_stage_are_one_word``.
 WORK_ITEM_STAGE = "work_item"
 
-VALID_TIMELINE_STAGES = frozenset({"open", "place", "close", WORK_ITEM_STAGE})
+#: The stage an ERA conversation runs in (eras E3, design §5.4). Play lives on
+#: eras and frames, not on moments: one ▸ per era opens a conversation about a
+#: STRETCH of a life — where it started, where it ended, what else was going on
+#: inside it — rather than twenty ▸ asking about twenty undated things one at a
+#: time. Like `work_item` it is a STAGE of this child rather than an eighth
+#: child of Conversation: it mints no output field of its own (`placed` is the
+#: lane's existing one) and buys no new vocabulary, filer or lint set.
+#:
+#: The string is deliberately the Play kind's own word, exactly as
+#: `work_item` is (`?play=era:<era_id>`), so a host binds one verb and one
+#: stage and the two cannot drift.
+ERA_STAGE = "era"
+
+VALID_TIMELINE_STAGES = frozenset({"open", "place", "close", WORK_ITEM_STAGE,
+                                   ERA_STAGE})
 
 #: Playbook stop rule §6.10 — "stop when two probes in a row return no new
 #: bound". The caller counts; this module decides.
@@ -483,7 +497,8 @@ MAX_PROBES = 4
 def timeline_stage_for_session(session: object, *, user_leaving: bool = False,
                                placement_settled: bool = False,
                                no_new_bound_streak: int = 0,
-                               work_item: object = None) -> str:
+                               work_item: object = None,
+                               era: object = None) -> str:
     """Derive `{timeline_stage}` from the transcript plus two caller facts.
 
     The caller facts mirror `arc_walk.arc_stage_for_session`'s `user_leaving`
@@ -518,14 +533,24 @@ def timeline_stage_for_session(session: object, *, user_leaving: bool = False,
         return "close"
     turns = (session or {}).get("turns") or [] if isinstance(session, dict) else []
     target = work_item_target(work_item)
-    if not target and not any(
+    # E3: an era target selects the stage for the conversation's whole working
+    # life, exactly as a work item does, and for the same reason — the deep
+    # link already said which stretch of life this is about, so there is
+    # nothing to warm up to. A work item wins on the rare occasion both
+    # arrive: it is a specific disagreement, and the era is the room it is in.
+    era_row = None if target else era_target(era)
+    if not target and not era_row and not any(
         isinstance(turn, dict) and turn.get("role") == "lifehug" for turn in turns
     ):
         return "open"
     user_turns = sum(1 for turn in turns if isinstance(turn, dict) and turn.get("role") == "user")
     if user_turns >= MAX_PROBES:
         return "close"
-    return WORK_ITEM_STAGE if target else "place"
+    if target:
+        return WORK_ITEM_STAGE
+    if era_row:
+        return ERA_STAGE
+    return "place"
 
 
 def precision_so_far(session: object) -> object:
@@ -1716,6 +1741,243 @@ def build_timeline_plan(data: dict, *, era: str | None = None,
         "unknowns": rows,
         "offered": offered,
         "plan_n": len(rows),
+    }
+
+
+# --------------------------------------------------------------------------
+# The era stage (E3) — one stretch of a life, one conversation
+# --------------------------------------------------------------------------
+
+#: The era ladder, spelled out (design §5.4). Read TOP DOWN and stop at the
+#: first rung that is still open:
+#:
+#: 1. **bounds** — a `stretch` with an unbounded end. Everything else about an
+#:    era is cheaper once it has edges, and an era with no end is the one
+#:    thing that cannot be drawn.
+#: 2. **residence** — the residence chain inside it. Where somebody lived is
+#:    the strongest ordinary anchor there is and it dates several things at
+#:    once.
+#: 3. **leverage** — the highest-leverage undated moment inside it, which is
+#:    `timeline.row_leverage`'s own number and not a second one.
+#: 4. **precision** — and only while cheap: era → year → season → month, stop
+#:    at the first rung held WITHOUT hedging.
+#:
+#: A `thread` skips rung 1 outright: it has no honest end, and asking for one
+#: is the question §4.5's whole kind distinction exists to stop asking.
+ERA_LADDER = ("bounds", "residence", "leverage", "precision")
+
+#: The precision ladder, ascending, and it stops the moment the person holds a
+#: rung without hedging. "Somewhere in the early nineties" IS an answer.
+ERA_PRECISION_RUNGS = ("era", "year", "season", "month")
+
+ERA_PROBES = {
+    "bounds": {"step": "bounds", "cost": 2,
+               "text": "When did {label} end?",
+               "anchored": "Did {label} end before or after {anchor}?"},
+    "residence": {"step": "residence", "cost": 2,
+                  "text": "Where were you living during {label}?",
+                  "anchored": "During {label}, were you still at {anchor}?"},
+    "leverage": {"step": "parallel_domain", "cost": 4,
+                 "text": "What else was going on during {label} — home, work, "
+                         "anyone new around?",
+                 "anchored": "During {label} — had {anchor} happened yet?"},
+    "precision": {"step": "season", "cost": 7,
+                  "text": "{label} — what time of year does the start of it "
+                          "feel like?",
+                  "anchored": "{label} — was the start of it before or after "
+                              "{anchor}?"},
+}
+
+
+def era_target(value: object) -> dict | None:
+    """Normalize an era Play target, or ``None``. Refusal never raises.
+
+    Two shapes arrive and both are legitimate, exactly as they do for a work
+    item: a Play target (`kind` is the Play kind, `ref` the era id) and a bare
+    `era_identity.era_views` row. An unrecognized shape degrades to an
+    ordinary turn rather than raising — a target this stage cannot read must
+    not take the conversation down with it.
+    """
+    if not isinstance(value, dict) or not value:
+        return None
+    kind = str(value.get("kind") or "").strip()
+    if kind and kind not in (ERA_STAGE, "frame", "named_era"):
+        return None
+    era_id = str(value.get("era_id") or value.get("ref") or "").strip()
+    if not era_id:
+        return None
+    aliases = [str(a).strip() for a in (value.get("aliases") or ()) if str(a).strip()]
+    return {
+        "kind": ERA_STAGE,
+        "era_id": era_id,
+        "label": str(value.get("label") or value.get("headline") or era_id).strip(),
+        "era_kind": str(value.get("era_kind") or "").strip(),
+        "aliases": aliases,
+        "bounded": bool(value.get("bounded")),
+        "anchors": _anchor_rows(value.get("anchors")),
+    }
+
+
+def era_ladder_rung(target: object, *, rows: object = (),
+                    precision_so_far: object = None) -> dict | None:
+    """The first OPEN rung of :data:`ERA_LADDER` for this era, or ``None``.
+
+    ``rows`` are the era's own unknown rows (`build_timeline_plan(era=…)`'s
+    `unknowns`), already leverage-ordered. ``None`` means every rung this
+    conversation could climb is held, which is a real answer and the reason
+    the stage can close on its own.
+    """
+    row = era_target(target)
+    if row is None:
+        return None
+    ordered = [item for item in (rows or ()) if isinstance(item, dict)]
+    for rung in ERA_LADDER:
+        if rung == "bounds":
+            # A thread has no honest end. Never ask for one.
+            if row["era_kind"] == "thread" or row["bounded"]:
+                continue
+            return {"rung": rung, **ERA_PROBES[rung]}
+        if rung == "residence":
+            found = next((item for item in ordered
+                          if str(item.get("kind")) == "place_span"), None)
+            if found is not None:
+                return {"rung": rung, "row": found, **ERA_PROBES[rung]}
+            continue
+        if rung == "leverage":
+            found = next((item for item in ordered
+                          if str(item.get("kind")) != "place_span"), None)
+            if found is not None:
+                return {"rung": rung, "row": found, **ERA_PROBES[rung]}
+            continue
+        # precision — and only while cheap.
+        if _precise_enough(precision_so_far, "period_bound"):
+            return None
+        return {"rung": rung, **ERA_PROBES[rung]}
+    return None
+
+
+#: The era stage's recorder leaf (design §5.4). The ADR 0028 loop, unchanged:
+#: a SECOND model call after the reply is sent, with its own prompt, its own
+#: output and its own blocking backstop — because one completion cannot both
+#: be good company and file a fact, and it loses the fact.
+ERA_RECORDER_PROMPT = "recorder.md"
+
+#: The LLM purpose this pass spends its completion on: `date_record`, REUSED
+#: (owner decision 21). Not a third purpose name and not a denominator move —
+#: "what does hearing time cost" is one question with one answer, and the era
+#: stage is another place it is heard, not another thing being bought.
+ERA_RECORDER_PURPOSE = "date_record"
+
+
+def load_era_recorder_leaf(framework_root: str | Path | None = None) -> str:
+    """The era recorder leaf, verbatim. A host REPLAYs exactly this text."""
+    base = (Path(framework_root) / "interactions" / "timeline"
+            if framework_root else _SYSTEM_DIR.parent / "interactions" / "timeline")
+    return (base / "prompt" / ERA_RECORDER_PROMPT).read_text(encoding="utf-8")
+
+
+def build_era_recorder_prompt(*, target: object, question_asked: str,
+                              answer: str, reply: str = "",
+                              known: object = (), reminder: str = "",
+                              framework_root: str | Path | None = None) -> str:
+    """The era recorder's whole prompt, from the leaf plus its substitutions.
+
+    Deliberately NOT the conversation prompt: no identity, no behavior, no
+    examples, no transcript. The era, what is already known about it, the
+    question, what they said and what they were told — that is the entire
+    evidence a recording decision needs, and leaving the rest out is what
+    makes the second call small.
+    """
+    import temporal_claims as _tc  # noqa: PLC0415
+
+    row = era_target(target) or {"label": "", "era_kind": "", "aliases": []}
+    known_lines = [f"- {str(item).strip()}" for item in (known or ()) if str(item).strip()]
+    filled = load_era_recorder_leaf(framework_root)
+    # `.replace`, never `.format` — every leaf in this package substitutes the
+    # same way, and these leaves carry literal JSON braces.
+    for token, value in (
+        ("{era_label}", row["label"] or "(unnamed)"),
+        ("{era_kind}", row["era_kind"] or "not decided yet"),
+        ("{era_aliases}", ", ".join(row["aliases"]) or "(none)"),
+        ("{era_known}", "\n".join(known_lines) or "(nothing yet)"),
+        ("{question_asked}", (question_asked or "").strip()),
+        ("{claim_types}", " | ".join(_tc.CLAIM_TYPES)),
+        ("{event_kinds}", _era_event_kinds()),
+        ("{answer}", (answer or "").strip()),
+        ("{reply}", (reply or "(no reply was generated)").strip()),
+        ("{reminder}", f"\n\n{reminder.strip()}" if reminder else ""),
+    ):
+        filled = filled.replace(token, value)
+    return filled
+
+
+def _era_event_kinds() -> str:
+    """The event-kind starting set, with the era's own two named first."""
+    import general_listener as _gl  # noqa: PLC0415
+
+    return " | ".join(("period_started", "period_ended")) + " | " + _gl.render_event_kinds()
+
+
+def era_plan(data: dict, *, target: object, rows: object = None,
+             limit: int | None = None) -> dict:
+    """One era's Play plan: the era, its open rows, and the rung to ask next.
+
+    `build_timeline_plan(era=…)` already scopes and orders the rows; this adds
+    the era's own identity and the explicit ladder on top, so the caller does
+    not re-derive either. Nothing here reads a vault or calls a model.
+    """
+    row = era_target(target)
+    if row is None:
+        raise TypeError("era_plan needs an era target")
+    scoped = (rows if rows is not None
+              else build_timeline_plan(data, era=row["era_id"], limit=limit))
+    offered = list(scoped.get("offered") or ())
+    rung = era_ladder_rung(row, rows=offered)
+    return {
+        "target": {"kind": ERA_STAGE, "ref": row["era_id"], "label": row["label"]},
+        "era": row,
+        "unknowns": list(scoped.get("unknowns") or ()),
+        "offered": offered,
+        "ladder": list(ERA_LADDER),
+        "rung": rung,
+        "plan_n": int(scoped.get("plan_n") or 0),
+    }
+
+
+#: A moment that belongs to no era stays a row in Unknowns with NO question of
+#: its own (§5.4). "Talk about this" opens the era stage with the moment as
+#: visible context and NO era target, and the recorder's first move is the open
+#: `parallel_domain` question — never "before or after you were born", which is
+#: what the anchor-ordered opener asks a moment with nothing to hang on.
+NO_ERA_FIRST_RUNG = "parallel_domain"
+
+
+def no_era_moment_target(row: object) -> dict | None:
+    """"Talk about this" on a moment in no era: context, and no era target.
+
+    Returns the era-stage target shape with ``era_id`` absent and the moment
+    carried as context, or ``None`` when the row is not a moment. The absence
+    of an era id is the point: the conversation is grounded in the moment the
+    person tapped and claims nothing about where it sits, and any date they
+    say files on that moment's own `event_ref` (T-CV-13).
+    """
+    if not isinstance(row, dict) or not row:
+        return None
+    label = str(row.get("label") or row.get("key") or "").strip()
+    if not label:
+        return None
+    probe = dict(PROBE_TEXTS)
+    return {
+        "kind": ERA_STAGE,
+        "era_id": None,
+        "label": label,
+        "moment": {"key": str(row.get("key") or "").strip(), "label": label,
+                   "event_ref": str(row.get("event_ref") or "").strip()},
+        "rung": {"rung": NO_ERA_FIRST_RUNG,
+                 "step": NO_ERA_FIRST_RUNG,
+                 "cost": _STEP_BY_NAME[NO_ERA_FIRST_RUNG]["cost"],
+                 "text": probe[NO_ERA_FIRST_RUNG]},
+        "anchors": _anchor_rows(row.get("anchors")),
     }
 
 
