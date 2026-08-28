@@ -1,7 +1,7 @@
 {
-  "version": 238,
+  "version": 245,
   "released": "2026-08-27",
-  "changelog": "v238: age frames — the permanent calculated coordinate system (lifehug#259, contract docs/pr-specs/eras-o-e1-age-frames.md, ADR 0030, the Eras controlling design §3). WHY: the founder's Timeline read College 1990–1991 before High School because eras were dated from whatever moments keyword placement put inside them; there was no frame that could not be corrupted by its contents. NOW THE FRAME IS ARITHMETIC: `cross_dating.age_frames(birth, *, as_of, death=None)` — Childhood [0,13), Teen years [13,20), then every reached decade, no maximum — with `chronology.add_years` preserving grain and clamping Feb-29 → Feb-28 under rule `age-frame:1`. The fold mints period nodes `age:self:<band>` (`node_kind: period`, `event_kind: age_frame`, `definition_span` with an EXCLUSIVE end, `life_clip_end: present` resolved at read time, `origin_basis` via `CLAIM_BASIS_BY_DATE_BASIS`, `legacy_refs`, `life_view: lived|future_plan`) under `temporal_projection.PROJECTION_SCHEMA_VERSION = 2`, additive — a v1 payload still reads. `CALCULATION_RULE_VERSION` → `timeline-rules:2`. PUBLICATION STOPS CHURNING: `rebuild_signature` covers the reached-frame epoch `{count, current}` and `as_of` is never persisted, so `publish()` is a semantic NO-OP (`unchanged: true`, no generation, no write) inside one frame and publishes exactly once at a boundary. `timeline.legacy_period_ref` is the one alias map for `period:my-20s` / `tl:my-20s` / `band:my-20s`; roster rows named like a band contribute aliases only. Frames are excluded from the placement score. Seven design deviations recorded in the contract (chiefly: the projection schema constant, not `temporal_claims.SCHEMA_VERSION`; a frame must cite claims; a decade-grain origin widens to a decade-wide range). TESTS: `tests/test_eras_e1.py`, 55 cases, 63 red against unmodified code first. WHAT YOU'LL NOTICE: your Timeline has a frame that nothing sorted into it can bend — Childhood, your teens, your 20s, 30s, 40s… — and it stops re-publishing every day for no reason.",
+  "changelog": "v245: one birth gap, one work id — score v2 and the alias map (lifehug#262, contract docs/pr-specs/eras-o-e6-work-items.md, ADR 0030, the Eras controlling design §7 row \"Work item (birth origin)\"; begun by Claude Opus 5, finished by Claude Sonnet 5 via Claude Code). WHY: the missing-birthday question could be minted twice — once by the keystone path under `temporal_anchor`, once by the substrate under its own spelling — so answering it on one surface left it open on another, the exact failure §2.3 forbids. NOW ONE VOCABULARY, ONE ID: `system/temporal_work_items.py` holds the canonical `requested_field` for the birth-origin item; `_derive_work_items` mints it on the ABSENCE of an explicit owner birth (not only on a tripped finding) and a provisional origin (v241) never closes it — only an explicit birth claim does. SCORE V2: `system_value = clamp(0.6 + min(0.4, age_claims / REACH_SATURATION), 0, 1)` under rule `temporal-score:2`, recorded on `TemporalProjection.score_rule`, so the birthday is high-value by REACH, never by an unconditional class. THE ALIAS MAP: `work_item_aliases: {legacy_id: canonical_id}` is DERIVED, never stored — every canonical item re-minted under the legacy `temporal_anchor` spelling (and, for the birth origin, the legacy birth-anchor subject spellings) — and published in the SAME generation as `work_items`, so a rebuild reproduces it byte-identically; `resolve_work_item_id(ref, aliases=…)` is the one lookup, used by the bank markers in `question_planner`, `timeline.keystones[].work_item_id`, `mirror_work` and `timeline_interaction.work_item_target`, with an AST guard (`NoThirdSpelling`) proving `temporal_anchor` has exactly two literal homes and no caller mints a raw id. AND A CORRECTION PUBLISHES BEFORE IT IS CALLED DONE: `mirror_work.resolve_mirror_item` republishes after filing, so the Timeline, Mirror and the daily queue read the closed item in the same breath. TESTS: `tests/test_work_item_aliases.py`, `tests/test_work_item_queue.py`, every negative seen failing first. WHAT YOU'LL NOTICE: answer your birthday anywhere — the question closes everywhere.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -489,6 +489,16 @@
     "tests/walkthrough_entity_candidate.py",
     "tests/walkthrough_focus_candidate.py",
     "tests/walkthrough_lib.py",
-    "wiki/SCHEMA.md"
+    "wiki/SCHEMA.md",
+    "system/birth_origin.py",
+    "system/era_identity.py",
+    "system/era_record.py",
+    "system/event_binding.py",
+    "interactions/timeline/prompt/recorder.md",
+    "sources/eras/.gitkeep",
+    "tests/test_eras_e3.py",
+    "tests/test_eras_e_bo.py",
+    "tests/test_classify_story_current.py",
+    "tests/test_eras_e1b.py"
   ]
 }

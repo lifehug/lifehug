@@ -214,7 +214,7 @@ class VaultContractTests(unittest.TestCase):
         # (stale-first classification) added `state/classify_cursor.json`.
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 244)
+        self.assertEqual(exported["identity"]["framework_version"], 245)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),
