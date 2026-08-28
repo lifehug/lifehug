@@ -22,7 +22,9 @@ from pathlib import Path
 
 from lifehug_core import (
     ANSWERS_DIR,
+    CORRECTION_ROLES,
     CORRECTION_SOURCES_DIR,
+    DEFAULT_CORRECTION_ROLE,
     ENTITY_ROSTERS_DIR,
     REPO_DIR,
     SOURCE_LINT_FINDINGS_FILE,
@@ -30,6 +32,8 @@ from lifehug_core import (
     SOURCES_DIR,
     WIKI_DIR,
     answer_id_from_filename,
+    correction_role_marks_stale,
+    normalize_correction_role,
     now_utc,
     read_bytes,
     read_json,
@@ -108,6 +112,7 @@ FRONTMATTER_ORDER = (
     "supersedes_path",
     "reflects",
     "correction_kind",
+    "correction_role",
     "raw_url",
     "source_path",
     "content_sha256",
@@ -1282,9 +1287,13 @@ def create_linked_source(
     title: str | None,
     source_medium: str,
     correction_kind: str | None = None,
+    correction_role: str | None = None,
     suppress_on: list[str] | None = None,
     supersedes: str | None = None,
 ) -> Path:
+    # v237 (O-C2): refuse an unknown role BEFORE anything is written, so a
+    # typo cannot file a correction whose staleness nobody can explain.
+    role = normalize_correction_role(correction_role)
     target_path = resolve_source_target(target)
     target_record = source_record(target_path)
     captured_at = now_utc()
@@ -1357,6 +1366,10 @@ def create_linked_source(
         metadata["corrects"] = target_record["source_id"]
         metadata["corrects_path"] = rel(target_path)
         metadata["correction_kind"] = correction_kind or "other"
+        # v237 (O-C2): what this correction IS to the reading it is filed
+        # against. Durable, so a later reader can tell a date DECISION from a
+        # refutation without re-deriving the intent of whoever filed it.
+        metadata["correction_role"] = role
         if superseded is not None:
             # The predecessor is NOT edited. The edge lives on the new record
             # only, which is what keeps the old belief readable forever.
@@ -1366,16 +1379,29 @@ def create_linked_source(
         write_text(path, f"{format_frontmatter(metadata)}\n\n{payload}")
     register_source(path)
     if source_type == "source_correction":
-        # v103: a corrected fact invalidates the target's derived
+        # v103: a CONTENT correction invalidates the target's derived
         # classification — its events/people/themes were extracted from the
-        # uncorrected text. Mark it stale so the next weekly batch
-        # re-classifies (the prompt injects corrections as authoritative);
-        # the old classification keeps feeding the timeline/wiki until the
-        # fresh one replaces it.
+        # uncorrected text. Mark it stale so the next batch re-classifies
+        # (the prompt injects corrections as authoritative); under v237 the
+        # stale reading leaves every derived reader immediately.
+        #
+        # v237 (O-C2): a PLACEMENT correction does not. Dating a moment is a
+        # decision about WHEN it happened, not a claim that the text it was
+        # read out of is wrong — and marking it stale would withhold the very
+        # moment the person just placed. `mark_stale` is told the role and
+        # refuses on its own; the decision lives in ONE predicate
+        # (`lifehug_core.correction_role_marks_stale`), never here.
         try:
             import classify_story  # noqa: PLC0415
-            if classify_story.mark_stale(target_path, reason=f"correction filed: {rel(path)}"):
+            if classify_story.mark_stale(
+                target_path,
+                reason=f"correction filed: {rel(path)}",
+                correction_role=role,
+            ):
                 print(f"→ marked {rel(target_path)} for re-classification")
+            elif not correction_role_marks_stale(role):
+                print(f"→ {rel(target_path)} stays current — a {role} correction "
+                      f"decides a date, it does not refute the reading")
         except Exception as exc:  # never block the correction itself
             print(f"warn: could not mark classification stale: {exc}", file=sys.stderr)
     return path
@@ -1679,6 +1705,7 @@ def cmd_correct(args: argparse.Namespace) -> int:
             title=args.title,
             source_medium=args.source,
             correction_kind=args.kind,
+            correction_role=args.role,
             supersedes=getattr(args, "supersedes", None),
         )
     except SupersedesError as exc:
@@ -1806,6 +1833,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("correct", help="Create an additive correction source from stdin")
     p.add_argument("target", help="Source path or source_id to correct")
     p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
+    p.add_argument("--role", default=DEFAULT_CORRECTION_ROLE, choices=list(CORRECTION_ROLES),
+                   help="What this correction is to the target's reading: "
+                        "content (the text got a fact wrong — the classification "
+                        "goes stale) or placement (a date decision about a moment "
+                        "— the classification stays current)")
     p.add_argument("--source", default="manual")
     p.add_argument("--title")
     p.add_argument(
