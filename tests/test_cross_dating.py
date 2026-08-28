@@ -408,7 +408,11 @@ class VaultFixture(unittest.TestCase):
                 {"name": "Childhood", "slug": "childhood", "chrono": 1,
                  "page_eligible": True, "date": "1984/1990"},
             ]}), encoding="utf-8")
-        self.write_events(self.EVENTS)
+        # eras O-E2: these moments enter Childhood by the classifier's OWN era
+        # tag now (rung 2, `_era_label_match`), not by the retired
+        # source-membership mechanism — the fixture's INTENT (four Childhood
+        # moments) is unchanged; only how they get there is.
+        self.write_events(self.EVENTS, eras=("childhood",))
         self.store = root / "state" / "landmarks.json"
         self.store.write_text(json.dumps(self.LANDMARKS), encoding="utf-8")
 
@@ -430,24 +434,31 @@ class VaultFixture(unittest.TestCase):
             setattr(tl, name, value)
         self.tmp.cleanup()
 
-    def write_events(self, events):
+    def write_events(self, events, *, eras: tuple = ()):
+        """`eras` (eras O-E2): the classifier's OWN era tags for this answer
+        (`load_events`' `time_periods`) — the rung 2 signal that replaces
+        source membership. Absent, exactly v206's byte-identical shape."""
+        payload = {"source_path": "answers/A1.md", "events": events}
+        if eras:
+            payload["time_periods"] = [{"era": e} for e in eras]
         (self.root / "state" / "classifications" / "answers-a1.json").write_text(
-            json.dumps({"source_path": "answers/A1.md", "events": events}),
-            encoding="utf-8")
+            json.dumps(payload), encoding="utf-8")
 
-    def write_one_per_source(self, events):
+    def write_one_per_source(self, events, *, eras: tuple = ()):
         """One classification per answer — `unknown_key` is (period, source),
         so N moments are only N unknowns when they came from N answers, which
-        is the shape a real vault has."""
+        is the shape a real vault has. `eras`: see `write_events`."""
         for path in (self.root / "state" / "classifications").glob("*.json"):
             path.unlink()
         refs = []
         for index, event in enumerate(events, start=1):
             ref = f"A{index}"
             refs.append(ref)
+            payload = {"source_path": f"answers/{ref}.md", "events": [event]}
+            if eras:
+                payload["time_periods"] = [{"era": e} for e in eras]
             (self.root / "state" / "classifications" / f"answers-a{index}.json").write_text(
-                json.dumps({"source_path": f"answers/{ref}.md", "events": [event]}),
-                encoding="utf-8")
+                json.dumps(payload), encoding="utf-8")
         return refs
 
     def write_period_page(self, refs, *, dated: bool):
@@ -573,7 +584,7 @@ class PromiseEqualsDeliveryTests(VaultFixture):
             {"title": f"moment {n}", "description": f"Something happened, number {n}.",
              "when_hint": "", "anchor": None, "date": None}
             for n in range(48)
-        ])
+        ], eras=("childhood",))
         self.write_period_page(refs, dated=False)
 
     def _date_the_era(self):
@@ -610,7 +621,7 @@ class PromiseEqualsDeliveryTests(VaultFixture):
              "when_hint": "", "anchor": None, "date": {"stated": "1986"}},
             {"title": "The dog", "description": "A dog followed me home.",
              "when_hint": "", "anchor": None, "date": None},
-        ])
+        ], eras=("childhood",))
         self.write_period_page(refs, dated=False)
         index = tl.dependency_index(self.data())
         event_keys = [key for key in index if key.startswith("event:")]
@@ -647,7 +658,7 @@ class FoundersScaleTests(VaultFixture):
              "description": f"Something from those years, number {n}.",
              "when_hint": "", "anchor": None, "date": None}
             for n in range(48)
-        ])
+        ], eras=("childhood",))
         self.write_period_page(refs, dated=True)
 
     def test_a_dated_childhood_places_all_forty_eight(self):
@@ -828,7 +839,7 @@ class FounderBandTests(VaultFixture):
             {"title": "The bike with no brakes",
              "description": "I rode a bike with no brakes down the hill.",
              "when_hint": "", "anchor": None, "date": None},
-        ])
+        ], eras=("childhood",))
         self.write_period_page(refs, dated=False)
         self.write_roster(dated=False)
 
@@ -939,7 +950,7 @@ class AgeBandVaultTests(FounderBandTests):
             {"title": "The corner apartment",
              "description": "We rented the corner apartment for a while.",
              "when_hint": "", "anchor": None, "date": None},
-        ])
+        ], eras=("20s",))
         (self.root / "wiki" / "periods" / "my-20s.md").write_text(
             PAGE.format(title="My 20s", page_type="period", chrono=1, extra="",
                         sources=_sources(refs)),
@@ -1106,7 +1117,7 @@ class RecordGainTests(VaultFixture):
             {"title": "The bike with no brakes",
              "description": "I rode a bike with no brakes down the hill.",
              "when_hint": "", "anchor": None, "date": None},
-        ])
+        ], eras=("childhood",))
         self.write_period_page(refs, dated=False)
         (self.root / "state" / "entity_rosters" / "period.json").write_text(json.dumps({
             "version": 1, "type": "period", "entities": [

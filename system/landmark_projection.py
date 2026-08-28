@@ -258,6 +258,75 @@ def date_event_kind(row: object) -> str:
     return UNDISAMBIGUATED_EVENT_KIND
 
 
+# --------------------------------------------------------------------------
+# Owner relevance — a stated relationship AND an owner-relevant occurrence
+# --------------------------------------------------------------------------
+
+#: WHICH landmark domains make somebody ELSE's occurrence part of the owner's
+#: life, and how (eras design §2.5). It is deliberately a table of FOUR rows,
+#: not a rule over the nine domains: `residences`, `schools`, `work`,
+#: `military` and `birth` are the owner's own life, so their entries never
+#: reach this question, and no other domain enumerates a second person.
+#:
+#: The relation is the DESIGN's, not an inference: a partnership landmark is
+#: something the owner was in (``participated``); a child's birth, a family
+#: member's birth and a loss are things that happened to somebody else and that
+#: the owner lived through (``lived_effect``).
+OWNER_RELEVANCE_BY_DOMAIN = {
+    "children": "lived_effect",
+    "losses": "lived_effect",
+    "family": "lived_effect",
+    "partnerships": "participated",
+}
+
+
+def entry_supported_event_kinds(domain: object) -> tuple[str, ...]:
+    """The event kinds ONE entry of ``domain`` is evidence for.
+
+    This is the narrow half of §2.5, and the narrowness is the point. A
+    ``children`` entry says a child was born and says nothing whatsoever about
+    that child's graduation, their move, or the year they changed jobs — so the
+    entry supports exactly the event kinds its own ``date_semantics`` mints,
+    read through :func:`date_event_kind` and the two span bounds, and nothing
+    else. *The relationship alone does not pull the relative's other dated
+    events onto the axis.*
+    """
+    row = domain_row_or_none(domain)
+    if row is None:
+        return ()
+    # The domain's OWN declared semantics, plus whatever `date_event_kind`
+    # collapses them to. Both spellings are real on disk: a legacy
+    # `partnerships` entry's single `date` field lands at `transition` (three
+    # declared semantics, none of them guessable), while the recorder and the
+    # listener emit `married` / `first_met` / `dating_started` directly. One
+    # entry is evidence for both readings of the same fact and for nothing
+    # wider than that.
+    kinds = {date_event_kind(row)}
+    kinds.update(landmarks_interaction.date_semantics(row))
+    kinds.discard("span")
+    if not landmarks_interaction.dates_each_entry(row):
+        kinds.update((SPAN_START_EVENT_KIND, SPAN_END_EVENT_KIND))
+    return tuple(sorted(kind for kind in kinds if kind))
+
+
+def owner_relevance_for(domain: object, event_kind: object) -> str | None:
+    """How this entry makes THIS occurrence the owner's, or ``None``.
+
+    ``None`` is a real answer and the commonest one: it means the entry is not
+    evidence that this occurrence belongs on the owner's axis, and the caller
+    is then required to say ``contextual_only`` rather than quietly placing the
+    row anyway. A domain the question set does not declare also returns
+    ``None`` — an undeclared domain has no stated relationship semantics, and
+    inventing one is the guess this whole phase exists to stop.
+    """
+    name = collapsed_text(domain)
+    relation = OWNER_RELEVANCE_BY_DOMAIN.get(name)
+    if relation is None:
+        return None
+    kind = collapsed_text(event_kind)
+    return relation if kind and kind in entry_supported_event_kinds(name) else None
+
+
 def entry_subject_mention(entry: object, row: object, domain: object) -> str:
     """The raw mention a claim about this entry names as its subject.
 

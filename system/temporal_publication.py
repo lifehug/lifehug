@@ -79,7 +79,9 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
 import era_identity as ei  # noqa: E402
+import era_memberships as era  # noqa: E402
 import event_binding as eb  # noqa: E402
+import landmark_projection as lp  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
@@ -311,6 +313,7 @@ def projection_payload(result: tt.CalculatedTimeline, *, published_at: str,
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
         "work_items": len(result.work_items),
+        "memberships": len(result.memberships),
         "unplaced": len((result.diagnostics or {}).get("unplaced") or ()),
     }
     return payload
@@ -400,6 +403,9 @@ def publish(
     era_views: object = None,
     roster_snapshot: object = (),
     constraints: object = None,
+    membership_assertions: object = None,
+    display_decisions: object = None,
+    landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
     now: object = None,
@@ -418,6 +424,11 @@ def publish(
     "read them", an explicit sequence is "use exactly these", and ``()`` is
     "none" — the distinction matters because a drag's republish must pick up the
     move that was just filed without every caller remembering to load it.
+
+    ``membership_assertions``, ``display_decisions`` and ``landmark_entries``
+    (eras E2) follow exactly that convention, and for exactly that reason: a
+    drag that files a membership receipt republishes in the same job, and the
+    receipt it just wrote has to be in the projection it just published.
     """
     started = time.perf_counter()
     timings: dict[str, float] = {}
@@ -442,6 +453,12 @@ def publish(
         # Same `None` means "read them" rule as `constraints` above: the act
         # that creates an era must publish a projection that HAS it.
         era_views = ei.era_views(vault_root)
+    if membership_assertions is None:
+        membership_assertions = era.active_era_memberships(vault_root)
+    if display_decisions is None:
+        display_decisions = era.active_era_displays(vault_root)
+    if landmark_entries is None:
+        landmark_entries = lp.load_landmark_sources(vault_root)
 
     generation = next_generation(vault_root)
     result = tt.derive_calculated_timeline(
@@ -451,6 +468,9 @@ def publish(
         era_views=era_views,
         roster_snapshot=roster_snapshot,
         constraints=constraints,
+        membership_assertions=membership_assertions,
+        display_decisions=display_decisions,
+        landmark_entries=landmark_entries,
         birth_date=birth_date,
         owner_ref=owner_ref,
         projection_generation=generation,
@@ -596,7 +616,8 @@ EMPTY_VIEW = {
     "work_item_aliases": {},
     "reach": {},
     "reached_frame_epoch": {"count": 0, "current": None},
-    "counts": {"nodes": 0, "work_items": 0, "claims": 0, "unplaced": 0},
+    "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
+               "unplaced": 0},
 }
 
 
@@ -701,6 +722,12 @@ def calculated_view(vault_root: str | Path) -> dict:
         },
         "counts": {
             "nodes": int(counts.get("nodes") or len(payload.get("nodes") or ())),
+            # E2: the SERVED block, not only the published file. A host reading
+            # `calculated_view` is the platform's Timeline, and a membership it
+            # cannot see is a row it draws in the wrong frame.
+            "memberships": int(
+                counts.get("memberships") or len(payload.get("memberships") or ())
+            ),
             "work_items": int(
                 counts.get("work_items") or len(payload.get("work_items") or ())
             ),

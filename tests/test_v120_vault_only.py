@@ -56,6 +56,8 @@ EXPECTED_DATA_PATHS = {
     "temporal_resolutions",
     "coverage",
     "entity_rosters",
+    "era_display_sources",
+    "era_membership_sources",
     "focus_curation_state",
     "focus_merges",
     "focus_recommendations",
@@ -214,7 +216,7 @@ class VaultContractTests(unittest.TestCase):
         # (stale-first classification) added `state/classify_cursor.json`.
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 246)
+        self.assertEqual(exported["identity"]["framework_version"], 247)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),
