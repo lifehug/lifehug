@@ -439,6 +439,26 @@ share one legacy key. Anything that still joins nothing stays in
 `stale_placements` and is counted at `counts["stale_placements"]`, with
 `counts["placements_rejoined"]` naming what the repair rescued on that read.
 
+**A pin survives its moment's reclassification (v253).** A content key is only
+as stable as the content, and rewriting a moment's description is `classify-story`'s
+ordinary weekly job — so every reclassification used to orphan the pin of every
+moment it touched: the person named a date, the date was on disk, and the moment
+rendered undated (lifehug#276). `resolve_placements` therefore has a **third
+rung**: a stored key that joins nothing, whose row's own `source` mints exactly
+one live moment, re-keys to that moment. Zero candidates or several and the rung
+does not run — the row stays orphaned under the named diagnostic
+`placement_orphaned_ambiguous` (`timeline_data()["placement_diagnostics"]`,
+counted at `counts["placements_orphaned_ambiguous"]`), because filing the
+person's date onto the wrong moment is worse than leaving it stranded. Rung 3 is
+also the only rung whose repair is **durable**: `rekey_orphaned_placements`
+rewrites the row's key with `rekeyed_from`/`rekeyed_at` provenance, seated in the
+weekly `timeline-retire` pass that runs right after `classify-story` — the read
+heals immediately, the store heals on that pass, and replaying it is a no-op.
+Rungs 1 and 2 still leave the stored key exactly as v215 pinned it. At the
+filing end, `timeline-place` refuses an explicit `--placement-key` that no live
+moment mints (`placement_key_not_live`) rather than writing a pin that is dead
+on arrival.
+
 Weekly too, `arc-plan` reads `place_no_stories` off the same assembled
 payload and plans a **place aside** onto a card whose gap slot the whisper
 left empty (v200). Nothing is written: a place stops being a gap the moment a
