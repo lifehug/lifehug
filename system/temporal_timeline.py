@@ -103,6 +103,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import cross_dating as cd  # noqa: E402
+import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -710,15 +711,61 @@ def _roster_names(roster_snapshot: object) -> dict:
     return {ref: name or ref for ref, name in index.refs.items()}
 
 
-def _group_claims(claims: list[dict], *, owner_ref: str) -> dict:
+def _era_groups(era_views: object, *, owner_ref: str) -> dict:
+    """One seeded ``named_era`` group per known era (eras E3, design §7).
+
+    An era EXISTS as soon as somebody made one, and it has to be able to
+    appear on the Timeline undated — in "Not placed yet", with a ▸ on it —
+    before anybody says a year. So the era's own identity record is what mints
+    the node, and the claims resolved to it are what date it; the node cites
+    the era's `identity` claim, which is the "identity claim → node" of §7's
+    table and is what keeps `node_without_inputs` an honest rule rather than a
+    thing eras are excused from.
+
+    The label is the era's OWN label, handed in rather than derived: the fold
+    is pure and never reads a vault, and *"Me's named era"* is not what
+    anybody called it.
+    """
+    views = era_views.values() if isinstance(era_views, dict) else (era_views or ())
+    groups: dict[str, dict] = {}
+    for view in views:
+        if not isinstance(view, dict):
+            continue
+        era_id = collapsed_text(view.get("era_id"))
+        if not era_id:
+            continue
+        groups[era_id] = {
+            "node_id": era_id,
+            "event_kind": tp.NAMED_ERA_EVENT_KIND,
+            "node_kind": "period",
+            "subject": owner_ref,
+            "subjects": [owner_ref],
+            "resolved": True,
+            "claims": [],
+            "era_label": collapsed_text(view.get("label")),
+            "era_kind": collapsed_text(view.get("era_kind")),
+            "identity_claim_id": collapsed_text(view.get("identity_claim_id")),
+        }
+    return groups
+
+
+def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = ()) -> dict:
     """Claims → ``node_id -> group``, in one deterministic pass.
 
     The grouping key is the claim's own ``event_ref`` when the recorder minted
-    one, and the derived node id otherwise. ``identity`` claims form no node:
-    they assert *who*, not *when*, and their contribution to the projection is
-    the resolution they feed, not a row on the page.
+    one — or when E3's binder RESOLVED one — and the derived node id
+    otherwise. ``identity`` claims form no node: they assert *who*, not
+    *when*, and their contribution to the projection is the resolution they
+    feed, not a row on the page.
+
+    ``era_views`` seeds the era groups first (:func:`_era_groups`), so a
+    `period_started` claim bound to an era lands IN that era's node instead of
+    minting a second one keyed on the claim's own event kind. The seeded
+    group's `event_kind` is `named_era` and its `node_kind` is `period`, and
+    the merge below never overwrites either — an era is what it is, whatever
+    the claims about it happen to be called.
     """
-    groups: dict[str, dict] = {}
+    groups: dict[str, dict] = _era_groups(era_views, owner_ref=owner_ref)
     for claim in claims:
         if claim.get("claim_type") == "identity":
             continue
@@ -796,13 +843,78 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list) -> dict:
             if isinstance(value, dict):
                 relations.append({"claim": claim, "relation": value})
     outcome = chrono.reconcile(records)
+    span = _era_span(group)
     return {
-        "best": outcome["best_supported"],
+        "best": span if span is not None else outcome["best_supported"],
         "alternates": list(outcome["alternates"]),
         "conflict": float(outcome["conflict"]),
         "relations": relations,
         "durations": durations,
     }
+
+
+#: The two event kinds that are the ENDS of an era, not events in it (§4.2).
+PERIOD_BOUND_EVENT_KINDS = ("period_started", "period_ended")
+
+
+def _era_span(group: dict) -> object:
+    """An era's own interval, composed from its bound claims. Or ``None``.
+
+    `chronology.reconcile` is right for every other node and wrong for exactly
+    this one: it reads a group's dated claims as RIVAL READINGS of one moment
+    and picks the best-supported, which turns *"2007 through 2011"* into
+    "2007, and something disagrees". A `period_started` and a `period_ended`
+    are not rivals. They are the two ends of one thing, and composing them is
+    the whole difference between an era that reads *2007–2011* and an era that
+    reads *2007* with a contradiction hanging off it.
+
+    Only ``named_era`` groups take this path, and only for the two bound
+    kinds; anything else said ABOUT an era (an event that happened in it)
+    reaches the node through a membership, never through this. Two claims of
+    the same bound still reconcile against each other first — two different
+    answers to "when did College start" IS a disagreement — so this composes
+    the reconciled start with the reconciled end and invents nothing.
+    """
+    if group.get("event_kind") != tp.NAMED_ERA_EVENT_KIND:
+        return None
+    ends: dict[str, object] = {}
+    for kind in PERIOD_BOUND_EVENT_KINDS:
+        records = [
+            record
+            for claim in group["claims"]
+            if collapsed_text(claim.get("event_kind")) == kind
+            and collapsed_text(claim.get("claim_type")) in tc.DATED_CLAIM_TYPES
+            for record in (_record_for_dated_claim(claim),)
+            if record is not None
+        ]
+        if records:
+            ends[kind] = chrono.reconcile(records)["best_supported"]
+    started = ends.get("period_started")
+    ended = ends.get("period_ended")
+    if started is None and ended is None:
+        return None
+    if started is not None and ended is None:
+        return started
+    if started is None:
+        return ended
+    return chrono.DateRecord(
+        best=f"{started.best}/{ended.best}",
+        earliest=started.earliest,
+        latest=ended.latest,
+        granularity="range",
+        # The WEAKER of the two ends. `chronology.CONFIDENCES` runs
+        # certain → conjectural, so the weaker one is the later index: a span
+        # is only as firmly held as its shakiest end, and a certain start
+        # must not launder a conjectural finish.
+        confidence=max(
+            (started.confidence, ended.confidence),
+            key=lambda name: chrono.CONFIDENCES.index(name)
+            if name in chrono.CONFIDENCES else len(chrono.CONFIDENCES),
+        ),
+        basis=started.basis,
+        anchors=tuple(dict.fromkeys([*started.anchors, *ended.anchors])),
+        provenance=tuple([*started.provenance, *ended.provenance]),
+    )
 
 
 def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> None:
@@ -1418,6 +1530,7 @@ def _node_dict(
     label: str,
     generation: int,
     as_of: str | None = None,
+    possible: object = None,
 ) -> dict:
     """One validated :class:`~temporal_projection.CalculatedTimelineNode`.
 
@@ -1464,7 +1577,97 @@ def _node_dict(
             "conflict_state": state,
             "provenance_summary": _provenance_summary(group, calculated, best),
             "life_view": _life_view(best, as_of),
+            **({"possible_temporal_value": possible.to_dict()}
+               if possible is not None else {}),
         }
+    )
+
+
+#: Design §4.2. A `within` says an era sits inside a frame; it does NOT say
+#: when the era began or ended. So a named era with no dating claims of its
+#: own keeps `best_temporal_value` EMPTY and publishes the containment here,
+#: at a confidence that cannot be mistaken for something the person said.
+POSSIBLE_VALUE_CONFIDENCE = "inferred"
+
+
+def _within_frame_anchors(node_id: str, constraints: object, frame_values: dict):
+    """The FRAME intervals an era's active `within` constraints point at.
+
+    A frame is not a node in ``groups`` — it is calculated from the owner's
+    birth after the fixpoint has run — so ``_build_edges`` legitimately files
+    an `anchor_unresolved` diagnostic for it and ``_propagate`` never sees it.
+    That is fine for a bound, because a `within` is not one; it is exactly
+    what this reads instead.
+    """
+    found = []
+    for value in constraints or ():
+        try:
+            row = tc.validate_ordering_constraint(value)
+        except TemporalContractError:
+            continue
+        if row["status"] != "active" or row["relation"] != "within":
+            continue
+        if row["subject_node_id"] != node_id:
+            continue
+        for anchor in row["anchor_node_ids"]:
+            record = frame_values.get(anchor)
+            if record is not None:
+                found.append((anchor, record))
+    return found
+
+
+def _within_only_possibility(node_id: str, group: dict, calculated: dict,
+                             placed: object, edges, *, constraints: object = (),
+                             frame_values: dict | None = None) -> object:
+    """The `possible_temporal_value` for an era placed ONLY by containment.
+
+    Two conditions, both necessary. The node is a `named_era` — an age
+    frame's interval IS its definition and a moment's containment is an
+    ordinary bound. And its own claims dated it not at all — one stated bound
+    makes the era `partial` and the containment is then corroboration, not the
+    only thing we have.
+
+    Two roads reach it. An era inside another ERA propagated through
+    ``_propagate`` like anything else, and is used only when EVERY edge that
+    touched it was a `within` (an era placed by *"after High School"* has been
+    genuinely bounded by an ordering claim, and that is a bound). An era
+    inside a FRAME never propagated at all, because a frame is not a node in
+    the fixpoint, so its constraint is read directly and converted through
+    `chronology.from_anchor` — the one conversion, which yields BOUNDS from a
+    relation and never a named date.
+
+    Returns the record to publish as possible (and the caller then publishes
+    NO best), or ``None`` when the ordinary path stands.
+    """
+    if group.get("event_kind") != tp.NAMED_ERA_EVENT_KIND:
+        return None
+    if calculated.get("best") is not None:
+        return None
+
+    record = None
+    if placed is not None:
+        touching = [edge for edge in edges if edge.subject == node_id]
+        if touching and all(edge.relation == "within" for edge in touching):
+            record = chrono.from_dict(
+                placed.to_dict() if hasattr(placed, "to_dict") else placed
+            )
+    if record is None:
+        for _anchor, frame in _within_frame_anchors(
+            node_id, constraints, frame_values or {}
+        ):
+            during = chrono.from_anchor(frame, "during")
+            record = during if record is None else chrono.intersect(record, during)
+        if record is None:
+            return None
+    return chrono.DateRecord(
+        best=record.best,
+        earliest=record.earliest,
+        latest=record.latest,
+        granularity=record.granularity,
+        confidence=POSSIBLE_VALUE_CONFIDENCE,
+        basis="anchor",
+        anchors=tuple(record.anchors or ()),
+        provenance=tuple(record.provenance or ()),
     )
 
 
@@ -1648,6 +1851,8 @@ def derive_calculated_timeline(
     active_index: object,
     *,
     resolution_records: object = (),
+    event_resolution_records: object = (),
+    era_views: object = (),
     roster_snapshot: object = (),
     constraints: object = (),
     birth_date: object = None,
@@ -1684,6 +1889,23 @@ def derive_calculated_timeline(
 
     claims = active_claim_rows(active_index)
 
+    # E3 (§4.3): EVENT resolution, before subjects and before grouping,
+    # because the grouping key IS the resolved `event_ref`. This is the same
+    # seam `resolution_records` already is, extended from subjects to events:
+    # a caller that keeps ONE ledger of decisions may hand it in either
+    # argument, so the `event_resolution`-typed rows are harvested out of both
+    # rather than requiring every caller to sort its own ledger.
+    claims, event_findings = eb.resolve_events(
+        claims,
+        [
+            row
+            for row in (list(event_resolution_records or ())
+                        + list(resolution_records or ()))
+            if isinstance(row, dict) and row.get("type") == eb.EVENT_RESOLUTION_TYPE
+        ],
+    )
+    diagnostics.extend(event_findings)
+
     mark = clock()
     resolved, records, by_mention = _resolve_subjects(
         claims,
@@ -1695,14 +1917,15 @@ def derive_calculated_timeline(
     timings["resolve"] = clock() - mark
 
     mark = clock()
-    groups = _group_claims(resolved, owner_ref=owner)
+    groups = _group_claims(resolved, owner_ref=owner, era_views=era_views)
     roster_names = _roster_names(roster_snapshot)
     displays = {
         node_id: _subject_display(group["subject"], group["claims"], roster_names)
         for node_id, group in groups.items()
     }
     labels = {
-        node_id: _node_label(displays[node_id], group["event_kind"])
+        node_id: (collapsed_text(group.get("era_label"))
+                  or _node_label(displays[node_id], group["event_kind"]))
         for node_id, group in groups.items()
     }
     timings["group"] = clock() - mark
@@ -1775,31 +1998,19 @@ def derive_calculated_timeline(
         for ref in edge.constraint_refs:
             constraints_by_node.setdefault(edge.subject, []).append(ref)
 
-    nodes = [
-        _node_dict(
-            groups[node_id],
-            calculated[node_id],
-            best=placed.get(node_id),
-            extra_alternates=rejected.get(node_id, ()),
-            extra_claim_refs=anchor_claim_refs.get(node_id, ()),
-            contradicted=node_id in contradicted_nodes,
-            constraint_refs=constraints_by_node.get(node_id, ()),
-            label=labels[node_id],
-            generation=projection_generation,
-            as_of=as_of,
-        )
-        for node_id in sorted(groups)
-    ]
-
-    # The age frames (eras E1). They are calculated LAST because they are
-    # calculated FROM the reconciled owner birth node — the whole point of
-    # `age:self:<band>` being a projection of the substrate rather than a
-    # roster row somebody's monthly model wrote.
+    # The age frames (eras E1). They are calculated FROM the reconciled owner
+    # birth node — the whole point of `age:self:<band>` being a projection of
+    # the substrate rather than a roster row somebody's monthly model wrote —
+    # and they are calculated BEFORE the group nodes are rendered because E3's
+    # `within(frame)` needs their intervals: a frame is not in `groups`, so
+    # `_propagate` cannot see it, and an era told it sits in somebody's 20s
+    # would otherwise be told nothing at all.
     mark = clock()
+    frame_nodes: list[dict] = []
     origin = _owner_birth(groups, calculated, placed, owner, diagnostics)
     if origin is not None:
         _birth_node_id, resolved_origin = origin
-        nodes.extend(_age_frame_nodes(
+        frame_nodes = list(_age_frame_nodes(
             origin=resolved_origin,
             claim_refs=[claim.get("claim_id")
                         for claim in resolved_origin["group"].get("claims", ())],
@@ -1808,6 +2019,40 @@ def derive_calculated_timeline(
             roster_snapshot=roster_snapshot,
             generation=projection_generation,
         ))
+    frame_values = {
+        row["node_id"]: chrono.from_dict(row.get("best_temporal_value"))
+        for row in frame_nodes
+        if row.get("best_temporal_value")
+    }
+
+    possibilities = {
+        node_id: _within_only_possibility(
+            node_id, groups[node_id], calculated[node_id], placed.get(node_id),
+            edges, constraints=constraints, frame_values=frame_values,
+        )
+        for node_id in sorted(groups)
+    }
+    nodes = [
+        _node_dict(
+            groups[node_id],
+            calculated[node_id],
+            best=None if possibilities.get(node_id) is not None else placed.get(node_id),
+            possible=possibilities.get(node_id),
+            extra_alternates=rejected.get(node_id, ()),
+            extra_claim_refs=[
+                *anchor_claim_refs.get(node_id, ()),
+                *([groups[node_id]["identity_claim_id"]]
+                  if groups[node_id].get("identity_claim_id") else ()),
+            ],
+            contradicted=node_id in contradicted_nodes,
+            constraint_refs=constraints_by_node.get(node_id, ()),
+            label=labels[node_id],
+            generation=projection_generation,
+            as_of=as_of,
+        )
+        for node_id in sorted(groups)
+    ]
+    nodes.extend(frame_nodes)
     timings["age_frames"] = clock() - mark
     nodes.sort(key=_node_sort_key)
 

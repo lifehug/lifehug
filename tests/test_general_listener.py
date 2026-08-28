@@ -353,7 +353,7 @@ class ListenerPromptTests(unittest.TestCase):
         self.assertIn("You are not in the conversation", prompt)
 
     def test_the_measured_size_is_pinned(self):
-        """MEASURED, not guessed: 9181 characters with an empty store.
+        """MEASURED, not guessed: 9661 characters with an empty store.
 
         The focused recorder's leaf pins at 8400 for ONE domain. This one
         carries nine domain KEY lines (~780 characters), the person-record
@@ -363,8 +363,14 @@ class ListenerPromptTests(unittest.TestCase):
         property this pin exists to hold, exactly as
         `test_the_recorder_has_no_voice_and_no_transcript` holds it there.
         The honest cost of the claims contract is written out at that pin.
+
+        E3 (eras §4.3) moved it again, from 9181, by ONE bullet: the
+        `event_mention` key and the paragraph that tells the ear it is writing
+        down a NAME and not making a link. 480 characters, re-measured here
+        rather than rounded up — a pin that gets padded "for headroom" stops
+        being a measurement of anything.
         """
-        self.assertLess(len(self._prompt()), 9400)
+        self.assertLess(len(self._prompt()), 9800)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()
