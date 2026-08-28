@@ -93,6 +93,80 @@ never have to ask whether the docs match the code.
   a `<!-- embed: … behavior.md -->` block that no longer byte-matches its
   source. Edit a `behavior.md`, edit its handbook page in the same commit.
 
+## Landed 2026-08-27→28 — THE ERAS PROGRAM (in progress)
+
+Controlling design: platform `docs/design/eras.md` (tracking
+lifehug-platform#686); this repo's half is **ADR 0030**
+(`docs/adr/0030-eras.md`). The founder's own Timeline read College 1990–1991
+before High School because eras were dated from whatever moments keyword
+placement happened to put inside them — full diagnosis in the ADR's
+Context. Fix: age frames (Childhood, Teen years, every reached decade) are
+the permanent, calculated coordinate system; named eras (College, the
+Mission) are immutable, person-created interpretations dated only by what
+the person said; membership and display are separate durable receipts;
+every event carries who it happened to and why it belongs on the owner's
+own axis.
+
+**Merged, v235→v239**: **v235** ADR 0030 itself, and it keeps v234's own
+promise — the `mirror_item` read alias is deleted (lifehug#257) · **v236**
+O-E0 immediate defects — honest probes by relationship rather than
+`anchor_rows[0]`, the owner's birth claim binds to subject `self`
+(lifehug#255 contract, lifehug#258 implementation: `period_bound` is
+refused with a typed reason rather than misfiled onto an unrelated moment)
+· **v238** O-E1 — age frames as one pure arithmetic definition
+(`cross_dating.age_frames`), the calculated projection's additive schema v2
+(`node_kind: "period"`, `CALCULATION_RULE_VERSION` →
+`timeline-rules:2`), publication as a semantic no-op inside one
+reached-frame epoch, the one legacy alias map `timeline.legacy_period_ref`
+(lifehug#259) · **v239** O-E3 — an era is an identity: the opaque
+content-addressed `era_id`, label/kind as separate decision records, the
+deterministic event binder (`event_resolution`), the atomic `era-record`
+writer, and the `era` Play stage (lifehug#261). Membership/display filing
+is a DELIBERATELY separate, not-yet-wired seam — `era-record` refuses a
+whole payload that asks for a membership rather than filing the rest and
+dropping it silently. **v243** (this PR) is docs-only: the handbook page
+and glossary section, zero executable diff — rebased once mid-flight when
+v239 landed while it was open, so it describes era-record as merged rather
+than in flight.
+
+**Open / in flight**: **O-C** (lifehug#256) — the `is_current` reader gate,
+`--stale-first` + a durable cursor, corrections are never classification
+targets themselves; its stacked fix **O-C2** decides that a `timeline-place`
+correction is a date DECISION, not a content refutation, and must not mark
+its own source's classification stale (`correction_role`) · **O-E1b**
+(lifehug#263) — the view block serves memberships/labels/overlays/
+`life_view` from what the file actually publishes · **O-E6** (lifehug#262)
+— the missing-birthday work item's v2 score and the `work_item_aliases`
+map · **O-BO** (lifehug#264) — a provisional birth origin intersected from
+what the person said, never averaged. Version slots go by readiness, not
+by branch order, and can legitimately collide (two branches both claimed
+v240 this session) or leave a hole (the v228 precedent) — resolved at
+merge time, not at branch time.
+
+**Operational lessons, additive to this file's existing ones:**
+
+- **A shared `git stash` across worktrees loses another worktree's staged
+  work.** Multiple agents working parallel Eras branches out of sibling
+  worktrees must commit often instead — `git stash` is repo-global state,
+  not worktree-scoped, and a stash popped in the wrong worktree silently
+  discards what looked like someone else's uncommitted change.
+- **`TMPDIR=/private/tmp` is required for this repo's own suite on macOS**,
+  not only for platform walkthroughs — the same symlinked-`/var` vault-root
+  guard trips inside `tests/` here too.
+- **`system/vault_contract.json` carries an identity digest that must be
+  re-stamped after any edit that changes what it certifies** — a stale
+  digest reads as a valid contract for the wrong content, which is worse
+  than a missing one.
+- **OSS CI requires a version bump per PR, and that is what keeps a
+  contract-only draft honestly red.** A PR that lands only a contract
+  (`needs-implementation`) is *supposed* to fail the "version bump present"
+  gate until its implementation PR actually bumps `system/version.json` —
+  treating that failure as a bug to silence would delete the signal that
+  separates a plan from a shipped behavior.
+- **An Opus rate limit mid-session is a continuation, not a stall**: the
+  remaining Eras waves continued on Sonnet with honest attribution
+  (`🤖 Generated with Claude Sonnet 5 via Claude Code` where Sonnet actually
+  wrote the final text) rather than blocking on Opus availability.
 
 Then decide:
 

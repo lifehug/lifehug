@@ -91,3 +91,64 @@ together (owner-set, 2026-08-23).
 **How they relate:** landmarks are the universal skeleton; keystones are the
 per-person gaps that skeleton leaves; whispers and keystone questions are the
 two ways the loop asks.
+
+---
+
+## Eras
+
+Two different kinds of period, kept as two different facts (ADR 0030,
+2026-08-27 — see [Eras](eras.md) for the full page).
+
+- **Age frame** — the permanent, calculated coordinate system: Childhood
+  `[0,13)`, Teen years `[13,20)`, then every reached decade, derived from the
+  birth origin by one definition (`cross_dating.age_frames`). Never
+  model-authored, always visible, excluded from the placement score.
+  **Merged**, v238/lifehug#259.
+- **Named era** — a meaningful, possibly overlapping interpretation (College,
+  the Mission, "Building Etherfuse") the person creates in conversation, with
+  an opaque immutable **`era_id`** seeded from the creating operation, never
+  from its label. `era_kind` is `stretch` (a bounded interval) or `thread`
+  (a recurring presence, no natural end); flipping between them preserves
+  identity and history. Dated only by what the person said — never by the
+  moment envelope, roster fields, or page frontmatter. **Merged**, O-E3,
+  lifehug#261, v239 (the atomic `era-record` writer and the `era` Play
+  stage; membership/display are a separate, not-yet-wired seam — next).
+- **Membership assertion / display decision** — the two durable receipts
+  behind "this event belongs to that era" and "this is where it renders":
+  independent evidence assertions feed one calculated `era_membership`, and
+  a separate `era_display` decision picks where an event renders without
+  ever touching chronology. **Not yet built** — `era-record` names the seam
+  and refuses a payload that requests a membership rather than filing the
+  rest of the act and silently dropping it; no PR is open yet.
+- **Event resolution** — the deterministic binder's own receipt linking a
+  date claim to the era it names, kept as a record separate from the claim
+  itself so a claim can never end up resolved to two eras at once. An alias
+  two eras share binds nothing and mints `identity_uncertain` rather than
+  guessing. **Merged**, O-E3, lifehug#261, v239.
+- **Occurrence subject scope / owner timeline relation** — who an event
+  happened to, and why it belongs on the owner's own axis
+  (`participated`, `lived_effect`, `contextual_only`, …), each with its own
+  evidence. A stated relationship never by itself pulls a relative's
+  unrelated history onto the axis. **Design decided, not yet built.**
+- **Correction role** — the difference between a correction saying a source
+  got something wrong (`content`, which marks the classification stale) and
+  one saying only when an accepted moment happened (`placement`, which must
+  not) — so dating a moment is never the reason it disappears. **In
+  flight**, folded into O-C, lifehug#256.
+- **`is_current`** — the one reader gate that excludes a classification
+  marked stale from every derived reader immediately. **In flight**, O-C,
+  lifehug#256.
+- **`work_item_aliases`** — the derived map from legacy `temporal_anchor`
+  work-item ids to their canonical form, so one work item keeps one
+  identity across Timeline, Mirror, and the daily queue after this program.
+  **In flight**, O-E6, lifehug#262.
+- **`placement_reason`** — the additive field on every legacy-pass row
+  answering "why is this here": which rung, what evidence, which frame or
+  era, whether stale was excluded. **Design decided, not yet built.**
+- **`life_view`** — the reading a node gets once placed against the life
+  clip: lived history, `contradictory`, `future_plan`, or
+  `subject_uncertain`. **Merged**, v238/lifehug#259.
+- **`reached_frame_epoch`** — the `(reached-frame count, current band)` pair
+  the publisher's signature tracks instead of the wall clock, so
+  re-publishing inside one epoch is a true no-op. **Merged**,
+  v238/lifehug#259.
