@@ -22,7 +22,9 @@ sys.path.insert(0, str(ROOT / "system"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import era_identity as ei  # noqa: E402
+import era_record as er  # noqa: E402
 import event_binding as eb  # noqa: E402
+import temporal_timeline as tt  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_store as ts  # noqa: E402
 from tempdirs import root_parent_tmp  # noqa: E402
@@ -286,15 +288,23 @@ class MigrationTests(unittest.TestCase):
         # is no claim, no constraint, and nothing in the era's records that
         # could be read as a date.
         root = _vault(self)
-        ei.migrate_legacy_periods(root, roster_snapshot=LEGACY_ROSTER,
-                                  batch="1", dry_run=False, now=NOW)
+        report = ei.migrate_legacy_periods(root, roster_snapshot=LEGACY_ROSTER,
+                                           batch="1", dry_run=False, now=NOW)
         blob = "\n".join(
             (root / relative).read_text(encoding="utf-8")
             for relative in sorted(_files(root))
             if relative.startswith("sources/eras/")
         )
         self.assertNotIn("2001", blob)
-        self.assertEqual(ts.receipt_relative_paths(root), [])
+        # The only claims a migration files are the eras' own IDENTITY claims
+        # — no date, no event, nothing that could become a bound.
+        index = ts.rebuild_active_index(root)
+        kinds = {row["claim_type"] for row in ts.active_claims(index)}
+        self.assertEqual(kinds, {"identity"})
+        self.assertEqual(
+            len(ts.active_claims(index)), len(report["mapped"]),
+            "one identity claim per migrated era and not one more",
+        )
 
     def test_rerunning_the_same_batch_writes_nothing(self):
         root = _vault(self)
@@ -572,6 +582,383 @@ class ResolutionRecordTests(unittest.TestCase):
             eb.load_event_resolutions(self.root)[0]["resolution_id"],
             filed["resolution_id"],
         )
+
+
+# --------------------------------------------------------------------------
+# S5 — `era-record`, the atomic writer
+# --------------------------------------------------------------------------
+
+COLLEGE_PAYLOAD = {
+    "label": "College Years",
+    "aliases": ["College"],
+    "era_kind": "stretch",
+    "session_ref": "s1",
+    "turn_ref": "t1",
+    "message_text": "I think of 2007 through 2011 as my College years.",
+    "claims": [
+        {"claim_type": "date", "subject_mention": "me",
+         "event_kind": "period_started", "event_mention": "College",
+         "temporal_value": "2007",
+         "evidence": "2007 through 2011 as my College years"},
+        {"claim_type": "date", "subject_mention": "me",
+         "event_kind": "period_ended", "event_mention": "College",
+         "temporal_value": "2011",
+         "evidence": "2007 through 2011 as my College years"},
+    ],
+}
+
+
+class EraRecordTests(unittest.TestCase):
+    """§4.4 — one sentence, one act, and replay is a no-op at every step."""
+
+    def setUp(self):
+        self.root = _vault(self)
+
+    def test_one_sentence_becomes_one_era_with_two_bound_claims(self):
+        # T-NE-01, founder-shaped.
+        summary = er.record_era(self.root, COLLEGE_PAYLOAD, now=NOW)
+        era_id = summary["era_id"]
+        self.assertTrue(summary["steps"]["identity"]["created"])
+        self.assertTrue(summary["steps"]["label"]["created"])
+        self.assertEqual(summary["steps"]["kind"]["era_kind"], "stretch")
+
+        views = ei.era_views(self.root)
+        self.assertEqual(list(views), [era_id])
+        self.assertEqual(views[era_id]["label"], "College Years")
+
+        claims = summary["steps"]["claims"]
+        self.assertEqual(len(claims["claim_ids"]), 2)
+        self.assertEqual({b["event_ref"] for b in claims["bindings"]}, {era_id})
+        self.assertEqual({b["bound_by"] for b in claims["bindings"]}, {"target"})
+
+        # And the two dates now group onto the ERA's node, not onto "me".
+        index = ts.rebuild_active_index(self.root)
+        resolved, _ = eb.resolve_events(
+            tt.active_claim_rows(index), eb.load_event_resolutions(self.root)
+        )
+        self.assertEqual(
+            {row["event_ref"] for row in resolved
+             if row["claim_type"] != "identity"},
+            {era_id},
+        )
+        result = tt.derive_calculated_timeline(
+            index,
+            event_resolution_records=eb.load_event_resolutions(self.root),
+            era_views=ei.era_views(self.root),
+            now=NOW,
+        )
+        era_node = result.node(era_id)
+        self.assertIsNotNone(era_node)
+        self.assertEqual(era_node["node_kind"], "period")
+        self.assertEqual(era_node["event_kind"], "named_era")
+        self.assertEqual(era_node["label"], "College Years")
+        self.assertEqual(era_node["best_temporal_value"]["earliest"], "2007")
+        self.assertEqual(era_node["best_temporal_value"]["latest"], "2011")
+
+    def test_replaying_the_same_act_writes_nothing(self):
+        # T-W-01/02.
+        er.record_era(self.root, COLLEGE_PAYLOAD, now=NOW)
+        before = _files(self.root)
+        again = er.record_era(self.root, COLLEGE_PAYLOAD, now=NOW)
+        self.assertFalse(again["steps"]["identity"]["created"])
+        self.assertFalse(again["steps"]["label"]["created"])
+        self.assertFalse(again["steps"]["kind"]["created"])
+        self.assertFalse(any(b["created"] for b in again["steps"]["claims"]["bindings"]))
+        self.assertTrue(again["steps"]["publish"]["unchanged"])
+        self.assertEqual(before, _files(self.root))
+
+    def test_a_job_that_dies_mid_way_completes_on_the_retry(self):
+        # T-W-02/03. Every step is a crash point; the retry under the SAME
+        # mutation id converges on the uninterrupted run's exact file set.
+        whole = _vault(self)
+        er.record_era(whole, COLLEGE_PAYLOAD, now=NOW)
+        expected = _files(whole)
+        for step in ("identity", "label", "kind", "claims"):
+            with self.subTest(died_after=step):
+                root = _vault(self)
+                er.record_era(root, COLLEGE_PAYLOAD, now=NOW, stop_after=step)
+                self.assertLess(len(_files(root)), len(expected))
+                er.record_era(root, COLLEGE_PAYLOAD, now=NOW)
+                self.assertEqual(_files(root), expected)
+
+    def test_a_rename_through_the_writer_keeps_the_era_id(self):
+        # T-NE-17 end to end: the second act names the era it is renaming.
+        first = er.record_era(self.root, COLLEGE_PAYLOAD, now=NOW)
+        era_id = first["era_id"]
+        label_digest = ei._digest_of(
+            ei.read_era_record(self.root, first["steps"]["label"]["path"])
+        )
+        second = er.record_era(self.root, {
+            "era_id": era_id,
+            "label": "Finding My Direction",
+            "aliases": ["College"],
+            "supersedes_label": label_digest,
+            "session_ref": "s2", "turn_ref": "t7",
+        }, now="2026-09-01T00:00:00Z")
+        self.assertEqual(second["era_id"], era_id)
+        views = ei.era_views(self.root)
+        self.assertEqual(list(views), [era_id])
+        self.assertEqual(views[era_id]["label"], "Finding My Direction")
+        # The claims filed under the old name still point at the same era.
+        resolutions = eb.load_event_resolutions(self.root)
+        self.assertEqual({r["event_ref"] for r in resolutions}, {era_id})
+
+    def test_a_graduation_keeps_its_own_event_ref(self):
+        # T-B-05. "I graduated in 2011 during College" is a date claim about
+        # the GRADUATION plus (E2) a membership assertion. The era's own
+        # bounds are not moved by it, and the graduation does not become a
+        # bound of College just because the sentence said the word.
+        er.record_era(self.root, COLLEGE_PAYLOAD, now=NOW)
+        era_id = ei.era_id_for("s1#t1")
+        er.record_era(self.root, {
+            "era_id": era_id,
+            "session_ref": "s1", "turn_ref": "t2",
+            "message_text": "I graduated in 2011 during College.",
+            "claims": [
+                {"claim_type": "date", "subject_mention": "me",
+                 "event_kind": "graduation", "temporal_value": "2011",
+                 "evidence": "I graduated in 2011"},
+            ],
+        }, now=NOW)
+        index = ts.rebuild_active_index(self.root)
+        result = tt.derive_calculated_timeline(
+            index,
+            event_resolution_records=eb.load_event_resolutions(self.root),
+            era_views=ei.era_views(self.root),
+            now=NOW,
+        )
+        graduation = [node for node in result.nodes
+                      if node["event_kind"] == "graduation"]
+        self.assertEqual(len(graduation), 1)
+        self.assertNotEqual(graduation[0]["node_id"], era_id)
+        era_node = result.node(era_id)
+        self.assertEqual(era_node["best_temporal_value"]["earliest"], "2007")
+        self.assertEqual(era_node["best_temporal_value"]["latest"], "2011")
+        self.assertNotIn(graduation[0]["node_id"], era_node["input_claim_refs"])
+
+    def test_two_eras_sharing_an_alias_bind_to_neither_and_mint_a_question(self):
+        er.record_era(self.root, {
+            "label": "The Mission", "session_ref": "a", "turn_ref": "1",
+        }, now=NOW)
+        er.record_era(self.root, {
+            "label": "Mission Years", "aliases": ["The Mission"],
+            "session_ref": "b", "turn_ref": "1",
+        }, now=NOW)
+        # A THIRD era is the session's target: §4.3's target rule wins only on
+        # the target's OWN exact label, so it must not break a tie it is not
+        # in — `test_the_target_does_not_break_a_tie_it_is_not_in` pins the
+        # binder half, and this pins the writer half.
+        er.record_era(self.root, {
+            "label": "College Years", "session_ref": "c", "turn_ref": "0",
+        }, now=NOW)
+        summary = er.record_era(self.root, {
+            "era_id": ei.era_id_for("c#0"),
+            "session_ref": "c", "turn_ref": "1",
+            "message_text": "That was during the Mission.",
+            "claims": [{"claim_type": "date", "subject_mention": "me",
+                        "event_kind": "job", "event_mention": "the Mission",
+                        "temporal_value": "2003",
+                        "evidence": "That was during the Mission"}],
+        }, now=NOW)
+        binding = summary["steps"]["claims"]["bindings"][0]
+        self.assertIsNone(binding["event_ref"])
+        self.assertEqual(binding["bound_by"], "none")
+        self.assertEqual(binding["work_item"]["kind"], eb.AMBIGUOUS_WORK_ITEM_KIND)
+        self.assertEqual(len(binding["work_item"]["candidates"]), 2)
+
+    def test_a_mention_nothing_answers_to_is_a_named_miss(self):
+        summary = er.record_era(self.root, {
+            "label": "College Years", "session_ref": "s1", "turn_ref": "t1",
+            "message_text": "That was during Narnia.",
+            "claims": [{"claim_type": "date", "subject_mention": "me",
+                        "event_kind": "job", "event_mention": "Narnia",
+                        "temporal_value": "2003",
+                        "evidence": "That was during Narnia"}],
+        }, now=NOW)
+        binding = summary["steps"]["claims"]["bindings"][0]
+        self.assertIsNone(binding["event_ref"])
+        self.assertEqual(binding["finding"], eb.UNBOUND_FINDING)
+
+    def test_within_a_frame_is_a_possibility_and_never_a_bound(self):
+        # T-NE-09 (§4.2). The era says nothing about when it began; it says
+        # it happened inside a frame.
+        birth = tc.validate_temporal_claim({
+            "claim_type": "date", "subject_mention": "self",
+            "event_kind": "birth", "temporal_value": "1981-07-11",
+            "evidence": "I was born on 11 July 1981",
+            "source_kind": "conversation",
+            "source_ref": {"source_id": "conversation:msg-b",
+                           "revision": "sha256:" + "2" * 64},
+            "extractor_version": "landmark_recorder@1",
+        }, now=NOW)
+        ts.write_receipt(self.root, {
+            "source_ref": birth["source_ref"],
+            "extractor_version": "landmark_recorder@1",
+            "claims": [birth],
+        }, now=NOW)
+        summary = er.record_era(self.root, {
+            "label": "College Years", "era_kind": "stretch",
+            "session_ref": "s1", "turn_ref": "t1",
+            "within": "age:self:20s",
+            "message_text": "College was in my 20s.",
+        }, now=NOW)
+        era_id = summary["era_id"]
+        self.assertEqual(summary["steps"]["within"]["anchor"], "age:self:20s")
+        result = tt.derive_calculated_timeline(
+            ts.rebuild_active_index(self.root),
+            event_resolution_records=eb.load_event_resolutions(self.root),
+            era_views=ei.era_views(self.root),
+            constraints=ts.active_ordering_constraints(self.root),
+            now=NOW,
+        )
+        node = result.node(era_id)
+        self.assertIsNotNone(node, "the era must reach the projection")
+        self.assertIsNone(node["best_temporal_value"])
+        self.assertIsNotNone(node.get("possible_temporal_value"))
+        self.assertEqual(node["basis"], "inferred")
+
+    def test_an_unknown_payload_key_is_refused_before_a_byte_lands(self):
+        before = _files(self.root)
+        with self.assertRaises(er.EraRecordError) as caught:
+            er.record_era(self.root, {"label": "X", "session_ref": "s",
+                                      "turn_ref": "t", "vibes": "good"})
+        self.assertEqual(caught.exception.code, "era_payload_unknown_key")
+        self.assertEqual(before, _files(self.root))
+
+    def test_a_refused_claim_refuses_the_whole_act(self):
+        before = _files(self.root)
+        with self.assertRaises(er.EraRecordError) as caught:
+            er.record_era(self.root, {
+                "label": "X", "session_ref": "s", "turn_ref": "t",
+                "message_text": "Ada, Bo, Cy and Della were born in 1979.",
+                "claims": [{"claim_type": "date",
+                            "subject_mention": "Ada, Bo, Cy and Della",
+                            "event_kind": "birth", "temporal_value": "1979",
+                            "evidence": "Ada, Bo, Cy and Della"}],
+            })
+        self.assertEqual(caught.exception.code, "era_payload_claim_refused")
+        self.assertEqual(before, _files(self.root))
+
+    def test_memberships_with_no_writer_refuse_the_whole_act(self):
+        # ADR 0021: unwired is a loud failure, never a silent under-delivery.
+        before = _files(self.root)
+        with self.assertRaises(er.EraRecordError) as caught:
+            er.record_era(self.root, {
+                "label": "X", "session_ref": "s", "turn_ref": "t",
+                "memberships": [{"member_node_id": "event:abc",
+                                 "relation": "within"}],
+            })
+        self.assertEqual(caught.exception.code, "era_membership_unwired")
+        self.assertEqual(before, _files(self.root))
+
+    def test_a_wired_membership_writer_is_called_once_per_row(self):
+        calls = []
+
+        def writer(vault_root, **kwargs):
+            calls.append(kwargs)
+            return {"assertion_id": f"a{len(calls)}"}, True
+
+        self.addCleanup(setattr, er, "MEMBERSHIP_WRITER", None)
+        er.MEMBERSHIP_WRITER = writer
+        summary = er.record_era(self.root, {
+            "label": "College Years", "session_ref": "s1", "turn_ref": "t1",
+            "memberships": [{"member_node_id": "event:abc", "relation": "within",
+                             "source_ref": "src:1"}],
+        }, now=NOW)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["member_node_id"], "event:abc")
+        self.assertEqual(calls[0]["era_node_id"], summary["era_id"])
+        self.assertEqual(len(summary["steps"]["memberships"]), 1)
+
+
+# --------------------------------------------------------------------------
+# S7 — stretch vs thread
+# --------------------------------------------------------------------------
+
+
+class StretchOrThreadTests(unittest.TestCase):
+    """§4.5 — decided from the words, ambiguous means ASK."""
+
+    def test_a_stated_interval_is_a_stretch(self):
+        for said in ("I think of 2007 through 2011 as my College years",
+                     "from 1998 to 2004 we were in Austin",
+                     "it started in the spring and ended when we moved"):
+            with self.subTest(said=said):
+                self.assertEqual(er.era_kind_from_words(said), "stretch")
+
+    def test_recurring_presence_is_a_thread(self):
+        for said in ("Ruth has been around over the years",
+                     "it came and goes, on and off",
+                     "ever since, it has been part of things"):
+            with self.subTest(said=said):
+                self.assertEqual(er.era_kind_from_words(said), "thread")
+
+    def test_a_within_makes_it_a_stretch(self):
+        self.assertEqual(
+            er.era_kind_from_words("College was in my 20s", has_within=True),
+            "stretch",
+        )
+
+    def test_ambiguous_is_none_and_never_a_default(self):
+        # A default here would mint a span work item against a thing with no
+        # honest end and then ask, forever, when it finished.
+        self.assertIsNone(er.era_kind_from_words("it was a thing"))
+        self.assertIsNone(er.era_kind_from_words(
+            "over the years, from 1998 to 2004, on and off"))
+
+    def test_the_flip_preserves_identity_and_swaps_the_open_work_item(self):
+        # T-NE-16.
+        root = _vault(self)
+        summary = er.record_era(root, COLLEGE_PAYLOAD, now=NOW)
+        era_id = summary["era_id"]
+        kind_digest = ei._digest_of(
+            ei.read_era_record(root, summary["steps"]["kind"]["path"])
+        )
+        flipped = er.flip_era_kind(root, era_id=era_id, era_kind="thread",
+                                   supersedes=kind_digest,
+                                   now="2026-09-01T00:00:00Z")
+        self.assertEqual(flipped["era_id"], era_id)
+        self.assertEqual(flipped["span_work_item"], "retired")
+        views = ei.era_views(root)
+        self.assertEqual(list(views), [era_id])
+        self.assertEqual(views[era_id]["era_kind"], "thread")
+        self.assertEqual(views[era_id]["label"], "College Years")
+        # The claims and their bindings are exactly where they were.
+        self.assertEqual(
+            {r["event_ref"] for r in eb.load_event_resolutions(root)}, {era_id}
+        )
+        # And a Focus candidate exists, pending, creating no Focus.
+        state = json.loads(
+            (root / "state" / "focus_recommendations.json").read_text()
+        )
+        row, = state["recommendations"]
+        self.assertEqual(row["entity"], "College Years")
+        self.assertEqual(row["type"], er.THREAD_FOCUS_TYPE)
+        self.assertEqual(row["status"], "pending")
+        self.assertEqual(row["reason"], er.THREAD_FOCUS_REASON)
+
+    def test_flipping_back_re_mints_the_span_work_item(self):
+        root = _vault(self)
+        summary = er.record_era(root, COLLEGE_PAYLOAD, now=NOW)
+        era_id = summary["era_id"]
+        er.flip_era_kind(root, era_id=era_id, era_kind="thread", now=NOW)
+        back = er.flip_era_kind(root, era_id=era_id, era_kind="stretch",
+                                now="2026-09-02T00:00:00Z")
+        self.assertEqual(back["span_work_item"], "minted")
+        self.assertIsNone(back["focus_candidate"])
+        self.assertEqual(len(ei.load_era_kinds(root)), 3)
+
+    def test_the_focus_candidate_is_appended_once(self):
+        root = _vault(self)
+        summary = er.record_era(root, COLLEGE_PAYLOAD, now=NOW)
+        era_id = summary["era_id"]
+        er.flip_era_kind(root, era_id=era_id, era_kind="thread", now=NOW)
+        again = er.flip_era_kind(root, era_id=era_id, era_kind="thread", now=NOW)
+        self.assertFalse(again["focus_candidate"]["created"])
+        state = json.loads(
+            (root / "state" / "focus_recommendations.json").read_text()
+        )
+        self.assertEqual(len(state["recommendations"]), 1)
 
 
 class VaultContractTests(unittest.TestCase):

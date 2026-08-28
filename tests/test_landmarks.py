@@ -2752,12 +2752,17 @@ class LandmarkRecorderTests(unittest.TestCase):
         # transcript — which is the property this pin exists to hold and the
         # only one it has ever held. A ceiling that forced the contract to be
         # incomplete would be buying tokens with dropped facts.
-        self.assertLess(len(prompt), 8400)
+        #
+        # E3 (eras §4.3) moved it again, 8225 → 8555, by ONE bullet:
+        # `event_mention` and the paragraph telling the ear it is writing down
+        # a NAME rather than making a link. Re-measured, not rounded up — a
+        # pin padded "for headroom" measures nothing.
+        self.assertLess(len(prompt), 8700)
         for row in li.load_questions():
             with self.subTest(domain=row["domain"]):
                 self.assertLess(len(self._prompt(domain=row["domain"],
                                                  question_asked=row["ask"])),
-                                8400)
+                                8700)
 
     def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
         military = self._prompt()

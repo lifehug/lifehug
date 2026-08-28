@@ -372,12 +372,77 @@ def file_era_identity(
         text = collapsed_text(value)
         if text:
             frontmatter[name] = text
-    return _publish(
+    record, created = _publish(
         vault_root,
         era_relative_path(era_id),
         frontmatter=frontmatter,
         heading=heading,
         prose=prose,
+    )
+    _file_identity_claim(vault_root, record, now=occurred_at)
+    return record, created
+
+
+#: The extractor that files an era's identity claim. A SECOND purpose name
+#: beside `era_record`'s, never a rename: "what did the era writer hear" and
+#: "which eras exist" are different questions and stay separately answerable.
+IDENTITY_EXTRACTOR = "era_identity"
+
+
+def _file_identity_claim(vault_root: str | Path, record: dict, *, now: object = None) -> None:
+    """The era's own `identity` claim, over the era's own source document.
+
+    Design §7 row "Named era node", column 5: *identity claim → node*. A
+    calculated node must cite at least one claim
+    (`temporal_projection.node_without_inputs`: *"a node with no
+    input_claim_refs is not a calculation, it is a fabrication"*), and an era
+    nobody has dated yet still has to be able to appear — undated, in "Not
+    placed yet", with a ▸ on it. This is the claim it cites: not a date, not
+    an event, just *this era exists and here is the document that says so*.
+
+    Filed through the ordinary receipt store so it folds, supersedes and
+    retracts like everything else — retiring an era is a `retract` correction
+    on THIS claim (§2.3), which is why it has to be a real claim rather than
+    a special case in the fold.
+    """
+    import temporal_claims as tc  # noqa: PLC0415
+
+    source_ref = store.read_source_ref(vault_root, record["relative_path"])
+    if source_ref is None:  # pragma: no cover - _publish read it back already
+        return
+    quote = collapsed_text(record.get("body")) or record["era_id"]
+    claim = tc.validate_temporal_claim({
+        "claim_type": "identity",
+        "subject_mention": record["era_id"],
+        "evidence": {"quote": quote[:tc.MAX_EVIDENCE_QUOTE_CHARS]},
+        "basis": "explicit",
+        "confidence": 1.0,
+        "source_kind": "system_derived",
+        "source_ref": source_ref.to_dict(),
+        "extractor_version": IDENTITY_EXTRACTOR,
+        "created_at": record.get("captured_at"),
+    }, now=now)
+    store.write_receipt(vault_root, {
+        "source_ref": source_ref.to_dict(),
+        "extractor_version": IDENTITY_EXTRACTOR,
+        "claims": [claim],
+    }, now=record.get("captured_at") or now)
+
+
+def era_identity_claim_id(record: object) -> str:
+    """The identity claim id an era identity record produces. Pure."""
+    import temporal_claims as tc  # noqa: PLC0415
+
+    row = record if isinstance(record, dict) else {}
+    digest = collapsed_text(row.get("content_sha256")).lower()
+    return tc.derive_claim_id(
+        claim_type="identity",
+        subject_mention=collapsed_text(row.get("era_id")),
+        event_kind=None,
+        temporal_value=None,
+        source_ref={"source_id": collapsed_text(row.get("source_id")),
+                    "revision": f"sha256:{digest}"},
+        extractor_version=IDENTITY_EXTRACTOR,
     )
 
 
@@ -659,6 +724,7 @@ def era_views(vault_root: str | Path) -> dict:
             "label": "",
             "aliases": [],
             "identity_path": record.get("relative_path"),
+            "identity_claim_id": era_identity_claim_id(record),
             "label_path": None,
             "kind_path": None,
         }
@@ -893,10 +959,12 @@ __all__ = [
     "FRONTMATTER_ORDER",
     "LEGACY_DATE_FIELDS",
     "MAX_ALIASES",
+    "IDENTITY_EXTRACTOR",
     "MAX_LABEL_CHARS",
     "describe_migration",
     "era_digest",
     "era_id_for",
+    "era_identity_claim_id",
     "era_kind_relative_path",
     "era_label_relative_path",
     "era_relative_path",

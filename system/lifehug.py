@@ -82,6 +82,8 @@ READ_ONLY_COMMANDS = frozenset({
     # scores committed goldens, and the landmarks plan recomputes the
     # open landmark rows from the vault and prints them.
     "landmarks-evals",
+    # E3 (eras §4.1): the era list is a pure read of sources/eras/.
+    "era-list",
     # the Reading Room (v204, ADR 0025): both are pure reads — the seat gate
     # scores committed goldens, and the plan recomputes the dig plan and the
     # per-witness lists from the vault and prints them.
@@ -179,6 +181,13 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # sources/corrections/ and republishes the calculated projection. Same
     # single-transaction vault mutation family as timeline-place.
     "timeline-move", "timeline-move-undo",
+    # E3 (eras §4.4): the ATOMIC era writer. One payload creates the
+    # identity, names it, decides its kind, files and binds its claims, files
+    # a `within` and publishes — in one act, every step idempotent. Same
+    # single-transaction vault mutation family as timeline-move; classified by
+    # name, and `era-migrate --dry-run` writes nothing but is still classified
+    # here for the same reason focus-autopilot is.
+    "era-record", "era-migrate",
     "timeline-unplace", "unretract",
 })
 
@@ -864,6 +873,75 @@ def cmd_timeline_move_undo(args: argparse.Namespace) -> int:
     print(f"✓ Move {args.constraint_id} undone; its record remains")
     print(f"  correction: {correction.relative_path}")
     print(f"  projection generation {summary['generation']}")
+    return 0
+
+
+def cmd_era_record(args: argparse.Namespace) -> int:
+    """`era-record` — one JSON payload on stdin, one act, one summary.
+
+    Deliberately stdin rather than twenty flags: the payload is a nested
+    document (a list of claim drafts, a list of memberships) and flattening it
+    into an argv would invent a second serialization of shapes the substrate
+    already has one of.
+    """
+    import json  # noqa: PLC0415
+
+    import era_record  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    try:
+        payload = json.loads(raw or "{}")
+    except ValueError as exc:
+        print(f"Error: era-record reads one JSON payload on stdin ({exc})",
+              file=sys.stderr)
+        return 1
+    try:
+        summary = era_record.record_era(REPO_DIR, payload)
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    else:
+        print("\n".join(era_record.describe(summary)))
+    return 0
+
+
+def cmd_era_list(args: argparse.Namespace) -> int:
+    """Every era this vault holds, folded from its own records."""
+    import json  # noqa: PLC0415
+
+    import era_identity  # noqa: PLC0415
+
+    views = era_identity.era_views(REPO_DIR)
+    if getattr(args, "json", False):
+        print(json.dumps(views, indent=2, sort_keys=True, default=str))
+        return 0
+    if not views:
+        print("No eras yet.")
+        return 0
+    for era_id, view in views.items():
+        aliases = ", ".join(view.get("aliases") or ())
+        print(f"{era_id}  {view.get('label') or '(unnamed)'}"
+              f"  [{view.get('era_kind') or 'kind undecided'}]"
+              f"{'  aka ' + aliases if aliases else ''}"
+              f"{'  origin ' + view['origin'] if view.get('origin') else ''}")
+    return 0
+
+
+def cmd_era_migrate(args: argparse.Namespace) -> int:
+    """Migrate the legacy roster periods to era identities (§4.1)."""
+    import era_identity  # noqa: PLC0415
+    from entity_roster import load_roster  # noqa: PLC0415
+
+    report = era_identity.migrate_legacy_periods(
+        REPO_DIR,
+        roster_snapshot=[load_roster("period")],
+        batch=args.batch or era_identity.DEFAULT_MIGRATION_BATCH,
+        dry_run=not args.apply,
+    )
+    print("\n".join(era_identity.describe_migration(report)))
     return 0
 
 
@@ -2756,6 +2834,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("constraint_id", help="The constraint id the move returned")
     p.add_argument("--author", help="Who undid it (source_medium; default owner)")
     p.set_defaults(func=cmd_timeline_move_undo)
+
+    p = sub.add_parser("era-record",
+                       help="Create/name/date an era in ONE act (JSON payload on stdin)")
+    p.add_argument("--json", action="store_true", help="Print the summary as JSON")
+    p.set_defaults(func=cmd_era_record)
+
+    p = sub.add_parser("era-list", help="List this vault's eras and their labels")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_era_list)
+
+    p = sub.add_parser("era-migrate",
+                       help="Migrate legacy roster periods to era identities "
+                            "(dry run unless --apply)")
+    p.add_argument("--batch", default=None,
+                   help="Migration batch label; part of every migrated era's "
+                        "identity, so re-running the SAME batch writes nothing")
+    p.add_argument("--apply", action="store_true", help="Actually write")
+    p.set_defaults(func=cmd_era_migrate)
 
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")
