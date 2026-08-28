@@ -768,8 +768,25 @@ AGE_FRAME_FIXED_BANDS = (("childhood", 0, 13), ("teens", 13, 20))
 AGE_FRAME_DECADE_FLOOR = 20
 AGE_FRAME_DECADE = 10
 
-#: What each band is CALLED. A decade names itself ("My 20s").
-AGE_FRAME_LABELS = {"childhood": "Childhood", "teens": "Teen years"}
+#: How far up the generated ladder is walked when a caller needs the WHOLE
+#: table rather than one life's reached frames — the alias map and the age
+#: pair a label states. One ceiling, read by both, so "no maximum" cannot
+#: mean two different maximums.
+AGE_FRAME_LADDER_CEILING = 200
+
+#: What each band is NAMED. A decade names itself ("My 20s"), so only the two
+#: fixed bands need a name written down.
+AGE_FRAME_NAMES = {"childhood": "Childhood", "teens": "Teen years"}
+
+#: The separator and the phrase that turn a band NAME into the display string
+#: eras design §3.3 specifies — "Childhood · ages 0–12". They live here, beside
+#: the ladder they read, because the whole point of `O-E1b` finding 2 is that
+#: the PACKAGE mints the string a host renders verbatim: a host that composed
+#: "· ages 0–12" itself would be writing a title, which is exactly the thing
+#: the standing ruling forbids, and two hosts composing it would be two
+#: definitions of one sentence.
+AGE_FRAME_LABEL_SEPARATOR = " \u00b7 "
+AGE_FRAME_AGES_PHRASE = "ages {low}\u2013{high}"
 
 #: The one sentence a frame shows for where it came from.
 AGE_FRAME_PROVENANCE = "from your birthday"
@@ -819,10 +836,48 @@ class AgeFrame:
         }
 
 
-def age_frame_label(band: object) -> str:
-    """A band key as the person reads it."""
+def age_frame_name(band: object) -> str:
+    """A band key as its bare NAME — "Childhood", "Teen years", "My 20s"."""
     key = str(band or "").strip()
-    return AGE_FRAME_LABELS.get(key) or (f"My {key}" if key else "")
+    return AGE_FRAME_NAMES.get(key) or (f"My {key}" if key else "")
+
+
+def age_frame_ages(band: object) -> tuple[int, int] | None:
+    """The band's INCLUSIVE age pair, read off the one ladder — `(0, 12)`.
+
+    Inclusive because that is what a person reads: the ladder's half-open
+    `[0, 13)` and the display's "ages 0–12" are the same fact, and this is the
+    single place the second spelling is derived from the first.
+    """
+    key = str(band or "").strip()
+    for name, low, high in age_frame_ladder(AGE_FRAME_LADDER_CEILING):
+        if name == key:
+            return low, high - 1
+    return None
+
+
+def age_frame_label(band: object) -> str:
+    """A band as the person reads it — the WHOLE display string (§3.3).
+
+    "Childhood · ages 0–12", "Teen years · ages 13–19", "My 20s". A decade's
+    own name already states its ages, so it carries no suffix; a named band
+    does not, so it carries one. That rule is the reason the suffix is derived
+    from :data:`AGE_FRAME_NAMES` rather than listed a second time.
+
+    This string is the node's ``label``, and a host renders it verbatim — see
+    `docs/pr-specs/eras-o-e1b-view-block.md` finding 2.
+    """
+    key = str(band or "").strip()
+    name = age_frame_name(key)
+    if not name or key not in AGE_FRAME_NAMES:
+        return name
+    ages = age_frame_ages(key)
+    if ages is None:
+        return name
+    low, high = ages
+    return name + AGE_FRAME_LABEL_SEPARATOR + AGE_FRAME_AGES_PHRASE.format(
+        low=low, high=high
+    )
 
 
 def age_frame_ladder(max_age: object) -> tuple[tuple[str, int, int], ...]:
@@ -865,7 +920,8 @@ def age_frame_legacy_slugs() -> dict:
     ladder's is deliberately absent: `My 50s` is a frame the moment it is
     reached, and `AGE_BAND_AGES`' 50s row agrees with the ladder, so it maps.
     """
-    ladder = {band: (low, high) for band, low, high in age_frame_ladder(200)}
+    ladder = {band: (low, high)
+              for band, low, high in age_frame_ladder(AGE_FRAME_LADDER_CEILING)}
     slugs: dict[str, list[str]] = {}
     for band, names in AGE_FRAME_CANONICAL_NAMES.items():
         slugs[band] = [age_frame_slug(name) for name in names]
