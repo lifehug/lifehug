@@ -99,6 +99,9 @@ PERIOD_EVENT_KINDS = ("age_frame", "named_era")
 #: The event kind of an age frame, spelled once.
 AGE_FRAME_EVENT_KIND = "age_frame"
 
+#: The event kind of a person-made era (E3), spelled once for the same reason.
+NAMED_ERA_EVENT_KIND = "named_era"
+
 #: Where a node sits against the life clip (eras design §2.6). E1 assigns
 #: exactly these two — an event dated after ``as_of`` is a plan, not lived
 #: history inside a frame. ``contradictory`` and ``unresolved`` need the
@@ -404,6 +407,15 @@ class CalculatedTimelineNode:
     #: against the clip. Absent on every v1 node and on every node that is not
     #: a frame — absent means unchanged.
     definition_span: dict | None = None
+    #: v2, additive (eras design §2.2/§4.2), E3. A ``named_era`` that nobody
+    #: has dated but that somebody said sits INSIDE a frame — *"College was in
+    #: my 20s"* — gets a possible value here and **nothing** in
+    #: ``best_temporal_value``. The distinction is the whole of §4.2: a
+    #: `within` is a containment, not a bound, and publishing the containing
+    #: frame's interval as the era's own date is exactly how an era ends up
+    #: dated by something other than what the person said. Absent means the
+    #: era has no such relation.
+    possible_temporal_value: dict | None = None
     life_clip_end: str | None = None
     origin_basis: str | None = None
     legacy_refs: tuple[str, ...] = ()
@@ -433,6 +445,7 @@ class CalculatedTimelineNode:
             ("provenance_summary", self.provenance_summary),
             ("model_version", self.model_version),
             ("definition_span", self.definition_span),
+            ("possible_temporal_value", self.possible_temporal_value),
             ("life_clip_end", self.life_clip_end),
             ("origin_basis", self.origin_basis),
             ("life_view", self.life_view),
@@ -570,6 +583,9 @@ def validate_calculated_timeline_node(value: object) -> dict:
             normalized[key] = cleaned
     if definition_span is not None:
         normalized["definition_span"] = definition_span
+    possible = _normalized_node_value(value.get("possible_temporal_value"))
+    if possible is not None:
+        normalized["possible_temporal_value"] = possible
     if origin_basis:
         normalized["origin_basis"] = origin_basis
     if life_view:
@@ -611,6 +627,7 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         projection_generation=normalized["projection_generation"],
         conflict_state=normalized["conflict_state"],
         definition_span=normalized.get("definition_span"),
+        possible_temporal_value=normalized.get("possible_temporal_value"),
         life_clip_end=normalized.get("life_clip_end"),
         origin_basis=normalized.get("origin_basis"),
         legacy_refs=tuple(normalized.get("legacy_refs") or ()),
@@ -973,6 +990,7 @@ def surfaces_conflict(items: object) -> tuple[str, ...]:
 
 __all__ = [
     "AGE_FRAME_EVENT_KIND",
+    "NAMED_ERA_EVENT_KIND",
     "CONFLICT_STATES",
     "LIFE_VIEWS",
     "MEMBERSHIP_DISPLAY_ROLES",

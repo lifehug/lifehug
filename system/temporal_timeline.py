@@ -103,6 +103,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import cross_dating as cd  # noqa: E402
+import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -1418,6 +1419,7 @@ def _node_dict(
     label: str,
     generation: int,
     as_of: str | None = None,
+    possible: object = None,
 ) -> dict:
     """One validated :class:`~temporal_projection.CalculatedTimelineNode`.
 
@@ -1464,7 +1466,54 @@ def _node_dict(
             "conflict_state": state,
             "provenance_summary": _provenance_summary(group, calculated, best),
             "life_view": _life_view(best, as_of),
+            **({"possible_temporal_value": possible.to_dict()}
+               if possible is not None else {}),
         }
+    )
+
+
+#: Design §4.2. A `within` says an era sits inside a frame; it does NOT say
+#: when the era began or ended. So a named era with no dating claims of its
+#: own keeps `best_temporal_value` EMPTY and publishes the containment here,
+#: at a confidence that cannot be mistaken for something the person said.
+POSSIBLE_VALUE_CONFIDENCE = "inferred"
+
+
+def _within_only_possibility(node_id: str, group: dict, calculated: dict,
+                             placed: object, edges) -> object:
+    """The `possible_temporal_value` for an era placed ONLY by containment.
+
+    Three conditions, all of them necessary. The node is a `named_era` — an
+    age frame's interval IS its definition and a moment's containment is an
+    ordinary bound. Its own claims dated it not at all — one stated bound
+    makes the era `partial` and the containment is then just corroboration.
+    And every edge that touched it was a `within` — an era placed by *"after
+    High School"* has been genuinely bounded by an ordering claim and that is
+    a bound, not a possibility.
+
+    Returns the record to publish as possible (and the caller then publishes
+    NO best), or ``None`` when any condition fails and the ordinary path
+    stands.
+    """
+    if group.get("event_kind") != tp.NAMED_ERA_EVENT_KIND:
+        return None
+    if calculated.get("best") is not None or placed is None:
+        return None
+    touching = [edge for edge in edges if edge.subject == node_id]
+    if not touching or any(edge.relation != "within" for edge in touching):
+        return None
+    record = chrono.from_dict(placed.to_dict() if hasattr(placed, "to_dict") else placed)
+    if record is None:
+        return None
+    return chrono.DateRecord(
+        best=record.best,
+        earliest=record.earliest,
+        latest=record.latest,
+        granularity=record.granularity,
+        confidence=POSSIBLE_VALUE_CONFIDENCE,
+        basis="anchor",
+        anchors=tuple(record.anchors or ()),
+        provenance=tuple(record.provenance or ()),
     )
 
 
@@ -1648,6 +1697,7 @@ def derive_calculated_timeline(
     active_index: object,
     *,
     resolution_records: object = (),
+    event_resolution_records: object = (),
     roster_snapshot: object = (),
     constraints: object = (),
     birth_date: object = None,
@@ -1683,6 +1733,23 @@ def derive_calculated_timeline(
     as_of = as_of_day(now)
 
     claims = active_claim_rows(active_index)
+
+    # E3 (§4.3): EVENT resolution, before subjects and before grouping,
+    # because the grouping key IS the resolved `event_ref`. This is the same
+    # seam `resolution_records` already is, extended from subjects to events:
+    # a caller that keeps ONE ledger of decisions may hand it in either
+    # argument, so the `event_resolution`-typed rows are harvested out of both
+    # rather than requiring every caller to sort its own ledger.
+    claims, event_findings = eb.resolve_events(
+        claims,
+        [
+            row
+            for row in (list(event_resolution_records or ())
+                        + list(resolution_records or ()))
+            if isinstance(row, dict) and row.get("type") == eb.EVENT_RESOLUTION_TYPE
+        ],
+    )
+    diagnostics.extend(event_findings)
 
     mark = clock()
     resolved, records, by_mention = _resolve_subjects(
@@ -1775,11 +1842,18 @@ def derive_calculated_timeline(
         for ref in edge.constraint_refs:
             constraints_by_node.setdefault(edge.subject, []).append(ref)
 
+    possibilities = {
+        node_id: _within_only_possibility(
+            node_id, groups[node_id], calculated[node_id], placed.get(node_id), edges
+        )
+        for node_id in sorted(groups)
+    }
     nodes = [
         _node_dict(
             groups[node_id],
             calculated[node_id],
-            best=placed.get(node_id),
+            best=None if possibilities.get(node_id) is not None else placed.get(node_id),
+            possible=possibilities.get(node_id),
             extra_alternates=rejected.get(node_id, ()),
             extra_claim_refs=anchor_claim_refs.get(node_id, ()),
             contradicted=node_id in contradicted_nodes,

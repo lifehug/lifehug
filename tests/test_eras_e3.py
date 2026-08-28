@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "system"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import era_identity as ei  # noqa: E402
+import event_binding as eb  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_store as ts  # noqa: E402
 from tempdirs import root_parent_tmp  # noqa: E402
@@ -315,6 +316,262 @@ class MigrationTests(unittest.TestCase):
         two = ei.migrate_legacy_periods(root, roster_snapshot=LEGACY_ROSTER,
                                         batch="2", dry_run=True)
         self.assertNotEqual(one["mapped"]["college"], two["mapped"]["college"])
+
+
+# --------------------------------------------------------------------------
+# S3 — event_mention, the binder, the resolution record
+# --------------------------------------------------------------------------
+
+
+def _claim(**overrides) -> dict:
+    row = {
+        "claim_type": "date",
+        "subject_mention": "me",
+        "event_kind": "period_started",
+        "event_mention": "College",
+        "temporal_value": "2007",
+        "evidence": "2007 through 2011 as my College years",
+        "source_kind": "conversation",
+        "source_ref": {"source_id": "conversation:msg-1", "revision": "sha256:" + "1" * 64},
+        "extractor_version": "landmark_recorder@1",
+    }
+    row.update(overrides)
+    return tc.validate_temporal_claim(row, now=NOW)
+
+
+class EventMentionContractTests(unittest.TestCase):
+    """§4.3 — the ear writes the NAME; nothing in the prompt writes a link."""
+
+    def test_the_leaf_may_emit_a_mention(self):
+        import general_listener as gl  # noqa: PLC0415
+
+        self.assertIn("event_mention", gl.CLAIM_PROMPT_KEYS)
+        self.assertIn("event_mention", gl.CLAIM_DRAFT_KEYS)
+
+    def test_the_leaf_may_not_emit_a_ref(self):
+        # ADR 0029 is amended by exactly one key and not two.
+        import general_listener as gl  # noqa: PLC0415
+
+        self.assertNotIn("event_ref", gl.CLAIM_PROMPT_KEYS)
+        self.assertNotIn("subject_ref", gl.CLAIM_PROMPT_KEYS)
+        draft, finding = gl.validate_claim_draft({
+            "claim_type": "date", "subject_mention": "me", "event_kind": "job",
+            "event_ref": "era:1", "temporal_value": "1974", "evidence": "q",
+        })
+        self.assertIsNone(draft)
+        self.assertEqual(finding, gl.claim_refused(gl.CLAIM_UNKNOWN_KEY))
+
+    def test_both_leaves_teach_the_mention(self):
+        for leaf in ("recorder.md", "listener.md"):
+            text = (ROOT / "interactions" / "landmarks" / "prompt" / leaf).read_text()
+            with self.subTest(leaf=leaf):
+                self.assertIn("`event_mention` is what THEY called", text)
+                self.assertNotIn("event_ref", text)
+
+    def test_a_mention_survives_filing_and_is_not_in_the_id(self):
+        with_mention = _claim()
+        without = _claim(event_mention=None)
+        self.assertEqual(with_mention["event_mention"], "College")
+        self.assertNotIn("event_mention", without)
+        # CLAIM_IDENTITY_KEYS is unchanged (design §2.3): a mention is data
+        # about a claim, so the same fact keeps one id whether or not the ear
+        # caught the name.
+        self.assertEqual(with_mention["claim_id"], without["claim_id"])
+        self.assertNotIn("event_mention", tc.CLAIM_IDENTITY_KEYS)
+
+    def test_an_identity_claim_carries_no_mention(self):
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            _claim(claim_type="identity", event_kind=None, temporal_value=None,
+                   event_mention="College")
+        self.assertEqual(caught.exception.code, "identity_claim_carries_no_event")
+
+    def test_a_mention_that_is_a_paragraph_is_refused(self):
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            _claim(event_mention="x" * (tc.MAX_EVENT_MENTION_CHARS + 1))
+        self.assertEqual(caught.exception.code, "event_mention_too_long")
+
+
+class BinderTests(unittest.TestCase):
+    """§4.3 — exact, whole-label, and a miss rather than a guess."""
+
+    def setUp(self):
+        self.root = _vault(self)
+        self.college = ei.era_id_for("s1#t1")
+        ei.file_era_identity(self.root, operation_id="s1#t1", occurred_at=NOW)
+        ei.file_era_label(self.root, era_id=self.college, label="College Years",
+                          aliases=["College"], occurred_at=NOW)
+        self.index = ei.label_index(ei.era_views(self.root))
+
+    def test_an_exact_case_folded_whole_label_binds(self):
+        # T-B-01.
+        for said in ("College", "college", "  COLLEGE  ", "College Years"):
+            with self.subTest(said=said):
+                ref, how, _ = eb.bind_event_mention(said, index=self.index)
+                self.assertEqual(ref, self.college)
+                self.assertEqual(how, "alias")
+
+    def test_a_substring_never_binds(self):
+        # "whole-label" is the whole rule: "college applications" is not
+        # "College", and guessing that it is would be the wrong link §4.3
+        # ranks above a miss.
+        ref, how, candidates = eb.bind_event_mention(
+            "college applications", index=self.index
+        )
+        self.assertIsNone(ref)
+        self.assertEqual(how, "none")
+        self.assertEqual(candidates, ())
+
+    def test_the_target_wins_only_on_its_own_exact_label(self):
+        # T-B-02. A session about the Mission does not capture a sentence
+        # that named College.
+        other = ei.era_id_for("s9#t9")
+        ei.file_era_identity(self.root, operation_id="s9#t9", occurred_at=NOW)
+        ei.file_era_label(self.root, era_id=other, label="The Mission", occurred_at=NOW)
+        index = ei.label_index(ei.era_views(self.root))
+        ref, how, _ = eb.bind_event_mention("College", index=index, target_era_id=other)
+        self.assertEqual(ref, self.college)
+        self.assertEqual(how, "alias")
+        ref, how, _ = eb.bind_event_mention(
+            "The Mission", index=index, target_era_id=other
+        )
+        self.assertEqual(ref, other)
+        self.assertEqual(how, "target")
+
+    def test_two_eras_sharing_an_alias_bind_to_neither(self):
+        # The founder-shaped case: two eras aliased "the Mission".
+        first = ei.era_id_for("s2#t1")
+        second = ei.era_id_for("s3#t1")
+        for era_id, op, label in ((first, "s2#t1", "The Mission"),
+                                  (second, "s3#t1", "Mission Years")):
+            ei.file_era_identity(self.root, operation_id=op, occurred_at=NOW)
+            ei.file_era_label(self.root, era_id=era_id, label=label,
+                              aliases=["the Mission"], occurred_at=NOW)
+        index = ei.label_index(ei.era_views(self.root))
+        ref, how, candidates = eb.bind_event_mention("the Mission", index=index)
+        self.assertIsNone(ref)
+        self.assertEqual(how, "none")
+        self.assertEqual(set(candidates), {first, second})
+        item = eb.ambiguous_work_item("the Mission", candidates,
+                                      views=ei.era_views(self.root))
+        self.assertEqual(item["kind"], eb.AMBIGUOUS_WORK_ITEM_KIND)
+        self.assertEqual({row["ref"] for row in item["candidates"]}, {first, second})
+        self.assertIn("The Mission", item["headline"])
+        self.assertIn("Mission Years", item["headline"])
+
+    def test_the_target_does_not_break_a_tie_it_is_not_in(self):
+        first, second = ei.era_id_for("s2#t1"), ei.era_id_for("s3#t1")
+        for era_id, op in ((first, "s2#t1"), (second, "s3#t1")):
+            ei.file_era_identity(self.root, operation_id=op, occurred_at=NOW)
+            ei.file_era_label(self.root, era_id=era_id, label=f"Era {op}",
+                              aliases=["the Mission"], occurred_at=NOW)
+        index = ei.label_index(ei.era_views(self.root))
+        ref, _how, _ = eb.bind_event_mention(
+            "the Mission", index=index, target_era_id=self.college
+        )
+        self.assertIsNone(ref)
+
+
+class ResolutionRecordTests(unittest.TestCase):
+    """§4.3 — the link is a record, and the claim is never edited."""
+
+    def setUp(self):
+        self.root = _vault(self)
+        self.era_id = ei.era_id_for("s1#t1")
+
+    def test_filing_a_resolution_twice_writes_one_file(self):
+        record, created = eb.file_event_resolution(
+            self.root, claim_id="claim:abc", event_mention="College",
+            event_ref=self.era_id, bound_by="alias", now=NOW,
+        )
+        self.assertTrue(created)
+        before = _files(self.root)
+        again, made = eb.file_event_resolution(
+            self.root, claim_id="claim:abc", event_mention="College",
+            event_ref=self.era_id, bound_by="alias",
+            now="2026-09-09T00:00:00Z",
+        )
+        self.assertFalse(made)
+        self.assertEqual(again["resolution_id"], record["resolution_id"])
+        self.assertEqual(before, _files(self.root))
+
+    def test_a_miss_is_recorded_too(self):
+        record, _ = eb.file_event_resolution(
+            self.root, claim_id="claim:abc", event_mention="Narnia",
+            bound_by="none", now=NOW,
+        )
+        self.assertIsNone(record["event_ref"])
+        self.assertEqual(record["bound_by"], "none")
+        self.assertIsNotNone(eb.read_event_resolution(self.root, record["relative_path"]))
+
+    def test_the_fold_takes_the_newest_active_resolution(self):
+        first = eb.validate_event_resolution({
+            "claim_id": "claim:abc", "event_mention": "College",
+            "event_ref": "era:aaa", "bound_by": "alias", "created_at": NOW,
+        })
+        second = eb.validate_event_resolution({
+            "claim_id": "claim:abc", "event_mention": "College",
+            "event_ref": "era:bbb", "bound_by": "target",
+            "supersedes": first["resolution_id"],
+            "created_at": "2026-09-01T00:00:00Z",
+        })
+        for order in ([first, second], [second, first]):
+            with self.subTest(order=[r["event_ref"] for r in order]):
+                index = eb.event_resolution_index(order)
+                self.assertEqual(index["claim:abc"]["event_ref"], "era:bbb")
+
+    def test_two_active_resolutions_for_one_claim_refuse_loudly(self):
+        # T-B-03. Recency is not a tiebreak for "what did this sentence mean".
+        rows = [
+            {"claim_id": "claim:abc", "event_mention": "College",
+             "event_ref": "era:aaa", "bound_by": "alias", "created_at": NOW},
+            {"claim_id": "claim:abc", "event_mention": "the Mission",
+             "event_ref": "era:bbb", "bound_by": "alias",
+             "created_at": "2026-09-01T00:00:00Z"},
+        ]
+        with self.assertRaises(eb.EventBindingError) as caught:
+            eb.event_resolution_index(rows)
+        self.assertEqual(caught.exception.code, "event_resolution_ambiguous")
+
+    def test_resolve_events_is_an_overlay_not_an_edit(self):
+        claim = _claim()
+        record = eb.validate_event_resolution({
+            "claim_id": claim["claim_id"], "event_mention": "College",
+            "event_ref": self.era_id, "bound_by": "alias", "created_at": NOW,
+        })
+        resolved, findings = eb.resolve_events([claim], [record])
+        self.assertEqual(findings, [])
+        self.assertEqual(resolved[0]["event_ref"], self.era_id)
+        self.assertEqual(resolved[0]["event_resolution"]["bound_by"], "alias")
+        # The input row is untouched — a receipt on disk is evidence.
+        self.assertNotIn("event_ref", claim)
+
+    def test_an_unbound_mention_is_a_named_diagnostic(self):
+        claim = _claim(event_mention="Narnia")
+        _resolved, findings = eb.resolve_events([claim], [])
+        self.assertEqual(findings[0]["finding"], eb.UNBOUND_FINDING)
+        self.assertEqual(findings[0]["event_mention"], "Narnia")
+
+    def test_an_alias_added_later_does_not_rewrite_a_filed_binding(self):
+        # T-B-04. Aliases reach the future only.
+        claim = _claim()
+        filed, _ = eb.file_event_resolution(
+            self.root, claim_id=claim["claim_id"], event_mention="College",
+            event_ref="era:aaa", bound_by="alias", now=NOW,
+        )
+        # A second era now also answers to "College"…
+        for op in ("s5#t1", "s6#t1"):
+            ei.file_era_identity(self.root, operation_id=op, occurred_at=NOW)
+            ei.file_era_label(self.root, era_id=ei.era_id_for(op),
+                              label=f"Era {op}", aliases=["College"], occurred_at=NOW)
+        # …and the already-filed decision still says what it said.
+        resolved, _ = eb.resolve_events(
+            [claim], eb.load_event_resolutions(self.root)
+        )
+        self.assertEqual(resolved[0]["event_ref"], "era:aaa")
+        self.assertEqual(
+            eb.load_event_resolutions(self.root)[0]["resolution_id"],
+            filed["resolution_id"],
+        )
 
 
 class VaultContractTests(unittest.TestCase):

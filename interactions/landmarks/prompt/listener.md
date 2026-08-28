@@ -110,7 +110,8 @@ This list is where everything the two lists above cannot hold goes — and that
 is most of what people actually say.
 
   {"claim_type": "date", "subject_mention": "Danforth Steel",
-   "event_kind": "job", "temporal_value": "1974",
+   "event_kind": "job", "event_mention": "the Danforth years",
+   "temporal_value": "1974",
    "evidence": "I started at Danforth Steel that fall"}
 
 - `claim_type` is one of: {claim_types}. `date` and `range` carry a date;
@@ -126,6 +127,12 @@ is most of what people actually say.
   word when none of those is what they said — the list is a starting set, not
   a fence. Every claim except `identity` needs one: a date is the date of an
   EVENT, never of a person.
+- `event_mention` is what THEY called the stretch of life this belongs to —
+  "College", "the Mission", "when we were in Austin" — copied from their
+  words and left alone. Include it only when they actually named one in the
+  same breath; leave it out otherwise. You are not linking anything and you
+  do not know which era it is: something else decides that afterwards, and it
+  can only decide it if you wrote down the name they used.
 - `temporal_value` is the time itself: `"1974"`, `"1974-06"`,
   `"2 April 1979"` for a date; `"about 12"` or
   `{"low": 11, "high": 11, "unit": "years", "text": "eleven years"}` for an

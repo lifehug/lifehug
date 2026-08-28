@@ -78,6 +78,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import event_binding as eb  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
@@ -390,6 +391,7 @@ def publish(
     *,
     active_index: object = None,
     resolution_records: object = (),
+    event_resolution_records: object = None,
     roster_snapshot: object = (),
     constraints: object = None,
     birth_date: object = None,
@@ -424,11 +426,18 @@ def publish(
 
     if constraints is None:
         constraints = store.active_ordering_constraints(vault_root)
+    if event_resolution_records is None:
+        # `None` means "read them", exactly as it does for `constraints` above
+        # and for the same reason: the act that files a binding must publish a
+        # projection that HAS it, without every caller remembering to load the
+        # record it just wrote. `()` still means "none".
+        event_resolution_records = eb.load_event_resolutions(vault_root)
 
     generation = next_generation(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
+        event_resolution_records=event_resolution_records,
         roster_snapshot=roster_snapshot,
         constraints=constraints,
         birth_date=birth_date,
@@ -629,6 +638,7 @@ def verify(
     vault_root: str | Path,
     *,
     resolution_records: object = (),
+    event_resolution_records: object = None,
     roster_snapshot: object = (),
     constraints: object = None,
     birth_date: object = None,
@@ -653,9 +663,16 @@ def verify(
     index = store.rebuild_active_index(vault_root)
     if constraints is None:
         constraints = store.active_ordering_constraints(vault_root)
+    if event_resolution_records is None:
+        # `None` means "read them", exactly as it does for `constraints` above
+        # and for the same reason: the act that files a binding must publish a
+        # projection that HAS it, without every caller remembering to load the
+        # record it just wrote. `()` still means "none".
+        event_resolution_records = eb.load_event_resolutions(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
+        event_resolution_records=event_resolution_records,
         roster_snapshot=roster_snapshot,
         constraints=constraints,
         birth_date=birth_date,

@@ -877,15 +877,24 @@ def parse_listener_output(raw: object, *,
 #: is a key nothing reads, and a model told it may write one would be told a
 #: falsehood. `subject_ref`/`event_ref` are absent on purpose: resolution
 #: happens after the claim exists (plan §6.3) and must never re-mint it.
+#:
+#: E3 (eras §4.3, an ADR 0029 AMENDMENT) adds exactly one key:
+#: ``event_mention``, what the person CALLED the stretch of life the fact
+#: belongs to — *"College"*, *"the Mission"*. It is the same kind of thing
+#: ``subject_mention`` is and it is added for the same reason: the ear records
+#: the words, and a later deterministic pass decides what they point at.
+#: `event_ref` stays absent — the model may still never link — and
+#: `test_the_leaf_may_not_emit_a_ref` pins that.
 CLAIM_PROMPT_KEYS = frozenset({
-    "claim_type", "subject_mention", "event_kind", "temporal_value",
-    "evidence", "basis", "confidence",
+    "claim_type", "subject_mention", "event_kind", "event_mention",
+    "temporal_value", "evidence", "basis", "confidence",
 })
 
 #: The draft's own field order — stable, so a draft is comparable and a
 #: receipt's bytes do not depend on dict insertion luck.
 CLAIM_DRAFT_KEYS = ("claim_type", "subject_mention", "event_kind",
-                    "temporal_value", "evidence", "basis", "confidence")
+                    "event_mention", "temporal_value", "evidence", "basis",
+                    "confidence")
 
 #: The fields BINDING supplies and a draft therefore never carries. Named so
 #: the strip is a declaration rather than four literals in a comprehension.

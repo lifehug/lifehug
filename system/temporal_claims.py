@@ -236,6 +236,12 @@ CLAIM_BASIS_BY_DATE_BASIS = {
 MAX_EVIDENCE_QUOTE_CHARS = 300
 #: A subject mention longer than this is a sentence, not a subject.
 MAX_SUBJECT_MENTION_CHARS = 200
+
+#: E3 (eras §4.3). How long an `event_mention` may be. A mention is a NAME
+#: the person used for a stretch of their life — "College", "the Mission",
+#: "Building Etherfuse" — not a sentence, and the binder matches it as a whole
+#: label, so a paragraph here would never bind anything anyway.
+MAX_EVENT_MENTION_CHARS = 120
 #: Parts of an enumeration are names and short phrases; anything longer means
 #: the "and" was grammar rather than a list (see :func:`split_subject_enumeration`).
 MAX_ENUMERATION_PART_WORDS = 4
@@ -329,6 +335,7 @@ ERROR_CODES = (
     "aggregate_subject_mention",
     "identity_claim_carries_no_temporal_value",
     "identity_claim_carries_no_event",
+    "event_mention_too_long",
     "temporal_claim_needs_event_kind",
     "temporal_claim_needs_value",
     "temporal_value_unusable",
@@ -1061,6 +1068,16 @@ class TemporalClaim:
     temporal_value: object = None
     subject_ref: str | None = None
     event_ref: str | None = None
+    #: E3 (eras §4.3, ADR 0029 amendment). WHAT THE PERSON CALLED THE THING —
+    #: "College", "the Mission" — kept verbatim beside the fact, exactly as
+    #: ``subject_mention`` keeps who they meant. It is NOT a link: binding a
+    #: mention to an era is a separate `event_resolution` record
+    #: (`system/event_binding.py`), because the claim is immutable and a
+    #: rename must never rewrite what somebody said. Deliberately ABSENT from
+    #: :data:`CLAIM_IDENTITY_KEYS` — the same fact said with two names is
+    #: still two utterances of one fact, and resolution is data *about* a
+    #: claim.
+    event_mention: str | None = None
     event_kind: str | None = None
     evidence: tuple[EvidenceSpan, ...] = ()
     basis: str = "inferred"
@@ -1092,6 +1109,7 @@ class TemporalClaim:
         for key, value in (
             ("subject_ref", self.subject_ref),
             ("event_ref", self.event_ref),
+            ("event_mention", self.event_mention),
             ("event_kind", self.event_kind),
             ("subject_resolution", self.subject_resolution),
         ):
@@ -1206,8 +1224,14 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
 
     event_kind = _opt_text(value.get("event_kind"))
     event_ref = _opt_text(value.get("event_ref"))
+    event_mention = _opt_text(value.get("event_mention"))
+    if event_mention and len(event_mention) > MAX_EVENT_MENTION_CHARS:
+        raise TemporalClaimError(
+            "event_mention_too_long",
+            f"event_mention is {len(event_mention)} chars; a mention is a name, not a sentence",
+        )
     if claim_type == "identity":
-        if event_kind or event_ref:
+        if event_kind or event_ref or event_mention:
             raise TemporalClaimError(
                 "identity_claim_carries_no_event",
                 "person identity and event transitions are distinct records",
@@ -1309,6 +1333,8 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
         normalized["subject_ref"] = subject_ref
     if event_ref:
         normalized["event_ref"] = event_ref
+    if event_mention:
+        normalized["event_mention"] = event_mention
     if event_kind:
         normalized["event_kind"] = event_kind
     resolution = value.get("subject_resolution")
@@ -1371,6 +1397,7 @@ def claim_from_dict(value: object) -> TemporalClaim | None:
         temporal_value=normalized["temporal_value"],
         subject_ref=normalized.get("subject_ref"),
         event_ref=normalized.get("event_ref"),
+        event_mention=normalized.get("event_mention"),
         event_kind=normalized.get("event_kind"),
         evidence=tuple(
             EvidenceSpan(
@@ -1767,6 +1794,7 @@ __all__ = [
     "EVENT_KIND_RE",
     "IDEMPOTENCY_KEYS",
     "LANDMARK_DATE_SEMANTICS",
+    "MAX_EVENT_MENTION_CHARS",
     "MAX_EVIDENCE_QUOTE_CHARS",
     "QUANTITY_CLAIM_TYPES",
     "QUANTITY_UNITS",
