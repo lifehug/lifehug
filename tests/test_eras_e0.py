@@ -356,7 +356,7 @@ class SupersedingCorrectionTests(unittest.TestCase):
 
         class _Stub:
             @staticmethod
-            def mark_stale(path, reason=""):
+            def mark_stale(path, reason="", **_kwargs):
                 marked.append((Path(path).name, reason))
                 return True
 

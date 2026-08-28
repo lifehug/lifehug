@@ -760,9 +760,16 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
             assertion += f" (anchored on {', '.join(record.anchors)})"
     if args.when_hint:
         assertion += f", {args.when_hint}"
+    # v237 (O-C2): `--role placement`. The durable half of a placement is a
+    # date DECISION about a moment the person already accepts — not a claim
+    # that the source's text is wrong — so it must not mark the target's
+    # classification stale. It used to, and under v237's `is_current` reader
+    # gate that withheld the moment the person had just dated, which is the
+    # opposite of lifehug#224's guarantee. Contract:
+    # `docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md`.
     result = subprocess.run(
         [sys.executable, str(script("source_integrity.py")), "correct", args.source,
-         "--kind", "date", "--source", "fix"],
+         "--kind", "date", "--role", "placement", "--source", "fix"],
         input=assertion,
         text=True,
         capture_output=True,
@@ -1791,6 +1798,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
         flags.append("--classify-all")
         if args.unclassified:
             flags.append("--unclassified")
+        if getattr(args, "stale_first", False):
+            flags.append("--stale-first")
         if getattr(args, "emit_prompts", None):
             flags.extend(["--emit-prompts", args.emit_prompts])
     if args.model:
@@ -2267,13 +2276,24 @@ def loop_health_checks() -> int:
     except Exception as exc:  # noqa: BLE001
         warn("zombie-focus check unavailable", str(exc)[:80])
 
-    # Classification coverage — the learning loop starves without it.
-    classified = len(list(CLASSIFICATIONS_DIR.glob("*.json"))) if CLASSIFICATIONS_DIR.exists() else 0
+    # Classification coverage — the learning loop starves without it. v237:
+    # current / stale / unclassified are reported SEPARATELY, because a stale
+    # classification is withheld from every derived reader and folding it into
+    # one total hid exactly the hole the owner needed to see.
+    import classify_story as _cs  # noqa: PLC0415
+
+    counts = _cs.classification_counts()
+    classified = counts["current"]
     answers = len(list(ANSWERS_DIR.glob("*.md"))) if ANSWERS_DIR.exists() else 0
     if answers and not classified:
-        warn("no sources classified", f"{answers} answers, 0 classifications — the learning loop has never run")
+        warn("no sources classified", f"{answers} answers, 0 current classifications — the learning loop has never run")
     elif answers:
-        check("classification coverage", True, f"{classified}/{answers} sources classified")
+        check("classification coverage", True,
+              f"{classified} current / {counts['stale']} stale / "
+              f"{counts['unclassified']} unclassified")
+    if counts["stale"]:
+        warn(f"{counts['stale']} classification(s) {_cs.WITHHELD_STALE_REASON}",
+             "run: lifehug classify-story --classify-all --unclassified --stale-first")
 
     return failures
 
@@ -2540,6 +2560,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", metavar="PATH", help="With --from-response: the source file it classifies")
     p.add_argument("--classify-all", action="store_true")
     p.add_argument("--unclassified", action="store_true")
+    p.add_argument("--stale-first", action="store_true",
+                   help="With --classify-all: stale classifications first (oldest first), "
+                        "then never-classified newest-source-first, resuming after "
+                        "state/classify_cursor.json")
     p.add_argument("--emit-prompts", metavar="DIR",
                    help="With --classify-all: write prompts + manifest for agent completion instead of calling AI")
     p.add_argument("--limit", type=int, help="With --classify-all: maximum files to classify")

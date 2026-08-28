@@ -92,22 +92,25 @@ def load_mirror_entries() -> list[dict]:
             "classified_at": classified_at,
         })
 
-    if CLASSIFICATIONS_DIR.exists():
-        for path in sorted(CLASSIFICATIONS_DIR.glob("*.json")):
-            data = read_json(path, default={}) or {}
-            source = str(data.get("source_path", path.stem))
-            classified_at = str(data.get("classified_at", ""))
-            source_short = Path(source).stem
+    # v237: stale classifications are withheld from the Mirror the moment a
+    # correction is filed — `classify_story.current_classification_files` is
+    # the one gate.
+    import classify_story  # noqa: PLC0415
 
-            for c in data.get("contradictions") or []:
-                if isinstance(c, str):
-                    add("contradiction", c, source=source, source_short=source_short,
-                        classified_at=classified_at)
-            for i in data.get("self_understanding_insights") or []:
-                if isinstance(i, str):
-                    kind = "position" if i.strip().lower().startswith("position:") else "insight"
-                    add(kind, i, source=source, source_short=source_short,
-                        classified_at=classified_at)
+    for path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
+        source = str(data.get("source_path", path.stem))
+        classified_at = str(data.get("classified_at", ""))
+        source_short = Path(source).stem
+
+        for c in data.get("contradictions") or []:
+            if isinstance(c, str):
+                add("contradiction", c, source=source, source_short=source_short,
+                    classified_at=classified_at)
+        for i in data.get("self_understanding_insights") or []:
+            if isinstance(i, str):
+                kind = "position" if i.strip().lower().startswith("position:") else "insight"
+                add(kind, i, source=source, source_short=source_short,
+                    classified_at=classified_at)
 
     responses = read_json(MIRROR_RESPONSES_FILE, default={}) or {}
     for item in responses.get("responses") or []:

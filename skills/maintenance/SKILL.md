@@ -70,6 +70,26 @@ classifications — classify first so this week's queue sees this week's answers
    CORRECTIONS block — those override the story text; never extract the
    corrected-away version.
 
+   A stale classification is ALSO withheld from every derived reader the
+   moment it is marked (v237, `classify_story.is_current`) — the Timeline,
+   the Mirror, the Book, progress, research, focus recommendations and the
+   wiki all skip it, the file stays on disk, and compile proceeds without
+   it. That makes re-deriving it the most valuable call in the batch, which
+   is why the weekly run passes `--stale-first`: stale targets first (oldest
+   first), then never-classified newest-source-first, resuming after
+   `state/classify_cursor.json` so a capped run never starves the tail.
+   Correction documents are never targets themselves — the source a
+   correction corrects is (`classify_story.classify_target_for`).
+
+   Only a CONTENT correction makes a classification stale (O-C2). A
+   correction declares its role — `content` (the default) or `placement`,
+   the closed vocabulary in `lifehug_core` — and a placement, which is
+   what `timeline-place` files, does NOT mark its target stale: it is a
+   date decision about a moment, not a refutation of the text the moment
+   was read out of. So a vault where somebody has been dating moments has
+   no stale classifications to re-derive from that alone, and the
+   Timeline shows those dates with no model call.
+
 2. **Synthesize the Mirror** (v100) — the weekly introspection edition built
    from classifier contradictions/insights/positions:
    ```bash

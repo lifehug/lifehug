@@ -174,6 +174,12 @@ fi
 run_step python3 "$SCRIPT_DIR/lifehug.py" compile --no-ai
 run_source_integrity
 
+# v237: --stale-first. A classification marked stale by a correction is
+# withheld from every derived reader IMMEDIATELY, so re-deriving it is the most
+# valuable call the batch can make; the never-classified sweep behind it runs
+# newest-source-first and resumes after state/classify_cursor.json, so a
+# capped weekly run can never re-emit the same alphabetical heads forever.
+#
 # v92: keyless agent mode. With no AI route (gateway or key), classification
 # emits agent tasks to state/agent_tasks/classify instead of recording a raw
 # learning failure. The maintenance skill (skills/maintenance) completes them
@@ -184,7 +190,7 @@ echo
 if [[ "$KEYLESS" == "1" ]]; then
   echo "==> keyless — emitting classification tasks for agent completion"
   set +e
-  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --emit-prompts "$AGENT_TASKS_DIR/classify" 2>&1)
+  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --stale-first --limit "$CLASSIFY_LIMIT" --emit-prompts "$AGENT_TASKS_DIR/classify" 2>&1)
   CLASSIFY_STATUS=$?
   set -e
   if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
@@ -194,9 +200,9 @@ if [[ "$KEYLESS" == "1" ]]; then
 $CLASSIFY_OUT"
   fi
 else
-  echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --limit ${CLASSIFY_LIMIT}"
+  echo "==> python3 system/lifehug.py classify-story --classify-all --unclassified --stale-first --limit ${CLASSIFY_LIMIT}"
   set +e
-  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" 2>&1)
+  CLASSIFY_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --stale-first --limit "$CLASSIFY_LIMIT" 2>&1)
   CLASSIFY_STATUS=$?
   set -e
   if [[ "$CLASSIFY_STATUS" -ne 0 ]]; then
