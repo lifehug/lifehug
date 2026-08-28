@@ -4,7 +4,7 @@
     "framework": "lifehug/lifehug",
     "framework_version": 244,
     "revision": "vault-contract-v11",
-    "content_digest": "sha256:PLACEHOLDER"
+    "content_digest": "sha256:8b2b7159a34ce5918945573ea65c63acf22c929ff727c0272081b990e309eeb5"
   },
   "special_file_policy": {
     "regular_files": "allow",

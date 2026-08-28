@@ -1726,7 +1726,7 @@ def cmd_correct(args: argparse.Namespace) -> int:
             title=args.title,
             source_medium=args.source,
             correction_kind=args.kind,
-            correction_role=args.role,
+            correction_role=getattr(args, "role", None),
             supersedes=getattr(args, "supersedes", None),
         )
     except SupersedesError as exc:
