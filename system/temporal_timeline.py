@@ -1798,7 +1798,7 @@ def derive_calculated_timeline(
     mark = clock()
     origin = _owner_birth(groups, calculated, placed, owner, diagnostics)
     if origin is not None:
-        birth_node_id, resolved_origin = origin
+        _birth_node_id, resolved_origin = origin
         nodes.extend(_age_frame_nodes(
             origin=resolved_origin,
             claim_refs=[claim.get("claim_id")
