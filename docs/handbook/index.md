@@ -26,6 +26,7 @@ planned:
 | [Conversations & the Day Model](conversations.md) | chats, sessions, the daily reset |
 | [Decisions & Learning](decisions-and-learning.md) | the weekly rubric edit; how owner decisions teach the system |
 | [The Timeline & Chronology](timeline.md) | dates as intervals with a basis, bands, unknowns, keystones |
+| [Eras — Age Frames & Named Eras](eras.md) | the permanent calculated coordinate system, immutable named-era identity, membership as evidence |
 
 Until a page exists, its territory is covered by the
 [README](https://github.com/lifehug/lifehug#readme) and the
