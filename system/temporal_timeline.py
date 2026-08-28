@@ -456,10 +456,12 @@ def _resolution_index(records: object) -> dict:
     return {key: value["record"] for key, value in index.items()}
 
 
-def _resolve_subjects(claims, *, resolution_records, roster_snapshot, now):
+def _resolve_subjects(
+    claims, *, resolution_records, roster_snapshot, now, owner_ref: object = None
+):
     """Attach identity to every claim, keeping the ones that will not resolve.
 
-    Three layers, in order, each of them ``identity_resolution``'s and none of
+    Four layers, in order, each of them ``identity_resolution``'s and none of
     them re-implemented here:
 
     1. a claim that already carries ``subject_ref`` is left alone — the recorder
@@ -468,14 +470,28 @@ def _resolve_subjects(claims, *, resolution_records, roster_snapshot, now):
     2. a supplied :class:`~identity_resolution.ResolutionRecord` for the
        mention wins next, because it may carry a model rung's or an owner's
        verdict that no deterministic rule can reach;
-    3. otherwise the deterministic resolver runs against the roster snapshot.
+    3. a legacy birth landmark whose subject is the DOMAIN WORD resolves to the
+       owner through :func:`~identity_resolution.owner_birth_domain_resolution`
+       (design §3.1). The rule is narrow by construction — the word *and* the
+       birth event kind — and it produces a record, not an edit, so the receipt
+       still says what it said and the mapping can be reversed;
+    4. otherwise the deterministic resolver runs against the roster snapshot.
+
+    Layers 3 and 4 keep SEPARATE caches on purpose. They are both keyed by
+    mention, and a vault holding both a birth claim and some other claim that
+    happens to say "birth" would otherwise answer whichever arrived first —
+    an order-dependent identity, which is the one thing this fold promises
+    never to have. The returned mapping prefers the rule's record for such a
+    key because it is the more specific of the two.
 
     Returns ``(resolved_claims, records_by_mention_key, claim_ids_by_mention_key)``.
     The third is what turns one ambiguous mention into ONE Mirror row citing
     every claim that ever said it (§5.4's answer-once).
     """
+    owner = collapsed_text(owner_ref) or DEFAULT_OWNER_REF
     supplied = _resolution_index(resolution_records)
-    records: dict[str, ident.ResolutionRecord] = dict(supplied)
+    rule_records: dict[str, ident.ResolutionRecord] = {}
+    roster_records: dict[str, ident.ResolutionRecord] = {}
     by_mention: dict[str, list[str]] = {}
     resolved: list[dict] = []
 
@@ -486,22 +502,55 @@ def _resolve_subjects(claims, *, resolution_records, roster_snapshot, now):
         if collapsed_text(claim.get("subject_ref")):
             resolved.append(claim)
             continue
-        record = records.get(key)
+        evidence_ref = _source_key(claim) or collapsed_text(claim.get("claim_id"))
+        record = supplied.get(key)
+        if record is None and ident.is_owner_birth_domain_word(
+            mention, claim.get("event_kind")
+        ):
+            record = rule_records.get(key)
+            if record is None:
+                record = ident.owner_birth_domain_resolution(
+                    mention, owner_ref=owner, evidence_ref=evidence_ref, now=now
+                )
+                rule_records[key] = record
         if record is None:
-            record = ident.resolve_mention(
-                mention,
-                roster=roster_snapshot,
-                evidence_ref=_source_key(claim) or collapsed_text(claim.get("claim_id")),
-                now=now,
-            )
-            records[key] = record
+            record = roster_records.get(key)
+            if record is None:
+                record = ident.resolve_mention(
+                    mention,
+                    roster=roster_snapshot,
+                    evidence_ref=evidence_ref,
+                    now=now,
+                )
+                roster_records[key] = record
         try:
             resolved.append(ident.apply_resolution(claim, record, now=now))
         except TemporalContractError:
             # A resolution that cannot be attached is a resolution we do not
             # apply — never a claim we drop.
             resolved.append(claim)
+
+    records: dict[str, ident.ResolutionRecord] = dict(roster_records)
+    records.update(rule_records)
+    records.update(supplied)
     return resolved, records, by_mention
+
+
+def _is_owner_birth_group(group: dict, owner: str) -> bool:
+    """Is this the OWNER's birth — under either spelling (design §3.1)?
+
+    The resolved subject is the answer whenever identity landed, which after
+    layer 3 above is every legacy receipt too. The raw-mention half is the
+    belt: a supplied record that leaves the mention ``uncertain`` pops
+    ``subject_ref`` back off the claim, and a vault whose only birth receipt is
+    a legacy one must not lose its birthday to that.
+    """
+    if normalized_mention_key(group["subject"]) == normalized_mention_key(owner):
+        return True
+    return any(
+        ident.is_owner_birth_domain_word(claim.get("subject_mention"), claim.get("event_kind"))
+        for claim in group["claims"]
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1432,6 +1481,7 @@ def derive_calculated_timeline(
         resolution_records=resolution_records,
         roster_snapshot=roster_snapshot,
         now=now,
+        owner_ref=owner,
     )
     timings["resolve"] = clock() - mark
 
@@ -1453,14 +1503,16 @@ def derive_calculated_timeline(
     # dated claims settle first and the quantities read the result.
     birth = chrono.from_dict(birth_date) if birth_date is not None else None
     if birth is None:
+        # The owner's birth, and only the owner's. There used to be a fallback
+        # here — "if that is not exactly one, take whatever birth exists" —
+        # and it was wrong in both directions: with a child's birth filed it
+        # matched two and picked nothing, and with none of the owner's filed it
+        # silently promoted somebody else's birthday to the owner's age anchor.
         births = [
             group
             for group in groups.values()
-            if group["event_kind"] == "birth"
-            and normalized_mention_key(group["subject"]) == normalized_mention_key(owner)
+            if group["event_kind"] == "birth" and _is_owner_birth_group(group, owner)
         ]
-        if len(births) != 1:
-            births = [group for group in groups.values() if group["event_kind"] == "birth"]
         if len(births) == 1:
             seeded = _reconcile_group(births[0], birth=None, diagnostics=[])
             birth = seeded["best"]

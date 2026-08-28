@@ -161,7 +161,20 @@ OWNER_REASON = "owner_verdict"
 #: legible as a reversal rather than as a fresh failure to resolve.
 UNRESOLVED_REASON = "unresolved"
 
+#: The subject a landmark entry that names nobody falls back to is its own
+#: DOMAIN word (``landmark_projection.entry_subject_mention``), and for one
+#: domain — ``birth`` — that word denotes the person themselves. Receipts
+#: filed before design §3.1's extractor rule therefore say ``"birth"`` where
+#: they mean ``self``. This is the named deterministic rule that reads them,
+#: recorded on the record like every other resolution so it is visible and
+#: reversible rather than a silent rewrite of the receipt.
+OWNER_BIRTH_DOMAIN_REASON = "owner_birth_domain_word"
+
+#: The legacy spelling that rule answers to.
+LEGACY_OWNER_BIRTH_MENTION = "birth"
+
 RESOLUTION_REASONS = DETERMINISTIC_REASONS + (
+    OWNER_BIRTH_DOMAIN_REASON,
     MODEL_REASON,
     OWNER_REASON,
     UNRESOLVED_REASON,
@@ -256,6 +269,7 @@ ERROR_CODES = (
     "no_candidate_has_candidates",
     "resolution_not_reversible",
     "resolution_would_remint",
+    "owner_ref_required",
     "episode_needs_event_kind",
     "episode_needs_subject",
     "episode_needs_counterpart",
@@ -749,6 +763,53 @@ def resolve_mention(
     )
 
 
+def is_owner_birth_domain_word(mention: object, event_kind: object) -> bool:
+    """Is this claim a legacy birth landmark naming the domain instead of the person?
+
+    BOTH halves are required, on purpose. The word alone proves nothing — a
+    person may be mentioned by any word — so the rule fires only where the
+    claim is also *about a birth*, which is the one place
+    ``entry_subject_mention``'s domain fallback ever meant "the person whose
+    vault this is". A ``birth``-worded mention on any other event kind is left
+    exactly where it is, unresolved, for the ordinary resolver to answer.
+    """
+    return (
+        normalized_mention_key(mention) == normalized_mention_key(LEGACY_OWNER_BIRTH_MENTION)
+        and collapsed_text(event_kind) == "birth"
+    )
+
+
+def owner_birth_domain_resolution(
+    mention: object,
+    *,
+    owner_ref: object,
+    evidence_ref: object,
+    now: object = None,
+) -> ResolutionRecord:
+    """The :data:`OWNER_BIRTH_DOMAIN_REASON` rule, as a record.
+
+    It resolves ``same`` to the owner's own handle and carries that handle as
+    its single candidate, so the decision reads back through exactly the same
+    door — and the same ``unresolve`` — as a roster match or an owner verdict.
+    """
+    ref = collapsed_text(owner_ref)
+    if not ref:
+        raise IdentityResolutionError(
+            "owner_ref_required", "the owner-birth rule resolves to the owner's own handle"
+        )
+    return resolution_record(
+        {
+            "mention": mention,
+            "candidates": [{"ref": ref, "name": ref, "basis": "exact_ref"}],
+            "resolution": "same",
+            "resolved_ref": ref,
+            "reason": OWNER_BIRTH_DOMAIN_REASON,
+            "evidence_ref": evidence_ref,
+        },
+        now=now,
+    )
+
+
 def unresolve(record: object, *, now: object = None) -> ResolutionRecord:
     """Reverse a resolution without destroying it (§6.3's "reversible").
 
@@ -1055,6 +1116,10 @@ __all__ = [
     "REPEATABLE_EVENT_KINDS",
     "RESOLUTIONS",
     "RESOLUTION_REASONS",
+    "OWNER_BIRTH_DOMAIN_REASON",
+    "LEGACY_OWNER_BIRTH_MENTION",
+    "is_owner_birth_domain_word",
+    "owner_birth_domain_resolution",
     "UNCERTAIN_REASONS",
     "UNRESOLVED_REASON",
     "UNRESOLVED_REF_PREFIX",

@@ -153,6 +153,13 @@ SPAN_END_EVENT_KIND = "ended"
 #: per-event claims, which supersede rather than rewrite.
 UNDISAMBIGUATED_EVENT_KIND = "transition"
 
+#: The subject a ``birth`` landmark entry names (design §3.1). It is the
+#: owner's own handle — ``temporal_timeline.DEFAULT_OWNER_REF`` — spelled here
+#: as the literal the substrate stores, because this module mints MENTIONS and
+#: a mention is text, not a ref. The fold resolves it to the owner like any
+#: other mention; it simply never needs a roster to do it.
+OWNER_BIRTH_MENTION = "self"
+
 #: The entry keys the projector must never read from a promoted source: they
 #: are the temporal assertion, and the temporal assertion lives in the claims.
 #: See :func:`skeleton_of`.
@@ -257,12 +264,24 @@ def entry_subject_mention(entry: object, row: object, domain: object) -> str:
     The entry's own identity as the writer spelled it
     (`landmarks_interaction.identity_named` — label, then name, then the
     domain's identity rung), falling back to the DOMAIN word for an entry that
-    names no subject. ``birth`` is the designed instance of that fallback: its
-    ladder is three date grains and the person's own birthday has no subject
-    other than the domain it sits in. The substrate requires a non-empty
-    mention on every claim and is right to — a claim about nobody is not a
-    claim — so the fallback is named rather than left to an empty string.
+    names no subject. The substrate requires a non-empty mention on every claim
+    and is right to — a claim about nobody is not a claim — so the fallback is
+    named rather than left to an empty string.
+
+    ``birth`` is the ONE domain whose subject is the person themselves, and it
+    says so (design §3.1): the mention is :data:`OWNER_BIRTH_MENTION`,
+    unconditionally, because a birth entry's ladder is three date grains and
+    whatever else the row happens to carry, the birthday being filed is the
+    owner's. Before this rule the fallback minted the domain word ``"birth"``,
+    which read as a *person named "birth"* — and the moment a child's birth
+    was filed the fold could no longer tell which of the two births was the
+    owner's, so every age claim lost its anchor. Legacy receipts carrying that
+    spelling are still read: ``identity_resolution.is_owner_birth_domain_word``
+    maps them back to the owner at fold time, so no re-harvest is required and
+    the two spellings group as one node.
     """
+    if collapsed_text(domain) == "birth":
+        return OWNER_BIRTH_MENTION
     named = landmarks_interaction.identity_named(entry, row) if isinstance(row, dict) else None
     if not named and isinstance(entry, dict):
         for field in landmarks_interaction.IDENTITY_FIELDS:

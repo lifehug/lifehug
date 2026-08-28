@@ -16,6 +16,7 @@ import json
 import re
 import sys
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -102,6 +103,9 @@ FRONTMATTER_ORDER = (
     "immutable",
     "schema_version",
     "corrects",
+    "corrects_path",
+    "supersedes",
+    "supersedes_path",
     "reflects",
     "correction_kind",
     "raw_url",
@@ -864,16 +868,40 @@ def _linked_source_day(captured_at: str) -> str:
     return day
 
 
+def _linked_source_identity(
+    source_type: str, target_id: str, payload: str, supersedes: str = ""
+) -> str:
+    """What makes one linked source the SAME source as another.
+
+    ``supersedes`` joins the identity only when it is present, so every stem
+    minted before O-E0d is byte-identical. It has to join it at all because
+    "correction of X saying P" and "correction of X saying P *that retires
+    correction C*" are different acts: without this, filing the second on a
+    vault that already holds the first would land on the existing file, skip
+    the write, and report success while the supersession edge went nowhere.
+    """
+    parts = [source_type, target_id, normalize_payload(payload)]
+    if supersedes:
+        parts.append(f"supersedes={supersedes}")
+    return "\0".join(parts)
+
+
 def linked_source_stem(
-    target_id: str, source_type: str, payload: str, captured_at: str
+    target_id: str,
+    source_type: str,
+    payload: str,
+    captured_at: str,
+    *,
+    supersedes: str = "",
 ) -> str:
     """Stable, bounded stem for correction/retraction source files.
 
     Contract: ``YYYY-MM-DD-<kind>-<target-label>-<hash>.md``.  ``target-label``
     is only a bounded slug of the authoritative target id; the full question
     text is never part of the filename.  The digest includes the full target
-    id, kind, and payload, keeping distinct corrections collision-safe even
-    when their visible labels truncate to the same text.
+    id, kind, payload and (when present) the correction this one supersedes,
+    keeping distinct corrections collision-safe even when their visible labels
+    truncate to the same text.
     """
     day = _linked_source_day(captured_at or now_utc())
     kind = {"source_correction": "correction", "source_retraction": "retraction"}.get(
@@ -886,8 +914,9 @@ def linked_source_stem(
         f"{day}-{kind}---{suffix}" + "f" * 64
     )
     target_label = _bounded_slug(target_id, max(1, label_budget))
-    identity = "\0".join((source_type, target_id, normalize_payload(payload)))
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        _linked_source_identity(source_type, target_id, payload, supersedes).encode("utf-8")
+    ).hexdigest()
     return f"{day}-{kind}-{target_label}-{digest[:LINKED_SOURCE_HASH_LENGTH]}"
 
 
@@ -897,12 +926,16 @@ def _linked_source_path(
     source_type: str,
     payload: str,
     captured_at: str,
+    *,
+    supersedes: str = "",
 ) -> Path:
     """Choose a bounded name, extending the digest deterministically on a hash-prefix collision."""
-    stem = linked_source_stem(target_id, source_type, payload, captured_at)
+    stem = linked_source_stem(
+        target_id, source_type, payload, captured_at, supersedes=supersedes
+    )
     prefix, short_digest = stem.rsplit("-", 1)
     full_digest = hashlib.sha256(
-        "\0".join((source_type, target_id, normalize_payload(payload))).encode("utf-8")
+        _linked_source_identity(source_type, target_id, payload, supersedes).encode("utf-8")
     ).hexdigest()
     for digest_length in range(len(short_digest), len(full_digest) + 1, 16):
         candidate = directory / f"{prefix}-{full_digest[:digest_length]}.md"
@@ -917,9 +950,307 @@ def _linked_source_path(
             str(existing_metadata.get("type", "")) == source_type
             and _linked_source_target_id(existing_metadata) == target_id
             and normalize_payload(existing_payload) == normalize_payload(payload)
+            and str(existing_metadata.get("supersedes", "") or "") == supersedes
         ):
             return candidate  # idempotent retry of the same linked source
     raise RuntimeError("unable to allocate a unique linked-source filename")
+
+
+# ---------------------------------------------------------------------------
+# Corrections — the one reader, and the supersession edge (contract O-E0d)
+# ---------------------------------------------------------------------------
+#
+# A correction source is immutable, which is the point: the record of what was
+# once believed survives the record of what is believed now. Before this, the
+# consequence was that a correction could only be piled on — every correction
+# ever filed against a source reached the classification prompt at once, and
+# the reader's only tie-break was filename order, which is capture time
+# wearing a disguise. `--supersedes` gives the person the verb they actually
+# want: *that correction was itself wrong*. The predecessor is not edited and
+# not deleted; a new correction simply names it, and the readers stop reading
+# it.
+#
+# One definition, many hosts (ADR 0021): `active_correction_leaves` is the
+# graph, `active_corrections_for` is the disk reader over it, and every other
+# host — the classify prompt, the compiler's correction injection — binds to
+# one of those two rather than globbing the directory itself. The guard test
+# is T-E0-12.
+
+SUPERSEDES_ERROR_CODES = (
+    "supersedes_missing",
+    "supersedes_not_a_correction",
+    "supersedes_target_mismatch",
+    "supersedes_cycle",
+    "supersedes_outside_target_set",
+)
+
+
+class SupersedesError(ValueError):
+    """A typed refusal on the supersession edge. ``code`` is the contract's."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
+
+
+@dataclass(frozen=True)
+class CorrectionRecord:
+    """One `type: source_correction` file, read.
+
+    ``body`` is the correction's text with its own ``# Title`` heading removed
+    — the form every reader wants and none of them should re-derive.
+    """
+
+    source_id: str
+    path: str
+    title: str
+    body: str
+    corrects: str
+    corrects_path: str
+    correction_kind: str
+    supersedes: str = ""
+    supersedes_path: str = ""
+
+    @property
+    def identity_keys(self) -> frozenset[str]:
+        """Every spelling by which another correction may name this one."""
+        return frozenset(k for k in (self.source_id, self.path) if k)
+
+
+def _correction_body(text: str) -> str:
+    _metadata, raw = split_frontmatter(text)
+    body = raw if raw != text else text
+    return re.sub(r"^# .+?\n+", "", body.strip(), count=1).strip()
+
+
+def correction_record_from_mapping(item: object) -> CorrectionRecord | None:
+    """Adapt an already-loaded correction row (the compiler's) into the record.
+
+    Returns ``None`` for anything that is not a correction, so a host can hand
+    this its whole source pool without pre-filtering.
+    """
+    if not isinstance(item, dict):
+        return None
+    kind = str(item.get("kind") or item.get("type") or "")
+    if kind != "source_correction":
+        return None
+    return CorrectionRecord(
+        source_id=str(item.get("source_id") or item.get("id") or ""),
+        path=str(item.get("source_path") or item.get("source") or item.get("path") or ""),
+        title=str(item.get("title") or ""),
+        body=str(item.get("body") or ""),
+        corrects=str(item.get("corrects") or ""),
+        corrects_path=str(item.get("corrects_path") or ""),
+        correction_kind=str(item.get("correction_kind") or ""),
+        supersedes=str(item.get("supersedes") or ""),
+        supersedes_path=str(item.get("supersedes_path") or ""),
+    )
+
+
+def _corrections_dir(corrections_dir: Path | None = None) -> Path:
+    return Path(corrections_dir) if corrections_dir is not None else CORRECTION_SOURCES_DIR
+
+
+def read_correction_records(
+    *, corrections_dir: Path | None = None, repo_dir: Path | None = None
+) -> list[CorrectionRecord]:
+    """Every correction on disk, in filename order. The ONE directory read."""
+    corrections_root = _corrections_dir(corrections_dir)
+    if not corrections_root.exists():
+        return []
+    root = Path(repo_dir) if repo_dir is not None else REPO_DIR
+    records: list[CorrectionRecord] = []
+    for path in sorted(corrections_root.glob("*.md")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        metadata, _raw = split_frontmatter(text)
+        if str(metadata.get("type") or "") != "source_correction":
+            continue
+        try:
+            relative = path.resolve().relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            relative = path.as_posix()
+        records.append(
+            CorrectionRecord(
+                source_id=str(metadata.get("source_id") or f"correction:{path.stem}"),
+                path=relative,
+                title=str(metadata.get("title") or ""),
+                body=_correction_body(text),
+                corrects=str(metadata.get("corrects") or ""),
+                corrects_path=str(metadata.get("corrects_path") or ""),
+                correction_kind=str(metadata.get("correction_kind") or ""),
+                supersedes=str(metadata.get("supersedes") or ""),
+                supersedes_path=str(metadata.get("supersedes_path") or ""),
+            )
+        )
+    return records
+
+
+def corrections_targeting(
+    source_path: Path,
+    *,
+    corrections_dir: Path | None = None,
+    repo_dir: Path | None = None,
+    records: list[CorrectionRecord] | None = None,
+) -> list[CorrectionRecord]:
+    """Every correction naming this source, superseded ones included."""
+    root = Path(repo_dir) if repo_dir is not None else REPO_DIR
+    target = Path(source_path)
+    try:
+        rel_target = target.resolve().relative_to(Path(root).resolve()).as_posix()
+    except ValueError:
+        rel_target = target.as_posix()
+    answer_id = f"answer:{target.stem}"
+    pool = records if records is not None else read_correction_records(
+        corrections_dir=corrections_dir, repo_dir=repo_dir
+    )
+    return [
+        record
+        for record in pool
+        if record.corrects_path == rel_target or record.corrects == answer_id
+    ]
+
+
+def active_correction_leaves(records: object) -> list[CorrectionRecord]:
+    """The leaves of the supersession graph, in the order given. PURE.
+
+    A correction is active unless SOME correction in the set names it. That
+    "some" is deliberately not "some *active* one": in a chain A ← B ← C only
+    C is active, and reading it any other way would let a superseded text come
+    back the moment the correction that replaced it was itself replaced.
+
+    Two shapes are refused loudly rather than absorbed, because both of them
+    would silently RESTORE a text somebody said was wrong:
+
+    * ``supersedes_outside_target_set`` — an edge pointing at a correction that
+      is not among this target's own. Nothing here can honour it, and treating
+      it as "no edge" would quietly re-activate the corrections it was meant to
+      retire.
+    * ``supersedes_cycle`` — a cycle, which the leaf rule would render as an
+      empty active set: every correction gone, and no error to say so.
+    """
+    rows = list(records or ())
+    by_key: dict[str, CorrectionRecord] = {}
+    for record in rows:
+        for key in record.identity_keys:
+            by_key[key] = record
+
+    edges: dict[int, int] = {}
+    index_of = {id(record): position for position, record in enumerate(rows)}
+    for position, record in enumerate(rows):
+        named = record.supersedes or record.supersedes_path
+        if not named:
+            continue
+        predecessor = by_key.get(record.supersedes) or by_key.get(record.supersedes_path)
+        if predecessor is None:
+            raise SupersedesError(
+                "supersedes_outside_target_set",
+                f"{record.path or record.source_id} supersedes {named!r}, "
+                "which is not a correction of the same source",
+            )
+        edges[position] = index_of[id(predecessor)]
+
+    for start in edges:
+        seen = {start}
+        cursor = edges.get(start)
+        while cursor is not None:
+            if cursor in seen:
+                raise SupersedesError(
+                    "supersedes_cycle",
+                    f"the corrections of this source supersede in a cycle "
+                    f"through {rows[cursor].path or rows[cursor].source_id}",
+                )
+            seen.add(cursor)
+            cursor = edges.get(cursor)
+
+    superseded = set(edges.values())
+    return [record for position, record in enumerate(rows) if position not in superseded]
+
+
+def active_corrections_for(
+    source_path: Path,
+    *,
+    corrections_dir: Path | None = None,
+    repo_dir: Path | None = None,
+) -> list[CorrectionRecord]:
+    """The corrections a reader should honour for this source, filename order.
+
+    The authoritative definition. ``classify_story.corrections_for`` and the
+    compiler's correction injection both come through here or through
+    :func:`active_correction_leaves`; nothing else reads the directory.
+    """
+    return active_correction_leaves(
+        corrections_targeting(
+            source_path, corrections_dir=corrections_dir, repo_dir=repo_dir
+        )
+    )
+
+
+def resolve_supersedes(
+    value: str,
+    target_path: Path,
+    *,
+    corrections_dir: Path | None = None,
+    repo_dir: Path | None = None,
+) -> CorrectionRecord:
+    """Validate ``--supersedes`` at WRITE time, or raise :class:`SupersedesError`.
+
+    The three refusals are the contract's, and each one is a wrong join the
+    read side could never undo: a predecessor that does not exist, one that is
+    not a correction at all, and one that corrects a DIFFERENT source. The
+    last is the dangerous one — it would retire a correction of some other
+    story, invisibly.
+    """
+    named = str(value or "").strip()
+    if not named:
+        raise SupersedesError("supersedes_missing", "--supersedes names no correction")
+
+    corrections_root = _corrections_dir(corrections_dir)
+    root = Path(repo_dir) if repo_dir is not None else REPO_DIR
+    candidate_path: Path | None = None
+    if corrections_root.exists():
+        for path in sorted(corrections_root.glob("*.md")):
+            try:
+                relative = path.resolve().relative_to(Path(root).resolve()).as_posix()
+            except ValueError:
+                relative = path.as_posix()
+            metadata, _raw = split_frontmatter(
+                path.read_text(encoding="utf-8", errors="replace")
+            )
+            if named in {
+                str(metadata.get("source_id") or ""),
+                relative,
+                path.as_posix(),
+                path.name,
+                path.stem,
+            }:
+                candidate_path = path
+                break
+    if candidate_path is None:
+        raise SupersedesError(
+            "supersedes_missing", f"no source found for --supersedes {named!r}"
+        )
+
+    metadata, _raw = split_frontmatter(
+        candidate_path.read_text(encoding="utf-8", errors="replace")
+    )
+    if str(metadata.get("type") or "") != "source_correction":
+        raise SupersedesError(
+            "supersedes_not_a_correction",
+            f"{named!r} is a {metadata.get('type') or 'source'}, not a correction",
+        )
+
+    own = corrections_targeting(
+        target_path, corrections_dir=corrections_dir, repo_dir=repo_dir
+    )
+    for record in own:
+        if named in record.identity_keys or record.path == candidate_path.as_posix():
+            return record
+    raise SupersedesError(
+        "supersedes_target_mismatch",
+        f"{named!r} corrects {metadata.get('corrects') or metadata.get('corrects_path')!r}, "
+        f"not {rel(Path(target_path))!r}",
+    )
 
 
 def resolve_source_target(value: str) -> Path:
@@ -952,10 +1283,21 @@ def create_linked_source(
     source_medium: str,
     correction_kind: str | None = None,
     suppress_on: list[str] | None = None,
+    supersedes: str | None = None,
 ) -> Path:
     target_path = resolve_source_target(target)
     target_record = source_record(target_path)
     captured_at = now_utc()
+    superseded: CorrectionRecord | None = None
+    if supersedes:
+        if source_type != "source_correction":
+            raise SupersedesError(
+                "supersedes_not_a_correction",
+                "only a correction supersedes a correction",
+            )
+        # Validated BEFORE anything is written: a refusal leaves the vault
+        # exactly as it was.
+        superseded = resolve_supersedes(supersedes, target_path)
     target_title = str(target_record.get("title") or target_record["source_id"])
     label = {"source_reflection": "Reflection",
              "source_retraction": "Retraction"}.get(source_type, "Correction")
@@ -969,7 +1311,12 @@ def create_linked_source(
     target_id = str(target_record["source_id"])
     if source_type in LINKED_SOURCE_TYPES:
         path = _linked_source_path(
-            CORRECTION_SOURCES_DIR, target_id, source_type, payload, captured_at
+            CORRECTION_SOURCES_DIR,
+            target_id,
+            source_type,
+            payload,
+            captured_at,
+            supersedes=superseded.source_id if superseded else "",
         )
     else:
         # Reflections are narrative sources and retain their historical,
@@ -1010,6 +1357,11 @@ def create_linked_source(
         metadata["corrects"] = target_record["source_id"]
         metadata["corrects_path"] = rel(target_path)
         metadata["correction_kind"] = correction_kind or "other"
+        if superseded is not None:
+            # The predecessor is NOT edited. The edge lives on the new record
+            # only, which is what keeps the old belief readable forever.
+            metadata["supersedes"] = superseded.source_id
+            metadata["supersedes_path"] = superseded.path
     if not path.exists():
         write_text(path, f"{format_frontmatter(metadata)}\n\n{payload}")
     register_source(path)
@@ -1319,15 +1671,22 @@ def cmd_correct(args: argparse.Namespace) -> int:
     if not body:
         print("Error: correction text must be provided on stdin", file=sys.stderr)
         return 1
-    path = create_linked_source(
-        args.target,
-        body,
-        source_type="source_correction",
-        title=args.title,
-        source_medium=args.source,
-        correction_kind=args.kind,
-    )
+    try:
+        path = create_linked_source(
+            args.target,
+            body,
+            source_type="source_correction",
+            title=args.title,
+            source_medium=args.source,
+            correction_kind=args.kind,
+            supersedes=getattr(args, "supersedes", None),
+        )
+    except SupersedesError as exc:
+        print(f"Error: {exc.code}: {exc.message}", file=sys.stderr)
+        return 1
     print(f"✓ Created correction source: {rel(path)}")
+    if getattr(args, "supersedes", None):
+        print(f"  It supersedes {args.supersedes} — that correction stops being read.")
     return 0
 
 
@@ -1449,6 +1808,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
     p.add_argument("--source", default="manual")
     p.add_argument("--title")
+    p.add_argument(
+        "--supersedes",
+        help=(
+            "source_id (or path) of an EARLIER correction of the same target that "
+            "this one replaces; the earlier one stays on disk and stops being read"
+        ),
+    )
     p.set_defaults(func=cmd_correct)
 
     p = sub.add_parser("reflect", help="Create an additive reflection source from stdin")
