@@ -496,6 +496,7 @@
     "interactions/timeline/prompt/recorder.md",
     "sources/eras/.gitkeep",
     "tests/test_eras_e3.py",
-    "tests/test_eras_e_bo.py"
+    "tests/test_eras_e_bo.py",
+    "tests/test_eras_e1b.py"
   ]
 }
