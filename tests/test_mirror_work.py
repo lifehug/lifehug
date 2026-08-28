@@ -453,6 +453,130 @@ class BoundedScopeTests(MirrorWorkTestCase):
 # --------------------------------------------------------------------------
 
 
+class ResolutionPublishesTests(MirrorWorkTestCase):
+    """T-Q-06 — `eras.md` §10: *resolve_mirror_item publishes*.
+
+    A correction that only reaches the receipts leaves every surface showing
+    the row the person just closed: Timeline, the whisper lane, the daily queue
+    and Mirror all read the PUBLISHED generation. "Answer once, closed
+    everywhere" is a promise about what those surfaces show.
+
+    Verified against v235/v236 first: `mirror_work` imported no publication
+    module and `resolve_mirror_item` returned straight from the correction, so
+    the projection only moved on the next compile.
+    """
+
+    def published(self) -> dict:
+        import temporal_publication as tpub  # noqa: PLC0415
+
+        return tpub.read_work_items(self.vault) or {}
+
+    def test_the_generation_advances_and_the_row_stops_being_derived(self):
+        fixture = self.contradiction_fixture()
+        before = self.published().get("projection_generation") or 0
+
+        resolution = mw.resolve_mirror_item(
+            self.vault,
+            item=fixture["item"],
+            resolution_text="It was 1978 — I mixed our anniversary up with Ann's.",
+            retire_claim_ids=[fixture["claims"][1]],
+            author="owner",
+            now=NOW,
+        )
+
+        after = self.published()
+        self.assertGreater(resolution.projection_generation or 0, before)
+        self.assertEqual(after.get("projection_generation"),
+                         resolution.projection_generation)
+        self.assertNotIn(
+            fixture["item"]["work_item_id"],
+            [row.get("work_item_id") for row in (after.get("work_items") or ())],
+        )
+        # The alias map travels in the same generation it describes.
+        self.assertIn("work_item_aliases", after)
+
+    def test_an_abandoned_resolution_publishes_nothing_because_it_wrote_nothing(self):
+        fixture = self.contradiction_fixture()
+        before = self.published().get("projection_generation") or 0
+        resolution = mw.resolve_mirror_item(
+            self.vault,
+            item=fixture["item"],
+            resolution_text="",
+            retire_claim_ids=[fixture["claims"][1]],
+            now=NOW,
+        )
+        self.assertEqual(resolution.outcome, "abandoned")
+        self.assertIsNone(resolution.projection_generation)
+        self.assertEqual(self.published().get("projection_generation") or 0, before)
+
+    def test_a_publish_failure_is_loud_and_the_correction_survives_it(self):
+        """The order that cannot lose the answer.
+
+        The correction is durable BEFORE the projection is derived, so a
+        publish that fails names the correction that survived it and a retry
+        writes nothing twice. Swallowing this would leave the person looking at
+        the row they just closed with nothing anywhere saying why.
+        """
+        import temporal_publication as tpub  # noqa: PLC0415
+
+        fixture = self.contradiction_fixture()
+        original = tpub.publish
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("disk went away")
+
+        tpub.publish = explode
+        try:
+            with self.assertRaises(mw.MirrorWorkError) as caught:
+                mw.resolve_mirror_item(
+                    self.vault,
+                    item=fixture["item"],
+                    resolution_text="It was 1978.",
+                    retire_claim_ids=[fixture["claims"][1]],
+                    now=NOW,
+                )
+        finally:
+            tpub.publish = original
+
+        self.assertEqual(caught.exception.code, "resolution_publish_failed")
+        correction_id = caught.exception.detail["correction_id"]
+        self.assertTrue(correction_id)
+        # Durable: the correction is on disk and the claim is already retired.
+        self.assertTrue((self.vault / caught.exception.detail["correction_path"]).is_file())
+        index = self.index()
+        by_id = {row["claim_id"]: row for row in index["claims"]}
+        self.assertEqual(by_id[fixture["claims"][1]]["status"], "superseded")
+
+        # Retrying is a no-op in evidence and publishes the same correction.
+        retried = mw.resolve_mirror_item(
+            self.vault,
+            item=fixture["item"],
+            resolution_text="It was 1978.",
+            retire_claim_ids=[fixture["claims"][1]],
+            now=NOW,
+        )
+        self.assertEqual(retried.correction_id, correction_id)
+        self.assertGreater(retried.projection_generation or 0, 0)
+
+    def test_publish_false_is_for_batching_and_states_that_it_did_not(self):
+        fixture = self.contradiction_fixture()
+        before = self.published().get("projection_generation") or 0
+        resolution = mw.resolve_mirror_item(
+            self.vault,
+            item=fixture["item"],
+            resolution_text="It was 1978.",
+            retire_claim_ids=[fixture["claims"][1]],
+            publish=False,
+            now=NOW,
+        )
+        self.assertEqual(resolution.outcome, "corrected")
+        self.assertIsNone(resolution.projection_generation)
+        self.assertEqual(self.published().get("projection_generation") or 0, before)
+        self.assertEqual(
+            "resolution_publish_failed" in mw.MIRROR_WORK_ERROR_CODES, True
+        )
+
+
 class ResolutionTests(MirrorWorkTestCase):
     def test_a_resolution_writes_durable_evidence_and_the_row_then_closes(self) -> None:
         fixture = self.contradiction_fixture()
@@ -489,8 +613,17 @@ class ResolutionTests(MirrorWorkTestCase):
         self.assertEqual(by_id[losing]["subject_mention"], "Katie")
         self.assertTrue(by_id[losing]["status_marks"])
 
+        # O-E6: the resolution PUBLISHED, so the file Mirror reads is the fold's
+        # own generation and no longer implies this contradiction at all.
+        self.assertGreater(resolution.projection_generation or 0, 0)
         self.assertEqual(mw.load_mirror_rows(self.vault), [])
-        closed = mw.load_mirror_rows(self.vault, include_resolved=True)
+        self.assertNotIn(
+            fixture["item"]["work_item_id"],
+            [row.get("work_item_id") for row in mw.load_work_items(self.vault)],
+        )
+        # The row's own state is still DERIVED from the claims, which is the
+        # property this test is about: shown the item, Mirror says resolved.
+        closed = mw.mirror_rows([fixture["item"]], self.index(), include_resolved=True)
         self.assertEqual([row.state for row in closed], ["resolved"])
         self.assertEqual(closed[0].work_item_id, fixture["item"]["work_item_id"])
 
@@ -791,9 +924,9 @@ class IdentityRowTests(MirrorWorkTestCase):
             now=NOW,
         )
         self.assertEqual(resolution.outcome, "corrected")
-        self.index()
+        self.assertGreater(resolution.projection_generation or 0, 0)
         self.assertEqual(mw.load_mirror_rows(self.vault), [])
-        closed = mw.load_mirror_rows(self.vault, include_resolved=True)
+        closed = mw.mirror_rows([fixture["item"]], self.index(), include_resolved=True)
         self.assertEqual([row.state for row in closed], ["resolved"])
 
     def test_a_resolved_subject_is_not_a_mirror_row(self) -> None:

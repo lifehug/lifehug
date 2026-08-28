@@ -194,6 +194,7 @@ MIRROR_WORK_ERROR_CODES = (
     "mirror_item_not_actionable",
     "resolution_targets_uncited_claim",
     "resolution_needs_extractor_version",
+    "resolution_publish_failed",
 )
 
 
@@ -956,6 +957,10 @@ class MirrorResolution:
     source_id: str | None = None
     source_path: str | None = None
     receipt_path: str | None = None
+    #: The generation this resolution published (O-E6, design §10). ``None`` on
+    #: an abandoned resolution, which writes nothing and therefore changes
+    #: nothing to publish.
+    projection_generation: int | None = None
 
     @property
     def wrote_correction(self) -> bool:
@@ -974,6 +979,7 @@ class MirrorResolution:
             ("source_id", self.source_id),
             ("source_path", self.source_path),
             ("receipt_path", self.receipt_path),
+            ("projection_generation", self.projection_generation),
         ):
             if value is not None:
                 payload[key] = value
@@ -1013,6 +1019,7 @@ def resolve_mirror_item(
     resolution_text: str,
     retire_claim_ids: object = (),
     correction_kind: str = "supersede",
+    publish: bool = True,
     claims_for: object = None,
     extractor_version: str | None = None,
     extractor: object = None,
@@ -1053,6 +1060,18 @@ def resolve_mirror_item(
     correction. Every call here is idempotent — the promotion, the receipt and
     the correction are each keyed by content — so a retried resolution is one
     record, not two.
+
+    **Then it PUBLISHES** (O-E6; `eras.md` §10). A correction that only reaches
+    the receipts leaves every surface showing the row the person just closed —
+    Timeline, the whisper lane, the daily queue and Mirror itself all read the
+    PUBLISHED generation, and "answer once, closed everywhere" is a promise
+    about what they show, not about what the store holds. The order is the one
+    that cannot lose the answer: the correction is durable BEFORE the
+    projection is derived, so a publish that fails raises
+    ``resolution_publish_failed`` naming the correction that survived it, and
+    a retry republishes with nothing written twice. ``publish=False`` is for a
+    caller batching several resolutions into one generation; it is never a way
+    to skip the publish.
     """
     normalized = _actionable(item)
     text = collapsed_text(resolution_text)
@@ -1100,6 +1119,29 @@ def resolve_mirror_item(
         occurred_at=now,
     )
 
+    generation: int | None = None
+    if publish:
+        try:
+            import temporal_publication  # noqa: PLC0415
+
+            generation = int(temporal_publication.publish(vault_root, now=now)
+                             .get("generation") or 0)
+        except Exception as exc:  # noqa: BLE001
+            # LOUD, and naming what survived: the correction is already on
+            # disk, content-keyed, so the caller can retry the publish (or let
+            # the next compile do it) without writing anything twice. Swallowing
+            # this would leave the person looking at the row they just closed
+            # with nothing anywhere saying why.
+            raise MirrorWorkError(
+                "resolution_publish_failed",
+                f"{normalized.work_item_id} was corrected but not published: {exc}",
+                detail={
+                    "work_item_id": normalized.work_item_id,
+                    "correction_id": correction.correction_id,
+                    "correction_path": correction.relative_path,
+                },
+            ) from exc
+
     return MirrorResolution(
         work_item_id=normalized.work_item_id,
         outcome="corrected",
@@ -1114,6 +1156,7 @@ def resolve_mirror_item(
             if receipt_path is not None
             else None
         ),
+        projection_generation=generation,
     )
 
 
