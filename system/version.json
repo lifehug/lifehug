@@ -499,6 +499,8 @@
     "system/birth_origin.py",
     "tests/test_classify_story_current.py",
     "tests/test_eras_e_bo.py",
-    "tests/test_eras_e1b.py"
+    "tests/test_eras_e1b.py",
+    "system/temporal_work_items.py",
+    "tests/test_work_item_aliases.py"
   ]
 }
