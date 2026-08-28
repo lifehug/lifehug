@@ -1489,14 +1489,15 @@ def _age_frame_nodes(*, origin: dict, claim_refs, as_of: str, death: object,
     alias onto the node, and the reached-frame epoch inside the fingerprint.
     """
     best = origin["best"]
-    frames = cd.age_frames(best, as_of=as_of, death=death)
+    origin_basis = _origin_basis_of(best)
+    frames = cd.age_frames(best, as_of=as_of, death=death,
+                           origin_basis=origin_basis)
     if not frames:
         return []
     epoch = f"age-frame-epoch:{len(frames)}:{frames[-1].band}"
     basis = tc.CLAIM_BASIS_BY_DATE_BASIS.get(
         chrono.from_dict(best).basis if best is not None else "", "calculated"
     )
-    origin_basis = _origin_basis_of(best)
     aliases = _legacy_period_aliases(roster_snapshot)
     refs = tuple(ref for ref in dict.fromkeys(collapsed_text(r) for r in claim_refs) if ref)
     rows: list[dict] = []
@@ -2501,6 +2502,7 @@ def derive_calculated_timeline(
         frames = cd.age_frames(
             resolved_origin["best"], as_of=as_of,
             death=_owner_death(groups, calculated, placed, owner),
+            origin_basis=birth_origin_basis,
         )
         frame_nodes = list(_age_frame_nodes(
             origin=resolved_origin,

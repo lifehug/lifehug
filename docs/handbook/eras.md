@@ -165,7 +165,8 @@ that asks for one rather than silently filing five-sixths of the act.
 ## 3. How it works
 
 **Age frames are arithmetic, not a decision.** One definition,
-`cross_dating.age_frames(birth, *, as_of, death=None)`, generates every band
+`cross_dating.age_frames(birth, *, as_of, death=None, origin_basis=…)`,
+generates every band
 whose floor is at or below the person's current age — Childhood, Teen years,
 then `20s`, `30s`, … with no upper row to remember to add when someone turns
 100 (`age_frame_ladder` builds the ladder rather than tabulating it). A
@@ -177,6 +178,20 @@ rather show you two honest possibilities than one confident wrong one. A
 February 29 birthday clamps to February 28 in non-leap target years, and
 that clamp is itself recorded in provenance
 (`chronology.AGE_FRAME_CLAMP_RULE`) rather than silently applied.
+
+**A frame says how it knows its own edges.** Every frame carries one
+provenance entry for its origin, and the entry depends on `origin_basis` —
+the fold's one answer, through `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS`.
+A stated birthday gives *"from your birthday"*, which `display_date` quotes
+back as *"— you said from your birthday"*. A **provisional** origin
+(`birth_origin.provisional_origin`, seeded from age statements on a vault
+with no birthday on file) gives a clause that names the arithmetic instead —
+*"calculated from “I was 30 when I started there”"* — filed under
+`chronology.CALCULATED_PROVENANCE_BASIS` so it renders verbatim. The
+distinction is one predicate, `cross_dating.origin_is_explicit`, shared with
+the node's own `provenance_summary`, because a frame that told you that you
+said your birthday when you never did is the one thing a provisional
+scaffold must not do (lifehug#266).
 
 **The current frame is finite, on purpose.** "My 40s" persists a real,
 finite span (`2021–2031` for a 1981 birthday) with `life_clip_end:
