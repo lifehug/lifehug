@@ -101,6 +101,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import birth_origin as bo  # noqa: E402
 import chronology as chrono  # noqa: E402
 import cross_dating as cd  # noqa: E402
 import event_binding as eb
@@ -1428,6 +1429,21 @@ def _owner_death(groups: dict, calculated: dict, placed: dict, owner: str) -> ob
     return placed.get(deaths[0]) or (calculated.get(deaths[0]) or {}).get("best")
 
 
+def _origin_basis_of(value: object) -> str:
+    """"explicit" for a stated birth, "calculated" otherwise — the ONE mapping
+    (design §3.2, binding fact 7), read through
+    `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS` and no second table. Shared by
+    the age frames (which have always needed it) and the birth node itself
+    (E-BO: an explicit birth's own node carries `origin_basis` too, so the
+    provisional and the promoted view read the same shape on the one node
+    both of them are).
+    """
+    basis = tc.CLAIM_BASIS_BY_DATE_BASIS.get(
+        chrono.from_dict(value).basis if value is not None else "", "calculated"
+    )
+    return "explicit" if basis == "explicit" else "calculated"
+
+
 def _age_frame_nodes(*, origin: dict, claim_refs, as_of: str, death: object,
                      roster_snapshot: object, generation: int) -> list[dict]:
     """The reached age frames, as validated ``period`` nodes (design §3.3).
@@ -1446,7 +1462,7 @@ def _age_frame_nodes(*, origin: dict, claim_refs, as_of: str, death: object,
     basis = tc.CLAIM_BASIS_BY_DATE_BASIS.get(
         chrono.from_dict(best).basis if best is not None else "", "calculated"
     )
-    origin_basis = "explicit" if basis == "explicit" else "calculated"
+    origin_basis = _origin_basis_of(best)
     aliases = _legacy_period_aliases(roster_snapshot)
     refs = tuple(ref for ref in dict.fromkeys(collapsed_text(r) for r in claim_refs) if ref)
     rows: list[dict] = []
@@ -1476,7 +1492,7 @@ def _age_frame_nodes(*, origin: dict, claim_refs, as_of: str, death: object,
                 "calculation_rule_version": CALCULATION_RULE_VERSION,
                 "projection_generation": generation,
                 "conflict_state": "none",
-                "provenance_summary": cd.AGE_FRAME_PROVENANCE,
+                "provenance_summary": bo.origin_provenance_summary(origin_basis),
                 "life_view": _life_view(frame.value.to_dict(), as_of),
             })
         )
@@ -2007,9 +2023,36 @@ def derive_calculated_timeline(
     # would otherwise be told nothing at all.
     mark = clock()
     frame_nodes: list[dict] = []
+    provisional_node: dict | None = None
+    birth_node_id: str | None = None
+    birth_origin_basis: str | None = None
     origin = _owner_birth(groups, calculated, placed, owner, diagnostics)
+    if origin is None:
+        # No stated birthday. What the person has already said about their age
+        # may still bound one (eras design §3.2, E-BO) — `birth_origin` seeds a
+        # PROVISIONAL origin node, or withholds the frames and reports a
+        # contradiction. It never suppresses the explicit-birthday question.
+        provisional = bo.provisional_origin(
+            groups=groups, calculated=calculated, owner=owner,
+            node_id=_mint_node_id(event_kind="birth", subject=owner, owner_ref=owner),
+            node_kind=_node_kind_for("birth"),
+            label=_node_label(_subject_display(owner, [], _roster_names(roster_snapshot)),
+                              "birth"),
+            rule_version=CALCULATION_RULE_VERSION,
+            generation=projection_generation,
+            confidence_of=_node_confidence,
+            diagnostics=diagnostics,
+        )
+        if provisional is not None:
+            # Held until the group nodes exist — E3 renders them AFTER the
+            # frames so `within(frame)` can resolve, so the provisional birth
+            # node joins `nodes` below, beside the frames it seeded.
+            provisional_node = provisional.node
+            origin = provisional.origin
     if origin is not None:
         _birth_node_id, resolved_origin = origin
+        birth_node_id = _birth_node_id
+        birth_origin_basis = _origin_basis_of(resolved_origin["best"])
         frame_nodes = list(_age_frame_nodes(
             origin=resolved_origin,
             claim_refs=[claim.get("claim_id")
@@ -2052,6 +2095,20 @@ def derive_calculated_timeline(
         )
         for node_id in sorted(groups)
     ]
+    if provisional_node is not None:
+        nodes.append(provisional_node)
+    if birth_node_id is not None:
+        # The birth node itself learns `origin_basis` too (E-BO) — not just its
+        # frames — so the provisional node and the one it is promoted into read
+        # the same shape: ONE node, whose origin_basis flips explicit the
+        # moment a stated birthday exists. The provisional node already set
+        # this in `birth_origin.provisional_origin`; an explicit birth's own
+        # node (built generically by `_node_dict`, which knows nothing about
+        # origins) has not, so it is stamped here and only here.
+        for node in nodes:
+            if node.get("node_id") == birth_node_id and node.get("origin_basis") is None:
+                node["origin_basis"] = birth_origin_basis
+                break
     nodes.extend(frame_nodes)
     timings["age_frames"] = clock() - mark
     nodes.sort(key=_node_sort_key)
@@ -2290,6 +2347,11 @@ def _derive_work_items(
         )
         if item_id:
             reach[item_id] = len(refs)
+
+    # -- a birth origin its own evidence contradicts (E-BO) ---------------
+    for row in diagnostics:
+        if row.get("finding") == bo.CONTRADICTION_FINDING:
+            _mint_work_item(items, components, now=now, **bo.contradiction_work_item(row))
 
     for row in diagnostics:
         if row.get("finding") == "order_cycle":

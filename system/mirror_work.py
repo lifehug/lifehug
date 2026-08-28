@@ -363,6 +363,17 @@ def is_mirror_kind(kind: object) -> bool:
     return collapsed_text(kind) in MIRROR_WORK_ITEM_KINDS
 
 
+#: Rows whose label is the FIELD they ask about, not the claims they cite.
+#: A contradiction is normally between two datings of one event, and the cited
+#: claims name it. A birth origin calculated from age statements is a
+#: contradiction between two DERIVED readings, and its cited claims are about
+#: whatever events those ages were stated at — labelling it from them would
+#: read "about I — graduation" for a row that is about a birthday. The item
+#: already says which field it wants; where that answers the question better
+#: than the claims do, it wins.
+LABELS_BY_REQUESTED_FIELD = {"birth_date": "your birthday"}
+
+
 def _label(item: TemporalWorkItem, claims: list[dict]) -> str:
     """A short human handle for what the row is about, from what we have.
 
@@ -371,7 +382,12 @@ def _label(item: TemporalWorkItem, claims: list[dict]) -> str:
     that says "Katie — married" is legible where one saying ``node:9f3c…`` is
     not. A contradiction names the event too; an identity row is about the
     mention alone — "Who is AJ?", never "Who is AJ — met?".
+
+    :data:`LABELS_BY_REQUESTED_FIELD` comes first for the rows it names.
     """
+    by_field = LABELS_BY_REQUESTED_FIELD.get(collapsed_text(item.requested_field))
+    if by_field:
+        return by_field
     for claim in claims:
         mention = collapsed_text(claim.get("subject_mention"))
         if not mention:
@@ -1054,6 +1070,7 @@ def resolve_mirror_item(
 
 __all__ = [
     "DEFAULT_CONTRADICTION_SEVERITY",
+    "LABELS_BY_REQUESTED_FIELD",
     "DEFAULT_IDENTITY_SEVERITY",
     "HIDDEN_ITEM_STATES",
     "MAX_ALTERNATIVES",

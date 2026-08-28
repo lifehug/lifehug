@@ -973,6 +973,206 @@ def day_before(token: object) -> str | None:
         return None
 
 
+def day_after(token: object) -> str | None:
+    """The ISO day after ``YYYY-MM-DD`` — an exclusive low bound, closed.
+
+    :func:`day_before` closes a half-open END; this closes a half-open START,
+    and the two belong side by side. ``(2001-07-11, …`` and
+    ``2001-07-12/…`` are the same interval said two ways.
+    """
+    parts = str(token or "").split("-")
+    if len(parts) != 3:
+        return None
+    try:
+        return (_date(int(parts[0]), int(parts[1]), int(parts[2])) + _timedelta(days=1)).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+# --------------------------------------------------------------------------
+# The birth origin: an age plus a dated event, run backwards (eras §3.2)
+# --------------------------------------------------------------------------
+
+#: The ONE rule name for the birth-origin arithmetic, recorded in the
+#: provenance of every record it produces. A date nobody stated and the system
+#: worked out has to say which rule worked it out.
+BIRTH_ORIGIN_RULE = "birth-origin:1"
+
+#: The rule name for the 29 February widening below. Separate from
+#: :data:`BIRTH_ORIGIN_RULE` because it fires on a minority of inputs and a
+#: person looking at an edge case deserves to see that the edge case is why.
+BIRTH_ORIGIN_LEAP_RULE = "birth-origin:leap-day"
+
+_LEAP_CLAIM = (
+    "a 29 February birthday keeps its anniversary on the 28th in a year with "
+    "no 29th, so the end of February is widened by a day rather than guessed"
+)
+
+#: The grain a birth-origin EDGE is expressed at, per the event's own grain.
+#: A month-grain event cannot bound a birth to a day and a year-grain event
+#: cannot bound it to a month; rounding outward to these is the only direction
+#: that can never exclude the true birthday (eras design §3.2, §3.3).
+BIRTH_ORIGIN_EDGE_GRAIN = {
+    "day": "day", "month": "month", "season": "month",
+    "year": "year", "range": "year", "era": "year",
+}
+
+
+def birth_origin_from_age(event: object, age: object, *,
+                          claim: str | None = None) -> DateRecord | None:
+    """A dated event plus the age someone WAS at it → when they were born.
+
+    :func:`from_age_band` runs this arithmetic forwards and coarsely — it reads
+    only ``year_of(birth)``, which is right for placing *"when I was about
+    five"* and useless for bounding a birthday. This runs it backwards at the
+    event's own grain, and it is the origin of the age frames whenever nobody
+    has stated a birthday (eras design §3.2).
+
+    Exact age ``a`` at an event whose instant range is ``[t0, t1]`` puts the
+    birth in ``(t0 − (a+1)y, t1 − a·y]`` — open at the low end, because
+    somebody born one day earlier would already have had the next birthday.
+    Three things widen it and nothing narrows it:
+
+    * an ``approximate`` band widens by a year on each side, the same
+      Huttenlocher rounding :func:`from_age_band` applies to its own output;
+    * the edges round OUTWARD to the event's grain
+      (:data:`BIRTH_ORIGIN_EDGE_GRAIN`) — a year-grain event gives
+      *"about 1980–1981"*, never a day in January;
+    * rule :data:`BIRTH_ORIGIN_LEAP_RULE`: because ``add_years`` clamps 29
+      February to the 28th (rule :data:`AGE_FRAME_CLAMP_RULE`), a 29 February
+      birthday ages up a day early in a non-leap year and the exact endpoints
+      become calendar-dependent. Both endpoints widen by a day around the end
+      of February. Over-including a candidate birthday is a wider interval;
+      under-including one is a wrong answer.
+
+    ``basis`` is ``age`` — which is what makes the frames built on this record
+    publish ``origin_basis: calculated``, through
+    ``temporal_claims.CLAIM_BASIS_BY_DATE_BASIS`` and no second table — and the
+    confidence is never firmer than ``inferred`` (:func:`at_most`).
+
+    ``None``, never a guess, for: an unusable event, an event with no bounds,
+    a band outside :func:`parse_age`'s own domain, or a quantity in any unit
+    but years (a birth origin from *"about eight months"* is a precision this
+    has no honest way to express).
+    """
+    parsed = _as_record(event)
+    if parsed is None:
+        return None
+    quantity = age.to_dict() if hasattr(age, "to_dict") else age
+    if not isinstance(quantity, dict):
+        return None
+    unit = " ".join(str(quantity.get("unit") or "years").split()) or "years"
+    if unit != "years":
+        return None
+    band = _age_band(quantity.get("low"), quantity.get("high"))
+    if band is None:
+        return None
+    min_age, max_age = band
+    if bool(quantity.get("approximate")):
+        min_age, max_age = max(min_age - 1, 0), max_age + 1
+
+    grain = BIRTH_ORIGIN_EDGE_GRAIN.get(parsed.granularity, "year")
+    low_ordinal = _ordinal(parsed.earliest, end=False)
+    high_ordinal = _ordinal(parsed.latest, end=True)
+    if low_ordinal is None and high_ordinal is None:
+        return None
+
+    leap_widened = False
+    earliest: str | None = None
+    if low_ordinal is not None:
+        shifted, _clamped = _shift_iso(_iso_day(low_ordinal), -(max_age + 1))
+        if shifted is None:
+            return None
+        if _is_late_february(shifted):
+            # The exclusive bound's own day stays IN: whether a birthday on it
+            # counts depends on the target year's calendar (see the rule).
+            leap_widened = True
+        else:
+            shifted = day_after(shifted)
+        earliest = _truncate_iso(shifted, grain)
+    latest: str | None = None
+    if high_ordinal is not None:
+        shifted, _clamped = _shift_iso(_iso_day(high_ordinal), -min_age)
+        if shifted is None:
+            return None
+        extended = _extend_through_leap_day(shifted)
+        if extended != shifted:
+            leap_widened = True
+        latest = _truncate_iso(extended, grain)
+    if earliest is None and latest is None:
+        return None
+
+    granularity = grain if earliest == latest else "range"
+    best = earliest if (earliest and earliest == latest) else (
+        f"{earliest or '..'}/{latest or '..'}"
+    )
+    phrase = _prov_text(claim) or _prov_text(quantity.get("text"))
+    said = f"age {min_age}" if min_age == max_age else f"age {min_age}\u2013{max_age}"
+    entries: list[dict] = [
+        {"claim": phrase or f"{said} at a dated event",
+         "basis": "age", "source": BIRTH_ORIGIN_RULE}
+    ]
+    if leap_widened:
+        entries.append({"claim": _LEAP_CLAIM, "basis": "age",
+                        "source": BIRTH_ORIGIN_LEAP_RULE})
+    return DateRecord(
+        best=best,
+        earliest=earliest,
+        latest=latest,
+        granularity=granularity,
+        confidence=at_most(parsed.confidence, "inferred"),
+        basis="age",
+        anchors=parsed.anchors,
+        provenance=parsed.provenance + tuple(entries),
+    )
+
+
+def _prov_text(value: object) -> str:
+    """A provenance phrase, whitespace-collapsed; ``""`` for anything else."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
+
+
+def _iso_day(ordinal: tuple[int, int, int]) -> str:
+    return "{:04d}-{:02d}-{:02d}".format(*ordinal)
+
+
+def _is_late_february(token: str) -> bool:
+    """Is this ISO day 28 or 29 February? — the calendar-dependent boundary."""
+    parts = str(token or "").split("-")
+    return len(parts) == 3 and parts[1] == "02" and parts[2] in ("28", "29")
+
+
+def _extend_through_leap_day(token: str) -> str:
+    """28 February of a leap year reaches the 29th (rule ``birth-origin:leap-day``)."""
+    parts = str(token or "").split("-")
+    if len(parts) != 3 or parts[1] != "02" or parts[2] != "28":
+        return token
+    try:
+        year = int(parts[0])
+    except (TypeError, ValueError):
+        return token
+    return f"{year:04d}-02-29" if _month_last_day(year, 2) == 29 else token
+
+
+def _truncate_iso(token: object, grain: str) -> str | None:
+    """An ISO day rounded OUTWARD to ``grain``: truncation, which only widens.
+
+    As an ``earliest`` bound ``1980-06`` reads as 1 June and as a ``latest``
+    bound it reads as the 30th (:func:`_ordinal`), so dropping the finer
+    components moves each bound away from the middle in both cases.
+    """
+    parts = str(token or "").split("-")
+    if len(parts) != 3:
+        return None
+    if grain == "day":
+        return "-".join(parts)
+    if grain == "month":
+        return "-".join(parts[:2])
+    return parts[0]
+
+
 def _shift_coarse(body: str, years: int) -> str | None:
     """A decade (``197X``) or century (``19XX``), when the shift keeps it one."""
     decade = _DECADE_RE.match(body)
