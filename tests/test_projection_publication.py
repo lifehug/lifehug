@@ -462,6 +462,14 @@ class InstrumentationTests(VaultTestCase):
         self.assertIn("generation 1", line)
         self.assertIn("work item", line)
         self.assertIn("total", line)
+        self.assertNotIn("unchanged", line)
+
+    def test_the_report_line_says_when_it_wrote_nothing(self) -> None:
+        """A compile log claiming a generation it did not write would be a lie
+        of omission — the no-op is meant to be visible (eras E1)."""
+        pub.publish(self.vault, now=NOW)
+        line = pub.publication_report_line(pub.publish(self.vault, now=NOW))
+        self.assertIn("generation 1 (unchanged — nothing written)", line)
 
 
 # --------------------------------------------------------------------------

@@ -544,8 +544,11 @@ def publication_report_line(summary: object) -> str:
     phases = ", ".join(
         f"{name} {float(value) * 1000:.0f}ms" for name, value in sorted(timings.items())
     )
+    # A compile log that says "generation 1" after writing nothing would be a
+    # lie of omission — the whole point of the no-op is that it is visible.
+    unchanged = " (unchanged — nothing written)" if row.get("unchanged") else ""
     return (
-        f"calculated timeline generation {row.get('generation')}: "
+        f"calculated timeline generation {row.get('generation')}{unchanged}: "
         f"{row.get('nodes')} node(s), {row.get('work_items')} work item(s) "
         f"from {row.get('claims')} active claim(s)"
         + (f" [{phases}]" if phases else "")
