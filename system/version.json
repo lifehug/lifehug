@@ -485,6 +485,7 @@
     "tests/walkthrough_entity_candidate.py",
     "tests/walkthrough_focus_candidate.py",
     "tests/walkthrough_lib.py",
-    "wiki/SCHEMA.md"
+    "wiki/SCHEMA.md",
+    "tests/test_eras_e0a.py"
   ]
 }

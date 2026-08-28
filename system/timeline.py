@@ -65,6 +65,7 @@ from lifehug_core import (  # noqa: E402
     WIKI_DIR,
     now_utc,
     read_json,
+    read_learning_failures,
     slugify,
     write_json,
 )
@@ -3062,6 +3063,35 @@ def anchor_index(periods: list[dict], entities: list[dict], events: list[dict],
     return index
 
 
+def _place_refusal_diagnostics() -> dict:
+    """O-E0c's one counter: how many `period_bound` answers the package
+    refused to file rather than misjoin onto whatever undated moment happens
+    to sit in that era's lineup (`timeline_interaction.place_refusal`,
+    `conversation_delivery._file_placement`).
+
+    Read-only over the vault's own learning-failures ledger — the same
+    ledger every other filing diagnostic already lands in
+    (`lifehug_core.record_learning_failure`) — so there is one authoritative
+    count, not a second one this module keeps itself. Guarded: a ledger
+    problem must never take the timeline down, and an unreadable ledger
+    reads as zero refusals rather than an error.
+    """
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        reason = timeline_interaction.PLACE_REFUSED_NO_ERA_WRITER
+        rows = read_learning_failures(limit=1_000_000, since_days=None)
+        count = sum(
+            1 for row in rows
+            if row.get("component") == "conversation_delivery"
+            and row.get("operation") == "timeline_place"
+            and row.get("error") == reason
+        )
+    except Exception:  # noqa: BLE001
+        count = 0
+    return {"place_refused_no_era_writer": count}
+
+
 def timeline_data(evidence: list[dict] | None = None,
                   birth_date: object = None) -> dict:
     # v197 (landmarks): the store is read ONCE here and threaded through, and
@@ -3333,6 +3363,15 @@ def timeline_data(evidence: list[dict] | None = None,
     data["counts"]["calculated_nodes"] = data["calculated"]["counts"]["nodes"]
     data["counts"]["calculated_work_items"] = data["calculated"]["counts"]["work_items"]
     data["counts"]["projection_generation"] = data["calculated"]["projection_generation"]
+    # O-E0c (lifehug-platform#686): the posture is only real if a host can
+    # PROVE it held. `conversation_delivery._file_placement` logs a refusal
+    # to the vault's own learning-failures ledger through the same
+    # `_diagnostic` every other filing failure uses; this counts them back
+    # out, so a `period_bound` answer that was refused rather than misfiled
+    # is visible on the very page that would otherwise show it landed
+    # nowhere. Guarded like every other derived block here: a ledger problem
+    # must never take the timeline down.
+    data["diagnostics"] = _place_refusal_diagnostics()
     return data
 
 

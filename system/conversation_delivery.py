@@ -1751,11 +1751,24 @@ def _file_placement(item: dict, placed: dict, *, session_id: str,
     argv without `input=` is what made every conversational date exit 1 into a
     silent `place_failed` (lifehug#223), and the vault is selected explicitly
     with `--vault-root` rather than by a working directory the CLI never reads.
+
+    O-E0c (lifehug-platform#686, defect 3): an era's own bounds
+    (`period_bound`) has no legitimate writer until E3's `era-record` exists,
+    so this checks `timeline_interaction.place_refusal` FIRST — before ever
+    building an invocation — and logs the typed reason rather than the generic
+    `place_failed`. The answer text is already delivered either way; only the
+    filing is refused, loudly and diagnosably, never silently misjoined onto
+    whatever undated moment happens to sit in that era's lineup.
     """
     try:
         import subprocess  # noqa: PLC0415
 
         import timeline_interaction  # noqa: PLC0415
+
+        refusal = timeline_interaction.place_refusal(placed, item)
+        if refusal is not None:
+            _diagnostic("timeline_place", refusal, session_id)
+            return False
 
         invocation = timeline_interaction.place_invocation(
             placed,
@@ -1768,6 +1781,7 @@ def _file_placement(item: dict, placed: dict, *, session_id: str,
             # the date the person named was gone. The clamp moved into
             # `place_invocation`, so there is one description length too.
             placement_key=str(item.get("placement_key") or ""),
+            item=item,
         )
         if invocation is None:
             return False
