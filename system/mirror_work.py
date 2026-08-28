@@ -80,6 +80,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_store as store  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 from temporal_claims import (  # noqa: E402
     CONSTRAINT_ID_PREFIX,
     TemporalContractError,
@@ -193,6 +194,7 @@ MIRROR_WORK_ERROR_CODES = (
     "mirror_item_not_actionable",
     "resolution_targets_uncited_claim",
     "resolution_needs_extractor_version",
+    "resolution_publish_failed",
 )
 
 
@@ -262,6 +264,47 @@ def load_work_items(vault_root: str | Path) -> list[dict]:
     raise MirrorWorkError(
         "work_items_unreadable", f"{WORK_ITEMS_FILE} holds neither a list nor a mapping"
     )
+
+
+def load_work_item_aliases(vault_root: str | Path) -> dict:
+    """`{legacy_work_item_id: canonical_work_item_id}`, or `{}` (O-E6).
+
+    Read from the SAME published file as the items themselves, so the map and
+    the set it describes are one generation by construction — atomic
+    publication already pairs them, and a second, separately-read table would
+    be the drift this map exists to prevent.
+
+    Absent is `{}`: a projection published before O-E6 has no map, and every id
+    in it is then its own canonical id, which is exactly right.
+    """
+    root = _root(vault_root)
+    path = store.store_path(root, WORK_ITEMS_FILE)
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(read_vault_text(path, vault_root=root))
+    except (OSError, ValueError):
+        # `load_work_items` is the reader that refuses an unreadable file by
+        # name. Refusing twice for the same byte would turn one honest error
+        # into two, so the map degrades and the items raise.
+        return {}
+    aliases = payload.get("work_item_aliases") if isinstance(payload, dict) else None
+    if not isinstance(aliases, dict):
+        return {}
+    return {
+        collapsed_text(old): collapsed_text(new)
+        for old, new in aliases.items()
+        if collapsed_text(old) and collapsed_text(new)
+    }
+
+
+def resolve_work_item_id(ref: object, *, aliases: object = None) -> str:
+    """One stored reference to the id it is addressed by now — the ONE lookup.
+
+    Re-exported from `temporal_work_items` so Mirror has a single door and no
+    caller writes `aliases.get(ref, ref)` by hand.
+    """
+    return twi.resolve_work_item_id(ref, aliases=aliases)
 
 
 def load_active_index(vault_root: str | Path) -> dict:
@@ -628,7 +671,8 @@ def _describe_identity(label: str, candidates: tuple[dict, ...], active: list[di
     )
 
 
-def row_for(item: object, index: object) -> MirrorWorkRow | None:
+def row_for(item: object, index: object, *,
+            aliases: object = None) -> MirrorWorkRow | None:
     """Render ONE work item as a Mirror row against the current claim index.
 
     ``None`` — not an exception — for anything Mirror does not show: a kind
@@ -685,7 +729,11 @@ def row_for(item: object, index: object) -> MirrorWorkRow | None:
         )
 
     row = MirrorWorkRow(
-        work_item_id=normalized.work_item_id,
+        # O-E6: a published generation written before the vocabulary converged
+        # holds legacy ids, and a Play target minted from one has to keep
+        # opening. Resolution decides what a row IS the same as; it never
+        # rewrites what the item itself says.
+        work_item_id=resolve_work_item_id(normalized.work_item_id, aliases=aliases),
         kind=normalized.kind,
         state=state,
         headline=headline,
@@ -848,6 +896,7 @@ def mirror_rows(
     *,
     cap: int = MIRROR_ROW_CAP,
     include_resolved: bool = False,
+    aliases: object = None,
 ) -> list[MirrorWorkRow]:
     """Every actionable row, hardest first, capped. Pure — no vault, no clock.
 
@@ -858,7 +907,7 @@ def mirror_rows(
     """
     rows: list[MirrorWorkRow] = []
     for item in work_items or ():
-        row = row_for(item, index)
+        row = row_for(item, index, aliases=aliases)
         if row is None:
             continue
         if not include_resolved and row.state != "open":
@@ -881,6 +930,7 @@ def load_mirror_rows(
         load_active_index(vault_root),
         cap=cap,
         include_resolved=include_resolved,
+        aliases=load_work_item_aliases(vault_root),
     )
 
 
@@ -907,6 +957,10 @@ class MirrorResolution:
     source_id: str | None = None
     source_path: str | None = None
     receipt_path: str | None = None
+    #: The generation this resolution published (O-E6, design §10). ``None`` on
+    #: an abandoned resolution, which writes nothing and therefore changes
+    #: nothing to publish.
+    projection_generation: int | None = None
 
     @property
     def wrote_correction(self) -> bool:
@@ -925,6 +979,7 @@ class MirrorResolution:
             ("source_id", self.source_id),
             ("source_path", self.source_path),
             ("receipt_path", self.receipt_path),
+            ("projection_generation", self.projection_generation),
         ):
             if value is not None:
                 payload[key] = value
@@ -964,6 +1019,7 @@ def resolve_mirror_item(
     resolution_text: str,
     retire_claim_ids: object = (),
     correction_kind: str = "supersede",
+    publish: bool = True,
     claims_for: object = None,
     extractor_version: str | None = None,
     extractor: object = None,
@@ -1004,6 +1060,18 @@ def resolve_mirror_item(
     correction. Every call here is idempotent — the promotion, the receipt and
     the correction are each keyed by content — so a retried resolution is one
     record, not two.
+
+    **Then it PUBLISHES** (O-E6; `eras.md` §10). A correction that only reaches
+    the receipts leaves every surface showing the row the person just closed —
+    Timeline, the whisper lane, the daily queue and Mirror itself all read the
+    PUBLISHED generation, and "answer once, closed everywhere" is a promise
+    about what they show, not about what the store holds. The order is the one
+    that cannot lose the answer: the correction is durable BEFORE the
+    projection is derived, so a publish that fails raises
+    ``resolution_publish_failed`` naming the correction that survived it, and
+    a retry republishes with nothing written twice. ``publish=False`` is for a
+    caller batching several resolutions into one generation; it is never a way
+    to skip the publish.
     """
     normalized = _actionable(item)
     text = collapsed_text(resolution_text)
@@ -1051,6 +1119,29 @@ def resolve_mirror_item(
         occurred_at=now,
     )
 
+    generation: int | None = None
+    if publish:
+        try:
+            import temporal_publication  # noqa: PLC0415
+
+            generation = int(temporal_publication.publish(vault_root, now=now)
+                             .get("generation") or 0)
+        except Exception as exc:  # noqa: BLE001
+            # LOUD, and naming what survived: the correction is already on
+            # disk, content-keyed, so the caller can retry the publish (or let
+            # the next compile do it) without writing anything twice. Swallowing
+            # this would leave the person looking at the row they just closed
+            # with nothing anywhere saying why.
+            raise MirrorWorkError(
+                "resolution_publish_failed",
+                f"{normalized.work_item_id} was corrected but not published: {exc}",
+                detail={
+                    "work_item_id": normalized.work_item_id,
+                    "correction_id": correction.correction_id,
+                    "correction_path": correction.relative_path,
+                },
+            ) from exc
+
     return MirrorResolution(
         work_item_id=normalized.work_item_id,
         outcome="corrected",
@@ -1065,6 +1156,7 @@ def resolve_mirror_item(
             if receipt_path is not None
             else None
         ),
+        projection_generation=generation,
     )
 
 
@@ -1092,11 +1184,13 @@ __all__ = [
     "is_play_target_kind",
     "load_active_index",
     "load_mirror_rows",
+    "load_work_item_aliases",
     "load_work_items",
     "mirror_rows",
     "moves_cited",
     "play_target",
     "resolve_mirror_item",
+    "resolve_work_item_id",
     "row_for",
     "row_sort_key",
 ]

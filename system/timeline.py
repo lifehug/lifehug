@@ -52,6 +52,7 @@ import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
 import temporal_projection  # noqa: E402
 import temporal_publication  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 import timeline_corroboration as tcorr  # noqa: E402
 
 from lifehug_core import (  # noqa: E402
@@ -1988,8 +1989,31 @@ def keystones(data: dict, n: int = KEYSTONE_CAP) -> list[dict]:
     moved out to `_scored_anchors` and `_greedy_plan`, so `dig_plan` EXTENDS
     this same plan to `k` picks with a witness partition instead of forking a
     second, drifting copy of it. Nothing about a keystone changed.
+
+    O-E6: each row also carries its canonical `work_item_id`, derived through
+    `temporal_work_items.canonical_work_item_id` from the anchor and the
+    anchor's own KIND. That is the identity the substrate's fold mints for the
+    same gap, so the ★ the daily surface shows and the item the whisper lane
+    suppresses are provably one thing — and it is what lets a host put
+    `work_item_id` on its "today" payload beside the existing `tl:<slug>`
+    without re-deriving anything.
     """
-    return _greedy_plan(_scored_anchors(data), n)
+    anchors = data.get("anchors") if isinstance(data, dict) else None
+    kinds = {
+        str(key): str((row or {}).get("kind") or "")
+        for key, row in (anchors or {}).items()
+        if isinstance(row, dict) or row is None
+    } if isinstance(anchors, dict) else {}
+    rows = []
+    for row in _greedy_plan(_scored_anchors(data), n):
+        anchor = str(row.get("anchor") or "")
+        identity = twi.canonical_work_item_id(
+            kind=twi.BIRTH_ORIGIN_KIND,
+            subject_ref=anchor,
+            anchor_kind=kinds.get(anchor),
+        )
+        rows.append({**row, "work_item_id": identity} if identity else dict(row))
+    return rows
 
 
 # ---------------------------------------------------------------------------

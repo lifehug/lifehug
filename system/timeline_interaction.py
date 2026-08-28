@@ -714,7 +714,28 @@ def _reading_view(value: object) -> dict | None:
     }
 
 
-def work_item_target(value: object) -> dict | None:
+def _resolved_work_item_id(value: object, aliases: object) -> str:
+    """One stored reference to the id it is addressed by NOW — GUARDED.
+
+    O-E6: a session, a bank marker or a `?play=` link minted before the
+    vocabulary converged carries a legacy `work:` id. Resolving it here is what
+    keeps it OPENING; without this, the same conversation would refuse a target
+    the person can still see on their Timeline. Unknown ids come back unchanged
+    — resolution never invents an identity — and a broken temporal package
+    degrades to exactly the pre-O-E6 behaviour rather than closing the door.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        import temporal_work_items  # noqa: PLC0415
+
+        return temporal_work_items.resolve_work_item_id(raw, aliases=aliases) or raw
+    except Exception:  # noqa: BLE001
+        return raw
+
+
+def work_item_target(value: object, *, aliases: object = None) -> dict | None:
     """Normalize a Play target (or a bare work item) for this stage, or `None`.
 
     Two shapes arrive and both are legitimate. A **Play target** is
@@ -741,7 +762,10 @@ def work_item_target(value: object) -> dict | None:
         return None
     if item_kind not in WORK_ITEM_KINDS:
         return None
-    work_item_id = str(value.get("work_item_id") or value.get("ref") or "").strip()
+    work_item_id = _resolved_work_item_id(
+        value.get("work_item_id") or value.get("ref"),
+        aliases if aliases is not None else value.get("work_item_aliases"),
+    )
     if not work_item_id:
         return None
 

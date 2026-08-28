@@ -32,6 +32,7 @@ import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as ts  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 
 
 def revision(seed: str) -> str:
@@ -78,8 +79,20 @@ def node_for(result, event_kind: str, subject: str | None = None) -> dict | None
     return None
 
 
-def items_of(result, kind: str) -> list[dict]:
-    return [row for row in result.work_items if row["kind"] == kind]
+#: O-E6: the birth origin is a work item of EVERY vault that has not stated a
+#: birthday, because it is the coordinate system every age frame is derived
+#: from (`eras.md` §3, §7) rather than one gap among others. It is therefore a
+#: constant of these fixtures and not the subject of tests about other gaps —
+#: which is exactly why it is excluded by name here and asserted on its own in
+#: :class:`TheBirthOrigin` below.
+BIRTH_ORIGIN_ID = twi.birth_origin_work_item_id()
+
+
+def items_of(result, kind: str, *, include_birth_origin: bool = False) -> list[dict]:
+    rows = [row for row in result.work_items if row["kind"] == kind]
+    if include_birth_origin:
+        return rows
+    return [row for row in rows if row["work_item_id"] != BIRTH_ORIGIN_ID]
 
 
 # --------------------------------------------------------------------------
@@ -219,8 +232,13 @@ class RelativeAndInferredTime(unittest.TestCase):
             "age_without_birth_anchor",
             [row["finding"] for row in result.diagnostics["findings"]],
         )
-        asks = [i for i in items_of(result, "missing_anchor") if i["requested_field"] == "birth_date"]
+        asks = [
+            i
+            for i in items_of(result, "missing_anchor", include_birth_origin=True)
+            if i["requested_field"] == "birth_date"
+        ]
         self.assertEqual(len(asks), 1)
+        self.assertEqual(asks[0]["work_item_id"], BIRTH_ORIGIN_ID)
         self.assertEqual(asks[0]["claim_refs"], [fair["claim_id"]])
 
     def test_a_duration_places_nothing_until_it_has_a_start(self):
@@ -891,6 +909,189 @@ class OneDefinition(unittest.TestCase):
             self.assertIn(code, emitted, f"{code} is declared but never reported")
 
 
+class TheBirthOrigin(unittest.TestCase):
+    """O-E6 / T-Q-01, T-Q-02, T-Q-05 — `eras.md` §3.1, §3.2, §7.
+
+    The birth origin is not one gap among others: every age frame is
+    calculated from it, so the question that asks for it exists whenever the
+    answer does not, and it is worth something before any other evidence has
+    arrived. Both halves used to be false — the item was minted only when an
+    age claim had already tripped over its absence, and its whole worth was
+    that reach.
+    """
+
+    def birth(self, value="1981-07-11", *, subject="self", basis="explicit",
+              claim_type="date", seed="birth"):
+        return claim(
+            claim_type=claim_type,
+            subject_mention=subject,
+            event_kind="birth",
+            temporal_value=value,
+            quote="I was born in July 1981",
+            basis=basis,
+            seed=seed,
+        )
+
+    def a_dated_thing(self):
+        return claim(
+            claim_type="date",
+            subject_mention="the move",
+            event_kind="move",
+            temporal_value="1999",
+            seed="move-only",
+        )
+
+    def item(self, result):
+        rows = [
+            row for row in result.work_items if row["work_item_id"] == BIRTH_ORIGIN_ID
+        ]
+        return rows[0] if rows else None
+
+    # -- T-Q-01 --------------------------------------------------------------
+
+    def test_a_birthless_vault_asks_for_the_birthday_with_no_age_claims_at_all(self):
+        """T-Q-01. Nothing has tripped over the absence; the ask exists anyway."""
+        result = derive(self.a_dated_thing(), owner_ref="self")
+        self.assertNotIn(
+            "age_without_birth_anchor",
+            [row["finding"] for row in result.diagnostics["findings"]],
+        )
+        item = self.item(result)
+        self.assertIsNotNone(item, "the birth origin has no question")
+        self.assertEqual(item["kind"], "missing_anchor")
+        self.assertEqual(item["subject_ref"], "self")
+        self.assertEqual(item["requested_field"], "birth_date")
+        self.assertEqual(item["claim_refs"], [])
+        # No invented count in the prompt when nothing is waiting on it.
+        self.assertEqual(item["prompt_intent"], "What is your date of birth?")
+
+    def test_it_clears_the_queue_threshold_that_reach_alone_could_not(self):
+        """T-Q-01, the half that matters: it is askable, not merely present.
+
+        The old formula stated its worth as `reach / REACH_SATURATION`, which
+        is ZERO on a vault with no age claims — so the one item that unlocks
+        the coordinate system scored below the queue threshold on exactly the
+        vault that needed it. Both numbers are computed here from the shipped
+        scorer rather than quoted, so a weight change moves the assertion.
+        """
+        import question_planner as qp  # noqa: PLC0415
+
+        threshold = float(qp.DEFAULT_LANE_POLICY["work_item_queue_threshold"])
+        item = self.item(derive(self.a_dated_thing(), owner_ref="self"))
+        self.assertGreaterEqual(
+            qp.score_work_item(item)["combined_score"], threshold
+        )
+        reach_only = {**item, "system_value": 0.0}
+        self.assertLess(
+            qp.score_work_item(reach_only)["combined_score"],
+            threshold,
+            "the pre-O-E6 statement of its worth would still reach the queue — "
+            "this test is no longer proving anything",
+        )
+
+    def test_no_priority_class_anywhere_bought_the_slot(self):
+        """T-Q-01: it wins on a stated term in one formula, not on its type."""
+        item = self.item(derive(self.a_dated_thing(), owner_ref="self"))
+        self.assertNotIn("birth", str(tt.WORK_ITEM_VALUE_DEFAULTS))
+        self.assertEqual(
+            item["allowed_surfaces"], list(tt.SURFACES_BY_KIND["missing_anchor"])
+        )
+
+    # -- T-Q-02 --------------------------------------------------------------
+
+    def test_the_value_is_the_scaffold_plus_bounded_reach(self):
+        """T-Q-02: `clamp(0.6 + min(0.4, age_claims / REACH_SATURATION), 0, 1)`."""
+        self.assertAlmostEqual(twi.birth_origin_system_value(0), 0.6)
+        self.assertAlmostEqual(twi.birth_origin_system_value(1), 0.8)
+        self.assertAlmostEqual(twi.birth_origin_system_value(2), 1.0)
+        # Saturated, never above one, however many things are waiting.
+        self.assertAlmostEqual(twi.birth_origin_system_value(500), 1.0)
+
+    def test_the_fold_states_the_rule_that_minted_the_number(self):
+        """T-Q-02: `temporal-score:2` on the item AND on the envelope."""
+        result = derive(self.a_dated_thing(), owner_ref="self")
+        self.assertEqual(self.item(result)["score_rule"], "temporal-score:2")
+        self.assertEqual(result.score_formula_version, "temporal-score:2")
+        self.assertEqual(tt.SCORE_FORMULA_VERSION, twi.BIRTH_ORIGIN_SCORE_RULE)
+
+    def test_the_raw_count_still_travels_beside_the_normalized_one(self):
+        fair = claim(
+            claim_type="age",
+            subject_mention="the state fair",
+            event_kind="transition",
+            temporal_value="about 12",
+            seed="fair-reach",
+        )
+        result = derive(fair, owner_ref="self")
+        item = self.item(result)
+        self.assertEqual(result.reach[BIRTH_ORIGIN_ID], 1)
+        self.assertAlmostEqual(item["system_value"], 0.8)
+        self.assertIn("1 thing you dated by age", item["prompt_intent"])
+
+    # -- T-Q-05 --------------------------------------------------------------
+
+    def test_an_explicit_birthday_closes_it(self):
+        """T-Q-05, the positive half."""
+        result = derive(self.birth(), owner_ref="self")
+        self.assertIsNone(self.item(result), "a stated birthday leaves the ask open")
+
+    def test_the_legacy_domain_word_subject_closes_it_too(self):
+        """§3.1: a pre-O-E0b receipt mentions `birth`, not `self`.
+
+        The fold must read that as the owner's own birth, or the E0b extraction
+        change would open a question against a vault that has the birthday.
+        """
+        result = derive(self.birth(subject="birth", seed="legacy-birth"),
+                        owner_ref="self")
+        self.assertIsNone(self.item(result))
+
+    def test_a_calculated_origin_does_not_close_it(self):
+        """T-Q-05, the half `eras.md` §3.2 is explicit about.
+
+        A provisional origin worked out from age statements is a VIEW, not a
+        birthday: *"the explicit-birthday work item stays open"*. The predicate
+        is the published class, so E-BO's provisional node needs no new flag —
+        it arrives `calculated` and this keeps holding.
+        """
+        stated = chrono.DateRecord(
+            earliest="1981-07-11", latest="1981-07-11", best="1981-07-11",
+            granularity="day", confidence="certain", basis="stated",
+        )
+        # Exactly the shape §3.2 describes: an interval worked out from age
+        # statements, wide, approximate, `basis: age` -> class `calculated`.
+        provisional = chrono.DateRecord(
+            earliest="1980", latest="1982", best="1981",
+            granularity="year", confidence="approximate", basis="age",
+        )
+        self.assertTrue(twi.is_explicit_origin(stated))
+        for record in (provisional, provisional.to_dict(), None):
+            self.assertFalse(twi.is_explicit_origin(record))
+
+        # And the fold's own predicate, on a real owner birth group. E-BO owns
+        # the provisional NODE; what this pins is that when it arrives it will
+        # not close the ask, with no new flag required of it.
+        groups = {"node:x": {"event_kind": "birth", "subject": "self"}}
+        self.assertTrue(
+            tt._has_explicit_owner_birth(groups, {"node:x": stated}, "self")
+        )
+        self.assertFalse(
+            tt._has_explicit_owner_birth(groups, {"node:x": provisional}, "self")
+        )
+        self.assertFalse(
+            tt._has_explicit_owner_birth(groups, {"node:x": None}, "self")
+        )
+
+    def test_the_identity_is_one_string_however_it_is_derived(self):
+        """The id the platform, the bank and the keystone lane all resolve to."""
+        self.assertEqual(
+            BIRTH_ORIGIN_ID,
+            tp.derive_work_item_id(
+                kind="missing_anchor", subject_ref="self",
+                event_ref=None, requested_field="birth_date",
+            ),
+        )
+
+
 class ProjectionContract(unittest.TestCase):
     """Every node this module emits survives §5.3's own door."""
 
@@ -927,10 +1128,20 @@ class ProjectionContract(unittest.TestCase):
         self.assertTrue(all(row["projection_generation"] == 7 for row in result.nodes))
         self.assertEqual(result.projection_generation, 7)
 
-    def test_an_empty_substrate_derives_an_empty_projection(self):
+    def test_an_empty_substrate_derives_no_nodes_and_one_question(self):
+        """O-E6: no claims means no nodes — and one thing worth asking.
+
+        Before O-E6 an empty substrate published literally nothing, which read
+        as tidy and was a hole: a vault that has said nothing has no birthday
+        either, and the birthday is what every age frame is calculated from
+        (`eras.md` §3). The projection now states that absence as the one work
+        item it is, and nothing else.
+        """
         result = tt.derive_calculated_timeline({"claims": []}, now=NOW)
         self.assertEqual(result.nodes, ())
-        self.assertEqual(result.work_items, ())
+        self.assertEqual(
+            [row["work_item_id"] for row in result.work_items], [BIRTH_ORIGIN_ID]
+        )
         self.assertEqual(result.diagnostics["claims"], 0)
 
     def test_an_unreadable_index_is_named_rather_than_guessed(self):

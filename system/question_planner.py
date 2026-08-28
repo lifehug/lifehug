@@ -978,9 +978,15 @@ def current_timeline_probes() -> dict:
         # matches on. A pre-wave-F row has no `work_item:` marker and its id is
         # DERIVED from the anchor it does carry, so the suppression rule works
         # on a bank minted by any version.
-        markers = {row["bank_id"]: row["work_item_id"] for row in bank_work_items(text).values()}
+        table = published_work_item_aliases()
+        markers = {
+            row["bank_id"]: row["work_item_id"]
+            for row in bank_work_items(text, aliases=table).values()
+        }
         for bank_id, row in index.items():
-            identity = markers.get(bank_id) or timeline_work_item_id(anchor=row.get("anchor"))
+            identity = markers.get(bank_id) or timeline_work_item_id(
+                anchor=row.get("anchor"), anchor_kind=row.get("anchor_kind")
+            )
             if identity:
                 row["work_item_id"] = identity
         return index
@@ -1114,10 +1120,89 @@ LOSS_DISCOVERY_SUBJECTS = frozenset({
     "losses", "loss", "area:losses", "landmark:losses", "landmark/losses",
 })
 
-#: The field a timeline gap is missing. One string, used by every derivation of
-#: a timeline work-item id, so the keystone lane and the whisper lane cannot
-#: drift into two identities for one question.
+#: DEPRECATED (O-E6), and the only place in this module that may name it.
+#: `temporal_anchor` was the keystone lane's single flat spelling of "the field
+#: this gap is missing", and it was ALSO in
+#: `temporal_projection.WORK_ITEM_IDENTITY_KEYS` — so the same birthday minted
+#: here and minted by the substrate's fold were two `work:` ids for one
+#: question, and answer-once closure is by identity. The canonical vocabulary
+#: is `temporal_work_items.CANONICAL_REQUESTED_FIELDS`; this name survives for
+#: readers that already import it and is asserted equal to
+#: `temporal_work_items.LEGACY_REQUESTED_FIELD` by
+#: `tests/test_work_item_aliases.py`. Nothing here mints under it any more.
 TIMELINE_REQUESTED_FIELD = "temporal_anchor"
+
+
+def _work_item_vocabulary():
+    """`temporal_work_items`, or `None` — GUARDED, like every seam here.
+
+    Every reach into the temporal package from this module is lazy and
+    swallowed, because the weekly queue must never be able to break on a
+    projection problem. One canonicalization that could not run degrades to
+    "the id you were given", which is what the pre-O-E6 behaviour was.
+    """
+    try:
+        import temporal_work_items  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return None
+    # `import` hands back whatever sits in `sys.modules` under that name, which
+    # a partially vendored package or a test double can make into something
+    # that is not this module at all. Ask for the door before using it.
+    if not hasattr(temporal_work_items, "canonical_ask"):
+        return None
+    return temporal_work_items
+
+
+def _aliases_for(question_bank_text: object, aliases: object) -> dict:
+    """Which alias map a bank-joining call should use.
+
+    Explicit wins. Otherwise the map is read from the vault ONLY on the
+    vault-bound path — the same seam issue #225 drew for the bank itself: a
+    caller that injected a bank is vault-less on purpose and must not pick up
+    the process checkout's published generation.
+    """
+    if isinstance(aliases, dict):
+        return aliases
+    if question_bank_text is None:
+        return published_work_item_aliases()
+    return {}
+
+
+def published_work_item_aliases() -> dict:
+    """`{legacy_id: canonical_id}` from the published generation, or `{}`.
+
+    O-E6: the map is DERIVED and published beside the items in the same
+    generation (`work-items.json`), so reading it here is reading the same
+    bytes the items came from — never a second, drifting table.
+    """
+    try:
+        import temporal_projection  # noqa: PLC0415
+
+        published = read_json(REPO_DIR / temporal_projection.WORK_ITEMS_FILE, None)
+    except Exception:  # noqa: BLE001
+        return {}
+    aliases = published.get("work_item_aliases") if isinstance(published, dict) else None
+    if not isinstance(aliases, dict):
+        return {}
+    return {
+        str(old): str(new)
+        for old, new in aliases.items()
+        if str(old or "").strip() and str(new or "").strip()
+    }
+
+
+def resolve_work_item_id(ref: object, *, aliases: object = None) -> str:
+    """The ONE lookup, re-exported so the queue has a single door — GUARDED.
+
+    `aliases=None` reads the published map. An id that is already canonical, or
+    that no map knows, comes back unchanged: resolution never invents an
+    identity.
+    """
+    vocabulary = _work_item_vocabulary()
+    table = published_work_item_aliases() if aliases is None else aliases
+    if vocabulary is None:
+        return str(ref or "").strip()
+    return vocabulary.resolve_work_item_id(ref, aliases=table)
 
 #: The bank provenance marker that carries the work-item identity. It is
 #: APPENDED to v196's `timeline_probe:` comment rather than replacing it: the
@@ -1137,6 +1222,10 @@ _WORK_ITEM_MARKER_RE = re.compile(
 
 
 def _clamp_unit(value: object, default: float = 0.0) -> float:
+    """`0.0..1.0`, or `default`. One definition (`temporal_work_items`)."""
+    vocabulary = _work_item_vocabulary()
+    if vocabulary is not None:
+        return vocabulary.clamp_unit(value, default)
     try:
         number = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -1148,7 +1237,8 @@ def _clamp_unit(value: object, default: float = 0.0) -> float:
 
 def timeline_work_item_id(*, anchor: object = "", unknown_key: object = "",
                           kind: str = "missing_anchor",
-                          requested_field: str = TIMELINE_REQUESTED_FIELD) -> str:
+                          requested_field: object = None,
+                          anchor_kind: object = None) -> str:
     """The ONE work-item identity for a timeline ask — GUARDED.
 
     A keystone names an ANCHOR; a whisper is chosen for a GAP that some anchor
@@ -1156,6 +1246,16 @@ def timeline_work_item_id(*, anchor: object = "", unknown_key: object = "",
     keystone question and the whisper about the gap it resolves are provably
     the same item (plan §2.3, §5.4). A gap with no resolving anchor falls back
     to its own unknown key, which is still stable across rebuilds.
+
+    **O-E6: and so is the SUBSTRATE's own item for the same gap.** This used to
+    mint under `temporal_anchor`, which put it in a different identity from the
+    fold's `birth_date` / `date` / `start_date` / `order` — two ids, one
+    question, and the person could answer their birthday on Timeline and be
+    asked for it by the daily question the same week. The whole tuple is now
+    canonicalized by `temporal_work_items.canonical_ask`: the `birth` anchor
+    becomes the owner's `self` subject and `temporal_anchor` becomes
+    `birth_date`, together, because moving one half without the other mints a
+    third id rather than one.
 
     Returns `""` when there is nothing to be about — an id derived from nothing
     would collide every anchorless gap into one item, which is worse than
@@ -1165,14 +1265,16 @@ def timeline_work_item_id(*, anchor: object = "", unknown_key: object = "",
     event = str(unknown_key or "").strip()
     if not subject and not event:
         return ""
+    vocabulary = _work_item_vocabulary()
+    if vocabulary is None:
+        return ""
     try:
-        import temporal_projection  # noqa: PLC0415
-
-        return temporal_projection.derive_work_item_id(
+        return vocabulary.canonical_work_item_id(
             kind=kind,
             subject_ref=subject or None,
             event_ref=None if subject else event,
             requested_field=requested_field,
+            anchor_kind=anchor_kind,
         )
     except Exception:  # noqa: BLE001 — a projection problem never breaks the queue
         return ""
@@ -1192,11 +1294,26 @@ def work_item_from_keystone(keystone: object, *, now: str | None = None) -> dict
     text = " ".join(str(probe.get("text") or "").split())
     if not anchor or not text:
         return None
+    # O-E6: the keystone's identity tuple is CANONICALIZED before it is
+    # validated, so the row this returns is the same item the fold minted for
+    # the same gap rather than a second one wearing the old spelling. A
+    # keystone row that already carries `work_item_id` (`timeline.keystones`
+    # derives it the same way) is believed, and asserted equal below.
+    vocabulary = _work_item_vocabulary()
+    if vocabulary is None:
+        return None
+    kind, subject_ref, event_ref, requested_field = vocabulary.canonical_ask(
+        kind=vocabulary.BIRTH_ORIGIN_KIND,
+        subject_ref=anchor,
+        requested_field=row.get("requested_field"),
+        anchor_kind=row.get("anchor_kind") or row.get("kind"),
+    )
     payload = {
-        "kind": "missing_anchor",
+        "kind": kind,
         "state": "open",
-        "subject_ref": anchor,
-        "requested_field": TIMELINE_REQUESTED_FIELD,
+        "subject_ref": subject_ref,
+        "event_ref": event_ref,
+        "requested_field": requested_field,
         "prompt_intent": text,
         "allowed_surfaces": ["timeline", WHISPER_SURFACE, DAILY_QUESTION_SURFACE],
         "created_at": now or now_utc(),
@@ -1227,7 +1344,10 @@ def current_work_items(*, timeline_payload: object = None) -> list[dict]:
     claims behind the item and the person value of the subject, where a
     keystone knows only reach.
     """
-    return _dedupe_work_items(_published_work_items() + _keystone_work_items(timeline_payload))
+    return _dedupe_work_items(
+        _published_work_items() + _keystone_work_items(timeline_payload),
+        aliases=published_work_item_aliases(),
+    )
 
 
 def work_items_from_projection(payload: object) -> list[dict]:
@@ -1305,10 +1425,21 @@ def _keystone_work_items(timeline_payload: object = None) -> list[dict]:
     return [item for item in adapted if item]
 
 
-def _dedupe_work_items(items: list[dict]) -> list[dict]:
+def _dedupe_work_items(items: list[dict], *, aliases: object = None) -> list[dict]:
+    """One row per CANONICAL identity, first source winning.
+
+    O-E6: the dedupe KEY is resolved through the alias map, so a stale
+    published generation holding a legacy id and a freshly adapted keystone
+    holding the canonical one collapse into one row instead of competing as
+    two questions about the same gap. The row itself is kept as it arrived —
+    resolution decides what is the same, never what a row says.
+    """
+    table = aliases if isinstance(aliases, dict) else {}
     deduped: dict[str, dict] = {}
     for item in items:
-        deduped.setdefault(str(item.get("work_item_id") or ""), item)
+        deduped.setdefault(
+            resolve_work_item_id(item.get("work_item_id"), aliases=table), item
+        )
     deduped.pop("", None)
     return list(deduped.values())
 
@@ -1431,14 +1562,22 @@ def score_work_item(item: object, *, weights: object = None, policy: object = No
     }
 
 
-def bank_work_items(question_bank_text: object) -> dict:
+def bank_work_items(question_bank_text: object, *, aliases: object = None) -> dict:
     """`{work_item_id: row}` for every timeline-origin question in the bank.
 
     Reads the bank's own provenance comment. A row minted before wave F carries
     no `work_item:` field — its identity is DERIVED from the anchor it does
     carry, by the same function everything else uses, so the pre-wave-F bank
     dedupes and closes exactly like a post-wave-F one and no migration exists.
+
+    **O-E6: a row whose marker holds a LEGACY id is keyed under the canonical
+    one.** The bank is the answer-once ledger, so a marker written last month
+    under `temporal_anchor` has to tick the item the fold mints today or the
+    person is asked their own birthday twice. `aliases` is the published map
+    (`published_work_item_aliases`); pure by default, so a caller with no vault
+    behaves exactly as it did before the map existed.
     """
+    table = aliases if isinstance(aliases, dict) else {}
     text = str(question_bank_text or "")
     rows: dict[str, dict] = {}
     lines = text.splitlines()
@@ -1451,8 +1590,10 @@ def bank_work_items(question_bank_text: object) -> dict:
             continue
         marker = _WORK_ITEM_MARKER_RE.search(lines[position + 1])
         anchor = tag.group("anchor").strip()
-        work_item_id = (marker.group("work_item_id") if marker
-                        else timeline_work_item_id(anchor=anchor))
+        work_item_id = resolve_work_item_id(
+            marker.group("work_item_id") if marker else timeline_work_item_id(anchor=anchor),
+            aliases=table,
+        )
         if not work_item_id:
             continue
         rows.setdefault(work_item_id, {
@@ -1467,7 +1608,8 @@ def bank_work_items(question_bank_text: object) -> dict:
     return rows
 
 
-def work_item_states_from_bank(question_bank_text: object) -> dict:
+def work_item_states_from_bank(question_bank_text: object, *,
+                               aliases: object = None) -> dict:
     """`{work_item_id: state}` — the deterministic cross-surface linkage.
 
     This is the answer-once half of plan §2.3: a bank row that is checked means
@@ -1478,29 +1620,38 @@ def work_item_states_from_bank(question_bank_text: object) -> dict:
     """
     return {
         work_item_id: ("answered" if row["answered"] else "offered")
-        for work_item_id, row in bank_work_items(question_bank_text).items()
+        for work_item_id, row in bank_work_items(
+            question_bank_text, aliases=aliases
+        ).items()
     }
 
 
-def close_answered_work_items(items: object, *, question_bank_text: object = None) -> list[dict]:
+def close_answered_work_items(items: object, *, question_bank_text: object = None,
+                              aliases: object = None) -> list[dict]:
     """Stamp each item with the state the bank proves it is in.
 
     Items the bank has never seen are returned untouched: absence of a row is
-    "not asked yet", never "answered".
+    "not asked yet", never "answered". O-E6: a bank row under a legacy id
+    answers the canonical item, because both sides of the join go through
+    `resolve_work_item_id` first.
     """
     text = read_text(QUESTIONS_FILE) if question_bank_text is None else question_bank_text
-    states = work_item_states_from_bank(text)
+    table = _aliases_for(question_bank_text, aliases)
+    states = work_item_states_from_bank(text, aliases=table)
     closed: list[dict] = []
     for item in items or ():
         if not isinstance(item, dict):
             continue
-        state = states.get(str(item.get("work_item_id") or ""))
+        state = states.get(
+            resolve_work_item_id(item.get("work_item_id"), aliases=table)
+        )
         closed.append({**item, "state": state} if state else dict(item))
     return closed
 
 
 def queue_candidates(items: object = None, *, question_bank_text: object = None,
-                     policy: object = None, weights: object = None) -> list[dict]:
+                     policy: object = None, weights: object = None,
+                     aliases: object = None) -> list[dict]:
     """The eligible, scored, ranked work items — highest combined score first.
 
     The admission ladder, in order, and each rung is a REFUSAL with a name:
@@ -1523,7 +1674,8 @@ def queue_candidates(items: object = None, *, question_bank_text: object = None,
                                DEFAULT_LANE_POLICY["work_item_queue_threshold"]) or 0)
     rows = list(items) if isinstance(items, (list, tuple)) else current_work_items()
     text = read_text(QUESTIONS_FILE) if question_bank_text is None else question_bank_text
-    known = bank_work_items(text)
+    table = _aliases_for(question_bank_text, aliases)
+    known = bank_work_items(text, aliases=table)
     candidates: list[dict] = []
     for item in rows:
         if not isinstance(item, dict):
@@ -1535,7 +1687,9 @@ def queue_candidates(items: object = None, *, question_bank_text: object = None,
             continue
         if str(item.get("state") or "open") not in ("open", "offered"):
             continue
-        identity = str(item.get("work_item_id") or "")
+        # O-E6: both sides of "has this already been asked?" are canonical, so
+        # a bank row minted under a legacy id refuses the item it was about.
+        identity = resolve_work_item_id(item.get("work_item_id"), aliases=table)
         if not identity or identity in known:
             continue
         score = score_work_item(item, weights=weights, policy=lane)
@@ -1618,15 +1772,17 @@ def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
 
         policy = {**DEFAULT_LANE_POLICY, **load_planner_state().get("lane_policy", {})}
         text = read_text(QUESTIONS_FILE) if question_bank_text is None else str(question_bank_text)
-        candidates = queue_candidates(work_items, question_bank_text=text, policy=policy)
+        table = _aliases_for(question_bank_text, None)
+        candidates = queue_candidates(work_items, question_bank_text=text,
+                                      policy=policy, aliases=table)
         if not candidates:
             return []
         import timeline_interaction  # noqa: PLC0415
 
         minted: list[dict] = []
-        seen = set(bank_work_items(text))
+        seen = set(bank_work_items(text, aliases=table))
         for candidate in candidates:
-            if str(candidate.get("work_item_id")) in seen:
+            if resolve_work_item_id(candidate.get("work_item_id"), aliases=table) in seen:
                 continue
             row = mint_work_item_question(
                 candidate,
@@ -1634,7 +1790,7 @@ def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
             if not row:
                 continue
             text = timeline_interaction.insert_keystone_question(text, row)
-            seen.add(str(candidate.get("work_item_id")))
+            seen.add(resolve_work_item_id(candidate.get("work_item_id"), aliases=table))
             minted.append(row)
         if minted and not dry_run and question_bank_text is None:
             write_text(QUESTIONS_FILE, text)

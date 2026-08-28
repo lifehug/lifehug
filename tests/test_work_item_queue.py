@@ -34,6 +34,7 @@ import temporal_projection as tp  # noqa: E402
 import temporal_store as ts  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 import timeline_interaction as ti  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 
 
 def load(name):
@@ -55,6 +56,11 @@ qp = load("question_planner")
 ap = load("arc_planner")
 
 NOW = "2026-08-26T00:00:00Z"
+
+#: O-E6: every birthless vault carries the birth-origin item, because the birth
+#: origin is the coordinate system rather than one gap among others. Tests about
+#: a SPECIFIC gap name it here and exclude it.
+BIRTH_ORIGIN_ID = twi.birth_origin_work_item_id()
 EMPTY_BANK = "# Questions\n\n## A: Origins\n\n- [ ] A1: Where does your story start?\n"
 
 #: A keystone the way `timeline.keystones()` hands one over.
@@ -439,12 +445,39 @@ class MintingTests(unittest.TestCase):
             else:
                 sys.modules["timeline_interaction"] = original
 
-    def test_a_broken_projection_never_breaks_the_identity_derivation(self):
-        original = sys.modules.get("temporal_projection")
-        sys.modules["temporal_projection"] = object()
+    def test_an_unusable_vocabulary_never_breaks_the_identity_derivation(self):
+        """O-E6: the guarded seam moved, and it still degrades to "no id".
+
+        Identity derivation reaches the temporal package through
+        `temporal_work_items` now, so THAT is the module a broken package
+        breaks. Shadowed, both doors return their honest empty rather than
+        raising into the weekly queue.
+        """
+        original = sys.modules.get("temporal_work_items")
+        sys.modules["temporal_work_items"] = object()
         try:
             self.assertEqual(qp.timeline_work_item_id(anchor="period:mesa"), "")
             self.assertIsNone(qp.work_item_from_keystone(KEYSTONE, now=NOW))
+            self.assertEqual(qp.resolve_work_item_id("work:abc"), "work:abc")
+        finally:
+            if original is None:
+                sys.modules.pop("temporal_work_items", None)
+            else:
+                sys.modules["temporal_work_items"] = original
+
+    def test_a_late_shadow_of_the_projection_no_longer_reaches_it(self):
+        """Stated rather than left as a silent behaviour change.
+
+        `temporal_work_items` binds `temporal_projection` at ITS OWN import, so
+        replacing the entry in `sys.modules` afterwards cannot reach a
+        derivation that is already wired. The property that matters — a
+        package that will not IMPORT yields no id — is the test above; this one
+        pins the mechanism so the two can never be confused again.
+        """
+        original = sys.modules.get("temporal_projection")
+        sys.modules["temporal_projection"] = object()
+        try:
+            self.assertTrue(qp.timeline_work_item_id(anchor="period:mesa"))
         finally:
             if original is None:
                 sys.modules.pop("temporal_projection", None)
@@ -595,7 +628,8 @@ class WaveDSeamTests(unittest.TestCase):
         result = derive(*waiting_on_an_anchor(5))
         items = qp.work_items_from_projection(result.to_dict())
         [candidate] = [row for row in qp.queue_candidates(items, question_bank_text=EMPTY_BANK)
-                       if row["kind"] == "missing_anchor"]
+                       if row["kind"] == "missing_anchor"
+                       and row["work_item_id"] != BIRTH_ORIGIN_ID]
         derived = next(row for row in result.work_items
                        if row["work_item_id"] == candidate["work_item_id"])
         self.assertEqual(candidate["derivation_score"], derived["combined_score"])

@@ -955,6 +955,11 @@ class TemporalWorkItem:
     requested_field: str | None = None
     prompt_intent: str | None = None
     allowed_surfaces: tuple[str, ...] = ()
+    #: Which versioned arithmetic minted ``system_value`` (O-E6). Optional and
+    #: additive: an item written before the field existed reads as ``None``,
+    #: and a reader that does not know it is unaffected. It is deliberately NOT
+    #: in :data:`WORK_ITEM_IDENTITY_KEYS` — a re-scored item is the same item.
+    score_rule: str | None = None
     scores: dict = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
@@ -979,6 +984,7 @@ class TemporalWorkItem:
             ("node_ref", self.node_ref),
             ("requested_field", self.requested_field),
             ("prompt_intent", self.prompt_intent),
+            ("score_rule", self.score_rule),
         ):
             if value is not None:
                 payload[key] = value
@@ -1093,6 +1099,7 @@ def validate_temporal_work_item(value: object, *, now: object = None) -> dict:
         ("node_ref", optional_text(value.get("node_ref"))),
         ("requested_field", requested_field),
         ("prompt_intent", optional_text(value.get("prompt_intent"))),
+        ("score_rule", optional_text(value.get("score_rule"))),
     ):
         if cleaned:
             normalized[key] = cleaned
@@ -1116,6 +1123,7 @@ def work_item_from_dict(value: object) -> TemporalWorkItem | None:
         evidence_refs=tuple(normalized["evidence_refs"]),
         requested_field=normalized.get("requested_field"),
         prompt_intent=normalized.get("prompt_intent"),
+        score_rule=normalized.get("score_rule"),
         allowed_surfaces=tuple(normalized["allowed_surfaces"]),
         scores={k: normalized[k] for k in WORK_ITEM_SCORE_FIELDS if k in normalized},
         created_at=normalized["created_at"],
