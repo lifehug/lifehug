@@ -106,6 +106,7 @@ import chronology as chrono  # noqa: E402
 import cross_dating as cd  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
+import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
@@ -127,7 +128,14 @@ from temporal_claims import (  # noqa: E402
 #:
 #: ``timeline-rules:2`` (eras E1): the fold mints ``period`` nodes for the age
 #: frames, so the same claims now calculate to a strictly larger projection.
-CALCULATION_RULE_VERSION = "timeline-rules:2"
+#:
+#: ``timeline-rules:3`` (eras E2): memberships, occurrence scope and owner
+#: relevance. The same claims calculate to a projection that says which frames
+#: a moment is in and whose life it happened in — and to a SMALLER axis, since
+#: a `contextual_only` node now gets no membership at all. The design named
+#: `:2` for the whole of E1+E2; E1 took that slot, so E2 takes the next one
+#: rather than shipping two different meanings under one version.
+CALCULATION_RULE_VERSION = "timeline-rules:3"
 
 #: The combined-score formula's own version, separate from the rules above
 #: because scoring is recalibrated on a different cadence from the arithmetic.
@@ -242,7 +250,8 @@ DEFAULT_OWNER_REF = twi.OWNER_SUBJECT_REF
 #: The phases §7.1 asks to instrument *within* the pure derivation. Extraction,
 #: the claim fold and projection publication are measured by their own owners;
 #: what this module can honestly report is what it does.
-TIMING_PHASES = ("resolve", "group", "reconcile", "propagate", "age_frames", "work_items", "total")
+TIMING_PHASES = ("resolve", "group", "reconcile", "propagate", "age_frames",
+                 "memberships", "work_items", "total")
 
 #: The highest ``chronology.claim_score`` any single claim can reach, computed
 #: from chronology's own weights so the normalizer cannot drift from them.
@@ -1559,6 +1568,398 @@ def _roster_period_rows(roster_snapshot: object) -> list[dict]:
     return rows
 
 
+# --------------------------------------------------------------------------
+# Owner relevance — whose occurrence, and why it is on the owner's axis (E2)
+# --------------------------------------------------------------------------
+
+
+def _landmark_entry_index(landmark_entries: object) -> dict:
+    """``source_id -> {"source_id", "domain", "entry_key"}``.
+
+    The rows are ``landmark_projection.load_landmark_sources``' own, passed in
+    rather than read, so the fold stays a pure function of its arguments. The
+    join key is the ``source_id`` every claim minted from that entry cites, so
+    the landmark DOMAIN reaches a claim through a durable record rather than by
+    parsing the free-text quote it happens to carry.
+    """
+    index: dict[str, dict] = {}
+    for row in landmark_entries or ():
+        if not isinstance(row, dict):
+            continue
+        source_id = collapsed_text(row.get("source_id"))
+        domain = collapsed_text(row.get("domain"))
+        if not source_id or not domain:
+            continue
+        index[source_id] = {
+            "source_id": source_id,
+            "domain": domain,
+            "entry_key": collapsed_text(row.get("entry_key")),
+        }
+    return index
+
+
+def _before_birth(best: object, birth: object) -> bool:
+    """Is this occurrence WHOLLY before the supported birth interval?
+
+    "Wholly" is doing real work: an interval that merely starts before the
+    birth's latest reading overlaps it, and an overlap is not a contradiction —
+    it is a person who does not know the month yet.
+    """
+    record = chrono.from_dict(best) if not isinstance(best, chrono.DateRecord) else best
+    origin = chrono.from_dict(birth) if not isinstance(birth, chrono.DateRecord) else birth
+    if record is None or origin is None:
+        return False
+    latest = chrono._ordinal(record.latest or record.best, end=True)  # noqa: SLF001
+    earliest = chrono._ordinal(origin.earliest or origin.best, end=False)  # noqa: SLF001
+    if latest is None or earliest is None:
+        return False
+    return latest < earliest
+
+
+def _group_entries(group: dict, entry_index: dict) -> list[dict]:
+    """The landmark entries (`landmark_projection.load_landmark_sources` rows)
+    behind this group's claims — join key `claim.source_ref.source_id`."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for claim in group.get("claims") or ():
+        ref = claim.get("source_ref")
+        source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+        entry = entry_index.get(source_id)
+        if entry is not None and source_id not in seen:
+            seen.add(source_id)
+            out.append(entry)
+    return out
+
+
+def _mention_is_ambiguous(group: dict) -> bool:
+    """Did identity resolution find MORE THAN ONE roster candidate for this
+    subject and stop rather than guess (`identity_resolution.resolve_mention`,
+    ``reason: "ambiguous_candidates"``)?
+
+    This — not "no `subject_ref` landed" — is what "an unresolved mention"
+    means (eras design §2.5): a mention with **zero** roster candidates
+    (`"no_candidate"`) is not ambiguous, it simply names nobody the roster
+    knows, which is the ordinary shape of the owner's OWN narration ("the
+    reunion", "the wedding") and defaults to the owner below — never to
+    `unresolved`, which is reserved for a genuine standoff between candidates.
+    """
+    for claim in group.get("claims") or ():
+        resolution = claim.get("subject_resolution")
+        if isinstance(resolution, dict) and resolution.get("reason") == "ambiguous_candidates":
+            return True
+    return False
+
+
+def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str,
+                     birth: object) -> dict:
+    """Whose occurrence this is, why it is on the owner's axis, and the proof.
+
+    Four answers and no fifth (eras design §2.5):
+
+    1. the subject resolves to the OWNER, or every landmark entry behind this
+       claim is one of the OWNER's OWN LIFE domains (residences, schools,
+       work, military, birth) — their own axis, ``participated``, no evidence
+       owed. `landmark_projection.OWNER_RELEVANCE_BY_DOMAIN` is deliberately a
+       table of the FOUR other-person domains, not the nine; an entry from any
+       domain outside it never reaches the subject question at all;
+    2. identity landed on more than one candidate and stopped rather than
+       guess — ``unresolved`` / ``unresolved``. **Never the owner by
+       default**: `_derive_work_items` already carries this to Mirror as an
+       ``identity_uncertain`` row, and guessing `self` here is exactly how
+       somebody else's life ends up drawn as the owner's. A mention that
+       matches NO roster candidate at all is not this case — see rule 1's
+       fallback below;
+    3. somebody else, and a LANDMARK ENTRY behind this claim makes this
+       particular occurrence owner-relevant — ``lived_effect`` for a child's
+       birth or a loss, ``participated`` for a partnership, citing the entry;
+    4. somebody else and nothing does — ``contextual_only``, which is an
+       ANSWER: a relationship may well be stated, and this occurrence still is
+       not the owner's. Rule 4 also swallows rule 3 when the occurrence is
+       wholly before the owner's birth: a grandmother's birth is family
+       history, not something the owner lived through.
+
+    The occurrence subject is never rewritten to the owner in any of them.
+    """
+    subject = collapsed_text(group.get("subject"))
+    entries = _group_entries(group, entry_index)
+    domains = {entry["domain"] for entry in entries}
+    owner_row = {
+        "occurrence_subject_scope": "owner",
+        "owner_timeline_relation": "participated",
+        "relation_evidence_refs": (),
+    }
+    if normalized_mention_key(subject) == normalized_mention_key(owner):
+        return owner_row
+    if entries and domains.isdisjoint(lp.OWNER_RELEVANCE_BY_DOMAIN):
+        # Every entry behind this claim is one of the owner's own-life
+        # domains — a residence/school/work/military/birth entry's subject is
+        # the owner whatever its raw mention text happens to be (a domain-word
+        # fallback is common when the entry names nobody else).
+        return owner_row
+    if _mention_is_ambiguous(group):
+        return {
+            "occurrence_subject_scope": "unresolved",
+            "owner_timeline_relation": "unresolved",
+            "relation_evidence_refs": (),
+        }
+
+    event_kind = collapsed_text(group.get("event_kind"))
+    relation = None
+    refs: list[str] = []
+    for entry in entries:
+        granted = lp.owner_relevance_for(entry["domain"], event_kind)
+        if granted is None:
+            continue
+        relation = granted if relation is None else relation
+        if entry["source_id"] not in refs:
+            refs.append(entry["source_id"])
+    if relation is None and not entries and not group.get("resolved"):
+        # No landmark entry at all, and no roster candidate either — an
+        # ordinary, self-narrated claim naming nobody the roster knows. Rule
+        # 2's veto is for a genuine standoff between candidates; the absence
+        # of any candidate is the ordinary shape of the owner's own life.
+        return owner_row
+    if relation is not None and _before_birth(best, birth):
+        # Family history the owner was not alive for. The relationship is
+        # stated and the evidence stands; what it does not support is a row on
+        # a life that had not started.
+        relation = "contextual_only"
+    return {
+        "occurrence_subject_scope": "other_person",
+        "owner_timeline_relation": relation or "contextual_only",
+        "relation_evidence_refs": tuple(refs),
+    }
+
+
+def _relevance_life_view(relevance: dict, *, best: object, birth: object,
+                         as_of: object, diagnostics: list, node_id: str,
+                         birth_node_id: object) -> str:
+    """E1's ``lived``/``future_plan``, plus §2.6's two occurrence-subject rows.
+
+    An OWNER-subject occurrence wholly before the supported birth interval is
+    ``contradictory`` and mints a diagnostic naming the birth node — Mirror's
+    row, not a censored claim; §2.6 is explicit that this is never a deletion.
+    An unresolved subject is ``unresolved``, which is how the page knows not to
+    draw it on the axis while the identity question is open.
+    """
+    scope = relevance["occurrence_subject_scope"]
+    if scope == "unresolved":
+        return "unresolved"
+    if scope == "owner" and _before_birth(best, birth):
+        diagnostics.append({
+            "finding": "before_owner_birth",
+            "node_ids": [node_id],
+            "birth_node_id": collapsed_text(birth_node_id) or None,
+        })
+        return "contradictory"
+    return _life_view(best, as_of)
+
+
+# --------------------------------------------------------------------------
+# Memberships — arithmetic for frames, receipts for named eras (E2)
+# --------------------------------------------------------------------------
+
+
+def _membership_row(*, member: str, era: str, relation: str, evidence,
+                    basis: str, confidence: float, fingerprint: object = None) -> dict:
+    payload = {
+        "member_node_id": member,
+        "era_node_id": era,
+        "relation": relation,
+        "evidence_refs": list(evidence),
+        "basis": basis,
+        "confidence": confidence,
+    }
+    if fingerprint:
+        payload["input_fingerprint"] = fingerprint
+    return tp.validate_calculated_membership(payload)
+
+
+def _frame_memberships(nodes: list[dict], frames, *, on_axis: dict) -> list[dict]:
+    """Every dated, owner-relevant node's place in the age frames. Arithmetic.
+
+    `cross_dating.frames_touching` is the whole rule and there is no second
+    copy of it: one containing frame is ``within``, anything wider or straddling
+    is ``overlaps`` in EVERY frame it touches, and nothing picks a winner —
+    which frame the row renders in is a display role, decided below.
+
+    Two gates, both of them refusals rather than guesses. A node with no
+    ``best_temporal_value`` gets no membership (an undated moment is not
+    secretly in childhood), and a node whose ``owner_timeline_relation`` does
+    not put it on the axis gets none either — that is §2.5's *"Not placed yet ·
+    about someone else"* expressed as an absence rather than as a row somebody
+    has to notice is wrong.
+    """
+    if not frames:
+        return []
+    by_band = {frame.band: tp.age_frame_node_id(frame.band) for frame in frames}
+    rows: list[dict] = []
+    for node in nodes:
+        node_id = collapsed_text(node.get("node_id"))
+        if node.get("node_kind") == "period" or not node_id:
+            continue
+        if not on_axis.get(node_id):
+            continue
+        best = node.get("best_temporal_value")
+        if not isinstance(best, dict):
+            continue
+        refs = list(node.get("input_claim_refs") or ())
+        refs.append(tp.FRAME_MEMBERSHIP_RULE)
+        for band, relation in cd.frames_touching(frames, best):
+            era_node_id = by_band.get(band)
+            if not era_node_id:
+                continue
+            rows.append(_membership_row(
+                member=node_id, era=era_node_id, relation=relation,
+                evidence=refs, basis=collapsed_text(node.get("basis")) or "inferred",
+                confidence=float(node.get("confidence") or 0.0),
+                fingerprint=node.get("input_fingerprint"),
+            ))
+    return rows
+
+
+def _asserted_memberships(assertions: object, *, node_ids: set) -> list[dict]:
+    """The union of active membership receipts — ONE membership, N evidence.
+
+    Grouped by ``(member, era, relation)``, which is exactly
+    `temporal_projection.derive_membership_id`'s identity, so two independent
+    witnesses to one containment are one calculated membership carrying both
+    ``assertion_id``s (T-M-09) and retracting either leaves it standing on the
+    other (T-M-10). The receipts are the only source: a claim's ``event_ref``
+    is never read for membership, because an era's own bounds claims carry the
+    era's ``event_ref`` and an event's claim carries the event's — *"graduated
+    in 2011 during college"* is one date claim plus one assertion (§2.4).
+    """
+    grouped: dict[tuple, dict] = {}
+    for row in assertions or ():
+        if not isinstance(row, dict):
+            continue
+        member = collapsed_text(row.get("member_node_id"))
+        era = collapsed_text(row.get("era_node_id"))
+        relation = collapsed_text(row.get("relation")) or "within"
+        assertion = collapsed_text(row.get("assertion_id"))
+        if not member or not era or not assertion:
+            continue
+        # A receipt about a node this projection does not hold is kept out of
+        # the projection and NOT deleted: the assertion is still on disk, and
+        # the node may arrive with the next extraction.
+        if node_ids and member not in node_ids:
+            continue
+        key = (member, era, relation)
+        bucket = grouped.setdefault(key, {"evidence": [], "basis": "explicit"})
+        if assertion not in bucket["evidence"]:
+            bucket["evidence"].append(assertion)
+        basis = collapsed_text(row.get("basis"))
+        if basis in ("explicit", "calculated", "inferred"):
+            bucket["basis"] = basis if bucket["basis"] == "explicit" else bucket["basis"]
+    rows: list[dict] = []
+    for (member, era, relation) in sorted(grouped):
+        bucket = grouped[(member, era, relation)]
+        evidence = sorted(bucket["evidence"])
+        rows.append(_membership_row(
+            member=member, era=era, relation=relation, evidence=evidence,
+            basis=bucket["basis"],
+            # Two independent witnesses support a containment more than one
+            # does, and the ladder saturates: this is a display ORDER, never a
+            # probability, which is why it is capped and stated here rather
+            # than dressed up as a calibrated number.
+            confidence=min(0.95, 0.6 + 0.15 * (len(evidence) - 1)),
+        ))
+    return rows
+
+
+def _apply_display_roles(memberships: list[dict], *, decisions: object,
+                         node_index: dict) -> list[dict]:
+    """Exactly one ``primary`` per member; everything else ``secondary``.
+
+    The design's own order (§2.4), and every rung of it is deterministic: an
+    active display decision naming this container wins; otherwise a direct
+    event-level assertion (a ``within`` receipt) outranks calculated
+    arithmetic; otherwise the highest-supported membership (confidence, then
+    evidence count); otherwise the MOST SPECIFIC era, measured as the narrowest
+    interval the container node carries; and finally the era node id, so two
+    equal candidates never swap between rebuilds.
+
+    Display roles are rendering. Nothing downstream reads one for a date, an
+    order or a membership.
+    """
+    chosen: dict[str, str] = {}
+    for row in decisions or ():
+        if not isinstance(row, dict):
+            continue
+        member = collapsed_text(row.get("member_node_id"))
+        container = collapsed_text(row.get("primary_container_id"))
+        if member and container:
+            chosen[member] = container
+
+    by_member: dict[str, list[dict]] = {}
+    for row in memberships:
+        by_member.setdefault(row["member_node_id"], []).append(row)
+
+    def specificity(era_node_id: str) -> float:
+        node = node_index.get(era_node_id) or {}
+        record = chrono.from_dict(node.get("best_temporal_value"))
+        if record is None:
+            return float("inf")
+        low = chrono._ordinal(record.earliest or record.best, end=False)  # noqa: SLF001
+        high = chrono._ordinal(record.latest or record.best, end=True)  # noqa: SLF001
+        if low is None or high is None:
+            return float("inf")
+        return float(high[0] - low[0]) + (high[1] - low[1]) / 12.0
+
+    def is_calculated(row: dict) -> bool:
+        """Frame arithmetic cites its own rule name and nothing else does —
+        a direct receipt-backed assertion never carries it (design §2.4's
+        "a direct event-level assertion outranks calculated arithmetic")."""
+        return tp.FRAME_MEMBERSHIP_RULE in row.get("evidence_refs", ())
+
+    out: list[dict] = []
+    for member in sorted(by_member):
+        rows = by_member[member]
+        decided = chosen.get(member)
+        ranked = sorted(
+            rows,
+            key=lambda row: (
+                row["era_node_id"] != decided,
+                row["relation"] != "within",
+                is_calculated(row),
+                -row["confidence"],
+                -len(row["evidence_refs"]),
+                specificity(row["era_node_id"]),
+                row["era_node_id"],
+            ),
+        )
+        for index, row in enumerate(ranked):
+            out.append({**row, "display_role": "primary" if index == 0 else "secondary"})
+    out.sort(key=lambda row: (row["member_node_id"], row["era_node_id"], row["relation"]))
+    return out
+
+
+def observed_envelope(memberships: object, node_index: dict, era_node_id: str) -> dict | None:
+    """One named era's COVERAGE of its explicit members — never a bound.
+
+    This is the single most dangerous number in the whole design and the
+    docstring is where the danger is named: the founder's Timeline said
+    *"College 1990-1991"* because an era was DATED from whatever got sorted into
+    it. So the envelope is computed, published on its own key, stamped
+    ``basis: order``, and is never written into ``best_temporal_value``,
+    ``definition_span`` or ``possible_temporal_value``. It says what the era's
+    members happen to span. It does not say when the era was.
+    """
+    dated = []
+    for row in memberships or ():
+        if collapsed_text(row.get("era_node_id")) != collapsed_text(era_node_id):
+            continue
+        node = node_index.get(collapsed_text(row.get("member_node_id"))) or {}
+        record = chrono.from_dict(node.get("best_temporal_value"))
+        if record is not None:
+            dated.append({"date": record})
+    if not dated:
+        return None
+    span = cd.span_from_dated(dated)
+    return span.to_dict() if span is not None else None
+
+
 def _node_dict(
     group: dict,
     calculated: dict,
@@ -1572,6 +1973,8 @@ def _node_dict(
     generation: int,
     as_of: str | None = None,
     possible: object = None,
+    relevance: dict | None = None,
+    life_view: str | None = None,
 ) -> dict:
     """One validated :class:`~temporal_projection.CalculatedTimelineNode`.
 
@@ -1615,9 +2018,10 @@ def _node_dict(
             "projection_generation": generation,
             "conflict_state": state,
             "provenance_summary": _provenance_summary(group, calculated, best),
-            "life_view": _life_view(best, as_of),
+            "life_view": life_view or _life_view(best, as_of),
             **({"possible_temporal_value": possible.to_dict()}
                if possible is not None else {}),
+            **(relevance or {}),
         }
     )
 
@@ -1900,6 +2304,9 @@ def derive_calculated_timeline(
     era_views: object = (),
     roster_snapshot: object = (),
     constraints: object = (),
+    membership_assertions: object = (),
+    display_decisions: object = (),
+    landmark_entries: object = (),
     birth_date: object = None,
     owner_ref: object = None,
     projection_generation: int = 0,
@@ -1910,6 +2317,13 @@ def derive_calculated_timeline(
     ``active_index`` is ``temporal_store.fold_active_index``'s mapping (or its
     ``claims`` list, or a bare list of claim mappings). ``constraints`` are the
     :class:`~temporal_claims.OrderingConstraint` records a drag wrote.
+    ``membership_assertions`` and ``display_decisions`` are
+    ``era_memberships.active_era_memberships`` / ``active_era_displays``' rows,
+    and ``landmark_entries`` are ``landmark_projection.load_landmark_sources``'.
+    All three arrive as ARGUMENTS rather than being read here, for the reason
+    ``roster_snapshot`` does: this function must stay a pure function of what it
+    is handed, so a test can hand it two receipts and assert one membership.
+
     ``birth_date`` is the anchor ages are measured from; when it is not supplied
     and the substrate holds exactly one ``birth`` node, that node's own
     best-supported value is used, and when neither exists ages stay unplaced and
@@ -2052,9 +2466,11 @@ def derive_calculated_timeline(
     # would otherwise be told nothing at all.
     mark = clock()
     frame_nodes: list[dict] = []
+    frames: tuple = ()
     provisional_node: dict | None = None
     birth_node_id: str | None = None
     birth_origin_basis: str | None = None
+    resolved_origin: dict | None = None
     origin = _owner_birth(groups, calculated, placed, owner, diagnostics)
     if origin is None:
         # No stated birthday. What the person has already said about their age
@@ -2082,6 +2498,10 @@ def derive_calculated_timeline(
         _birth_node_id, resolved_origin = origin
         birth_node_id = _birth_node_id
         birth_origin_basis = _origin_basis_of(resolved_origin["best"])
+        frames = cd.age_frames(
+            resolved_origin["best"], as_of=as_of,
+            death=_owner_death(groups, calculated, placed, owner),
+        )
         frame_nodes = list(_age_frame_nodes(
             origin=resolved_origin,
             claim_refs=[claim.get("claim_id")
@@ -2095,6 +2515,21 @@ def derive_calculated_timeline(
         row["node_id"]: chrono.from_dict(row.get("best_temporal_value"))
         for row in frame_nodes
         if row.get("best_temporal_value")
+    }
+
+    # The owner relevance layer (eras E2). Needs the origin resolved above —
+    # `origin_best` is the birth (explicit or provisional) `_age_frame_nodes`
+    # just used, falling back to the plain reconciled `birth` (used for
+    # `_reconcile_group`) when neither exists — reading the origin twice would
+    # be two definitions of "the owner's birthday".
+    origin_best = resolved_origin["best"] if resolved_origin is not None else birth
+    entry_index = _landmark_entry_index(landmark_entries)
+    relevance = {
+        node_id: _owner_relevance(
+            groups[node_id], best=placed.get(node_id), entry_index=entry_index,
+            owner=owner, birth=origin_best,
+        )
+        for node_id in sorted(groups)
     }
 
     possibilities = {
@@ -2121,6 +2556,12 @@ def derive_calculated_timeline(
             label=labels[node_id],
             generation=projection_generation,
             as_of=as_of,
+            relevance=relevance[node_id],
+            life_view=_relevance_life_view(
+                relevance[node_id], best=placed.get(node_id), birth=origin_best,
+                as_of=as_of, diagnostics=diagnostics, node_id=node_id,
+                birth_node_id=birth_node_id,
+            ),
         )
         for node_id in sorted(groups)
     ]
@@ -2142,6 +2583,33 @@ def derive_calculated_timeline(
     timings["age_frames"] = clock() - mark
     nodes.sort(key=_node_sort_key)
 
+    # Memberships (eras E2). Arithmetic for the frames, receipts for the named
+    # eras, and one display role decided over the union of both.
+    mark = clock()
+    node_index = {collapsed_text(row.get("node_id")): row for row in nodes}
+    on_axis = {
+        node_id: relevance[node_id]["owner_timeline_relation"] in tp.AXIS_RELATIONS
+        for node_id in relevance
+    }
+    memberships = _frame_memberships(nodes, frames, on_axis=on_axis)
+    memberships.extend(
+        _asserted_memberships(membership_assertions, node_ids=set(node_index))
+    )
+    memberships = _apply_display_roles(
+        memberships, decisions=display_decisions, node_index=node_index
+    )
+    # A named era's envelope is COVERAGE of its explicit members. E3 (now
+    # merged) mints the `named_era` nodes this loop draws the envelope onto.
+    for index, row in enumerate(nodes):
+        if row.get("event_kind") != "named_era":
+            continue
+        envelope = observed_envelope(memberships, node_index, row.get("node_id"))
+        if envelope is not None:
+            nodes[index] = tp.validate_calculated_timeline_node(
+                {**row, "observed_envelope": envelope}
+            )
+    timings["memberships"] = clock() - mark
+
     mark = clock()
     items, components, reach = _derive_work_items(
         groups=groups,
@@ -2161,12 +2629,13 @@ def derive_calculated_timeline(
     return CalculatedTimeline(
         nodes=tuple(nodes),
         work_items=tuple(items),
-        # Derived, never stored (O-E6, design §7 row 6): every id these items
+# Derived, never stored (O-E6, design §7 row 6): every id these items
         # have ever been addressed by, mapped onto the id they are addressed by
         # now. Computed here so it is published in the SAME generation as the
         # items it describes — a reader can never hold a map for a different
         # set — and so deleting the file and rebuilding is byte-identical.
         work_item_aliases=twi.work_item_aliases(items),
+        memberships=tuple(memberships),
         timings={phase: round(timings.get(phase, 0.0), 9) for phase in TIMING_PHASES},
         score_components=components,
         reach=reach,
@@ -2174,6 +2643,7 @@ def derive_calculated_timeline(
             "findings": diagnostics,
             "claims": len(claims),
             "nodes": len(nodes),
+            "memberships": len(memberships),
             "edges": len(edges),
             "unplaced": sorted(
                 node_id for node_id in groups if placed.get(node_id) is None

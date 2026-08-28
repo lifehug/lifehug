@@ -102,11 +102,49 @@ AGE_FRAME_EVENT_KIND = "age_frame"
 #: The event kind of a person-made era (E3), spelled once for the same reason.
 NAMED_ERA_EVENT_KIND = "named_era"
 
-#: Where a node sits against the life clip (eras design §2.6). E1 assigns
-#: exactly these two — an event dated after ``as_of`` is a plan, not lived
-#: history inside a frame. ``contradictory`` and ``unresolved`` need the
-#: occurrence-subject machinery and arrive with E2, which extends this tuple.
-LIFE_VIEWS = ("lived", "future_plan")
+#: Where a node sits against the life clip (eras design §2.6). ``lived`` and
+#: ``future_plan`` are E1's; E2 adds the two that need the occurrence-subject
+#: machinery — ``contradictory`` for an OWNER-subject occurrence wholly before
+#: the supported birth interval (Mirror owns the row, and the claim is never
+#: censored), and ``unresolved`` for a subject nobody has identified, which is
+#: emphatically not the same thing as the owner (§2.6: *never `self` by
+#: default*).
+LIFE_VIEWS = ("lived", "future_plan", "contradictory", "unresolved")
+
+#: WHOSE occurrence a node is (eras design §2.5). It names the person the event
+#: happened to, and it is **never rewritten to the owner**: a moment about
+#: somebody else stays about somebody else no matter how it got onto a page.
+OCCURRENCE_SUBJECT_SCOPES = ("owner", "other_person", "unresolved")
+
+#: WHY a node is on the OWNER's axis (eras design §2.5), which is a different
+#: question from whose occurrence it is and is answered by different evidence.
+#:
+#: ``participated`` — the owner was in it (their own life, a partnership
+#: landmark's first-met/married). ``lived_effect`` — it happened to somebody
+#: else and the owner lived through it (a child's birth, a loss). Both put the
+#: row on the axis. ``contextual_only`` — a stated relationship exists and this
+#: particular occurrence is not owner-relevant (a relative's unrelated event,
+#: pre-birth family history); the row renders under "Not placed yet · about
+#: someone else" and gets no membership. ``none`` — no relationship is stated
+#: at all. ``unresolved`` — identity has not landed yet.
+OWNER_TIMELINE_RELATIONS = (
+    "participated",
+    "lived_effect",
+    "contextual_only",
+    "none",
+    "unresolved",
+)
+
+#: The relations that put a row ON the owner's axis, spelled once so the fold
+#: and the legacy pass cannot answer "is this on the timeline?" two ways.
+AXIS_RELATIONS = ("participated", "lived_effect")
+
+#: The evidence ref a FRAME membership cites. A frame membership is arithmetic
+#: over the member's own dates and the birth origin — there is no receipt to
+#: point at — so it cites the rule by name rather than leaving ``evidence_refs``
+#: empty, which the schema refuses. A NAMED ERA never uses this: date overlap
+#: alone is not a membership (design §2.4).
+FRAME_MEMBERSHIP_RULE = "rule:age-frame-arithmetic:1"
 
 #: Where a node sits on the calendar (eras design §2.2). ``unplaced`` has no
 #: supported value; ``partial`` has one that is materially wider than the event
@@ -220,6 +258,8 @@ ERROR_CODES = (
     "unknown_origin_basis",
     "unknown_temporal_state",
     "unknown_life_view",
+    "unknown_occurrence_subject_scope",
+    "unknown_owner_timeline_relation",
     "membership_not_a_mapping",
     "membership_needs_member",
     "membership_needs_era",
@@ -452,6 +492,21 @@ class CalculatedTimelineNode:
     #: calendar; see :data:`TEMPORAL_STATES`. Absent on every node written so
     #: far, and absent means unchanged.
     temporal_state: str | None = None
+    #: v2, additive (eras design §2.5). Whose occurrence this is, why it is on
+    #: the owner's axis, and the records that say so — a landmark entry's
+    #: ``source_id`` and the identity claim that named the person. A relation of
+    #: ``contextual_only`` with real evidence refs is an HONEST answer, not a
+    #: missing one: it says a relationship is stated and this occurrence still
+    #: is not the owner's.
+    occurrence_subject_scope: str | None = None
+    owner_timeline_relation: str | None = None
+    relation_evidence_refs: tuple[str, ...] = ()
+    #: v2, additive (eras design §2.2, §2.4). A named era's COVERAGE of its
+    #: explicit members. It is never a bound: it does not enter
+    #: ``best_temporal_value``, ``definition_span`` or
+    #: ``possible_temporal_value``, because dating an era from what got sorted
+    #: into it is the founder's own "College 1990-1991 before High School".
+    observed_envelope: dict | None = None
     schema_version: int = PROJECTION_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -482,11 +537,16 @@ class CalculatedTimelineNode:
             ("origin_basis", self.origin_basis),
             ("life_view", self.life_view),
             ("temporal_state", self.temporal_state),
+            ("occurrence_subject_scope", self.occurrence_subject_scope),
+            ("owner_timeline_relation", self.owner_timeline_relation),
+            ("observed_envelope", self.observed_envelope),
         ):
             if value is not None:
                 payload[key] = value
         if self.legacy_refs:
             payload["legacy_refs"] = list(self.legacy_refs)
+        if self.relation_evidence_refs:
+            payload["relation_evidence_refs"] = list(self.relation_evidence_refs)
         return payload
 
 
@@ -590,6 +650,19 @@ def validate_calculated_timeline_node(value: object) -> dict:
         raise TimelineNodeError(
             "unknown_temporal_state", f"unknown temporal_state: {temporal_state!r}"
         )
+    scope = collapsed_text(value.get("occurrence_subject_scope"))
+    if scope and scope not in OCCURRENCE_SUBJECT_SCOPES:
+        raise TimelineNodeError(
+            "unknown_occurrence_subject_scope",
+            f"unknown occurrence_subject_scope: {scope!r}",
+        )
+    relation = collapsed_text(value.get("owner_timeline_relation"))
+    if relation and relation not in OWNER_TIMELINE_RELATIONS:
+        raise TimelineNodeError(
+            "unknown_owner_timeline_relation",
+            f"unknown owner_timeline_relation: {relation!r}",
+        )
+    envelope = _normalized_node_value(value.get("observed_envelope"))
     span = value.get("definition_span")
     definition_span = None
     if isinstance(span, dict):
@@ -630,9 +703,18 @@ def validate_calculated_timeline_node(value: object) -> dict:
         normalized["life_view"] = life_view
     if temporal_state:
         normalized["temporal_state"] = temporal_state
+    if scope:
+        normalized["occurrence_subject_scope"] = scope
+    if relation:
+        normalized["owner_timeline_relation"] = relation
+    if envelope is not None:
+        normalized["observed_envelope"] = envelope
     legacy_refs = _ref_tuple(value.get("legacy_refs"))
     if legacy_refs:
         normalized["legacy_refs"] = list(legacy_refs)
+    relation_refs = _ref_tuple(value.get("relation_evidence_refs"))
+    if relation_refs:
+        normalized["relation_evidence_refs"] = list(relation_refs)
     return normalized
 
 
@@ -673,6 +755,10 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         legacy_refs=tuple(normalized.get("legacy_refs") or ()),
         life_view=normalized.get("life_view"),
         temporal_state=normalized.get("temporal_state"),
+        occurrence_subject_scope=normalized.get("occurrence_subject_scope"),
+        owner_timeline_relation=normalized.get("owner_timeline_relation"),
+        relation_evidence_refs=tuple(normalized.get("relation_evidence_refs") or ()),
+        observed_envelope=normalized.get("observed_envelope"),
         schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
     )
 
@@ -1153,8 +1239,12 @@ def surfaces_conflict(items: object) -> tuple[str, ...]:
 __all__ = [
     "AGE_FRAME_EVENT_KIND",
     "NAMED_ERA_EVENT_KIND",
+    "AXIS_RELATIONS",
     "CONFLICT_STATES",
+    "FRAME_MEMBERSHIP_RULE",
     "LIFE_VIEWS",
+    "OCCURRENCE_SUBJECT_SCOPES",
+    "OWNER_TIMELINE_RELATIONS",
     "MEMBERSHIP_DISPLAY_ROLES",
     "MEMBERSHIP_RELATIONS",
     "ORIGIN_BASES",
