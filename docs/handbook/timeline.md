@@ -102,21 +102,33 @@ asks you for a year.
   recomputed on every read. Before v205 nothing propagated a resolved anchor at
   all, so a filed birthday left "Born in Redlands" undated and the leverage
   number promised what no pass delivered.
-- **Band dating** (v207) — the same pass, one level up. An **undated** era
-  takes a span from the places lived in it (their own span, or the residence
-  landmark the page names exactly), else from the envelope of the moments
-  already dated inside it, else — when the roster NAMED it after an age, "My
-  20s" — from the birthday. The order is deliberately not the moment ladder's:
-  an age label is a name a model wrote, so it ranks under the two rungs
-  grounded in what the person actually did. Before v207 the founder's birth was
-  filed, "Born in Redlands" was dated to the day, and "Childhood" still read
-  `undated`.
-- **A floor is not a ceiling** (v207) — a residence union and a moment envelope
-  bound an era from *inside*: they say it at least covers that. Honest to
-  display, to order the spine by, and to measure a gap between eras with; never
-  pushed back down onto the era's other moments, where one dated moment would
-  pin every undated one to its own year. Only a span closed at both ends — an
-  age label, or an explicitly dated era — bounds what is inside it
+- **Date before you place** (v254) — the pass runs in two halves, and the half
+  that needs no era runs **first**, before a moment is slotted anywhere. Until
+  v254 it ran entirely afterwards, so a moment whose date the pass supplies was
+  undated at the moment something asked where it goes: twelve of the founder's
+  thirteen dated moments landed by era LANGUAGE instead of by their date, and
+  "Married Katie" (2007) sat in `high-school` while `my-20s` held nothing.
+- **Band dating** (v207, narrowed in v254) — the same pass, one level up. An
+  **undated** era takes a span from the places lived in it (their own span, or
+  the residence landmark the page names exactly), else — when the roster NAMED
+  it after an age, "My 20s" — from the birthday. The order is deliberately not
+  the moment ladder's: an age label is a name a model wrote, so it ranks under
+  the rung grounded in what the person actually did.
+- **An era is never dated by its members** (v254) — the envelope of the moments
+  inside an era used to be band rule 2, and it is gone. What is "inside" an era
+  is a placement this same pass helps decide, so dating the era from it makes
+  the accident of slotting look like a fact: `high-school` read `1997/2021` off
+  moments that were only there because the rung above had failed. The coverage
+  is still computed and still published — `observed_envelope` on the row, the
+  same key and the same arithmetic the calculated projection uses — and it
+  never reaches `date`. It says what the era's members happen to span. It does
+  not say when the era was.
+- **A floor is not a ceiling** (v207) — a residence union bounds an era from
+  *inside*: it says the era at least covers that. Honest to display, to order
+  the spine by, and to measure a gap between eras with; never pushed back down
+  onto the era's other moments, where one dated moment would pin every undated
+  one to its own year. Only a span closed at both ends — an age label, or an
+  explicitly dated era — bounds what is inside it
   (`cross_dating.BAND_RULES_THAT_BOUND`).
 - **The filing beat** (v207) — when a landmark or a placement is filed, the
   reply says what it just unlocked: *"Got it — that dates nine moments and your
@@ -384,16 +396,19 @@ and the minted question's weight in the queue's own objective currency.
 Adjacency is gone: a bank question whose focus merely resembled a keystone is
 not a keystone and is never starred.
 
-**The cross-dating pass, in three phases** (v207). Moments, then bands, then
-the moments the newly dated bands now bound. The third phase is the *same*
-idempotent sweep as the first — a moment already carrying a date is skipped in
-both — and it exists because containment reads a band's span, which phase two
-is what supplies. `timeline_data` then re-runs `derive_chrono` whenever a band
-was derived, so a filed landmark improves the spine's **order** on the same read
-it improves the dates. The accounting follows with no extra wiring: a derived
-era leaves the `period_bound` unknowns because `unknowns()` reads the payload
-the pass just wrote, and `era_gaps` measures holes against derived spans. The
-band ladder's own order is `cross_dating.BAND_RULES`.
+**The cross-dating pass, and where placement sits inside it** (v207, split in
+v254). `cross_date_moments` runs first, **before** anything is placed: it is
+every rung that needs no era — a definitional anchor, an age statement, a
+place's containment — and it exists so that placement's own first rung, *dated
+→ frame arithmetic*, has a date to read. Then moments are placed. Then
+`cross_date` runs the rungs that need to know which era a moment is in: band
+spans, then the moments those newly dated bands now bound. That last sweep is
+the *same* idempotent one — a moment already carrying a date is skipped — and
+there is no cycle, because a date derived from an era can never move the moment
+out of the era it was derived from. `timeline_data` re-runs `derive_chrono`
+whenever a band was derived, so a filed landmark improves the spine's **order**
+on the same read it improves the dates. The two halves report one set of
+counts. The band ladder's own order is `cross_dating.BAND_RULES`.
 
 **A worked example.** Your birthday is 12 April 1979. You say a letter arrived
 when you were "about five". `parse_age` reads `(5, 5, hedged)`; the hedge

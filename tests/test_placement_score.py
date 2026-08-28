@@ -453,23 +453,57 @@ class ThePairIsImmovableTests(VaultFixture):
     and the Goodhart guard's display half."""
 
     EMPTY_REPORT = {"derived": 0, "by_rule": {}, "by_join": {}, "moments": [],
-                    "bands": {"derived": 0, "by_rule": {}, "by_join": {}, "bands": []}}
+                    "bands": {"derived": 0, "by_rule": {}, "by_join": {},
+                              "bands": [], "observed_envelopes": 0}}
 
     def without_the_pass(self):
+        # v254: the pass has two halves and "without the pass" means without
+        # BOTH — the membership-independent one now runs before placement.
         with mock.patch.object(tl.cross_dating, "cross_date",
-                               return_value=dict(self.EMPTY_REPORT)):
+                               return_value=dict(self.EMPTY_REPORT)), \
+                mock.patch.object(tl.cross_dating, "cross_date_moments",
+                                  side_effect=lambda *a, **k: dict(self.EMPTY_REPORT)):
             return self.data()
+
+    #: v254 (issue #278): this class needs an era the band ladder CAN date, and
+    #: the rung it used to lean on is gone — until now Childhood took the
+    #: ENVELOPE of the moments dated inside it, which is precisely the
+    #: derivation ADR 0030 decision 4 forbids. So the era is named after an age
+    #: instead: `My 20s` IS the decade from the twentieth birthday, it is
+    #: closed at both ends, and it therefore both dates itself from the
+    #: birthday and bounds its own moments — exactly the two-step this class
+    #: was written to observe. Nothing else about the fixture moved.
+    ERA_NAME, ERA_SLUG, ERA_TAG = "My 20s", "my-20s", "20s"
+
+    def write_period(self, *, dated):
+        (self.root / "wiki" / "periods" / f"{self.ERA_SLUG}.md").write_text(
+            PAGE.format(title=self.ERA_NAME, page_type="period", chrono=1,
+                        extra=f"date: {dated}\n" if dated else "",
+                        sources=_sources(self.REFS)),
+            encoding="utf-8")
 
     def setUp(self):
         super().setUp()
-        # An era the band ladder CAN date: its moments carry dates of their own,
-        # so `span_from_dated` gives Childhood a derived span and containment
-        # then reaches the rest.
+        (self.root / "wiki" / "periods" / "childhood.md").unlink(missing_ok=True)
+        (self.root / "state" / "entity_rosters" / "period.json").write_text(
+            json.dumps({"version": 1, "type": "period", "entities": [
+                {"name": self.ERA_NAME, "slug": self.ERA_SLUG, "chrono": 1,
+                 "page_eligible": True}]}), encoding="utf-8")
+        for ref in self.REFS:
+            path = (self.root / "state" / "classifications"
+                    / f"answers-{ref.lower()}.json")
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["time_periods"] = [{"era": self.ERA_TAG}]
+            path.write_text(json.dumps(payload), encoding="utf-8")
+        # One moment the person dated himself, so the pair has a stated half.
         (self.root / "state" / "classifications" / "answers-a1.json").write_text(
-            json.dumps({"source_path": "answers/A1.md", "events": [
-                {"title": "The bike with no brakes",
-                 "description": "The bike with no brakes.", "when_hint": "",
-                 "anchor": None, "date": {"stated": "1990"}}]}), encoding="utf-8")
+            json.dumps({"source_path": "answers/A1.md",
+                        "time_periods": [{"era": self.ERA_TAG}],
+                        "events": [
+                            {"title": "The bike with no brakes",
+                             "description": "The bike with no brakes.",
+                             "when_hint": "", "anchor": None,
+                             "date": {"stated": "1990"}}]}), encoding="utf-8")
 
     def test_the_pass_derives_something_at_all(self):
         self.assertGreater(self.data()["counts"]["periods_cross_dated"], 0)
