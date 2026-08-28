@@ -174,6 +174,13 @@ LANDMARK_SOURCES_DIR = _data("landmark_sources")
 # `system/era_identity.py` owns every write and is told which vault on every
 # call, exactly as `temporal_store` is.
 ERA_SOURCES_DIR = _data("era_sources")
+# E2: the two era decision records (eras design §2.3), nested under the same
+# `sources/eras` parent E3 registers above. Immutable, content-addressed
+# sources — a membership assertion says a thing is inside an era, a display
+# decision says which container it renders in. Never state: they are
+# evidence, and `system/era_memberships.py` owns every write.
+ERA_MEMBERSHIP_SOURCES_DIR = _data("era_membership_sources")
+ERA_DISPLAY_SOURCES_DIR = _data("era_display_sources")
 ARTIFACT_SOURCES_DIR = _data("artifact_sources")
 CANDIDATE_RESEARCH_SOURCES_DIR = _data("candidate_research_sources")
 QUESTION_CANDIDATES_FILE = _data("question_candidates")

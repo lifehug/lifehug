@@ -56,6 +56,8 @@ EXPECTED_DATA_PATHS = {
     "temporal_resolutions",
     "coverage",
     "entity_rosters",
+    "era_display_sources",
+    "era_membership_sources",
     "focus_curation_state",
     "focus_merges",
     "focus_recommendations",
