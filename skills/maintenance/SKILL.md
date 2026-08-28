@@ -81,6 +81,15 @@ classifications — classify first so this week's queue sees this week's answers
    Correction documents are never targets themselves — the source a
    correction corrects is (`classify_story.classify_target_for`).
 
+   Only a CONTENT correction makes a classification stale (O-C2). A
+   correction declares its role — `content` (the default) or `placement`,
+   the closed vocabulary in `lifehug_core` — and a placement, which is
+   what `timeline-place` files, does NOT mark its target stale: it is a
+   date decision about a moment, not a refutation of the text the moment
+   was read out of. So a vault where somebody has been dating moments has
+   no stale classifications to re-derive from that alone, and the
+   Timeline shows those dates with no model call.
+
 2. **Synthesize the Mirror** (v100) — the weekly introspection edition built
    from classifier contradictions/insights/positions:
    ```bash

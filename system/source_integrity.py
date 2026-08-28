@@ -902,8 +902,16 @@ def _linked_source_path(
     source_type: str,
     payload: str,
     captured_at: str,
+    correction_role: str = DEFAULT_CORRECTION_ROLE,
 ) -> Path:
-    """Choose a bounded name, extending the digest deterministically on a hash-prefix collision."""
+    """Choose a bounded name, extending the digest deterministically on a hash-prefix collision.
+
+    `correction_role` (v237, O-C2) is NOT part of the digest — every existing
+    correction keeps its filename — but it IS part of what counts as the same
+    record. A placement and a content correction with byte-identical text are
+    two different acts, and treating the second as an idempotent retry of the
+    first would leave a record whose frontmatter describes the other one.
+    """
     stem = linked_source_stem(target_id, source_type, payload, captured_at)
     prefix, short_digest = stem.rsplit("-", 1)
     full_digest = hashlib.sha256(
@@ -922,9 +930,21 @@ def _linked_source_path(
             str(existing_metadata.get("type", "")) == source_type
             and _linked_source_target_id(existing_metadata) == target_id
             and normalize_payload(existing_payload) == normalize_payload(payload)
+            and _recorded_correction_role(existing_metadata) == correction_role
         ):
             return candidate  # idempotent retry of the same linked source
     raise RuntimeError("unable to allocate a unique linked-source filename")
+
+
+def _recorded_correction_role(metadata: dict[str, object]) -> str:
+    """The role an existing linked source records — `content` when it predates
+    the field (every correction filed before v237 was a content correction) or
+    when the file says something the vocabulary does not know, so a corrupt
+    record can never masquerade as an idempotent retry of a placement."""
+    try:
+        return normalize_correction_role(metadata.get("correction_role"))
+    except ValueError:
+        return DEFAULT_CORRECTION_ROLE
 
 
 def resolve_source_target(value: str) -> Path:
@@ -978,7 +998,8 @@ def create_linked_source(
     target_id = str(target_record["source_id"])
     if source_type in LINKED_SOURCE_TYPES:
         path = _linked_source_path(
-            CORRECTION_SOURCES_DIR, target_id, source_type, payload, captured_at
+            CORRECTION_SOURCES_DIR, target_id, source_type, payload, captured_at,
+            correction_role=role,
         )
     else:
         # Reflections are narrative sources and retain their historical,
