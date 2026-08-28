@@ -74,17 +74,28 @@ class PlaceFilesAssertionTests(unittest.TestCase):
         self.assertTrue(str(args[1]).endswith("source_integrity.py"))
         self.assertEqual(args[2:4], ["correct", "answers/Z1.md"])
         right = kwargs["input"]
-        self.assertIn("happened during Childhood", right)
+        # v251: the body is the DATE DECISION and nothing else — the person's
+        # own words for when, never the era the pin lands in. The era is
+        # information the ROW carries (`period`, read by rung 0); asserting it
+        # in an immutable source record made a derived name as authoritative as
+        # a stated date. See `timeline.placement_assertion`.
         self.assertIn("summer of first grade", right)
+        self.assertNotIn("Childhood", right)
+        self.assertNotIn("during", right)
         self.assertEqual(args[args.index("--kind") + 1], "date")
         rec = tl.load_placements()["placements"][0]
         self.assertEqual(rec["correction"], "sources/corrections/c1.md")
 
     def test_place_without_when_hint_still_files(self):
+        """A period-only pin still files its durable half — and now says the
+        honest thing, which is that no date was stated. It used to state the
+        era as fact, and that was the ONLY temporal thing it said."""
         result, calls = self._place(when_hint="")
         self.assertEqual(result, 0)
         right = calls[0][1]["input"]
-        self.assertTrue(right.endswith("happened during Childhood"))
+        self.assertIn("The porch dog summer", right)
+        self.assertIn("I stated no date", right)
+        self.assertNotIn("Childhood", right)
 
     def test_cli_failure_does_not_create_pin(self):
         result, _ = self._place(cli_rc=1, cli_out="boom")

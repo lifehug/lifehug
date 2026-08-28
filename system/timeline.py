@@ -653,6 +653,67 @@ LANDMARKS_STORE = LANDMARKS_FILE
 #: made this a two-recipe identity in the first place.
 PLACEMENT_DESCRIPTION_MAX = 200
 
+#: The longest description the placement's DURABLE BODY quotes back. Prose,
+#: not identity — `PLACEMENT_DESCRIPTION_MAX` above is the identity clamp and
+#: the two must never be conflated: shortening this one changes a sentence,
+#: shortening that one changes a key.
+PLACEMENT_ASSERTION_DESCRIPTION_MAX = 120
+
+
+def placement_assertion(description: str, *, date: object = None,
+                        when_hint: str = "") -> str:
+    """The durable body of a placement correction: the DATE DECISION, only.
+
+    ONE definition, because this text is durable twice over. It is the
+    immutable payload of a vault source record (`--role placement`, v237/O-C2),
+    and `classify_story.corrections_for` hands it back to the next
+    classification prompt under the heading *"LATER CORRECTIONS
+    (authoritative — these OVERRIDE the story text above)"*. Whatever this
+    sentence says, the vault keeps forever and the model is told to obey.
+
+    So it says the date and nothing else. Until v251 it opened
+    ``"“…” happened during My 40s, May 2022"`` — one sentence carrying both a
+    date and an ERA, which is the sentence shape of the 2026-08-25 defect one
+    era to the right. Two authorities forbid it:
+
+    * **v244 / O-C2** — a placement is a date DECISION about a moment the
+      person accepts, not an assertion about the era it lands in.
+    * **the Eras design §5.1** — the period is DERIVED from the date by frame
+      arithmetic. ``My 40s`` is not something anybody said; it is what the
+      arithmetic computed from ``May 2022``. Asserting the derived half back
+      as fact gives it the date's own authority, and a later correction to the
+      arithmetic cannot reach it: prose inside an immutable source is not a
+      claim anything can supersede.
+
+    The era is not lost, because it was never information this record held:
+    it lives as ``period`` on the row in ``state/timeline_placements.json``,
+    which is where rung 0 reads it (see `save_placement`).
+
+    `date` is a `chronology.DateRecord` or its serialized form; `when_hint` is
+    the person's own words for when, which stand on their own when no date
+    parsed. With neither, the body states the placement and claims no time at
+    all — the honest reading of a period-only pin from the viewer's form.
+    """
+    quoted = f"“{str(description)[:PLACEMENT_ASSERTION_DESCRIPTION_MAX]}”"
+    record = date if isinstance(date, chrono.DateRecord) else (
+        chrono.from_dict(date) if date is not None else None)
+    clauses: list[str] = []
+    stated = chrono.display_date(record, with_basis=False) if record is not None else ""
+    if stated:
+        anchors = tuple(getattr(record, "anchors", ()) or ())
+        clauses.append(f"{stated} (anchored on {', '.join(anchors)})"
+                       if anchors else stated)
+    hint = str(when_hint or "").strip()
+    # A host that derives its `--when-hint` FROM the date says the date twice:
+    # `timeline_interaction.place_invocation` sets the hint to this very
+    # `display_date`. The era used to stand between the two copies; without it
+    # the duplication is the whole sentence.
+    if hint and hint != stated:
+        clauses.append(hint)
+    if not clauses:
+        return f"{quoted} — I placed this moment on my timeline; I stated no date."
+    return f"{quoted} happened {', '.join(clauses)}"
+
 
 def placement_key(event: dict) -> str:
     """The identity of one placement: the event's SOURCE and its DESCRIPTION.

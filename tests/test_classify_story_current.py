@@ -489,7 +489,9 @@ class PlacementKeepsItsOwnMomentTests(unittest.TestCase):
         with redirect_stdout(buffer):
             path = si.create_linked_source(
                 "answers/A1.md",
-                "“the move to Mesa” happened during Childhood, 1984",
+                # v251: the shape `timeline.placement_assertion` actually
+                # files — the date decision, never the era it lands in.
+                "“the move to Mesa” happened 1984",
                 source_type="source_correction", title=None,
                 source_medium="fix", correction_kind=kind,
                 correction_role=role)

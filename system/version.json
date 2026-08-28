@@ -1,7 +1,7 @@
 {
-  "version": 250,
+  "version": 251,
   "released": "2026-08-28",
-  "changelog": "v250: a provisional frame says how it was calculated, never that you said it (lifehug#266, lifehug-platform#686). WHY: O-E1 files ONE provenance entry on every age frame's own record, and it was always the stated birthday's — cross_dating.AGE_FRAME_PROVENANCE, which chronology.display_date renders as “— you said from your birthday”. v241's birth_origin.provisional_origin then started drawing frames on a CALCULATED origin (origin_basis: calculated), seeded from age statements on a vault whose whole point is that it has no birthday on file — so every frame of a provisional scaffold rendered a sentence the person never said. The node's own provenance_summary was already correct; the record the host renders was not. NOW: cross_dating.frame_origin_provenance is the ONE place the entry is chosen, and it reads the ORIGIN's basis — explicit keeps “from your birthday” verbatim; calculated quotes the origin's own words back from the birth-origin:1 provenance row (“calculated from ‘I was 30 when I started there’”), or the bare AGE_FRAME_CALCULATED_PROVENANCE sentence when the origin kept none. Never omitted: an absent entry would promote the age-frame:1 clamp row into the clause and tell the same lie in different words. age_frames gains origin_basis (default explicit — timeline.py's three callers hold a stated vault birthday; the fold passes what _origin_basis_of already answered, so the substrate table CLAIM_BASIS_BY_DATE_BASIS is still read in exactly one place). chronology.CALCULATED_PROVENANCE_BASIS is a new provenance-entry basis — not a member of BASES — whose claim display_date prints VERBATIM after the dash, because a clause that names arithmetic has nobody to attribute it to. cross_dating.origin_is_explicit is the one predicate, shared with birth_origin.origin_provenance_summary, so the frame's rendered clause and the node's summary cannot drift; birth_origin.CALCULATED_ORIGIN_PROVENANCE is now a re-export of the cross_dating constant rather than a second copy of the sentence. TESTS: tests/test_eras_e_bo.py ProvisionalFrameProvenanceTests (five cases: the defect, the quoted clause, the no-quote fallback, the frame/node non-drift, the explicit origin untouched) and tests/test_eras_e1.py StatedOriginProvenanceTests (three cases pinning the stated rendering and the predicate); every one was run against unmodified main (90bdc57) first and SEEN failing — the prime case failed with “16 June 1980–15 June 1994 — you said from your birthday” on all seven reached frames. WHAT YOU'LL NOTICE: on a vault with no birthday, the age frames now read “16 June 1980–15 June 1994 — calculated from ‘I was 30’” instead of claiming you gave a birthday you never gave. A stated birthday's frames are byte-identical to v249.",
+  "changelog": "v251: a placement records the DATE, never the era (lifehug#274, found by the E7a rehearsal; authorities v244/O-C2 `docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md` and the Eras controlling design §5.1). WHY: `timeline-place` files the durable half of every placement as a `--role placement` correction, and the body it composed read ““Charlee writes … Father's Day letter to Dave” happened during My 40s, May 2022” — ONE SENTENCE CARRYING BOTH A DATE AND AN ERA, which is the sentence shape of the 2026-08-25 defect one era to the right. O-C2 already ruled that a placement is a date DECISION about a moment the person accepts, not an assertion about the era it lands in; §5.1 says the period is DERIVED from the date by frame arithmetic. `My 40s` is not something anybody said — it is what the arithmetic computed from `May 2022`. THE BODY IS DURABLE TWICE, which is what made this worse than untidy prose: it is the immutable payload of a vault source record, AND `classify_story.corrections_for` hands it straight back to the next classification prompt under “LATER CORRECTIONS (authoritative — these OVERRIDE the story text above)”. So the derived era steered the next reclassification with the date's own authority, and a later correction to the arithmetic could never reach it: prose inside an immutable source is not a claim anything can supersede. NOW: ONE DEFINITION — `timeline.placement_assertion` — composes the body, and it states the date decision only: ““…” happened May 2022” at the grain the person gave it (`around 1984`, `sometime in the 1980s`, `spring 2001`, `21 December 2010`), the anchor clause kept because anchors are evidence FOR the date, and the when-hint kept unless a host derived it from the date itself (`timeline_interaction.place_invocation` sets `--when-hint` to the very same `display_date`, so without the era standing between them the duplication was the whole sentence). A period-only pin — no date, no hint — now says so out loud rather than naming the era as the only temporal thing it asserts. THE ERA IS NOT LOST: it was never information this record held. It travels as `period` on the row in `state/timeline_placements.json`, which is where rung 0 reads it (`timeline.save_placement`). `cmd_timeline_place` no longer composes a sentence of its own — composing it there is how the era got in — and `period_label` stays what it always was: display, in the success line. CONTENT-ROLE CORRECTIONS ARE UNTOUCHED: a person saying the text got a fact wrong still files their own words verbatim and still marks the reading stale. TESTS: `tests/test_placement_body_date_only.py`, 16 cases / 5 subtests, every one seen failing first — the one definition read directly, the command's filed body pinned to be that definition's output, the bytes on disk in a real temp vault whose era is named `My 40s`, and the classification-prompt injection proved era-free at the point the model actually reads it. WHAT YOU'LL NOTICE: dating a moment writes down the date you gave and nothing the machine inferred.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -421,6 +421,7 @@
     "tests/test_eras_e1b.py",
     "tests/test_eras_e2.py",
     "tests/test_eras_e3.py",
+    "tests/test_eras_e3b.py",
     "tests/test_eras_e_bo.py",
     "tests/test_exact_file_git.py",
     "tests/test_extraction_claims.py",
@@ -442,6 +443,7 @@
     "tests/test_people_roster.py",
     "tests/test_person_dates.py",
     "tests/test_place_no_stories_arcs.py",
+    "tests/test_placement_body_date_only.py",
     "tests/test_placement_score.py",
     "tests/test_projection_publication.py",
     "tests/test_question_candidate.py",
@@ -504,7 +506,6 @@
     "tests/walkthrough_entity_candidate.py",
     "tests/walkthrough_focus_candidate.py",
     "tests/walkthrough_lib.py",
-    "wiki/SCHEMA.md",
-    "tests/test_eras_e3b.py"
+    "wiki/SCHEMA.md"
   ]
 }

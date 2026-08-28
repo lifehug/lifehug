@@ -739,8 +739,9 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
     )
     # v195 (ADR 0024): the placement can carry a real date record. The filed
     # correction — the DURABLE half; the pin is only display — says the date in
-    # words, so the archive reads "happened around 1984 (you said you were about
-    # five)" rather than only naming an era.
+    # words, so the archive reads "happened around 1984" rather than naming an
+    # era. v251: it says ONLY that. The body is composed by the one definition
+    # `timeline.placement_assertion`, which is where the reason lives.
     record = None
     if getattr(args, "date", None):
         record = chronology.parse_edtf(args.date, basis=(args.basis or "stated"))
@@ -756,13 +757,13 @@ def cmd_timeline_place(args: argparse.Namespace) -> int:
 
         record = _replace(record, basis=basis,
                           anchors=tuple(getattr(args, "anchor", None) or ()))
-    assertion = f"“{description[:120]}” happened during {period_label}"
-    if record is not None:
-        assertion += f", {chronology.display_date(record, with_basis=False)}"
-        if record.anchors:
-            assertion += f" (anchored on {', '.join(record.anchors)})"
-    if args.when_hint:
-        assertion += f", {args.when_hint}"
+    # v251: the DATE DECISION, and never the era it lands in — `period_label`
+    # is display, and the era travels on the placement row where rung 0 reads
+    # it. Composing this sentence here is how the era got into an immutable
+    # record and, through `classify_story.corrections_for`, into the next
+    # classification prompt as an authoritative fact.
+    assertion = timeline.placement_assertion(
+        description, date=record, when_hint=args.when_hint)
     # v237 (O-C2): `--role placement`. The durable half of a placement is a
     # date DECISION about a moment the person already accepts — not a claim
     # that the source's text is wrong — so it must not mark the target's
