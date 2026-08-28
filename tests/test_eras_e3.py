@@ -842,6 +842,11 @@ class EraRecordTests(unittest.TestCase):
 
     def test_memberships_with_no_writer_refuse_the_whole_act(self):
         # ADR 0021: unwired is a loud failure, never a silent under-delivery.
+        # O-E2 IS wired now (lifehug#270), so being unwired has to be staged:
+        # the resolver is what answers `None`, and everything downstream of it
+        # must still refuse the WHOLE act rather than file five sixths of it.
+        self.addCleanup(setattr, er, "membership_writer", er.membership_writer)
+        er.membership_writer = lambda: None
         before = _files(self.root)
         with self.assertRaises(er.EraRecordError) as caught:
             er.record_era(self.root, {

@@ -33,11 +33,24 @@ completes the remaining steps and duplicates none of the finished ones
 point and then running it whole.
 
 **What this module deliberately does not own.** The membership receipt is
-O-E2's (`sources/eras/memberships/`), reached here through ONE named seam
-(:func:`membership_writer`). Per ADR 0021 an unwired seam FAILS LOUD: a
-payload carrying `memberships` with no writer is refused BEFORE the first
-byte is written, rather than filing five sixths of the act and shrugging
-about the sixth.
+O-E2's (`sources/eras/memberships/` — :func:`era_memberships.file_era_membership`),
+reached here through ONE named seam (:func:`membership_writer`) that BINDS
+that function rather than reimplementing it. Per ADR 0021 an unwired seam
+FAILS LOUD: a payload carrying `memberships` with no writer is refused BEFORE
+the first byte is written, rather than filing five sixths of the act and
+shrugging about the sixth.
+
+That guard was load-bearing for a whole release and nobody noticed, which is
+worth writing down. This module was authored against O-E2 before O-E2 landed
+and guessed the module name — `era_membership`, singular, with a
+`file_membership_assertion` inside it. v247 shipped `era_memberships` with
+`file_era_membership`. The lazy import raised `ImportError`, the seam
+answered `None` honestly, and `era-record` correctly refused every payload
+carrying memberships — so the fifth leg was not *broken*, it was *never
+performed*, on any vault, for the entire life of the verb (lifehug#270). The
+refusal is why this cost nothing but a missing feature. The lesson is that a
+seam resolved by a STRING needs a test that the string names something real,
+which is what `tests/test_eras_e3b.py`'s import guard now is.
 """
 
 from __future__ import annotations
@@ -96,27 +109,102 @@ class EraRecordError(TemporalContractError):
 # The O-E2 seam
 # --------------------------------------------------------------------------
 
-#: Set by O-E2 (or by a test) to the function that files ONE membership
-#: assertion: ``fn(vault_root, *, member_node_id, era_node_id, relation,
-#: source_ref, basis, now) -> (record, created)``.
+#: Set by a test (or a host with its own binding) to the function that files
+#: ONE membership assertion: ``fn(vault_root, *, member_node_id, era_node_id,
+#: relation, source_ref, basis, now) -> (record, created)``. Left ``None``,
+#: :func:`membership_writer` binds O-E2's real writer through
+#: :func:`_adapt_membership_writer`.
 MEMBERSHIP_WRITER: Callable | None = None
+
+#: The module O-E2 shipped the receipt writer in, and the function inside it.
+#: Named as constants because the whole defect this pair exists to prevent was
+#: a *string* — `era_record` lazily imported ``era_membership`` (singular) for
+#: a module O-E2 shipped as ``era_memberships``, so the seam resolved to
+#: ``None`` on every vault and the fifth leg of the atomic writer was refused
+#: rather than performed (lifehug#270). A name in a constant is a name the
+#: import guard can check.
+MEMBERSHIP_MODULE = "era_memberships"
+MEMBERSHIP_FUNCTION = "file_era_membership"
+
+#: What an era-record membership asserts by default. NOT ``"stated"`` — that
+#: word is not in :data:`temporal_claims.CLAIM_BASES` and the receipt writer
+#: refuses it. A person saying "during College" in their own sentence is
+#: `explicit`, which is also O-E2's own default.
+MEMBERSHIP_DEFAULT_BASIS = "explicit"
+
+#: What an era-record membership asserts when the row does not say.
+MEMBERSHIP_DEFAULT_RELATION = "within"
 
 
 def membership_writer() -> Callable | None:
     """The membership receipt writer, or ``None`` when nothing is wired.
 
-    Explicit override first, then O-E2's module if it is present. Returning
-    ``None`` is the honest answer and the caller refuses on it — a silent
-    skip here would be exactly the "wired into some hosts and silently does
-    less in others" failure ADR 0021 was ratified over.
+    Explicit override first, then O-E2's module. Returning ``None`` is the
+    honest answer and the caller refuses on it — a silent skip here would be
+    exactly the "wired into some hosts and silently does less in others"
+    failure ADR 0021 was ratified over.
+
+    There is ONE writer and this does not become a second one: the adapter
+    below translates names and return shape and files nothing itself.
     """
     if MEMBERSHIP_WRITER is not None:
         return MEMBERSHIP_WRITER
     try:
-        import era_membership  # noqa: PLC0415
-    except ImportError:
+        import era_memberships  # noqa: PLC0415
+    except ImportError:  # pragma: no cover - the module is vendored beside us
         return None
-    return getattr(era_membership, "file_membership_assertion", None)
+    filer = getattr(era_memberships, MEMBERSHIP_FUNCTION, None)
+    if filer is None:  # pragma: no cover - guarded by the import-name test
+        return None
+    return _adapt_membership_writer(era_memberships, filer)
+
+
+def _adapt_membership_writer(module, filer: Callable) -> Callable:
+    """O-E2's writer, wearing the seam's signature. Adapts; never re-implements.
+
+    Two things differ and only two: the clock parameter is spelled
+    ``occurred_at`` there and ``now`` here, and O-E2 returns the normalized row
+    while this seam promised ``(record, created)``. ``created`` is *observed*
+    — the receipt is content-addressed, so whether this call minted the file is
+    exactly whether its path was absent a moment ago — rather than recomputed
+    by a parallel copy of ``_create_or_keep``'s logic, which is the shape ADR
+    0021 exists to forbid.
+    """
+
+    def write(
+        vault_root,
+        *,
+        member_node_id,
+        era_node_id,
+        relation=MEMBERSHIP_DEFAULT_RELATION,
+        source_ref=None,
+        basis=MEMBERSHIP_DEFAULT_BASIS,
+        now=None,
+        **extra,
+    ):
+        verb = collapsed_text(relation).lower() or MEMBERSHIP_DEFAULT_RELATION
+        relative = module.membership_relative_path(
+            module.membership_digest(
+                member_node_id=member_node_id,
+                era_node_id=era_node_id,
+                relation=verb,
+                source_ref=source_ref,
+            )
+        )
+        existed = store.store_path(Path(vault_root), relative).exists()
+        record = filer(
+            vault_root,
+            member_node_id=collapsed_text(member_node_id),
+            era_node_id=collapsed_text(era_node_id),
+            source_ref=source_ref,
+            relation=verb,
+            basis=basis,
+            occurred_at=now,
+            **extra,
+        )
+        return record, not existed
+
+    return write
 
 
 # --------------------------------------------------------------------------
@@ -506,14 +594,18 @@ def record_era(
                 vault_root,
                 member_node_id=collapsed_text(row.get("member_node_id")),
                 era_node_id=era_id,
-                relation=collapsed_text(row.get("relation")) or "within",
-                source_ref=collapsed_text(row.get("source_ref"))
-                or summary.get("steps", {}).get("claims", {}).get("source_id")
-                or plan["operation_id"],
-                basis=collapsed_text(row.get("basis")) or "stated",
+                relation=collapsed_text(row.get("relation"))
+                or MEMBERSHIP_DEFAULT_RELATION,
+                source_ref=_membership_source_ref(row, summary, plan),
+                basis=collapsed_text(row.get("basis")) or MEMBERSHIP_DEFAULT_BASIS,
                 now=when,
             )
-            rows.append({"created": created, "record": record})
+            rows.append({
+                "created": created,
+                "assertion_id": (record or {}).get("assertion_id"),
+                "path": (record or {}).get("relative_path"),
+                "record": record,
+            })
         summary["steps"]["memberships"] = rows
     if done("memberships"):
         return summary
@@ -530,6 +622,31 @@ def record_era(
         "nodes": published["nodes"],
     }
     return summary
+
+
+def _membership_source_ref(row: dict, summary: dict, plan: dict) -> object:
+    """What one membership assertion CITES, in the order the design permits.
+
+    An explicit `source_ref` on the row first — a caller that already knows the
+    evidence is not overruled. Otherwise **this act's own promoted source**: the
+    `SourceRef` the claims leg promoted, passed WHOLE rather than as its
+    `source_id`, because `era_memberships.membership_digest` keys identity on
+    `source_id@revision` and a bare id would make this the one receipt in the
+    vault citing a source at no revision.
+
+    Last, the operation id — for the payload that asserts a membership and
+    files no claim, so promoted nothing. It is a real, stable citation of the
+    act that said so, and the alternative is an empty `source_ref`, which O-E2
+    refuses outright ("date overlap is not evidence").
+    """
+    stated = row.get("source_ref")
+    if isinstance(stated, dict) or hasattr(stated, "to_dict"):
+        return stated
+    text = collapsed_text(stated)
+    if text:
+        return text
+    promoted = (summary.get("steps") or {}).get("claims") or {}
+    return promoted.get("source_ref") or plan["operation_id"]
 
 
 def _file_claims_and_bind(
@@ -590,6 +707,9 @@ def _file_claims_and_bind(
     return {
         "source_id": source_ref.source_id,
         "source_path": source_ref.source_path,
+        # The WHOLE ref, not just its id: the membership leg cites a source AT
+        # A REVISION, and `source_id` alone silently drops the revision half.
+        "source_ref": source_ref.to_dict(),
         "receipt": Path(receipt).name,
         "claim_ids": [claim["claim_id"] for claim in minted],
         "bindings": bindings,
@@ -645,6 +765,10 @@ def describe(summary: object) -> list[str]:
 __all__ = [
     "ERA_RECORD_ERROR_CODES",
     "ERA_RECORD_EXTRACTOR",
+    "MEMBERSHIP_DEFAULT_BASIS",
+    "MEMBERSHIP_DEFAULT_RELATION",
+    "MEMBERSHIP_FUNCTION",
+    "MEMBERSHIP_MODULE",
     "MEMBERSHIP_WRITER",
     "PAYLOAD_KEYS",
     "STEPS",
