@@ -12,15 +12,21 @@ Three things are pinned here, all from
    never starve the tail again.
 3. A correction document is never a classification TARGET — the source it
    corrects is.
+4. (O-C2) A PLACEMENT correction does not mark its target stale. Dating a
+   moment is a decision about it, not a refutation of the text it was read out
+   of — see `PlacementKeepsItsOwnMomentTests` and
+   `docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md`.
 
 Synthetic data only; NEVER references ~/Workspace/dave.
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -34,12 +40,14 @@ sys.path.insert(0, str(SYSTEM))
 
 import book  # noqa: E402
 import classify_story as cs  # noqa: E402
+import lifehug_core as core  # noqa: E402
 import mirror  # noqa: E402
 import progress  # noqa: E402
 import question_planner  # noqa: E402
 import recommend_focuses  # noqa: E402
 import research_expand  # noqa: E402
 import serve_wiki  # noqa: E402
+import source_integrity as si  # noqa: E402
 import timeline as tl  # noqa: E402
 import weekly_report  # noqa: E402
 
@@ -419,30 +427,32 @@ class CorrectionsAreNeverTargetsTests(unittest.TestCase):
         self.assertIn("answers/Z1.md", message)
 
 
-class PlacementWithholdsItsOwnMomentTests(unittest.TestCase):
-    """A REPORTED CONTRACT COLLISION, pinned rather than papered over.
+class PlacementKeepsItsOwnMomentTests(unittest.TestCase):
+    """O-C2 — a placement is a DECISION about a moment, not a refutation of
+    the text it was read out of.
 
+    O-C's first draft pinned the opposite, as a reported contract collision:
     `timeline-place` files a date CORRECTION as its durable half (v103/v213),
-    and `source_integrity.create_linked_source` marks every corrected source's
-    classification stale. Under this PR's ruling — "a stale classification is
-    excluded from every derived reader immediately" — that means placing a
-    date on a moment WITHHOLDS THAT MOMENT from the Timeline until a model
-    re-derives its classification. The person's own act of dating a moment is
-    what makes it disappear.
+    `source_integrity.create_linked_source` marked EVERY corrected source's
+    classification stale, and this PR's `is_current` gate drops a stale
+    classification from every derived reader at once — so the person's own act
+    of dating a moment was what made it disappear, until a model re-derived
+    it. That contradicts lifehug#224's stated guarantee ("the proof ends where
+    the person looks: the moment, in its period, dated") and broke seven of
+    lifehug#228's placement-identity tests.
 
-    Both halves are ruled behavior and neither was written knowing about the
-    other: the exclusion is decision 13 / design §6, and "the proof ends where
-    the person looks: the moment, in its period, dated" is lifehug#224's own
-    stated guarantee. `docs/pr-specs/eras-o-c-stale-first-cursor.md` names
-    `mark_stale` as the source of `stale: true` and does not name this
-    consequence, so it is reported as a contract error for the owner to rule
-    on — the choices being (a) accept it, with the stale-first batch as the
-    repair window, (b) place through the claim substrate's `timeline-move`
-    instead of a correction, or (c) narrow `mark_stale` so a correction that
-    ADDS a date the classifier never had does not invalidate the reading.
+    The ruling taken (option (c) of the three the pin listed, flagged to the
+    owner for veto): only a CONTENT correction invalidates a reading. The
+    correction record says which it is — `correction_role`, a closed
+    vocabulary of exactly two values in `lifehug_core` — and both hosts ask
+    the one predicate. Contract:
+    `docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md`.
 
-    This test asserts what the code DOES today. It is not an endorsement; when
-    the ruling lands, this is the test that has to change, by name.
+    Every classification path here is derived through
+    `cs.classification_path`, never spelled by hand: `classify_stem` slugifies
+    (lowercasing) and a hand-written `answers-A1.json` matches on macOS and
+    NOT on Linux — which is precisely why the pin this class replaces passed
+    locally and failed on CI.
     """
 
     def setUp(self):
@@ -452,23 +462,162 @@ class PlacementWithholdsItsOwnMomentTests(unittest.TestCase):
         self.clf = self.tmp / "state" / "classifications"
         self.source = self.tmp / "answers" / "A1.md"
         self.source.parent.mkdir(parents=True)
-        self.source.write_text("# A1\n\nWe moved to Mesa.\n", encoding="utf-8")
-        _write(self.clf, "answers-A1.json", CURRENT)
+        self.source.write_text(
+            '---\ntype: "prompted_answer"\nsource_id: "answer:A1"\n---\n\n'
+            "# A1\n\nWe moved to Mesa.\n", encoding="utf-8")
+        for patcher in (
+            mock.patch.object(cs, "CLASSIFICATIONS_DIR", self.clf),
+            mock.patch.object(cs, "REPO_DIR", self.tmp),
+            mock.patch.object(cs, "ANSWERS_DIR", self.tmp / "answers"),
+            mock.patch.object(si, "SOURCES_DIR", self.tmp / "sources"),
+            mock.patch.object(si, "ANSWERS_DIR", self.tmp / "answers"),
+            mock.patch.object(si, "REPO_DIR", self.tmp),
+            mock.patch.object(si, "CORRECTION_SOURCES_DIR",
+                              self.tmp / "sources" / "corrections"),
+            mock.patch.object(si, "resolve_source_target", lambda _v: self.source),
+            mock.patch.object(si, "register_source", lambda _p: {}),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # The classification file the readers read, at the stem the code
+        # itself derives.
+        self.classification = cs.classification_path(self.source)
+        _write(self.clf, self.classification.name, CURRENT)
 
-    def test_marking_a_placed_sources_classification_stale_withholds_its_moment(self):
-        with mock.patch.object(cs, "CLASSIFICATIONS_DIR", self.clf), \
-                mock.patch.object(cs, "REPO_DIR", self.tmp):
-            with mock.patch.object(tl, "CLASSIFICATIONS_DIR", self.clf):
-                before = [e["description"] for e in tl.load_events()]
-            self.assertEqual(before, ["the current event"])
+    def _file(self, *, role, kind="date"):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            path = si.create_linked_source(
+                "answers/A1.md",
+                "“the move to Mesa” happened during Childhood, 1984",
+                source_type="source_correction", title=None,
+                source_medium="fix", correction_kind=kind,
+                correction_role=role)
+        return path, buffer.getvalue()
 
-            # Exactly what filing a placement's correction does.
-            self.assertTrue(cs.mark_stale(self.source, reason="correction filed"))
+    def _moments(self):
+        with mock.patch.object(tl, "CLASSIFICATIONS_DIR", self.clf):
+            return [e["description"] for e in tl.load_events()]
 
-            with mock.patch.object(tl, "CLASSIFICATIONS_DIR", self.clf):
-                after = [e["description"] for e in tl.load_events()]
-        self.assertEqual(after, [], "the moment survived its own placement — "
-                                    "the collision was resolved; update this test")
+    def _stale_flag(self):
+        return json.loads(
+            self.classification.read_text(encoding="utf-8")).get("stale")
+
+    def test_a_placement_correction_keeps_the_moment_it_placed(self):
+        self.assertEqual(self._moments(), ["the current event"])
+        _path, output = self._file(role="placement")
+        self.assertIsNone(self._stale_flag())
+        self.assertTrue(cs.is_current(self.source))
+        self.assertEqual(self._moments(), ["the current event"],
+                         "the moment vanished the instant it was dated")
+        self.assertIn("stays current", output)
+
+    def test_a_content_correction_still_withholds_its_moment(self):
+        """The positive control — the SAME call, the other role. The moment is
+        absent because the reading was refuted, not because the fixture never
+        reached the reader."""
+        self.assertEqual(self._moments(), ["the current event"])
+        _path, output = self._file(role="content", kind="factual")
+        self.assertTrue(self._stale_flag())
+        self.assertFalse(cs.is_current(self.source))
+        self.assertEqual(self._moments(), [])
+        self.assertIn("for re-classification", output)
+
+    def test_an_unstated_role_is_a_content_correction(self):
+        """`correct` and `fix` file no role and must behave exactly as they
+        did before O-C2: a person correcting a fact still invalidates the
+        reading it was extracted from."""
+        self._file(role=None, kind="factual")
+        self.assertTrue(self._stale_flag())
+        self.assertFalse(cs.is_current(self.source))
+
+    def test_the_correction_records_its_role_durably(self):
+        path, _ = self._file(role="placement")
+        metadata, _payload = si.split_frontmatter(
+            path.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["correction_role"], "placement")
+        self.assertEqual(metadata["correction_kind"], "date")
+        content, _ = self._file(role="content", kind="factual")
+        metadata, _payload = si.split_frontmatter(
+            content.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["correction_role"], "content")
+
+    def test_the_same_words_in_two_roles_are_two_records(self):
+        """Linked-source identity is content-addressed, and the role is part of
+        what "the same record" means. Byte-identical text filed as a placement
+        and as a content correction are two different acts; treating the second
+        as an idempotent retry left a record whose frontmatter described the
+        other one (found by the test above, before this guard existed)."""
+        placement, _ = self._file(role="placement")
+        content, _ = self._file(role="content")
+        self.assertNotEqual(placement, content)
+        for path, role in ((placement, "placement"), (content, "content")):
+            metadata, _payload = si.split_frontmatter(
+                path.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["correction_role"], role)
+        # And a genuine retry of either is still one record, not two.
+        again, _ = self._file(role="placement")
+        self.assertEqual(again, placement)
+
+    def test_an_unknown_role_refuses_and_writes_nothing(self):
+        with self.assertRaises(ValueError):
+            self._file(role="whenever")
+        self.assertIsNone(self._stale_flag())
+        self.assertFalse((self.tmp / "sources" / "corrections").exists(),
+                         "a refused correction still wrote its record")
+
+    def test_mark_stale_itself_refuses_the_placement_role(self):
+        """The seam, not just the caller: the predicate lives in ONE place and
+        `mark_stale` asks it, so a future second caller cannot re-file a
+        placement as a refutation by forgetting a guard."""
+        self.assertFalse(
+            cs.mark_stale(self.source, reason="placement filed",
+                          correction_role="placement"))
+        self.assertIsNone(self._stale_flag())
+        self.assertTrue(
+            cs.mark_stale(self.source, reason="correction filed",
+                          correction_role="content"))
+        self.assertTrue(self._stale_flag())
+
+    def test_the_role_vocabulary_is_closed(self):
+        self.assertEqual(core.CORRECTION_ROLES, ("content", "placement"))
+        self.assertEqual(core.DEFAULT_CORRECTION_ROLE, "content")
+        self.assertTrue(core.correction_role_marks_stale(None))
+        self.assertTrue(core.correction_role_marks_stale("content"))
+        self.assertFalse(core.correction_role_marks_stale("placement"))
+        for bad in ("Placement", "placements", "date", "stale", "  ", "0"):
+            with self.assertRaises(ValueError, msg=bad):
+                core.normalize_correction_role(bad)
+        # Surrounding whitespace is tolerated; the value itself is not guessed.
+        self.assertEqual(core.normalize_correction_role(" placement "),
+                         "placement")
+
+    def test_timeline_place_files_in_the_placement_role(self):
+        """The one line of `cmd_timeline_place` that carries the ruling, pinned
+        where removing it fails loudly. The end-to-end proof — a real
+        subprocess, a real vault, the moment read back at its placed date — is
+        `tests/test_timeline_place_filing.py`, whose seven lifehug#228
+        identity tests pass unchanged because of this flag."""
+        import lifehug as lh  # noqa: PLC0415
+
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return subprocess.CompletedProcess(argv, 1, "", "")
+
+        args = argparse.Namespace(
+            source="answers/A1.md", period="childhood", date=None, basis=None,
+            anchor=[], when_hint="", note="", placement_key="")
+        with mock.patch.object(lh.sys, "stdin", io.StringIO("the move to Mesa")), \
+                mock.patch.object(lh.subprocess, "run", fake_run), \
+                mock.patch("timeline.load_periods", return_value=[]), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            lh.cmd_timeline_place(args)
+        argv = seen["argv"]
+        self.assertIn("--role", argv)
+        self.assertEqual(argv[argv.index("--role") + 1], "placement")
+        self.assertEqual(argv[argv.index("--kind") + 1], "date")
 
 
 class VaultContractTests(unittest.TestCase):

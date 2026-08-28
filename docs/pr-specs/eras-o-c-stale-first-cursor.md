@@ -8,9 +8,10 @@ parity twin: #254. Controlling authority: the platform's `docs/design/eras.md`
 
 ## Why
 
-A classification carrying `stale: true` — filed by a correction through
-`source_integrity.create_linked_source` → `classify_story.mark_stale`
-(`system/source_integrity.py:1025`) — **keeps feeding the Timeline, Mirror,
+A classification carrying `stale: true` — filed by a CONTENT correction
+through `source_integrity.create_linked_source` → `classify_story.mark_stale`
+(`system/source_integrity.py:1025`; amended by O-C2, see below) — **keeps
+feeding the Timeline, Mirror,
 the Book, focus recommendations and the wiki until a fresh one overwrites
 it**. `is_classified`'s own docstring records the leak
 (`system/classify_story.py:184-193`): stale counts as "unclassified" for the
@@ -35,6 +36,32 @@ classification explicitly marked stale is excluded from derived readers
 **immediately**; reclassification is queued promptly, stale-first; compile
 proceeds zero-model; a model outage never restores a known-stale
 interpretation.
+
+### Amendment — O-C2: what marks a classification stale
+
+`docs/pr-specs/eras-o-c2-placement-keeps-its-moment.md` (stacked on this PR)
+narrows the sentence above about *which* corrections mark a target stale.
+This contract said "a correction" and meant all of them; composed with the
+`is_current` gate, that withheld the very moment a person had just dated,
+because `timeline-place` files its durable half as a `source_correction`.
+`PlacementWithholdsItsOwnMomentTests` in this PR reported the collision and
+listed three options; option (c) was taken.
+
+A correction now declares its **role** — `correction_role`, a closed
+vocabulary of `content` | `placement` in `lifehug_core`:
+
+* `content` (the default, and every correction filed before O-C2) — the
+  text got a fact wrong; the reading is known-wrong. **Marks stale**, and
+  everything this contract rules about staleness applies unchanged.
+* `placement` (`timeline-place` only) — a date DECISION about a moment the
+  person accepts. **Does not mark stale**; the placement overlay
+  `state/timeline_placements.json` moves the date on read.
+
+Nothing else in this contract changes: `is_current`, the eight rewired
+readers, `--stale-first`, the cursor and the corrections-are-never-targets
+rule all stand as written. `PlacementWithholdsItsOwnMomentTests` becomes
+`PlacementKeepsItsOwnMomentTests` and
+`tests/test_timeline_place_filing.py` returns to its unadapted form.
 
 ## Binding facts (as of `origin/main` v234, `235eea91…`)
 
