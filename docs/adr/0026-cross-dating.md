@@ -233,6 +233,16 @@ And nothing ever told him, in the conversation, what his answer had just done
 
 ### 1. Bands date themselves, from a ladder of their own
 
+> **Amended by ADR 0030 decision 4 (v254, issue #278).** The `moments` /
+> `moment_envelope` rung below is **removed from the ladder**. What is "inside"
+> an era is a placement the same pass helps decide, so dating the era from its
+> members makes the accident of slotting read as a fact — on the founder's
+> vault `high-school` took `1997/2021` from twelve moments that were only there
+> because placement ran before cross-dating. The envelope survives as
+> `cross_dating.observed_envelope`, published on the era row's own
+> `observed_envelope` key: *coverage, never a bound*. Everything else in this
+> section stands, and `BAND_RULES` is now `("residence", "age_label")`.
+
 `cross_dating.date_bands` walks every UNDATED period and gives it a span:
 
 | Rule | Join | The span it takes |

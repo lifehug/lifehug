@@ -1389,6 +1389,12 @@ def place_events(events: list[dict], periods: list[dict],
                     pinned = chrono.from_dict(manual["date"])
                     if pinned is not None:
                         event["date"] = pinned
+                        # v254: the pre-placement pass may already have derived
+                        # a date for this moment. The owner's pin outranks it —
+                        # and a `date_derived` left behind would label a stated
+                        # date as one this system worked out, which is exactly
+                        # the provenance lie ADR 0026 exists to prevent.
+                        event.pop("date_derived", None)
                 if manual.get("note"):
                     event["placement_note"] = manual["note"]
                 event["placement_reason"] = {"rung": 0, "evidence": "manual"}
@@ -3513,6 +3519,23 @@ def timeline_data(evidence: list[dict] | None = None,
             frames = cross_dating.age_frames(birth_date, as_of=now_utc())
         except Exception:  # noqa: BLE001
             frames = ()
+    # v254 (issue #278, ADR 0030 §4) — DATE BEFORE YOU PLACE. `heuristic_slot`
+    # rung 1 is "dated → frame arithmetic", and it was structurally unreachable:
+    # this function placed first and cross-dated second, so a moment whose date
+    # the pass supplies was undated at the moment somebody asked where it goes.
+    # Twelve of the founder's thirteen dated moments were in that state and
+    # every one of them landed by era LANGUAGE instead of by its date
+    # (lifehug-platform#720 CERT-03). So the membership-INDEPENDENT rungs run
+    # here, before placement; the rungs that need to know which era a moment is
+    # in stay in `cross_date` below. Guarded like every other derived block —
+    # a cross-dating problem must not take the timeline down, and a failure
+    # here simply leaves the rows undated for `place_events`, exactly as before.
+    try:
+        cross_dating_report = cross_dating.cross_date_moments(
+            events, entity_lineup=entity_lineup, anchors=anchors,
+            birth_date=birth_date)
+    except Exception:  # noqa: BLE001
+        cross_dating_report = None
     event_lineup, unplaced_events = place_events(
         events, periods, placements, frames=frames, anchors=landmark_anchors,
         birth_date=birth_date,
@@ -3542,6 +3565,9 @@ def timeline_data(evidence: list[dict] | None = None,
             entity_lineup=entity_lineup,
             anchors=anchors,
             birth_date=birth_date,
+            # v254: continue the pre-placement phase's report so the two halves
+            # of one pass report ONE set of counts.
+            report=cross_dating_report,
         )
         # v207 (ADR 0026 amendment, design D3): a band the pass just dated is
         # a new anchor for the spine's order, so the ordering improves on the
@@ -3550,10 +3576,14 @@ def timeline_data(evidence: list[dict] | None = None,
         if cross_dating_report["bands"]["derived"]:
             periods = derive_chrono(periods)
     except Exception:  # noqa: BLE001
-        cross_dating_report = {"derived": 0, "by_rule": {}, "by_join": {},
-                               "moments": [],
-                               "bands": {"derived": 0, "by_rule": {},
-                                         "by_join": {}, "bands": []}}
+        # v254: phase one already ran and its counts are true — keep them
+        # rather than reporting zero for work that demonstrably happened.
+        cross_dating_report = cross_dating_report if isinstance(
+            cross_dating_report, dict) else {"derived": 0, "by_rule": {},
+                                             "by_join": {}, "moments": []}
+        cross_dating_report["bands"] = {"derived": 0, "by_rule": {},
+                                        "by_join": {}, "bands": [],
+                                        "observed_envelopes": 0}
     for rows_here in event_lineup.values():
         sort_period_events(rows_here)
 

@@ -69,13 +69,13 @@ founder filed his birth and *"Childhood"* still read `undated`, because
    era (their own page span, or the residence landmark whose label they name).
    Where you were living is the person's own fact, and it bounds the era that
    contains it.
-2. **moments** — the envelope of the era's already-dated moments, exactly the
-   discipline :func:`span_from_dated` has always applied to a residence
-   (``timeline._place_span`` now delegates to it). Bounds from what is dated
-   inside, never a manufactured point.
-3. **age_label** — an era the roster NAMED after an age (*"My 20s"*) plus the
+2. **age_label** — an era the roster NAMED after an age (*"My 20s"*) plus the
    birthday, which is a definitional join and inherits the birthday's own
    confidence.
+
+**v254 removed a third rung that used to sit between those two** — `moments`,
+the envelope of the era's already-dated members. See :data:`BAND_RULES` and
+:func:`observed_envelope`.
 
 The order is deliberately NOT :data:`RULES`' order. A definitional join is the
 strongest thing a MOMENT can have, because the marker is the person's own
@@ -131,23 +131,31 @@ PROVENANCE_SOURCE = "cross-dating"
 #: deliberately NOT :data:`RULES`' order. For a MOMENT a definitional join is
 #: the strongest thing there is, because the marker is the person's own
 #: sentence. For a BAND the "definitional" rung is an age the ROSTER MODEL put
-#: in a name ("My 20s"), so it is ranked under the two rungs grounded in what
-#: the person actually did: where they lived, and what is already dated inside.
-BAND_RULES = ("residence", "moments", "age_label")
+#: in a name ("My 20s"), so it is ranked under the rung grounded in what the
+#: person actually did: where they lived.
+#:
+#: **v254 (issue #278, ADR 0030 decision 4): `moments` LEFT THIS LADDER.** An
+#: era is never dated by whatever got sorted into it — the envelope of its
+#: members is COVERAGE and is published as :func:`observed_envelope` on the
+#: row, never as the era's bounds. See that function's docstring for the
+#: incident.
+BAND_RULES = ("residence", "age_label")
 
 #: Which band identity a derivation leaned on. One per rule, so far.
-BAND_JOINS = ("residence_span", "moment_envelope", "age_label")
+BAND_JOINS = ("residence_span", "age_label")
 
 #: Which band rules produce a span that BOUNDS the era on both sides — the only
 #: kind a moment inside it may then take as containment bounds.
 #:
-#: This is the sharpest line in the amendment. A residence union and a moment
-#: envelope say *"this era at least covers that"* — they are a floor on its
-#: extent, not a ceiling — so they are honest to DISPLAY as the era's span, to
-#: order the spine by, and to measure a hole between eras with, and they are
-#: dishonest to push back down onto the era's other moments: one dated moment
-#: would otherwise pin forty-seven undated ones to its own year. An age label
-#: is different in kind: *"My 20s"* IS the decade from the twentieth birthday,
+#: This is the sharpest line in the amendment. A residence union says *"this
+#: era at least covers that"* — a floor on its extent, not a ceiling — so it is
+#: honest to DISPLAY as the era's span, to order the spine by, and to measure a
+#: hole between eras with, and it is dishonest to push back down onto the era's
+#: other moments: one dated moment would otherwise pin forty-seven undated ones
+#: to its own year. (The moment envelope used to sit here too; v254 took it out
+#: of the ladder entirely — it is not even a floor, because what is "inside" an
+#: era is itself a placement this pass helps decide.) An age label is different
+#: in kind: *"My 20s"* IS the decade from the twentieth birthday,
 #: closed at both ends, so it bounds what is inside it exactly as an explicitly
 #: dated era does.
 BAND_RULES_THAT_BOUND = ("age_label",)
@@ -745,24 +753,32 @@ def residence_span(places: object) -> Derivation | None:
         label=str(ordered[0]["label"]), provenance=provenance)
 
 
-def moment_envelope(events: object) -> Derivation | None:
-    """Band rule 2 — the envelope of the moments already dated inside it.
+def observed_envelope(moments: object) -> chrono.DateRecord | None:
+    """One era's COVERAGE of its dated members — **never a bound** (v254).
 
-    This is why the pass runs the moment ladder FIRST: a birth landmark dates
-    "Born in Redlands", and the era that moment sits in is then bounded by it.
-    There is no circularity — a moment can only take an era's span by
-    containment once that era HAS one, and an era with no span contributes
-    nothing to date the moments this rule then reads.
+    This is the single most dangerous number in the whole design and this
+    docstring is where the danger is named. Until v254 this was band rule 2
+    (`moment_envelope`) and it WROTE the era's span. The founder's real vault
+    is what proved it wrong: twelve of his thirteen dated moments got their
+    date from the cross-dating pass that ran AFTER placement, so at placement
+    time they were undated and fell to era-language matching — "Married Katie"
+    (2007), "Moved to Seattle" (2012) and Etherfuse (2020) all landed in
+    `high-school`, which then took `1997/2021` as its bounds *from those very
+    moments*. `my-20s` and `my-30s` held zero. The era was dated by the
+    accident of what got sorted into it, and the dated era then read as placed
+    (lifehug#278, lifehug-platform#720 CERT-02/03).
+
+    So the coverage is computed, published on its own key
+    (`period["observed_envelope"]`, the same name and the same arithmetic the
+    projection layer already uses in `temporal_timeline.observed_envelope`),
+    and is never written to ``date``, ``date_derived`` or
+    ``approximate_dates``. It says what the era's members happen to span. It
+    does not say when the era was. — ADR 0030 decision 4, design §4.2.
+
+    One definition: :func:`span_from_dated`, which `timeline._place_span` also
+    delegates to.
     """
-    record = span_from_dated(events)
-    if record is None:
-        return None
-    provenance = "from the moments you have already dated"
-    return Derivation(
-        record=_stamp_band(record, source="moments", basis="order",
-                           confidence=record.confidence, provenance=provenance),
-        rule="moments", join="moment_envelope", anchor="moments",
-        label="", provenance=provenance)
+    return span_from_dated(moments)
 
 
 #: The age-named eras a roster actually mints, and the ages each one means.
@@ -1227,15 +1243,17 @@ def frame_for(frames: object, record: object) -> str | None:
     return None
 
 
-def band_span(period: object, *, places: object = (), moments: object = (),
+def band_span(period: object, *, places: object = (),
               birth_date: object = None) -> Derivation | None:
-    """The one derivation for one undated band, :data:`BAND_RULES` in order."""
+    """The one derivation for one undated band, :data:`BAND_RULES` in order.
+
+    v254: the ``moments`` rung and its parameter are GONE — an era's members
+    are coverage, not bounds (:func:`observed_envelope`). Passing `moments=`
+    now fails loud rather than silently doing nothing.
+    """
     if not isinstance(period, dict) or period.get("date") is not None:
         return None
     found = residence_span(places)
-    if found is not None:
-        return found
-    found = moment_envelope(moments)
     if found is not None:
         return found
     return age_band_span(period.get("name") or period.get("label") or period.get("slug"),
@@ -1255,17 +1273,32 @@ def date_bands(*, periods: object = (), event_lineup: object = None,
 
     Nothing is written anywhere: like the moment pass this is recomputed on
     every read, so a corrected landmark un-dates the era it used to bound.
+
+    **v254.** Every period — dated or not — also gets ``observed_envelope``:
+    the coverage of its dated members, on its own key, never a bound. That is
+    the whole of what its members are allowed to say about it
+    (:func:`observed_envelope`, ADR 0030 decision 4).
     """
     lineup = event_lineup if isinstance(event_lineup, dict) else {}
     report = {"derived": 0, "by_rule": {rule: 0 for rule in BAND_RULES},
-              "by_join": {join: 0 for join in BAND_JOINS}, "bands": []}
+              "by_join": {join: 0 for join in BAND_JOINS}, "bands": [],
+              "observed_envelopes": 0}
     for period in periods or ():
-        if not isinstance(period, dict) or period.get("date") is not None:
+        if not isinstance(period, dict):
             continue
         slug = str(period.get("slug") or "")
+        # Coverage first, and for EVERY era: an explicitly dated era has
+        # members too, and what they span is worth rendering beside a span the
+        # person stated. Recomputed here, never accumulated.
+        period.pop("observed_envelope", None)
+        envelope = observed_envelope(lineup.get(slug) or ())
+        if envelope is not None:
+            period["observed_envelope"] = envelope.to_dict()
+            report["observed_envelopes"] += 1
+        if period.get("date") is not None:
+            continue
         found = band_span(period,
                           places=band_places(entity_lineup, slug, anchors),
-                          moments=lineup.get(slug) or (),
                           birth_date=birth_date)
         if found is None:
             continue
@@ -1322,15 +1355,90 @@ def derive(event: object, *, anchors: object = None, birth_date: object = None,
 # ---------------------------------------------------------------------------
 
 
+def _moment_report() -> dict:
+    """A fresh, empty moment report — the ONE shape both phases accumulate."""
+    return {"derived": 0, "by_rule": {rule: 0 for rule in RULES},
+            "by_join": {join: 0 for join in JOINS}, "moments": []}
+
+
+def _record_derivation(event: dict, found: Derivation, *, period_slug: object,
+                       report: dict) -> None:
+    """Stamp one derived date onto its moment and count it. One definition,
+    shared by both phases, so the two can never drift in what they record."""
+    event["date"] = found.record
+    event["date_derived"] = found.to_dict()
+    report["derived"] += 1
+    report["by_rule"][found.rule] = report["by_rule"].get(found.rule, 0) + 1
+    report["by_join"][found.join] = report["by_join"].get(found.join, 0) + 1
+    report["moments"].append({
+        "period": None if period_slug is None else str(period_slug),
+        "source_short": str(event.get("source_short") or ""),
+        "rule": found.rule, "join": found.join, "anchor": found.anchor,
+    })
+
+
+def cross_date_moments(events: object, *, entity_lineup: object = None,
+                       anchors: object = None, birth_date: object = None,
+                       report: object = None) -> dict:
+    """**Phase one: date before you place** (v254, issue #278).
+
+    Every rung of :func:`derive` that needs NO era membership — a definitional
+    anchor, an age statement, and the containment of a PLACE whose own sources
+    cite this moment's source. All three read the person's own facts and the
+    entity lineup, both of which exist before a single moment has been slotted
+    into an era.
+
+    This exists because `timeline.heuristic_slot`'s rung 1 is *"dated → frame
+    arithmetic"* and it was structurally unreachable: `timeline_data` placed
+    first and cross-dated second, so a moment whose date this pass supplies was
+    undated at the moment somebody asked where it goes. Twelve of the founder's
+    thirteen dated moments were in exactly that state, and every one of them
+    landed by era LANGUAGE instead of by its date
+    (lifehug-platform#720 CERT-03).
+
+    No cycle, and that is not an assertion: nothing here reads a period, so
+    nothing here can be an input to the placement it precedes. The rung that
+    DOES read a period — containment from the era's own span — stays in
+    :func:`cross_date`, after placement, where a membership exists; a date
+    derived from an era can never move the moment out of that era, because it
+    was derived from being in it.
+
+    ``report`` continues an existing moment report instead of starting one, so
+    the two phases add up to ONE set of counts. A row derived here carries
+    ``"period": None`` — it had no era yet, which is the entire point.
+    """
+    report = report if isinstance(report, dict) else _moment_report()
+    places = _places_by_source(entity_lineup)
+    for event in events or ():
+        if not isinstance(event, dict) or event.get("date") is not None:
+            continue
+        found = derive(event, anchors=anchors, birth_date=birth_date,
+                       period=None,
+                       place=places.get(str(event.get("source") or "")))
+        if found is None:
+            continue
+        _record_derivation(event, found, period_slug=None, report=report)
+    return report
+
+
 def cross_date(*, event_lineup: object, unplaced_events: object = (),
                periods: object = (), entity_lineup: object = None,
-               anchors: object = None, birth_date: object = None) -> dict:
+               anchors: object = None, birth_date: object = None,
+               report: object = None) -> dict:
     """Run the pass over an assembled lineup. Returns a report; mutates rows.
 
     Each dated moment gains ``date`` (a `chronology.DateRecord`) and
     ``date_derived`` (this pass's own `Derivation.to_dict()`), which is the
     ONLY marker of a derived date and the only thing a renderer needs to show
     the landmark provenance in place of the classifier's free-text anchor.
+
+    **v254 — this is PHASE TWO.** :func:`cross_date_moments` has already run
+    the membership-independent rungs before `timeline.place_events`, so the
+    first sweep here is normally a no-op over rows that are already dated; what
+    remains is everything that needs to know which era a moment is in. Pass
+    that phase's report as ``report`` and the two add up to one set of counts.
+    Called on its own with no ``report`` it still runs the WHOLE ladder — a
+    caller holding an already-placed lineup (`record_gain`) is unchanged.
 
     **Three phases (v207).** Moments, then bands, then the moments the newly
     dated bands now bound. The third phase is the SAME idempotent pass as the
@@ -1347,8 +1455,7 @@ def cross_date(*, event_lineup: object, unplaced_events: object = (),
     period_by_slug = {str(p.get("slug")): p for p in (periods or ())
                       if isinstance(p, dict) and p.get("slug")}
     places = _places_by_source(entity_lineup)
-    report = {"derived": 0, "by_rule": {rule: 0 for rule in RULES},
-              "by_join": {join: 0 for join in JOINS}, "moments": []}
+    report = report if isinstance(report, dict) else _moment_report()
 
     def run(event: object, period_slug: object) -> None:
         if not isinstance(event, dict) or event.get("date") is not None:
@@ -1358,16 +1465,7 @@ def cross_date(*, event_lineup: object, unplaced_events: object = (),
                        place=places.get(str(event.get("source") or "")))
         if found is None:
             return
-        event["date"] = found.record
-        event["date_derived"] = found.to_dict()
-        report["derived"] += 1
-        report["by_rule"][found.rule] = report["by_rule"].get(found.rule, 0) + 1
-        report["by_join"][found.join] = report["by_join"].get(found.join, 0) + 1
-        report["moments"].append({
-            "period": None if period_slug is None else str(period_slug),
-            "source_short": str(event.get("source_short") or ""),
-            "rule": found.rule, "join": found.join, "anchor": found.anchor,
-        })
+        _record_derivation(event, found, period_slug=period_slug, report=report)
 
     def sweep() -> None:
         for slug, rows in lineup.items():
