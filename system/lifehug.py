@@ -1791,6 +1791,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
         flags.append("--classify-all")
         if args.unclassified:
             flags.append("--unclassified")
+        if getattr(args, "stale_first", False):
+            flags.append("--stale-first")
         if getattr(args, "emit_prompts", None):
             flags.extend(["--emit-prompts", args.emit_prompts])
     if args.model:
@@ -2551,6 +2553,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", metavar="PATH", help="With --from-response: the source file it classifies")
     p.add_argument("--classify-all", action="store_true")
     p.add_argument("--unclassified", action="store_true")
+    p.add_argument("--stale-first", action="store_true",
+                   help="With --classify-all: stale classifications first (oldest first), "
+                        "then never-classified newest-source-first, resuming after "
+                        "state/classify_cursor.json")
     p.add_argument("--emit-prompts", metavar="DIR",
                    help="With --classify-all: write prompts + manifest for agent completion instead of calling AI")
     p.add_argument("--limit", type=int, help="With --classify-all: maximum files to classify")

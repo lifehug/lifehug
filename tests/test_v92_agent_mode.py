@@ -195,6 +195,18 @@ class WrapperPassthroughTests(unittest.TestCase):
         self.assertIn("state/agent_tasks/classify", flags)
         self.assertIn("--unclassified", flags)
 
+    def test_stale_first_passthrough(self):
+        """v237: the flag has to survive the wrapper, or the weekly run asks
+        for stale-first ordering and silently gets the alphabetical sweep."""
+        flags = self._flags_for([
+            "classify-story", "--classify-all", "--unclassified",
+            "--stale-first", "--limit", "5",
+        ])
+        self.assertIn("--stale-first", flags)
+        self.assertNotIn(
+            "--stale-first",
+            self._flags_for(["classify-story", "--classify-all", "--unclassified"]))
+
     def test_from_response_passthrough(self):
         flags = self._flags_for([
             "classify-story", "--from-response", "resp.json", "--source", "answers/A1.md",
@@ -213,6 +225,9 @@ class OrchestratorContractTests(unittest.TestCase):
     def test_weekly_checks_ai_status_and_emits(self):
         self.assertIn("ai-status", self.weekly)
         self.assertIn('--emit-prompts "$AGENT_TASKS_DIR/classify"', self.weekly)
+        # v237: BOTH branches order stale-first — the keyless one is the one
+        # that starved, since nothing it emits is ever filed by the run itself.
+        self.assertEqual(self.weekly.count("--stale-first"), 4)  # comment + echo + both branches
         self.assertIn("⏸ keyless", self.weekly)
 
     def test_weekly_keyless_failure_is_distinct_operation(self):
