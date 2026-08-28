@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "system"))
 
 import birth_origin as bo  # noqa: E402
 import chronology as chrono  # noqa: E402
+import cross_dating as cd  # noqa: E402
 import mirror_work as mw  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -544,6 +545,92 @@ class ProvisionalOriginTests(unittest.TestCase):
         baseline = tt.structural_signature(fold(disagreeing))
         random.Random(11).shuffle(disagreeing)
         self.assertEqual(tt.structural_signature(fold(disagreeing)), baseline)
+
+
+class ProvisionalFrameProvenanceTests(unittest.TestCase):
+    """lifehug#266 — a provisional frame says how it was CALCULATED.
+
+    O-E1 files one provenance entry on every frame's own record, and
+    `chronology.display_date` turns the first such entry into the trailing
+    clause a person reads. Until this fix that entry was always the stated
+    birthday's — so a vault whose whole point is that it has NO birthday on
+    file rendered every frame as *"— you said from your birthday"*, a sentence
+    the person never said.
+
+    Every negative test below was run against this file's base
+    (`origin/main` at `90bdc57`) first and SEEN failing.
+    """
+
+    def one_statement(self) -> list[dict]:
+        return [
+            dated(subject="self", event_kind="job", best="2011-06-15",
+                  granularity="day", source="s-job"),
+            aged(subject="self", event_kind="job",
+                 age=quantity(30, text="I was 30"), source="s-job",
+                 quote="I was 30 when I started there"),
+        ]
+
+    def frames(self) -> list[dict]:
+        rows = nodes_by_kind(fold(self.one_statement()), "age_frame")
+        self.assertTrue(rows, "the provisional origin drew no frames")
+        return rows
+
+    def test_a_provisional_frame_never_says_you_said(self):
+        """THE DEFECT. Seen failing on the base with 'you said from your
+        birthday' on all seven reached frames."""
+        for row in self.frames():
+            rendered = chrono.display_date(row["best_temporal_value"])
+            self.assertNotIn("you said", rendered, row["node_id"])
+            self.assertNotIn(cd.AGE_FRAME_PROVENANCE, rendered, row["node_id"])
+
+    def test_a_provisional_frame_quotes_the_age_statement_instead(self):
+        for row in self.frames():
+            record = row["best_temporal_value"]
+            entry = record["provenance"][0]
+            self.assertEqual(entry["basis"], chrono.CALCULATED_PROVENANCE_BASIS)
+            self.assertEqual(entry["source"],
+                             f"{cd.PROVENANCE_SOURCE}:{cd.BIRTH_KEY}")
+            self.assertEqual(
+                entry["claim"],
+                cd.AGE_FRAME_CALCULATED_QUOTED_PROVENANCE.format(phrase="I was 30"),
+            )
+            self.assertIn("calculated from \u201cI was 30\u201d",
+                          chrono.display_date(record))
+
+    def test_the_frame_and_the_node_summary_cannot_drift(self):
+        """One predicate answers both sentences (`cd.origin_is_explicit`)."""
+        for row in self.frames():
+            self.assertEqual(row["origin_basis"], "calculated")
+            self.assertEqual(row["provenance_summary"],
+                             bo.CALCULATED_ORIGIN_PROVENANCE)
+            self.assertEqual(bo.CALCULATED_ORIGIN_PROVENANCE,
+                             cd.AGE_FRAME_CALCULATED_PROVENANCE)
+
+    def test_a_calculated_origin_with_nothing_to_quote_still_says_calculated(self):
+        """No `birth-origin:1` row on the origin ⇒ the bare sentence, never the
+        clamp rule promoted into the clause and never the stated one."""
+        origin = chrono.DateRecord(
+            best="1980-06-16/1981-06-15", earliest="1980-06-16",
+            latest="1981-06-15", granularity="range", confidence="inferred",
+            basis="anchor",
+        )
+        drawn = cd.age_frames(origin, as_of="2026-08-27",
+                              origin_basis="calculated")
+        self.assertTrue(drawn)
+        entry = drawn[0].value.provenance[0]
+        self.assertEqual(entry["claim"], cd.AGE_FRAME_CALCULATED_PROVENANCE)
+        rendered = chrono.display_date(drawn[0].value)
+        self.assertNotIn("you said", rendered)
+        self.assertTrue(rendered.endswith(cd.AGE_FRAME_CALCULATED_PROVENANCE),
+                        rendered)
+
+    def test_an_explicit_origin_is_untouched(self):
+        drawn = cd.age_frames(chrono.parse_edtf("1981-07-11"),
+                              as_of="2026-08-27", origin_basis="explicit")
+        entry = drawn[0].value.provenance[0]
+        self.assertEqual(entry["claim"], cd.AGE_FRAME_PROVENANCE)
+        self.assertIn("you said from your birthday",
+                      chrono.display_date(drawn[0].value))
 
 
 class TemporalStateContractTests(unittest.TestCase):

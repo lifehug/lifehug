@@ -850,8 +850,26 @@ AGE_FRAME_NAMES = {"childhood": "Childhood", "teens": "Teen years"}
 AGE_FRAME_LABEL_SEPARATOR = " \u00b7 "
 AGE_FRAME_AGES_PHRASE = "ages {low}\u2013{high}"
 
-#: The one sentence a frame shows for where it came from.
+#: The one sentence a frame shows for where it came from, when the origin is
+#: the owner's own STATED birthday. `chronology.display_date` renders it as
+#: *"— you said from your birthday"*, which is only true of an explicit origin.
 AGE_FRAME_PROVENANCE = "from your birthday"
+
+#: The two sentences a frame shows when its origin was CALCULATED — a
+#: provisional scaffold seeded from age statements, with no birthday on file
+#: (`birth_origin.provisional_origin`, design §3.2). The quoted form is used
+#: whenever the origin record kept the person's own words about their age; the
+#: bare form when it did not. Neither says "you said": a provisional frame is
+#: arithmetic over what the person said about their AGE, and a birthday is
+#: exactly the thing they have not given. (lifehug#266.)
+AGE_FRAME_CALCULATED_QUOTED_PROVENANCE = "calculated from \u201c{phrase}\u201d"
+AGE_FRAME_CALCULATED_PROVENANCE = "calculated from what you have said about your age"
+
+#: The value of a node's ``origin_basis`` that means "the owner stated this
+#: birthday". The MAPPING from a date basis to it is
+#: `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS`, read by the fold and passed in
+#: — this module never re-answers it, it only reads the answer.
+ORIGIN_BASIS_EXPLICIT = "explicit"
 
 #: Re-exported so a caller reading frames does not have to know that the clamp
 #: rule is minted one module down. There is one name for it, and this is it.
@@ -1039,10 +1057,55 @@ def _as_of_bound(value: object) -> tuple | None:
     return bounds[0] if bounds else None
 
 
-def _frame_provenance(*records: chrono.DateRecord) -> tuple[dict, ...]:
+def origin_is_explicit(origin_basis: object) -> bool:
+    """Did the owner STATE this birthday? The ONE predicate (lifehug#266).
+
+    One place decides, so the frame's provenance entry and the node's
+    `birth_origin.origin_provenance_summary` sentence cannot disagree about
+    whether a birthday is on file. The value itself is the fold's answer,
+    computed once through `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS`.
+    """
+    return " ".join(str(origin_basis or "").split()) == ORIGIN_BASIS_EXPLICIT
+
+
+def frame_origin_provenance(origin: object, origin_basis: object) -> dict:
+    """The ONE provenance entry a frame carries for where its origin came from.
+
+    An explicit origin gets :data:`AGE_FRAME_PROVENANCE` — the person really
+    did say a birthday, and `chronology.display_date` may quote it back at
+    them. A CALCULATED origin gets a clause that names the arithmetic instead,
+    filed under `chronology.CALCULATED_PROVENANCE_BASIS` so the renderer prints
+    it verbatim: quoting the person's own age statement when the origin record
+    kept one (it is written there by `chronology.birth_origin_from_age`, under
+    rule `chronology.BIRTH_ORIGIN_RULE`, and no other module re-derives it),
+    and the bare sentence when it did not.
+
+    There is no third outcome and no "omit the clause" branch: a frame whose
+    provenance opens with the calendar CLAMP row would be rendered by
+    `display_date` as *"you said <the clamp rule>"*, which is the same lie in
+    a different sentence.
+    """
+    if origin_is_explicit(origin_basis):
+        return {"claim": AGE_FRAME_PROVENANCE, "basis": "anchor",
+                "source": f"{PROVENANCE_SOURCE}:{BIRTH_KEY}"}
+    record = origin if isinstance(origin, chrono.DateRecord) else chrono.from_dict(origin)
+    phrase = ""
+    for row in (record.provenance if record is not None else ()):
+        if row.get("source") != chrono.BIRTH_ORIGIN_RULE:
+            continue
+        phrase = " ".join(str(row.get("claim") or "").split())
+        if phrase:
+            break
+    claim = (AGE_FRAME_CALCULATED_QUOTED_PROVENANCE.format(phrase=phrase)
+             if phrase else AGE_FRAME_CALCULATED_PROVENANCE)
+    return {"claim": claim, "basis": chrono.CALCULATED_PROVENANCE_BASIS,
+            "source": f"{PROVENANCE_SOURCE}:{BIRTH_KEY}"}
+
+
+def _frame_provenance(origin: object, *records: chrono.DateRecord,
+                      origin_basis: object) -> tuple[dict, ...]:
     """The frame's own sentence, plus any calendar rule the shift had to use."""
-    entries: list[dict] = [{"claim": AGE_FRAME_PROVENANCE, "basis": "anchor",
-                            "source": f"{PROVENANCE_SOURCE}:{BIRTH_KEY}"}]
+    entries: list[dict] = [frame_origin_provenance(origin, origin_basis)]
     for record in records:
         for row in record.provenance:
             if row.get("source") == AGE_FRAME_CLAMP_RULE and row not in entries:
@@ -1050,8 +1113,8 @@ def _frame_provenance(*records: chrono.DateRecord) -> tuple[dict, ...]:
     return tuple(entries)
 
 
-def age_frames(birth: object, *, as_of: object,
-               death: object = None) -> tuple[AgeFrame, ...]:
+def age_frames(birth: object, *, as_of: object, death: object = None,
+               origin_basis: object = ORIGIN_BASIS_EXPLICIT) -> tuple[AgeFrame, ...]:
     """The reached age frames of one life. ONE definition (design §3.3).
 
     Pure arithmetic over the birth origin: `start_k = add_years(birth, low)`,
@@ -1063,7 +1126,14 @@ def age_frames(birth: object, *, as_of: object,
     ``explicit`` or ``calculated``. That is a *claim* basis with exactly one
     definition already — `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS` — and
     importing the substrate here to re-answer it would be a second copy of that
-    table inside a module whose whole value is that it is pure.
+    table inside a module whose whole value is that it is pure. It is passed
+    in as ``origin_basis``, and the frames READ it: a frame drawn on a
+    calculated origin says how it was calculated, never that you said it
+    (:func:`frame_origin_provenance`, lifehug#266). The default is
+    ``explicit`` because every caller that holds a plain vault birthday —
+    `timeline.py`'s three — holds a stated one; the one caller that can hold a
+    provisional origin is the fold, and it passes what `_origin_basis_of`
+    already answered.
     """
     origin = birth if isinstance(birth, chrono.DateRecord) else chrono.from_dict(birth)
     if origin is None:
@@ -1105,7 +1175,9 @@ def age_frames(birth: object, *, as_of: object,
         value = chrono.DateRecord(
             best=f"{earliest}/{latest}", earliest=earliest, latest=latest,
             granularity="range", confidence=confidence, basis="anchor",
-            anchors=(BIRTH_KEY,), provenance=_frame_provenance(start, end),
+            anchors=(BIRTH_KEY,),
+            provenance=_frame_provenance(origin, start, end,
+                                         origin_basis=origin_basis),
         )
         last = index == len(rows) - 1
         if last and clipped_by_death:

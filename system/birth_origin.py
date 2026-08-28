@@ -74,8 +74,11 @@ CONTRADICTION_SYSTEM_VALUE = 1.0
 
 #: The one sentence a frame shows when the origin was calculated. Its explicit
 #: twin is `cross_dating.AGE_FRAME_PROVENANCE` ("from your birthday"), which
-#: would be a lie on a vault that has no birthday.
-CALCULATED_ORIGIN_PROVENANCE = "calculated from what you have said about your age"
+#: would be a lie on a vault that has no birthday. Re-exported, not re-typed:
+#: it is the same sentence `cross_dating.frame_origin_provenance` files on the
+#: frame's own record (lifehug#266), and one name for it is what keeps the
+#: node's summary and the frame's rendered clause from drifting apart.
+CALCULATED_ORIGIN_PROVENANCE = cd.AGE_FRAME_CALCULATED_PROVENANCE
 
 #: How many stated phrases a provenance summary quotes before it stops. A
 #: summary is a sentence a person reads, not the evidence list — which is
@@ -155,7 +158,7 @@ def origin_provenance_summary(origin_basis: object) -> str:
     """
     return (
         cd.AGE_FRAME_PROVENANCE
-        if collapsed_text(origin_basis) == "explicit"
+        if cd.origin_is_explicit(origin_basis)
         else CALCULATED_ORIGIN_PROVENANCE
     )
 

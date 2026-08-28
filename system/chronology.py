@@ -69,6 +69,17 @@ BASES = (
 #: ask "did this come out of an artifact?" without re-listing them.
 EVIDENCE_BASES = ("document", "photo", "relative")
 
+#: The provenance-entry basis for a clause that explains HOW a value was worked
+#: out instead of quoting something the person said (lifehug#266). It is not a
+#: member of :data:`BASES` — a record's basis says what KIND of evidence dated
+#: it, while this says what a *sentence* is, and the two vocabularies were
+#: conflated for exactly one release: an age frame drawn on a calculated birth
+#: origin carried the stated-birthday clause and :func:`display_date` rendered
+#: it as *"— you said from your birthday"* on a vault with no birthday on file.
+#: A claim filed under this basis is rendered VERBATIM after the dash, so it
+#: has to read as a whole clause ("calculated from “I was 30 in June 2011”").
+CALCULATED_PROVENANCE_BASIS = "calculated"
+
 #: How much each basis is trusted when two claims disagree (ruling 3).
 #:
 #: The three v204 weights are FLAT — one number each, no era-conditional
@@ -476,7 +487,10 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
     ``"around 1984 — you said you were about 5"``, ``"spring 1998"``,
     ``"sometime in the 1980s"``, ``"1984–1990"``, ``"after the move to Mesa"``.
     The basis clause is appended only when the record carries a provenance
-    ``claim`` (there is nothing to quote back otherwise).
+    ``claim`` (there is nothing to quote back otherwise), and every clause but
+    :data:`CALCULATED_PROVENANCE_BASIS` attributes that claim to somebody — the
+    person, a relative, a document. A calculated clause is rendered verbatim
+    because there is nobody to attribute it to.
     """
     record = record if isinstance(record, DateRecord) else from_dict(record)
     if record is None:
@@ -504,6 +518,11 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
     if claim_basis == "relative":
         name = witness_name(record)
         return f"{body} — {name} says {claim}" if name else f"{body} — a relative says {claim}"
+    # A calculated clause already IS the sentence (lifehug#266): it names the
+    # arithmetic, so "you said" in front of it would attribute to the person a
+    # statement they never made.
+    if claim_basis == CALCULATED_PROVENANCE_BASIS:
+        return f"{body} — {claim}"
     return f"{body} — you said {claim}"
 
 

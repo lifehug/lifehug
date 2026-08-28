@@ -252,6 +252,35 @@ class LeapDayTests(unittest.TestCase):
         self.assertIn(cd.AGE_FRAME_CLAMP_RULE, sources)
 
 
+class StatedOriginProvenanceTests(unittest.TestCase):
+    """lifehug#266 — a frame drawn on a STATED birthday still says so.
+
+    The regression pin for the other half of the fix: the calculated clause
+    exists so the explicit one can stay exactly what it always was.
+    """
+
+    def test_the_frame_quotes_the_birthday_back(self) -> None:
+        teens = band(frames(), "teens")
+        entry = teens.value.provenance[0]
+        self.assertEqual(entry["claim"], cd.AGE_FRAME_PROVENANCE)
+        self.assertEqual(entry["basis"], "anchor")
+        self.assertIn("you said from your birthday",
+                      chrono.display_date(teens.value))
+
+    def test_explicit_is_what_the_predicate_answers(self) -> None:
+        self.assertTrue(cd.origin_is_explicit("explicit"))
+        self.assertFalse(cd.origin_is_explicit("calculated"))
+        self.assertFalse(cd.origin_is_explicit(None))
+
+    def test_a_calculated_origin_never_reads_as_stated(self) -> None:
+        """The same birthday, declared calculated, loses the "you said"."""
+        drawn = cd.age_frames(chrono.parse_edtf(BIRTH_DAY), as_of=AS_OF,
+                              origin_basis="calculated")
+        rendered = chrono.display_date(band(drawn, "teens").value)
+        self.assertNotIn("you said", rendered)
+        self.assertIn(cd.AGE_FRAME_CALCULATED_PROVENANCE, rendered)
+
+
 class ReachedFramesTests(unittest.TestCase):
     """T-AF-06 — no maximum, and nothing unreached."""
 
