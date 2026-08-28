@@ -262,21 +262,25 @@ def _corrections_block(source_path: Path) -> str:
 def corrections_for(source_path: Path) -> list[str]:
     """Later authoritative corrections targeting this source (issue #24) —
     included in the classification prompt so a corrected-away fact is never
-    re-derived into people/places/events/candidates."""
-    corrections_dir = SOURCES_DIR / "corrections"
-    if not corrections_dir.exists():
-        return []
-    rel_target = _relative_path(source_path)
-    out: list[str] = []
-    for path in sorted(corrections_dir.glob("*.md")):
-        content = path.read_text(encoding="utf-8", errors="replace")
-        fm2, body = parse_frontmatter(content)
-        if fm2.get("type") != "source_correction":
-            continue
-        if fm2.get("corrects_path") == rel_target or fm2.get("corrects") == f"answer:{source_path.stem}":
-            body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
-            out.append(body)
-    return out
+    re-derived into people/places/events/candidates.
+
+    A thin binding, by contract O-E0d: `source_integrity.active_corrections_for`
+    is the one definition of *which* corrections count, and since v236 that
+    means the LEAVES of the supersession graph — a correction somebody later
+    corrected never reaches this prompt again. This function's remaining job is
+    to bind that definition to this module's own paths (which the tests move)
+    and to hand back the bodies the prompt wants.
+    """
+    from source_integrity import active_corrections_for  # noqa: PLC0415
+
+    return [
+        record.body
+        for record in active_corrections_for(
+            source_path,
+            corrections_dir=SOURCES_DIR / "corrections",
+            repo_dir=REPO_DIR,
+        )
+    ]
 
 
 def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:

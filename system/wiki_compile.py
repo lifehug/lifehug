@@ -238,6 +238,8 @@ def read_manual_sources() -> dict[str, dict]:
             "retracts_sha256": str(metadata.get("retracts_sha256", "") or ""),
             "voided": bool(metadata.get("voided", False)),
             "corrects_path": str(metadata.get("corrects_path", "") or ""),
+            "supersedes": str(metadata.get("supersedes", "") or ""),
+            "supersedes_path": str(metadata.get("supersedes_path", "") or ""),
             "suppress_on": metadata.get("suppress_on", []) if isinstance(metadata.get("suppress_on"), list) else [],
             "source_trust": str(metadata.get("source_trust", "")),
             "authority": str(metadata.get("authority", "")),
@@ -307,6 +309,42 @@ def split_correction_layer(manual_sources: dict) -> tuple[dict, list[dict], list
 CORRECTION_MARKER = "[LATER CORRECTION — authoritative]"
 
 
+def active_corrections(corrections: list[dict]) -> list[dict]:
+    """Drop the corrections a later correction superseded (contract O-E0d).
+
+    The graph itself is `source_integrity.active_correction_leaves` — this
+    compiler never re-derives it, it only groups by target first, because a
+    supersession edge is only meaningful among the corrections of ONE source.
+    Ordering is preserved so the compiled output moves only where a
+    supersession actually exists.
+    """
+    from source_integrity import (  # noqa: PLC0415
+        active_correction_leaves,
+        correction_record_from_mapping,
+    )
+
+    if not any(item.get("supersedes") or item.get("supersedes_path") for item in corrections):
+        return list(corrections)
+
+    grouped: dict[str, list[dict]] = {}
+    for item in corrections:
+        key = str(item.get("corrects") or item.get("corrects_path") or "")
+        grouped.setdefault(key, []).append(item)
+
+    kept: set[int] = set()
+    for rows in grouped.values():
+        records = [correction_record_from_mapping(row) for row in rows]
+        pairs = [(row, record) for row, record in zip(rows, records) if record is not None]
+        leaves = set(map(id, active_correction_leaves([record for _row, record in pairs])))
+        for row, record in pairs:
+            if id(record) in leaves:
+                kept.add(id(row))
+        for row, record in zip(rows, records):
+            if record is None:
+                kept.add(id(row))
+    return [item for item in corrections if id(item) in kept]
+
+
 def apply_corrections(answers: dict, manual_sources: dict, corrections: list[dict]) -> int:
     """Append each correction to its target's body under the authoritative
     marker. Matching is by source_id or path. Returns count applied."""
@@ -318,7 +356,7 @@ def apply_corrections(answers: dict, manual_sources: dict, corrections: list[dic
     for source_id, item in manual_sources.items():
         by_id[source_id] = item
         by_id[item.get("source", "")] = item
-    for correction in corrections:
+    for correction in active_corrections(corrections):
         target = by_id.get(correction.get("corrects", "")) or by_id.get(correction.get("corrects_path", ""))
         if not target:
             continue
