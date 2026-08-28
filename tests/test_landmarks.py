@@ -345,8 +345,12 @@ class AnchorTests(unittest.TestCase):
         placed = chrono.from_age(anchors["birth"]["date"], "about 5")
         self.assertIsNotNone(placed)
         self.assertEqual(placed.basis, "age")
-        self.assertLessEqual(int(placed.earliest), 1983)
-        self.assertGreaterEqual(int(placed.latest), 1984)
+        # v255: a day-precise birthday now yields a day-precise calendar
+        # span rather than a year-only one — the old bare-year assertions
+        # (`earliest <= 1983`, `latest >= 1984`) can no longer `int()` the
+        # bound, so the exact calendar span is asserted directly instead.
+        self.assertEqual(placed.earliest, "1982-04-12")
+        self.assertEqual(placed.latest, "1985-04-11")
 
     def test_anchors_for_person_reads_the_filed_set(self):
         import timeline_interaction as ti  # noqa: PLC0415

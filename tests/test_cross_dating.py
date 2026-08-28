@@ -196,7 +196,12 @@ class AgeStatementTests(unittest.TestCase):
         self.assertEqual(found.rule, "age")
         self.assertEqual(found.record.basis, "age")
         self.assertEqual(found.record.best, "1986~")
-        self.assertEqual((found.record.earliest, found.record.latest), ("1985", "1988"))
+        # v255: BIRTHDAY is day-precise (1981-07-11), so the interval is now
+        # the calendar span around that birthday rather than the old
+        # year-only "1985".."1988" — which straddled frame boundaries a
+        # day-precise birthday never needs to straddle.
+        self.assertEqual((found.record.earliest, found.record.latest),
+                         ("1985-07-11", "1988-07-10"))
 
     def test_the_written_ages_the_detector_accepts(self):
         cases = {
@@ -229,6 +234,30 @@ class AgeStatementTests(unittest.TestCase):
         moment = {"title": "", "description": "when I was about five",
                   "when_hint": "", "anchor": "", "date": None}
         self.assertIsNone(xd.derive(moment, anchors={}, birth_date=None))
+
+    def test_an_exact_age_lands_inside_exactly_one_frame_not_none(self):
+        """v255 regression: a day-precise birthday's age arithmetic used to
+        discard the birthday and go year-only, so "at 39" (1981-07-11) came
+        back 2020..2021 — straddling the 30s/40s boundary at 2021-07-11 — and
+        `frame_for` returned None. It must now land squarely inside one
+        frame, the way the founder's own D1/A4 moments needed to."""
+        frames = xd.age_frames(BIRTHDAY, as_of="2025-01-01")
+
+        thirty_nine = {"title": "", "description": "I was 39 when I started a new job.",
+                       "when_hint": "", "anchor": "", "date": None}
+        found = xd.derive(thirty_nine, anchors={}, birth_date=BIRTHDAY)
+        self.assertEqual(found.rule, "age")
+        band = xd.frame_for(frames, found.record)
+        self.assertIsNotNone(band, "the 39-year-old moment fell through to no frame")
+        self.assertEqual(band, "30s")
+
+        nineteen = {"title": "", "description": "I was 19 when I left home.",
+                    "when_hint": "", "anchor": "", "date": None}
+        found = xd.derive(nineteen, anchors={}, birth_date=BIRTHDAY)
+        self.assertEqual(found.rule, "age")
+        band = xd.frame_for(frames, found.record)
+        self.assertIsNotNone(band, "the 19-year-old moment fell through to no frame")
+        self.assertEqual(band, "teens")
 
 
 class ResidenceBoundsTests(unittest.TestCase):
