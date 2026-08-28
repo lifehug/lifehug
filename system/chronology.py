@@ -36,7 +36,7 @@ import math
 import re
 from dataclasses import dataclass, field, replace
 from datetime import date as _date
-from datetime import datetime, timezone
+from datetime import datetime, timedelta as _timedelta, timezone
 
 # --------------------------------------------------------------------------
 # The closed vocabularies (ADR 0024's durable data contract)
@@ -801,6 +801,191 @@ def from_age(birth_date: object, age_text: object, *, claim: str | None = None) 
         birth_date, min_age, max_age, approximate=hedged,
         claim=claim or (str(age_text).strip() or None),
     )
+
+
+# --------------------------------------------------------------------------
+# Anniversaries: the same date, n years later (v-E1, eras design §3.3)
+# --------------------------------------------------------------------------
+
+#: The ONE rule name for the 29 February clamp, recorded in a shifted record's
+#: provenance whenever it fires. A calendar fact the arithmetic had to invent —
+#: there is no 29 February in 1997 — is never allowed to be invisible.
+AGE_FRAME_CLAMP_RULE = "age-frame:1"
+
+_CLAMP_CLAIM = "29 February falls on 28 February in a year that has no 29th"
+
+#: A `best` expression's optional EDTF qualifier suffix.
+_QUALIFIER_SUFFIX_RE = re.compile(r"^(.*?)([~?%]*)$", re.DOTALL)
+
+
+def add_years(record: object, years: object) -> DateRecord | None:
+    """The same date, ``years`` later — GRAIN PRESERVED (eras design §3.3).
+
+    :func:`from_age_band` is the package's other age arithmetic and it is
+    deliberately coarser: it works off ``year_of(birth)`` and discards the
+    birth's day and month, which is right for *"when I was about five"* and
+    wrong for a frame EDGE. A twentieth birthday is a day when the birthday is
+    a day, a month when it is a month, and a decade-wide window when the
+    birthday is only known to a decade. This is the one definition of that.
+
+    * ``1981-07-11 + 20 → 2001-07-11`` (day), ``1981-07 + 20 → 2001-07``
+      (month), ``1981-22 + 20 → 2001-22`` (season, bounds moved with it),
+      ``1981 + 20 → 2001`` (year).
+    * **29 February clamps to the 28th** in a target year that has no 29th, and
+      the record says so: rule :data:`AGE_FRAME_CLAMP_RULE` is appended to
+      ``provenance``. A silent clamp is a date the person never gave and
+      nothing on the page could explain.
+    * A grain that CANNOT survive the shift widens rather than lying. A decade
+      (``197X``, granularity ``era``) moved by an amount that is not a multiple
+      of ten is not a decade any more, so both bounds move (``1983``/``1992``)
+      and the result is a ``range`` — decade-WIDE, which is the honest reading
+      of a decade-grain origin, and never a decade it is not.
+
+    Confidence, basis and anchors ride through untouched: shifting a date by a
+    whole number of years neither strengthens nor weakens the warrant it had.
+    """
+    parsed = _as_record(record)
+    if parsed is None:
+        return None
+    try:
+        offset = int(years)
+    except (TypeError, ValueError):
+        return None
+
+    clamped = False
+    bounds: dict[str, str | None] = {}
+    for name in ("earliest", "latest"):
+        value = getattr(parsed, name)
+        if not value:
+            bounds[name] = None
+            continue
+        moved, hit = _shift_iso(value, offset)
+        if moved is None:
+            return None
+        bounds[name] = moved
+        clamped = clamped or hit
+
+    best, best_hit, kept_grain = _shift_best(parsed.best, offset)
+    clamped = clamped or best_hit
+    granularity = parsed.granularity
+    if not kept_grain:
+        earliest, latest = bounds["earliest"], bounds["latest"]
+        if not earliest and not latest:
+            return None
+        best = earliest if (earliest and earliest == latest) else (
+            f"{earliest or '..'}/{latest or '..'}"
+        )
+        granularity = parsed.granularity if earliest == latest else "range"
+
+    provenance = parsed.provenance
+    if clamped:
+        provenance = provenance + (
+            {"claim": _CLAMP_CLAIM, "basis": parsed.basis, "source": AGE_FRAME_CLAMP_RULE},
+        )
+    return DateRecord(
+        best=best,
+        earliest=bounds["earliest"],
+        latest=bounds["latest"],
+        granularity=granularity,
+        confidence=parsed.confidence,
+        basis=parsed.basis,
+        anchors=parsed.anchors,
+        provenance=provenance,
+    )
+
+
+def _shift_iso(token: str, years: int) -> tuple[str | None, bool]:
+    """One ISO bound, ``years`` later. Returns ``(token, clamped)``.
+
+    Handles the four bound shapes :func:`_ordinal` accepts — ``YYYY``,
+    ``YYYY-MM`` (including the season codes 21–24), ``YYYY-MM-DD`` — and
+    clamps 29 February. ``(None, False)`` for anything else, so a caller
+    refuses rather than guessing.
+    """
+    parts = str(token).split("-")
+    try:
+        year = int(parts[0]) + years
+    except (TypeError, ValueError):
+        return None, False
+    if len(parts) == 1:
+        return f"{year:04d}", False
+    if not parts[1].isdigit():
+        return None, False
+    if len(parts) == 2:
+        return f"{year:04d}-{parts[1]}", False
+    if len(parts) != 3 or not parts[2].isdigit():
+        return None, False
+    month, day = int(parts[1]), int(parts[2])
+    if not (1 <= month <= 12) or not (1 <= day <= 31):
+        return None, False
+    last = _month_last_day(year, month)
+    if day > last:
+        return f"{year:04d}-{month:02d}-{last:02d}", True
+    return f"{year:04d}-{month:02d}-{day:02d}", False
+
+
+def _shift_best(best: object, years: int) -> tuple[str | None, bool, bool]:
+    """A ``best`` EDTF expression, ``years`` later.
+
+    Returns ``(expression, clamped, kept_grain)``. ``kept_grain`` is False when
+    the expression's own grain cannot express the shifted value — a decade
+    moved by 13 years — and the caller falls back to the shifted bounds.
+    """
+    text = str(best or "").strip()
+    if not text:
+        return None, False, False
+    pieces = text.split("/")
+    if len(pieces) > 2:
+        return None, False, False
+    moved: list[str] = []
+    clamped = False
+    for piece in pieces:
+        piece = piece.strip()
+        if piece == "..":
+            moved.append(piece)
+            continue
+        match = _QUALIFIER_SUFFIX_RE.match(piece)
+        body, qualifier = (match.group(1), match.group(2)) if match else (piece, "")
+        shifted = _shift_coarse(body, years)
+        if shifted is None:
+            shifted, hit = _shift_iso(body, years)
+            clamped = clamped or hit
+        if shifted is None:
+            return None, clamped, False
+        moved.append(shifted + qualifier)
+    return "/".join(moved), clamped, True
+
+
+def day_before(token: object) -> str | None:
+    """The ISO day before ``YYYY-MM-DD`` — a half-open end, closed.
+
+    ``[2001-07-11, 2011-07-11)`` and ``2001-07-11/2011-07-10`` are the same
+    interval said two ways, and the second is the one this module stores. The
+    conversion is one line of calendar arithmetic and it lives here, with the
+    rest of the calendar, rather than in whichever caller needed it first.
+    """
+    parts = str(token or "").split("-")
+    if len(parts) != 3:
+        return None
+    try:
+        return (_date(int(parts[0]), int(parts[1]), int(parts[2])) - _timedelta(days=1)).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _shift_coarse(body: str, years: int) -> str | None:
+    """A decade (``197X``) or century (``19XX``), when the shift keeps it one."""
+    decade = _DECADE_RE.match(body)
+    if decade:
+        if years % 10:
+            return None
+        return f"{(int(decade.group(1)) * 10 + years) // 10:03d}X"
+    century = _CENTURY_RE.match(body)
+    if century:
+        if years % 100:
+            return None
+        return f"{(int(century.group(1)) * 100 + years) // 100:02d}XX"
+    return None
 
 
 # --------------------------------------------------------------------------

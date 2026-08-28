@@ -102,6 +102,7 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
+import cross_dating as cd  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -120,7 +121,10 @@ from temporal_claims import (  # noqa: E402
 #: input fingerprint. Bump it whenever a rule in this module changes what the
 #: same claims calculate to — that is what makes a stale projection detectable
 #: rather than merely wrong (§5.3, §7).
-CALCULATION_RULE_VERSION = "timeline-rules:1"
+#:
+#: ``timeline-rules:2`` (eras E1): the fold mints ``period`` nodes for the age
+#: frames, so the same claims now calculate to a strictly larger projection.
+CALCULATION_RULE_VERSION = "timeline-rules:2"
 
 #: The combined-score formula's own version, separate from the rules above
 #: because scoring is recalibrated on a different cadence from the arithmetic.
@@ -225,7 +229,7 @@ DEFAULT_OWNER_REF = "self"
 #: The phases §7.1 asks to instrument *within* the pure derivation. Extraction,
 #: the claim fold and projection publication are measured by their own owners;
 #: what this module can honestly report is what it does.
-TIMING_PHASES = ("resolve", "group", "reconcile", "propagate", "work_items", "total")
+TIMING_PHASES = ("resolve", "group", "reconcile", "propagate", "age_frames", "work_items", "total")
 
 #: The highest ``chronology.claim_score`` any single claim can reach, computed
 #: from chronology's own weights so the normalizer cannot drift from them.
@@ -274,6 +278,9 @@ class CalculatedTimeline:
 
     nodes: tuple[dict, ...] = ()
     work_items: tuple[dict, ...] = ()
+    #: Calculated memberships (eras design §2.2). The KEY lands in E1 so a
+    #: tolerant reader is written once; E2 fills the rows.
+    memberships: tuple[dict, ...] = ()
     timings: dict = field(default_factory=dict)
     score_components: dict = field(default_factory=dict)
     reach: dict = field(default_factory=dict)
@@ -301,6 +308,7 @@ class CalculatedTimeline:
             "projection_generation": self.projection_generation,
             "nodes": [dict(row) for row in self.nodes],
             "work_items": [dict(row) for row in self.work_items],
+            "memberships": [dict(row) for row in self.memberships],
             "reach": dict(self.reach),
             "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "diagnostics": dict(self.diagnostics),
@@ -330,6 +338,7 @@ def structural_signature(result: object) -> dict:
         "score_formula_version": current.score_formula_version,
         "nodes": [dict(row) for row in current.nodes],
         "work_items": items,
+        "memberships": [dict(row) for row in current.memberships],
         "reach": dict(current.reach),
         "diagnostics": dict(current.diagnostics),
     }
@@ -388,13 +397,22 @@ def _subject_handle(claim: dict) -> str:
 
 
 def _node_kind_for(event_kind: object) -> str:
-    """``episode`` for anything a life can hold more than one of, else ``event``.
+    """``period`` for a stretch of life, ``episode`` for a repeat, else ``event``.
 
-    Read off ``identity_resolution``'s own two predicates so this module and
-    :func:`identity_resolution.derive_episode_ref` cannot disagree about a node
-    id's own payload — ``node_kind`` is *inside* the digest, so a disagreement
-    here would silently mint two ids for one thing.
+    ``period`` arrives with eras E1: an age frame is a stretch of the life
+    axis, not a thing that happened, and `temporal_projection.NODE_KINDS` has
+    declared the kind since the substrate landed while nothing ever minted it.
+    The event kinds that mean "period" are read from
+    :data:`~temporal_projection.PERIOD_EVENT_KINDS` rather than listed here, so
+    E3's ``named_era`` needs no second edit.
+
+    The other two are read off ``identity_resolution``'s own two predicates so
+    this module and :func:`identity_resolution.derive_episode_ref` cannot
+    disagree about a node id's own payload — ``node_kind`` is *inside* the
+    digest, so a disagreement here would silently mint two ids for one thing.
     """
+    if collapsed_text(event_kind) in tp.PERIOD_EVENT_KINDS:
+        return "period"
     if ident.is_relationship_event(event_kind) or ident.is_repeatable_event(event_kind):
         return "episode"
     return "event"
@@ -1200,6 +1218,194 @@ def _conflict_state(*, alternates, conflict: float, contradicted: bool) -> str:
     return "alternatives" if alternates else "none"
 
 
+def as_of_day(now: object) -> str:
+    """``YYYY-MM-DD`` for the fold's clock — the one ``as_of`` definition.
+
+    Every ``as_of`` question in the fold (which frames has the person reached?
+    is this event lived or planned?) is answered against this one day, so a
+    projection derived twice at one ``now`` is byte-identical. It is never
+    stored: ``present`` is resolved again at read time, with the reader's own
+    ``as_of`` and timezone (eras design §3.4).
+    """
+    return tc.normalized_timestamp(now, error=TemporalTimelineError)[:10]
+
+
+def _life_view(best: object, as_of: object) -> str:
+    """``future_plan`` when a node starts after today, else ``lived`` (§2.6).
+
+    An undated node is ``lived``: "we do not know when" is not "it has not
+    happened", and the honest reading of an unplaced memory is that it is
+    somewhere in the life already lived.
+    """
+    day = collapsed_text(as_of)
+    record = chrono.from_dict(best)
+    if record is None or not day:
+        return "lived"
+    start = chrono._ordinal(record.earliest, end=False)  # noqa: SLF001
+    today = chrono._ordinal(day, end=False)  # noqa: SLF001
+    if start is None or today is None:
+        return "lived"
+    return "future_plan" if start > today else "lived"
+
+
+def _owner_birth(groups: dict, calculated: dict, placed: dict, owner: str,
+                 diagnostics: list) -> tuple[str, dict] | None:
+    """The owner's ONE birth group — the frames' origin, or a named refusal.
+
+    Post-`O-E0b` the owner's birth receipt resolves to subject ``self`` under
+    either spelling, so this is a single-key lookup rather than the seeding
+    block's two-step fallback. Zero groups and two groups are both refusals
+    with their own diagnostic: frames calculated from a birthday nobody can
+    identify would be a coordinate system for somebody else's life.
+    """
+    any_birth = [
+        (node_id, group)
+        for node_id, group in sorted(groups.items())
+        if group.get("event_kind") == "birth"
+    ]
+    births = [
+        (node_id, group) for node_id, group in any_birth
+        if normalized_mention_key(_subject_handle_of(group)) == normalized_mention_key(owner)
+    ]
+    if not births:
+        # A vault with NO birth at all is not a surprise and mints no finding:
+        # the substrate already says so through the `missing_anchor birth_date`
+        # work item, and a diagnostic on every empty vault is noise. A vault
+        # that holds SOMEBODY's birth and not the owner's is the founder's own
+        # incident (design §1 item 5) and is worth saying out loud.
+        if any_birth:
+            diagnostics.append({
+                "finding": "age_frames_without_birth_anchor", "subject_ref": owner,
+                "node_ids": [node_id for node_id, _ in any_birth],
+            })
+        return None
+    if len(births) > 1:
+        diagnostics.append({
+            "finding": "age_frames_ambiguous_birth", "subject_ref": owner,
+            "node_ids": [node_id for node_id, _ in births],
+        })
+        return None
+    node_id, group = births[0]
+    best = placed.get(node_id) or (calculated.get(node_id) or {}).get("best")
+    if best is None:
+        diagnostics.append({"finding": "age_frames_without_birth_anchor",
+                            "subject_ref": owner, "node_ids": [node_id]})
+        return None
+    return node_id, {"group": group, "best": best}
+
+
+def _subject_handle_of(group: dict) -> str:
+    return collapsed_text(group.get("subject"))
+
+
+def _owner_death(groups: dict, calculated: dict, placed: dict, owner: str) -> object:
+    """The owner's death, when the substrate holds exactly one (design §3.4).
+
+    Contract only — nothing in this phase WRITES an owner death claim. What is
+    built is the reading: a life clip that ends where the life did, and no
+    frames after it.
+    """
+    deaths = [
+        node_id
+        for node_id, group in sorted(groups.items())
+        if group.get("event_kind") == "death"
+        and normalized_mention_key(_subject_handle_of(group)) == normalized_mention_key(owner)
+    ]
+    if len(deaths) != 1:
+        return None
+    return placed.get(deaths[0]) or (calculated.get(deaths[0]) or {}).get("best")
+
+
+def _age_frame_nodes(*, origin: dict, claim_refs, as_of: str, death: object,
+                     roster_snapshot: object, generation: int) -> list[dict]:
+    """The reached age frames, as validated ``period`` nodes (design §3.3).
+
+    The arithmetic is `cross_dating.age_frames` and there is no second copy of
+    it here. What this adds is everything that is substrate rather than
+    calendar: the readable identity, the claims the frame cites, the origin
+    BASIS through the substrate's one date-basis mapping, the legacy slugs that
+    alias onto the node, and the reached-frame epoch inside the fingerprint.
+    """
+    best = origin["best"]
+    frames = cd.age_frames(best, as_of=as_of, death=death)
+    if not frames:
+        return []
+    epoch = f"age-frame-epoch:{len(frames)}:{frames[-1].band}"
+    basis = tc.CLAIM_BASIS_BY_DATE_BASIS.get(
+        chrono.from_dict(best).basis if best is not None else "", "calculated"
+    )
+    origin_basis = "explicit" if basis == "explicit" else "calculated"
+    aliases = _legacy_period_aliases(roster_snapshot)
+    refs = tuple(ref for ref in dict.fromkeys(collapsed_text(r) for r in claim_refs) if ref)
+    rows: list[dict] = []
+    for frame in frames:
+        rows.append(
+            tp.validate_calculated_timeline_node({
+                "node_id": tp.age_frame_node_id(frame.band),
+                "node_kind": _node_kind_for(tp.AGE_FRAME_EVENT_KIND),
+                "event_kind": tp.AGE_FRAME_EVENT_KIND,
+                "subject_refs": [DEFAULT_OWNER_REF],
+                "label": frame.label,
+                "best_temporal_value": frame.value.to_dict(),
+                "definition_span": {"start": frame.start.to_dict(),
+                                    "end": frame.end.to_dict()},
+                "life_clip_end": frame.life_clip_end,
+                "origin_basis": origin_basis,
+                "legacy_refs": list(aliases.get(frame.band, ())),
+                "input_claim_refs": list(refs),
+                "input_fingerprint": tp.derive_input_fingerprint(
+                    claim_ids=refs,
+                    constraint_ids=(),
+                    calculation_rule_version=CALCULATION_RULE_VERSION,
+                    epoch=epoch,
+                ),
+                "basis": basis,
+                "confidence": _node_confidence(frame.value, 0.0),
+                "calculation_rule_version": CALCULATION_RULE_VERSION,
+                "projection_generation": generation,
+                "conflict_state": "none",
+                "provenance_summary": cd.AGE_FRAME_PROVENANCE,
+                "life_view": _life_view(frame.value.to_dict(), as_of),
+            })
+        )
+    return rows
+
+
+def _legacy_period_aliases(roster_snapshot: object) -> dict:
+    """`{band: (legacy refs…)}` — the slugs that alias onto each frame.
+
+    The canonical three spellings per band (``period:``/``tl:``/``band:``), plus
+    whatever a roster row NAMED like a band adds. A roster row contributes
+    aliases and nothing else (design §3.5): it does not create a frame, date
+    one, rename one or order one.
+    """
+    aliases: dict[str, list[str]] = {}
+    for band, slugs in cd.age_frame_legacy_slugs().items():
+        aliases[band] = [f"{prefix}:{slug}" for slug in slugs
+                         for prefix in ("period", "tl", "band")]
+    for entity in _roster_period_rows(roster_snapshot):
+        names = [entity.get("name"), entity.get("slug"), *(entity.get("aliases") or ())]
+        band = next((found for found in (cd.age_frame_band_of(name) for name in names)
+                     if found), None)
+        if band is None:
+            continue
+        slug = collapsed_text(entity.get("slug")) or cd.age_frame_slug(entity.get("name"))
+        for prefix in ("period", "tl", "band"):
+            ref = f"{prefix}:{slug}"
+            if slug and ref not in aliases.setdefault(band, []):
+                aliases[band].append(ref)
+    return {band: tuple(dict.fromkeys(refs)) for band, refs in aliases.items()}
+
+
+def _roster_period_rows(roster_snapshot: object) -> list[dict]:
+    rows: list[dict] = []
+    for roster in roster_snapshot or ():
+        if not isinstance(roster, dict) or collapsed_text(roster.get("type")) != "period":
+            continue
+        rows.extend(row for row in (roster.get("entities") or ()) if isinstance(row, dict))
+    return rows
+
+
 def _node_dict(
     group: dict,
     calculated: dict,
@@ -1211,6 +1417,7 @@ def _node_dict(
     constraint_refs,
     label: str,
     generation: int,
+    as_of: str | None = None,
 ) -> dict:
     """One validated :class:`~temporal_projection.CalculatedTimelineNode`.
 
@@ -1256,6 +1463,7 @@ def _node_dict(
             "projection_generation": generation,
             "conflict_state": state,
             "provenance_summary": _provenance_summary(group, calculated, best),
+            "life_view": _life_view(best, as_of),
         }
     )
 
@@ -1472,6 +1680,7 @@ def derive_calculated_timeline(
     timings: dict[str, float] = {}
     diagnostics: list[dict] = []
     owner = collapsed_text(owner_ref) or DEFAULT_OWNER_REF
+    as_of = as_of_day(now)
 
     claims = active_claim_rows(active_index)
 
@@ -1577,9 +1786,29 @@ def derive_calculated_timeline(
             constraint_refs=constraints_by_node.get(node_id, ()),
             label=labels[node_id],
             generation=projection_generation,
+            as_of=as_of,
         )
         for node_id in sorted(groups)
     ]
+
+    # The age frames (eras E1). They are calculated LAST because they are
+    # calculated FROM the reconciled owner birth node — the whole point of
+    # `age:self:<band>` being a projection of the substrate rather than a
+    # roster row somebody's monthly model wrote.
+    mark = clock()
+    origin = _owner_birth(groups, calculated, placed, owner, diagnostics)
+    if origin is not None:
+        _birth_node_id, resolved_origin = origin
+        nodes.extend(_age_frame_nodes(
+            origin=resolved_origin,
+            claim_refs=[claim.get("claim_id")
+                        for claim in resolved_origin["group"].get("claims", ())],
+            as_of=as_of,
+            death=_owner_death(groups, calculated, placed, owner),
+            roster_snapshot=roster_snapshot,
+            generation=projection_generation,
+        ))
+    timings["age_frames"] = clock() - mark
     nodes.sort(key=_node_sort_key)
 
     mark = clock()

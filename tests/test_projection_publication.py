@@ -173,6 +173,11 @@ class WholeProjectionTests(VaultTestCase):
 
     def test_every_node_carries_the_generation_it_was_published_in(self) -> None:
         pub.publish(self.vault, now=NOW)
+        # A SECOND publication needs something new to say: an unchanged
+        # republish is a semantic no-op (eras E1, design §3.4).
+        self.file_claims([claim(claim_type="date", subject_mention="the big move",
+                                event_kind="transition", temporal_value="1994",
+                                source="src-anchor", seed="anchor")])
         pub.publish(self.vault, now=NOW)
         for node in self.published()["nodes"]:
             self.assertEqual(node["projection_generation"], 2)
@@ -238,6 +243,7 @@ class AtomicityTests(VaultTestCase):
         the same call — which is why the next generation is taken from the MAX
         across both files rather than from the projection alone."""
         pub.publish(self.vault, now=NOW)
+        self.file_claims(disagreeing())
         real = pub._write
 
         def tear(vault_root, relative, text):
@@ -253,7 +259,10 @@ class AtomicityTests(VaultTestCase):
         self.assertEqual(self.queue_slice()["projection_generation"], 1)
         self.assertEqual(pub.published_generation(self.vault), 2)
 
+        # And the repair needs NO new evidence: the two files disagree about
+        # their generation, and a torn pair is never a no-op.
         summary = pub.publish(self.vault, now=NOW)
+        self.assertFalse(summary["unchanged"])
         self.assertEqual(summary["generation"], 3)
         self.assertEqual(self.published()["projection_generation"], 3)
         self.assertEqual(self.queue_slice()["projection_generation"], 3)
@@ -263,6 +272,7 @@ class AtomicityTests(VaultTestCase):
         path either holds the previous complete generation or the next one."""
         pub.publish(self.vault, now=NOW)
         first = json.loads(pub.projection_path(self.vault).read_text(encoding="utf-8"))
+        self.file_claims(disagreeing())
         seen = {}
 
         def peek():
@@ -297,8 +307,23 @@ class GenerationTests(VaultTestCase):
         self.assertEqual(pub.published_generation(self.vault), 0)
         self.assertEqual(pub.next_generation(self.vault), 1)
         for expected in (1, 2, 3):
+            if expected > 1:
+                self.file_claims([claim(
+                    claim_type="date", subject_mention=f"a new thing {expected}",
+                    event_kind="transition", temporal_value=f"199{expected}",
+                    source=f"src-new-{expected}", seed=f"new-{expected}")])
             self.assertEqual(pub.publish(self.vault, now=NOW)["generation"], expected)
             self.assertEqual(pub.published_generation(self.vault), expected)
+
+    def test_an_unchanged_republish_mints_no_generation_at_all(self) -> None:
+        """Eras E1, design §3.4. Age frames make the projection a function of
+        the clock too, so "publish again" would otherwise advance the counter
+        every day and no reader could tell a frame boundary from a heartbeat."""
+        self.assertFalse(pub.publish(self.vault, now=NOW)["unchanged"])
+        second = pub.publish(self.vault, now="2026-08-27T09:00:00Z")
+        self.assertTrue(second["unchanged"])
+        self.assertEqual(second["generation"], 1)
+        self.assertEqual(pub.published_generation(self.vault), 1)
 
     def test_the_counter_reads_the_max_across_both_files(self) -> None:
         """A generation number already on disk is never re-used, whichever of
@@ -310,6 +335,8 @@ class GenerationTests(VaultTestCase):
             json.dumps(payload, indent=2) + "\n", encoding="utf-8"
         )
         self.assertEqual(pub.published_generation(self.vault), 9)
+        # A hand-edited generation is a TEAR — the two files disagree — and a
+        # torn pair always publishes, above both numbers.
         self.assertEqual(pub.publish(self.vault, now=NOW)["generation"], 10)
 
     def test_a_generation_that_is_not_a_number_is_refused_by_name(self) -> None:
@@ -352,13 +379,19 @@ class RebuildOracleTests(VaultTestCase):
         self.assertEqual(pub.rebuild_signature(self.published()), before)
         self.assertEqual(pub.rebuild_signature(self.queue_slice()), queue_before)
 
-    def test_republishing_an_unchanged_substrate_changes_only_the_metadata(self) -> None:
+    def test_republishing_an_unchanged_substrate_changes_nothing_at_all(self) -> None:
+        """Eras E1 (design §3.4) INVERTED this: an unchanged republish used to
+        rewrite both files with new metadata, and now it writes nothing. The
+        signature is what the substrate implies, and it did not move."""
         pub.publish(self.vault, now=NOW)
         first = pub.rebuild_signature(self.published())
-        pub.publish(self.vault, now=NOW)
+        before = pub.projection_path(self.vault).read_bytes()
+        summary = pub.publish(self.vault, now=NOW)
         second = self.published()
+        self.assertTrue(summary["unchanged"])
         self.assertEqual(pub.rebuild_signature(second), first)
-        self.assertEqual(second["projection_generation"], 2)
+        self.assertEqual(second["projection_generation"], 1)
+        self.assertEqual(pub.projection_path(self.vault).read_bytes(), before)
 
     def test_a_new_claim_changes_the_projection_and_the_digest(self) -> None:
         pub.publish(self.vault, now=NOW)
@@ -429,6 +462,14 @@ class InstrumentationTests(VaultTestCase):
         self.assertIn("generation 1", line)
         self.assertIn("work item", line)
         self.assertIn("total", line)
+        self.assertNotIn("unchanged", line)
+
+    def test_the_report_line_says_when_it_wrote_nothing(self) -> None:
+        """A compile log claiming a generation it did not write would be a lie
+        of omission — the no-op is meant to be visible (eras E1)."""
+        pub.publish(self.vault, now=NOW)
+        line = pub.publication_report_line(pub.publish(self.vault, now=NOW))
+        self.assertIn("generation 1 (unchanged — nothing written)", line)
 
 
 # --------------------------------------------------------------------------
@@ -770,13 +811,14 @@ class RecorderSeatTests(VaultTestCase):
         self.assertIsNone(pub.read_projection(self.vault))
 
     def test_refiling_the_same_message_is_idempotent_in_evidence(self) -> None:
-        """The receipt is immutable and idempotent; the projection is a view,
-        so it simply advances. The claims must not double."""
+        """The receipt is immutable and idempotent, and since eras E1 so is the
+        publication: refiling the same message says nothing new, so it mints no
+        generation either. The claims must not double."""
         self.file_it([self.MOVE])
         claims = self.published()["counts"]["claims"]
         self.file_it([self.MOVE])
         self.assertEqual(self.published()["counts"]["claims"], claims)
-        self.assertEqual(pub.published_generation(self.vault), 2)
+        self.assertEqual(pub.published_generation(self.vault), 1)
         self.assertEqual(
             len(list((self.vault / ts.CONVERSATION_SOURCES_DIR).rglob("*.md"))), 1)
 

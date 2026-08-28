@@ -259,11 +259,35 @@ def _canonical(payload: object) -> str:
     return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
 
+def reached_frame_epoch(result: object) -> dict:
+    """`{count, current}` — which age frames the person has reached (§3.4).
+
+    The epoch is what makes "nothing moved" decidable without persisting
+    ``as_of``: two publications on different days inside one epoch imply the
+    same frames, and crossing a birthday boundary changes the count and the
+    current band. It rides the ENVELOPE, which puts it inside
+    :func:`rebuild_signature` by that function's own rule — one comparison, not
+    a second definition sitting beside it.
+    """
+    nodes = result.nodes if isinstance(result, tt.CalculatedTimeline) else (
+        (result or {}).get("nodes") or () if isinstance(result, dict) else ()
+    )
+    frames = [row for row in nodes
+              if isinstance(row, dict) and row.get("event_kind") == tp.AGE_FRAME_EVENT_KIND]
+    current = next((row for row in frames if row.get("life_clip_end") == "present"), None)
+    band = None
+    if current is not None:
+        band = str(current.get("node_id") or "").rpartition(":")[2] or None
+    return {"count": len(frames), "current": band}
+
+
 def _envelope(result: tt.CalculatedTimeline, *, published_at: str, input_digest: str,
               timings: dict) -> dict:
     return {
         "version": PUBLICATION_VERSION,
         "schema_version": SCHEMA_VERSION,
+        "projection_schema_version": tp.PROJECTION_SCHEMA_VERSION,
+        "reached_frame_epoch": reached_frame_epoch(result),
         "projection_generation": result.projection_generation,
         "published_at": published_at,
         "calculation_rule_version": result.calculation_rule_version,
@@ -280,6 +304,7 @@ def projection_payload(result: tt.CalculatedTimeline, *, published_at: str,
     payload = _envelope(result, published_at=published_at, input_digest=input_digest,
                         timings=timings)
     payload.update(body)
+    payload["memberships"] = [dict(row) for row in result.memberships]
     payload["counts"] = {
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
@@ -425,6 +450,22 @@ def publish(
             result, published_at=published_at, input_digest=digest, timings=timings
         ),
     }
+
+    # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
+    # function of the clock as well as of the receipts, so "publish again"
+    # would otherwise mint a generation every single day and nobody could tell
+    # a frame boundary from a heartbeat. When the standing pair says exactly
+    # what the fresh render says, this writes nothing and mints nothing.
+    standing = _unchanged_generation(vault_root, payloads)
+    if standing is not None:
+        timings["publish"] = time.perf_counter() - mark
+        timings["publication_total"] = time.perf_counter() - started
+        return _summary(result, generation=standing, unchanged=True,
+                        published_at=str(_published_at_of(vault_root) or published_at),
+                        digest=digest, timings=timings,
+                        paths=[str(store.store_path(vault_root, name))
+                               for name in PUBLICATION_ORDER])
+
     # Serialize BOTH before writing EITHER: a payload that cannot be rendered
     # must fail with nothing on disk changed, not halfway through the pair.
     rendered = {name: _canonical(payload) for name, payload in payloads.items()}
@@ -432,12 +473,56 @@ def publish(
     timings["publish"] = time.perf_counter() - mark
     timings["publication_total"] = time.perf_counter() - started
 
+    return _summary(result, generation=generation, unchanged=False,
+                    published_at=published_at, digest=digest, timings=timings,
+                    paths=written)
+
+
+def _published_at_of(vault_root: str | Path) -> str | None:
+    payload = read_projection(vault_root)
+    return (payload or {}).get("published_at")
+
+
+def _unchanged_generation(vault_root: str | Path, payloads: dict) -> int | None:
+    """The standing generation when a republish would say nothing new.
+
+    All four conditions, and none of them is optional:
+
+    1. both files are present and readable,
+    2. they carry the SAME generation — a publication torn between the two
+       renames is never a no-op, because repairing the tear is exactly what
+       `published_generation`'s max exists for,
+    3. the projection's signature matches, and
+    4. the queue slice's signature matches.
+
+    :func:`rebuild_signature` already excludes the generation, the timings, the
+    publication timestamp and the input digest, so this compares what the
+    substrate IMPLIES — including the reached-frame epoch, which rides the
+    envelope for exactly this reason.
+    """
+    published = read_projection(vault_root)
+    queue = read_work_items(vault_root)
+    if published is None or queue is None:
+        return None
+    generation = _generation_of(published)
+    if generation <= 0 or generation != _generation_of(queue):
+        return None
+    if rebuild_signature(payloads[PROJECTION_FILE]) != rebuild_signature(published):
+        return None
+    if rebuild_signature(payloads[WORK_ITEMS_FILE]) != rebuild_signature(queue):
+        return None
+    return generation
+
+
+def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
+             published_at: str, digest: str, timings: dict, paths: list) -> dict:
     return {
         "generation": generation,
+        "unchanged": unchanged,
         "published_at": published_at,
         "input_digest": digest,
         "files": list(PUBLICATION_ORDER),
-        "paths": written,
+        "paths": list(paths),
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
         "work_items": len(result.work_items),
@@ -459,8 +544,11 @@ def publication_report_line(summary: object) -> str:
     phases = ", ".join(
         f"{name} {float(value) * 1000:.0f}ms" for name, value in sorted(timings.items())
     )
+    # A compile log that says "generation 1" after writing nothing would be a
+    # lie of omission — the whole point of the no-op is that it is visible.
+    unchanged = " (unchanged — nothing written)" if row.get("unchanged") else ""
     return (
-        f"calculated timeline generation {row.get('generation')}: "
+        f"calculated timeline generation {row.get('generation')}{unchanged}: "
         f"{row.get('nodes')} node(s), {row.get('work_items')} work item(s) "
         f"from {row.get('claims')} active claim(s)"
         + (f" [{phases}]" if phases else "")
@@ -478,11 +566,14 @@ EMPTY_VIEW = {
     "published": False,
     "projection_generation": 0,
     "published_at": None,
+    "schema_version": tp.PROJECTION_SCHEMA_VERSION,
     "calculation_rule_version": tt.CALCULATION_RULE_VERSION,
     "score_formula_version": tt.SCORE_FORMULA_VERSION,
     "nodes": (),
     "work_items": (),
+    "memberships": (),
     "reach": {},
+    "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "claims": 0, "unplaced": 0},
 }
 
@@ -499,15 +590,25 @@ def calculated_view(vault_root: str | Path) -> dict:
     if payload is None:
         return dict(EMPTY_VIEW)
     counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    epoch = payload.get("reached_frame_epoch")
     return {
         "published": True,
         "projection_generation": _generation_of(payload),
         "published_at": payload.get("published_at"),
+        # TOLERANT BY CONSTRUCTION (eras design §7.8 step 1): a v1 payload has
+        # no `projection_schema_version` key and no v2 node fields, and reads
+        # here as schema 1 with the same nodes. Absent means unchanged; it never
+        # means unreadable.
+        "schema_version": int(payload.get("projection_schema_version") or 1),
         "calculation_rule_version": payload.get("calculation_rule_version"),
         "score_formula_version": payload.get("score_formula_version"),
         "nodes": tuple(payload.get("nodes") or ()),
         "work_items": tuple(payload.get("work_items") or ()),
+        "memberships": tuple(payload.get("memberships") or ()),
         "reach": dict(payload.get("reach") or {}),
+        "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
+            "count": 0, "current": None
+        },
         "counts": {
             "nodes": int(counts.get("nodes") or len(payload.get("nodes") or ())),
             "work_items": int(
