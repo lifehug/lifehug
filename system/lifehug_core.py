@@ -168,6 +168,12 @@ CONVERSATION_SOURCES_DIR = _data("conversation_sources")
 # every call and resolves the directory against THAT root, exactly as
 # `temporal_store` does for the two source directories above.
 LANDMARK_SOURCES_DIR = _data("landmark_sources")
+# E3 (eras): an era's identity, its label/alias decisions and its kind
+# decision are immutable vault SOURCES on one opaque id — a named era is not a
+# roster row and its name is not its identity (design §2.3/§4.1).
+# `system/era_identity.py` owns every write and is told which vault on every
+# call, exactly as `temporal_store` is.
+ERA_SOURCES_DIR = _data("era_sources")
 ARTIFACT_SOURCES_DIR = _data("artifact_sources")
 CANDIDATE_RESEARCH_SOURCES_DIR = _data("candidate_research_sources")
 QUESTION_CANDIDATES_FILE = _data("question_candidates")
@@ -183,6 +189,11 @@ CLASSIFICATIONS_DIR = _data("classifications")
 TEMPORAL_CLAIMS_DIR = _data("temporal_claims_state")
 TEMPORAL_RECEIPTS_DIR = _data("temporal_receipts")
 TEMPORAL_ACTIVE_INDEX_FILE = _data("temporal_active_index")
+# E3 (eras): event resolution records — which era a claim's `event_mention`
+# names. A resolution is a SEPARATE record, never an edit of the immutable
+# claim, so a re-binding supersedes rather than rewrites
+# (system/event_binding.py owns every write).
+TEMPORAL_RESOLUTIONS_DIR = _data("temporal_resolutions")
 # v231: the two published projections over that substrate — the whole
 # calculated timeline and the queue's work-item slice of the same
 # generation. Both are materialized views with the same repair path as the

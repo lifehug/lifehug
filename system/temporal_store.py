@@ -355,7 +355,14 @@ def _canonical_json(payload: object) -> str:
     return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
 
-def _read_text(vault_root: str | Path, relative: str) -> str | None:
+def read_store_text(vault_root: str | Path, relative: str) -> str | None:
+    """The text of one store-relative file, or ``None`` when it is not there.
+
+    Public since E3: `era_identity` files records in exactly this module's
+    shape and must read them back the same way. A second reader would be a
+    second answer to "did the bytes drift", which is the one question this
+    substrate is not allowed to have two of.
+    """
     root = _vault_root(vault_root)
     path = store_path(root, relative)
     if not path.is_file():
@@ -366,8 +373,14 @@ def _read_text(vault_root: str | Path, relative: str) -> str | None:
         return None
 
 
-def _create_or_keep(vault_root: str | Path, relative: str, content: str) -> tuple[Path, bool]:
-    """Publish a new immutable file; report whether this call created it."""
+def create_or_keep(vault_root: str | Path, relative: str, content: str) -> tuple[Path, bool]:
+    """Publish a new immutable file; report whether this call created it.
+
+    Public since E3 for the same reason :func:`read_store_text` is: the era
+    records are content-addressed immutable sources in this module's shape,
+    and "replay writes nothing" has to be ONE implementation or it is a
+    property nobody actually holds.
+    """
     root = _vault_root(vault_root)
     path = store_path(root, relative)
     try:
@@ -377,6 +390,13 @@ def _create_or_keep(vault_root: str | Path, relative: str, content: str) -> tupl
     except ValueError as exc:
         raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
     return path, True
+
+
+#: The private spellings these two carried before E3 made them public. Kept as
+#: aliases rather than renamed at every call site: a rename touches thirty
+#: lines to say nothing, and a caller written against either name is right.
+_read_text = read_store_text
+_create_or_keep = create_or_keep
 
 
 # --------------------------------------------------------------------------
@@ -1607,6 +1627,7 @@ __all__ = [
     "active_ordering_constraints",
     "active_index_path",
     "constraint_relative_path",
+    "create_or_keep",
     "conversation_source_relative_path",
     "correction_relative_path",
     "derive_correction_id",
@@ -1628,6 +1649,7 @@ __all__ = [
     "read_ordering_constraint",
     "read_receipt",
     "read_source_ref",
+    "read_store_text",
     "read_temporal_correction",
     "rebuild_active_index",
     "receipt_path",
