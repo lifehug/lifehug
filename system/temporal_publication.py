@@ -588,10 +588,77 @@ EMPTY_VIEW = {
     "nodes": (),
     "work_items": (),
     "memberships": (),
+    "chapter_overlays": (),
     "reach": {},
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "claims": 0, "unplaced": 0},
 }
+
+
+#: The one key :data:`EMPTY_VIEW` adds that the published file has no reason to
+#: carry: a file that exists IS a publication, so "published" is a fact about
+#: the read, not about the bytes.
+VIEW_ONLY_KEYS = ("published",)
+
+#: Every top-level key the published projection carries that
+#: :func:`calculated_view` deliberately does NOT serve under that name, and why.
+#:
+#: This exists because of `O-E1b` finding 1 (lifehug-platform#691): a host pins
+#: the view's block key-for-key, so a key served by the FILE and absent from the
+#: BLOCK is unreadable to that host no matter what the file contains — and
+#: nothing in the package failed when that happened. The two sides of the guard
+#: are now derived from source: a new top-level key must either be served or be
+#: named here with a reason, and a name here that the file has stopped
+#: publishing fails too, so this table cannot go stale in either direction.
+PUBLISHED_KEYS_NOT_SERVED = {
+    "version": (
+        "the publication FORMAT's version. A page never branches on it; a "
+        "reader that had to would be reading bytes, not a projection."
+    ),
+    "schema_version": (
+        "the CLAIM contract's version (`temporal_claims.SCHEMA_VERSION`). The "
+        "view's own `schema_version` is the PROJECTION's "
+        "(`projection_schema_version`) — the two numbers differ today (1 and "
+        "2) and a page that branched on the receipt store's version would be "
+        "asking the wrong question about the node shape it is rendering."
+    ),
+    "projection_schema_version": (
+        "served, RENAMED: `calculated_view()['schema_version']` is exactly "
+        "this number. One key on the read side, because a host branching on "
+        "'which node contract is this' has exactly one question to ask."
+    ),
+    "input_digest": (
+        "the derivation's input digest — the rebuild oracle's key, not a "
+        "rendering input."
+    ),
+    "timings": "§7's explicitly excluded runtime metadata.",
+    "score_components": (
+        "the QUEUE's explanation of its own scores, published in the "
+        "work-items file and read there (§8.5)."
+    ),
+    "diagnostics": (
+        "findings about the FOLD — `age_frames_without_birth_anchor` and its "
+        "kind. They are a maintainer's surface and a work item's input, and "
+        "putting them on a person's page would be the system talking about "
+        "itself."
+    ),
+}
+
+
+def view_block_keys() -> tuple[str, ...]:
+    """The view's declared key set — what a host pins itself against."""
+    return tuple(EMPTY_VIEW)
+
+
+def published_block_keys() -> tuple[str, ...]:
+    """The top-level keys a published projection is expected to carry.
+
+    Derived from the view plus the named exclusions, never listed a third
+    time — so the guard in `tests/test_eras_e1b.py` compares two things that
+    are both computed rather than one computed thing against a literal.
+    """
+    served = set(EMPTY_VIEW) - set(VIEW_ONLY_KEYS)
+    return tuple(sorted(served | set(PUBLISHED_KEYS_NOT_SERVED)))
 
 
 def calculated_view(vault_root: str | Path) -> dict:
@@ -621,6 +688,7 @@ def calculated_view(vault_root: str | Path) -> dict:
         "nodes": tuple(payload.get("nodes") or ()),
         "work_items": tuple(payload.get("work_items") or ()),
         "memberships": tuple(payload.get("memberships") or ()),
+        "chapter_overlays": tuple(payload.get("chapter_overlays") or ()),
         "reach": dict(payload.get("reach") or {}),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None
