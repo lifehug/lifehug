@@ -51,6 +51,7 @@ from question_planner import DEFAULT_DELIVERY_QUEUE_LIMIT
 from recommend_focuses import FOCUS_RECOMMENDATION_TYPES
 from research_expand import VALID_OUTPUT_TYPES, VALID_TOPIC_TYPES
 from focus_candidate import FOCUS_RELATIONSHIPS
+from source_integrity import add_correct_source_arguments
 from roadmap import FOCUS_TYPES
 
 SYSTEM_DIR = Path(__file__).resolve().parent
@@ -438,9 +439,11 @@ def cmd_source_findings(args: argparse.Namespace) -> int:
 
 
 def cmd_correct_source(args: argparse.Namespace) -> int:
-    flags = ["correct", args.target, "--kind", args.kind, "--source", args.source]
+    flags = ["correct", args.target, "--kind", args.kind, "--role", args.role, "--source", args.source]
     if args.title:
         flags.extend(["--title", args.title])
+    if getattr(args, "supersedes", None):
+        flags.extend(["--supersedes", args.supersedes])
     return run_python("source_integrity.py", flags)
 
 
@@ -2448,10 +2451,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_source_findings)
 
     p = sub.add_parser("correct-source", help="Create an additive correction source from stdin")
-    p.add_argument("target", help="Source path or source_id to correct")
-    p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
-    p.add_argument("--source", default="manual")
-    p.add_argument("--title")
+    add_correct_source_arguments(p)
     p.set_defaults(func=cmd_correct_source)
 
     p = sub.add_parser("reflect-source", help="Create an additive reflection source from stdin")

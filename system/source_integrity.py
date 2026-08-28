@@ -1803,6 +1803,35 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     return 0
 
 
+def add_correct_source_arguments(p: argparse.ArgumentParser) -> None:
+    """The correction argument set, bound identically by every entry point
+    that creates a correction source.
+
+    ADR 0021 ("one definition, many hosts"): ``source_integrity.py correct``
+    and ``lifehug.py correct-source`` are the same operation on two entry
+    points, so they build their argparse arguments from this ONE function
+    rather than each hand-declaring its own copy — the shape that let
+    ``--supersedes`` (v236) and ``--role`` (v237, O-C2) reach one entry point
+    and silently not the other (lifehug#268).
+    """
+    p.add_argument("target", help="Source path or source_id to correct")
+    p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
+    p.add_argument("--role", default=DEFAULT_CORRECTION_ROLE, choices=list(CORRECTION_ROLES),
+                   help="What this correction is to the target's reading: "
+                        "content (the text got a fact wrong — the classification "
+                        "goes stale) or placement (a date decision about a moment "
+                        "— the classification stays current)")
+    p.add_argument("--source", default="manual")
+    p.add_argument("--title")
+    p.add_argument(
+        "--supersedes",
+        help=(
+            "source_id (or path) of an EARLIER correction of the same target that "
+            "this one replaces; the earlier one stays on disk and stops being read"
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Lifehug source integrity tools")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1852,22 +1881,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_findings)
 
     p = sub.add_parser("correct", help="Create an additive correction source from stdin")
-    p.add_argument("target", help="Source path or source_id to correct")
-    p.add_argument("--kind", default="other", choices=["factual", "date", "name", "emotional", "perspective", "omission", "relationship", "other"])
-    p.add_argument("--role", default=DEFAULT_CORRECTION_ROLE, choices=list(CORRECTION_ROLES),
-                   help="What this correction is to the target's reading: "
-                        "content (the text got a fact wrong — the classification "
-                        "goes stale) or placement (a date decision about a moment "
-                        "— the classification stays current)")
-    p.add_argument("--source", default="manual")
-    p.add_argument("--title")
-    p.add_argument(
-        "--supersedes",
-        help=(
-            "source_id (or path) of an EARLIER correction of the same target that "
-            "this one replaces; the earlier one stays on disk and stops being read"
-        ),
-    )
+    add_correct_source_arguments(p)
     p.set_defaults(func=cmd_correct)
 
     p = sub.add_parser("reflect", help="Create an additive reflection source from stdin")
