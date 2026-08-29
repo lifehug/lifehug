@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 251,
-    "revision": "vault-contract-v12",
-    "content_digest": "sha256:111d8188480c571a6d98bf29c2cc751757ff0c5c389a8f742760c1f5cef73e16"
+    "framework_version": 260,
+    "revision": "vault-contract-v13",
+    "content_digest": "sha256:3f54925bac5c06f7b08a62ce15c7b9e6ce978e65c6963feb9885eed4194078f4"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -617,7 +617,6 @@
     },
     "landmarks": {
       "path": "state/landmarks.json",
-      "embedded_path": "system/landmarks.json",
       "kind": "file",
       "required": false,
       "tracked": true,

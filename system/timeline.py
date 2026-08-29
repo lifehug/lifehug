@@ -992,10 +992,15 @@ def load_landmarks() -> dict:
             for key, value in domains.items() if isinstance(value, list)}
 
 
-#: The two directories the landmark store can sit in. `lifehug_core._data`
-#: resolves `state/landmarks.json` for an external-layout vault and
-#: `system/landmarks.json` for an embedded one (the framework checkout, which
-#: IS its own vault), and :func:`_projection_vault_root` inverts exactly that.
+#: The directory names the landmark store can sit under, which
+#: :func:`_projection_vault_root` strips to recover the vault root.
+#:
+#: Since v260 (Timeline Fix 01) the contract names ONE path in both layouts —
+#: the store is always `<vault>/state/landmarks.json`. `system` stays in this
+#: tuple on purpose: it is not a route, it is the INVERSE of one, and a vault
+#: that still carries the pre-v260 embedded copy (until `update.py`'s v260
+#: migration retires it) must still resolve to its own root rather than to its
+#: `system/` directory. Removing it would make an old vault's root wrong.
 LANDMARK_STORE_PARENTS = ("state", "system")
 
 
