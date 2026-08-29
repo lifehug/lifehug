@@ -874,8 +874,48 @@ def split_frontmatter(content: str) -> tuple[dict[str, object], str]:
     return metadata, body
 
 
+def skip_leading_frontmatter_blocks(content: str) -> tuple[dict[str, object], str, int]:
+    """Skip EVERY leading fenced frontmatter block, not just the first.
+
+    Issue #282: a source restored from a lost rebase can carry the same
+    frontmatter concatenated two or three times in a row (`---` fences x4 or
+    x6, each a complete block). `split_frontmatter` above only strips ONE
+    block — a reader built on it (or on a second ad hoc `---` search inside
+    what it leaves behind) treats the second block's `key: value` lines as
+    prose, so the real answer after the last block goes unread, or — when
+    there is no real body at all — a non-empty "body" (the extra block's own
+    YAML) is returned instead of an honest empty string.
+
+    Metadata is taken from the FIRST block only: the stacked blocks are
+    near-duplicates from the restore, not independent facts, so later blocks
+    have nothing to add.
+
+    Blank lines between blocks are tolerated (a lost-and-recovered rebase
+    can glue files together with or without one); the very first block still
+    requires the file to open with `---\\n`, exactly like `split_frontmatter`.
+
+    Returns (first_block_metadata, body_after_every_leading_block, block_count).
+    """
+    first_metadata: dict[str, object] = {}
+    remaining = content
+    block_count = 0
+    while True:
+        probe = remaining if block_count == 0 else remaining.lstrip("\n")
+        if not probe.startswith("---\n"):
+            break
+        metadata, body = split_frontmatter(probe)
+        if body == probe:
+            # No closing fence found in `probe` — not a real block, stop.
+            break
+        block_count += 1
+        if block_count == 1:
+            first_metadata = metadata
+        remaining = body
+    return first_metadata, remaining, block_count
+
+
 def answer_body(content: str) -> str:
-    _metadata, frontmatter_body = split_frontmatter(content)
+    _metadata, frontmatter_body, _block_count = skip_leading_frontmatter_blocks(content)
     target = frontmatter_body if frontmatter_body != content else content
     body_match = re.search(r"---\n+(.*?)(?:\n+---|\Z)", target, re.DOTALL)
     if body_match:
