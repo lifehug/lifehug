@@ -349,6 +349,17 @@ class EmbeddedSeedMigrationTests(unittest.TestCase):
         self.assertTrue(self.seed.exists())
         self.assertEqual(self.filed, [])
 
+    def test_it_refuses_to_file_one_vaults_entries_into_another(self) -> None:
+        """An external install updates the FRAMEWORK checkout while the process
+        is bound to the person's vault. Entries found there are not that
+        vault's data — leave them, say so, delete nothing."""
+        write_json(self.seed, EMBEDDED_ENTRIES)
+
+        note = update.migrate_embedded_landmark_store(self.vault)
+
+        self.assertIn("bound to", str(note))
+        self.assertTrue(self.seed.exists())
+
     def test_no_seed_is_no_work(self) -> None:
         write_json(self.store, POPULATED_STORE)
         self.assertIsNone(self.migrate())

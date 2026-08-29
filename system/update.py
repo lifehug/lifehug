@@ -157,6 +157,20 @@ def migrate_embedded_landmark_store(repo_dir=None, *, save_landmarks=None):
         )
 
     if save_landmarks is None:
+        from lifehug_core import REPO_DIR as BOUND_VAULT  # local import  # noqa: PLC0415
+
+        # Filing goes through the bound vault, so refuse to file one vault's
+        # entries into another's substrate. An external-layout install runs
+        # this updater against the FRAMEWORK checkout while `lifehug_core` is
+        # bound to the user's vault; a checkout that somehow carries entries
+        # there is not the bound vault's data and must not be filed into it.
+        if Path(str(BOUND_VAULT)).resolve() != root.resolve():
+            return (
+                f"Left {LEGACY_EMBEDDED_LANDMARK_STORE} in place: it holds entries "
+                f"and belongs to {root}, but this process is bound to "
+                f"{BOUND_VAULT}. Run the update from that vault to file them; "
+                "nothing was deleted."
+            )
         from timeline import save_landmarks  # local import; same dir  # noqa: PLC0415
     filed = 0
     for domain in sorted(entries):
