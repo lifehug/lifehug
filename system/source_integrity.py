@@ -37,6 +37,7 @@ from lifehug_core import (
     now_utc,
     read_bytes,
     read_json,
+    skip_leading_frontmatter_blocks,
     slugify,
     split_frontmatter,
     write_json,
@@ -343,6 +344,9 @@ def source_record(path: Path) -> dict[str, object]:
         if candidate_path:
             candidate_research_error = f"candidate research is not strict UTF-8: {exc}"
     metadata, payload = split_frontmatter(content)
+    _first_metadata, _body_after_all_blocks, frontmatter_block_count = (
+        skip_leading_frontmatter_blocks(content)
+    )
     inferred = build_source_metadata(path, content)
     source_id = str(metadata.get("source_id") or inferred["source_id"])
     source_type = (
@@ -370,6 +374,7 @@ def source_record(path: Path) -> dict[str, object]:
         "captured_at": str(metadata.get("captured_at") or inferred["captured_at"]),
         "source_medium": str(metadata.get("source_medium") or inferred["source_medium"]),
         "has_frontmatter": has_frontmatter(content),
+        "frontmatter_block_count": frontmatter_block_count,
         "metadata": metadata,
         "required_missing": [key for key in REQUIRED_SOURCE_KEYS if key not in metadata],
         "content_sha256": payload_sha256(payload),
@@ -560,6 +565,33 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
                 "source file has no Lifehug source metadata frontmatter",
                 fixability="safe",
                 recommended_action="run source-lint --fix to add metadata without changing the body",
+            ))
+
+        block_count = int(record.get("frontmatter_block_count") or 0)
+        if block_count > 1:
+            # Issue #282: a lost-and-recovered rebase can glue two or three
+            # complete answer/source files together, each opening its own
+            # `---` frontmatter block. Only the first is read as metadata
+            # and every reader that stops at the second `---` fence never
+            # sees the real body after the last block — sometimes there is
+            # none at all. Caught here at lint time, before a batch
+            # classification run sends a model a prompt it cannot answer.
+            findings.append(finding(
+                "stacked_frontmatter",
+                "error",
+                path,
+                f"source has {block_count} consecutive leading frontmatter "
+                "blocks glued together — likely a lost-and-recovered rebase "
+                "(lifehug#282); only the first is read as metadata and the "
+                "real body after the last block may be invisible to every "
+                "reader",
+                fixability="manual",
+                recommended_action=(
+                    "split the concatenated sources apart by hand, or confirm "
+                    "there is no real body left to recover and file/retire "
+                    "the source deliberately; never delete the extra blocks "
+                    "silently"
+                ),
             ))
 
         missing = list(record.get("required_missing", []))

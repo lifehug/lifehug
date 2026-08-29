@@ -60,6 +60,7 @@ from lifehug_core import (
     parse_categories,
     parse_questions,
     read_json,
+    skip_leading_frontmatter_blocks,
     slugify,
     write_json,
     write_text,
@@ -111,22 +112,16 @@ def get_model(args: argparse.Namespace) -> str:
 def parse_frontmatter(content: str) -> tuple[dict, str]:
     """Return (frontmatter_dict, body_text) from a markdown file.
 
-    Handles both source files (--- YAML ---) and answer files.
+    Handles both source files (--- YAML ---) and answer files. Delegates to
+    `lifehug_core.skip_leading_frontmatter_blocks` — THE one frontmatter
+    reader in the repo (issue #282) — so a source restored with two or three
+    stacked leading blocks reads past every one of them here too, not only
+    for the answers/*.md files `load_source_text` routes to `answer_body()`
+    below. This used to be its own hand-rolled single-block parser; keeping
+    it as a thin wrapper avoids a second, drifting implementation.
     """
-    fm: dict = {}
-    body = content
-
-    if content.startswith("---"):
-        # Find the closing ---
-        end = content.find("\n---", 3)
-        if end != -1:
-            raw_fm = content[3:end].strip()
-            body = content[end + 4:].strip()
-            for line in raw_fm.splitlines():
-                if ":" in line:
-                    k, _, v = line.partition(":")
-                    fm[k.strip()] = v.strip().strip('"').strip("'")
-    return fm, body
+    metadata, body, _block_count = skip_leading_frontmatter_blocks(content)
+    return metadata, body
 
 
 def load_source_text(source_path: Path) -> tuple[dict, str]:
@@ -1022,7 +1017,7 @@ def classify_file(
     fm, story_text = load_source_text(source_path)
 
     if not story_text.strip():
-        print(f"Warning: no story text found in {source_path}", file=sys.stderr)
+        print(f"Warning: no story text found: {_relative_path(source_path)}", file=sys.stderr)
         return 1
 
     if dry_run:
@@ -1125,6 +1120,11 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         return 1
 
     fm, story_text = load_source_text(source_path)
+
+    if not story_text.strip():
+        print(f"Warning: no story text found: {_relative_path(source_path)}", file=sys.stderr)
+        return 1
+
     prompt = build_prompt(source_path, fm, story_text)
     print(prompt)
     return 0
@@ -1167,7 +1167,7 @@ def emit_prompts(sources: list[Path], out_dir: Path) -> int:
     for source_path in sources:
         fm, story_text = load_source_text(source_path)
         if not story_text.strip():
-            print(f"Warning: no story text found in {source_path}", file=sys.stderr)
+            print(f"Warning: no story text found: {_relative_path(source_path)}", file=sys.stderr)
             continue
         stem = classify_stem(source_path)
         prompt_file = out_dir / f"{stem}.prompt.md"
