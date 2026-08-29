@@ -83,8 +83,9 @@ PROTECTED_FILES = {
 #: the shadow copy out of the vaults that already carry it.
 LEGACY_EMBEDDED_LANDMARK_STORE = "system/landmarks.json"
 
-#: The bytes the framework used to ship at that path. A file matching it holds
-#: nothing and is simply removed; anything else is the person's data.
+#: What the framework used to ship at that path. A file whose parsed content
+#: equals this holds nothing and is simply removed; anything else is data
+#: somebody put there, and the migration does not delete data.
 LANDMARK_SEED_TEMPLATE = {"version": 1, "domains": {}}
 
 
@@ -116,7 +117,7 @@ def migrate_embedded_landmark_store(repo_dir=None, *, save_landmarks=None):
     Idempotent by CONTENT, never by a marker file (the house pattern —
     `migrate_vault_to_v120`, `flip_landmarks_if_needed`).
 
-    Three states, and the rule for each is the conservative one:
+    The states it can find, and the conservative rule for each:
 
     * **the framework's own empty seed** — removed. It holds nothing; leaving
       it behind leaves a file that looks like a landmark store and is not one.
@@ -133,6 +134,9 @@ def migrate_embedded_landmark_store(repo_dir=None, *, save_landmarks=None):
       ALONE, with a note. The contract no longer reads it, so it is inert; a
       migration that deletes a hand-edited file it does not recognize is a
       worse defect than the one being fixed.
+    * **entries belonging to another vault** — refused, with a note naming
+      both. See the guard below: an external-layout install runs this updater
+      against the framework checkout, not against the vault it is bound to.
     """
     root = Path(repo_dir) if repo_dir is not None else REPO_DIR
     legacy = root / LEGACY_EMBEDDED_LANDMARK_STORE
