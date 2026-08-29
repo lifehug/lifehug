@@ -1065,11 +1065,15 @@ def redraw(vault_root: str | Path) -> dict:
 
     The whole projection in one call, and deliberately WITHOUT the write: the
     landmark store's path is resolved by `lifehug_core` against the process's
-    bound vault and differs between an embedded-layout vault (where it is
-    ``system/landmarks.json``) and an external one (``state/landmarks.json``).
-    Re-deriving that path here would be a second definition of where the file
-    lives, so the one writer is `timeline.redraw_landmarks`, which already
-    holds it as ``LANDMARKS_STORE``.
+    bound vault. Re-deriving that path here would be a second definition of
+    where the file lives, so the one writer is `timeline.redraw_landmarks`,
+    which already holds it as ``LANDMARKS_STORE``.
+
+    v260 (Timeline Fix 01) removed the layout difference this paragraph used
+    to have to explain: the store was at ``system/landmarks.json`` on an
+    embedded vault and under ``state/`` on an external one, and the embedded
+    path was a framework file an update re-shipped empty. It is now the one
+    path in both layouts.
     """
     index = store.rebuild_active_index(vault_root)
     sources = load_landmark_sources(vault_root)

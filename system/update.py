@@ -74,6 +74,130 @@ PROTECTED_FILES = {
 }
 
 
+#: The landmark store's pre-v260 EMBEDDED location. Until v260 the vault
+#: contract routed the `landmarks` durable-data key here on an embedded vault
+#: (one that carries its own `system/`) while an external vault kept it at
+#: `state/landmarks.json` — and this path was ALSO a framework file, so every
+#: `--apply` re-shipped the empty template over the person's own landmarks.
+#: The contract now names one path in both layouts; what is left is getting
+#: the shadow copy out of the vaults that already carry it.
+LEGACY_EMBEDDED_LANDMARK_STORE = "system/landmarks.json"
+
+#: What the framework used to ship at that path. A file whose parsed content
+#: equals this holds nothing and is simply removed; anything else is data
+#: somebody put there, and the migration does not delete data.
+LANDMARK_SEED_TEMPLATE = {"version": 1, "domains": {}}
+
+
+def _landmark_entries(raw):
+    """`{domain: [entry, ...]}` for the non-empty domains of a store's text."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    domains = data.get("domains")
+    if not isinstance(domains, dict):
+        return {}
+    found = {}
+    for domain, entries in domains.items():
+        rows = [e for e in (entries or []) if isinstance(e, dict)] if isinstance(entries, list) else []
+        if rows:
+            found[str(domain)] = rows
+    return found
+
+
+def migrate_embedded_landmark_store(repo_dir=None, *, save_landmarks=None):
+    """One landmark store per vault: retire the shadow copy under `system/`.
+
+    Returns a one-line description of what it did, or ``None`` when there was
+    nothing to do — which is what makes it idempotent: the second call finds no
+    file at :data:`LEGACY_EMBEDDED_LANDMARK_STORE` and returns ``None``.
+    Idempotent by CONTENT, never by a marker file (the house pattern —
+    `migrate_vault_to_v120`, `flip_landmarks_if_needed`).
+
+    The states it can find, and the conservative rule for each:
+
+    * **the framework's own empty seed** — removed. It holds nothing; leaving
+      it behind leaves a file that looks like a landmark store and is not one.
+    * **entries** — FILED into the vault's one store through
+      `timeline.save_landmarks`, the ordinary durable verb: each record is
+      promoted to a source, its assertions become claims, and the projection's
+      ONE writer redraws `state/landmarks.json` from them. That is the store's
+      own same-key rule (`landmarks_interaction.landmark_entry_key` +
+      `merge_landmark_entry`) doing the merge, at draw time, exactly as a
+      live answer would — so an entry the state store already holds folds
+      into it instead of doubling, and nothing here becomes a second writer of
+      the drawing. The shadow copy is removed only after every record filed.
+    * **neither** — a file that is not the seed and holds no entries is LEFT
+      ALONE, with a note. The contract no longer reads it, so it is inert; a
+      migration that deletes a hand-edited file it does not recognize is a
+      worse defect than the one being fixed.
+    * **entries belonging to another vault** — refused, with a note naming
+      both. See the guard below: an external-layout install runs this updater
+      against the framework checkout, not against the vault it is bound to.
+    """
+    root = Path(repo_dir) if repo_dir is not None else REPO_DIR
+    legacy = root / LEGACY_EMBEDDED_LANDMARK_STORE
+    if not legacy.exists():
+        return None
+    raw = legacy.read_text(encoding="utf-8")
+    entries = _landmark_entries(raw)
+
+    if not entries:
+        if entries is not None and json.loads(raw) == LANDMARK_SEED_TEMPLATE:
+            legacy.unlink()
+            _stage_removal(root, LEGACY_EMBEDDED_LANDMARK_STORE)
+            return (
+                f"Removed {LEGACY_EMBEDDED_LANDMARK_STORE} (the framework's empty "
+                "landmark seed). Your landmarks live in state/landmarks.json, in "
+                "every layout, and an update can no longer overwrite them."
+            )
+        return (
+            f"Left {LEGACY_EMBEDDED_LANDMARK_STORE} in place: it is neither the "
+            "framework's seed nor a store with entries, and nothing reads it any "
+            "more. Delete it whenever you like."
+        )
+
+    if save_landmarks is None:
+        from lifehug_core import REPO_DIR as BOUND_VAULT  # local import  # noqa: PLC0415
+
+        # Filing goes through the bound vault, so refuse to file one vault's
+        # entries into another's substrate. An external-layout install runs
+        # this updater against the FRAMEWORK checkout while `lifehug_core` is
+        # bound to the user's vault; a checkout that somehow carries entries
+        # there is not the bound vault's data and must not be filed into it.
+        if Path(str(BOUND_VAULT)).resolve() != root.resolve():
+            return (
+                f"Left {LEGACY_EMBEDDED_LANDMARK_STORE} in place: it holds entries "
+                f"and belongs to {root}, but this process is bound to "
+                f"{BOUND_VAULT}. Run the update from that vault to file them; "
+                "nothing was deleted."
+            )
+        from timeline import save_landmarks  # local import; same dir  # noqa: PLC0415
+    filed = 0
+    for domain in sorted(entries):
+        save_landmarks(domain, entries[domain])
+        filed += len(entries[domain])
+    legacy.unlink()
+    _stage_removal(root, LEGACY_EMBEDDED_LANDMARK_STORE)
+    return (
+        f"Filed {filed} landmark entr{'y' if filed == 1 else 'ies'} from "
+        f"{LEGACY_EMBEDDED_LANDMARK_STORE} into this vault's one store "
+        "(state/landmarks.json) through the ordinary filing verb, so they merge "
+        "by the store's own same-key rule, and removed the shadow copy."
+    )
+
+
+def _stage_removal(root, relative):
+    """Stage a migration's deletion so `apply_version`'s commit carries it."""
+    subprocess.run(
+        ["git", "-C", str(root), "add", "--", relative],
+        capture_output=True, text=True,
+    )
+
+
 def load_json(path):
     with open(path) as f:
         return json.load(f)
@@ -835,6 +959,31 @@ def run_migrations(target_version, current_version):
             print(
                 "  Note: calculated timeline publication deferred (it will run "
                 f"on the next landmark write): {exc}"
+            )
+
+    if target_version >= 260 and current_version < 260:
+        # v260: ONE landmark store per vault (Timeline Fix 01,
+        # lifehug-platform#755). The contract used to route `landmarks` to
+        # `system/landmarks.json` on an embedded vault, and that path was a
+        # framework file — so this very function's caller re-shipped the empty
+        # template over the person's landmarks on every release, while the
+        # real entries sat unread in `state/landmarks.json`. The contract now
+        # names one path; this retires the shadow copy the vault already has.
+        #
+        # It runs LAST, after the v224 flip and the v231 publication, for the
+        # same reason those do: the merge path imports `timeline`, which
+        # reaches `lifehug_core`, whose import binds the interpreter to one
+        # vault root and refuses an unrepaired one. It must also run after the
+        # flip specifically — filing an entry into a half-flipped vault is the
+        # state `save_landmark` exists to prevent.
+        try:
+            note = migrate_embedded_landmark_store()
+            if note:
+                print(f"  {note}")
+        except Exception as exc:  # never let a migration break the update
+            print(
+                "  Note: the embedded landmark store was left in place "
+                f"(nothing was deleted): {exc}"
             )
 
 

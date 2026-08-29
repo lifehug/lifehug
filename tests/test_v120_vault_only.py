@@ -212,11 +212,13 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(list(exported["framework_paths"]), sorted(exported["framework_paths"]))
         # Moves only when the CONTRACT moves, which is why it lags the
         # framework version: v231 published the projection, E3 (eras) added
-        # `sources/eras` and `state/temporal_claims/resolutions`, and O-C
-        # (stale-first classification) added `state/classify_cursor.json`.
+        # `sources/eras` and `state/temporal_claims/resolutions`, O-C
+        # (stale-first classification) added `state/classify_cursor.json`, and
+        # v260 (Timeline Fix 01) took the `landmarks` entry's `embedded_path`
+        # away — one store per vault, `vault-contract-v13`.
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 251)
+        self.assertEqual(exported["identity"]["framework_version"], 260)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),
