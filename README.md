@@ -430,6 +430,7 @@ Generation can use:
 3. **OpenClaw gateway** — selected automatically when locally configured, or deliberately with `ai_provider: openclaw`. Its fixed localhost destination and port are validated before any request.
 4. **Kimi** — selected deliberately by a `kimi*`, `moonshot*`, or `k3*` model (or `ai_provider: kimi`) plus `KIMI_API_KEY`.
 5. **Anthropic SDK** — selected by a configured key in backward-compatible auto mode, or deliberately with `ai_provider: anthropic`. The SDK is optional; if absent, status stays keyless without terminating the process.
+6. **Headless Claude Code** — selected deliberately with `ai_provider: claude-code`. Runs `claude -p --output-format json` with the composed prompt on stdin under your own logged-in Claude Code subscription, so an unattended run (e.g. `classify_story.py --classify-all --unclassified --stale-first`) needs no API key and no agent session watching every prompt. Optional `claude_code_model` picks the model; never part of `auto` resolution and never a fallback target.
 
 If none is available, Focuses and stories are still scaffolded — the script just tells you how to seed questions later.
 Provider configuration errors fail closed, chat and readiness bodies are size-bounded,
@@ -643,7 +644,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 
 | Script | What it does |
 |---|---|
-| **`ai_provider.py`** | The single privacy-aware provider/router shared by every model-backed surface. Supports fail-closed on-machine OpenAI-compatible models plus deliberate OpenClaw, Kimi, Anthropic, and keyless agent-task routes. |
+| **`ai_provider.py`** | The single privacy-aware provider/router shared by every model-backed surface. Supports fail-closed on-machine OpenAI-compatible models plus deliberate OpenClaw, Kimi, Anthropic, headless Claude Code (`claude -p`, v256), and keyless agent-task routes. |
 | **`question_judgment.py`** | The one authoritative judgment-rubric loader (ADR 0007): `load_judgment_rubric()` assembles `interactions/question_judgment/prompt/behavior.md` (never truncated) plus the vault's `state/question_judgment/learned.md`; `classify_story.py` and `research_expand.py` both call it instead of each hand-slicing `research.md` (the old `research[:3000]`/`research_notes[:800]` truncations are gone). Also runs the weekly RUBRIC-EDIT accelerator (ADR 0009, `judgment-update`): reads the week's owner promote/dismiss/defer decisions plus quality-profile movement and applies at most one bounded, evidence-cited amendment to `learned.md` — never a rewrite, never a deterministic invention when no model is available. |
 | **`research_expand.py`** | The growth engine. Opens question **neighborhoods** along memoir/self/relationship arcs, detects coverage **gaps**, and generates new questions as **candidates** through the shared provider. The biggest script — see [research & neighborhoods](#research--neighborhoods-finding-new-questions). |
 | **`question_candidates.py`** | The review buffer. Manages the candidate lifecycle (list / review / update / promote), quality-checks each candidate (flags yes/no wording, vagueness, duplicates), and promotes accepted ones into the bank with provenance. |

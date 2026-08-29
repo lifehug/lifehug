@@ -66,6 +66,20 @@ followup_model: "anthropic/claude-opus-4-6"
 # Check the selected provider/model and make a non-mutating GET /models probe:
 #   python3 system/lifehug.py ai-status
 
+# --- Headless Claude Code (v256) ---
+# Runs `claude -p --output-format json` with the composed prompt on stdin,
+# under YOUR OWN logged-in Claude Code subscription — no API key, no agent
+# session watching every prompt. Useful for `classify_story.py --classify-all
+# --unclassified --stale-first` and other unattended runs. Chosen ONLY when
+# explicitly set (never part of `auto` resolution, never a fallback target):
+# ai_provider: "claude-code"
+# Optional; otherwise the `claude` CLI's own default model is used:
+# claude_code_model: "claude-sonnet-5"
+# The `claude` binary must be installed and already authenticated
+# (`claude /login`) on this machine. If it is missing, or the call fails for
+# any reason, Lifehug returns a typed error rather than falling through to
+# OpenClaw, Kimi, or Anthropic.
+
 # --- Kimi models (v113) ---
 # Any model named kimi*/moonshot*/k3* routes to the Kimi OpenAI-compatible
 # endpoint instead of Anthropic. Key from the Kimi Code Console (or set
