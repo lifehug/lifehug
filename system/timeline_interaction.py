@@ -97,11 +97,13 @@ KIND_OPENERS = {
     "moment": {
         "step": "content", "cost": 1,
         "anchored_step": "sequence", "anchored_cost": 5,
-        # With no landmark at all there is nothing to place it against, so the
-        # honest opening is the moment itself — the one place the bare content
-        # probe belongs.
-        "text": "Tell me about {label} — just the moment itself, however it "
-                "comes.",
+        # Timeline Fix 09 (lifehug-platform#767, owner-ruled 2026-08-29): a
+        # person presses Play on a moment they can already see on the page —
+        # the content is known, the missing thing is WHEN. This overrides the
+        # v196 content-first rule for exactly this path; the anchored variant
+        # below was already a WHEN question and is unchanged.
+        "text": "About when was {label}? A year, how old you were, or where "
+                "you were living is enough.",
         "anchored": "{label} — was that before or after {anchor}?",
     },
     "period_bound": {
