@@ -569,22 +569,26 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
 
         block_count = int(record.get("frontmatter_block_count") or 0)
         if block_count > 1:
-            # Issue #282: a lost-and-recovered rebase can glue two or three
-            # complete answer/source files together, each opening its own
-            # `---` frontmatter block. Only the first is read as metadata
-            # and every reader that stops at the second `---` fence never
-            # sees the real body after the last block — sometimes there is
-            # none at all. Caught here at lint time, before a batch
+            # Issues #282/#286: a lost-and-recovered rebase can glue two or
+            # three complete answer/source documents together, each opening
+            # its own `---` frontmatter block — sometimes fence-to-fence
+            # (#282), sometimes with the writer's own duplicated `# Question
+            # ...` heading sitting between blocks (#286). Either way only the
+            # first is read as metadata and every reader that stops at the
+            # wrong fence never sees the real body after the last block —
+            # sometimes there is none at all. `block_count` here (from
+            # `skip_leading_frontmatter_blocks`) counts PREAMBLES, so it
+            # catches both shapes. Caught here at lint time, before a batch
             # classification run sends a model a prompt it cannot answer.
             findings.append(finding(
                 "stacked_frontmatter",
                 "error",
                 path,
                 f"source has {block_count} consecutive leading frontmatter "
-                "blocks glued together — likely a lost-and-recovered rebase "
-                "(lifehug#282); only the first is read as metadata and the "
-                "real body after the last block may be invisible to every "
-                "reader",
+                "preambles glued together — likely a lost-and-recovered "
+                "rebase (lifehug#282/#286); only the first is read as "
+                "metadata and the real body after the last one may be "
+                "invisible to every reader",
                 fixability="manual",
                 recommended_action=(
                     "split the concatenated sources apart by hand, or confirm "

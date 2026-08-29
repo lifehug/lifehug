@@ -874,27 +874,48 @@ def split_frontmatter(content: str) -> tuple[dict[str, object], str]:
     return metadata, body
 
 
+_LEADING_HEADING_RE = re.compile(r"^#[ \t]+(.*?)[ \t]*(?:\n|\Z)")
+
+
 def skip_leading_frontmatter_blocks(content: str) -> tuple[dict[str, object], str, int]:
-    """Skip EVERY leading fenced frontmatter block, not just the first.
+    """Skip EVERY leading fenced frontmatter PREAMBLE, not just the first.
 
     Issue #282: a source restored from a lost rebase can carry the same
-    frontmatter concatenated two or three times in a row (`---` fences x4 or
-    x6, each a complete block). `split_frontmatter` above only strips ONE
-    block — a reader built on it (or on a second ad hoc `---` search inside
-    what it leaves behind) treats the second block's `key: value` lines as
-    prose, so the real answer after the last block goes unread, or — when
-    there is no real body at all — a non-empty "body" (the extra block's own
-    YAML) is returned instead of an honest empty string.
+    frontmatter concatenated two or three times in a row. Issue #286
+    (measured against the two REAL sources #282/v257 was written for)
+    corrected the shape: it is not consecutive fenced blocks glued directly
+    together — it is CONCATENATED WHOLE DOCUMENTS, `frontmatter -> the
+    writer's own "# Question ..." H1 -> frontmatter -> H1 -> ... -> body`.
+    v257 only continued past a fence immediately followed by ANOTHER fence;
+    the real files have the writer's own heading sitting between them (the
+    same heading `process_answer.py` always emits, whose text is byte-
+    identical to that block's own `title` metadata), so v257 stopped at the
+    first heading and a reader built on it returned the SECOND document's
+    frontmatter keys as the body — the exact defect this was meant to fix.
 
-    Metadata is taken from the FIRST block only: the stacked blocks are
-    near-duplicates from the restore, not independent facts, so later blocks
+    A "preamble" is therefore either shape:
+      - a fence immediately followed by another fence (v257's shape), or
+      - a fence followed by an H1 whose text matches THAT block's own
+        `title`, itself immediately followed by another fence (#286's
+        shape) — proof this heading belongs to a duplicated preamble, not
+        to the final document's real content.
+    Every leading preamble is skipped and the loop keeps going; the first
+    fence/H1 pair that is NOT immediately followed by another fence is the
+    final, real document and is left untouched — including its own heading,
+    which stays in the body exactly like an ordinary single-document answer
+    (several other `answer_body` readers rely on that heading staying put).
+
+    Metadata is taken from the FIRST block only: the stacked preambles are
+    near-duplicates from the restore, not independent facts, so later ones
     have nothing to add.
 
-    Blank lines between blocks are tolerated (a lost-and-recovered rebase
-    can glue files together with or without one); the very first block still
-    requires the file to open with `---\\n`, exactly like `split_frontmatter`.
+    Blank lines between blocks/headings are tolerated (a lost-and-recovered
+    rebase can glue files together with or without one); the very first
+    block still requires the file to open with `---\\n`, exactly like
+    `split_frontmatter`.
 
-    Returns (first_block_metadata, body_after_every_leading_block, block_count).
+    Returns (first_block_metadata, body_after_every_leading_preamble, block_count)
+    — `block_count` counts fences, i.e. the number of preambles skipped.
     """
     first_metadata: dict[str, object] = {}
     remaining = content
@@ -910,7 +931,28 @@ def skip_leading_frontmatter_blocks(content: str) -> tuple[dict[str, object], st
         block_count += 1
         if block_count == 1:
             first_metadata = metadata
-        remaining = body
+
+        after_block = body.lstrip("\n")
+        if after_block.startswith("---\n"):
+            # v257 shape: fences glued directly together, no heading between.
+            remaining = body
+            continue
+
+        # #286 shape: does the writer's own heading sit here, and does
+        # ANOTHER fence follow it? Only then is it a duplicated preamble —
+        # never strip a heading that turns out to introduce the real body.
+        title = str(metadata.get("title", "")).strip()
+        consumed_heading = False
+        if title:
+            heading_match = _LEADING_HEADING_RE.match(after_block)
+            if heading_match and heading_match.group(1).strip() == title:
+                after_heading = after_block[heading_match.end():].lstrip("\n")
+                if after_heading.startswith("---\n"):
+                    remaining = after_heading
+                    consumed_heading = True
+        if not consumed_heading:
+            remaining = body
+            break
     return first_metadata, remaining, block_count
 
 
