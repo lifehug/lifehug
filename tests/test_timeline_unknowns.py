@@ -277,8 +277,11 @@ class ProbeGoldenTests(unittest.TestCase):
     GOLDENS = {
         "moment": (
             {"kind": "moment", "label": "Dad lost the truck keys while camping"},
-            "Tell me about Dad lost the truck keys while camping — just the "
-            "moment itself, however it comes.",
+            # Timeline Fix 09 (lifehug-platform#767): the unanchored moment
+            # opener asks WHEN, not "tell me about" — the person pressing
+            # Play on a moment can already see its content on the page.
+            "About when was Dad lost the truck keys while camping? A year, "
+            "how old you were, or where you were living is enough.",
             "Dad lost the truck keys while camping — was that before or after "
             "the move to San Diego?",
         ),
