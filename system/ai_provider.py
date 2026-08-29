@@ -14,6 +14,8 @@ import ipaddress
 import json
 import math
 import os
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -275,9 +277,9 @@ def _provider_choice(requested_model: str, cfg: dict[str, object]) -> str:
     explicit = _setting(cfg, "LIFEHUG_AI_PROVIDER", "ai_provider").lower() or "auto"
     aliases = {"local-openai": "local", "sdk-key": "anthropic", "gateway": "openclaw"}
     explicit = aliases.get(explicit, explicit)
-    if explicit not in {"auto", "local", "openclaw", "kimi", "anthropic"}:
+    if explicit not in {"auto", "local", "openclaw", "kimi", "anthropic", "claude-code"}:
         raise AIConfigurationError(
-            "ai_provider must be auto, local, openclaw, kimi, or anthropic"
+            "ai_provider must be auto, local, openclaw, kimi, anthropic, or claude-code"
         )
     if explicit != "auto":
         return explicit
@@ -734,6 +736,82 @@ def _call_anthropic(prompt: str, model: str, cfg: dict[str, object]):
     return content
 
 
+def _claude_code_settings(cfg: dict[str, object]) -> tuple[str | None, float]:
+    model = _setting(cfg, "LIFEHUG_CLAUDE_CODE_MODEL", "claude_code_model") or None
+    return model, _global_timeout(cfg)
+
+
+def _call_claude_code(prompt: str, cfg: dict[str, object]) -> str:
+    """Run headless Claude Code (``claude -p --output-format json``) with the
+    prompt on stdin, under the owner's own logged-in subscription — no API
+    key, no agent session. Chosen only by explicit ``ai_provider:
+    claude-code``; never auto-selected and never a keyless fallback."""
+    model, timeout = _claude_code_settings(cfg)
+    argv = ["claude", "-p", "--output-format", "json"]
+    if model:
+        argv += ["--model", model]
+    try:
+        completed = subprocess.run(  # noqa: S603 — fixed argv, never shell=True
+            argv,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise AIUnavailableError(
+            "claude-code is selected but the `claude` binary was not found on PATH",
+            provider="claude-code",
+            operation="chat-completion",
+            status="binary_missing",
+        ) from None
+    except subprocess.TimeoutExpired:
+        raise AIUnavailableError(
+            "claude-code timed out",
+            provider="claude-code",
+            operation="chat-completion",
+            status="timeout",
+        ) from None
+    except OSError:
+        raise AIUnavailableError(
+            "claude-code could not be started",
+            provider="claude-code",
+            operation="chat-completion",
+            status="unavailable",
+        ) from None
+    stdout = completed.stdout or ""
+    response_bytes = len(stdout.encode("utf-8", errors="replace"))
+    if completed.returncode != 0:
+        raise AIUnavailableError(
+            f"claude-code exited with a non-zero status ({completed.returncode})",
+            provider="claude-code",
+            operation="chat-completion",
+            status=f"exit_{completed.returncode}",
+            response_bytes=response_bytes,
+        )
+    try:
+        parsed = json.loads(stdout)
+        result = parsed["result"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise AIResponseError(
+            "claude-code returned malformed output",
+            provider="claude-code",
+            operation="decode-chat",
+            status="malformed",
+            response_bytes=response_bytes,
+        ) from None
+    if not isinstance(result, str) or not result.strip():
+        raise AIResponseError(
+            "claude-code returned an empty completion",
+            provider="claude-code",
+            operation="decode-chat",
+            status="empty",
+            response_bytes=response_bytes,
+        )
+    return result
+
+
 def call_ai(prompt: str, model: str) -> str:
     """Call the selected provider and return response text.
 
@@ -751,6 +829,8 @@ def call_ai(prompt: str, model: str) -> str:
                           _global_timeout(cfg), cfg)
     if provider == "anthropic":
         return _call_anthropic(prompt, model, cfg)
+    if provider == "claude-code":
+        return _call_claude_code(prompt, cfg)
     if provider == "agent-task":
         raise AIUnavailableError("no unattended AI provider is ready; use agent-task mode")
 
@@ -902,6 +982,11 @@ def provider_status(requested_model: str | None = None, *, probe: bool = False) 
         return ProviderStatus(
             "anthropic", _safe_label(requested_model), key_ready and sdk_ready, detail
         )
+    if provider == "claude-code":
+        model = _setting(cfg, "LIFEHUG_CLAUDE_CODE_MODEL", "claude_code_model") or requested_model
+        ready = shutil.which("claude") is not None
+        detail = "claude binary found on PATH" if ready else "claude binary not found on PATH"
+        return ProviderStatus("claude-code", _safe_label(model), ready, detail)
     return ProviderStatus("agent-task", _safe_label(requested_model), False,
                           "no unattended provider configured")
 
