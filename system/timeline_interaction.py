@@ -1998,7 +1998,11 @@ def build_era_recorder_prompt(*, target: object, question_asked: str,
         ("{era_aliases}", ", ".join(row["aliases"]) or "(none)"),
         ("{era_known}", "\n".join(known_lines) or "(nothing yet)"),
         ("{question_asked}", (question_asked or "").strip()),
-        ("{claim_types}", " | ".join(_tc.CLAIM_TYPES)),
+        # Timeline Fix 05: MODEL_CLAIM_TYPES, not CLAIM_TYPES — the dateless
+        # `occurrence` type is the deterministic classifier migration's alone
+        # and is never offered to a model whose whole job is hearing time.
+        # This keeps the composed prompt byte-identical across that release.
+        ("{claim_types}", " | ".join(_tc.MODEL_CLAIM_TYPES)),
         ("{event_kinds}", _era_event_kinds()),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),

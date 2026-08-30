@@ -168,6 +168,13 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # writes state/question_judgment/learned.md and last_edit.json directly
     # (--dry-run/--emit-task never write) — same family as quality-update.
     "judgment-update",
+    # Timeline Fix 05 item 8.1 (lifehug-platform#759): the classifier
+    # migration writes extraction receipts and, for a re-classified source,
+    # one supersession correction — then rebuilds the index and republishes
+    # the calculated timeline. Same single-transaction vault mutation family
+    # as era-record; --dry-run writes nothing but the command is still
+    # classified by name (the focus-autopilot/era-migrate convention).
+    "migrate-classifier-moments",
     "mirror-compile", "perennial-add", "perennials",
     "planner-clear", "planner-objective-add", "planner-objective-clear", "planner-queue",
     "planner-state", "quality-update", "rebuild", "recommend-focuses", "reflect-source",
@@ -990,6 +997,26 @@ def cmd_era_migrate(args: argparse.Namespace) -> int:
         dry_run=not args.apply,
     )
     print("\n".join(era_identity.describe_migration(report)))
+    return 0
+
+
+def cmd_migrate_classifier_moments(args: argparse.Namespace) -> int:
+    """`migrate-classifier-moments` — every classifier moment becomes a claim.
+
+    Timeline Fix 05 item 8.1. The command is a thin seat: the rule, the
+    counts and the idempotency all live in `classifier_claims`, which is what
+    lets the hosted platform run the identical migration through the vendored
+    package instead of re-deriving it.
+    """
+    import classifier_claims  # noqa: PLC0415
+
+    report = classifier_claims.migrate_classifier_moments(
+        REPO_DIR, dry_run=bool(getattr(args, "dry_run", False))
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print("\n".join(classifier_claims.describe_migration(report)))
     return 0
 
 
@@ -2914,6 +2941,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "identity, so re-running the SAME batch writes nothing")
     p.add_argument("--apply", action="store_true", help="Actually write")
     p.set_defaults(func=cmd_era_migrate)
+
+    p = sub.add_parser(
+        "migrate-classifier-moments",
+        help="File every current classifier moment as a source-backed temporal claim",
+    )
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the counts and write nothing")
+    p.add_argument("--json", action="store_true", help="Print the report as JSON")
+    p.set_defaults(func=cmd_migrate_classifier_moments)
 
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")

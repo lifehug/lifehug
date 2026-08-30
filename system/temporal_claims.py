@@ -150,8 +150,43 @@ SCHEMA_VERSION = 1
 SOURCE_KINDS = ("conversation", "correction", "import", "system_derived")
 
 #: What the claim asserts. ``identity`` asserts *who* and carries no date;
-#: everything else asserts *when* and carries an ``event_kind``.
-CLAIM_TYPES = ("date", "range", "age", "duration", "relative_order", "identity")
+#: ``occurrence`` asserts *that an event happened* and carries no date either;
+#: everything else asserts *when*. Every type but ``identity`` carries an
+#: ``event_kind``, because a date — or the bare fact of happening — is a date
+#: of an EVENT and never of a person.
+#:
+#: ``occurrence`` arrives with the classifier migration (Timeline Fix 05,
+#: lifehug-platform#759). The vault holds hundreds of moments the person
+#: narrated and never dated, and until this type existed there was no way to
+#: say so: :func:`validate_temporal_claim` refuses a dated type with no value
+#: (correctly — a fabricated interval is the false precision the substrate
+#: exists to end) and ``identity`` refuses an ``event_kind``. So an undated
+#: moment could only be dropped or lied about. It is now a claim with an event
+#: and no time, the fold mints it a node with no ``best_temporal_value``, and
+#: the page shows it where it honestly belongs: not placed yet.
+CLAIM_TYPES = (
+    "date", "range", "age", "duration", "relative_order", "identity", "occurrence",
+)
+
+#: The claim type that asserts happening without asserting when.
+OCCURRENCE_CLAIM_TYPE = "occurrence"
+
+#: The two types that carry NO ``temporal_value`` at all. Stated as a set so a
+#: reader asks the question once instead of listing the exceptions three times.
+DATELESS_CLAIM_TYPES = ("identity", OCCURRENCE_CLAIM_TYPE)
+
+#: The subset a MODEL extractor may emit. The recorder, the general listener
+#: and the timeline interaction all interpolate this into their prompts, and
+#: ``occurrence`` is deliberately withheld from them: those extractors exist to
+#: hear TIME, their backstops are built around a withheld date, and offering a
+#: dateless type would let a model file "something happened" instead of
+#: listening harder. ``occurrence`` is minted by the deterministic classifier
+#: migration alone, which reads moments a model already extracted and is not
+#: asking anybody for a date. Keeping the two vocabularies apart is also what
+#: keeps every existing composed prompt BYTE-IDENTICAL across this release.
+MODEL_CLAIM_TYPES = tuple(
+    value for value in CLAIM_TYPES if value != OCCURRENCE_CLAIM_TYPE
+)
 
 #: The epistemic class the product surfaces render (plan §5.1, §8.1) — NOT
 #: ``chronology.BASES``, which answers how the interval was arrived at.
@@ -234,6 +269,16 @@ CLAIM_BASIS_BY_DATE_BASIS = {
 
 #: A bounded quotation is evidence; an unbounded one is a copy of the source.
 MAX_EVIDENCE_QUOTE_CHARS = 300
+#: How many places one claim may carry, and how long each may be. A
+#: ``place_mention`` is a NAME the source used for somewhere ("San Diego", "the
+#: Williams house"), kept beside the fact exactly as ``event_mention`` keeps
+#: what the event was called. It is evidence for a later co-location rule
+#: (Timeline Fix 05 §8.3) and it is deliberately NOT a link and NOT in
+#: :data:`CLAIM_IDENTITY_KEYS`: where a thing happened does not change WHICH
+#: claim it is, and binding a mention to a place is resolution, which happens
+#: after the claim exists.
+MAX_PLACE_MENTIONS = 12
+MAX_PLACE_MENTION_CHARS = 120
 #: A subject mention longer than this is a sentence, not a subject.
 MAX_SUBJECT_MENTION_CHARS = 200
 
@@ -335,6 +380,8 @@ ERROR_CODES = (
     "aggregate_subject_mention",
     "identity_claim_carries_no_temporal_value",
     "identity_claim_carries_no_event",
+    "occurrence_claim_carries_no_temporal_value",
+    "place_mention_too_long",
     "event_mention_too_long",
     "temporal_claim_needs_event_kind",
     "temporal_claim_needs_value",
@@ -972,14 +1019,22 @@ def normalized_temporal_value(value: object, *, claim_type: str) -> object:
     definition in this package and this module does not add a second parser.
     ``age | duration`` normalize through :func:`validate_temporal_quantity`,
     which is a length and not a calendar position. ``relative_order``
-    normalizes through :func:`validate_ordering_relation`. ``identity``
-    carries no value at all.
+    normalizes through :func:`validate_ordering_relation`. ``identity`` and
+    ``occurrence`` carry no value at all.
     """
     if claim_type == "identity":
         if value is not None:
             raise TemporalClaimError(
                 "identity_claim_carries_no_temporal_value",
                 "an identity claim asserts who, not when",
+            )
+        return None
+    if claim_type == OCCURRENCE_CLAIM_TYPE:
+        if value is not None:
+            raise TemporalClaimError(
+                "occurrence_claim_carries_no_temporal_value",
+                "an occurrence claim asserts that it happened, not when; "
+                "a claim that knows when is a date, a range, an age or an order",
             )
         return None
     if claim_type == "relative_order":
@@ -1079,6 +1134,15 @@ class TemporalClaim:
     #: claim.
     event_mention: str | None = None
     event_kind: str | None = None
+    #: Timeline Fix 05 (lifehug-platform#759). WHERE THE SOURCE SAID IT
+    #: HAPPENED, verbatim, as names — never a link and never a date. It is
+    #: EVIDENCE, carried so a later deterministic rule can put an undated
+    #: moment inside a dated residence's span ("you lived in San Diego
+    #: 1988-1990") without re-reading the source. Additive and absent unless
+    #: the source named somewhere; deliberately outside
+    #: :data:`CLAIM_IDENTITY_KEYS`, because where a thing happened does not
+    #: change WHICH claim it is.
+    place_mentions: tuple[str, ...] = ()
     evidence: tuple[EvidenceSpan, ...] = ()
     basis: str = "inferred"
     confidence: float = 0.0
@@ -1115,6 +1179,8 @@ class TemporalClaim:
         ):
             if value is not None:
                 payload[key] = value
+        if self.place_mentions:
+            payload["place_mentions"] = list(self.place_mentions)
         return payload
 
 
@@ -1181,8 +1247,9 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
     * the raw ``subject_mention`` is required and survives resolution;
     * an enumerated mention is refused by name, with the parts in the error, so
       *"Ada, Bo, Cy, and Della"* becomes four claims and never one;
-    * ``identity`` claims carry no date and no event; every dated claim carries
-      an ``event_kind``, because a date is the date of an event and never of a
+    * ``identity`` claims carry no date and no event; an ``occurrence`` claim
+      carries an event and no date; every dated claim carries an
+      ``event_kind``, because a date is the date of an event and never of a
       person;
     * evidence is required and bounded;
     * ``claim_id`` is derived, and a supplied id that disagrees with the
@@ -1230,6 +1297,7 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
             "event_mention_too_long",
             f"event_mention is {len(event_mention)} chars; a mention is a name, not a sentence",
         )
+    place_mentions = normalized_place_mentions(value.get("place_mentions"))
     if claim_type == "identity":
         if event_kind or event_ref or event_mention:
             raise TemporalClaimError(
@@ -1247,7 +1315,10 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
                 "unknown_event_kind",
                 f"event_kind must be a lowercase token, got {event_kind!r}",
             )
-        if value.get("temporal_value") is None:
+        if (
+            claim_type != OCCURRENCE_CLAIM_TYPE
+            and value.get("temporal_value") is None
+        ):
             raise TemporalClaimError(
                 "temporal_claim_needs_value", f"a {claim_type} claim needs a temporal_value"
             )
@@ -1337,6 +1408,8 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
         normalized["event_mention"] = event_mention
     if event_kind:
         normalized["event_kind"] = event_kind
+    if place_mentions:
+        normalized["place_mentions"] = list(place_mentions)
     resolution = value.get("subject_resolution")
     if isinstance(resolution, dict) and resolution:
         normalized["subject_resolution"] = _normalized_resolution(resolution)
@@ -1378,6 +1451,39 @@ def unit_score(value: object, *, error: type[TemporalContractError]) -> float:
 _as_unit_float = unit_score
 
 
+def normalized_place_mentions(value: object) -> tuple[str, ...]:
+    """The places a claim names, bounded, de-duplicated and order-preserving.
+
+    Order is the source's own, because "San Diego, then Mesa" is information;
+    duplicates fold by :func:`normalized_mention_key`, which is the same
+    equality every other mention in this substrate uses. A mention longer than
+    :data:`MAX_PLACE_MENTION_CHARS` is a sentence rather than a place name and
+    is refused by name rather than silently truncated — truncating would file a
+    place that nobody said.
+    """
+    if isinstance(value, (str, bytes)):
+        value = [value]
+    seen: set[str] = set()
+    places: list[str] = []
+    for item in (value or ()):
+        text = _text(item)
+        if not text:
+            continue
+        if len(text) > MAX_PLACE_MENTION_CHARS:
+            raise TemporalClaimError(
+                "place_mention_too_long",
+                f"place_mention is {len(text)} chars; a place is a name, not a sentence",
+            )
+        key = _normalized_mention_key(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        places.append(text)
+        if len(places) >= MAX_PLACE_MENTIONS:
+            break
+    return tuple(places)
+
+
 def claim_from_dict(value: object) -> TemporalClaim | None:
     """Tolerant reader — ``None`` rather than an exception (compat rule 2)."""
     try:
@@ -1399,6 +1505,7 @@ def claim_from_dict(value: object) -> TemporalClaim | None:
         event_ref=normalized.get("event_ref"),
         event_mention=normalized.get("event_mention"),
         event_kind=normalized.get("event_kind"),
+        place_mentions=tuple(normalized.get("place_mentions") or ()),
         evidence=tuple(
             EvidenceSpan(
                 quote=span["quote"],
@@ -1789,6 +1896,7 @@ __all__ = [
     "CONSTRAINT_RELATIONS",
     "CORRECTION_SOURCES_DIR",
     "DATED_CLAIM_TYPES",
+    "DATELESS_CLAIM_TYPES",
     "ERROR_CODES",
     "EVENT_KINDS",
     "EVENT_KIND_RE",
@@ -1796,6 +1904,10 @@ __all__ = [
     "LANDMARK_DATE_SEMANTICS",
     "MAX_EVENT_MENTION_CHARS",
     "MAX_EVIDENCE_QUOTE_CHARS",
+    "MAX_PLACE_MENTIONS",
+    "MAX_PLACE_MENTION_CHARS",
+    "MODEL_CLAIM_TYPES",
+    "OCCURRENCE_CLAIM_TYPE",
     "QUANTITY_CLAIM_TYPES",
     "QUANTITY_UNITS",
     "RECEIPTS_DIR",
@@ -1832,6 +1944,7 @@ __all__ = [
     "is_safe_id",
     "is_seed_event_kind",
     "normalized_mention_key",
+    "normalized_place_mentions",
     "normalized_revision",
     "normalized_temporal_value",
     "normalized_timestamp",
