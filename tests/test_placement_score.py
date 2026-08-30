@@ -325,11 +325,25 @@ class PayloadShapeTests(unittest.TestCase):
         self.assertEqual(set(score), {
             "score", "score_stated", "band", "stated_fraction", "derived_fraction",
             "life_span_years", "things", "per_year_band", "caveat_floor", "next_gain",
+            # Timeline Fix 05 §8.3 — both ADDITIVE, and both owed to the
+            # platform twin: the version so a reader can tell which arithmetic
+            # produced the number, and the share so the eye pane can say how
+            # much of it is the system's inference rather than the person's
+            # word. `#758` owns the one line of pane text.
+            "score_formula_version", "inferred_fraction",
         })
         self.assertEqual(score["things"], 30)  # 25 moments + 5 eras
         self.assertEqual(len(score["per_year_band"]), score["life_span_years"] + 1)
         for row in score["per_year_band"]:
             self.assertEqual(set(row), {"year", "pinned_fraction", "stated_vs_derived"})
+
+    def test_the_new_fields_say_what_they_mean(self):
+        score = tl.placement_score(crema_payload(pinned=True))
+        self.assertEqual(score["score_formula_version"],
+                         tl.PLACEMENT_SCORE_FORMULA_VERSION)
+        # Nothing in this payload is inferred, so the share is honestly zero
+        # rather than absent — an absent field would read as "unknown".
+        self.assertEqual(score["inferred_fraction"], 0.0)
 
     def test_the_stated_and_derived_fractions_are_shares_of_the_dated_things(self):
         score = tl.placement_score(crema_payload(pinned=True))

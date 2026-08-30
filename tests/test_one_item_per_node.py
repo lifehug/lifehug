@@ -69,9 +69,14 @@ class OneItemPerNode(unittest.TestCase):
                          "When did you move to San Diego?")
 
     def test_the_precedence_table_is_ordered_by_what_answers_what(self):
+        """`place_ambiguous` (`timeline-rules:4`, Timeline Fix 05 §8.3) sits
+        ABOVE `missing_anchor`: "which time in San Diego was this?" is strictly
+        more answerable than "when did this happen?" about the same node, and
+        answering it answers both — which is what this table means."""
         self.assertEqual(
             tt.WORK_ITEM_PRECEDENCE,
-            ("identity_uncertain", "contradiction", "missing_anchor", "precision_gap"),
+            ("identity_uncertain", "contradiction", "place_ambiguous",
+             "missing_anchor", "precision_gap"),
         )
         ranks = [tt._precedence(kind) for kind in tt.WORK_ITEM_PRECEDENCE]  # noqa: SLF001
         self.assertEqual(ranks, sorted(ranks))

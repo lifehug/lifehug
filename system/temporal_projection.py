@@ -174,7 +174,17 @@ CONFLICT_STATES = ("none", "alternatives", "contradicted")
 
 #: Typed work, one identity across every surface (plan §5.4, §14 row 6). A
 #: contradiction is not forced into an API named only for "gaps".
-WORK_ITEM_KINDS = ("missing_anchor", "precision_gap", "contradiction", "identity_uncertain")
+#:
+#: ``place_ambiguous`` arrives with Timeline Fix 05 §8.3 (``timeline-rules:4``):
+#: a moment names a place the person was in MORE THAN ONCE, so the co-location
+#: rule declines to infer and asks WHICH TIME instead. It is its own kind and
+#: not a ``missing_anchor`` because the answer is a choice between spans the
+#: substrate already holds, not a date typed from nothing — and because the
+#: question a person can actually answer is *"which time in San Diego?"*.
+WORK_ITEM_KINDS = (
+    "missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
+    "place_ambiguous",
+)
 
 #: ``offered`` is "shown to the person and not yet answered"; ``obsolete`` is
 #: "the substrate no longer implies this question" — which is how answering
