@@ -1,0 +1,115 @@
+{
+  "generated_for": "v262 — Timeline Fix 07, the question writer (lifehug-platform#761)",
+  "source": "the nine work items the founder's Timeline showed on 2026-08-29, quoted verbatim in the contract's section 1. Inputs are the SHAPES of those rows; every name here is synthetic.",
+  "rule": "a question is a sentence a person would say, or it is withheld (null) — never a template",
+  "rows": [
+    {
+      "live": "Two dates are claimed for James — birth. Which is right?",
+      "defect": "D3 — the node kind printed after an em dash",
+      "composer": "question",
+      "args": {
+        "item_kind": "contradiction",
+        "event_kind": "birth",
+        "who": "James Taylor",
+        "readings": "20 March 1990 and 10 May 2013"
+      },
+      "page_outcome": "one contradiction row, both readings named",
+      "expected": "Two dates are claimed for James Taylor's birth — 20 March 1990 and 10 May 2013. Which is right?"
+    },
+    {
+      "live": "When was James's birth?  (subject: unresolved:james s birth, shown as NO DATE YET)",
+      "defect": "D2 — a date question for a fact already answered on the same page",
+      "composer": "anchor",
+      "args": {
+        "text": "James's birth"
+      },
+      "page_outcome": "NEVER MINTED: the handle resolves to the dated James node, so the item is dropped and a `anchor_resolved_late` diagnostic is filed. With two Jameses on the roster it becomes an identity question instead. The sentence below is only what the composer WOULD say for a name nobody recognises.",
+      "expected": "When was James's birth?"
+    },
+    {
+      "live": "When was my dad graduated from college?",
+      "defect": "D3 — a clause conjugated into a question that is not English",
+      "composer": "anchor",
+      "args": {
+        "text": "my dad graduated from college"
+      },
+      "page_outcome": "one missing_anchor row",
+      "expected": "You mentioned your dad graduated from college — when was that?"
+    },
+    {
+      "live": "When did San Diego begin?",
+      "defect": "D4 — one of two questions about one node",
+      "composer": "question",
+      "args": {
+        "item_kind": "missing_anchor",
+        "event_kind": "span",
+        "what": "San Diego",
+        "is_place": true
+      },
+      "page_outcome": "the SURVIVING row: missing_anchor outranks precision_gap, so this is the one question San Diego gets",
+      "expected": "When did you move to San Diego?"
+    },
+    {
+      "live": "When did move to San Diego — move — happen?",
+      "defect": "D3 — the node kind printed, and the verb already in the label",
+      "composer": "question",
+      "args": {
+        "item_kind": "precision_gap",
+        "event_kind": "move",
+        "what": "move to San Diego"
+      },
+      "page_outcome": "one precision_gap row",
+      "expected": "When did you move to San Diego?"
+    },
+    {
+      "live": "Do you know the year for Big Brother dynamic flip — transition?",
+      "defect": "D3 — the node kind printed",
+      "composer": "question",
+      "args": {
+        "item_kind": "precision_gap_coarse",
+        "event_kind": "transition",
+        "what": "Big Brother dynamic flip",
+        "target": "year"
+      },
+      "page_outcome": "one precision_gap row",
+      "expected": "Do you know the year for Big Brother dynamic flip?"
+    },
+    {
+      "live": "Do you know the year for I — span?",
+      "defect": "D3 — the subject is a bare pronoun; there is no thing here to ask about",
+      "composer": "question",
+      "args": {
+        "item_kind": "precision_gap_coarse",
+        "event_kind": "span",
+        "what": "I"
+      },
+      "page_outcome": "WITHHELD: the node shows with no play control and one honest line until the claim carries a description Fix 05 can title it with",
+      "expected": null
+    },
+    {
+      "live": "When did San Diego — span — happen?",
+      "defect": "D3 + D4 — the node kind printed, and the second question about one node",
+      "composer": "question",
+      "args": {
+        "item_kind": "precision_gap",
+        "event_kind": "span",
+        "what": "San Diego",
+        "is_place": true
+      },
+      "page_outcome": "ABSORBED by the missing_anchor row above (D4); the sentence below is what it says when it stands alone",
+      "expected": "When were you in San Diego?"
+    },
+    {
+      "live": "When did speaker's mission — transition — happen?",
+      "defect": "D3 — the extractor's third-person handle for the OWNER, and the node kind",
+      "composer": "question",
+      "args": {
+        "item_kind": "precision_gap",
+        "event_kind": "transition",
+        "what": "speaker's mission"
+      },
+      "page_outcome": "one precision_gap row",
+      "expected": "When did your mission happen?"
+    }
+  ]
+}

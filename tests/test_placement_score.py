@@ -367,8 +367,13 @@ class VaultFixture(unittest.TestCase):
 
     Deliberately austere: no dated place, no age words, no landmark markers in
     any description. The ONLY thing that can date these moments is the era's
-    own span, so `period:childhood` is the keystone and the margin's promise is
-    exactly what filing that era's date delivers.
+    own span, so `period:farmhouse` is the keystone and the margin's promise
+    is exactly what filing that era's date delivers.
+
+    Timeline Fix 07 D5: the era is a NAMED era, not "Childhood". An age frame's
+    bounds are arithmetic off the birth origin (ADR 0030) and are never asked,
+    so a fixture era named Childhood would mint no `period_bound` row at all —
+    which is the behaviour `tests/test_question_writer.py` pins directly.
     """
 
     REFS = ("A1", "A2", "A3", "A4")
@@ -387,7 +392,7 @@ class VaultFixture(unittest.TestCase):
         self.write_period(dated=None)
         (root / "state" / "entity_rosters" / "period.json").write_text(json.dumps({
             "version": 1, "type": "period", "entities": [
-                {"name": "Childhood", "slug": "childhood", "chrono": 1,
+                {"name": "Farmhouse", "slug": "farmhouse", "chrono": 1,
                  "page_eligible": True},
             ]}), encoding="utf-8")
         titles = ("The bike with no brakes", "The dog that followed me home",
@@ -398,8 +403,8 @@ class VaultFixture(unittest.TestCase):
                            # eras O-E2: the classifier's OWN era tag — rung 2's
                            # signal, replacing the retired source-membership
                            # mechanism these four moments used to enter
-                           # Childhood by.
-                           "time_periods": [{"era": "childhood"}],
+                           # Farmhouse by.
+                           "time_periods": [{"era": "farmhouse"}],
                            "events": [
                     {"title": title, "description": f"{title}.", "when_hint": "",
                      "anchor": None, "date": None}]}), encoding="utf-8")
@@ -426,8 +431,8 @@ class VaultFixture(unittest.TestCase):
         self.tmp.cleanup()
 
     def write_period(self, *, dated):
-        (self.root / "wiki" / "periods" / "childhood.md").write_text(
-            PAGE.format(title="Childhood", page_type="period", chrono=1,
+        (self.root / "wiki" / "periods" / "farmhouse.md").write_text(
+            PAGE.format(title="Farmhouse", page_type="period", chrono=1,
                         extra=f"date: {dated}\n" if dated else "",
                         sources=_sources(self.REFS)),
             encoding="utf-8")
@@ -466,7 +471,7 @@ class ThePairIsImmovableTests(VaultFixture):
             return self.data()
 
     #: v254 (issue #278): this class needs an era the band ladder CAN date, and
-    #: the rung it used to lean on is gone — until now Childhood took the
+    #: the rung it used to lean on is gone — until now Farmhouse took the
     #: ENVELOPE of the moments dated inside it, which is precisely the
     #: derivation ADR 0030 decision 4 forbids. So the era is named after an age
     #: instead: `My 20s` IS the decade from the twentieth birthday, it is
@@ -484,7 +489,7 @@ class ThePairIsImmovableTests(VaultFixture):
 
     def setUp(self):
         super().setUp()
-        (self.root / "wiki" / "periods" / "childhood.md").unlink(missing_ok=True)
+        (self.root / "wiki" / "periods" / "farmhouse.md").unlink(missing_ok=True)
         (self.root / "state" / "entity_rosters" / "period.json").write_text(
             json.dumps({"version": 1, "type": "period", "entities": [
                 {"name": self.ERA_NAME, "slug": self.ERA_SLUG, "chrono": 1,
@@ -531,7 +536,7 @@ class PromiseEqualsDeliveryTests(VaultFixture):
 
     def test_the_star_is_the_era_and_the_margin_names_it(self):
         gain = self.data()["placement"]["next_gain"]
-        self.assertEqual(gain["anchor"], "period:childhood")
+        self.assertEqual(gain["anchor"], "period:farmhouse")
         self.assertEqual(set(gain), {"anchor", "count", "delta"})
 
     def test_a_wholly_unplaced_life_scores_zero(self):
@@ -705,7 +710,9 @@ class PriorSpanThroughTimelineDataTests(VaultFixture):
 
     def test_a_day_pinned_moment_inside_the_era_does_carry_one(self):
         (self.root / "state" / "classifications" / "answers-a1.json").write_text(
-            json.dumps({"source_path": "answers/A1.md", "events": [
+            json.dumps({"source_path": "answers/A1.md",
+                        "time_periods": [{"era": "farmhouse"}],
+                        "events": [
                 {"title": "The bike with no brakes",
                  "description": "The bike with no brakes.", "when_hint": "",
                  "anchor": None, "date": {"stated": "1986-07-11"}}]}), encoding="utf-8")
@@ -819,10 +826,10 @@ class RowReachThroughTimelineDataTests(VaultFixture):
     def test_the_era_row_reaches_the_moments_the_index_gives_it(self):
         data = self.data()
         rows = {row["key"]: row for row in data["unknowns"]}
-        era = rows["period_bound:childhood"]
+        era = rows["period_bound:farmhouse"]
         index = tl.dependency_index(data)
         self.assertEqual(set(era["resolves"]),
-                         set(index["period:childhood"]) - {era["key"]})
+                         set(index["period:farmhouse"]) - {era["key"]})
         self.assertEqual(era["leverage"], 1 + len(era["resolves"]))
 
     def test_every_offered_row_carries_both_numbers(self):

@@ -232,6 +232,23 @@ class ProbeTests(unittest.TestCase):
             ti.work_item_probe(target(item_kind="missing_anchor", anchors=[]))["step"],
             "content")
 
+    def test_the_anchored_fallback_is_never_the_birthday(self):
+        """Timeline Fix 07 D1 (lifehug-platform#761, owner-ruled 2026-08-29).
+        ANCHORS' first row is the birthday, and `work_item_probe` took
+        `anchor_rows[0]` — so the fallback for an item with no material of its
+        own was "before or after when you were born?". It now goes through
+        `anchor_for_probe` like every other probe."""
+        row = target(item_kind="missing_anchor", label="the Dayton move")
+        text = ti.work_item_probe(row)["text"]
+        self.assertNotIn("born", text.lower())
+        self.assertIn("when your mother died", text)
+        only_birth = [ANCHORS[0]]
+        self.assertEqual(
+            ti.work_item_probe(target(item_kind="missing_anchor",
+                                      anchors=only_birth),
+                               anchors=only_birth)["step"],
+            "content")
+
     def test_an_unusable_target_is_a_named_refusal(self):
         with self.assertRaises(ti.TimelineInteractionError):
             ti.work_item_probe({"kind": "nope"})

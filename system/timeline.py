@@ -1892,6 +1892,29 @@ def unknown_years(row: dict, data: dict, *, life: tuple[int, int] | None) -> lis
     if not isinstance(row, dict) or not isinstance(data, dict):
         return []
     floor = [int(life[0]), int(life[1])] if life else []
+    return _life_floor_years(row, data, life=life, floor=floor)
+
+
+def range_is_whole_life(years: object, life: tuple[int, int] | None) -> bool:
+    """Is this interval the ENTIRE life — i.e. no information at all?
+
+    D5 (Timeline Fix 07): the owner's page read "could be 1981-2026" beside a
+    question. A range equal to the life span says only "sometime while you
+    were alive", which is what `undated` already means, and dressing it up as
+    a range invites the reader to believe the system knows something. The
+    interval itself is unchanged — the placement score's denominator depends
+    on it (ADR 0027) — but a row carrying it is stamped `undated_range` so
+    every surface renders it as undated rather than as a span.
+    """
+    if not life or not isinstance(years, (list, tuple)) or len(years) != 2:
+        return False
+    try:
+        return [int(years[0]), int(years[1])] == [int(life[0]), int(life[1])]
+    except (TypeError, ValueError):
+        return False
+
+
+def _life_floor_years(row: dict, data: dict, *, life, floor: list) -> list[int]:
     kind = str(row.get("kind") or "")
     if kind in ("residence_gap", "date_contradiction", "landmark_subject"):
         return _own_years(row) or floor
@@ -1944,8 +1967,19 @@ def unknowns(data: dict, landmarks: object = None) -> list[dict]:
     for event in data.get("unplaced_events") or []:
         add(moment_unknown(event, None))
 
-    # 2. A specific era's missing bounds.
+    # 2. A specific era's missing bounds — EXCEPT an age frame's.
+    #
+    # D5 (Timeline Fix 07, owner's 14:21 staging screenshot 2026-08-29): the
+    # page asked "When did Childhood end — before or after First big paycheck
+    # arrives by mail?". Childhood is an AGE FRAME: its bounds are arithmetic
+    # off the birth origin (`cross_dating.age_frames`, ADR 0030 — frames are
+    # the permanent calculated coordinate system, never model-authored and
+    # never asked). The legacy `period.json` roster still names them, which is
+    # exactly how they reached this loop; `legacy_period_ref` is the one map
+    # that says which slugs those are, so there is no second list here.
     for period in data.get("periods") or []:
+        if legacy_period_ref(period.get("slug")) is not None:
+            continue
         if period.get("date") is None:
             row = {
                 "kind": "period_bound",
@@ -2019,6 +2053,12 @@ def unknowns(data: dict, landmarks: object = None) -> list[dict]:
         years = unknown_years(row, data, life=life)
         if years:
             row["years"] = years
+            # D5 (Timeline Fix 07): a range equal to the whole life carries no
+            # information. The interval STAYS — the placement score's floor is
+            # exactly this width (ADR 0027) — but the row says so, so no
+            # surface renders "could be 1981-2026" as if it were a finding.
+            if range_is_whole_life(years, life):
+                row["undated_range"] = True
 
     for row in rows:
         # v202: a row that arrived with its OWN exact question keeps it. The
@@ -3416,6 +3456,36 @@ def anchor_index(periods: list[dict], entities: list[dict], events: list[dict],
         key = f"moment-{event['source_short']}-{slugify(event_title(event))[:32]}"
         index.setdefault(key, {"label": event_title(event), "date": event["date"],
                                "kind": "landmark"})
+    return _type_the_origin(index, birth)
+
+
+def _type_the_origin(index: dict, birth: object) -> dict:
+    """Every row that IS the birth origin is typed `birth`, whatever minted it.
+
+    Timeline Fix 07 D1 (lifehug-platform#761, owner-reported 2026-08-29). The
+    exclusion `timeline_interaction.anchor_for_probe` has carried since v236
+    keys off ``kind == "birth"`` — and on the founder's own vault it never
+    fired, because his birthday also entered this index as an ordinary dated
+    MOMENT ("Author's birth", `kind: "landmark"`, 1981-07-11), sorted first by
+    year, and became `anchor_rows[0]`. That is how "When did Switzerland
+    Mission begin — before or after Author's birth?" reached a page.
+
+    So the origin is identified by its DATE, not by which loop above happened
+    to add it: any row whose interval is exactly the birth record's is the
+    birth. One definition, so a second writer of the same fact cannot smuggle
+    it back in as a landmark.
+    """
+    if birth is None:
+        return index
+    bounds = (birth.earliest, birth.latest)
+    for key, row in index.items():
+        if not isinstance(row, dict) or row.get("kind") == "birth":
+            continue
+        record = chrono.from_dict(row.get("date"))
+        if record is None:
+            continue
+        if (record.earliest, record.latest) == bounds:
+            index[key] = dict(row, kind="birth")
     return index
 
 

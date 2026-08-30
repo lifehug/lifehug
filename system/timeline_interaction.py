@@ -186,16 +186,64 @@ def _anchor_rows(anchors: object) -> list[dict]:
     return [row for row in rows if row["key"]]
 
 
-#: O-E0a (lifehug-platform#686): the eligible anchor KINDS for the two unknown
-#: kinds that must never sort against the person's own birth — a residence or
-#: an era is never honestly asked "before or after you were born"; only a bare
-#: MOMENT may legitimately predate the person (a family story is older than
-#: they are). `era_gap`/`residence_gap` are untouched here — their opener
-#: names the two dated neighbours the row already carries (`between`), never
-#: `{anchor}`, so they never reach this function at all.
-_RELATIONAL_ELIGIBLE_KINDS = frozenset({"residence", "period", "landmark"})
-#: The two unknown kinds this rule governs.
+#: O-E0a (lifehug-platform#686), REVISED by Timeline Fix 07 D1
+#: (lifehug-platform#761, owner-ruled 2026-08-29). The structural anchors — a
+#: residence or an era — are spans of the life axis, and sorting one against
+#: another is a question a person can answer. A bare landmark MOMENT is not
+#: structural, so it only qualifies when it is demonstrably about the same
+#: subject, place or era (:func:`anchor_is_relevant`); "When did Childhood end
+#: — before or after First big paycheck arrives by mail?" is what adjacency
+#: without relevance produces.
+_RELATIONAL_ELIGIBLE_KINDS = frozenset({"residence", "period"})
+#: The two unknown kinds that must be sorted against structure.
 _RELATIONAL_KINDS = frozenset({"place_span", "period_bound"})
+
+#: **Birth is never an anchor, for anything.** The owner's ruling of
+#: 2026-08-29 — *"obviously nothing can happen before my birth, so this is a
+#: silly question. No questions should ever be asked before my birth"* —
+#: REVERSES v236's carve-out that "a moment may legitimately sort against the
+#: birthday". The origin of the coordinate system is not one of its landmarks.
+NEVER_AN_ANCHOR_KINDS = frozenset({"birth"})
+
+#: Words too common to prove two labels are about the same thing.
+_RELEVANCE_STOPWORDS = frozenset({
+    "the", "a", "an", "of", "in", "on", "at", "to", "and", "my", "your", "our",
+    "years", "year", "time", "times", "when", "was", "were", "is", "it", "that",
+    "this", "with", "for", "from", "by", "big", "first", "new", "old", "day",
+})
+
+
+def _relevance_tokens(text: object) -> set:
+    return {
+        word for word in re.findall(r"[a-z0-9]+", str(text or "").lower())
+        if len(word) > 2 and word not in _RELEVANCE_STOPWORDS
+    }
+
+
+def anchor_is_relevant(unknown: object, anchor_row: object) -> bool:
+    """Does this anchor SHARE a subject, a place or an era with the target?
+
+    Timeline Fix 07 D5 (lifehug-platform#761). The anchor the founder was shown
+    — *"before or after First big paycheck arrives by mail?"* — was picked by
+    adjacency in a sorted list, and had nothing whatever to do with the thing
+    being asked about. An anchor a person cannot relate to the target is worse
+    than no anchor: it makes the question unanswerable AND makes the system
+    look as though it thinks the two belong together.
+
+    Relevant means one of two things, both checkable:
+
+    * the anchor IS the target's own era or place (``period`` / ``slug`` /
+      ``key``), or
+    * their labels share a content word — the same person, place or thing
+      named twice.
+    """
+    row = unknown if isinstance(unknown, dict) else {}
+    anchor = anchor_row if isinstance(anchor_row, dict) else {}
+    own = {str(row.get(name) or "").strip()
+           for name in ("period", "slug", "key")} - {""}
+    if str(anchor.get("key") or "").strip() in own:
+        return True
+    return bool(_relevance_tokens(row.get("label")) & _relevance_tokens(anchor.get("label")))
 
 
 def anchor_for_probe(unknown: object, anchor_rows: object) -> dict | None:
@@ -203,36 +251,47 @@ def anchor_for_probe(unknown: object, anchor_rows: object) -> dict | None:
 
     `choose_probe` used to hand every anchored opener ``anchor_rows[0]`` — and
     `_anchor_rows` sorts birth first, because it dates everything else by
-    arithmetic — so any residence or era unknown asked to sort itself against
-    the person's own birth: *"Were you living in Mexico before or after when
-    you were born?"* (lifehug-platform#686 defect 1, executed against the
-    founder's own vault).
+    arithmetic — so any unknown asked to sort itself against the person's own
+    birth: *"Were you living in Mexico before or after when you were born?"*
+    (lifehug-platform#686 defect 1), and later *"When did Switzerland Mission
+    begin — before or after Author's birth?"* (lifehug-platform#761 D1).
 
-    `unknown["kind"]` decides the eligible set:
+    Three filters, in order, and every one of them can leave the set empty —
+    ``None`` is a first-class answer and means *ask the unanchored question*:
 
-    * `place_span` (a residence) and `period_bound` (an era) — `residence`,
-      `period`, `landmark`; **never `birth`**, and `period_bound` additionally
-      never the era's OWN anchor row (`unknown["slug"]`/`["period"]`/`["key"]`).
-    * every other kind (`moment`, `date_contradiction`, `era_gap`,
-      `residence_gap`, and any future kind) — unchanged: the nearest row in
-      `anchor_rows`' own order, birth included. A moment may legitimately sort
-      against the birthday; a residence or an era never can.
+    1. **Never the birth.** The origin is not a landmark to sort against, for
+       ANY unknown kind (Timeline Fix 07 D1, owner-ruled). This reverses the
+       v236 carve-out that let a `moment` anchor on the birthday.
+    2. **Never itself** — an era is not asked whether it came before itself.
+    3. **Never something unrelated** (D5): a `place_span` or a `period_bound`
+       sorts against STRUCTURE — another residence, another era — or against a
+       landmark that is demonstrably about the same subject, place or era
+       (:func:`anchor_is_relevant`). "When did Childhood end — before or after
+       First big paycheck arrives by mail?" is what adjacency without
+       relevance produces. The rule is deliberately NOT extended to a bare
+       `moment` or a `date_contradiction`: ordering one memory against another
+       is how people actually date them, and the ladder's `sequence` rung
+       exists for exactly that.
 
-    Within the eligible set: nearest by year to the unknown's own `years`
-    hint (`[start, end]`, `timeline.unknown_years`) when present; otherwise
-    `anchor_rows`' own order already IS residence → period → landmark, then
-    year, then key (`_anchor_rows`'s sort), so the first eligible row already
-    satisfies the tie-break with no second sort needed.
+    Within what survives: nearest by year to the unknown's own ``years`` hint
+    (`timeline.unknown_years`) when it has one, otherwise `anchor_rows`' own
+    order, which is already residence → period → landmark, then year, then key.
     """
     row = unknown if isinstance(unknown, dict) else {}
     rows = anchor_rows if isinstance(anchor_rows, list) else list(anchor_rows or ())
     kind = str(row.get("kind") or "")
-    if kind not in _RELATIONAL_KINDS:
-        return rows[0] if rows else None
     own_key = str(row.get("slug") or row.get("period") or row.get("key") or "").strip()
-    eligible = [r for r in rows
-               if r.get("kind") in _RELATIONAL_ELIGIBLE_KINDS
-               and (not own_key or r.get("key") != own_key)]
+    eligible = [
+        candidate for candidate in rows
+        if candidate.get("kind") not in NEVER_AN_ANCHOR_KINDS
+        and (not own_key or candidate.get("key") != own_key)
+    ]
+    if kind in _RELATIONAL_KINDS:
+        eligible = [
+            candidate for candidate in eligible
+            if candidate.get("kind") in _RELATIONAL_ELIGIBLE_KINDS
+            or anchor_is_relevant(row, candidate)
+        ]
     if not eligible:
         return None
     hint_year = None
@@ -359,7 +418,11 @@ def choose_probe(unknown: object, *, anchors: object = (),
     anchor_rows = _anchor_rows(anchors)
     asked = {str(step) for step in (asked_steps or ())}
     label = str(row.get("label") or row.get("key") or "this moment").strip()
-    anchor_label = anchor_rows[0]["label"] if anchor_rows else ""
+    # Timeline Fix 07 D1/D5: the LADDER's anchor is chosen by the same rule as
+    # the opener's. `anchor_rows[0]` was the second way the birth reached a
+    # question — the opener stopped naming it in v236 and the ladder went on.
+    fallback = anchor_for_probe(row, anchor_rows)
+    anchor_label = fallback["label"] if fallback else ""
 
     if _precise_enough(precision_so_far, row.get("kind")):
         step = "convergence" if "convergence" not in asked else "defer"
@@ -872,7 +935,15 @@ def work_item_probe(target: object, *, anchors: object = ()) -> dict:
         raise TimelineInteractionError("work item target is unusable")
     spec = WORK_ITEM_PROBES[row["item_kind"]]
     anchor_rows = _anchor_rows(anchors) or row["anchors"]
-    anchor_label = str(anchor_rows[0].get("label") or "") if anchor_rows else ""
+    # Timeline Fix 07 D1/D5: never the birth, never something unrelated. A work
+    # item's anchored variant is already a fallback; an irrelevant fallback is
+    # worse than the unanchored question it replaces.
+    chosen = anchor_for_probe(
+        {"kind": row["item_kind"], "label": row.get("label"),
+         "key": row.get("node_ref") or row.get("event_ref")},
+        anchor_rows,
+    )
+    anchor_label = str(chosen.get("label") or "") if chosen else ""
     readings = " and ".join(r["display"] for r in row["readings"]) or "two different times"
     candidates = " or ".join(c["name"] for c in row["candidates"]) or "which one"
     field = FIELD_DISPLAY.get(row.get("requested_field", ""), DEFAULT_FIELD_DISPLAY)

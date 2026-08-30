@@ -322,6 +322,122 @@ def lint_turn(
     return findings
 
 
+# --------------------------------------------------------------------------
+# The question writer's own lint (Timeline Fix 07, lifehug-platform#761)
+# --------------------------------------------------------------------------
+
+#: The finding one refusal produces. Named apart from every ``lint_turn``
+#: finding because it governs a different artefact: a WORK ITEM's
+#: ``prompt_intent``, composed deterministically by
+#: :func:`temporal_timeline.compose_question`, never a model's turn.
+QUESTION_TEMPLATE_LEAK = "question_template_leak"
+
+#: The internal node-kind vocabulary a person must never be shown. These are
+#: ``temporal_claims.EVENT_KINDS`` spellings as they appear once the composer's
+#: predecessor collapsed them to words — the exact tokens the owner read on
+#: 2026-08-29 ("San Diego — span", "speaker's mission — transition").
+TEMPLATE_KIND_WORDS = (
+    "span", "move", "transition", "birth", "death", "episode", "period",
+    "event", "start", "started", "end", "ended", "named era", "age frame",
+    "child born", "first met", "dating started", "loss", "job", "school",
+    "graduation", "military", "married", "engaged", "separated", "divorced",
+    "reconciled",
+)
+
+#: The third-person handles the extractor writes for the vault's OWNER. A
+#: question that still carries one is a question written about the person to
+#: somebody else. ``i``/``me``/``my`` are deliberately absent here — they are
+#: rewritten, and a *surviving* bare "I" is caught by
+#: :data:`_QUESTION_BARE_PRONOUN_RE` instead, so "When did you move to
+#: Indiana?" is never mistaken for a leak.
+TEMPLATE_OWNER_TOKENS = ("speaker", "speakers", "author", "authors", "the subject")
+
+_QUESTION_KIND_DASH_RE = re.compile(
+    r"\s\u2014\s(?:the\s+)?(" + "|".join(
+        re.escape(word) for word in sorted(TEMPLATE_KIND_WORDS, key=len, reverse=True)
+    ) + r")(?!\w)",
+    re.IGNORECASE,
+)
+_QUESTION_OWNER_TOKEN_RE = re.compile(
+    r"(?<!\w)(" + "|".join(
+        re.escape(token) for token in sorted(TEMPLATE_OWNER_TOKENS, key=len, reverse=True)
+    ) + r")(?:['\u2019]s)?(?!\w)",
+    re.IGNORECASE,
+)
+_QUESTION_BARE_PRONOUN_RE = re.compile(
+    r"^\s*(?:when|where|what|who|how)\s+(?:did|was|were|does|is|are)\s+"
+    r"(?:i|me|the subject|self)(?!\w)",
+    re.IGNORECASE,
+)
+_QUESTION_EMPTY_SUBJECT_RE = re.compile(
+    r"(?:^|\s)(?:for|about|did|was|were)\s+(?:none|unknown|null|nan)(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def lint_question(text: object) -> list[dict]:
+    """Deterministic findings for ONE composed work-item question.
+
+    Same finding shape as :func:`lint_turn` — ``{"lint", "detail", "span"}`` —
+    because every consumer of a finding in this repo already reads that shape
+    and a second one would be a second contract for the same slot.
+
+    This lint REFUSES; it does not repair. A question with any finding is
+    minted with ``prompt_intent=None`` and a ``question_withheld`` diagnostic
+    (``temporal_timeline._mint_work_item``), which the hosted platform already
+    treats as "not askable" — so the person sees the node with no play control
+    and one honest line, never the template. That is the owner's ruling of
+    2026-08-29: *"whatever's writing these questions needs to be fixed"*, and
+    the only certifiable way to make a phrasing rule true is a deterministic
+    backstop, never prompt prose (ADR 0028's audit finding, applied to a
+    deterministic writer).
+
+    Four refusals:
+
+    * an internal node kind printed after an em dash — ``San Diego — span``;
+    * a third-person owner handle — ``speaker's mission``, ``Author's birth``;
+    * a question whose subject is a bare first-person pronoun — ``When did I
+      happen?`` — which is a subject string, not a person's own words;
+    * a question whose subject slot is empty or a placeholder.
+
+    Not checked here: whether the text ends in a question mark. A
+    ``prompt_intent`` is what the interaction is FOR, and two of the substrate's
+    own kinds state it as a sentence ("These cannot all be in the order they
+    were given: …"); refusing those would withhold honest work over punctuation.
+    """
+    body = str(text or "")
+    findings: list[dict] = []
+    match = _QUESTION_KIND_DASH_RE.search(body)
+    if match:
+        findings.append({
+            "lint": QUESTION_TEMPLATE_LEAK,
+            "detail": f"internal event kind printed to the person: {match.group(1)!r}",
+            "span": [match.start(), match.end()],
+        })
+    match = _QUESTION_OWNER_TOKEN_RE.search(body)
+    if match:
+        findings.append({
+            "lint": QUESTION_TEMPLATE_LEAK,
+            "detail": f"third-person owner reference: {match.group(0)!r}",
+            "span": [match.start(), match.end()],
+        })
+    match = _QUESTION_BARE_PRONOUN_RE.search(body)
+    if match:
+        findings.append({
+            "lint": QUESTION_TEMPLATE_LEAK,
+            "detail": "the question's subject is a bare pronoun, not a thing",
+            "span": [match.start(), match.end()],
+        })
+    match = _QUESTION_EMPTY_SUBJECT_RE.search(body)
+    if match:
+        findings.append({
+            "lint": QUESTION_TEMPLATE_LEAK,
+            "detail": "the question's subject slot is empty",
+            "span": [match.start(), match.end()],
+        })
+    return findings
+
+
 def lint_closing_phrases(text: str, *, config: dict | None = None) -> list[dict]:
     """Every closing-only check for CLOSING turns (never applied mid-
     conversation, where the same words are often fine).

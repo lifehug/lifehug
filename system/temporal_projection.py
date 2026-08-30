@@ -1186,9 +1186,24 @@ def validate_temporal_work_item(value: object, *, now: object = None) -> dict:
         ("requested_field", requested_field),
         ("prompt_intent", optional_text(value.get("prompt_intent"))),
         ("score_rule", optional_text(value.get("score_rule"))),
+        # Timeline Fix 07 (lifehug-platform#761). Additive and optional: WHY
+        # this item has no `prompt_intent`. An item may legitimately have no
+        # sentence — the composer refused to print a template at a person —
+        # and the host already refuses to open an item with no intent, so the
+        # reason is what turns a silent absence into an honest line on the
+        # page. Absent on every item that HAS a question.
+        ("withheld_reason", optional_text(value.get("withheld_reason"))),
     ):
         if cleaned:
             normalized[key] = cleaned
+    # Timeline Fix 07 D4: the kinds this item ABSORBED because one node gets
+    # one question. Additive; absent when nothing was absorbed.
+    superseded = tuple(dict.fromkeys(
+        collapsed_text(name) for name in (value.get("superseded_kinds") or ())
+        if collapsed_text(name)
+    ))
+    if superseded:
+        normalized["superseded_kinds"] = list(superseded)
     return normalized
 
 
