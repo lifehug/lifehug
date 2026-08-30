@@ -1,0 +1,236 @@
+{
+  "note": "I0-C4 fixtures — event-identity design v4 §5.5, §5.6, §5.8 rows 8/9/11/12. SYNTHETIC DATA ONLY. One split of one episode that has ALREADY had downstream activity — a label, an era placement, a display role, two work items, an open session and two ordering constraints — because 'split restores the prior drawing' is only interesting after that activity exists (audit B1).",
+  "split": {
+    "envelope": {
+      "record_type": "episode_operation",
+      "operation_id": "eop:000000000000000000000001",
+      "authority": "human",
+      "op": "split",
+      "episode_id": "episode:0000000000000000000000e1",
+      "members": [
+        "classification:larkspur-start#a1",
+        "landmark:lm-7"
+      ],
+      "supersedes_binding_ids": [
+        "eid:0002"
+      ],
+      "destinations": {
+        "landmark:lm-7": "episode:0000000000000000000000e9"
+      },
+      "aliases_created": [],
+      "canonical_event_kind": "job",
+      "status": "active"
+    },
+    "telling_node_ids": {
+      "landmark:lm-7": "node:00000000000000000000dd07",
+      "episode:0000000000000000000000e9": "node:00000000000000000000dd09"
+    },
+    "rows": [
+      {
+        "design": "§5.5 row 1",
+        "reference": {
+          "reference_kind": "ordering_constraint",
+          "reference_id": "oc:1",
+          "anchor_telling_ref": "landmark:lm-7"
+        },
+        "expect_destination": "episode:0000000000000000000000e9",
+        "why": "the constraint was stated against the departing telling's claim, and that claim went to exactly one side"
+      },
+      {
+        "design": "§5.5 row 1, the other side",
+        "reference": {
+          "reference_kind": "ordering_constraint",
+          "reference_id": "oc:2",
+          "anchor_telling_ref": "classification:larkspur-start#a1"
+        },
+        "expect_destination": "episode:0000000000000000000000e1",
+        "why": "the anchor claim stayed with the survivor, so the constraint does"
+      },
+      {
+        "design": "§5.5 last clause",
+        "reference": {
+          "reference_kind": "ordering_constraint",
+          "reference_id": "oc:3"
+        },
+        "expect_destination": "mirror_judgment",
+        "why": "no anchor claim, so which side it belongs to is a person's judgment — never both, never a quiet default to the survivor"
+      },
+      {
+        "design": "§5.5 row 2",
+        "reference": {
+          "reference_kind": "era_membership",
+          "reference_id": "membership:1"
+        },
+        "expect_destination": "episode:0000000000000000000000e1",
+        "why": "a membership is a receipt about an episode's identity, and the survivor keeps the identity"
+      },
+      {
+        "design": "§5.5 row 3",
+        "reference": {
+          "reference_kind": "display_decision",
+          "reference_id": "display:1"
+        },
+        "expect_destination": "episode:0000000000000000000000e1",
+        "why": "the person picked the display role for that episode, not for a telling"
+      },
+      {
+        "design": "§5.5 row 4, §3.4",
+        "reference": {
+          "reference_kind": "episode_label",
+          "reference_id": "label:1"
+        },
+        "expect_destination": "episode:0000000000000000000000e1",
+        "why": "the label is a decision record about the identity, and identity never moves"
+      },
+      {
+        "design": "§5.5 row 5, matrix row 12",
+        "reference": {
+          "reference_kind": "work_item",
+          "reference_id": "work:pair-old",
+          "rekeyed_to": "work:pair-new"
+        },
+        "expect_destination": "work:pair-new",
+        "why": "one id, answered once, updated everywhere — the item re-keys rather than forking"
+      },
+      {
+        "design": "§5.5 row 6, matrix row 12",
+        "reference": {
+          "reference_kind": "open_session",
+          "reference_id": "session:1",
+          "telling_ref": "landmark:lm-7",
+          "node_id": "node:00000000000000000000cc01"
+        },
+        "expect_destination": "node:00000000000000000000dd09",
+        "why": "the person is inside that session; it must not lose its subject because the substrate reorganised underneath it"
+      },
+      {
+        "design": "§5.5 row 7",
+        "reference": {
+          "reference_kind": "other_decision",
+          "reference_id": "decision:1"
+        },
+        "expect_destination": "mirror_judgment",
+        "why": "a decision whose target provenance is genuinely ambiguous is handed back as one inspectable row, never copied to both sides"
+      },
+      {
+        "design": "§5.5 last clause, the unenumerated kind",
+        "reference": {
+          "reference_kind": "pinned_photo",
+          "reference_id": "pin:1"
+        },
+        "expect_destination": "mirror_judgment",
+        "why": "a reference kind the table does not name is exactly the thing a default must not decide"
+      }
+    ]
+  },
+  "merge": {
+    "envelope": {
+      "record_type": "episode_operation",
+      "operation_id": "eop:000000000000000000000002",
+      "authority": "human",
+      "op": "merge",
+      "episode_id": "episode:0000000000000000000000e1",
+      "absorbed_episode_id": "episode:0000000000000000000000e2",
+      "supersedes_binding_ids": [
+        "eid:0080"
+      ],
+      "aliases_created": [
+        "episode:0000000000000000000000e2"
+      ],
+      "status": "active"
+    },
+    "bindings": [
+      {
+        "identity_id": "eid:0080",
+        "telling_ref": "classification:larkspur-found#b2",
+        "episode_id": "episode:0000000000000000000000e2",
+        "relation": "same",
+        "origin": "confirmed",
+        "canonical_event_kind": "job",
+        "subject_keys": [
+          "org/larkspur"
+        ]
+      }
+    ],
+    "left_behind_binding": {
+      "identity_id": "eid:0081",
+      "telling_ref": "landmark:lm-8",
+      "episode_id": "episode:0000000000000000000000e2",
+      "relation": "same",
+      "origin": "confirmed",
+      "canonical_event_kind": "job",
+      "subject_keys": [
+        "org/larkspur"
+      ]
+    },
+    "references": [
+      {
+        "reference_kind": "work_item",
+        "reference_id": "work:pair-e2",
+        "rekeyed_to": "work:pair-e1"
+      },
+      {
+        "reference_kind": "open_session",
+        "reference_id": "session:2",
+        "node_id": "node:00000000000000000000cc02",
+        "survivor_node_id": "node:00000000000000000000cc01"
+      },
+      {
+        "reference_kind": "episode_label",
+        "reference_id": "label:2"
+      }
+    ]
+  },
+  "reaudit": {
+    "telling_ref": "classification:larkspur-found#b2",
+    "bound_episode_id": "episode:0000000000000000000000e1",
+    "candidate_episode_id": "episode:0000000000000000000000e2",
+    "triggers": [
+      {
+        "trigger": "new_telling",
+        "why": "a new telling entered retrieval range and is a second plausible home"
+      },
+      {
+        "trigger": "new_date_evidence",
+        "why": "a date arrived on either side and the bind's date argument no longer holds alone"
+      },
+      {
+        "trigger": "new_place_evidence",
+        "why": "a place arrived on either side"
+      },
+      {
+        "trigger": "new_participant_evidence",
+        "why": "a resolved participant arrived on either side"
+      },
+      {
+        "trigger": "entity_resolution_change",
+        "why": "two people turned out to be one, or one turned out to be two"
+      },
+      {
+        "trigger": "telling_rekey",
+        "why": "the telling's words moved and the bind's evidence moved with them"
+      },
+      {
+        "trigger": "rule_version_change",
+        "why": "the rule that made the bind is not the rule in force"
+      },
+      {
+        "trigger": "episode_merge",
+        "why": "the candidate set changed because two episodes became one"
+      },
+      {
+        "trigger": "maintenance_sweep",
+        "why": "the weekly catch-all, so nothing depends on having noticed at the time"
+      }
+    ]
+  },
+  "delayed_answer": {
+    "design": "matrix row 12",
+    "episode_aliases": {
+      "episode:0000000000000000000000e2": "episode:0000000000000000000000e1"
+    },
+    "retired_tellings": [
+      "classification:larkspur-found#b2"
+    ]
+  }
+}

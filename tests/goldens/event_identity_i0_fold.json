@@ -1,0 +1,197 @@
+{
+  "note": "I0-C3 fixtures — event-identity design v4 §3.5, §5.1-§5.4, §5.6. SYNTHETIC DATA ONLY: 'Larkspur' is an invented company and every id here is made up. The SHAPE is the founder diagnosis in design §1 (one company told six ways: a dated work-history landmark, an undated 'started', an undated 'co-founded with', and an 'idea for' that is a different event), because that is the shape the contract has to survive; none of the content is real. '@node_of:<episode_id>' in an expectation is resolved by the test through episode_fold_contract.episode_node_id, so no digest is hand-copied into this file.",
+  "episodes": {
+    "episode:0000000000000000000000e1": {
+      "canonical_event_kind": "job",
+      "subject_keys": ["org/larkspur"],
+      "label": "Larkspur"
+    },
+    "episode:0000000000000000000000e2": {
+      "canonical_event_kind": "job",
+      "subject_keys": ["org/larkspur"],
+      "label": "Larkspur (the second reading)"
+    },
+    "episode:0000000000000000000000e3": {
+      "canonical_event_kind": "moment",
+      "subject_keys": ["self"],
+      "label": "the Mission trip"
+    }
+  },
+  "cases": [
+    {
+      "name": "bound_telling_groups_under_the_episode_node",
+      "design": "§5.1, §3.5",
+      "why": "The whole point of the separate fold input: an active `same` binding decides the key, and the telling's own key becomes an alias.",
+      "claims": [
+        {"claim_id": "claim:0001", "event_kind": "job", "event_ref": ""},
+        {"claim_id": "claim:0002", "event_kind": "job", "event_ref": ""}
+      ],
+      "manifest": [
+        {"telling_ref": "classification:larkspur-start#a1", "claim_ids": ["claim:0001"]},
+        {"telling_ref": "landmark:lm-7", "claim_ids": ["claim:0002"]}
+      ],
+      "bindings": [
+        {"identity_id": "eid:0001", "telling_ref": "classification:larkspur-start#a1",
+         "episode_id": "episode:0000000000000000000000e1", "relation": "same",
+         "origin": "deterministic", "canonical_event_kind": "job",
+         "subject_keys": ["org/larkspur"]},
+        {"identity_id": "eid:0002", "telling_ref": "landmark:lm-7",
+         "episode_id": "episode:0000000000000000000000e1", "relation": "same",
+         "origin": "stated", "canonical_event_kind": "job",
+         "subject_keys": ["org/larkspur"]}
+      ],
+      "expect": {
+        "claim:0001": {"kind": "episode", "reason": "episode_binding",
+                       "key": "@node_of:episode:0000000000000000000000e1"},
+        "claim:0002": {"kind": "episode", "reason": "episode_binding",
+                       "key": "@node_of:episode:0000000000000000000000e1"}
+      },
+      "expect_diagnostics": []
+    },
+    {
+      "name": "unbound_telling_keeps_the_existing_key",
+      "design": "§5.1",
+      "why": "I0 changes nothing live. A telling nobody bound folds exactly as it did at v264, and the contract says so by standing aside rather than by reimplementing _mint_node_id.",
+      "claims": [{"claim_id": "claim:0010", "event_kind": "moment", "event_ref": ""}],
+      "manifest": [{"telling_ref": "classification:mission-trip#d4", "claim_ids": ["claim:0010"]}],
+      "bindings": [],
+      "expect": {"claim:0010": {"kind": "existing", "reason": "no_binding", "key": ""}},
+      "expect_diagnostics": []
+    },
+    {
+      "name": "claim_with_no_manifest_row_keeps_the_existing_key",
+      "design": "§3.1",
+      "why": "A claim extracted before the binder ever ran has no telling. That is not an error and must not be one, or the fold would refuse every vault on the day the feature ships.",
+      "claims": [{"claim_id": "claim:0011", "event_kind": "moment", "event_ref": ""}],
+      "manifest": [],
+      "bindings": [],
+      "expect": {"claim:0011": {"kind": "existing", "reason": "no_telling", "key": ""}},
+      "expect_diagnostics": []
+    },
+    {
+      "name": "a_proposed_binding_groups_nothing",
+      "design": "§2.3",
+      "why": "Only stated, confirmed and deterministic affect grouping. A proposal ranks the queue and renders a soft line; it changes no drawing.",
+      "claims": [{"claim_id": "claim:0020", "event_kind": "job", "event_ref": ""}],
+      "manifest": [{"telling_ref": "classification:larkspur-found#b2", "claim_ids": ["claim:0020"]}],
+      "bindings": [
+        {"identity_id": "eid:0020", "telling_ref": "classification:larkspur-found#b2",
+         "episode_id": "episode:0000000000000000000000e1", "relation": "same",
+         "origin": "proposed", "canonical_event_kind": "job",
+         "subject_keys": ["org/larkspur"]}
+      ],
+      "expect": {"claim:0020": {"kind": "existing", "reason": "proposal_not_applied", "key": ""}},
+      "expect_diagnostics": ["identity_proposal_not_applied"]
+    },
+    {
+      "name": "a_telling_about_the_era_itself_is_refused_as_a_binding_target",
+      "design": "§5.1 first era case, §5.4",
+      "why": "'College ran 2007 to 2011' is a claim about the era's own boundary. Its event_ref IS the era, an era is not an episode, and the binding somebody filed on it is reported here and refused at write time by C2.",
+      "claims": [{"claim_id": "claim:0030", "event_kind": "period_started",
+                  "event_ref": "era:0000000000000000000000c0"}],
+      "manifest": [{"telling_ref": "classification:college-bounds#c3", "claim_ids": ["claim:0030"]}],
+      "bindings": [
+        {"identity_id": "eid:0030", "telling_ref": "classification:college-bounds#c3",
+         "episode_id": "episode:0000000000000000000000e3", "relation": "same",
+         "origin": "deterministic", "canonical_event_kind": "moment",
+         "subject_keys": ["self"]}
+      ],
+      "expect": {"claim:0030": {"kind": "existing", "reason": "era_claim_not_groupable",
+                                "key": "era:0000000000000000000000c0"}},
+      "expect_diagnostics": ["identity_binding_to_era_bound_claim"]
+    },
+    {
+      "name": "a_telling_about_an_event_within_an_era_keeps_full_eligibility",
+      "design": "§5.1 second era case, audit F-pin 1",
+      "why": "The Mission TRIP happened during the Mission ERA. It carries no era event_ref — its era relationship is a membership on its node, computed by frame arithmetic after grouping — so nothing about the era removes its episode eligibility.",
+      "claims": [{"claim_id": "claim:0031", "event_kind": "moment", "event_ref": "",
+                  "era_memberships": ["era:0000000000000000000000c0"]}],
+      "manifest": [{"telling_ref": "classification:mission-trip#d4", "claim_ids": ["claim:0031"]}],
+      "bindings": [
+        {"identity_id": "eid:0031", "telling_ref": "classification:mission-trip#d4",
+         "episode_id": "episode:0000000000000000000000e3", "relation": "same",
+         "origin": "confirmed", "canonical_event_kind": "moment",
+         "subject_keys": ["self"]}
+      ],
+      "expect": {"claim:0031": {"kind": "episode", "reason": "episode_binding",
+                                "key": "@node_of:episode:0000000000000000000000e3"}},
+      "expect_diagnostics": []
+    },
+    {
+      "name": "a_recorder_episode_ref_and_a_binding_compose",
+      "design": "§5.1 last clause",
+      "why": "v221 already minted a node for this job. The binding names that same node as its episode; the two are one identity and there is nothing to alias.",
+      "claims": [{"claim_id": "claim:0040", "event_kind": "job",
+                  "event_ref": "@node_of:episode:0000000000000000000000e1"}],
+      "manifest": [{"telling_ref": "classification:larkspur-start#a1", "claim_ids": ["claim:0040"]}],
+      "bindings": [
+        {"identity_id": "eid:0040", "telling_ref": "classification:larkspur-start#a1",
+         "episode_id": "episode:0000000000000000000000e1", "relation": "same",
+         "origin": "deterministic", "canonical_event_kind": "job",
+         "subject_keys": ["org/larkspur"]}
+      ],
+      "expect": {"claim:0040": {"kind": "episode", "reason": "episode_binding_composes",
+                                "key": "@node_of:episode:0000000000000000000000e1"}},
+      "expect_diagnostics": []
+    },
+    {
+      "name": "the_binding_wins_over_a_different_recorder_ref_and_aliases_it",
+      "design": "§5.1, §3.5, Law 5",
+      "why": "The episode binding wins for grouping. The recorder's own ref is not wrong and is not deleted — it becomes a node alias, so an open session or an old URL holding it still resolves.",
+      "claims": [{"claim_id": "claim:0041", "event_kind": "job",
+                  "event_ref": "node:00000000000000000000ab01"}],
+      "manifest": [{"telling_ref": "landmark:lm-7", "claim_ids": ["claim:0041"]}],
+      "bindings": [
+        {"identity_id": "eid:0041", "telling_ref": "landmark:lm-7",
+         "episode_id": "episode:0000000000000000000000e1", "relation": "same",
+         "origin": "stated", "canonical_event_kind": "job",
+         "subject_keys": ["org/larkspur"]}
+      ],
+      "expect": {"claim:0041": {"kind": "episode", "reason": "episode_binding",
+                                "key": "@node_of:episode:0000000000000000000000e1",
+                                "aliased_from": ["node:00000000000000000000ab01"]}},
+      "expect_diagnostics": ["identity_episode_ref_aliased"]
+    },
+    {
+      "name": "a_dormant_binding_is_reported_and_ignored",
+      "design": "§3.3 lifecycle, §5.4",
+      "why": "The telling's claims were retracted by a correction. The binding is not an error — a retracted claim is not a bug in the binding — so it is reported and the fold carries on.",
+      "claims": [{"claim_id": "claim:0050", "event_kind": "job", "event_ref": ""}],
+      "manifest": [
+        {"telling_ref": "classification:larkspur-start#a1", "claim_ids": ["claim:0050"]},
+        {"telling_ref": "landmark:lm-gone", "claim_ids": []}
+      ],
+      "bindings": [
+        {"identity_id": "eid:0050", "telling_ref": "landmark:lm-gone",
+         "episode_id": "episode:0000000000000000000000e1", "relation": "same",
+         "origin": "stated", "canonical_event_kind": "job",
+         "subject_keys": ["org/larkspur"]}
+      ],
+      "expect": {"claim:0050": {"kind": "existing", "reason": "no_binding", "key": ""}},
+      "expect_diagnostics": ["identity_binding_dormant"]
+    }
+  ],
+  "mixed_telling": {
+    "design": "§5.1, §13.1 — a refusal, never a partial bind",
+    "claims": [
+      {"claim_id": "claim:0060", "event_kind": "period_started",
+       "event_ref": "era:0000000000000000000000c0"},
+      {"claim_id": "claim:0061", "event_kind": "moment", "event_ref": ""}
+    ],
+    "manifest": [{"telling_ref": "classification:college-bounds#c3",
+                  "claim_ids": ["claim:0060", "claim:0061"]}],
+    "bindings": [
+      {"identity_id": "eid:0060", "telling_ref": "classification:college-bounds#c3",
+       "episode_id": "episode:0000000000000000000000e3", "relation": "same",
+       "origin": "deterministic", "canonical_event_kind": "moment",
+       "subject_keys": ["self"]}
+    ]
+  },
+  "arrival_order_divergence": {
+    "design": "§5.6 / audit G3 — the E1-then-E2 case",
+    "why": "One telling, two arrival orders. Seen when E1 is the sole candidate it binds to E1; seen when E2 already exists there are two survivors and R1 declines. The partitions are NOT equal and the plan no longer claims they are: what the contract guarantees is that the second order's ambiguity is surfaced as one possible_overmerge naming both, never absorbed and never silently moved.",
+    "telling_ref": "classification:larkspur-found#b2",
+    "bound_episode_id": "episode:0000000000000000000000e1",
+    "late_candidate_episode_id": "episode:0000000000000000000000e2"
+  }
+}
