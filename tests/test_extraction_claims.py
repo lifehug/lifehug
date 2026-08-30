@@ -707,9 +707,19 @@ class LeafTests(unittest.TestCase):
 
     def test_the_rendered_vocabulary_is_the_contracts_own(self):
         """DERIVED, never re-typed: the day a claim type or an event kind
-        joins the contract, the leaf offers it with no second edit."""
+        joins the MODEL's half of the contract, the leaf offers it with no
+        second edit — and the day one joins the substrate's half WITHOUT
+        joining the model's, the leaf keeps quiet about it.
+
+        Timeline Fix 05 (lifehug-platform#759) made those two halves
+        different: `occurrence` is a real claim type and it is the
+        deterministic classifier migration's alone. These extractors exist to
+        hear TIME and their backstops are built around a withheld date;
+        offering them a dateless type would let a model file "something
+        happened" instead of listening harder.
+        """
         prompt = gl.build_listener_prompt(answer="x", reply="y")
-        self.assertIn(" | ".join(tc.CLAIM_TYPES), prompt)
+        self.assertIn(" | ".join(tc.MODEL_CLAIM_TYPES), prompt)
         self.assertIn(gl.render_event_kinds(), prompt)
         for kind in tc.EVENT_KINDS:
             with self.subTest(kind=kind):
@@ -717,8 +727,12 @@ class LeafTests(unittest.TestCase):
         recorder = lr.build_recorder_prompt(
             domain="work", question_asked="What work have you done?",
             answer="x", reply="y")
-        self.assertIn(" | ".join(tc.CLAIM_TYPES), recorder)
+        self.assertIn(" | ".join(tc.MODEL_CLAIM_TYPES), recorder)
         self.assertIn(gl.render_event_kinds(), recorder)
+        for rendered in (prompt, recorder):
+            for kind in set(tc.CLAIM_TYPES) - set(tc.MODEL_CLAIM_TYPES):
+                with self.subTest(withheld=kind):
+                    self.assertNotIn(kind, rendered)
 
     def test_the_seed_set_says_out_loud_that_it_is_a_seed(self):
         """The contract accepts any lowercase token, and a leaf that read the

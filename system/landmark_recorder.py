@@ -309,7 +309,11 @@ def build_recorder_prompt(*, domain: str, question_asked: str,
         ("{recordable_keys}", " | ".join(recordable_keys(row))),
         ("{none_allowed}", "yes" if li.domain_accepts_none(row) else "no"),
         ("{known_entries}", known),
-        ("{claim_types}", " | ".join(tc.CLAIM_TYPES)),
+        # Timeline Fix 05: MODEL_CLAIM_TYPES, not CLAIM_TYPES — the dateless
+        # `occurrence` type is the deterministic classifier migration's alone
+        # and is never offered to a model whose whole job is hearing time.
+        # This keeps the composed prompt byte-identical across that release.
+        ("{claim_types}", " | ".join(tc.MODEL_CLAIM_TYPES)),
         ("{event_kinds}", gl.render_event_kinds()),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),

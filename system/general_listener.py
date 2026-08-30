@@ -736,7 +736,11 @@ def build_listener_prompt(*, answer: str, reply: str = "",
         ("{domains}", render_domain_digest(framework_root)),
         ("{known_entries}", known),
         ("{family_relations}", relations),
-        ("{claim_types}", " | ".join(tc.CLAIM_TYPES)),
+        # Timeline Fix 05: MODEL_CLAIM_TYPES, not CLAIM_TYPES — the dateless
+        # `occurrence` type is the deterministic classifier migration's alone
+        # and is never offered to a model whose whole job is hearing time.
+        # This keeps the composed prompt byte-identical across that release.
+        ("{claim_types}", " | ".join(tc.MODEL_CLAIM_TYPES)),
         ("{event_kinds}", render_event_kinds()),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),

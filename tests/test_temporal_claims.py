@@ -73,10 +73,24 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(
             tc.SOURCE_KINDS, ("conversation", "correction", "import", "system_derived")
         )
+        # Timeline Fix 05 (lifehug-platform#759) adds `occurrence`, at the
+        # END so no existing type moves: a claim that an event HAPPENED and
+        # carries no time. The door refuses a dated type with no value and an
+        # `identity` claim refuses to carry an event, so before it existed an
+        # undated classifier moment could only be dropped or lied about.
         self.assertEqual(
             tc.CLAIM_TYPES,
+            ("date", "range", "age", "duration", "relative_order", "identity",
+             "occurrence"),
+        )
+        # The subset a MODEL extractor is offered is the vocabulary as it was:
+        # an extractor whose job is hearing time is never handed a dateless
+        # type, and every composed prompt stays byte-identical.
+        self.assertEqual(
+            tc.MODEL_CLAIM_TYPES,
             ("date", "range", "age", "duration", "relative_order", "identity"),
         )
+        self.assertEqual(tc.DATELESS_CLAIM_TYPES, ("identity", "occurrence"))
         self.assertEqual(tc.CLAIM_BASES, ("explicit", "calculated", "inferred"))
         self.assertEqual(
             tc.CLAIM_STATUSES, ("active", "superseded", "retracted", "disputed")
@@ -146,9 +160,20 @@ class VocabularyTests(unittest.TestCase):
         # the date branch and be silently mis-stored; this partition makes that
         # a build failure instead.
         shaped = set(tc.DATED_CLAIM_TYPES) | set(tc.QUANTITY_CLAIM_TYPES)
+        # `relative_order` carries a relation; the DATELESS types carry
+        # nothing at all. Reading the dateless set from the contract rather
+        # than re-typing it keeps this partition a build failure for a NEW
+        # type and never for a declared one.
         self.assertEqual(
-            set(tc.CLAIM_TYPES) - shaped - {"relative_order", "identity"}, set()
+            set(tc.CLAIM_TYPES) - shaped - {"relative_order"}
+            - set(tc.DATELESS_CLAIM_TYPES),
+            set(),
         )
+        for kind in tc.DATELESS_CLAIM_TYPES:
+            with self.subTest(claim_type=kind):
+                self.assertIsNone(
+                    tc.normalized_temporal_value(None, claim_type=kind)
+                )
         self.assertEqual(
             set(tc.DATED_CLAIM_TYPES) & set(tc.QUANTITY_CLAIM_TYPES), set()
         )
