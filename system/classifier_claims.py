@@ -111,6 +111,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import classify_story  # noqa: E402
+import event_identity as ei  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_publication as pub  # noqa: E402
@@ -262,6 +263,28 @@ def event_source_id(stem: object, event: object) -> str:
             "classification_stem_required", "a classification is identified by its file stem"
         )
     return f"{SOURCE_ID_PREFIX}:{text}#{event_key(event)}"
+
+
+def document_revision(vault_root: str | Path, source_path: object) -> str | None:
+    """The STORY's own revision — the thing a PERSON corrects (event identity I1).
+
+    C1 named this gap and carried it forward rather than papering over it: a
+    claim cites the CLASSIFICATION's revision, which moves whenever the model
+    rewords a title, so without a separately declared document revision the
+    telling manifest cannot tell a model rewording (design §3.1 case 2) from a
+    human source correction (case 4) and conservatively re-keys nothing.
+
+    The story file's own ``content_sha256`` is exactly the missing fact, and
+    `temporal_store.read_source_ref` is the one reader of it. A source that
+    cannot be read, or whose bytes have drifted under the claims that cite it,
+    yields ``None`` — the conservative reading stays, loudly, as
+    ``telling_document_revision_undeclared`` rather than as a guessed digest.
+    """
+    try:
+        ref = store.read_source_ref(vault_root, collapsed_text(source_path))
+    except TemporalContractError:
+        return None
+    return ref.revision if ref is not None else None
 
 
 def is_classifier_source_id(value: object) -> bool:
@@ -698,6 +721,9 @@ def migrate_classifier_moments(
             continue
 
         revision = classification_revision(data)
+        # Event identity I1: declared once per classification, not once per
+        # event — every event of one story shares the story.
+        story_revision = document_revision(root, source_path)
         events = classification_events(data)
         report["skipped_empty_description"] += len(
             (data or {}).get("events") or ()
@@ -736,11 +762,17 @@ def migrate_classifier_moments(
                 {
                     "source_ref": claim["source_ref"],
                     "extractor_version": CLASSIFIER_EXTRACTOR,
-                    "extractor": {
-                        "name": EXTRACTOR_NAME,
-                        "rule_version": RULE_VERSION,
-                        "deterministic": True,
-                    },
+                    "extractor": ei.declare_tellings(
+                        {
+                            "name": EXTRACTOR_NAME,
+                            "rule_version": RULE_VERSION,
+                            "deterministic": True,
+                        },
+                        telling_keys={
+                            claim["claim_id"]: ei.classifier_telling_ref(stem, event),
+                        },
+                        document_revision=story_revision,
+                    ),
                     "claims": [claim],
                     "recorder": "classifier_claims",
                 }

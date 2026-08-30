@@ -1,0 +1,103 @@
+{
+  "owner": "event identity I1 — the fold applies bindings (timeline-rules:5)",
+  "why": "The founder's own shape, executed on his vault at 5690d37e and recorded in design section 1: Etherfuse is SIX nodes — a dated work-history landmark, a dated conversation about the idea, and four UNDATED classifier occurrences of the same company. Needs-placing is inflated with facts the person already dated somewhere else, and Play can ask 'when did you start Etherfuse?' after he said May 2022. Every telling below mirrors one of those rows; every name, date and word is synthetic.",
+  "owner_birth": "1981-07-11",
+  "episode": {
+    "canonical_event_kind": "job",
+    "stated_date": "2022-05",
+    "label_hint": "Etherfuse"
+  },
+  "tellings": [
+    {
+      "role": "same",
+      "telling_ref": "landmark:entry-etherfuse",
+      "kind": "landmark",
+      "event_kind": "job",
+      "subject": "Etherfuse",
+      "dated": "2022-05",
+      "quote": "I started Etherfuse in May 2022."
+    },
+    {
+      "role": "same",
+      "telling_ref": "classification:started#a1a1a1a1a1a1",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "Started Etherfuse."
+    },
+    {
+      "role": "same",
+      "telling_ref": "classification:cofounded#b2b2b2b2b2b2",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "Co-founded Etherfuse with AJ."
+    },
+    {
+      "role": "same",
+      "telling_ref": "classification:threepeople#c3c3c3c3c3c3",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "Etherfuse ran with only three people."
+    },
+    {
+      "role": "same",
+      "telling_ref": "classification:firsthire#d4d4d4d4d4d4",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "We made our first hire at Etherfuse."
+    },
+    {
+      "role": "part_of",
+      "telling_ref": "classification:mexico#e5e5e5e5e5e5",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "Big Etherfuse event in Mexico."
+    },
+    {
+      "role": "related",
+      "telling_ref": "classification:idea#f6f6f6f6f6f6",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": "2021",
+      "quote": "The idea for Etherfuse."
+    },
+    {
+      "role": "not_same",
+      "telling_ref": "classification:otherjob#171717171717",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "The job before Etherfuse."
+    },
+    {
+      "role": "proposed",
+      "telling_ref": "classification:maybe#282828282828",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "subject": "I",
+      "dated": null,
+      "quote": "Something about a fintech in Mexico."
+    }
+  ],
+  "expected": {
+    "same_tellings": 5,
+    "nodes_before_binding": 10,
+    "nodes_after_binding": 6,
+    "entailed_not_same_pairs": 5,
+    "unplaced_before_binding": 7,
+    "unplaced_after_binding": 3,
+    "date_questions_before_binding": 7,
+    "date_questions_after_binding": 3
+  }
+}

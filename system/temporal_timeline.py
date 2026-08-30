@@ -106,6 +106,8 @@ import birth_origin as bo  # noqa: E402
 import chronology as chrono  # noqa: E402
 import conversation_lints as cl  # noqa: E402
 import cross_dating as cd  # noqa: E402
+import episode_fold as ef  # noqa: E402
+import episode_fold_contract as efc  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import landmark_projection as lp  # noqa: E402
@@ -144,7 +146,15 @@ from temporal_claims import (  # noqa: E402
 #: calculate to a projection where things the person never dated nonetheless
 #: sit somewhere — labelled ``inferred``, worth half a stated placement in the
 #: score, and discarded the moment a real value arrives.
-CALCULATION_RULE_VERSION = "timeline-rules:4"
+#: ``timeline-rules:5`` (event identity I1, design §3.5/§5.1): GROUPING READS
+#: THE IDENTITY LAYER. An active ``same`` binding groups a telling's claims
+#: under its episode's node instead of under the key v264 would have used, and
+#: a containment edge gives a valueless member a possible outer range. Grouping
+#: is the first input every other phase reads, so EVERY node's
+#: ``input_fingerprint`` moves with this bump whether or not that node is
+#: bound — which is the honest signal, since a stale projection calculated by
+#: :4 rules is stale everywhere, not only where a binding landed.
+CALCULATION_RULE_VERSION = "timeline-rules:5"
 
 #: The rule id every co-location provenance entry carries, so a reader can
 #: filter for "what did the SYSTEM put here" without parsing prose.
@@ -380,6 +390,23 @@ class CalculatedTimeline:
     #: migration map, so a bank marker, a session or a Play target minted under
     #: an older identity still resolves to the item it was always about.
     work_item_aliases: dict = field(default_factory=dict)
+    #: Event identity I1 (design §3.5). ``{former node id: episode node id}`` —
+    #: every key a bound telling's claims WOULD have grouped under, so an open
+    #: session, a Mirror row, a work item and an old URL all keep resolving
+    #: after a bind (Law 5).
+    node_aliases: dict = field(default_factory=dict)
+    #: ``{absorbed episode id: surviving episode id}``, read off the merge
+    #: receipts' own ``aliases_created`` so the table cannot drift from the act
+    #: that created it.
+    episode_aliases: dict = field(default_factory=dict)
+    #: The identity layer's own rule version, stamped beside the fold's so a
+    #: rule-version upgrade can name exactly what it re-derives.
+    identity_rule_version: str = efc.IDENTITY_RULE_VERSION
+    #: What the fold saw in the records and what it ENTAILED — dormant
+    #: bindings, bindings on era-bound claims, proposals deliberately not
+    #: applied, and the ``not_same`` closure, which is computed here and
+    #: never stored (§2.2).
+    identity_diagnostics: dict = field(default_factory=dict)
     timings: dict = field(default_factory=dict)
     score_components: dict = field(default_factory=dict)
     reach: dict = field(default_factory=dict)
@@ -410,6 +437,10 @@ class CalculatedTimeline:
             "memberships": [dict(row) for row in self.memberships],
             "chapter_overlays": [dict(row) for row in self.chapter_overlays],
             "work_item_aliases": dict(self.work_item_aliases),
+            "node_aliases": dict(self.node_aliases),
+            "episode_aliases": dict(self.episode_aliases),
+            "identity_rule_version": self.identity_rule_version,
+            "identity_diagnostics": dict(self.identity_diagnostics),
             "reach": dict(self.reach),
             "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "diagnostics": dict(self.diagnostics),
@@ -444,6 +475,13 @@ def structural_signature(result: object) -> dict:
         # Derived from the items above, so a rebuild reproduces it exactly and
         # a drift between the map and the set it describes is a signature diff.
         "work_item_aliases": dict(current.work_item_aliases),
+        # Event identity I1: all four are derived from the records the fold was
+        # handed, so a rebuild reproduces them exactly and a drift between the
+        # tables and the drawing they describe is a signature diff.
+        "node_aliases": dict(current.node_aliases),
+        "episode_aliases": dict(current.episode_aliases),
+        "identity_rule_version": current.identity_rule_version,
+        "identity_diagnostics": dict(current.identity_diagnostics),
         "reach": dict(current.reach),
         "diagnostics": dict(current.diagnostics),
     }
@@ -1303,14 +1341,24 @@ def _era_groups(era_views: object, *, owner_ref: str) -> dict:
     return groups
 
 
-def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = ()) -> dict:
+def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
+                  identity: object = None) -> dict:
     """Claims → ``node_id -> group``, in one deterministic pass.
 
-    The grouping key is the claim's own ``event_ref`` when the recorder minted
-    one — or when E3's binder RESOLVED one — and the derived node id
+    The grouping key is the EPISODE's node id when an active ``same`` binding
+    says this telling is that episode (event identity I1, design §5.1) — the
+    identity layer is consulted FIRST and its decision is
+    `episode_fold_contract.grouping_key`'s, never a second copy of it made
+    here. Otherwise it is the claim's own ``event_ref`` when the recorder
+    minted one — or when E3's binder RESOLVED one — and the derived node id
     otherwise. ``identity`` claims form no node: they assert *who*, not
     *when*, and their contribution to the projection is the resolution they
     feed, not a row on the page.
+
+    An episode group's ``event_kind`` is the episode's CANONICAL kind when its
+    creation recorded one (§3.2) and the first member claim's kind otherwise;
+    its ``node_kind`` is ``episode``, which is what the id was minted with, so
+    the group and the digest cannot disagree about what the node is.
 
     ``era_views`` seeds the era groups first (:func:`_era_groups`), so a
     `period_started` claim bound to an era lands IN that era's node instead of
@@ -1327,20 +1375,32 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = ())
         subject = _subject_handle(claim)
         if not event_kind or not subject:
             continue
-        node_id = collapsed_text(claim.get("event_ref")) or _mint_node_id(
+        episode_node = identity.episode_node_for(claim) if identity is not None else ""
+        node_id = episode_node or collapsed_text(claim.get("event_ref")) or _mint_node_id(
             event_kind=event_kind, subject=subject, owner_ref=owner_ref
         )
         group = groups.get(node_id)
         if group is None:
+            episode_id = (
+                identity.episode_of_node.get(node_id) if episode_node else None
+            )
+            canonical = (
+                (identity.episodes.get(episode_id).canonical_event_kind
+                 if episode_id and identity.episodes.get(episode_id) else None)
+                if episode_node else None
+            )
             group = {
                 "node_id": node_id,
-                "event_kind": event_kind,
-                "node_kind": _node_kind_for(event_kind),
+                "event_kind": canonical or event_kind,
+                "node_kind": (efc.EPISODE_NODE_KIND if episode_node
+                              else _node_kind_for(canonical or event_kind)),
                 "subject": subject,
                 "subjects": [],
                 "resolved": False,
                 "claims": [],
             }
+            if episode_node:
+                group["episode_id"] = episode_id
             groups[node_id] = group
         if subject not in group["subjects"]:
             group["subjects"].append(subject)
@@ -2788,6 +2848,7 @@ def _node_dict(
     possible: object = None,
     relevance: dict | None = None,
     life_view: str | None = None,
+    identity: dict | None = None,
 ) -> dict:
     """One validated :class:`~temporal_projection.CalculatedTimelineNode`.
 
@@ -2835,6 +2896,10 @@ def _node_dict(
             **({"possible_temporal_value": possible.to_dict()}
                if possible is not None else {}),
             **(relevance or {}),
+            # Event identity I1 (§3.5), additive: absent means this node's
+            # tellings carry no identity record, which is the state every node
+            # in every vault is in until somebody binds one.
+            **(identity or {}),
         }
     )
 
@@ -3216,6 +3281,7 @@ def derive_calculated_timeline(
     *,
     resolution_records: object = (),
     event_resolution_records: object = (),
+    episode_records: object = (),
     era_views: object = (),
     roster_snapshot: object = (),
     constraints: object = (),
@@ -3238,6 +3304,15 @@ def derive_calculated_timeline(
     All three arrive as ARGUMENTS rather than being read here, for the reason
     ``roster_snapshot`` does: this function must stay a pure function of what it
     is handed, so a test can hand it two receipts and assert one membership.
+
+    ``episode_records`` is the identity layer's own fold input (event identity
+    I1, design §3.5): ``{"operations", "bindings", "manifest"}``, or a bare
+    sequence read as the bindings alone. It is a SIBLING of
+    ``event_resolution_records`` and never touches ``event_ref``, whose v247
+    era meaning is unchanged — an era-bound claim is refused as a binding
+    target and reported, exactly as `episode_fold_contract` decided in I0.
+    ``episode_fold.load_episode_records`` is what reads them off a vault; this
+    function stays pure and is handed the result.
 
     ``birth_date`` is the anchor ages are measured from; when it is not supplied
     and the substrate holds exactly one ``birth`` node, that node's own
@@ -3280,6 +3355,15 @@ def derive_calculated_timeline(
     )
     diagnostics.extend(event_findings)
 
+    # Event identity I1 (§3.5). Built BEFORE grouping because grouping is what
+    # it changes, and built from the RESOLVED claims below rather than these —
+    # a telling ref is a function of the claim's source, which subject
+    # resolution never touches, so either set gives the same map and the
+    # cheaper one is the one already in hand. The refusals (§5.4) are raised
+    # inside the constructor: a fold that drew half a projection and then
+    # refused would be worse than one that refused.
+    identity = ef.EpisodeIdentity(claims, episode_records)
+
     mark = clock()
     resolved, records, by_mention = _resolve_subjects(
         claims,
@@ -3291,7 +3375,8 @@ def derive_calculated_timeline(
     timings["resolve"] = clock() - mark
 
     mark = clock()
-    groups = _group_claims(resolved, owner_ref=owner, era_views=era_views)
+    groups = _group_claims(resolved, owner_ref=owner, era_views=era_views,
+                           identity=identity)
     roster_names = _roster_names(roster_snapshot)
     displays = {
         node_id: _subject_display(group["subject"], group["claims"], roster_names)
@@ -3505,6 +3590,28 @@ def derive_calculated_timeline(
         )
         for node_id in sorted(groups)
     }
+    # Event identity I1, §5.3 — CONTAINMENT'S INHERITED VALUE. A member the
+    # person put INSIDE an episode and never dated renders the episode's own
+    # span as a POSSIBLE outer range: it lands in `possible_temporal_value`
+    # beside E3's `within`, which is what keeps every clause of the rule
+    # structural rather than asserted. It is never `best_temporal_value`, so
+    # it cannot override, cannot anchor and cannot be mistaken for a date the
+    # person gave; `placed` is untouched, so the member's own precision
+    # question is minted exactly as it was before the containment existed.
+    if identity.applies:
+        for node_id in sorted(groups):
+            if possibilities.get(node_id) is not None or placed.get(node_id) is not None:
+                continue
+            contained = identity.containment_value(
+                {identity.telling_for(claim) for claim in groups[node_id]["claims"]},
+                placed=placed, labels=labels,
+            )
+            if contained is not None:
+                possibilities[node_id] = contained
+    identity_blocks = {
+        node_id: identity.node_block(node_id, groups[node_id]["claims"])
+        for node_id in sorted(groups)
+    }
     nodes = [
         _node_dict(
             groups[node_id],
@@ -3528,6 +3635,7 @@ def derive_calculated_timeline(
                 as_of=as_of, diagnostics=diagnostics, node_id=node_id,
                 birth_node_id=birth_node_id,
             ),
+            identity=identity_blocks.get(node_id),
         )
         for node_id in sorted(groups)
     ]
@@ -3606,6 +3714,13 @@ def derive_calculated_timeline(
         # items it describes — a reader can never hold a map for a different
         # set — and so deleting the file and rebuilding is byte-identical.
         work_item_aliases=twi.work_item_aliases(items),
+        # Event identity I1 (§3.5). All four are derived from `episode_records`
+        # in this same generation, so a reader can never hold a table that
+        # describes a different drawing.
+        node_aliases=identity.node_aliases(),
+        episode_aliases=identity.episode_aliases(),
+        identity_rule_version=efc.IDENTITY_RULE_VERSION,
+        identity_diagnostics=identity.identity_diagnostics(),
         memberships=tuple(memberships),
         timings={phase: round(timings.get(phase, 0.0), 9) for phase in TIMING_PHASES},
         score_components=components,

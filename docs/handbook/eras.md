@@ -324,9 +324,11 @@ decided over both.
 O-E2 moved the calculation rule version to `timeline-rules:3` so a reader can
 tell, from the payload alone, whether it is looking at the pre-Eras,
 age-frames-only, or membership-and-relevance shape. Timeline Fix 05 §8.3 then
-took the next slot for place co-location, so the version in force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:4 -->
-`timeline-rules:4`.
+took the next slot for place co-location, and event identity I1 took
+`timeline-rules:5` when grouping learned to read the identity layer, so the
+version in force is
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:5 -->
+`timeline-rules:5`.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*

@@ -90,6 +90,7 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
+import event_identity as ei  # noqa: E402
 import landmarks_interaction  # noqa: E402
 import temporal_store as store  # noqa: E402
 from temporal_claims import (  # noqa: E402
@@ -693,15 +694,32 @@ def file_landmark_record(
         extractor_version=extractor_version,
         now=now,
     )
+    # Event identity I1 (C1's named gap, design §3.1). The recorder DECLARES
+    # its tellings rather than leaving a reader to infer them: one telling per
+    # promoted entry, keyed by the entry id, which is minted by the recorder
+    # and does not move when a later model describes the same entry with other
+    # words. That id is therefore also the strongest re-key evidence there is,
+    # and the promoted source is written once and never rewritten, so its own
+    # revision IS the document revision a person would correct.
+    entry_id = source_ref.source_id.partition(":")[2] or source_ref.source_id
     receipt = validate_extraction_receipt(
         {
             "source_ref": source_ref.to_dict(),
             "extractor_version": extractor_version,
-            "extractor": {
-                "name": "landmark-entry-rule",
-                "rule_version": "1",
-                "deterministic": True,
-            },
+            "extractor": ei.declare_tellings(
+                {
+                    "name": "landmark-entry-rule",
+                    "rule_version": "1",
+                    "deterministic": True,
+                },
+                telling_keys={
+                    collapsed_text(row.get("claim_id")): ei.landmark_telling_ref(entry_id)
+                    for row in claims
+                    if collapsed_text(row.get("claim_id"))
+                },
+                document_revision=source_ref.revision,
+                recorder_event_id=entry_id,
+            ),
             "claims": claims,
             "recorder": "landmark_projection",
         },

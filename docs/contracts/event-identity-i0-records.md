@@ -118,6 +118,15 @@ therefore takes the **conservative** reading: it re-keys nothing and emits
 `telling_document_revision_undeclared`. `declare_tellings()` is the one call
 I1 wires into `classifier_claims` and `landmark_recorder`.
 
+> **Closed in I1** (v267). `classifier_claims.document_revision()` declares
+> the STORY's own `content_sha256` — the thing a person corrects, as distinct
+> from the classification's revision, which moves whenever the model rewords a
+> title — and `landmark_projection.file_landmark_record` declares the promoted
+> record's revision, its telling key and its entry id. Where a revision is
+> genuinely undeclarable (a source that cannot be read, or whose bytes have
+> drifted under the claims citing it) the conservative reading is unchanged
+> and still says so by name.
+
 ---
 
 ## C2 — episode operations and the binding lifecycle (design §3.2–§3.3)
