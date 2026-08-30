@@ -175,6 +175,18 @@ CONFLICT_STATES = ("none", "alternatives", "contradicted")
 #: Typed work, one identity across every surface (plan §5.4, §14 row 6). A
 #: contradiction is not forced into an API named only for "gaps".
 #:
+#: v2, additive (event identity I1, §3.5). The keys one identity LINK row
+#: carries — a containment, a `related` edge or a proposal. Frozen here so the
+#: fold, the platform's card and a test read one spelling; the row is a view of
+#: a durable `event_identity` record, never a record itself.
+IDENTITY_LINK_KEYS = (
+    "telling_ref",
+    "episode_id",
+    "episode_node_id",
+    "relation",
+    "origin",
+)
+
 #: ``place_ambiguous`` arrives with Timeline Fix 05 §8.3 (``timeline-rules:4``):
 #: a moment names a place the person was in MORE THAN ONCE, so the co-location
 #: rule declines to infer and asks WHICH TIME instead. It is its own kind and
@@ -289,6 +301,9 @@ ERROR_CODES = (
     "contradiction_needs_two_claims",
     "score_out_of_range",
     "timestamp_unusable",
+    "episode_block_on_non_episode_node",
+    "telling_count_disagrees",
+    "identity_link_malformed",
 )
 
 
@@ -517,6 +532,25 @@ class CalculatedTimelineNode:
     #: ``possible_temporal_value``, because dating an era from what got sorted
     #: into it is the founder's own "College 1990-1991 before High School".
     observed_envelope: dict | None = None
+    #: v2, additive (event identity I1, design §3.5). What the identity layer
+    #: says about this node. The first four ride an EPISODE node only — a node
+    #: an `event_identity` binding actually made — because publishing
+    #: ``telling_count: 1`` on every node in a vault that has never bound
+    #: anything would be a schema change dressed as a fact. ``containments``,
+    #: ``related`` and ``proposed_links`` ride any node whose telling carries
+    #: such a record. Absent means no record, which is where every node starts.
+    #:
+    #: ``proposed_links`` is the one that must never draw anything (§2.3): a
+    #: proposal ranks the question queue and renders at most a soft "possibly
+    #: the same as…" line, so it is published as a link and NEVER folded into
+    #: grouping, the date, or the containment range.
+    episode_id: str | None = None
+    tellings: tuple[str, ...] = ()
+    telling_count: int = 0
+    identity_origins: tuple[str, ...] = ()
+    containments: tuple[dict, ...] = ()
+    related: tuple[dict, ...] = ()
+    proposed_links: tuple[dict, ...] = ()
     schema_version: int = PROJECTION_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -557,6 +591,16 @@ class CalculatedTimelineNode:
             payload["legacy_refs"] = list(self.legacy_refs)
         if self.relation_evidence_refs:
             payload["relation_evidence_refs"] = list(self.relation_evidence_refs)
+        if self.episode_id:
+            payload["episode_id"] = self.episode_id
+            payload["tellings"] = list(self.tellings)
+            payload["telling_count"] = int(self.telling_count)
+            payload["identity_origins"] = list(self.identity_origins)
+        for key, rows in (("containments", self.containments),
+                          ("related", self.related),
+                          ("proposed_links", self.proposed_links)):
+            if rows:
+                payload[key] = [dict(row) for row in rows]
         return payload
 
 
@@ -719,6 +763,36 @@ def validate_calculated_timeline_node(value: object) -> dict:
         normalized["owner_timeline_relation"] = relation
     if envelope is not None:
         normalized["observed_envelope"] = envelope
+    episode_id = collapsed_text(value.get("episode_id"))
+    if episode_id:
+        # An episode block on a node the identity layer did not make would be
+        # a claim about grouping that grouping never made. `node_kind` is
+        # INSIDE the id digest (`NODE_IDENTITY_KEYS`), so the two cannot
+        # disagree without one of them being a fabrication.
+        if node_kind != "episode":
+            raise TimelineNodeError(
+                "episode_block_on_non_episode_node",
+                f"{node_id} carries an episode_id but its node_kind is {node_kind!r}",
+            )
+        tellings = _ref_tuple(value.get("tellings"))
+        declared = value.get("telling_count")
+        try:
+            declared = int(declared)
+        except (TypeError, ValueError):
+            declared = len(tellings)
+        if declared != len(tellings):
+            raise TimelineNodeError(
+                "telling_count_disagrees",
+                f"{node_id} lists {len(tellings)} tellings and declares {declared}",
+            )
+        normalized["episode_id"] = episode_id
+        normalized["tellings"] = list(tellings)
+        normalized["telling_count"] = len(tellings)
+        normalized["identity_origins"] = list(_ref_tuple(value.get("identity_origins")))
+    for key in ("containments", "related", "proposed_links"):
+        rows = _identity_links(node_id, key, value.get(key))
+        if rows:
+            normalized[key] = rows
     legacy_refs = _ref_tuple(value.get("legacy_refs"))
     if legacy_refs:
         normalized["legacy_refs"] = list(legacy_refs)
@@ -726,6 +800,31 @@ def validate_calculated_timeline_node(value: object) -> dict:
     if relation_refs:
         normalized["relation_evidence_refs"] = list(relation_refs)
     return normalized
+
+
+def _identity_links(node_id: str, field_name: str, value: object) -> list:
+    """One identity link list, normalized to :data:`IDENTITY_LINK_KEYS`.
+
+    Sorted here rather than trusted from the caller, so two hosts assembling
+    the same records in two orders publish the same bytes.
+    """
+    rows = [value] if isinstance(value, dict) else list(value or ())
+    found = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise TimelineNodeError(
+                "identity_link_malformed",
+                f"{node_id}.{field_name} holds {row!r}, which is not a link row",
+            )
+        cleaned = {key: collapsed_text(row.get(key)) for key in IDENTITY_LINK_KEYS}
+        if not cleaned["episode_id"]:
+            raise TimelineNodeError(
+                "identity_link_malformed",
+                f"{node_id}.{field_name} holds a link that names no episode",
+            )
+        found.append(cleaned)
+    found.sort(key=lambda row: tuple(row[key] for key in IDENTITY_LINK_KEYS))
+    return found
 
 
 def _ref_tuple(value: object) -> tuple[str, ...]:
@@ -769,6 +868,13 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         owner_timeline_relation=normalized.get("owner_timeline_relation"),
         relation_evidence_refs=tuple(normalized.get("relation_evidence_refs") or ()),
         observed_envelope=normalized.get("observed_envelope"),
+        episode_id=normalized.get("episode_id"),
+        tellings=tuple(normalized.get("tellings") or ()),
+        telling_count=int(normalized.get("telling_count") or 0),
+        identity_origins=tuple(normalized.get("identity_origins") or ()),
+        containments=tuple(dict(row) for row in normalized.get("containments") or ()),
+        related=tuple(dict(row) for row in normalized.get("related") or ()),
+        proposed_links=tuple(dict(row) for row in normalized.get("proposed_links") or ()),
         schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
     )
 

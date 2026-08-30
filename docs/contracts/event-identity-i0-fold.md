@@ -48,6 +48,12 @@ field, no record is written anywhere, and `CALCULATION_RULE_VERSION` stays
 changes and every fingerprint moves with it. A test asserts that, so an I1
 branch cannot quietly borrow it early.
 
+> **I1 has since taken it** (`system/episode_fold.py`, v267). The test moved
+> with the promise rather than being deleted — it now reads `timeline-rules:5`
+> and the next phase that changes the fold's arithmetic takes `:6`. Everything
+> else in this document is unchanged: I1 CALLS these functions and
+> re-implements none of them.
+
 `IDENTITY_RULE_VERSION = "event-identity:1"` (design §7) is introduced here
 and has **exactly one home**, `episode_fold_contract`. Every other module —
 C1's manifest, C2's operations and bindings, I1's fold, the platform's own

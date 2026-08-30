@@ -78,6 +78,8 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import episode_fold as ef  # noqa: E402
+import episode_fold_contract as efc  # noqa: E402
 import era_identity as ei  # noqa: E402
 import era_memberships as era  # noqa: E402
 import event_binding as eb  # noqa: E402
@@ -400,6 +402,7 @@ def publish(
     active_index: object = None,
     resolution_records: object = (),
     event_resolution_records: object = None,
+    episode_records: object = None,
     era_views: object = None,
     roster_snapshot: object = (),
     constraints: object = None,
@@ -459,12 +462,19 @@ def publish(
         display_decisions = era.active_era_displays(vault_root)
     if landmark_entries is None:
         landmark_entries = lp.load_landmark_sources(vault_root)
+    if episode_records is None:
+        # Same `None` means "read them" rule (event identity I1, design §3.5):
+        # the act that files a binding must publish a projection that HAS it.
+        # `()` still means "none", which is what CERT-11's second half folds
+        # with when it proves the drawing returns.
+        episode_records = ef.load_episode_records(vault_root)
 
     generation = next_generation(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
         event_resolution_records=event_resolution_records,
+        episode_records=episode_records,
         era_views=era_views,
         roster_snapshot=roster_snapshot,
         constraints=constraints,
@@ -614,6 +624,12 @@ EMPTY_VIEW = {
     "memberships": (),
     "chapter_overlays": (),
     "work_item_aliases": {},
+    # Event identity I1 (design §3.5). Served, because a host that cannot see
+    # them cannot resolve a node id a bind superseded — which is exactly the
+    # O-E1b finding this key set exists to prevent, applied to a new layer.
+    "node_aliases": {},
+    "episode_aliases": {},
+    "identity_rule_version": efc.IDENTITY_RULE_VERSION,
     "reach": {},
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
@@ -661,6 +677,15 @@ PUBLISHED_KEYS_NOT_SERVED = {
     "score_components": (
         "the QUEUE's explanation of its own scores, published in the "
         "work-items file and read there (§8.5)."
+    ),
+    "identity_diagnostics": (
+        "findings about the IDENTITY LAYER — dormant bindings, bindings on "
+        "era-bound claims, proposals deliberately not applied — plus the "
+        "`not_same` closure the fold entailed. Same reasoning as "
+        "`diagnostics` below: a maintainer's surface and a work item's input, "
+        "and a person's page showing it would be the system talking about "
+        "itself. The three tables a page DOES need — `node_aliases`, "
+        "`episode_aliases`, `identity_rule_version` — are served."
     ),
     "diagnostics": (
         "findings about the FOLD — `age_frames_without_birth_anchor` and its "
@@ -716,6 +741,14 @@ def calculated_view(vault_root: str | Path) -> dict:
         "memberships": tuple(payload.get("memberships") or ()),
         "chapter_overlays": tuple(payload.get("chapter_overlays") or ()),
         "work_item_aliases": dict(payload.get("work_item_aliases") or {}),
+        # Tolerant by construction, exactly like the v1/v2 node fields above:
+        # a projection published before event identity I1 carries none of
+        # these, and reads here as "nothing bound", which is what it is.
+        "node_aliases": dict(payload.get("node_aliases") or {}),
+        "episode_aliases": dict(payload.get("episode_aliases") or {}),
+        "identity_rule_version": (
+            payload.get("identity_rule_version") or efc.IDENTITY_RULE_VERSION
+        ),
         "reach": dict(payload.get("reach") or {}),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None
@@ -747,6 +780,7 @@ def verify(
     *,
     resolution_records: object = (),
     event_resolution_records: object = None,
+    episode_records: object = None,
     era_views: object = None,
     roster_snapshot: object = (),
     constraints: object = None,
@@ -782,10 +816,13 @@ def verify(
         # Same `None` means "read them" rule as `constraints` above: the act
         # that creates an era must publish a projection that HAS it.
         era_views = ei.era_views(vault_root)
+    if episode_records is None:
+        episode_records = ef.load_episode_records(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
         event_resolution_records=event_resolution_records,
+        episode_records=episode_records,
         era_views=era_views,
         roster_snapshot=roster_snapshot,
         constraints=constraints,

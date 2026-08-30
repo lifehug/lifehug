@@ -141,8 +141,13 @@ def items_of_kind(result, kind: str) -> list[dict]:
 class TheRuleIsWrittenDown(unittest.TestCase):
     """§8.3 asks for the rule text as a constant, and for the version to move."""
 
-    def test_the_rule_version_moves_to_four(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:4")
+    def test_the_rule_version_tracks_the_current_rules(self):
+        """`:4` was co-location's own slot; event identity I1 took `:5` when
+        grouping changed. CERT-10's fixture moves WITH the constant — the
+        certification is about the co-location arithmetic, and pinning a
+        retired version number would only assert that nothing else may ever
+        change the fold."""
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:5")
         self.assertEqual(
             tt.CALCULATION_RULE_VERSION, CERT_10["calculation_rule_version"]
         )

@@ -1484,6 +1484,7 @@ def adopt_envelope(
     *,
     episode_id: object,
     creation_canonical_inputs: object,
+    canonical_event_kind: object = None,
     source_ref: object = None,
     created_at: object = None,
 ) -> dict:
@@ -1495,6 +1496,14 @@ def adopt_envelope(
     the decision it accompanies, and carrying the creation's own
     ``canonical_inputs`` so the adopted id is still explainable from first
     principles after every cache in the vault is gone.
+
+    ``canonical_event_kind`` is CARRIED, not decided (I1). §3.2 records the
+    kind at creation and changes it only by a superseding operation, and the
+    create envelope lives under ``state/`` where deleting it is a supported
+    act — so an adopt that does not carry the kind leaves the surviving
+    sources-side records unable to re-derive the episode's NODE id, which is
+    the very orphan G1 exists to prevent. It is outside
+    :data:`OPERATION_IDENTITY_KEYS`, so carrying it moves no digest.
     """
     record = validate_episode_operation(
         {
@@ -1502,6 +1511,7 @@ def adopt_envelope(
             "op": "adopt",
             "episode_id": episode_id,
             "acted_on_episode_ids": [episode_id],
+            "canonical_event_kind": canonical_event_kind,
             "source_ref": source_ref,
             "created_at": created_at,
         }
@@ -1515,6 +1525,7 @@ def file_adopt_envelope(
     *,
     episode_id: object,
     creation_canonical_inputs: object,
+    canonical_event_kind: object = None,
     source_ref: object = None,
     created_at: object = None,
 ) -> tuple[dict, bool]:
@@ -1522,6 +1533,7 @@ def file_adopt_envelope(
     record = adopt_envelope(
         episode_id=episode_id,
         creation_canonical_inputs=creation_canonical_inputs,
+        canonical_event_kind=canonical_event_kind,
         source_ref=source_ref,
         created_at=created_at,
     )

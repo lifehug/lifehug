@@ -499,10 +499,12 @@ class RuleVersionAndFingerprintTests(VaultTestCase):
         """eras O-E2 takes the NEXT rule-version slot (`timeline-rules:3`) for
         memberships/occurrence-scope, rather than renumbering E1's own —
         the design named `:2` for the whole of E1+E2 and E1 took it first.
-        Timeline Fix 05 §8.3 then took `:4` for place co-location; the slot
-        this test guards is that the version MOVES with the rules, so it
-        tracks the current one rather than pinning a retired number."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:4")
+        Timeline Fix 05 §8.3 then took `:4` for place co-location, and event
+        identity I1 took `:5` when grouping learned to read the identity
+        layer; the slot this test guards is that the version MOVES with the
+        rules, so it tracks the current one rather than pinning a retired
+        number."""
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:5")
 
     def test_a_fingerprint_without_an_epoch_is_byte_identical_to_v1s(self) -> None:
         self.assertEqual(
