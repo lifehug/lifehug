@@ -276,6 +276,86 @@ class NoEpisodeAtAll(unittest.TestCase):
                          expected["place_ambiguous_items"])
 
 
+PLACE_ROSTER = {
+    "type": "place",
+    "entities": [{"name": "San Diego", "slug": "san-diego", "aliases": ["SD"]}],
+}
+
+
+class ThePlaceRosterFoldsAliases(unittest.TestCase):
+    """§8.3 names `identity_resolution.roster_index(entity_type="place")` as
+    the resolver. Without it "SD" and "San Diego" are two places; with it they
+    are one, and that is the whole difference a roster makes."""
+
+    def _moment(self, mention: str) -> dict:
+        return moment_claim({"source": "s-sd", "quote": "we went to the zoo",
+                             "place_mentions": [mention]})
+
+    def test_an_alias_reaches_the_episode(self):
+        rows = [birth_claim(),
+                episode_claim(CERT_10["cases"]["one_dated_episode"]["episodes"][0]),
+                self._moment("SD")]
+        with_roster = derive(rows, roster_snapshot=PLACE_ROSTER)
+        without = derive(rows)
+        self.assertTrue([r for r in moment_nodes(with_roster)
+                         if r.get("best_temporal_value")])
+        self.assertFalse([r for r in moment_nodes(without)
+                          if r.get("best_temporal_value")],
+                         "an alias resolved with no roster to resolve it against")
+
+    def test_a_place_roster_is_never_read_off_a_person_roster(self):
+        """`entity_type="place"` forced over a person roster would file the
+        founder's children as cities (`_place_keys`' own refusal, reused)."""
+        people = {"type": "person",
+                  "entities": [{"name": "San Diego", "slug": "san-diego"}]}
+        rows = [birth_claim(),
+                episode_claim(CERT_10["cases"]["one_dated_episode"]["episodes"][0]),
+                self._moment("SD")]
+        result = derive(rows, roster_snapshot=people)
+        self.assertFalse([r for r in moment_nodes(result)
+                          if r.get("best_temporal_value")])
+
+
+class OnlyTheOwnersOwnEpisodesDate(unittest.TestCase):
+    """eras §5: a relative's history never rides onto the owner's axis on a
+    stated relationship alone. An episode that is not the owner's is not
+    evidence about where the OWNER was, and cannot date the owner's moments."""
+
+    def _group(self, **overrides) -> dict:
+        base = {"node_id": "ep:x", "node_kind": "episode", "event_kind": "job",
+                "subject": "person/uncle-ray", "resolved": True, "claims": []}
+        base.update(overrides)
+        return base
+
+    def test_a_job_the_owner_did_not_hold_is_not_on_the_axis(self):
+        group = self._group(claims=[{
+            "claim_id": "claim:x",
+            "subject_resolution": {"reason": "ambiguous_candidates"},
+        }])
+        self.assertFalse(tt._episode_on_owner_axis(  # noqa: SLF001
+            group, is_place_subject=False, best=None,
+            entry_index={}, owner="self", birth=None,
+        ))
+
+    def test_a_place_subject_episode_is_always_on_the_axis(self):
+        """A place has no life of its own — `PLACE_SPAN_SENTENCES` already
+        reads a place-subject span as "when were YOU in Yucaipa"."""
+        self.assertTrue(tt._episode_on_owner_axis(  # noqa: SLF001
+            self._group(event_kind="residence", subject="place/san-diego"),
+            is_place_subject=True, best=None,
+            entry_index={}, owner="self", birth=None,
+        ))
+
+    def test_the_owners_own_narration_is_on_the_axis(self):
+        """No roster candidate and no landmark entry is the ordinary shape of
+        somebody narrating their own life — `_owner_relevance`'s own rule."""
+        self.assertTrue(tt._episode_on_owner_axis(  # noqa: SLF001
+            self._group(subject="the shop", resolved=False),
+            is_place_subject=False, best=None,
+            entry_index={}, owner="self", birth=None,
+        ))
+
+
 class InferenceNeverOverridesAStatement(unittest.TestCase):
     """The promise that makes the rule safe to run on every rebuild."""
 

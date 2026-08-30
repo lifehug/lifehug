@@ -1657,9 +1657,33 @@ def _colocation_record(span: object, *, place: str, episode_id: str,
     )
 
 
+def _episode_on_owner_axis(group: dict, *, is_place_subject: bool, best: object,
+                           entry_index: dict, owner: str, birth: object) -> bool:
+    """Is this episode evidence about where the OWNER was?
+
+    Two ways to be, and the second one is not a shortcut. `_owner_relevance` is
+    the substrate's one answer to "whose occurrence is this" and it answers
+    about PEOPLE — so a residence whose subject resolved to a place in the
+    place roster comes back ``other_person`` / ``contextual_only``, which is
+    not a verdict about the owner at all; it is the question not applying.
+
+    A residence's subject being a place is exactly the case the rest of this
+    module already reads as the owner's own — `PLACE_SPAN_SENTENCES` asks
+    *"When were you in Yucaipa?"*, not *"When was Yucaipa?"*. Reading it the
+    other way here would mean the rule silently stopped working the moment a
+    vault gained a place roster, which is the reverse of what a roster is for.
+    """
+    if is_place_subject:
+        return True
+    relevance = _owner_relevance(
+        group, best=best, entry_index=entry_index, owner=owner, birth=birth
+    )
+    return relevance["owner_timeline_relation"] in tp.AXIS_RELATIONS
+
+
 def _apply_colocation(groups: dict, calculated: dict, *, roster_snapshot: object,
                       entry_index: dict, owner: str, birth: object,
-                      displays: dict, diagnostics: list) -> dict:
+                      displays: dict, place_flags: dict, diagnostics: list) -> dict:
     """:data:`COLOCATION_RULE_TEXT`, applied. Deterministic; no model call.
 
     Runs after :func:`_apply_durations` and before the edges, so an inferred
@@ -1695,10 +1719,11 @@ def _apply_colocation(groups: dict, calculated: dict, *, roster_snapshot: object
         span = calculated.get(node_id, {}).get("best")
         if span is None:
             continue
-        relevance = _owner_relevance(
-            group, best=span, entry_index=entry_index, owner=owner, birth=birth
-        )
-        if relevance["owner_timeline_relation"] not in tp.AXIS_RELATIONS:
+        if not _episode_on_owner_axis(
+            group,
+            is_place_subject=bool(place_flags.get(node_id)),
+            best=span, entry_index=entry_index, owner=owner, birth=birth,
+        ):
             # Somebody else's residence is not evidence about where the owner
             # was (eras §5 — a relative's history never rides in on a stated
             # relationship alone).
@@ -3333,6 +3358,7 @@ def derive_calculated_timeline(
         owner=owner,
         birth=birth,
         displays=displays,
+        place_flags=place_flags,
         diagnostics=diagnostics,
     )
     timings["reconcile"] = clock() - mark
