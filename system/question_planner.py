@@ -1076,6 +1076,10 @@ WORK_ITEM_PLACEMENT_GAIN = {
     "precision_gap": 0.4,
     "contradiction": 0.7,
     "identity_uncertain": 0.5,
+    # `timeline-rules:4`: the node is co-located but not placed, and the answer
+    # is a choice between spans the substrate already holds — so it places the
+    # node like a missing anchor does, at a fraction of the recall cost.
+    "place_ambiguous": 0.8,
 }
 
 #: What an item is worth when it says nothing. Neutral on value and fit, mildly

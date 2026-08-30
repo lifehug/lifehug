@@ -80,6 +80,21 @@ EVIDENCE_BASES = ("document", "photo", "relative")
 #: has to read as a whole clause ("calculated from “I was 30 in June 2011”").
 CALCULATED_PROVENANCE_BASIS = "calculated"
 
+#: The provenance-entry basis for a clause the system INFERRED rather than
+#: worked out arithmetically (Timeline Fix 05 §8.3, lifehug-platform#759). Same
+#: shape and the same reason as :data:`CALCULATED_PROVENANCE_BASIS` and, like
+#: it, NOT a member of :data:`BASES`: place co-location writes *"you lived in
+#: San Diego 1988-1990"*, which is a sentence about how the interval was
+#: reached, not a quotation of anything the person said. It is rendered
+#: VERBATIM for exactly that reason — the default clause is *"you said …"*, and
+#: attributing an inference to the person is the lifehug#266 defect wearing a
+#: new hat.
+INFERRED_PROVENANCE_BASIS = "inferred"
+
+#: The provenance bases whose ``claim`` is a whole clause ABOUT the derivation
+#: and is therefore rendered as itself, with nobody attributed.
+VERBATIM_PROVENANCE_BASES = (CALCULATED_PROVENANCE_BASIS, INFERRED_PROVENANCE_BASIS)
+
 #: How much each basis is trusted when two claims disagree (ruling 3).
 #:
 #: The three v204 weights are FLAT — one number each, no era-conditional
@@ -488,9 +503,9 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
     ``"sometime in the 1980s"``, ``"1984–1990"``, ``"after the move to Mesa"``.
     The basis clause is appended only when the record carries a provenance
     ``claim`` (there is nothing to quote back otherwise), and every clause but
-    :data:`CALCULATED_PROVENANCE_BASIS` attributes that claim to somebody — the
-    person, a relative, a document. A calculated clause is rendered verbatim
-    because there is nobody to attribute it to.
+    :data:`VERBATIM_PROVENANCE_BASES` attributes that claim to somebody — the
+    person, a relative, a document. A calculated or inferred clause is rendered
+    verbatim because there is nobody to attribute it to.
     """
     record = record if isinstance(record, DateRecord) else from_dict(record)
     if record is None:
@@ -521,7 +536,7 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
     # A calculated clause already IS the sentence (lifehug#266): it names the
     # arithmetic, so "you said" in front of it would attribute to the person a
     # statement they never made.
-    if claim_basis == CALCULATED_PROVENANCE_BASIS:
+    if claim_basis in VERBATIM_PROVENANCE_BASES:
         return f"{body} — {claim}"
     return f"{body} — you said {claim}"
 

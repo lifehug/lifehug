@@ -87,7 +87,8 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(tp.CONFLICT_STATES, ("none", "alternatives", "contradicted"))
         self.assertEqual(
             tp.WORK_ITEM_KINDS,
-            ("missing_anchor", "precision_gap", "contradiction", "identity_uncertain"),
+            ("missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
+             "place_ambiguous"),
         )
         self.assertEqual(
             tp.WORK_ITEM_STATES,

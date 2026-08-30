@@ -669,7 +669,7 @@ def precision_so_far(session: object) -> object:
 #: precision gap the queue surfaced opens the same conversation a
 #: contradiction does.
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
-                   "missing_anchor", "precision_gap")
+                   "missing_anchor", "place_ambiguous", "precision_gap")
 
 #: How many quoted spans a work-item context block carries. The same number as
 #: `mirror_work.MAX_PLAY_EVIDENCE` and pinned equal to it
@@ -716,6 +716,17 @@ WORK_ITEM_PROBES = {
                 "closer, or is somewhere in that stretch more honest?",
         "anchored": "You've told me about {label} \u2014 do you know {field} "
                     "any closer, or is somewhere around {anchor} more honest?",
+    },
+    # `timeline-rules:4` (Timeline Fix 05 §8.3). The place is named and the
+    # person was there more than once, so the probe asks WHICH TIME rather
+    # than which year — the same converging move a contradiction makes, on a
+    # choice the substrate already holds both halves of.
+    "place_ambiguous": {
+        "step": "content", "cost": 2,
+        "text": "You've told me about {label}, and you were in that place more "
+                "than once \u2014 which of those times was this?",
+        "anchored": "You've told me about {label} \u2014 was that before or "
+                    "after {anchor}?",
     },
 }
 

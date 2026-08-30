@@ -321,11 +321,12 @@ second, conflicting one.
 arithmetic (`cross_dating.frames_touching`) for age frames, the union of
 active `era_membership` receipts for named eras, and one `display_role`
 decided over both.
-The calculation rule version moves to
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:3 -->
-`timeline-rules:3` so a reader can tell, from the payload alone, whether it
-is looking at the pre-Eras, age-frames-only, or membership-and-relevance
-shape.
+O-E2 moved the calculation rule version to `timeline-rules:3` so a reader can
+tell, from the payload alone, whether it is looking at the pre-Eras,
+age-frames-only, or membership-and-relevance shape. Timeline Fix 05 §8.3 then
+took the next slot for place co-location, so the version in force is
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:4 -->
+`timeline-rules:4`.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*

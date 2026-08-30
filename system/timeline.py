@@ -2373,6 +2373,29 @@ PLACEMENT_ROUNDING = 4
 #: a FLOOR exactly as the score itself is one (ADR 0027).
 ANCHOR_GRAIN_YEARS = 1.0
 
+#: What an INFERRED placement is worth against a stated one (Timeline Fix 05
+#: §8.3, ADR 0027). `timeline-rules:4` puts an undated moment inside a dated
+#: residence's span — real information, and not the same thing as somebody
+#: saying when it was — so it earns HALF the credit.
+#:
+#: The arithmetic, once, here and in :func:`placement_score`'s docstring: the
+#: level is ``1 − Σwᵢ/(n·L)``, which is the same as ``Σ (L − wᵢ)/(n·L)`` — each
+#: thing CONTRIBUTES ``(L − wᵢ)/(n·L)``. Halving that contribution is the same
+#: as scoring the thing at ``w′ᵢ = L − 0.5·(L − wᵢ) = (L + wᵢ)/2``, which is
+#: what :func:`_effective_width` computes. Three properties come free and all
+#: three are the reason it is this and not a fudge factor: an inference always
+#: scores between its own width and the floor, a NARROWER inference still beats
+#: a wider one, and an inference can never beat a stated placement of the same
+#: width. Guessing still cannot pay (ADR 0027's first rule).
+INFERRED_PLACEMENT_WEIGHT = 0.5
+
+#: The placement score's own formula version, separate from
+#: `temporal_work_items.SCORE_FORMULA_VERSION` (which versions the WORK-ITEM
+#: score) because the two are recalibrated by different people for different
+#: reasons. `placement-score:1` is v208's original; `:2` is this release, in
+#: which an inferred placement stopped counting as a whole one.
+PLACEMENT_SCORE_FORMULA_VERSION = "placement-score:2"
+
 
 def _record_width(record: object, life: tuple[int, int]) -> float:
     """A dated thing's interval width in years, floored at one day.
@@ -2434,6 +2457,15 @@ def _thing(kind: str, key: str, *, record: object, unknown_row: dict,
     interval it would occupy on the stated basis alone."""
     derived = bool(unknown_row.get("date_derived"))
     dated = record is not None
+    # `timeline-rules:4`: is this interval something the system INFERRED?
+    # Read through `temporal_work_items.node_claim_basis`, which is the one
+    # mapping from "how was the interval arrived at" onto the class the
+    # product renders — so the score and the row's own `inferred` badge can
+    # never disagree about which things are inferences.
+    inferred = dated and twi.node_claim_basis(record) == "inferred"
+    # An inference is not something anybody stated, so the STATED basis reads
+    # it as unplaced exactly as it reads a cross-dated span as unplaced.
+    derived = derived or inferred
     if dated:
         years = _record_years(record) or [life[0], life[1]]
         width = _record_width(record, life)
@@ -2453,7 +2485,7 @@ def _thing(kind: str, key: str, *, record: object, unknown_row: dict,
         stated_width = _years_width(stated_years)
     return {"kind": kind, "key": key, "years": years, "width": width,
             "stated_years": stated_years, "stated_width": stated_width,
-            "dated": dated, "derived": derived}
+            "dated": dated, "derived": derived, "inferred": inferred}
 
 
 def _scored_things(data: dict, life: tuple[int, int]) -> list[dict]:
@@ -2509,12 +2541,34 @@ def _scored_things(data: dict, life: tuple[int, int]) -> list[dict]:
     return things
 
 
+def _effective_width(thing: dict, key: str, span: float) -> float:
+    """The width the level counts for this thing.
+
+    Its own, unless the interval was INFERRED rather than stated or worked
+    out — in which case it counts for :data:`INFERRED_PLACEMENT_WEIGHT` of a
+    stated placement, which is the width ``(L + wᵢ)/2``. See that constant for
+    why halving the CONTRIBUTION is the same as widening the interval, and for
+    the three properties that survive it.
+
+    On the ``stated_width`` basis an inferred thing is already sitting at the
+    floor (`_thing` reads it as underived), so the same arithmetic returns
+    ``L`` and the stated half of the pair is unmoved — which is ruling 3.
+    """
+    width = float(thing[key])
+    if not thing.get("inferred"):
+        return width
+    return span - INFERRED_PLACEMENT_WEIGHT * (span - width)
+
+
 def _level(things: list[dict], life: tuple[int, int], *, key: str = "width") -> float:
-    """`1 − Σwᵢ / (n · L)`, clamped to [0, 1] and rounded to four places."""
+    """`1 − Σw′ᵢ / (n · L)`, clamped to [0, 1] and rounded to four places.
+
+    ``w′ᵢ`` is :func:`_effective_width` — a stated or calculated thing's own
+    width, and an inferred thing's width discounted to half its credit."""
     span = float(max(life[1] - life[0], 1))
     if not things:
         return 0.0
-    total = sum(float(thing[key]) for thing in things)
+    total = sum(_effective_width(thing, key, span) for thing in things)
     value = 1.0 - (total / (len(things) * span))
     return round(min(max(value, 0.0), 1.0), PLACEMENT_ROUNDING)
 
@@ -2590,7 +2644,11 @@ def _next_gain(data: dict, things: list[dict], life: tuple[int, int],
     if not keys:
         return None
     collapsed = [
-        {**thing, "width": min(float(thing["width"]), ANCHOR_GRAIN_YEARS)}
+        # Answering the anchor makes these things STATED, so the inferred
+        # discount lifts with the same answer that narrows them — modelling
+        # the narrowing without the lift would understate the margin.
+        {**thing, "width": min(float(thing["width"]), ANCHOR_GRAIN_YEARS),
+         "inferred": False}
         if thing["key"] in keys else thing
         for thing in things
     ]
@@ -2611,7 +2669,7 @@ def placement_score(data: dict) -> dict | None:
 
     Otherwise `1 − Σwᵢ/(n·L)` over every thing the timeline holds, where `wᵢ`
     is the width in years of the interval that thing occupies — its own where
-    it is dated, `unknown_years`' where it is not. Four rules travel with the
+    it is dated, `unknown_years`' where it is not. Five rules travel with the
     number and are not optional:
 
     * **Width, never presence.** A field-filled meter is an improper scoring
@@ -2626,6 +2684,16 @@ def placement_score(data: dict) -> dict | None:
     * **Stated and derived are a pair.** `score_stated` recomputes with every
       derived record read as undated; the cross-dating pass moves `score` and
       cannot move `score_stated` (§1.5's italic convention, as two numbers).
+    * **An inference is worth half.** `timeline-rules:4` (Timeline Fix 05
+      §8.3) puts an undated moment inside a dated residence's span. That is
+      real information and it is not the same as being told when something
+      happened, so it earns half the credit: each thing contributes
+      `(L − wᵢ)/(n·L)`, and halving THAT contribution is exactly scoring the
+      thing at `w′ᵢ = L − 0.5·(L − wᵢ) = (L + wᵢ)/2`
+      (:data:`INFERRED_PLACEMENT_WEIGHT`, :func:`_effective_width`). A
+      narrower inference still beats a wider one; an inference never beats a
+      stated placement of the same width; and `score_stated` reads every
+      inference as unplaced, so the pair still moves independently.
     * **It is not a verdict on the life.** It is scoped to what the timeline
       can order and place — placement, never "completeness" or "accuracy".
 
@@ -2643,15 +2711,22 @@ def placement_score(data: dict) -> dict | None:
     score = _level(things, life)
     dated = [thing for thing in things if thing["dated"]]
     derived = sum(1 for thing in dated if thing["derived"])
+    inferred = sum(1 for thing in dated if thing["inferred"])
     stated = len(dated) - derived
     return {
         "score": score,
+        "score_formula_version": PLACEMENT_SCORE_FORMULA_VERSION,
         "score_stated": _level(things, life, key="stated_width"),
         "band": placement_score_band(score),
         "stated_fraction": (round(stated / len(dated), PLACEMENT_ROUNDING)
                             if dated else 0.0),
         "derived_fraction": (round(derived / len(dated), PLACEMENT_ROUNDING)
                              if dated else 0.0),
+        # The `derived` share that is specifically an INFERENCE, so the eye
+        # pane can say "n of these are where the system thinks you were, not
+        # where you said you were" without recomputing anything.
+        "inferred_fraction": (round(inferred / len(dated), PLACEMENT_ROUNDING)
+                              if dated else 0.0),
         "life_span_years": int(max(life[1] - life[0], 1)),
         "things": len(things),
         "per_year_band": _per_year_band(things, life),
