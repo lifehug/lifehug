@@ -969,12 +969,23 @@ class FounderBandTests(VaultFixture):
         self.assertIn("## Childhood", text)
 
     def test_the_eras_bounds_stay_an_open_question(self):
-        """Honest accounting, inverted by v254: the era's years are genuinely
-        unknown, so `period_bound` is an outstanding question to ASK rather
-        than one silently answered from its own members."""
+        """Honest accounting, inverted by v254 and NARROWED by Timeline Fix 07
+        (lifehug-platform#761): the era's years are genuinely unknown, so
+        `period_bound` is an outstanding question to ASK rather than one
+        silently answered from its own members — for a NAMED era.
+
+        This fixture's era is called "Childhood", which is an AGE FRAME: its
+        bounds are arithmetic off the birth origin (ADR 0030), the permanent
+        calculated coordinate system, and asking about them is what put "When
+        did Childhood end — before or after First big paycheck arrives by
+        mail?" on the founder's page. So the assertion is made against a named
+        era added beside it, and the frame's own absence is asserted too."""
         data = self.data()
+        data["periods"] = list(data["periods"]) + [
+            {"slug": "the-mission", "name": "the Mission", "date": None}]
         keys = {row["key"] for row in tl.unknowns(data)}
-        self.assertIn("period_bound:childhood", keys)
+        self.assertIn("period_bound:the-mission", keys)
+        self.assertNotIn("period_bound:childhood", keys)
 
     def test_derive_chrono_has_no_derived_span_to_consume(self):
         """v207's D3 still holds wherever a band IS derived (residence, age

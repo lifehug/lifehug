@@ -660,6 +660,15 @@ class NoBehaviorChangeGuardTests(unittest.TestCase):
             # rationale arc_planner.py carries above. No session, delivery, or
             # lint logic is copied into the child.
             "arc_walk.py",
+            # Timeline Fix 07 (lifehug-platform#761): the substrate's question
+            # writer imports the canonical LINT ENGINE and nothing else —
+            # `lint_question` refuses a work item's `prompt_intent` that leaks
+            # an internal node kind or a third-person handle for the owner.
+            # Same rationale as the child interactions above: one lint
+            # authority, never a second copy of the rules
+            # (recurring-defect doctrine). No session, store or delivery code
+            # is reached.
+            "temporal_timeline.py",
             # v196 (ruling 6, arc learning): the weekly judgment step reads
             # SESSION DOCUMENTS to compute what each arc-card intent kind
             # yielded — through this module's own list_sessions/load_session

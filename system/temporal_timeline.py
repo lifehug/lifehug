@@ -92,6 +92,7 @@ Controlling contract: the audited final timeline build plan §5.3, §5.4, §6.4,
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from dataclasses import dataclass, field, replace
@@ -103,6 +104,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import birth_origin as bo  # noqa: E402
 import chronology as chrono  # noqa: E402
+import conversation_lints as cl  # noqa: E402
 import cross_dating as cd  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
@@ -709,16 +711,427 @@ def _record_for_age_claim(claim: dict, birth: object) -> tuple[chrono.DateRecord
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# The question writer (Timeline Fix 07, lifehug-platform#761)
+# --------------------------------------------------------------------------
+#
+# The owner read his own Timeline on 2026-08-29 and found "When did speaker's
+# mission — transition — happen?", "When did San Diego — span — happen?" and
+# "When did I — span — happen?". Three composers were printing
+# `{node.label} — {event_kind}` into a sentence: `label` is whatever the
+# extractor wrote (its third-person handle for the OWNER, or a bare subject
+# string), and `event_kind` is an internal node kind nobody outside this
+# module has ever needed to see.
+#
+# A question is a sentence a person would say. That is one definition — this
+# one — used by `_node_label` (so the page's titles and its questions can
+# never drift) and by every composer in `_derive_work_items`. It is pure and
+# deterministic: no model call, no vault read, REPLAY-able by the hosted
+# platform, and testable one string at a time.
+
+
+#: Third person → second person. The extractor writes about the vault owner
+#: from outside ("the speaker's mission", "Author's birth"); the person reading
+#: the question is that owner, so every one of these handles is rewritten
+#: before it reaches a sentence. Keys are matched whole-word and
+#: case-insensitively, longest first; ``’`` is folded to ``'`` first so one
+#: key covers both apostrophes.
+OWNER_REFERENCE_REWRITES = {
+    "the speaker's": "your",
+    "the author's": "your",
+    "the subject's": "your",
+    "the narrator's": "your",
+    "the speaker": "you",
+    "the author": "you",
+    "the subject": "you",
+    "the narrator": "you",
+    "speaker's": "your",
+    "author's": "your",
+    "narrator's": "your",
+    "speaker": "you",
+    "author": "you",
+    "narrator": "you",
+    "self": "you",
+    "myself": "yourself",
+    "mine": "yours",
+    "my": "your",
+    "me": "you",
+    "i": "you",
+}
+
+#: What a rewritten reference collapses to when the mention was NOTHING BUT a
+#: reference to the owner — the founder's "I — span" node. "When did you
+#: happen?" is not a question, so a node whose only human text is one of these
+#: has no sentence and is withheld (see :func:`compose_question`).
+OWNER_BARE_REFERENCES = frozenset({"you", "your", "yours", "yourself"})
+
+_OWNER_REWRITE_RES = tuple(
+    (re.compile(r"(?<!\w)" + re.escape(key) + r"(?!\w)", re.IGNORECASE), value)
+    for key, value in sorted(
+        OWNER_REFERENCE_REWRITES.items(), key=lambda row: -len(row[0])
+    )
+)
+
+#: A "move" node's own text usually already contains the verb the sentence
+#: needs ("move to San Diego"), so the composer strips the lead rather than
+#: wrapping it in a second one ("When did move to San Diego happen?").
+_MOVE_LEAD_RE = re.compile(
+    r"^(?:the\s+)?(?:move[ds]?|moving)\s+(?:to|into|out\s+to|back\s+to)\s+",
+    re.IGNORECASE,
+)
+
+#: An anchor handle the extractor wrote as a CLAUSE ("my dad graduated from
+#: college") cannot be conjugated into "When did …?" without inventing grammar,
+#: so it is quoted back instead. Detected, never guessed: three or more words
+#: and at least one token that reads as a verb.
+_CLAUSE_VERB_RE = re.compile(
+    r"(?<!\w)(?:\w+(?:ed|ing)|is|was|were|are|has|had|have|went|got|"
+    r"became|came|goes|left|died|born)(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def owner_rewrite(text: object) -> str:
+    """Every third-person handle for the vault owner, in second person.
+
+    *"speaker's mission"* → *"your mission"*; *"my dad"* → *"your dad"*;
+    *"I"* → *"you"*. Whole-word and case-insensitive, longest key first, so
+    "Authorized" and "Iris" are untouched and "the speaker's" never resolves
+    as "speaker's" with a stray "the" in front of it.
+    """
+    body = collapsed_text(text).replace("’", "'")
+    if not body:
+        return ""
+    for pattern, replacement in _OWNER_REWRITE_RES:
+        body = pattern.sub(replacement, body)
+    return collapsed_text(body)
+
+
+def _possessive(text: object) -> str:
+    """``James`` → ``James's``; a text that is already possessive is untouched.
+
+    English style admits ``James'``; the product says ``James's`` because a
+    reader parses it as one word about one person and the apostrophe is not
+    left dangling at a line break.
+    """
+    body = collapsed_text(text)
+    if not body:
+        return ""
+    if body.endswith("'s") or body.endswith("s'") or body.endswith("’s"):
+        return body
+    return body + "'s"
+
+
+def is_owner_reference_only(text: object) -> bool:
+    """Is this text NOTHING but a reference to the owner (the "I — span" node)?"""
+    return owner_rewrite(text).strip().lower().rstrip(".") in OWNER_BARE_REFERENCES
+
+
+def _is_bare_kind_word(text: object) -> bool:
+    """Is this "human text" actually just an internal kind word?
+
+    ``birth — birth`` was a real node title: the extractor's subject mention was
+    the event's own name. Naming the kind twice is not a subject.
+    """
+    body = collapsed_text(text).lower().replace("_", " ")
+    return bool(body) and body in {
+        word for word in cl.TEMPLATE_KIND_WORDS
+    } | {"named era", "age frame"}
+
+
+#: One row per event kind: the node's TITLE and the sentence each work-item
+#: kind asks. ``None`` is the default row. Slots:
+#:
+#: * ``{who}`` — the subject as a person ("you", "James Taylor")
+#: * ``{whose}`` — the same, possessive ("your", "James Taylor's")
+#: * ``{who_was}`` / ``{who_did}`` — conjugated pairs ("were you" / "was James")
+#: * ``{what}`` — the node's own human text, owner-rewritten
+#: * ``{target}`` — the precision being asked for ("year", "month", "day")
+#: * ``{readings}`` — the rival dates, for a contradiction
+#:
+#: **No row prints ``event_kind``.** That is the rule this table exists to make
+#: structural rather than remembered.
+KIND_SENTENCES = {
+    "birth": {
+        "title": "{whose} birth",
+        "missing_anchor": "When {who_was} born?",
+        "precision_undated": "When {who_was} born?",
+        "precision_coarse": "Do you know the {target} of {whose} birth?",
+        "contradiction": "Two dates are claimed for {whose} birth — {readings}. "
+                         "Which is right?",
+    },
+    "child_born": {
+        "title": "{whose} birth",
+        "missing_anchor": "When {who_was} born?",
+        "precision_undated": "When {who_was} born?",
+        "precision_coarse": "Do you know the {target} of {whose} birth?",
+        "contradiction": "Two dates are claimed for {whose} birth — {readings}. "
+                         "Which is right?",
+    },
+    "death": {
+        "title": "{whose} death",
+        "missing_anchor": "When {who_did} die?",
+        "precision_undated": "When {who_did} die?",
+        "precision_coarse": "Do you know the {target} of {whose} death?",
+        "contradiction": "Two dates are claimed for {whose} death — {readings}. "
+                         "Which is right?",
+    },
+    "first_met": {
+        "title": "meeting {who}",
+        "missing_anchor": "When did you first meet {who}?",
+        "precision_undated": "When did you first meet {who}?",
+        "precision_coarse": "Do you know the {target} you first met {who}?",
+        "contradiction": "Two dates are claimed for when you met {who} — "
+                         "{readings}. Which is right?",
+    },
+    "dating_started": {
+        "title": "you and {who}",
+        "missing_anchor": "When did you and {who} start seeing each other?",
+        "precision_undated": "When did you and {who} start seeing each other?",
+        "precision_coarse": "Do you know the {target} you and {who} started "
+                            "seeing each other?",
+        "contradiction": "Two dates are claimed for when you and {who} started "
+                         "— {readings}. Which is right?",
+    },
+    "married": {
+        "title": "{what}",
+        "missing_anchor": "When did you get married?",
+        "precision_undated": "When did you get married?",
+        "precision_coarse": "Do you know the {target} you got married?",
+        "contradiction": "Two dates are claimed for when you got married — "
+                         "{readings}. Which is right?",
+    },
+    "span": {
+        "title": "{what}",
+        "missing_anchor": "When did {what} begin?",
+        "precision_undated": "When was {what}?",
+        "precision_coarse": "Do you know the {target} for {what}?",
+        "contradiction": "Two dates are claimed for {what} — {readings}. "
+                         "Which is right?",
+    },
+    "started": {
+        "title": "{what}",
+        "missing_anchor": "When did {what} start?",
+        "precision_undated": "When did {what} start?",
+        "precision_coarse": "Do you know the {target} for when {what} started?",
+        "contradiction": "Two dates are claimed for when {what} started — "
+                         "{readings}. Which is right?",
+    },
+    "ended": {
+        "title": "{what}",
+        "missing_anchor": "When did {what} end?",
+        "precision_undated": "When did {what} end?",
+        "precision_coarse": "Do you know the {target} for when {what} ended?",
+        "contradiction": "Two dates are claimed for when {what} ended — "
+                         "{readings}. Which is right?",
+    },
+    "move": {
+        "title": "{what}",
+        "missing_anchor": "When did you move to {place}?",
+        "precision_undated": "When did you move to {place}?",
+        "precision_coarse": "Do you know the {target} you moved to {place}?",
+        "contradiction": "Two dates are claimed for when you moved to {place} "
+                         "— {readings}. Which is right?",
+    },
+    "school": {
+        "title": "{what}",
+        "missing_anchor": "When did you start at {what}?",
+        "precision_undated": "When were you at {what}?",
+        "precision_coarse": "Do you know the {target} for {what}?",
+        "contradiction": "Two dates are claimed for {what} — {readings}. "
+                         "Which is right?",
+    },
+    "graduation": {
+        "title": "{what}",
+        "missing_anchor": "When did you graduate from {what}?",
+        "precision_undated": "When did you graduate from {what}?",
+        "precision_coarse": "Do you know the {target} you graduated from {what}?",
+        "contradiction": "Two dates are claimed for when you graduated from "
+                         "{what} — {readings}. Which is right?",
+    },
+    "job": {
+        "title": "{what}",
+        "missing_anchor": "When did you start at {what}?",
+        "precision_undated": "When were you at {what}?",
+        "precision_coarse": "Do you know the {target} for {what}?",
+        "contradiction": "Two dates are claimed for {what} — {readings}. "
+                         "Which is right?",
+    },
+    "named_era": {
+        "title": "{what}",
+        "missing_anchor": "When did {what} begin?",
+        "precision_undated": "When was {what}?",
+        "precision_coarse": "Do you know the {target} for {what}?",
+        "contradiction": "Two dates are claimed for {what} — {readings}. "
+                         "Which is right?",
+    },
+    None: {
+        "title": "{what}",
+        "missing_anchor": "When did {what} happen?",
+        "precision_undated": "When did {what} happen?",
+        "precision_coarse": "Do you know the {target} for {what}?",
+        "contradiction": "Two dates are claimed for {what} — {readings}. "
+                         "Which is right?",
+    },
+}
+
+#: A place-shaped ``span`` is a residence, and residences read better as
+#: "When were you in Yucaipa?" than "When was Yucaipa?".
+PLACE_SPAN_SENTENCES = {
+    "missing_anchor": "When did you move to {what}?",
+    "precision_undated": "When were you in {what}?",
+    "precision_coarse": "Do you know the {target} you were in {what}?",
+}
+
+#: D5 (owner's 14:21 staging screenshot, 2026-08-29). An AGE FRAME's boundary
+#: is arithmetic off the birth origin (`cross_dating.age_frames`, ADR 0030) —
+#: the permanent calculated coordinate system, never something a person is
+#: asked about. "When did Childhood end — before or after First big paycheck
+#: arrives by mail?" is three defects in one sentence and this is the first:
+#: the frame is not a question at all.
+UNASKABLE_EVENT_KINDS = frozenset({tp.AGE_FRAME_EVENT_KIND})
+
+#: Which sentence a work-item kind asks for.
+_ITEM_KIND_SLOTS = {
+    "missing_anchor": "missing_anchor",
+    "precision_gap": "precision_undated",
+    "precision_gap_coarse": "precision_coarse",
+    "contradiction": "contradiction",
+    "title": "title",
+}
+
+
+def compose_question(
+    item_kind: object,
+    event_kind: object,
+    *,
+    who: object = "",
+    what: object = "",
+    target: object = "",
+    readings: object = "",
+    is_owner: bool = False,
+    is_place: bool = False,
+) -> str | None:
+    """The sentence this work item asks, or ``None`` — *withheld*.
+
+    Pure, deterministic and one definition for every host (ADR 0021): the
+    hosted platform REPLAYs this and never re-words, so Today's tab, the
+    Timeline row, Mirror and the Telegram send cannot say four different
+    things about one node.
+
+    ``None`` is a first-class outcome and it is the honest one. A node whose
+    only human text is a bare pronoun, a bare internal kind word, or an age
+    frame's boundary HAS no sentence, and the alternative to withholding is
+    the template the owner read on his own timeline. The caller mints the item
+    with ``prompt_intent=None`` and files a ``question_withheld`` diagnostic;
+    the page then shows the node with no play control and one honest line.
+    """
+    kind = collapsed_text(event_kind) or None
+    if kind in UNASKABLE_EVENT_KINDS:
+        return None
+    slot = _ITEM_KIND_SLOTS.get(collapsed_text(item_kind))
+    if slot is None:
+        return None
+    row = KIND_SENTENCES.get(kind) or KIND_SENTENCES[None]
+    template = row.get(slot)
+    if not template:
+        return None
+
+    who_text = "you" if is_owner else owner_rewrite(who)
+    what_text = "you" if (is_owner and not collapsed_text(what)) else owner_rewrite(what)
+    if not what_text and who_text:
+        what_text = who_text
+    if not who_text and what_text:
+        who_text = what_text
+
+    # The three shapes with no sentence in them.
+    if not what_text and not who_text:
+        return None
+    if slot != "title" and is_owner_reference_only(what_text) and "{what}" in template:
+        return None
+    if _is_bare_kind_word(what_text) and "{what}" in template:
+        return None
+
+    place = _MOVE_LEAD_RE.sub("", what_text).strip() or what_text
+    if "{place}" in template and (
+        not place or is_owner_reference_only(place) or _is_bare_kind_word(place)
+    ):
+        return None
+
+    if is_place and kind == "span" and slot in PLACE_SPAN_SENTENCES:
+        template = PLACE_SPAN_SENTENCES[slot]
+
+    whose = "your" if is_owner else _possessive(who_text)
+    text = template.format(
+        who=who_text,
+        whose=whose,
+        who_was="were you" if is_owner else f"was {who_text}",
+        who_did="did you" if is_owner else f"did {who_text}",
+        what=what_text,
+        place=place,
+        target=collapsed_text(target) or DEFAULT_PRECISION_TARGET,
+        readings=collapsed_text(readings) or "two different times",
+    )
+    text = collapsed_text(text)
+    if not text or cl.lint_question(text):
+        return None
+    return text
+
+
+def compose_anchor_question(text: object) -> str | None:
+    """The sentence for an ANCHOR HANDLE — free text nobody has resolved yet.
+
+    The substrate's other composers know an event kind and a subject; this one
+    has only what somebody said ("my dad graduated from college", "the
+    Switzerland mission"). A noun phrase asks directly; a CLAUSE is quoted back
+    rather than conjugated, because turning "graduated" into "graduate"
+    correctly for arbitrary English is grammar this module has no business
+    inventing — and a wrong conjugation is exactly the not-a-sentence defect
+    the whole contract is about.
+    """
+    body = owner_rewrite(text)
+    if not body or is_owner_reference_only(body) or _is_bare_kind_word(body):
+        return None
+    words = body.split()
+    clause = len(words) >= 3 and bool(_CLAUSE_VERB_RE.search(body))
+    question = (
+        f"You mentioned {body} — when was that?" if clause else f"When was {body}?"
+    )
+    if cl.lint_question(question):
+        return None
+    return question
+
+
 def _event_words(event_kind: object) -> str:
+    """The kind as words — for DIAGNOSTICS and ids only, never for a person.
+
+    Timeline Fix 07: every user-facing string goes through
+    :func:`compose_question` or :func:`_node_label`. This survives because a
+    diagnostic row and a node id still need the kind spelled out, and deleting
+    it would push callers back to inlining ``replace("_", " ")``.
+    """
     return collapsed_text(event_kind).replace("_", " ")
 
 
-def _node_label(subject_display: str, event_kind: object) -> str:
-    """What the node is called before Timeline styles it (wave E owns the page)."""
-    words = _event_words(event_kind)
-    return f"{subject_display} — {words}" if subject_display and words else (
-        subject_display or words
+def _node_label(subject_display: str, event_kind: object, *,
+                what: object = "", is_owner: bool = False) -> str:
+    """What the node is CALLED — a phrase a person would recognise.
+
+    Before Timeline Fix 07 this was ``f"{subject_display} — {event_kind}"``,
+    which is where "I — span" and "birth — birth" on the founder's own page
+    came from. It now reads the SAME :data:`KIND_SENTENCES` table the questions
+    read, so a title and the question about it can never describe one node two
+    ways.
+    """
+    title = compose_question(
+        "title", event_kind,
+        who=subject_display,
+        what=what or subject_display,
+        is_owner=is_owner,
     )
+    if title:
+        return title
+    return collapsed_text(subject_display) or _event_words(event_kind)
 
 
 def _subject_display(subject: str, claims: list[dict], roster_names: dict) -> str:
@@ -2180,6 +2593,33 @@ def _surfaces_for(kind: str, *, event_kind: object, subject_ref: object, resolve
     return SURFACES_BY_KIND.get(kind, ("timeline",))
 
 
+#: D4 (Timeline Fix 07): ONE NODE, ONE QUESTION. Two derivation paths reached
+#: the same node with different `requested_field`s and minted two rows — the
+#: founder saw "When did San Diego begin?" and "When did San Diego — span —
+#: happen?" side by side. Highest precedence first, and the order is an
+#: argument: you cannot refine a date you do not have, and you cannot date a
+#: person you cannot identify.
+WORK_ITEM_PRECEDENCE = (
+    "identity_uncertain",
+    "contradiction",
+    "missing_anchor",
+    "precision_gap",
+)
+
+
+def _precedence(kind: object) -> int:
+    name = collapsed_text(kind)
+    return (WORK_ITEM_PRECEDENCE.index(name) if name in WORK_ITEM_PRECEDENCE
+            else len(WORK_ITEM_PRECEDENCE))
+
+
+def _union_refs(*rows: dict, field_name: str) -> list[str]:
+    out: set[str] = set()
+    for row in rows:
+        out |= set(row.get(field_name) or ())
+    return sorted(out)
+
+
 def _mint_work_item(
     sink: dict,
     components: dict,
@@ -2196,6 +2636,8 @@ def _mint_work_item(
     system_value: float = 0.0,
     subject_resolved: bool = False,
     score_rule: object = None,
+    by_node: dict | None = None,
+    diagnostics: list | None = None,
     now: object = None,
 ) -> str:
     """Validate one item into the sink, merging on a repeated identity.
@@ -2214,6 +2656,20 @@ def _mint_work_item(
         subject_ref=subject_ref,
         resolved=subject_resolved,
     )
+    # Timeline Fix 07 D3, the REFUSING backstop. Two ways an item arrives with
+    # no sentence, and both are recorded rather than silent: the composer
+    # already declined (`compose_question` returned None), or a hand-written
+    # intent still carries a template leak. Prompt prose alone is not
+    # certifiable (ADR 0028's audit); a deterministic refusal is.
+    intent = collapsed_text(prompt_intent)
+    withheld = ""
+    if intent:
+        findings = cl.lint_question(intent)
+        if findings:
+            withheld = f"{findings[0]['lint']}: {findings[0]['detail']}"
+            intent = ""
+    elif prompt_intent is None:
+        withheld = "question_withheld: no sentence could be composed for this node"
     payload = {
         "kind": kind,
         "state": "open",
@@ -2221,7 +2677,8 @@ def _mint_work_item(
         "event_ref": event_ref,
         "node_ref": node_ref,
         "requested_field": requested_field,
-        "prompt_intent": prompt_intent,
+        "prompt_intent": intent or None,
+        "withheld_reason": withheld or None,
         "claim_refs": list(claim_refs),
         "evidence_refs": list(evidence_refs),
         "allowed_surfaces": list(
@@ -2241,10 +2698,51 @@ def _mint_work_item(
     except TemporalContractError:
         return ""
     key = row["work_item_id"]
+    if withheld and diagnostics is not None:
+        diagnostics.append({
+            "finding": "question_withheld",
+            "work_item_id": key,
+            "node_id": collapsed_text(node_ref) or None,
+            "detail": withheld,
+        })
+    node = collapsed_text(node_ref)
+    if node and by_node is not None and key not in sink:
+        standing_key = by_node.get(node)
+        standing = sink.get(standing_key) if standing_key else None
+        if standing is not None and standing_key != key:
+            # D4: one node, one question. The higher-precedence kind survives
+            # and ABSORBS the other's evidence — nothing is lost, and the
+            # loser's kind is recorded on the survivor so the page can still
+            # say what else this node implies.
+            if _precedence(kind) < _precedence(standing.get("kind")):
+                merged = dict(row)
+                merged["claim_refs"] = _union_refs(row, standing, field_name="claim_refs")
+                merged["evidence_refs"] = _union_refs(row, standing, field_name="evidence_refs")
+                merged["superseded_kinds"] = sorted(
+                    set(standing.get("superseded_kinds") or ())
+                    | set(row.get("superseded_kinds") or ())
+                    | {collapsed_text(standing.get("kind"))}
+                )
+                sink.pop(standing_key, None)
+                components.pop(standing_key, None)
+                sink[key] = tp.validate_temporal_work_item(merged, now=now)
+                components[key] = scores
+                by_node[node] = key
+                return key
+            merged = dict(standing)
+            merged["claim_refs"] = _union_refs(standing, row, field_name="claim_refs")
+            merged["evidence_refs"] = _union_refs(standing, row, field_name="evidence_refs")
+            merged["superseded_kinds"] = sorted(
+                set(standing.get("superseded_kinds") or ()) | {kind}
+            )
+            sink[standing_key] = tp.validate_temporal_work_item(merged, now=now)
+            return standing_key
     current = sink.get(key)
     if current is None:
         sink[key] = row
         components[key] = scores
+        if node and by_node is not None:
+            by_node.setdefault(node, key)
         return key
     merged = dict(current)
     for field_name in ("claim_refs", "evidence_refs"):
@@ -2383,9 +2881,25 @@ def derive_calculated_timeline(
         node_id: _subject_display(group["subject"], group["claims"], roster_names)
         for node_id, group in groups.items()
     }
+    # Timeline Fix 07: one derivation of "what is this node, in words", read by
+    # the title AND by every question about it, so the two cannot disagree.
+    whats = {
+        node_id: _node_what(group, displays[node_id])
+        for node_id, group in groups.items()
+    }
+    owner_flags = {
+        node_id: _is_owner_subject(group, owner) for node_id, group in groups.items()
+    }
+    place_refs, place_name_keys = _place_keys(roster_snapshot)
+    place_flags = {
+        node_id: _is_place_subject(group, displays[node_id], place_refs, place_name_keys)
+        for node_id, group in groups.items()
+    }
     labels = {
         node_id: (collapsed_text(group.get("era_label"))
-                  or _node_label(displays[node_id], group["event_kind"]))
+                  or _node_label(displays[node_id], group["event_kind"],
+                                 what=whats[node_id],
+                                 is_owner=owner_flags[node_id]))
         for node_id, group in groups.items()
     }
     timings["group"] = clock() - mark
@@ -2431,6 +2945,25 @@ def derive_calculated_timeline(
         rejected=rejected,
         contributions=contributions,
     )
+    # Timeline Fix 07 D1 — THE ORIGIN FLOOR (lifehug-platform#761). The owner's
+    # birth is the origin of the coordinate system, so an interval on the
+    # owner's own axis that opens before it is claiming a stretch the system
+    # already knows to be empty — and it is that opening bound the certainty
+    # chart draws and the ordering questions enumerate. Only INFERRED bounds
+    # are clamped: a date somebody STATED before their own birth is a
+    # contradiction to surface, never a number to quietly rewrite.
+    for node_id in sorted(placed):
+        group = groups.get(node_id)
+        if group is None or not _is_owner_subject(group, owner):
+            continue
+        clamped = _clamp_to_origin(placed[node_id], birth)
+        if clamped is not None:
+            placed[node_id] = clamped
+            diagnostics.append({
+                "finding": "origin_floor_applied",
+                "node_id": node_id,
+                "detail": "an inferred interval opened before the birth origin",
+            })
     anchor_claim_refs = {
         node_id: [
             collapsed_text(claim.get("claim_id"))
@@ -2622,6 +3155,10 @@ def derive_calculated_timeline(
         records=records,
         by_mention=by_mention,
         displays=displays,
+        whats=whats,
+        owner_flags=owner_flags,
+        place_flags=place_flags,
+        roster_snapshot=roster_snapshot,
         owner=owner,
         now=now,
     )
@@ -2680,8 +3217,186 @@ def _has_explicit_owner_birth(groups: dict, placed: dict, owner: object) -> bool
     return False
 
 
+#: Bases that mean SOMEBODY SAID SO. A stated date before the origin is a
+#: contradiction for the person to settle, never a bound to silently move.
+STATED_BASES = ("stated", "document")
+
+#: The provenance rule one clamp records, so a moved bound is explainable.
+ORIGIN_FLOOR_RULE = "origin_floor"
+
+
+def _clamp_to_origin(record: object, birth: object):
+    """The record with its `earliest` raised to the birth origin, or ``None``.
+
+    ``None`` means "nothing to do" — no birth, no record, a stated basis, or an
+    interval that already starts at or after the origin. The clamp keeps every
+    other field and appends one provenance entry, because a bound that moved
+    with no reason attached is exactly the unexplainable number ADR 0027
+    forbids the score to rest on.
+    """
+    if birth is None or record is None:
+        return None
+    parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+    if parsed is None or parsed.basis in STATED_BASES:
+        return None
+    floor = birth.earliest
+    if not floor or not parsed.earliest or parsed.earliest >= floor:
+        return None
+    latest = parsed.latest
+    if latest and latest < floor:
+        # The whole interval is before the origin: that is a disagreement with
+        # the birthday, not a bound to slide, and it stays for the contradiction
+        # machinery to surface.
+        return None
+    return replace(
+        parsed,
+        earliest=floor,
+        provenance=parsed.provenance + ({"rule": ORIGIN_FLOOR_RULE,
+                                         "was": parsed.earliest,
+                                         "origin": floor},),
+    )
+
+
+def _rival_readings(calculated_row: dict) -> str:
+    """``"20 March 1990 and 1991"`` — the dates a contradiction is between.
+
+    A contradiction that names neither reading is not answerable; it is a
+    before/after against something unrelated, which is exactly the move
+    `timeline_interaction.work_item_probe` already refuses.
+    """
+    records = [calculated_row.get("best")] + list(calculated_row.get("alternates") or ())
+    shown: list[str] = []
+    for record in records:
+        parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+        if parsed is None:
+            continue
+        text = chrono.display_date(parsed, with_basis=False)
+        if text and text not in shown:
+            shown.append(text)
+    return " and ".join(shown[:2])
+
+
+def _node_what(group: dict, display: str) -> str:
+    """The node's own HUMAN text — what a person would call this thing.
+
+    An era's own label first (somebody named it), then the longest
+    ``event_mention`` among its claims (what the person called the event, kept
+    verbatim beside the fact since v239), then the subject display. Never the
+    ``event_kind``: that is the string the founder read on his own page.
+    """
+    era = collapsed_text(group.get("era_label"))
+    if era:
+        return era
+    mentions = [collapsed_text(claim.get("event_mention")) for claim in group.get("claims", ())]
+    mentions = [text for text in mentions if text]
+    if mentions:
+        return max(mentions, key=len)
+    return collapsed_text(display)
+
+
+def _is_owner_subject(group: dict, owner: object) -> bool:
+    """Is this node about the vault's owner — the person reading the question?"""
+    if collapsed_text(group.get("subject")) == collapsed_text(owner):
+        return True
+    return any(
+        is_owner_reference_only(claim.get("subject_mention"))
+        for claim in group.get("claims", ())
+    )
+
+
+def _place_keys(roster_snapshot: object) -> tuple[set, set]:
+    """``(refs, name keys)`` for every PLACE the roster knows.
+
+    A ``span`` whose subject is a place is a residence, and a residence reads
+    as "When were you in Yucaipa?" rather than "When was Yucaipa?". The signal
+    is the roster's OWN DECLARED TYPE — never a guess from the words, and never
+    `entity_type="place"` forced over a person roster, which would mint a place
+    ref for every person in it and call the founder's children residences.
+    """
+    if not isinstance(roster_snapshot, dict):
+        return set(), set()
+    if collapsed_text(roster_snapshot.get("type")) != "place":
+        return set(), set()
+    try:
+        index = ident.roster_index(roster_snapshot)
+    except TemporalContractError:
+        return set(), set()
+    keys = set(index.by_name_key) | set(index.by_alias_key)
+    return set(index.refs), keys
+
+
+def _is_place_subject(group: dict, display: str, refs: set, keys: set) -> bool:
+    if collapsed_text(group.get("subject")) in refs:
+        return True
+    return normalized_mention_key(display) in keys
+
+
+#: The nouns an anchor handle trails after the subject it is really about —
+#: "James's birth", "my dad's graduation". Stripping one is how the handle
+#: becomes a NAME the roster can be asked about (D2).
+ANCHOR_EVENT_NOUNS = (
+    "birth", "birthday", "death", "funeral", "wedding", "marriage",
+    "graduation", "move", "job", "school", "military service", "passing",
+)
+_ANCHOR_EVENT_NOUN_RE = re.compile(
+    r"(?:['\u2019]s|s['\u2019])?\s+(" + "|".join(
+        re.escape(word) for word in sorted(ANCHOR_EVENT_NOUNS, key=len, reverse=True)
+    ) + r")\s*$",
+    re.IGNORECASE,
+)
+_TRAILING_POSSESSIVE_RE = re.compile(r"['\u2019]s$|s['\u2019]$")
+
+#: The event kind each trailing noun names, so "James's birth" can be checked
+#: against the James—birth node rather than against any James node at all.
+ANCHOR_NOUN_EVENT_KINDS = {
+    "birth": "birth", "birthday": "birth",
+    "death": "death", "funeral": "death", "passing": "death",
+    "wedding": "married", "marriage": "married",
+    "graduation": "graduation", "move": "move", "job": "job",
+    "school": "school", "military service": "military",
+}
+
+
+def _anchor_handle_subject(text: object) -> tuple[str, str]:
+    """``"James's birth"`` → ``("James", "birth")``; a bare name keeps ``""``.
+
+    Deterministic and deliberately shallow: one trailing event noun from
+    :data:`ANCHOR_EVENT_NOUNS`, one possessive. Anything richer is a clause,
+    and a clause is not a name.
+    """
+    body = collapsed_text(text)
+    if not body:
+        return "", ""
+    match = _ANCHOR_EVENT_NOUN_RE.search(body)
+    if not match:
+        return body, ""
+    subject = _TRAILING_POSSESSIVE_RE.sub("", body[: match.start()]).strip()
+    noun = match.group(1).lower()
+    return (subject or body), ANCHOR_NOUN_EVENT_KINDS.get(noun, noun)
+
+
+def _dated_node_for(groups: dict, placed: dict, ref: str, event_kind: str) -> str:
+    """The node id that already answers this handle, or ``""``.
+
+    D2, the founder's own defect: *"When was James's birth? — no date yet"* sat
+    on the page beside *"20 March 1990 · James — birth · two claims disagree"*.
+    The handle had never been looked up: an unresolved anchor string was minted
+    straight into a `missing_anchor`. This is the lookup.
+    """
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        if collapsed_text(group.get("subject")) != collapsed_text(ref):
+            continue
+        if event_kind and collapsed_text(group.get("event_kind")) != event_kind:
+            continue
+        if placed.get(node_id) is not None:
+            return node_id
+    return ""
+
+
 def _derive_work_items(
-    *, groups, calculated, placed, edges, diagnostics, records, by_mention, displays, owner, now
+    *, groups, calculated, placed, edges, diagnostics, records, by_mention, displays,
+    whats=None, owner_flags=None, place_flags=None, roster_snapshot=(), owner, now
 ):
     """Everything the substrate currently implies a question about (§5.4, D2).
 
@@ -2695,6 +3410,23 @@ def _derive_work_items(
     items: dict[str, dict] = {}
     components: dict[str, dict] = {}
     reach: dict[str, int] = {}
+    #: D4: node ref -> the ONE item id standing for it.
+    by_node: dict[str, str] = {}
+    whats = whats or {}
+    owner_flags = owner_flags or {}
+    place_flags = place_flags or {}
+
+    def sentence(item_kind, node_id, group, **extra):
+        """This node's question through the ONE composer (D3)."""
+        return compose_question(
+            item_kind,
+            group.get("event_kind"),
+            who=displays.get(node_id, group.get("subject")),
+            what=whats.get(node_id) or displays.get(node_id, group.get("subject")),
+            is_owner=bool(owner_flags.get(node_id)),
+            is_place=bool(place_flags.get(node_id)),
+            **extra,
+        )
 
     unplaced = {node_id for node_id in groups if placed.get(node_id) is None}
 
@@ -2738,24 +3470,67 @@ def _derive_work_items(
             claim_refs=row.get("claim_refs") or (),
             evidence_refs=row.get("evidence_refs") or (),
             system_value=min(1.0, raw / REACH_SATURATION),
+            by_node=by_node,
+            diagnostics=diagnostics,
             now=now,
         )
         if item_id:
             reach[item_id] = raw
 
-    # -- missing anchors: an ordering anchor the substrate does not know --
+    # -- anchor handles: already answered, ambiguous, or genuinely new (D2) --
+    #
+    # The founder read "When was James's birth? — no date yet" beside a dated
+    # James — birth node with two rival claims on it. To him that was one
+    # question asked twice, and the second copy was false. The handle now goes
+    # through the roster before it is allowed to become a date question:
+    # one candidate with a dated node mints NOTHING (the anchor resolves late
+    # and the next fold binds it), two candidates mint an IDENTITY question
+    # ("which James?"), and only an unrecognised name asks for a date.
     for key in sorted(handle_text):
         raw = len(handle_reach.get(key, ()))
         text = handle_text[key]
+        refs = sorted(handle_claims.get(key, ()))
+        name, noun_kind = _anchor_handle_subject(text)
+        cands = ident.candidates_for(name, roster_snapshot) if name else ()
+        if len(cands) == 1:
+            answered = _dated_node_for(groups, placed, cands[0]["ref"], noun_kind)
+            if answered:
+                diagnostics.append({
+                    "finding": "anchor_resolved_late",
+                    "anchor": text,
+                    "subject_ref": cands[0]["ref"],
+                    "node_id": answered,
+                })
+                continue
+        if len(cands) > 1:
+            names = " or ".join(c["name"] or c["ref"] for c in cands)
+            item_id = _mint_work_item(
+                items,
+                components,
+                kind="identity_uncertain",
+                subject_ref=ident.unresolved_subject_ref(text),
+                requested_field=ident.IDENTITY_REQUESTED_FIELD,
+                prompt_intent=f"Which {name} is this: {names}?",
+                claim_refs=refs,
+                system_value=min(1.0, raw / REACH_SATURATION),
+                by_node=by_node,
+                diagnostics=diagnostics,
+                now=now,
+            )
+            if item_id:
+                reach[item_id] = raw
+            continue
         item_id = _mint_work_item(
             items,
             components,
             kind="missing_anchor",
             subject_ref=ident.unresolved_subject_ref(text),
             requested_field="date",
-            prompt_intent=f"When was {text}?",
-            claim_refs=sorted(handle_claims.get(key, ())),
+            prompt_intent=compose_anchor_question(text),
+            claim_refs=refs,
             system_value=min(1.0, raw / REACH_SATURATION),
+            by_node=by_node,
+            diagnostics=diagnostics,
             now=now,
         )
         if item_id:
@@ -2800,6 +3575,7 @@ def _derive_work_items(
             claim_refs=age_claims,
             system_value=twi.birth_origin_system_value(counted),
             score_rule=twi.BIRTH_ORIGIN_SCORE_RULE,
+            diagnostics=diagnostics,
             now=now,
         )
         if item_id:
@@ -2812,7 +3588,7 @@ def _derive_work_items(
     ):
         node_id = row.get("node_id")
         group = groups.get(node_id)
-        if group is None:
+        if group is None or collapsed_text(group["event_kind"]) in UNASKABLE_EVENT_KINDS:
             continue
         _mint_work_item(
             items,
@@ -2824,10 +3600,12 @@ def _derive_work_items(
             subject_ref=group["subject"],
             requested_field="start_date",
             subject_resolved=group["resolved"],
-            prompt_intent=f"When did {displays.get(node_id, group['subject'])} begin?",
+            prompt_intent=sentence("missing_anchor", node_id, group),
             claim_refs=[row.get("claim_id")] if row.get("claim_id") else [],
             evidence_refs=_evidence_refs(group),
             system_value=min(1.0, node_reach.get(node_id, 0) / REACH_SATURATION),
+            by_node=by_node,
+            diagnostics=diagnostics,
             now=now,
         )
 
@@ -2837,13 +3615,15 @@ def _derive_work_items(
         best = placed.get(node_id)
         if not _wants_precision(best, group["event_kind"]):
             continue
+        # D5: an age frame's boundary is arithmetic off the birth origin, never
+        # a question (ADR 0030). "When did Childhood end?" is not askable.
+        if collapsed_text(group["event_kind"]) in UNASKABLE_EVENT_KINDS:
+            continue
         raw = node_reach.get(node_id, 0)
-        display = displays.get(node_id, group["subject"])
         target = _precision_target(group["event_kind"])
-        intent = (
-            f"When did {display} — {_event_words(group['event_kind'])} — happen?"
-            if best is None
-            else f"Do you know the {target} for {display} — {_event_words(group['event_kind'])}?"
+        intent = sentence(
+            "precision_gap" if best is None else "precision_gap_coarse",
+            node_id, group, target=target,
         )
         item_id = _mint_work_item(
             items,
@@ -2859,6 +3639,8 @@ def _derive_work_items(
             claim_refs=_dated_claim_refs(group),
             evidence_refs=_evidence_refs(group),
             system_value=min(1.0, raw / REACH_SATURATION),
+            by_node=by_node,
+            diagnostics=diagnostics,
             now=now,
         )
         if item_id:
@@ -2869,6 +3651,8 @@ def _derive_work_items(
         group = groups[node_id]
         conflict = float(calculated[node_id].get("conflict") or 0.0)
         if conflict < MATERIAL_CONFLICT:
+            continue
+        if collapsed_text(group["event_kind"]) in UNASKABLE_EVENT_KINDS:
             continue
         refs = _dated_claim_refs(group)
         if len(refs) < 2:
@@ -2883,13 +3667,15 @@ def _derive_work_items(
             subject_ref=group["subject"],
             requested_field="date",
             subject_resolved=group["resolved"],
-            prompt_intent=(
-                f"Two dates are claimed for {displays.get(node_id, group['subject'])} — "
-                f"{_event_words(group['event_kind'])}. Which is right?"
+            prompt_intent=sentence(
+                "contradiction", node_id, group,
+                readings=_rival_readings(calculated[node_id]),
             ),
             claim_refs=refs,
             evidence_refs=_evidence_refs(group),
             system_value=conflict,
+            by_node=by_node,
+            diagnostics=diagnostics,
             now=now,
         )
         if item_id:
@@ -2898,7 +3684,8 @@ def _derive_work_items(
     # -- a birth origin its own evidence contradicts (E-BO) ---------------
     for row in diagnostics:
         if row.get("finding") == bo.CONTRADICTION_FINDING:
-            _mint_work_item(items, components, now=now, **bo.contradiction_work_item(row))
+            _mint_work_item(items, components, now=now, by_node=by_node,
+                            diagnostics=diagnostics, **bo.contradiction_work_item(row))
 
     for row in diagnostics:
         if row.get("finding") == "order_cycle":
@@ -2925,10 +3712,12 @@ def _derive_work_items(
                 requested_field="order",
                 prompt_intent=(
                     "These cannot all be in the order they were given: "
-                    + ", ".join(displays.get(n, n) for n in cycle)
+                    + ", ".join(owner_rewrite(whats.get(n) or displays.get(n, n))
+                                for n in cycle)
                 ),
                 claim_refs=refs,
                 system_value=1.0,
+                diagnostics=diagnostics,
                 now=now,
             )
             continue
@@ -2955,12 +3744,15 @@ def _derive_work_items(
             subject_ref=group["subject"],
             requested_field="date",
             prompt_intent=(
-                f"The order given for {displays.get(node_id, group['subject'])} does not fit "
-                "the date claimed for it."
+                "The order given for "
+                f"{owner_rewrite(whats.get(node_id) or displays.get(node_id, group['subject']))}"
+                " does not fit the date claimed for it."
             ),
             claim_refs=refs,
             evidence_refs=_evidence_refs(group),
             system_value=1.0,
+            by_node=by_node,
+            diagnostics=diagnostics,
             now=now,
         )
 

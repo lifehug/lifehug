@@ -54,8 +54,9 @@ THE_YUCAIPA_YEARS = {"key": "the-yucaipa-years", "label": "the Yucaipa years",
 
 
 class ProbesByRelationshipTests(unittest.TestCase):
-    """T-E0-01…04: a residence or an era never sorts against the birthday;
-    a bare moment still may (the over-correction regression guard)."""
+    """T-E0-01…04, as REVISED by Timeline Fix 07 (lifehug-platform#761):
+    NOTHING sorts against the birthday, and an anchor must be relevant to the
+    thing it anchors."""
 
     def test_e0_01_residence_unknown_never_names_the_birthday_when_a_residence_exists(self):
         unknown = {"kind": "place_span", "label": "Mexico"}
@@ -90,28 +91,37 @@ class ProbesByRelationshipTests(unittest.TestCase):
         self.assertNotIn("born", probe_anchored["text"].lower())
         self.assertIn("the move to San Diego", probe_anchored["text"])
 
-    def test_e0_04_a_moment_unknown_may_still_anchor_on_birth(self):
-        """Regression guard against over-correction: a moment MAY predate the
-        person (a family story is older than they are), so the rule must not
-        blanket-exclude birth for every kind — only place_span/period_bound."""
+    def test_e0_04_a_moment_unknown_never_anchors_on_birth(self):
+        """REVERSED by Timeline Fix 07 D1 (lifehug-platform#761, owner-ruled
+        2026-08-29). v236 kept a carve-out — "a moment MAY predate the person,
+        so only place_span/period_bound exclude birth" — and it is what put
+        "before or after Author's birth" on the founder's own timeline. The
+        owner's ruling is unconditional: *"no questions should ever be asked
+        before my birth"*. The origin of the coordinate system is not one of
+        its landmarks, for any kind."""
         unknown = {"kind": "moment", "label": "the barn fire"}
         probe = ti.choose_probe(unknown, anchors=[BIRTH])
-        self.assertIn("born", probe["text"].lower())
-        self.assertEqual(
-            probe["text"],
-            "the barn fire — was that before or after when you were born?",
-        )
+        self.assertNotIn("born", probe["text"].lower())
+        self.assertNotIn("birth", probe["text"].lower())
+        self.assertEqual(probe["text"], ti.KIND_OPENERS["moment"]["text"].format(
+            label="the barn fire"))
 
-    def test_anchor_for_probe_excludes_birth_for_the_two_relational_kinds_only(self):
+    def test_anchor_for_probe_excludes_birth_for_every_kind(self):
         rows = ti._anchor_rows([BIRTH, SAN_DIEGO])  # noqa: SLF001
         for kind in ("place_span", "period_bound"):
             with self.subTest(kind=kind):
                 chosen = ti.anchor_for_probe({"kind": kind}, rows)
                 self.assertIsNotNone(chosen)
                 self.assertNotEqual(chosen["kind"], "birth")
+        # Timeline Fix 07 D1: a bare moment no longer gets the birth either —
+        # it takes the next eligible row instead. Ordering one memory against
+        # another is still an honest question; ordering anything against the
+        # origin of the coordinate system is not.
         chosen = ti.anchor_for_probe({"kind": "moment"}, rows)
-        # `moment` is unchanged: the general anchor_rows[0] rule (birth first).
-        self.assertEqual(chosen["kind"], "birth")
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen["key"], "san-diego")
+        self.assertIsNone(ti.anchor_for_probe({"kind": "moment"},
+                                              ti._anchor_rows([BIRTH])))  # noqa: SLF001
 
     def test_anchor_for_probe_returns_none_when_nothing_is_eligible(self):
         rows = ti._anchor_rows([BIRTH])  # noqa: SLF001
@@ -125,13 +135,19 @@ class ProbesByRelationshipTests(unittest.TestCase):
         self.assertNotIn("born", probe["text"].lower())
         self.assertEqual(probe["text"], "When did the Yucaipa years begin and end?")
 
-    def test_keystone_probe_entity_and_event_kinds_are_unchanged(self):
+    def test_keystone_probe_entity_and_event_kinds_never_anchor_on_birth_either(self):
+        """Timeline Fix 07 D1: the same reversal. A keystone about a person or
+        a moment used to be allowed to sort against the birthday; nothing is."""
         rows = [BIRTH]
         entity_probe = ti.keystone_probe("entity:charlee", label="Charlee", anchors=rows)
-        self.assertIn("born", entity_probe["text"].lower())
+        self.assertNotIn("born", entity_probe["text"].lower())
+        self.assertEqual(entity_probe["text"],
+                         ti.KEYSTONE_PROBES["entity"]["text"].format(label="Charlee"))
         event_probe = ti.keystone_probe("event:childhood:A9", label="the barn fire",
                                         anchors=rows)
-        self.assertIn("born", event_probe["text"].lower())
+        self.assertNotIn("born", event_probe["text"].lower())
+        self.assertEqual(event_probe["text"],
+                         ti.KEYSTONE_PROBES["event"]["text"].format(label="the barn fire"))
 
 
 # --------------------------------------------------------------------------

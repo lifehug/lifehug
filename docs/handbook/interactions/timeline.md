@@ -105,6 +105,44 @@ configuration. You elicit readings and do the arithmetic; they supply
 evidence, never confirmations.
 <!-- /embed -->
 
+## 2b. The question writer — sentences, not templates
+
+A work item is only useful if the question it carries is a sentence a person
+would actually say. Until v262 three composers printed `{node label} — {event
+kind}` into a template and the founder's own Timeline asked *"When did
+speaker's mission — transition — happen?"* — the extractor's third-person
+handle for him, plus an internal node kind, inside a frame.
+
+| The thing | Where |
+|---|---|
+| The one composer | `temporal_timeline.compose_question(item_kind, event_kind, who=…, what=…, target=…, readings=…, is_owner=…, is_place=…)` — pure, deterministic, no model call. `None` means WITHHELD |
+| The words | `temporal_timeline.KIND_SENTENCES` (one row per event kind: the node's title and the sentence each work-item kind asks) and `OWNER_REFERENCE_REWRITES` ("speaker's" → "your", "I" → "you") |
+| The node's title | `temporal_timeline._node_label` reads the SAME table, so a title and the question about it can never describe one node two ways |
+| Free-text anchor handles | `temporal_timeline.compose_anchor_question` — a noun phrase is asked directly; a clause is quoted back ("You mentioned your dad graduated from college — when was that?") rather than conjugated |
+| The refusal | `conversation_lints.lint_question(text)` — an internal kind after an em dash, a third-person owner handle, a bare-pronoun subject, an empty subject slot. `_mint_work_item` calls it on EVERY intent and, on any finding, mints `prompt_intent=None` with a `withheld_reason` and a `question_withheld` diagnostic |
+
+Four rules travel with the composer and none of them is a preference:
+
+- **`event_kind` is never printed to a person.** `_event_words` survives for
+  diagnostics and node ids only.
+- **The birth is the floor and never an anchor.** `timeline.anchor_index`
+  types every row whose interval IS the birth record as `kind: "birth"`
+  (whatever minted it), and `anchor_for_probe` excludes birth for every
+  unknown kind — reversing v236's "a moment may sort against the birthday"
+  carve-out on the owner's ruling. An era's or a residence's anchor must
+  also be RELEVANT (`anchor_is_relevant`): another era or residence, or a
+  landmark that shares its era, place or a content word — never one picked
+  by adjacency in a sorted list. A bare moment is deliberately exempt:
+  ordering one memory against another is how people date them.
+- **One node, one question.** `WORK_ITEM_PRECEDENCE` = identity_uncertain →
+  contradiction → missing_anchor → precision_gap; the survivor absorbs the
+  other's evidence and records it in `superseded_kinds`.
+- **An age frame is never asked about.** Childhood, Teen years and every
+  reached decade are arithmetic off the birthday (ADR 0030) — the coordinate
+  system itself. `UNASKABLE_EVENT_KINDS` blocks the composer and
+  `timeline.unknowns` skips any legacy period slug `legacy_period_ref`
+  recognises as a frame.
+
 ## 3. The playbook, the anchors, and the stage
 
 | Concern | Where |
