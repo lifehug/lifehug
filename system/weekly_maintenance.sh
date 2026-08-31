@@ -355,6 +355,13 @@ FOCUS_AUTOPILOT_OUT="$LAST_STEP_OUT"
 # condition each pair passed and failed, and how many "when did this happen?"
 # questions an apply would end. The owner reviews it once, and `bind-episodes
 # --apply` is the door that writes.
+#
+# I2b (amendment v4.2 section 12b ruling 7) added the CONTAINMENT rung to the
+# same `plan()`, so this step also reports which tellings belong inside which
+# stretch of life and why — one block per container. It stays a dry run, and it
+# stays at the default `--containment-authority proposed` until the host's
+# drag-out gesture is live: nothing should appear that a person cannot yet take
+# back.
 run_learning_step "bind_episodes" python3 "$SCRIPT_DIR/lifehug.py" bind-episodes --dry-run
 # Read indirectly by the report section table below.
 # shellcheck disable=SC2034

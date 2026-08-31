@@ -188,6 +188,92 @@ CONTAINMENT_CLAIM_SENTENCE = "sometime during {episode} {span}"
 CONTAINMENT_PROBE_TEXT = "Was that early or late in {episode}?"
 
 # --------------------------------------------------------------------------
+# Containment as a DETERMINISTIC rung (amendment v4.2 §12b rulings 2 and 5)
+# --------------------------------------------------------------------------
+
+#: The two evidence-grade containment rules, and the whole list. §12b ruling 5
+#: is a CLOSED widening of C2's origin gate: *"deterministic containment is
+#: admitted for the two evidence-grade rules (`question_context`; the
+#: entity+span rung), and for nothing else."* A third rule id filing at
+#: ``deterministic`` origin is refused by name, which is what makes this a gate
+#: rather than a door left open.
+#:
+#: ONE HOME (ADR 0021). `event_identity.validate_event_identity` — the write
+#: door — and `episode_containers` — the rung that mints them — both read this
+#: tuple; a second spelling anywhere in `system/` fails the one-home sweep in
+#: `tests/test_event_identity_i0_fold.py`.
+RULE_ID_ENTITY_SPAN = "entity_span"
+RULE_ID_QUESTION_CONTEXT = "question_context"
+DETERMINISTIC_CONTAINMENT_RULE_IDS = (RULE_ID_ENTITY_SPAN, RULE_ID_QUESTION_CONTEXT)
+
+#: §12b ruling 5, in the module rather than in a diff.
+DETERMINISTIC_CONTAINMENT_RULE_TEXT = (
+    "A deterministic rung binds `same` and — since amendment v4.2 — `part_of` "
+    "for exactly two rule ids: `entity_span` (the telling shares a resolved "
+    "entity with a container whose span came from the person's own words, and "
+    "its date is inside that span or absent) and `question_context` (the "
+    "answer was given to a question that targeted the container). Every other "
+    "rule id filing a deterministic `part_of` is refused by name."
+)
+
+#: §12b ruling 6. Whether a containment record is a BINDING the drawing obeys
+#: or a proposal beside it is the HOST's flag, never the rung's opinion — the
+#: platform flips it to ``applied`` when the drag-out gesture that removes a
+#: wrong placement is live (I-P), and until then the same records file as
+#: proposals so nothing appears that a person cannot yet take back.
+CONTAINMENT_AUTHORITIES = ("applied", "proposed")
+
+#: The default. A vault whose host cannot yet undo a placement gets proposals.
+DEFAULT_CONTAINMENT_AUTHORITY = "proposed"
+
+#: The ONE thing the flag changes. ``origin`` is outside
+#: :data:`event_identity.IDENTITY_IDENTITY_KEYS`, so the two authorities mint
+#: the SAME ``identity_id``, the same evidence, the same rule id and the same
+#: directory under ``state/`` — and the only consequence is which side of
+#: :data:`GROUPING_ORIGINS` the record lands on, which is to say whether the
+#: fold publishes it as ``containments`` or as ``proposed_links``.
+CONTAINMENT_ORIGIN_BY_AUTHORITY = {"applied": "deterministic", "proposed": "proposed"}
+
+CONTAINMENT_AUTHORITY_RULE_TEXT = (
+    "The authority flag chooses one field — `origin` — and that field is "
+    "outside the binding digest, so flipping it re-keys nothing, rewrites no "
+    "evidence and moves no file: `applied` files `deterministic` and the fold "
+    "publishes `containments`; `proposed` files `proposed` and the fold "
+    "publishes `proposed_links`. Nothing else in the record differs."
+)
+
+
+def containment_origin(authority: object) -> str:
+    """The binding origin one authority files (:data:`CONTAINMENT_AUTHORITIES`).
+
+    An unknown authority is a refusal rather than a fallback: a host that
+    misspells its flag would otherwise silently get proposals and read the
+    absence of drawn containments as "the rung found nothing".
+    """
+    text = collapsed_text(authority) or DEFAULT_CONTAINMENT_AUTHORITY
+    if text not in CONTAINMENT_AUTHORITIES:
+        raise TemporalContractError(
+            "containment_authority_unknown",
+            f"unknown containment authority: {authority!r}",
+            detail={"authorities": list(CONTAINMENT_AUTHORITIES)},
+        )
+    return CONTAINMENT_ORIGIN_BY_AUTHORITY[text]
+
+
+def deterministic_relation_allowed(relation: object, rule_id: object) -> bool:
+    """May a ``deterministic`` binding assert this relation under this rule?
+
+    C2's gate, as one predicate so the write door and the rung that mints the
+    records cannot read §12b ruling 5 two different ways.
+    """
+    name = collapsed_text(relation)
+    if name == GROUPING_RELATION:
+        return True
+    return (name == "part_of"
+            and collapsed_text(rule_id) in DETERMINISTIC_CONTAINMENT_RULE_IDS)
+
+
+# --------------------------------------------------------------------------
 # Findings — raised loudly, or reported and ignored
 # --------------------------------------------------------------------------
 
@@ -876,6 +962,14 @@ def containment_probe(episode_label: object) -> str:
 
 
 __all__ = [
+    "RULE_ID_QUESTION_CONTEXT",
+    "RULE_ID_ENTITY_SPAN",
+    "DETERMINISTIC_CONTAINMENT_RULE_TEXT",
+    "DETERMINISTIC_CONTAINMENT_RULE_IDS",
+    "DEFAULT_CONTAINMENT_AUTHORITY",
+    "CONTAINMENT_ORIGIN_BY_AUTHORITY",
+    "CONTAINMENT_AUTHORITY_RULE_TEXT",
+    "CONTAINMENT_AUTHORITIES",
     "CONTAINMENT_CLAIM_SENTENCE",
     "CONTAINMENT_DATE_BASIS",
     "CONTAINMENT_PROBE_TEXT",
@@ -903,6 +997,8 @@ __all__ = [
     "active_binding_index",
     "claim_event_ref_kind",
     "containment_probe",
+    "deterministic_relation_allowed",
+    "containment_origin",
     "entailed_not_same",
     "episode_aliases",
     "episode_node_id",

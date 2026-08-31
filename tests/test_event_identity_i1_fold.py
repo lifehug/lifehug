@@ -642,13 +642,22 @@ class ContainmentTests(unittest.TestCase):
         self.assertIn(self.member["node_id"], asked)
         self.assertIn("{episode}", efc.CONTAINMENT_PROBE_TEXT)
 
-    def test_two_containing_episodes_are_no_pick_at_all(self):
-        """An ambiguity is a Mirror row for I3, never a guess made here.
+    def test_two_containing_episodes_are_legal_and_are_no_pick_at_all(self):
+        """A member of two containers renders in BOTH, and gets no date.
 
-        C2 refuses this state at WRITE time — a telling holds one grouping
-        binding or none (`validate_identity_set`) — and the fold refuses to
-        choose anyway, because "the writer would have stopped it" is not a
-        reason for a reader to guess.
+        Amendment v4.2 (§12b, §13.5) settled a disagreement the two halves of
+        one contract had carried in silence since I0: C3's
+        `active_binding_index` had always read §5.4's refusal narrowly (two
+        `same` bindings, or one pair decided twice) while C2's
+        `validate_identity_set` also refused a second `part_of`. §13.5
+        promises *"a member of two containers renders in both with one primary
+        display decision"* — the eras paradigm, where a membership is a
+        receipt rather than a bound — so the write door now refuses two
+        `same` bindings and nothing else.
+
+        What is UNCHANGED is the fold's refusal to choose: two containing
+        episodes give the member no possible outer range at all, because
+        picking one would be an answer nobody gave.
         """
         elsewhere = create_plan((refs_of("related")[0],), kind="moment")
         rows = list(self.records["bindings"]) + [
@@ -657,15 +666,28 @@ class ContainmentTests(unittest.TestCase):
                 side_binding(refs_of("part_of")[0], elsewhere["episode_id"], "part_of")
             ),
         ]
-        with self.assertRaises(ei.EventIdentityError) as caught:
-            ei.validate_identity_set(rows)
-        self.assertEqual(caught.exception.code, "identity_conflict")
+        self.assertEqual(len(ei.validate_identity_set(rows)), len(rows))
 
         result = derive(all_claims(), episode_records=records_input(
             self.records, bindings=rows))
         member = self._member(result)
         self.assertIsNone(member.get("possible_temporal_value"))
         self.assertEqual(len(member["containments"]), 2)
+
+    def test_two_same_bindings_are_still_a_write_time_refusal(self):
+        """The half that did NOT widen. Identity collapse is what R1's floor
+        exists to protect, and a second `same` on one telling is still
+        `identity_conflict` at the write door."""
+        elsewhere = create_plan((refs_of("related")[0],), kind="moment")
+        rows = list(self.records["bindings"]) + [
+            ei.validate_event_identity(elsewhere["bindings"][0]),
+            ei.validate_event_identity(
+                side_binding(refs_of("same")[0], elsewhere["episode_id"], "same")
+            ),
+        ]
+        with self.assertRaises(ei.EventIdentityError) as caught:
+            ei.validate_identity_set(rows)
+        self.assertEqual(caught.exception.code, "identity_conflict")
 
     def test_era_membership_alone_still_implies_no_date(self):
         """Unchanged from v247: a frame membership is a receipt ABOUT a node,

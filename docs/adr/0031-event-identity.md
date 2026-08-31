@@ -3,15 +3,16 @@
 **Status:** Accepted. Shipped in this repo: **I0** (records and
 contracts, v265/v266), **I1** (the fold applies bindings, v267), **I2** (the
 binder, v268, with v269's live-vault findings — one pair one row, one tally,
-the fold's own age frames, the recorder's stem) and **I3** (the questions —
-five answers, the split gesture, the listener leaf, v270). I4 (R3 model
-proposals, deferred) is not built. Wiring I3's generation into the published
-`work-items.json` loop, the owner-reviewed founder dry-run and the
+the fold's own age frames, the recorder's stem), **I3** (the questions —
+five answers, the split gesture, the listener leaf, v270) and **I2b**
+(containers first — the entity signal and the containment rung, v271). I4 (R3
+model proposals, deferred) is not built. Wiring I3's generation into the
+published `work-items.json` loop, the owner-reviewed founder dry-run and the
 all-tenant backfill runbook are I-P (platform), not this repo.
-**Date:** 2026-08-30.
-**Controlling design:** lifehug-platform `docs/design/event-identity.md` **v4**
-— that document is authoritative; this ADR records the model in this repo's
-own vocabulary and says what each phase actually shipped.
+**Date:** 2026-08-31.
+**Controlling design:** lifehug-platform `docs/design/event-identity.md`
+**v4.2** — that document is authoritative; this ADR records the model in this
+repo's own vocabulary and says what each phase actually shipped.
 **Tracking:** lifehug-platform#781, lifehug#295. Predecessors: #751,
 Timeline Fix 05, ADR 0030 (eras), ADR 0024 (chronology with basis).
 
@@ -220,11 +221,83 @@ Two new CLI verbs, `resolve-work-item` and `split-episode`, join
 `DIRECT_MUTATION_COMMANDS` beside `bind-episodes` and never run inside
 `compile` (swept the same way `episode_binder` itself is).
 
+### I2b — containers first (v271, amendment v4.2 §12b)
+
+I0–I3 built sameness, and the first dry run against the founder's own vault
+bound **nothing**. That is not a bug in the binder; it is an emphasis error,
+and the owner named it: *"life is a tree — life → age frames → big named spans
+(Etherfuse, 2021→now) → moments inside them… we're trying to collect things
+into events so they can be visualized."* Most tellings are MEMBERS of a stretch
+somebody lived, not duplicates of each other. **Collection outranks dedup.**
+
+* **The entity signal** (§12b ruling 1). A roster-resolved same entity — v221's
+  own resolution machinery, applied to organizations and named stretches as
+  well as people — is ONE independent signal, in §4.1 retrieval (a seventh
+  blocking signal, one point of plausibility) and in §4.2 condition 4. The
+  founder's own gap is what it closes: the recorder keeps a name in
+  `subject_mention` and the classifier keeps it inside a sentence, so the two
+  shared nothing but a word. **The roster's recognition is the evidence, not
+  the string** — a shared token that resolves to nobody yields nothing — and
+  **one fact is never two signals**: an entity another signal already counted
+  (a shared participant, a shared place) is subtracted before the entities are
+  scored. That subtraction is #300's rule generalized, after this rung's own
+  first run bound three pairs on `place, entity` where the entity WAS the
+  place. R1's floor is unchanged at two, and the entity signal has never bound
+  anything alone.
+* **What a container is** (`episode_containers.CONTAINER_RULE_TEXT`). A telling
+  whose own words OPEN A SPAN: a `started` claim at `stated` basis, closed by
+  an `ended` claim when the person gave one and OPEN when they did not, or a
+  stated value that is itself a proper range. A point-dated moment is not a
+  container. Its entities come from what it is ABOUT — its subject mentions —
+  so a job telling that mentions college does not become the college. Its id is
+  minted from the container ALONE: an id that digested its members would re-key
+  on every join and orphan every record already filed against it.
+* **The containment rung, for exactly two rule ids** (§12b rulings 2 and 5).
+  `entity_span` — shares a resolved entity with a person-dated container and is
+  dated inside its span or undated — and `question_context` — the answer was
+  given to a question that TARGETED the container, which is a fact about what
+  was asked rather than an inference from what was said. C2's origin gate
+  widens for `part_of` exactly that far (`DETERMINISTIC_CONTAINMENT_RULE_IDS`,
+  one home in `episode_fold_contract`) and refuses every third rule id by name.
+  I2's language rung reads prose and guesses, so it still files as a proposal.
+* **The recorder's stamp rides the SOURCE.** `TemporalClaim` gains no field
+  (§9 holds): `temporal_store.promote_conversational_source` understands one
+  additive metadata key, `question_context`, written to the promoted source's
+  frontmatter and outside `PROMOTION_IDENTITY_KEYS`;
+  `episode_binder.read_question_contexts` reads it back. A stamp naming no
+  container this run knows is a named diagnostic, never a placement into
+  whatever happened to be nearby.
+* **A membership is a receipt, not a bound.** C2's `validate_identity_set` read
+  §5.4's telling-level refusal as covering `part_of` while C3's
+  `active_binding_index` had always read it narrowly — two halves of one
+  contract disagreeing in silence since I0. §13.5 settles it (*"a member of two
+  containers renders in both with one primary display decision"*), the eras
+  paradigm arriving intact. A telling still belongs to at most ONE episode by
+  `same`; containment is not identity. The fold still refuses to CHOOSE: two
+  containing episodes give the member no possible outer range at all.
+* **Authority is the host's flag and it touches one field** (§12b ruling 6).
+  `--containment-authority {proposed,applied}`, default `proposed`, chooses
+  `origin` — outside `IDENTITY_IDENTITY_KEYS`, so both authorities mint the
+  same `identity_id`, rule id, evidence and directory, and the only consequence
+  is whether the fold publishes `containments` or `proposed_links`.
+* **Where placing happens** (§12b ruling 7): inside `plan()`, which is the
+  weekly maintenance step, an answer-time pass and an operator run — never
+  inside `compile`. The maintenance seat is still a dry run by construction.
+
+On the founder's own frozen clone (883 tellings): 0 containers → **3**, and 0
+placements → **48 memberships over 27 tellings**, with the Etherfuse tellings
+collecting under `Etherfuse (after May 2022)` and `the idea for Etherfuse
+(after 2021)`, `Joy Labs (November 2018–January 2021)` beside them, and a
+telling dated 1999 that names Etherfuse left for the person rather than moved
+to fit.
+
 ## Consequences
 
-* Two new record families and two new directories; one module. No new store
-  engine, loop, interaction, awaiting state, claim type, claim field,
-  dependency or LLM purpose.
+* Two new record families and two new directories; two modules after I2b
+  (`event_identity.py`, `episode_containers.py`). No new store engine, loop,
+  interaction, awaiting state, claim type, claim field, dependency or LLM
+  purpose — I2b's rung is arithmetic over the rosters and the spans the vault
+  already holds, and makes no model call.
 * `event_ref` keeps its v247 era meaning untouched. Episode resolution gets its
   own fold input in I1; it does not overwrite an existing slot.
 * The three frozen key lists (`CLAIM_IDENTITY_KEYS`, `NODE_IDENTITY_KEYS`,

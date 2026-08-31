@@ -180,16 +180,26 @@ whole promise:
 | `stated`, `confirmed` | `sources/identity/bindings/` |
 | `deterministic`, `proposed` | `state/temporal_claims/identities/bindings/` |
 
-Operations split by `authority` the same way. A `deterministic` binding may
-only assert `same` (§4.2's narrow floor); anything else is
-`identity_deterministic_relation_unsupported`.
+Operations split by `authority` the same way. A `deterministic` binding asserts
+`same` (§4.2's narrow floor) and — since **amendment v4.2 §12b ruling 5**, a
+CLOSED widening — `part_of` under exactly the two evidence-grade rule ids in
+`episode_fold_contract.DETERMINISTIC_CONTAINMENT_RULE_IDS` (`entity_span`,
+`question_context`). Anything else, including a `part_of` under any third rule
+id, is `identity_deterministic_relation_unsupported`.
 
 **Origin transition.** `proposed → confirmed` files the sources-side record
 **with `supersedes`** naming the state-side proposal. `validate_identity_set`
 refuses an unsuperseded semantic twin across directories
-(`identity_unsuperseded_twin`) and two active grouping bindings for one telling
-(`identity_conflict`) — never a recency contest, the same reasoning
+(`identity_unsuperseded_twin`) and two active **`same`** bindings for one
+telling (`identity_conflict`) — never a recency contest, the same reasoning
 `event_binding.event_resolution_index` already uses.
+
+That second refusal is about GROUPING and nothing else. It read `part_of` in as
+well until v271, while C3's `active_binding_index` had always read §5.4
+narrowly; amendment v4.2 settles the disagreement toward the narrow reading,
+because §13.5 promises that *"a member of two containers renders in both with
+one primary display decision"* — the eras paradigm, where a membership is a
+receipt rather than a bound. Identity stays exclusive; containment does not.
 
 ### Lifecycle matrix rows proved here (record level, no fold)
 

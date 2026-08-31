@@ -76,11 +76,13 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import temporal_store as store  # noqa: E402
 from episode_fold_contract import (  # noqa: E402
+    DETERMINISTIC_CONTAINMENT_RULE_IDS,
     GROUPING_ORIGINS,
     GROUPING_RELATION,
     IDENTITY_RULE_VERSION,
     ORIGINS,
     RELATIONS,
+    deterministic_relation_allowed,
 )
 from vault_paths import atomic_write_vault_text  # noqa: E402
 from temporal_claims import (  # noqa: E402
@@ -1690,10 +1692,19 @@ def validate_event_identity(value: object) -> dict:
     )
     origin = collapsed_text(row.get("origin"))
     _require(origin in ORIGINS, "identity_origin_unknown", f"unknown origin: {row.get('origin')!r}")
+    rule_id = collapsed_text(row.get("rule_id")) or None
+    # §12b ruling 5 widened this gate by EXACTLY two rule ids and no more. The
+    # predicate lives in C1's vocabulary module so the write door and the rung
+    # that mints containment records cannot read the ruling differently; the
+    # refusal keeps its name, because a `deterministic` `related`, a
+    # `deterministic` `not_same`, and a `deterministic` `part_of` under any
+    # third rule id are all still the same mistake.
     _require(
-        origin != "deterministic" or relation == GROUPING_RELATION,
+        origin != "deterministic" or deterministic_relation_allowed(relation, rule_id),
         "identity_deterministic_relation_unsupported",
-        f"a deterministic rung binds {GROUPING_RELATION!r} only (design §4.2); got {relation!r}",
+        f"a deterministic rung binds {GROUPING_RELATION!r}, and 'part_of' only under "
+        f"{list(DETERMINISTIC_CONTAINMENT_RULE_IDS)} (design §4.2, amendment v4.2 §12b.5); "
+        f"got relation={relation!r} rule_id={rule_id!r}",
     )
     rule_version = collapsed_text(row.get("rule_version")) or IDENTITY_RULE_VERSION
     supersedes = collapsed_text(row.get("supersedes")) or None
@@ -1727,7 +1738,7 @@ def validate_event_identity(value: object) -> dict:
         "relation": relation,
         "origin": origin,
         "rule_version": rule_version,
-        "rule_id": collapsed_text(row.get("rule_id")) or None,
+        "rule_id": rule_id,
         "evidence": evidence if isinstance(evidence, dict) else {},
         "candidates": sorted(
             dict.fromkeys(
@@ -1867,17 +1878,32 @@ def validate_identity_set(records: Sequence[object]) -> list[dict]:
             },
         )
 
+    # §5.4's telling-level refusal is about GROUPING and nothing else — the
+    # narrow reading `episode_fold_contract`'s own comment pinned at I0 and
+    # `active_binding_index` has always implemented. I0's C2 half read
+    # `part_of` into it as well, and the two halves of one contract disagreed
+    # in silence until a containment rung actually minted a second membership.
+    #
+    # **Amendment v4.2 settles it toward the narrow reading**, and not as a
+    # convenience: §13.5 promises in so many words that *"a member of two
+    # containers renders in both with one primary display decision"*, which is
+    # the eras program's own paradigm — a membership is a RECEIPT, not a
+    # bound; an event may belong to several stretches; the display role a
+    # person picks is a separate decision that never destroys a secondary
+    # membership. A telling still belongs to at most ONE episode by `same`:
+    # that is the identity collapse the whole floor exists to protect, and it
+    # is unchanged. Containment is not identity.
     by_telling: dict[str, list[dict]] = {}
     for row in active:
-        if row["relation"] in (GROUPING_RELATION, "part_of"):
+        if row["relation"] == GROUPING_RELATION:
             by_telling.setdefault(row["telling_ref"], []).append(row)
     for telling_ref, rows in sorted(by_telling.items()):
         if len(rows) < 2:
             continue
         raise EventIdentityError(
             "identity_conflict",
-            f"{telling_ref} carries {len(rows)} active grouping bindings and none "
-            "supersedes another; a telling belongs to one episode or to none",
+            f"{telling_ref} carries {len(rows)} active `{GROUPING_RELATION}` bindings "
+            "and none supersedes another; a telling belongs to one episode or to none",
             detail={
                 "telling_ref": telling_ref,
                 "identity_ids": sorted(row["identity_id"] for row in rows),

@@ -53,6 +53,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import cross_dating  # noqa: E402
+import episode_containers as ec  # noqa: E402
 import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import episode_routing_contract as erc  # noqa: E402
@@ -91,6 +92,15 @@ SAME_EVENT_KIND = "same_event"
 #: §4.5/§5.6's second kind, defined once by C4.
 POSSIBLE_OVERMERGE_KIND = erc.POSSIBLE_OVERMERGE_KIND
 
+#: Event identity **I2b** (amendment v4.2 §12b ruling 1). The entity signal's
+#: name, and the containment rung's two rule ids, imported from the module that
+#: owns them. A second spelling here would be the drift ADR 0021 exists to
+#: stop — and it is imported rather than re-declared because `episode_containers`
+#: is where a reader goes to find out what a roster-resolved entity IS.
+ENTITY_SIGNAL = ec.ENTITY_SIGNAL
+CONTAINMENT_AUTHORITIES = ec.CONTAINMENT_AUTHORITIES
+DEFAULT_CONTAINMENT_AUTHORITY = ec.DEFAULT_CONTAINMENT_AUTHORITY
+
 
 # --------------------------------------------------------------------------
 # §4.1 — retrieval
@@ -103,6 +113,14 @@ POSSIBLE_OVERMERGE_KIND = erc.POSSIBLE_OVERMERGE_KIND
 #: label did not also rewrite who was there.
 RETRIEVAL_SIGNALS = (
     "participant",
+    # I2b (§12b ruling 1). A roster-resolved same entity is a SEVENTH blocking
+    # signal and one point of plausibility: the founder's dry run showed a
+    # landmark telling ("Etherfuse", started 2022-05) and a classifier telling
+    # ("Started Etherfuse") sharing nothing but a word, because the recorder
+    # keeps the name in `subject_mention` and the classifier keeps it inside a
+    # sentence. The roster is what recognizes the word as an entity this life
+    # contains, and recognition is evidence a string match is not.
+    ENTITY_SIGNAL,
     "place",
     "era",
     "bounds_in_frame",
@@ -259,7 +277,7 @@ STEM_JOIN = "-"
 #: §4.2 condition 4's four, verbatim. TWO of them must hold, and neither the
 #: label nor the owner may be one of them — the owner is on every telling, so
 #: agreeing about him is not evidence about anything.
-INDEPENDENT_SIGNALS = ("source_document", "place", "participant", "bounds")
+INDEPENDENT_SIGNALS = ("source_document", "place", "participant", ENTITY_SIGNAL, "bounds")
 
 #: How many of them (§4.2 condition 4).
 REQUIRED_INDEPENDENT_SIGNALS = 2
@@ -537,6 +555,21 @@ class TellingView:
     created_at: str = ""
     eligible: bool = True
     ineligible_reason: str = ""
+    #: I2b. Every roster entity this telling NAMES (its event and subject
+    #: mentions, never its evidence prose) and, separately, the ones it is
+    #: ABOUT. The split is what makes a container nameable without making every
+    #: telling that mentions college into the college
+    #: (:data:`episode_containers.CONTAINER_RULE_TEXT`).
+    entities: frozenset = frozenset()
+    subject_entities: frozenset = frozenset()
+    #: The entities its PLACE mentions resolve to, kept apart so a place that
+    #: already scored the `place` signal is not counted a second time as an
+    #: entity (:data:`episode_containers.ONE_FACT_ONE_SIGNAL_TEXT`).
+    place_entities: frozenset = frozenset()
+    #: I2b. The stretch this telling's own words OPEN, and whether they closed
+    #: it. `None` for a point-dated moment, which is not a container.
+    span: object = None
+    span_open_ended: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -551,6 +584,11 @@ class TellingView:
             "documents": sorted(self.documents),
             "dated": self.dated,
             "containment": sorted(self.containment),
+            "entities": sorted(self.entities),
+            "subject_entities": sorted(self.subject_entities),
+            "place_entities": sorted(self.place_entities),
+            "opens_a_span": self.span is not None,
+            "span_open_ended": self.span_open_ended,
             "eligible": self.eligible,
             "ineligible_reason": self.ineligible_reason,
         }
@@ -579,6 +617,10 @@ class Candidate:
     documents: frozenset
     bounds: object = None
     dated: bool = False
+    #: I2b. The union of its members' named entities — the candidate side of
+    #: the entity signal — and, apart, the ones its places already account for.
+    entities: frozenset = frozenset()
+    place_entities: frozenset = frozenset()
     episode_id: str = ""
     adopted: bool = False
     authority: str = ""
@@ -692,9 +734,29 @@ class BinderPlan:
     overmerges: list = field(default_factory=list)
     bridges: list = field(default_factory=list)
     reaudits: list = field(default_factory=list)
+    #: I2b (§13.5). The containment rung's own report — one block per
+    #: CONTAINER, its members listed under it with the rule and the reason that
+    #: placed each one. Named `containments` when the host's authority is
+    #: `applied` and `containment_proposals` when it is `proposed`, because
+    #: those are two different promises to a reader and one word for both would
+    #: be a lie in one of the two cases.
+    containments: list = field(default_factory=list)
+    #: Stamps that named no container this run knows (`question_context`).
+    containment_diagnostics: list = field(default_factory=list)
+    #: The authority the run filed under (`episode_fold_contract`'s flag).
+    containment_authority: str = ec.DEFAULT_CONTAINMENT_AUTHORITY
+    #: `{container_key: Container}` the run reasoned over, kept for a caller
+    #: that wants the container itself rather than the report of it.
+    containers: dict = field(default_factory=dict)
     counts: dict = field(default_factory=dict)
     dropped: int = 0
     views: dict = field(default_factory=dict)
+
+    @property
+    def containment_block_name(self) -> str:
+        """`containments` or `containment_proposals`, per the authority flag."""
+        return ("containments" if self.containment_authority == "applied"
+                else "containment_proposals")
 
     def as_dict(self) -> dict:
         return {
@@ -712,6 +774,9 @@ class BinderPlan:
             "overmerges": list(self.overmerges),
             "bridges": list(self.bridges),
             "reaudits": list(self.reaudits),
+            "containment_authority": self.containment_authority,
+            self.containment_block_name: list(self.containments),
+            "containment_diagnostics": list(self.containment_diagnostics),
             "counts": dict(self.counts),
         }
 
@@ -743,6 +808,31 @@ def _claim_texts(claims: Sequence[object]) -> tuple[str, ...]:
             if quote:
                 found.append(quote)
     return tuple(dict.fromkeys(found))
+
+
+def _mention_texts(claims: Sequence[object]) -> tuple:
+    """``(every mention, the subject mentions)`` — the telling's NAMES.
+
+    Deliberately not `_claim_texts`: that one reads evidence quotes for the
+    containment-language parse, and the entity signal must not fire on prose
+    the model transcribed. These are the fields the substrate already keeps AS
+    names — what the telling calls the event, and who or what it is about.
+    """
+    every: list[str] = []
+    subjects: list[str] = []
+    for claim in claims or ():
+        row = claim if isinstance(claim, dict) else {}
+        for value in (row.get("event_mention"),):
+            text = collapsed_text(value)
+            if text and text not in every:
+                every.append(text)
+        text = collapsed_text(row.get("subject_mention"))
+        if text:
+            if text not in subjects:
+                subjects.append(text)
+            if text not in every:
+                every.append(text)
+    return tuple(every), tuple(subjects)
 
 
 def _label_of(claims: Sequence[object]) -> str:
@@ -826,7 +916,7 @@ def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
 
 
 def telling_views(claims: object, *, manifest: object = None,
-                  era_memberships: object = None) -> dict:
+                  era_memberships: object = None, entity_index: object = None) -> dict:
     """``{telling_ref: TellingView}`` — pure, over the claims and nothing else.
 
     The claim→telling map is `episode_fold.claim_telling_index`, which is C1's
@@ -837,6 +927,12 @@ def telling_views(claims: object, *, manifest: object = None,
     rather than a read: era membership is decided by the fold over records
     this module does not own, and re-deriving it here would be a second copy
     of the eras fold living inside the binder.
+
+    ``entity_index`` (I2b) is the vault's rosters as one
+    `episode_containers.EntityIndex`, and is an argument for the same reason —
+    a roster is a vault read and this function is pure. With none supplied the
+    entity signal simply never fires and every pair scores one signal fewer,
+    which can only ever retrieve LESS, never bind wrongly.
     """
     rows = [row for row in (claims or ()) if isinstance(row, dict)]
     index = ef.claim_telling_index(rows, manifest)
@@ -859,6 +955,11 @@ def telling_views(claims: object, *, manifest: object = None,
         label = _label_of(rows_here)
         participants = frozenset(signature.get("participant_set") or ())
         bounds, dated = _bounds_of(rows_here)
+        mentions, subject_mentions = _mention_texts(rows_here)
+        entities = ec.resolve_entity_set(mentions, entity_index)
+        subject_entities = ec.resolve_entity_set(subject_mentions, entity_index)
+        place_entities = ec.resolve_entity_set(signature.get("place_set") or (), entity_index)
+        span, span_open_ended = ec.span_from_claims(rows_here)
         about_an_era = ei.telling_is_about_an_era(rows_here)
         # §5.1 is claim-precise, and so is this. A telling ABOUT an era (C1's
         # own subject-side predicate) is never a binding target. A telling
@@ -883,6 +984,11 @@ def telling_views(claims: object, *, manifest: object = None,
             bounds=bounds,
             dated=dated,
             containment=containment_targets(_claim_texts(rows_here)),
+            entities=entities,
+            subject_entities=subject_entities,
+            place_entities=place_entities,
+            span=span,
+            span_open_ended=span_open_ended,
             created_at=max(
                 (collapsed_text(row.get("created_at")) for row in rows_here), default=""
             ),
@@ -938,6 +1044,10 @@ def _unit(key: str, kind: str, members: Sequence[str], views: Mapping[str, Telli
         documents=frozenset().union(*[row.documents for row in rows]) if rows else frozenset(),
         bounds=bounds,
         dated=any(row.dated for row in rows),
+        entities=(frozenset().union(*[row.entities for row in rows])
+                  if rows else frozenset()),
+        place_entities=(frozenset().union(*[row.place_entities for row in rows])
+                        if rows else frozenset()),
         episode_id=episode_id,
         adopted=adopted,
         authority=authority,
@@ -1025,6 +1135,8 @@ def retrieval_signals(view: TellingView, candidate: Candidate,
     found: list[str] = []
     if view.participants & candidate.participants:
         found.append("participant")
+    if view.entities & candidate.entities:
+        found.append(ENTITY_SIGNAL)
     if view.places & candidate.places:
         found.append("place")
     if view.eras & candidate.eras:
@@ -1104,14 +1216,29 @@ def independent_signals(view: TellingView, candidate: Candidate) -> tuple:
     evidence that they are the same thing. And a shared participant that is
     just the label again is not a second signal
     (:func:`independent_of_the_label`).
+
+    **The entity signal (I2b, §12b ruling 1)** is one signal here, and never
+    two: whatever `independent_of_the_label` already credited as a participant
+    is SUBTRACTED (`episode_containers.shared_entities`) before the shared
+    entities are counted. So a recorder telling whose subject IS the label
+    contributes the roster's recognition once, under one name, and R1's floor
+    of two independent signals is unchanged — the entity signal has never
+    bound anything on its own and cannot.
     """
     found: list[str] = []
     if view.documents & candidate.documents:
         found.append("source_document")
-    if view.places & candidate.places:
+    counted: set = set()
+    shared_places = view.places & candidate.places
+    if shared_places:
         found.append("place")
-    if independent_of_the_label(view, candidate):
+        counted |= set(shared_places) | set(view.place_entities & candidate.place_entities)
+    participants = independent_of_the_label(view, candidate)
+    if participants:
         found.append("participant")
+        counted |= set(participants)
+    if ec.shared_entities(view.entities, candidate.entities, already_counted=counted):
+        found.append(ENTITY_SIGNAL)
     if view.dated and candidate.dated and view.bounds is not None and \
             candidate.bounds is not None and \
             chrono.intersect(view.bounds, candidate.bounds) is not None:
@@ -1956,20 +2083,33 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
          era_memberships: object = None, manifest: object = None,
          question_cap: int = GLOBAL_QUESTION_CAP, trigger: str = "maintenance_sweep",
          answered_pairs: Sequence = (), open_items: Sequence = (),
+         entity_index: object = None, question_contexts: object = None,
+         containment_authority: object = None,
          now: object = None) -> BinderPlan:
     """One binder run, decided and not written. Pure.
 
     Deterministic end to end: tellings are swept in sorted order, candidates
     in sorted order, and every id in the result is a digest over semantic
     inputs. Run it twice on the same inputs and the two plans are equal.
+
+    **I2b's three new arguments**, all inputs and none of them reads:
+    ``entity_index`` is the vault's rosters (§12b ruling 1);
+    ``question_contexts`` is ``{telling_ref: container the session targeted}``,
+    the recorder's own stamp (§12b ruling 5); ``containment_authority`` is the
+    HOST's flag (§12b ruling 6) and chooses one field — ``origin`` — on the
+    records the containment rung mints, and nothing else about them.
     """
-    views = telling_views(claims, manifest=manifest, era_memberships=era_memberships)
+    authority = collapsed_text(containment_authority) or ec.DEFAULT_CONTAINMENT_AUTHORITY
+    # Refuse an unknown flag HERE, before a whole run is decided against it.
+    efc.containment_origin(authority)
+    views = telling_views(claims, manifest=manifest, era_memberships=era_memberships,
+                          entity_index=entity_index)
     units = candidates(views, episode_records=episode_records)
     records = ef.normalize_episode_records(episode_records)
     active = efc.active_binding_index(records["bindings"])
     entailed = efc.entailed_not_same(records["bindings"])
 
-    result = BinderPlan(views=views)
+    result = BinderPlan(views=views, containment_authority=authority)
     dropped = 0
     for telling_ref in sorted(views):
         view = views[telling_ref]
@@ -2057,6 +2197,33 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         rows.append(question_row(pair, views[pair.telling_ref], units[pair.candidate_key]))
     result.questions = apply_caps(rows, cap=question_cap)
 
+    # --- I2b: the containment rung (§12b rulings 2 and 5) -----------------
+    # AFTER the binds are accepted, and skipping every unit this run is about
+    # to change (:data:`episode_containers.CONTAINER_SKIPPED_WHILE_BINDING`):
+    # a container's id is minted from what it IS, so filing containment against
+    # a unit whose identity moves in the same run would orphan the records the
+    # same run wrote.
+    moving = {ref for members in accepted for ref in members}
+    result.containers = ec.containers(views, units, excluded_refs=moving)
+    containment = ec.containment_rows(
+        views, result.containers, question_contexts=question_contexts,
+    )
+    result.containment_diagnostics = ec.unresolved_question_contexts(
+        views, result.containers, question_contexts=question_contexts,
+    )
+    result.containments = ec.group_by_container(
+        containment, result.containers, authority=authority,
+    )
+    # ONE record per pair. The rung and I2's language rung share an
+    # `identity_id` by construction, so the merge is a decision made once and
+    # in the open rather than by whichever writer ran first.
+    result.proposals = ec.merge_containment_records([
+        *result.proposals,
+        *[ec.containment_record(row, result.containers[row["container_key"]],
+                                views[row["telling_ref"]], authority=authority, now=now)
+          for row in containment],
+    ])
+
     result.overmerges = overmerge_audit(views, units)
     result.bridges = bridge_diagnostics(episode_records)
     # DIRECTIONAL on purpose: a re-audit is "this bound telling has a new
@@ -2110,6 +2277,24 @@ def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
         # that used to be called "proposals" and disagreed with it in public.
         "proposal_pairs": verdicts.get("proposal", 0),
         "part_of_records": len(result.proposals),
+        # I2b. Named for what each one COUNTS, the same discipline #300 forced
+        # on `proposal_pairs`: how many stretches the person's own words open
+        # and this run could name, how many placements the rung made, how many
+        # tellings that is, and how many stamps named nothing.
+        "containers": len(result.containers),
+        "containment_members": sum(int(block["member_count"])
+                                   for block in result.containments),
+        "containment_tellings": len({
+            member["telling_ref"] for block in result.containments
+            for member in block["members"]
+        }),
+        "containment_by_rule": {
+            name: sum(1 for block in result.containments
+                      for member in block["members"] if member["rule_id"] == name)
+            for name in ec.DETERMINISTIC_CONTAINMENT_RULE_IDS
+        },
+        "containment_authority": result.containment_authority,
+        "unresolved_question_contexts": len(result.containment_diagnostics),
         "questions": len(result.questions),
         "surfaced_questions": sum(1 for row in result.questions if row["surfaced"]),
         "possible_overmerge": len(result.overmerges),
@@ -2159,6 +2344,12 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
         "APPLIED" if applied else "DRY RUN — nothing was written",
         "",
     ]
+    lines.extend(ec.describe_containments(
+        result.containments, authority=result.containment_authority,
+    ))
+    for row in result.containment_diagnostics:
+        lines.append(f"  ⚠ {row['finding']}: {row['telling_ref']} → {row['stamp']}")
+    lines.append("")
     if not result.pairs:
         lines.append("  no candidate pair reached the plausibility floor")
     for pair in sorted(result.pairs, key=lambda row: (row.telling_ref, row.candidate_key)):
@@ -2172,8 +2363,14 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
                 "would_bind_episodes", "proposal_pairs", "part_of_records",
                 "questions", "surfaced_questions", "possible_overmerge",
                 "bridges", "sole_receipts", "reaudits_minted",
-                "when_items_that_would_disappear"):
+                "when_items_that_would_disappear",
+                "containers", "containment_members", "containment_tellings",
+                "containment_authority", "unresolved_question_contexts"):
         lines.append(f"  {key}: {counts.get(key)}")
+    lines.append("  containment_by_rule: " + ", ".join(
+        f"{name}={counts.get('containment_by_rule', {}).get(name, 0)}"
+        for name in ec.DETERMINISTIC_CONTAINMENT_RULE_IDS
+    ))
     lines.append("  verdicts: " + ", ".join(
         f"{name}={counts['verdicts'].get(name, 0)}" for name in VERDICTS
     ))
@@ -2251,7 +2448,65 @@ def read_vault_inputs(vault_root: str | Path, *, now: object = None) -> dict:
         "claims": claims,
         "episode_records": records,
         "frames": fold_age_frames(claims, episode_records=records, now=now),
+        "entity_index": ec.load_entity_index(vault_root),
+        "question_contexts": read_question_contexts(vault_root, claims),
     }
+
+
+#: The seam §12b ruling 5 needs, named where a platform engineer will look for
+#: it. *"The session RECORDS which container its question targeted (the
+#: work-item/era Play target), so 'this answer was given to an Etherfuse
+#: question' is a fact, not an inference."* Nothing in `TemporalClaim` carries
+#: it and §9 froze that schema, so the stamp rides the SOURCE — the additive
+#: `question_context` frontmatter key `temporal_store.promote_conversational_source`
+#: understands — and a telling inherits it from the source its claims cite.
+#: The platform supplies the value when it opens the session; a vault whose
+#: sources carry none simply has no `question_context` rung, which is an
+#: absence and not a failure.
+QUESTION_CONTEXT_SEAM = (
+    "the recorder's stamp is `question_context` in the promoted source's own "
+    "frontmatter; a telling inherits it from the source its claims cite, and "
+    "the value names the container as an episode id, a container key or the "
+    "telling ref of the telling that opened it"
+)
+
+
+def read_question_contexts(vault_root: str | Path, claims: object) -> dict:
+    """``{telling_ref: the container that telling's question targeted}``.
+
+    Reads each cited source's frontmatter ONCE — the same
+    `temporal_store.split_frontmatter` every other reader uses — and never the
+    body. A source that carries no stamp contributes nothing; a source that
+    cannot be read contributes nothing and raises nothing, because a missing
+    file is a vault the fold already reports on and not this rung's outage.
+    """
+    paths: dict[str, str] = {}
+    for claim in claims or ():
+        row = claim if isinstance(claim, dict) else {}
+        ref = row.get("source_ref") if isinstance(row.get("source_ref"), dict) else {}
+        relative = collapsed_text(ref.get("source_path"))
+        if not relative:
+            continue
+        try:
+            telling_ref = ei.telling_ref_for_claim(row)
+        except TemporalContractError:
+            continue
+        paths.setdefault(telling_ref, relative)
+
+    by_path: dict[str, str] = {}
+    found: dict[str, str] = {}
+    for telling_ref in sorted(paths):
+        relative = paths[telling_ref]
+        if relative not in by_path:
+            stamp = ""
+            text = store.read_store_text(vault_root, relative)
+            if text:
+                metadata, _body = store.split_frontmatter(text)
+                stamp = collapsed_text((metadata or {}).get("question_context"))
+            by_path[relative] = stamp
+        if by_path[relative]:
+            found[telling_ref] = by_path[relative]
+    return found
 
 
 def fold_age_frames(claims: object, *, episode_records: object = (),
@@ -2307,7 +2562,8 @@ def apply_plan(vault_root: str | Path, result: BinderPlan) -> dict:
 def bind_episodes(vault_root: str | Path, *, apply: bool = False,
                   question_cap: int = GLOBAL_QUESTION_CAP,
                   trigger: str = "maintenance_sweep",
-                  era_memberships: object = None, now: object = None) -> dict:
+                  era_memberships: object = None,
+                  containment_authority: object = None, now: object = None) -> dict:
     """`bind-episodes`, as a function. ``apply=False`` writes NOTHING.
 
     Returns ``{"plan", "report", "applied", "filed"}`` — the plan for a
@@ -2317,6 +2573,9 @@ def bind_episodes(vault_root: str | Path, *, apply: bool = False,
     result = plan(
         inputs["claims"], episode_records=inputs["episode_records"],
         frames=inputs["frames"], era_memberships=era_memberships,
+        entity_index=inputs["entity_index"],
+        question_contexts=inputs["question_contexts"],
+        containment_authority=containment_authority,
         question_cap=question_cap, trigger=trigger, now=now,
     )
     filed = apply_plan(vault_root, result) if apply else None
@@ -2326,11 +2585,14 @@ def bind_episodes(vault_root: str | Path, *, apply: bool = False,
         "applied": bool(apply),
         "filed": filed,
         "frames": len(inputs["frames"]),
+        "entities": inputs["entity_index"].size(),
+        "question_contexts": len(inputs["question_contexts"]),
     }
 
 
 def binder_step(vault_root: str | Path, *, now: object = None,
                 era_memberships: object = None,
+                containment_authority: object = None,
                 question_cap: int = GLOBAL_QUESTION_CAP) -> dict:
     """The maintenance seam: run the binder after recording, WRITE NOTHING.
 
@@ -2340,17 +2602,28 @@ def binder_step(vault_root: str | Path, *, now: object = None,
     """
     outcome = bind_episodes(vault_root, apply=False, question_cap=question_cap,
                             era_memberships=era_memberships, now=now,
+                            containment_authority=containment_authority,
                             trigger="maintenance_sweep")
+    result = outcome["plan"]
     return {
-        "counts": dict(outcome["plan"].counts),
+        "counts": dict(result.counts),
         "report": outcome["report"],
-        "questions": list(outcome["plan"].questions),
-        "overmerges": list(outcome["plan"].overmerges),
+        "questions": list(result.questions),
+        "overmerges": list(result.overmerges),
+        # I2b: the containment rung runs in the weekly seam exactly as it runs
+        # in an operator run — the SAME `plan()` — and the step reports it
+        # under the name the authority flag earns.
+        result.containment_block_name: list(result.containments),
+        "containment_diagnostics": list(result.containment_diagnostics),
         "wrote": False,
     }
 
 
 __all__ = [
+    "QUESTION_CONTEXT_SEAM",
+    "ENTITY_SIGNAL",
+    "DEFAULT_CONTAINMENT_AUTHORITY",
+    "CONTAINMENT_AUTHORITIES",
     "BINDER_ERROR_CODES",
     "BINDER_OUTPUT_FILE",
     "CANONICAL_DIRECTION_RULE",
@@ -2426,6 +2699,7 @@ __all__ = [
     "prospective_episode_id",
     "question_row",
     "r1_conditions",
+    "read_question_contexts",
     "read_vault_inputs",
     "reaudit_findings",
     "retrieval_signals",
