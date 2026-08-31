@@ -244,6 +244,11 @@ class FrozenShapeTests(unittest.TestCase):
         import re
 
         program = (
+            # I2 (the binder) joined this program and joins this sweep with
+            # it: the guard's value is that it FAILS when a new module gives
+            # a shared word a second home, so a new module has to be in it.
+            "episode_binder.py",
+            "episode_fold.py",
             "episode_fold_contract.py",
             "episode_routing_contract.py",
             "event_identity.py",

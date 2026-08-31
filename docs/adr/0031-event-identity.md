@@ -1,10 +1,13 @@
 # ADR 0031 — Event identity: tellings, episodes, operations and bindings
 
-**Status:** Accepted for phase I0 (records and contracts only).
+**Status:** Accepted. Shipped in this repo: **I0** (records and
+contracts, v265/v266), **I1** (the fold applies bindings, v267) and **I2** (the
+binder, v268). I3 (the probe, the five answers, split) and I4 (R3 model
+proposals, deferred) are not built.
 **Date:** 2026-08-30.
 **Controlling design:** lifehug-platform `docs/design/event-identity.md` **v4**
 — that document is authoritative; this ADR records the model in this repo's
-own vocabulary and says what I0 actually shipped.
+own vocabulary and says what each phase actually shipped.
 **Tracking:** lifehug-platform#781, lifehug#295. Predecessors: #751,
 Timeline Fix 05, ADR 0030 (eras), ADR 0024 (chronology with basis).
 
@@ -79,6 +82,46 @@ origin-transition rule.
 change a drawing. That is deliberate: the auditor's condition was that
 authority, identity, migration and recovery semantics be settled in executable
 contracts *before* the phases that consume them.
+
+## What I2 shipped (the binder)
+
+`system/episode_binder.py`, the `bind-episodes` verb and a weekly maintenance
+step. This is the first phase that DECIDES a binding rather than applying one:
+
+* **Retrieval** over §4.1's six blocking signals and a zero-model plausibility
+  score — one point per independent signal — below which a candidate is
+  dropped **silently**, because absence is not a decision.
+* **R1**, the deterministic floor, as §4.2's seven conditions in §4.2's order,
+  each with its own reason: a kind-family table in code, repeatable protection
+  (an undated telling is never auto-bound to a `job`-class episode), exact
+  label stems over a fixed event-verb table, two independent non-label
+  non-owner signals, one surviving candidate, no active or entailed
+  `not_same`, and never joining two episodes that each hold two or more
+  tellings. A label-only match is a **proposal**; ambiguity is one question
+  naming both candidates.
+* **The safeguards ship with it, not after it**: the disjoint-bounds
+  over-merge audit, the operation-graph bridge diagnostic, and time-decay (a
+  wide-gap place mismatch is `part_of`-suggestive, never a veto). Every §5.6
+  re-audit trigger runs through C4's `reaudit`, whose only two outcomes are
+  *mint one item* and *do nothing*.
+* **Question OUTPUTS, not questions.** Pairs are emitted as data keyed by C4's
+  pair key with the inputs the existing work-item value scoring reads. Neither
+  `same_event` nor `possible_overmerge` is registered in
+  `temporal_projection.WORK_ITEM_KINDS`: I3 owns the probe, the five answers
+  and the filing, and a kind whose answer nothing can file is the silent
+  under-delivery ADR 0021 refuses.
+* **`--dry-run` is the default and the scheduled step is dry by
+  construction.** Rollout step 3 says no live bind before I3, so the weekly
+  loop reports and the owner's `--apply` is the only door that writes.
+
+Three readings the design left to the phase, each named in code rather than
+found in a diff: `CLUSTER_RULE_TEXT` (§4.2 names no envelope for a telling
+joining an existing episode, so the deterministic act is one `create` over the
+cluster, growth reuses §3.2's supersede-with-alias, and an adopted episode is
+never moved); `NON_TRANSITIVE_RULE_TEXT` (Law 3 — a bind needs both sides to
+choose each other and no third telling in the same run); and the containment
+record, which lands as `proposed` because C2's validator pins the narrow
+reading that a `deterministic` origin binds `same` and nothing else.
 
 ## Consequences
 

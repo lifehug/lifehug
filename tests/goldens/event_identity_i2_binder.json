@@ -1,0 +1,132 @@
+{
+  "owner": "event identity I2 — the binder (event-identity:1, rung R1)",
+  "why": "The I1 golden's own shape, carried forward and given the two things a BINDER needs that a FOLD did not: tellings that have not been decided yet, and a second story so the run has something to be wrong about. Executed on the founder's vault at 5690d37e, Etherfuse is six nodes — a dated work-history landmark, a dated conversation about the idea, and four undated classifier occurrences. Here the landmark and one classifier occurrence bind; `Co-founded Etherfuse with AJ` is a PROPOSAL because only one non-label signal agrees; `the idea for Etherfuse` is refused by the kind-family gate and becomes a question; the Mexico event says in its own words that it happened DURING Etherfuse. The Ridgeline rows are the same shape said three times, which is how ambiguity is proved rather than asserted. Every name, date, place and word is synthetic; nothing here reads any real vault.",
+  "owner_birth": "1981-07-11",
+  "tellings": [
+    {
+      "role": "etherfuse_anchor",
+      "telling_ref": "landmark:entry-etherfuse",
+      "kind": "landmark",
+      "event_kind": "job",
+      "dated": "2022-05",
+      "places": [
+        "Mexico City"
+      ],
+      "mention": "Started Etherfuse",
+      "quote": "I started Etherfuse in May 2022."
+    },
+    {
+      "role": "etherfuse_same",
+      "telling_ref": "classification:etherfuse-story#a1a1a1a1a1a1",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "dated": "2022",
+      "places": [
+        "Mexico City"
+      ],
+      "mention": "Started Etherfuse",
+      "quote": "Started Etherfuse."
+    },
+    {
+      "role": "etherfuse_proposal",
+      "telling_ref": "classification:cofounded-story#b2b2b2b2b2b2",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "dated": null,
+      "places": [
+        "Mexico City"
+      ],
+      "mention": "Co-founded Etherfuse with AJ",
+      "quote": "Co-founded Etherfuse with AJ.",
+      "participants": [
+        "AJ"
+      ]
+    },
+    {
+      "role": "etherfuse_asked",
+      "telling_ref": "classification:idea-story#f6f6f6f6f6f6",
+      "kind": "classifier",
+      "event_kind": "idea",
+      "dated": "2021",
+      "places": [
+        "Mexico City"
+      ],
+      "mention": "The idea for Etherfuse",
+      "quote": "The idea for Etherfuse came to me in 2021."
+    },
+    {
+      "role": "etherfuse_part_of",
+      "telling_ref": "classification:mexico-story#e5e5e5e5e5e5",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "dated": null,
+      "places": [
+        "Mexico City"
+      ],
+      "mention": "Big Etherfuse event in Mexico",
+      "quote": "We threw a big event in Mexico during Etherfuse."
+    },
+    {
+      "role": "ridgeline",
+      "telling_ref": "landmark:entry-ridgeline",
+      "kind": "landmark",
+      "event_kind": "job",
+      "dated": "2015",
+      "places": [
+        "Phoenix"
+      ],
+      "mention": "Joined Ridgeline",
+      "quote": "I joined Ridgeline in 2015."
+    },
+    {
+      "role": "ridgeline",
+      "telling_ref": "classification:ridgeline-story#c3c3c3c3c3c3",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "dated": "2015",
+      "places": [
+        "Phoenix"
+      ],
+      "mention": "Joined Ridgeline",
+      "quote": "Joined Ridgeline."
+    },
+    {
+      "role": "ridgeline_third",
+      "telling_ref": "classification:ridgeline-again#d4d4d4d4d4d4",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "dated": "2015",
+      "places": [
+        "Phoenix"
+      ],
+      "mention": "Joined Ridgeline",
+      "quote": "Joined Ridgeline that same year."
+    },
+    {
+      "role": "ridgeline_undated",
+      "telling_ref": "classification:ridgeline-undated#e6e6e6e6e6e6",
+      "kind": "classifier",
+      "event_kind": "moment",
+      "dated": null,
+      "places": [
+        "Phoenix"
+      ],
+      "mention": "Joined Ridgeline",
+      "quote": "Joined Ridgeline."
+    }
+  ],
+  "expected": {
+    "etherfuse_stem": "etherfuse-found",
+    "ridgeline_stem": "ridgeline-join",
+    "etherfuse_bind_members": [
+      "classification:etherfuse-story#a1a1a1a1a1a1",
+      "landmark:entry-etherfuse"
+    ],
+    "etherfuse_canonical_kind": "job",
+    "ridgeline_bind_members": [
+      "classification:ridgeline-story#c3c3c3c3c3c3",
+      "landmark:entry-ridgeline"
+    ],
+    "cofounded_stem": "etherfuse-found"
+  }
+}
