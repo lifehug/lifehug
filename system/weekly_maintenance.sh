@@ -164,6 +164,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
   run_step python3 "$SCRIPT_DIR/lifehug.py" arc-plan --dry-run --limit "$QUEUE_LIMIT" --gap-max "${LIFEHUG_WEEKLY_ARC_GAP_MAX:-3}"
+  run_step python3 "$SCRIPT_DIR/lifehug.py" bind-episodes --dry-run
   run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" progress
   SINCE_7D=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc)-timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
@@ -347,6 +348,18 @@ fi
 # shellcheck disable=SC2034
 FOCUS_AUTOPILOT_OUT="$LAST_STEP_OUT"
 
+# Event identity (I2): the binder runs as a maintenance step, AFTER recording
+# and never inside compile. It is a DRY RUN by construction — design section
+# 8.3 says no live bind before I3 exists, and a scheduled writer would be one.
+# What it produces is a report: which tellings look like one event, every
+# condition each pair passed and failed, and how many "when did this happen?"
+# questions an apply would end. The owner reviews it once, and `bind-episodes
+# --apply` is the door that writes.
+run_learning_step "bind_episodes" python3 "$SCRIPT_DIR/lifehug.py" bind-episodes --dry-run
+# Read indirectly by the report section table below.
+# shellcheck disable=SC2034
+BINDER_OUT="$LAST_STEP_OUT"
+
 run_step python3 "$SCRIPT_DIR/research_expand.py" --gaps --dry-run
 PROGRESS_OUT=$(python3 "$SCRIPT_DIR/lifehug.py" progress 2>&1)
 echo "$PROGRESS_OUT"
@@ -393,6 +406,7 @@ mkdir -p "$REPORT_DIR"
     "Candidate promotion:PROMOTE_OUT" \
     "Planner queue:QUEUE_OUT" \
     "Arc cards:ARCS_OUT" \
+    "Event identity (dry run):BINDER_OUT" \
     "Focus autopilot:FOCUS_AUTOPILOT_OUT" \
     "Progress:PROGRESS_OUT" \
     "Learning failures:LEARNING_OUT" \

@@ -196,6 +196,11 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # name, and `era-migrate --dry-run` writes nothing but is still classified
     # here for the same reason focus-autopilot is.
     "era-record", "era-migrate",
+    # bind-episodes (event identity I2): --apply files episode operations and
+    # bindings through the vault mutation seat, the same single-transaction
+    # family as era-record. --dry-run writes nothing but the command is
+    # classified BY NAME, exactly as focus-autopilot and era-migrate are.
+    "bind-episodes",
     "timeline-unplace", "unretract",
 })
 
@@ -960,6 +965,50 @@ def cmd_era_record(args: argparse.Namespace) -> int:
         print(json.dumps(summary, indent=2, sort_keys=True, default=str))
     else:
         print("\n".join(era_record.describe(summary)))
+    return 0
+
+
+def cmd_bind_episodes(args: argparse.Namespace) -> int:
+    """`bind-episodes` — event identity I2's binder, dry by default.
+
+    Dry by DEFAULT rather than by flag: rollout step 3 says no live bind
+    before I3, so the door that writes has to be the one somebody typed on
+    purpose. `--dry-run` is accepted and is the default; `--apply` is the
+    only thing that files anything.
+    """
+    import json  # noqa: PLC0415
+
+    import episode_binder  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    # --dry-run WINS. The two flags can both be typed, and the safe one is
+    # the one that has to win, or a muscle-memory `--apply` in a shell that
+    # already had `--dry-run` in it would write to a vault.
+    apply = bool(getattr(args, "apply", False)) and not bool(getattr(args, "dry_run", False))
+    cap = getattr(args, "question_cap", None)
+    if cap is None:
+        cap = episode_binder.GLOBAL_QUESTION_CAP
+    try:
+        outcome = episode_binder.bind_episodes(
+            REPO_DIR, apply=apply, question_cap=int(cap),
+        )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        payload = outcome["plan"].as_dict()
+        payload["applied"] = outcome["applied"]
+        payload["filed"] = outcome["filed"]
+        payload["age_frames"] = outcome["frames"]
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return 0
+    print("\n".join(outcome["report"]))
+    print(f"  age_frames: {outcome['frames']}")
+    if apply:
+        filed = outcome["filed"] or {}
+        print(f"✓ filed {len(filed.get('envelopes', []))} envelope(s), "
+              f"{len(filed.get('proposals', []))} proposal(s); "
+              f"{filed.get('created', 0)} new record group(s)")
     return 0
 
 
@@ -2928,6 +2977,21 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Create/name/date an era in ONE act (JSON payload on stdin)")
     p.add_argument("--json", action="store_true", help="Print the summary as JSON")
     p.set_defaults(func=cmd_era_record)
+
+    p = sub.add_parser(
+        "bind-episodes",
+        help="Decide which tellings are one event (dry run unless --apply)",
+    )
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print every pair's reasons and write nothing (the default; "
+                        "wins over --apply if both are given)")
+    p.add_argument("--apply", action="store_true",
+                   help="File the envelopes and proposals through the mutation seat")
+    p.add_argument("--question-cap", dest="question_cap", type=int,
+                   default=None,
+                   help="Global open identity-question cap (owner knob)")
+    p.add_argument("--json", action="store_true", help="Print the plan as JSON")
+    p.set_defaults(func=cmd_bind_episodes)
 
     p = sub.add_parser("era-list", help="List this vault's eras and their labels")
     p.add_argument("--json", action="store_true")

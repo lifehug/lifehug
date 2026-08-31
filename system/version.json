@@ -310,6 +310,7 @@
     "system/entity_candidate_evals.py",
     "system/entity_roster.py",
     "system/entity_verdict.py",
+    "system/episode_binder.py",
     "system/episode_fold.py",
     "system/episode_fold_contract.py",
     "system/episode_routing_contract.py",
