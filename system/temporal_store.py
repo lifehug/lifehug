@@ -582,12 +582,13 @@ def write_receipt(
     """Publish one immutable extraction receipt; return its path.
 
     Re-running the *same* extractor over the *same* source revision is a no-op:
-    the path is already occupied by byte-identical content and nothing is
-    written. Re-running a *different* extractor writes a new receipt beside the
-    old one, because a later model reading the same prose is a new
-    interpretation and not a cache rebuild (plan §1.3). An attempt to change an
-    existing receipt's bytes in place is refused by name — that is the only
-    thing this store treats as corruption rather than as history.
+    the path is already occupied and nothing is written. Re-running a
+    *different* extractor writes a new receipt beside the old one, because a
+    later model reading the same prose is a new interpretation and not a cache
+    rebuild (plan §1.3). An attempt to change what an existing receipt ASSERTS
+    is refused by name — that is the only thing this store treats as corruption
+    rather than as history, and :data:`RECEIPT_ANNOTATION_KEYS` says exactly
+    what "asserts" excludes.
 
     The source must be present when the receipt declares a ``source_path``, so
     a crash between promotion and filing can never leave a receipt citing a
@@ -618,8 +619,9 @@ def write_receipt(
             stored = None
         if isinstance(stored, dict) and _assertion_view(stored) == _assertion_view(normalized):
             # The same interpretation, filed again. The bytes already on disk
-            # win — including their original timestamps — because a retry is
-            # later, not different.
+            # win — including their original timestamps and their original
+            # declaration — because a retry is later, not different, and a
+            # declaration is made at filing time and cannot be back-dated.
             return path
     raise TemporalStoreError(
         "receipt_immutable_conflict",
@@ -629,18 +631,44 @@ def write_receipt(
     )
 
 
-def _assertion_view(receipt: dict) -> dict:
-    """A receipt with every clock removed — what it ASSERTS, not when it was filed.
+#: What a receipt ANNOTATES rather than asserts, so re-filing one is a no-op
+#: instead of corruption. Two keys, each for a stated reason.
+#:
+#: ``created_at`` — a re-run of the same extraction stamps a fresh clock on the
+#: receipt and on each claim. That is annotation, exactly as it is for
+#: :func:`temporal_claims.derive_claim_id`, and treating it as a difference
+#: would turn "file this again" — the retry every idempotent caller depends on
+#: — into a corruption error the moment the second attempt crossed a one-second
+#: boundary.
+#:
+#: ``extractor`` — the extraction's own DECLARATION about itself, the block
+#: `event_identity.declare_tellings` builds. What a receipt asserts is its
+#: source revision, its extractor version and its claims; how richly the
+#: extractor described its own run is provenance beside that assertion, and a
+#: later framework version legitimately declares MORE about the identical
+#: claims. Event identity I1 (v267) is the live instance: it wired
+#: ``telling_keys`` and ``document_revision`` into the classifier's and the
+#: recorder's blocks, and the founder vault's 839 classifier receipts — filed
+#: at v263, byte-identical in every claim — became un-refilable at their own
+#: identity, so re-running `migrate-classifier-moments` crashed
+#: ``receipt_immutable_conflict`` on the first one. Naming the whole block,
+#: rather than listing the three fields I1 happened to add, is what keeps a
+#: fourth declaration field from reopening this by construction.
+#:
+#: Everything else must match, so a genuinely different READING at the same
+#: identity is still refused: to assert something else you move the identity —
+#: a new source revision, or a new rule version — which is what supersession is
+#: for.
+RECEIPT_ANNOTATION_KEYS = ("created_at", "extractor")
 
-    A re-run of the same extraction stamps a fresh ``created_at`` on the receipt
-    and on each claim. That is annotation, exactly as it is for
-    :func:`temporal_claims.derive_claim_id`, and treating it as a difference
-    would turn "file this again" — the retry every idempotent caller depends on
-    — into a corruption error the moment the second attempt crossed a one-second
-    boundary. Everything else must match, so a genuinely different reading at the
-    same path is still refused.
-    """
-    view = {key: value for key, value in receipt.items() if key != "created_at"}
+
+def _assertion_view(receipt: dict) -> dict:
+    """What a receipt ASSERTS — itself minus :data:`RECEIPT_ANNOTATION_KEYS`."""
+    view = {
+        key: value
+        for key, value in receipt.items()
+        if key not in RECEIPT_ANNOTATION_KEYS
+    }
     view["claims"] = [
         {key: value for key, value in claim.items() if key != "created_at"}
         for claim in (receipt.get("claims") or ())
@@ -1636,6 +1664,7 @@ __all__ = [
     "ORDERING_CONSTRAINT_TYPE",
     "INDEX_VERSION",
     "PROMOTION_IDENTITY_KEYS",
+    "RECEIPT_ANNOTATION_KEYS",
     "STATUS_BY_CORRECTION_KIND",
     "STATUS_PRECEDENCE",
     "STORE_ERROR_CODES",

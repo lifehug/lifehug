@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import chronology as chrono  # noqa: E402
 import classifier_claims as cc  # noqa: E402
+import event_identity as ei  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_publication as pub  # noqa: E402
@@ -297,6 +299,48 @@ class ClaimsPerEventTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
+# A v263-written receipt, filed the way v263 filed it
+# --------------------------------------------------------------------------
+
+
+def _pre_i1_receipt(stem: str, payload: dict, event_row: dict, root: Path) -> dict:
+    """The receipt `migrate_classifier_moments` built BEFORE event identity I1.
+
+    Verbatim the dict commit `af85415` replaced (v267): a three-key `extractor`
+    literal, no `telling_keys` and no `document_revision`. Restated here rather
+    than reconstructed from today's derivation, because the whole point of the
+    fixture is to hold bytes this framework version would not write.
+    """
+    claim = cc.event_claim(
+        stem=stem,
+        event=event_row,
+        revision=cc.classification_revision(payload),
+        source_path=payload["source_path"],
+        document_places=payload.get("places") or (),
+        now=NOW,
+    )
+    return {
+        "source_ref": claim["source_ref"],
+        "extractor_version": cc.CLASSIFIER_EXTRACTOR,
+        "extractor": {
+            "name": cc.EXTRACTOR_NAME,
+            "rule_version": cc.RULE_VERSION,
+            "deterministic": True,
+        },
+        "claims": [claim],
+        "recorder": "classifier_claims",
+    }
+
+
+def _file_as_v263(root: Path, stem: str, payload: dict) -> list[Path]:
+    """File every event of one classification as v263 filed it."""
+    return [
+        ts.write_receipt(root, _pre_i1_receipt(stem, payload, row, root), now=NOW)
+        for row in cc.classification_events(payload)
+    ]
+
+
+# --------------------------------------------------------------------------
 # 2 — idempotency, on the bytes
 # --------------------------------------------------------------------------
 
@@ -345,6 +389,137 @@ class IdempotencyTests(unittest.TestCase):
         self.assertEqual(report["claims"], 2)
         self.assertEqual(report["nodes_after"], report["nodes_before"] + 2)
         self.assertIn("dry run", "\n".join(cc.describe_migration(report)))
+
+
+# --------------------------------------------------------------------------
+# 2b — idempotency ACROSS framework versions (the v263/v267 live incident)
+# --------------------------------------------------------------------------
+
+
+class IdempotencyAcrossFrameworkVersionsTests(unittest.TestCase):
+    """A vault whose receipts were written by v263 re-migrates as a no-op.
+
+    The live incident (founder vault, hosted initial compile parked
+    `mutation_parked`, 2026-08-31): event identity I1 (v267, commit `af85415`)
+    routed the receipt's `extractor` block through
+    `event_identity.declare_tellings`, which adds `telling_keys` and
+    `document_revision`. `RULE_VERSION` did not move — correctly, since the
+    CLAIMS did not move — so the same classification re-derived different
+    receipt BYTES at the same receipt identity and `temporal_store` refused it
+    by name: `receipt_immutable_conflict`. 839 receipts, every one of them.
+    """
+
+    def setUp(self):
+        self.root = _vault(self)
+        self.relative = _story(self.root, "the-move")
+        self.payload = classification(
+            self.relative,
+            event("The Williams house", "We moved into the Williams house.",
+                  date={"stated": "1988", "age": None, "anchor_ref": None,
+                        "relation": None}),
+            event("The bike with no brakes", "I rode a bike with no brakes."),
+        )
+        _classification(self.root, "the-move", self.payload)
+        self.filed = _file_as_v263(self.root, "the-move", self.payload)
+        # A v263 vault folded its index after filing, exactly as this does.
+        ts.rebuild_active_index(self.root)
+
+    def test_the_fixture_holds_the_shape_this_version_would_not_write(self):
+        """The fixture is only worth anything if v273 really derives more."""
+        stored = json.loads(self.filed[0].read_text(encoding="utf-8"))
+        self.assertEqual(
+            sorted(stored["extractor"]), ["deterministic", "name", "rule_version"]
+        )
+        self.assertNotIn("telling_keys", stored["extractor"])
+        self.assertNotIn("document_revision", stored["extractor"])
+
+    def test_re_migrating_a_v263_written_vault_is_a_byte_identical_no_op(self):
+        before = _files(self.root)
+        report = _run(self.root, publish=False)
+        self.assertEqual(_files(self.root), before)
+        self.assertEqual(report["receipts"], 2)
+        self.assertEqual(report["receipts_written"], 0)
+        self.assertEqual(report["receipts_kept"], 2)
+        self.assertIn(
+            "kept 2 already filed", "\n".join(cc.describe_migration(report))
+        )
+
+    def test_the_v263_receipts_are_what_the_fold_reads(self):
+        """The fold takes the receipt that is on disk, declaration and all."""
+        _run(self.root, publish=False)
+        rows = ts.active_claims(ts.fold_active_index(self.root))
+        self.assertEqual(
+            sorted(row["event_mention"] for row in rows),
+            ["The Williams house", "The bike with no brakes"],
+        )
+        for row in rows:
+            self.assertEqual(row["extractor_version"], cc.CLASSIFIER_EXTRACTOR)
+
+    def test_the_declaration_is_the_ONLY_thing_that_moved(self):
+        """Proven, not assumed: same claims, same receipt id, richer block.
+
+        This is what makes the KEEP correct rather than convenient. If a future
+        change moved a claim instead, this test says so and the answer is a
+        `RULE_VERSION` bump, not a wider annotation list.
+        """
+        stored = json.loads(self.filed[0].read_text(encoding="utf-8"))
+        derived = tc.validate_extraction_receipt(
+            _pre_i1_receipt("the-move", self.payload,
+                            cc.classification_events(self.payload)[0], self.root),
+            now=NOW,
+        )
+        derived["extractor"] = ei.declare_tellings(
+            derived["extractor"],
+            telling_keys={
+                derived["claims"][0]["claim_id"]: ei.classifier_telling_ref(
+                    "the-move", cc.classification_events(self.payload)[0]
+                )
+            },
+            document_revision=cc.document_revision(self.root, self.relative),
+        )
+        self.assertEqual(stored["claims"], derived["claims"])
+        self.assertEqual(stored["receipt_id"], derived["receipt_id"])
+        self.assertNotEqual(stored["extractor"], derived["extractor"])
+        self.assertEqual(
+            {key: value for key, value in derived["extractor"].items()
+             if key in stored["extractor"]},
+            stored["extractor"],
+        )
+
+    def test_without_the_annotation_rule_the_fixture_reproduces_the_incident(self):
+        """Proven-to-fire. The pre-fix rule, run against the same fixture.
+
+        `RECEIPT_ANNOTATION_KEYS` held only `("created_at",)` before this fix,
+        which is exactly the state the founder vault crashed in.
+        """
+        with unittest.mock.patch.object(
+            ts, "RECEIPT_ANNOTATION_KEYS", ("created_at",)
+        ):
+            with self.assertRaises(ts.TemporalStoreError) as caught:
+                _run(self.root, publish=False)
+        self.assertEqual(caught.exception.code, "receipt_immutable_conflict")
+
+    def test_a_v263_vault_that_re_classifies_still_supersedes(self):
+        """The KEEP is not a swallow: a NEW revision still lands beside it."""
+        _run(self.root, publish=False)
+        moved = classification(
+            self.relative,
+            event("The Williams house", "We moved into the Williams house.",
+                  date={"stated": "1989", "age": None, "anchor_ref": None,
+                        "relation": None}),
+        )
+        _classification(self.root, "the-move", moved)
+        report = _run(self.root, publish=False)
+        self.assertEqual(report["receipts_written"], 1)
+        self.assertEqual(report["receipts_kept"], 0)
+        self.assertEqual(report["superseded_claims"], 2)
+        dates = {
+            row["temporal_value"]["best"]
+            for row in ts.active_claims(ts.fold_active_index(self.root))
+            if row.get("temporal_value")
+        }
+        self.assertIn("1989", dates)
+        self.assertNotIn("1988", dates)
 
 
 # --------------------------------------------------------------------------
