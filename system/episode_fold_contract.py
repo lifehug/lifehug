@@ -242,6 +242,67 @@ CONTAINMENT_AUTHORITY_RULE_TEXT = (
     "publishes `proposed_links`. Nothing else in the record differs."
 )
 
+#: The ONE in-place origin move the identity layer admits, and the whole list.
+#:
+#: :data:`CONTAINMENT_AUTHORITY_RULE_TEXT` already promises that flipping the
+#: authority "re-keys nothing, rewrites no evidence and moves no file" — the
+#: two authorities mint the same ``identity_id`` and
+#: :func:`event_identity.bindings_dir` sends ``proposed`` and ``deterministic``
+#: to the SAME directory. A run at the stronger authority therefore meets its
+#: own record at its own path under its own id, and the only honest thing left
+#: to do is move the one field the flag owns. Before this pair existed, that
+#: run met create-or-keep, kept the proposal, and reported
+#: ``containment_members: 0`` — which reads as *the rung found nothing*, the
+#: exact misreading :func:`containment_origin` refuses an unknown authority to
+#: prevent.
+#:
+#: ONE HOME (ADR 0021). `event_identity` is the write door and the only module
+#: that acts on this; the binder and the containment rung read it to say what a
+#: run WOULD do. A second spelling anywhere is a second answer to "which way
+#: may an origin move".
+ORIGIN_UPGRADES = (("proposed", "deterministic"),)
+
+CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT = (
+    "Re-running the containment rung at `applied` authority over a record it "
+    "already filed at `proposed` — identical in every field but `origin`, "
+    "created_at included and preserved — moves that record's `origin` to "
+    "`deterministic` IN PLACE: same file, same identity_id, same evidence, "
+    "same clock, one field. The run counts it as an upgrade rather than a "
+    "creation, because nothing was decided that was not decided before; only "
+    "the host grew the gesture that lets a person take the placement back. "
+    "The reverse is not a move. A run at `proposed` authority meeting a filed "
+    "`deterministic` record KEEPS it and counts the keep, because a host that "
+    "forgot its flag must not silently un-draw a containment the person can "
+    "already see and already drag out. A record differing in anything besides "
+    "`origin` is not an upgrade target at all: ordinary create-or-keep stands, "
+    "and the difference is reported rather than resolved."
+)
+
+#: What one re-filing of a binding did. ``kept`` covers the byte-identical
+#: replay; ``kept_stronger`` is the refused downgrade above; ``kept_differs``
+#: is create-or-keep meeting a record that says something else.
+BINDING_FILING_OUTCOMES = (
+    "created", "upgraded", "kept", "kept_stronger", "kept_differs",
+)
+
+
+def origin_move(filed: object, minted: object) -> str:
+    """``"same"`` · ``"upgrade"`` · ``"downgrade"`` · ``"unrelated"``.
+
+    Pure, and deliberately about the ORIGINS alone: whether the two records
+    are otherwise identical is a separate question, answered on the bytes by
+    `event_identity.refile_event_identity` and never inferred from here.
+    """
+    left = collapsed_text(filed)
+    right = collapsed_text(minted)
+    if left == right:
+        return "same"
+    if (left, right) in ORIGIN_UPGRADES:
+        return "upgrade"
+    if (right, left) in ORIGIN_UPGRADES:
+        return "downgrade"
+    return "unrelated"
+
 
 def containment_origin(authority: object) -> str:
     """The binding origin one authority files (:data:`CONTAINMENT_AUTHORITIES`).
@@ -969,7 +1030,9 @@ __all__ = [
     "DEFAULT_CONTAINMENT_AUTHORITY",
     "CONTAINMENT_ORIGIN_BY_AUTHORITY",
     "CONTAINMENT_AUTHORITY_RULE_TEXT",
+    "CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT",
     "CONTAINMENT_AUTHORITIES",
+    "BINDING_FILING_OUTCOMES",
     "CONTAINMENT_CLAIM_SENTENCE",
     "CONTAINMENT_DATE_BASIS",
     "CONTAINMENT_PROBE_TEXT",
@@ -990,6 +1053,7 @@ __all__ = [
     "MANIFEST_READ_FIELDS",
     "NODE_REF_PREFIX",
     "ORIGINS",
+    "ORIGIN_UPGRADES",
     "REFUSAL_IDENTITY_CONFLICT",
     "REFUSAL_TELLING_MIXES_IDENTITIES",
     "RELATIONS",
@@ -997,6 +1061,7 @@ __all__ = [
     "active_binding_index",
     "claim_event_ref_kind",
     "containment_probe",
+    "origin_move",
     "deterministic_relation_allowed",
     "containment_origin",
     "entailed_not_same",

@@ -1018,6 +1018,14 @@ def cmd_bind_episodes(args: argparse.Namespace) -> int:
         print(f"✓ filed {len(filed.get('envelopes', []))} envelope(s), "
               f"{len(filed.get('proposals', []))} proposal(s); "
               f"{filed.get('created', 0)} new record group(s)")
+        # §12b ruling 6's upgrade path. A run over a vault whose containments
+        # were all filed at the other authority creates nothing, and the line
+        # above alone would read as "nothing happened".
+        print(f"  authority: {len(filed.get('upgraded', []))} upgraded to "
+              f"deterministic, {len(filed.get('kept_stronger', []))} kept at "
+              f"deterministic")
+        for row in filed.get("not_upgraded", ()):
+            print(f"  ⚠ not upgraded ({row['outcome']}): {row['identity_id']}")
     return 0
 
 
