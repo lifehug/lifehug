@@ -995,6 +995,7 @@ def cmd_bind_episodes(args: argparse.Namespace) -> int:
     try:
         outcome = episode_binder.bind_episodes(
             REPO_DIR, apply=apply, question_cap=int(cap),
+            containment_authority=getattr(args, "containment_authority", None),
         )
     except TemporalContractError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -1004,10 +1005,14 @@ def cmd_bind_episodes(args: argparse.Namespace) -> int:
         payload["applied"] = outcome["applied"]
         payload["filed"] = outcome["filed"]
         payload["age_frames"] = outcome["frames"]
+        payload["roster_entities"] = outcome["entities"]
+        payload["question_context_stamps"] = outcome["question_contexts"]
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
     print("\n".join(outcome["report"]))
     print(f"  age_frames: {outcome['frames']}")
+    print(f"  roster_entities: {outcome['entities']}")
+    print(f"  question_context_stamps: {outcome['question_contexts']}")
     if apply:
         filed = outcome["filed"] or {}
         print(f"✓ filed {len(filed.get('envelopes', []))} envelope(s), "
@@ -2598,6 +2603,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def episode_containers_authorities() -> tuple:
+    """`episode_fold_contract.CONTAINMENT_AUTHORITIES`, imported at parse time.
+
+    A local import so building the parser does not pull the whole identity
+    substrate into every `lifehug` invocation, and imported rather than
+    re-typed so the CLI's choices and the validator's list cannot drift.
+    """
+    import episode_containers  # noqa: PLC0415
+
+    return tuple(episode_containers.CONTAINMENT_AUTHORITIES)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Lifehug script-first workflow wrapper")
     parser.add_argument(
@@ -3084,6 +3101,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--question-cap", dest="question_cap", type=int,
                    default=None,
                    help="Global open identity-question cap (owner knob)")
+    p.add_argument("--containment-authority", dest="containment_authority",
+                   choices=episode_containers_authorities(),
+                   default=None,
+                   help="Whether containment records file as applied bindings or "
+                        "as proposals (host flag, amendment v4.2 §12b.6; default "
+                        "proposed until the drag-out gesture is live)")
     p.add_argument("--json", action="store_true", help="Print the plan as JSON")
     p.set_defaults(func=cmd_bind_episodes)
 

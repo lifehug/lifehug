@@ -404,6 +404,13 @@ _create_or_keep = create_or_keep
 # --------------------------------------------------------------------------
 
 
+#: Event identity I2b. The additive frontmatter key a promoted source carries
+#: when the session that produced it was ASKING ABOUT a container (§12b ruling
+#: 5). ONE HOME: `episode_binder.read_question_contexts` reads this name and
+#: nothing re-spells it.
+QUESTION_CONTEXT_KEY = "question_context"
+
+
 def promotion_digest(message_text: object, metadata: object = None) -> str:
     """The sha256 that identifies one utterance (:data:`PROMOTION_IDENTITY_KEYS`).
 
@@ -501,7 +508,20 @@ def promote_conversational_source(
 
     ``metadata`` is optional and understood keys are ``session_ref``,
     ``turn_ref``, ``speaker``, ``channel``/``source_medium``, ``occurred_at``,
-    ``title`` and ``visibility``. Only the first two participate in identity.
+    ``title``, ``visibility`` and — event identity **I2b** —
+    ``question_context``. Only the first two participate in identity.
+
+    **``question_context`` is the recorder's stamp** (event-identity amendment
+    v4.2 §12b ruling 5): the CONTAINER the session's question targeted — the
+    work-item or era Play target the host already holds when it opens the
+    conversation. *"A lot of the Etherfuse questions and answers are Etherfuse
+    questions, so we should place those in Etherfuse by default."* That makes
+    it a FACT about what was asked, not an inference from what was said, which
+    is why `episode_binder` files it as a deterministic `part_of` rather than
+    as a proposal. It rides the SOURCE and not the claim because §9 froze
+    `TemporalClaim`'s fields; it is additive, absent by default, and never
+    part of :data:`PROMOTION_IDENTITY_KEYS` — the same words said to two
+    different questions are still one utterance.
     """
     meta = dict(metadata) if isinstance(metadata, dict) else {}
     text = normalize_payload(str(message_text or ""))
@@ -532,7 +552,7 @@ def promote_conversational_source(
         "source_path": relative,
         "content_sha256": payload_sha256(payload),
     }
-    for key in ("session_ref", "turn_ref", "speaker"):
+    for key in ("session_ref", "turn_ref", "speaker", QUESTION_CONTEXT_KEY):
         value = collapsed_text(meta.get(key))
         if value:
             frontmatter[key] = value

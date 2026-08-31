@@ -314,10 +314,15 @@ class RetrievalTests(unittest.TestCase):
         self.views = eb.telling_views(claims_for())
         self.units = eb.candidates(self.views)
 
-    def test_the_six_signals_are_the_designs_six(self):
+    def test_the_seven_signals_are_the_designs_six_plus_i2bs_entity(self):
+        """§4.1's six, and amendment v4.2 §12b ruling 1's seventh.
+
+        `entity` sits beside `participant` because that is what it is a
+        widening of: the roster's recognition of a name the participant set
+        never carried."""
         self.assertEqual(eb.RETRIEVAL_SIGNALS,
-                         ("participant", "place", "era", "bounds_in_frame",
-                          "label_token", "source_document"))
+                         ("participant", "entity", "place", "era",
+                          "bounds_in_frame", "label_token", "source_document"))
 
     def test_the_score_is_one_point_per_signal_and_nothing_else(self):
         signals = eb.retrieval_signals(
