@@ -2208,6 +2208,22 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     containment = ec.containment_rows(
         views, result.containers, question_contexts=question_contexts,
     )
+    # I3c: a telling this run already carries ANY active binding for (event
+    # identity's own docstring: "never placed inside a container it is
+    # already a member of" — but the ORIGINAL filter only excluded a
+    # container's own opened-by/key telling, not an arbitrary EXISTING
+    # decision). Read from `active` — the same properly-collapsed view R1
+    # itself reads, never a raw scan — so a telling a person already
+    # confirmed `same` (or `part_of`, `related`, `not_same`) to this EXACT
+    # episode never gets a second, disagreeing containment proposal minted
+    # on top of it. Without this, a SECOND `bind-episodes --apply` after a
+    # confirmed answer re-proposes `part_of` over the person's own `same`
+    # and the next fold refuses: `identity_conflict`.
+    containment = [
+        row for row in containment
+        if row["episode_id"] not in
+        {b.get("episode_id") for b in active.get(row["telling_ref"], ())}
+    ]
     result.containment_diagnostics = ec.unresolved_question_contexts(
         views, result.containers, question_contexts=question_contexts,
     )

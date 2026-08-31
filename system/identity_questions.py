@@ -297,13 +297,34 @@ def _create_singleton(
     return episode_id
 
 
+def _pair_binding(vault_root: str | Path, *, telling_ref: str, episode_id: str) -> dict | None:
+    """The one ACTIVE binding this EXACT (telling, episode) pair currently
+    holds, of ANY relation — never assumed `same`-only. From the properly
+    collapsed view (:func:`_grouping_index`), so a binding a prior answer
+    already superseded is never mistaken for what the pair says now.
+
+    This is the read behind two rules at once (event identity I3c): a
+    healthy vault never has more than one active relation on one exact
+    pair (`episode_fold_contract.active_binding_index`'s own per-pair
+    refusal, `identity_conflict` — proactively avoided here rather than
+    triggered), so whatever this returns IS the pair's current answer,
+    whole.
+    """
+    for row in _grouping_index(vault_root).get(telling_ref) or ():
+        if collapsed_text(row.get("episode_id")) == episode_id:
+            return row
+    return None
+
+
 def _bind_into_episode(
     vault_root: str | Path, *, telling_ref: str, episode_id: str,
     evidence: object = None, source_ref: object = None, now: object = None,
 ) -> dict:
     """One telling, bound `same` into an EXISTING episode — the growth path
     for case (a): one side of a confirmed pair already belongs somewhere,
-    the other is standalone.
+    the other is standalone. Also the "same episode already" case, and the
+    containment-absorption case (I3c) — one function, because in a healthy
+    vault the pair carries at most ONE prior answer and this reads it once.
 
     No NEW operation envelope is minted. Active bindings are the sole fold
     authority (design §3.2); C2's operation vocabulary has no `add`, and
@@ -315,20 +336,39 @@ def _bind_into_episode(
     durable fact, so one bare binding into the episode that already exists
     is the complete, correct record, with no id to re-derive and nothing to
     alias.
+
+    **`same` ABSORBS membership (I3c, a real defect found rehearsing the
+    founder apply pass).** `bind-episodes --apply`'s containment rung can
+    file a `part_of` binding for this exact (telling, episode) pair before
+    anyone ever answers a `same_event` question about it — the telling
+    stops being a MEMBER and becomes the thing itself the moment a person
+    confirms `same`, so the new binding supersedes whatever the pair
+    already said, `part_of` included, exactly as it already superseded a
+    machine `same` proposal. Only one prior answer can be active on one
+    exact pair in a healthy vault, so ONE `supersedes` reference — the
+    pair's own existing binding, whatever its relation — is always enough.
     """
-    existing = _active_binding(
-        vault_root, telling_ref=telling_ref, episode_id=episode_id,
-        relation=efc.GROUPING_RELATION,
-    )
-    if existing is not None and existing.get("origin") in ei.HUMAN_ORIGINS:
-        # Already a human decision naming this exact pair — true idempotency,
-        # not a fresh supersession chain (§5.8 row 2).
+    existing = _pair_binding(vault_root, telling_ref=telling_ref, episode_id=episode_id)
+    if (
+        existing is not None
+        and existing.get("relation") == efc.GROUPING_RELATION
+        and existing.get("origin") in ei.HUMAN_ORIGINS
+    ):
+        # Already a human `same` decision naming this exact pair — true
+        # idempotency, not a fresh supersession chain (§5.8 row 2). Checked
+        # and returned BEFORE anything is written, per §13.4's "answering
+        # twice is idempotent by record digest" — no new record, not even a
+        # superseding one, for a pair that already says exactly this.
         return {"answer": "same", "episode_id": episode_id, "binding": existing, "created": False}
+    # `existing`, whatever it is, is superseded here: a machine `same`
+    # proposal (the ordinary origin-transition), or a `part_of`/`related`/
+    # `not_same` binding on the identical pair (`same` absorbing
+    # membership, I3c) — one prior answer, one `supersedes` reference.
     binding, created = ei.file_event_identity(
         vault_root,
         telling_ref=telling_ref, episode_id=episode_id, relation=efc.GROUPING_RELATION,
         origin="confirmed", rule_version=ei.IDENTITY_RULE_VERSION,
-        supersedes=_machine_origin_to_supersede(existing),
+        supersedes=existing["identity_id"] if existing is not None else None,
         evidence=evidence or {}, source_ref=source_ref, created_at=now,
     )
     return {"answer": "same", "episode_id": episode_id, "binding": binding, "created": created}
@@ -426,21 +466,54 @@ def _merge_episodes(
         # `supersedes_binding_ids` names, and re-filing an unchanged one is a
         # no-op (create-or-keep).
         bindings.append(dict(old))
+        # I3c: the telling may ALSO already carry a stray binding of some
+        # OTHER relation directly on the SURVIVOR (a containment membership
+        # `bind-episodes` filed before anyone merged anything). `same`
+        # absorbs it exactly as `_bind_into_episode` does — but `supersedes`
+        # only names ONE record, and the absorbed-episode retirement above
+        # is mandatory for the merge itself, so when both exist the two
+        # retirements ride TWO records: the absorbed-episode `same` retires
+        # via its own `none`-relation departure (the split-departure shape),
+        # and the new `same` into the survivor supersedes the STRAY record
+        # instead of `old`.
+        stray = _pair_binding(vault_root, telling_ref=telling, episode_id=survivor)
+        if stray is not None and stray.get("relation") != efc.GROUPING_RELATION:
+            departure_id = ei.binding_digest(
+                telling_ref=telling, episode_id=absorbed,
+                relation=ei.SPLIT_DEPARTURE_RELATION, rule_version=ei.IDENTITY_RULE_VERSION,
+                supersedes=old["identity_id"],
+            )
+            creates_ids.append(departure_id)
+            bindings.append({
+                "telling_ref": telling, "episode_id": absorbed,
+                "relation": ei.SPLIT_DEPARTURE_RELATION, "origin": "confirmed",
+                "rule_version": ei.IDENTITY_RULE_VERSION,
+                "supersedes": old["identity_id"],
+                "source_ref": source_ref, "created_at": now,
+            })
+            supersedes_ids.append(stray["identity_id"])
+            bindings.append(dict(stray))
+            new_supersede = stray["identity_id"]
+        else:
+            new_supersede = old["identity_id"]
         creates_ids.append(ei.binding_digest(
             telling_ref=telling, episode_id=survivor,
             relation=efc.GROUPING_RELATION, rule_version=ei.IDENTITY_RULE_VERSION,
-            supersedes=old["identity_id"],
+            supersedes=new_supersede,
         ))
         bindings.append({
             "telling_ref": telling, "episode_id": survivor,
             "relation": efc.GROUPING_RELATION, "origin": "confirmed",
             "rule_version": ei.IDENTITY_RULE_VERSION,
-            # Names the OLD (absorbed-episode) binding it retires — WITHOUT
-            # this, `validate_identity_set` has no record whose `supersedes`
-            # names the old one, the old binding stays "active" forever
-            # alongside the new one, and the very next fold refuses with the
-            # `identity_conflict` this whole function exists to prevent.
-            "supersedes": old["identity_id"],
+            # Names whichever prior record this exact NEW binding retires —
+            # the absorbed-episode `same` when the survivor pair was clean,
+            # or the stray record above when it was not. WITHOUT this,
+            # `validate_identity_set`/`active_binding_index` have no record
+            # whose `supersedes` names the old one, it stays "active"
+            # forever alongside the new one, and the very next fold refuses
+            # with the `identity_conflict` this whole function exists to
+            # prevent.
+            "supersedes": new_supersede,
             "source_ref": source_ref, "created_at": now,
         })
     envelope = ei.file_operation_envelope(
@@ -618,6 +691,20 @@ def resolve_same_event_answer(
         )
         episode_id = _create_singleton(vault_root, counterpart_ref, source_ref=source_ref, now=now)
 
+    # `same` ABSORBS membership; the reverse never happens (I3c). A pair the
+    # person already confirmed `same` on is not up for revision by a
+    # DIFFERENT relation on the identical pair — that is a contradiction of
+    # what they already said, not a correction of it. The way out is a
+    # `possible_overmerge` split (or an ordinary answer on a genuinely
+    # different candidate pair), never a silent overwrite here.
+    pair_now = _pair_binding(vault_root, telling_ref=telling, episode_id=episode_id)
+    _require(
+        pair_now is None or pair_now.get("relation") != efc.GROUPING_RELATION,
+        "identity_answer_contradicts_same",
+        f"{telling} already carries an active `same` binding to {episode_id}; "
+        f"answering {answer_code!r} on the identical pair would contradict it, "
+        "not revise it",
+    )
     existing = _active_binding(
         vault_root, telling_ref=telling, episode_id=episode_id, relation=relation,
     )
@@ -737,6 +824,11 @@ def resolve_possible_overmerge_answer(
                     "not an identity write",
         }
     if answer_code == "part_of":
+        # The overmerge audit's own sanctioned reverse: demoting an ACTIVE
+        # `same` to `part_of` is exactly what this answer is FOR (I3c),
+        # unlike a bare `same_event` pair's `part_of` answer, which never
+        # overwrites one. Superseded unconditionally, regardless of origin —
+        # a human's own overmerge decision, not an origin-transition.
         existing = _active_binding(
             vault_root, telling_ref=telling, episode_id=episode,
             relation=efc.GROUPING_RELATION,
@@ -745,7 +837,7 @@ def resolve_possible_overmerge_answer(
             vault_root,
             telling_ref=telling, episode_id=episode, relation="part_of",
             origin="confirmed", rule_version=ei.IDENTITY_RULE_VERSION,
-            supersedes=_machine_origin_to_supersede(existing),
+            supersedes=existing["identity_id"] if existing is not None else None,
             source_ref=source_ref, created_at=now,
         )
         return {"answer": "part_of", "episode_id": episode, "binding": binding, "created": created}

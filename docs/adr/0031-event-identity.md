@@ -7,7 +7,10 @@ the fold's own age frames, the recorder's stem), **I3** (the questions —
 five answers, the split gesture, the listener leaf, v270), **I2b**
 (containers first — the entity signal and the containment rung, v271) and
 **I3b** (composing overlapping confirmed pairs — a real defect found
-rehearsing the founder apply pass, v272). I4 (R3 model proposals, deferred)
+rehearsing the founder apply pass, v272) and **I3c** (idempotent answers —
+`same` absorbs an active `part_of` on the identical pair, the reverse is
+refused, and the containment rung stops re-proposing over what a person
+already confirmed, v273). I4 (R3 model proposals, deferred)
 is not built. Wiring I3's generation into the published `work-items.json`
 loop, the owner-reviewed founder dry-run and the all-tenant backfill runbook
 are I-P (platform), not this repo.
@@ -352,6 +355,70 @@ pairs sharing one vertex, in every choice of shared vertex and every filing
 order): no permutation ever raises `identity_conflict`, and every one
 converges to one episode of three. A third confirmed answer joining two
 mature human episodes files a merge, never a refusal.
+
+## I3c — idempotent answers, and `same` absorbing `part_of` (v273)
+
+The v272 rehearsal (a fresh copy) surfaced two more defects than I3b's own
+fix caught, both found by running the ACTUAL 19-answer, 48-containment
+founder-shaped batch rather than a hand-built fixture.
+
+**Defect A.** `bind-episodes --apply`'s containment rung can file a
+`part_of` binding for a (telling, episode) pair before anyone ever answers
+a `same_event` question about it. When a person later confirms `same` on
+that EXACT pair, the old code filed a fresh `same` binding without
+retiring the pair's own `part_of` — two active bindings on one (telling,
+episode) pair that disagree about the relation, and the next fold or
+dry-run correctly refused: `identity_conflict`
+(`episode_fold_contract.active_binding_index`'s own per-pair guard). `same`
+now ABSORBS whatever the pair already said — `_bind_into_episode` and
+`_merge_episodes` both read the pair's one existing binding, of ANY
+relation, and supersede it, unifying what used to be a same-relation-only
+origin-transition check with the new part_of-absorption case. The reverse
+— filing `part_of`/`related`/`different` over an active `same` — is refused
+with `identity_answer_contradicts_same`: a later different relation on the
+identical pair is a contradiction of what the person already said, not a
+revision of it. The one SANCTIONED reverse, `possible_overmerge`'s own
+`part_of` answer (explicitly about demoting an active `same`), was fixed to
+supersede a HUMAN-confirmed `same` too, not only a machine one.
+
+A `_merge_episodes` refinement fell out of the SAME rule: a member of the
+episode being ABSORBED into a merge may ALSO already carry a stray
+`part_of` directly on the SURVIVOR. `supersedes` only names one record, so
+the absorbed-episode retirement (mandatory for the merge itself) rides its
+own `none`-relation departure record (the split-departure shape), and the
+new `same` binding supersedes the stray instead.
+
+**Defect B.** Re-filing an already-answered pair raised `identity_conflict`
+instead of a create-or-keep no-op — for EVERY one of the 19 pairs, including
+ones with no containment involvement at all. Diagnosis, confirmed by
+running the actual driver twice: this was NOT one bug but two compounding
+across a whole-vault check. First, Defect A's own conflict poisoned every
+subsequent read, because `active_binding_index` processes the WHOLE vault
+and raises on the FIRST conflict it finds anywhere — fixing Defect A
+already restored idempotent replay for the pairs it didn't touch (I3b's
+own "same episode already" branch already reaches `_bind_into_episode`'s
+existing/no-op check before writing anything). Second, and only found by
+running `bind-episodes --apply` a SECOND time as the rehearsal's own driver
+does: the containment rung itself has NO awareness of the identity
+substrate — `episode_containers.containment_rows` derives its rows purely
+from entity/span retrieval and re-proposes `part_of` for a telling already
+`same`-confirmed to the exact episode its own container became, even
+though its own docstring already promised *"a telling is never placed
+inside a container it is already a member of."* `episode_binder.plan()`'s
+containment rung now filters its rows against the SAME properly-collapsed
+`active` view R1 itself already reads, before minting anything — pair-
+scoped, so an unrelated member's containment is untouched.
+
+**Verification: the actual driver, end to end, on a fresh copy.** `bind-
+episodes --apply` + all 19 confirmed answers (pass 1): 19/19 filed, 0
+errors. `bind-episodes --dry-run`: loads clean. The SAME driver run AGAIN
+on the SAME vault (pass 2 — `bind-episodes --apply` re-run, then all 19
+answers re-filed): 19/19 filed, 0 errors, every one a create-or-keep no-op.
+`bind-episodes --dry-run` after both passes: loads clean. The exact results
+are in the PR body. A property test additionally proves the general
+promise over a synthetic batch mixing containment-absorbing confirmations,
+a plain pair and a merge, across every one of 120 filing orders: the fold
+never refuses, and the final partition is the same regardless of order.
 
 ## Consequences
 
