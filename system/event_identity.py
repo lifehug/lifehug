@@ -83,6 +83,7 @@ from episode_fold_contract import (  # noqa: E402
     ORIGINS,
     RELATIONS,
     deterministic_relation_allowed,
+    origin_move,
 )
 from vault_paths import atomic_write_vault_text  # noqa: E402
 from temporal_claims import (  # noqa: E402
@@ -269,6 +270,7 @@ EVENT_IDENTITY_ERROR_CODES = (
     "identity_needs_episode",
     "identity_deterministic_relation_unsupported",
     "identity_binding_unreadable",
+    "identity_record_unwritable",
     "identity_unsuperseded_twin",
     "identity_conflict",
 )
@@ -1761,24 +1763,113 @@ def validate_event_identity(value: object) -> dict:
     return normalized
 
 
+def _binding_bytes(record: Mapping[str, object]) -> str:
+    """The exact bytes :func:`_write_json_record` would publish for a record."""
+    return json.dumps(
+        {key: value for key, value in dict(record).items()
+         if key != RECORD_PATH_KEY},
+        indent=2, sort_keys=True, ensure_ascii=False,
+    ) + "\n"
+
+
+def _file_binding(vault_root: str | Path, record: dict, *,
+                  upgrade: bool) -> tuple[dict, str]:
+    """Create-or-keep one binding, optionally moving its ORIGIN in place.
+
+    The one implementation behind both doors, so "what happens when a record
+    is already there" has a single answer. Returns one of
+    :data:`episode_fold_contract.BINDING_FILING_OUTCOMES`.
+
+    The upgrade is proved on the BYTES, never inferred: the filed record is
+    re-serialized with its own origin and compared to the file, so a record an
+    older normalization wrote differently is ``kept_differs`` rather than
+    silently re-normalized under cover of an origin flip. When it passes, what
+    is written is the FILED record with exactly one key replaced — the
+    evidence, the rule, the ids and the original ``created_at`` are the bytes
+    already on disk, not the re-derived ones.
+    """
+    relative = binding_relative_path(record["origin"], record["identity_id"])
+    _record, created = _write_json_record(vault_root, relative, record)
+    if created:
+        record[RECORD_PATH_KEY] = relative
+        return record, "created"
+
+    existing = read_event_identity(vault_root, relative)
+    if existing is None:
+        # Unreadable or foreign bytes at this path: create-or-keep's own
+        # answer, unchanged. Nothing here overwrites what it cannot read.
+        record[RECORD_PATH_KEY] = relative
+        return record, "kept_differs"
+
+    filed = {key: value for key, value in existing.items()
+             if key != RECORD_PATH_KEY}
+    move = origin_move(filed.get("origin"), record["origin"])
+    # The clock is annotation (:data:`ANNOTATION_KEYS`) and `origin` is the
+    # field under discussion; EVERYTHING else must match, or this is not one
+    # record wearing two authorities.
+    ignored = set(ANNOTATION_KEYS) | {"origin"}
+    same_but_origin = (
+        {key: value for key, value in filed.items() if key not in ignored}
+        == {key: value for key, value in record.items() if key not in ignored}
+    )
+    existing[RECORD_PATH_KEY] = relative
+    if move == "same":
+        return existing, "kept" if same_but_origin else "kept_differs"
+    if not same_but_origin:
+        return existing, "kept_differs"
+    if move == "downgrade":
+        # The refused half of CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT: a host
+        # that forgot its flag does not un-draw what a person can already see.
+        return existing, "kept_stronger"
+    if move != "upgrade" or not upgrade:
+        return existing, "kept"
+
+    on_disk = store.read_store_text(vault_root, relative)
+    if on_disk != _binding_bytes(filed):
+        # These bytes are not what this version writes for this record, so an
+        # "origin-only" rewrite would smuggle a re-normalization with it.
+        return existing, "kept_differs"
+    upgraded = dict(filed)
+    upgraded["origin"] = record["origin"]
+    root = store.store_path(vault_root, ".")
+    try:
+        atomic_write_vault_text(
+            store.store_path(root, relative), _binding_bytes(upgraded),
+            vault_root=root,
+        )
+    except ValueError as exc:
+        raise EventIdentityError("identity_record_unwritable", str(exc)) from exc
+    upgraded[RECORD_PATH_KEY] = relative
+    return upgraded, "upgraded"
+
+
 def file_event_identity(vault_root: str | Path, **kwargs: object) -> tuple[dict, bool]:
     """File one binding. ``(record, created)``.
 
     Canonical-bytes create-or-keep (audit A6): meeting an existing record with
     the same digest KEEPS the existing bytes and REPORTS, never overwrites —
     so a re-derivation cannot quietly restamp a decision's evidence or its
-    clock. Re-deciding is a new record with ``supersedes``.
+    clock. Re-deciding is a new record with ``supersedes``. This door NEVER
+    upgrades an origin; :func:`refile_event_identity` is the one that may.
     """
-    record = validate_event_identity(kwargs)
-    relative = binding_relative_path(record["origin"], record["identity_id"])
-    _record, created = _write_json_record(vault_root, relative, record)
-    if not created:
-        existing = read_event_identity(vault_root, relative)
-        if existing is not None:
-            existing["relative_path"] = relative
-            return existing, False
-    record["relative_path"] = relative
-    return record, created
+    record, outcome = _file_binding(
+        vault_root, validate_event_identity(kwargs), upgrade=False)
+    return record, outcome == "created"
+
+
+def refile_event_identity(vault_root: str | Path, **kwargs: object) -> tuple[dict, str]:
+    """File one binding whose ORIGIN may legitimately have moved.
+
+    ``(record, outcome)``, the outcome one of
+    :data:`episode_fold_contract.BINDING_FILING_OUTCOMES`. The rule this door
+    exists for is
+    :data:`episode_fold_contract.CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT`, and
+    it is deliberately a SECOND door: audit A6's create-or-keep is what every
+    other caller wants, and a writer that upgraded by default would make
+    "which origin is on disk" depend on who ran last.
+    """
+    return _file_binding(
+        vault_root, validate_event_identity(kwargs), upgrade=True)
 
 
 def read_event_identity(vault_root: str | Path, relative: str) -> dict | None:
@@ -2030,7 +2121,13 @@ def file_operation_envelope(
 #: for the same reason `temporal_store._assertion_view` drops it from a
 #: receipt comparison: a retry is later, not different, and treating a second
 #: elapsed second as a changed decision turns idempotency into corruption.
-ANNOTATION_KEYS = ("created_at", "relative_path")
+#: The one annotation that never rides the FILE — it says where the record was
+#: read from, and a reader adds it. Named so the byte-exact comparison in
+#: :func:`_file_binding` and the write in :func:`_write_json_record` cannot
+#: disagree about which keys are content.
+RECORD_PATH_KEY = "relative_path"
+
+ANNOTATION_KEYS = ("created_at", RECORD_PATH_KEY)
 
 
 def identity_assertion_view(record: object) -> dict:
@@ -2046,6 +2143,7 @@ def identity_assertion_view(record: object) -> dict:
 
 __all__ = [
     "ANNOTATION_KEYS",
+    "RECORD_PATH_KEY",
     "AUTHORITIES",
     "BINDING_DIGEST_DOMAIN",
     "BINDING_ID_PREFIX",
@@ -2122,6 +2220,7 @@ __all__ = [
     "file_adopt_envelope",
     "file_episode_operation",
     "file_event_identity",
+    "refile_event_identity",
     "file_operation_envelope",
     "identity_assertion_view",
     "is_adopted",

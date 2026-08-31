@@ -743,6 +743,19 @@ class BinderPlan:
     containments: list = field(default_factory=list)
     #: Stamps that named no container this run knows (`question_context`).
     containment_diagnostics: list = field(default_factory=list)
+    #: §12b ruling 6's upgrade path
+    #: (`episode_fold_contract.CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT`).
+    #: Records this rung ALREADY filed at the weaker authority, which this run
+    #: would move to `deterministic` in place — same file, same identity_id,
+    #: same evidence, same clock, one field. Empty at `proposed` authority by
+    #: construction: `proposed` -> `proposed` is not a move.
+    containment_upgrades: list = field(default_factory=list)
+    #: The mirror image, and deliberately NOT symmetric: identity_ids already
+    #: filed at `deterministic` that this run, at `proposed` authority, KEPT.
+    #: A host that forgot its flag does not un-draw a containment a person can
+    #: already see and already drag out — and a silent keep would be
+    #: indistinguishable from a rung that found nothing.
+    containment_kept_stronger: list = field(default_factory=list)
     #: The authority the run filed under (`episode_fold_contract`'s flag).
     containment_authority: str = ec.DEFAULT_CONTAINMENT_AUTHORITY
     #: `{container_key: Container}` the run reasoned over, kept for a caller
@@ -777,6 +790,8 @@ class BinderPlan:
             "containment_authority": self.containment_authority,
             self.containment_block_name: list(self.containments),
             "containment_diagnostics": list(self.containment_diagnostics),
+            "containment_upgrades": list(self.containment_upgrades),
+            "containment_kept_stronger": list(self.containment_kept_stronger),
             "counts": dict(self.counts),
         }
 
@@ -2219,11 +2234,19 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     # on top of it. Without this, a SECOND `bind-episodes --apply` after a
     # confirmed answer re-proposes `part_of` over the person's own `same`
     # and the next fold refuses: `identity_conflict`.
-    containment = [
-        row for row in containment
-        if row["episode_id"] not in
-        {b.get("episode_id") for b in active.get(row["telling_ref"], ())}
-    ]
+    #
+    # The filtered rows are KEPT, not discarded: exactly one of them is not a
+    # disagreeing second proposal but THIS rung's own record from an earlier
+    # run, filed at the other authority under the same `identity_id`
+    # (`episode_containers.containment_authority_moves`). Telling those two
+    # apart is what makes `--containment-authority applied` mean something on a
+    # vault that already ran at `proposed`; every other filtered row is
+    # filtered exactly as I3c filtered it.
+    fresh, already_bound = [], []
+    for row in containment:
+        episodes = {b.get("episode_id") for b in active.get(row["telling_ref"], ())}
+        (already_bound if row["episode_id"] in episodes else fresh).append(row)
+    containment = fresh
     result.containment_diagnostics = ec.unresolved_question_contexts(
         views, result.containers, question_contexts=question_contexts,
     )
@@ -2239,6 +2262,19 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
                                 views[row["telling_ref"]], authority=authority, now=now)
           for row in containment],
     ])
+    # The authority flag's own two lists. A record this run is about to FILE is
+    # never also a record it is about to upgrade — the language rung deliberately
+    # mints `proposed` whatever the flag says (:func:`part_of_proposal`), and
+    # upgrading its record here would overrule that with a flag it does not read.
+    filing = {row["identity_id"] for row in result.proposals}
+    upgrades, kept_stronger = ec.containment_authority_moves(
+        already_bound, result.containers, views,
+        active=active, authority=authority, now=now,
+    )
+    result.containment_upgrades = [row for row in upgrades
+                                   if row["identity_id"] not in filing]
+    result.containment_kept_stronger = [row for row in kept_stronger
+                                        if row not in filing]
 
     result.overmerges = overmerge_audit(views, units)
     result.bridges = bridge_diagnostics(episode_records)
@@ -2310,6 +2346,11 @@ def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
             for name in ec.DETERMINISTIC_CONTAINMENT_RULE_IDS
         },
         "containment_authority": result.containment_authority,
+        # The authority flag's own two numbers. `containment_members` counts
+        # what the rung PLACED this run; these count what an earlier run
+        # placed and this flag re-routes — or declines to.
+        "containment_upgrades": len(result.containment_upgrades),
+        "containment_kept_stronger": len(result.containment_kept_stronger),
         "unresolved_question_contexts": len(result.containment_diagnostics),
         "questions": len(result.questions),
         "surfaced_questions": sum(1 for row in result.questions if row["surfaced"]),
@@ -2365,6 +2406,15 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
     ))
     for row in result.containment_diagnostics:
         lines.append(f"  ⚠ {row['finding']}: {row['telling_ref']} → {row['stamp']}")
+    # The authority flag's own two lists, printed rather than left to the
+    # counts: "0 members placed" over a vault whose containments were all
+    # filed last week is the sentence this whole path exists to stop being
+    # the only thing a run says.
+    for row in result.containment_upgrades:
+        lines.append(f"  ↑ upgrade to deterministic: {row['identity_id']} "
+                     f"({row['telling_ref']} ⊂ {row['episode_id']})")
+    for identity_id in result.containment_kept_stronger:
+        lines.append(f"  = kept at deterministic (this run is `proposed`): {identity_id}")
     lines.append("")
     if not result.pairs:
         lines.append("  no candidate pair reached the plausibility floor")
@@ -2381,7 +2431,8 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
                 "bridges", "sole_receipts", "reaudits_minted",
                 "when_items_that_would_disappear",
                 "containers", "containment_members", "containment_tellings",
-                "containment_authority", "unresolved_question_contexts"):
+                "containment_authority", "containment_upgrades",
+                "containment_kept_stronger", "unresolved_question_contexts"):
         lines.append(f"  {key}: {counts.get(key)}")
     lines.append("  containment_by_rule: " + ", ".join(
         f"{name}={counts.get('containment_by_rule', {}).get(name, 0)}"
@@ -2555,13 +2606,22 @@ def apply_plan(vault_root: str | Path, result: BinderPlan) -> dict:
     `file_event_identity`'s create-or-keep. Applying the same plan twice
     creates nothing the second time, by digest arithmetic.
 
+    The ONE exception is the plan's ``containment_upgrades``, which go through
+    `refile_event_identity` — the door that may move an ``origin`` in place,
+    and only when the filed bytes differ by nothing else
+    (`episode_fold_contract.CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT`). It is
+    idempotent for the same reason everything else here is: the second run
+    finds ``deterministic`` already on disk and reports ``kept``.
+
     There is deliberately no ``now`` here: every record already carries the
     clock the PLAN stamped, and a writer that re-stamped it would make "when
     was this decided" a property of when it was filed.
     """
     _require(isinstance(result, BinderPlan), "binder_apply_needs_a_plan",
              "apply files a BinderPlan; run `plan()` first")
-    filed = {"envelopes": [], "proposals": [], "created": 0}
+    filed = {"envelopes": [], "proposals": [], "upgraded": [],
+             "kept_stronger": list(result.containment_kept_stronger),
+             "not_upgraded": [], "created": 0}
     for row in result.envelopes:
         outcome = ei.file_operation_envelope(
             vault_root, operation=row["operation"], bindings=row["bindings"],
@@ -2572,6 +2632,18 @@ def apply_plan(vault_root: str | Path, result: BinderPlan) -> dict:
         _row, created = ei.file_event_identity(vault_root, **dict(record))
         filed["proposals"].append(record["identity_id"])
         filed["created"] += 1 if created else 0
+    for record in result.containment_upgrades:
+        _row, outcome = ei.refile_event_identity(vault_root, **dict(record))
+        if outcome == "upgraded":
+            filed["upgraded"].append(record["identity_id"])
+        elif outcome == "kept_stronger":
+            filed["kept_stronger"].append(record["identity_id"])
+        elif outcome != "kept":
+            # The plan matched on `identity_id` and the ORIGINS; the writer is
+            # the one that read the bytes. A candidate the bytes refuse is
+            # reported by name rather than filed anyway or silently dropped.
+            filed["not_upgraded"].append({"identity_id": record["identity_id"],
+                                          "outcome": outcome})
     return filed
 
 
@@ -2631,6 +2703,11 @@ def binder_step(vault_root: str | Path, *, now: object = None,
         # under the name the authority flag earns.
         result.containment_block_name: list(result.containments),
         "containment_diagnostics": list(result.containment_diagnostics),
+        # The dry run says what an `--apply` at this authority WOULD move, so
+        # the owner-reviewed dry run the rollout gate requires can be reviewed
+        # for the upgrade too, not only for new placements.
+        "containment_upgrades": list(result.containment_upgrades),
+        "containment_kept_stronger": list(result.containment_kept_stronger),
         "wrote": False,
     }
 

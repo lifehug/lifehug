@@ -747,6 +747,53 @@ def containment_record(row: Mapping[str, object], container: Container,
     })
 
 
+def containment_authority_moves(rows: Sequence[Mapping], found: Mapping[str, Container],
+                                views: Mapping[str, object], *,
+                                active: Mapping[str, tuple],
+                                authority: object = None,
+                                now: object = None) -> tuple[list, list]:
+    """``(upgrades, kept_stronger)`` for rows the I3c filter already dropped.
+
+    :data:`episode_fold_contract.CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT`, as
+    the two lists a run reports. A containment row is dropped when its
+    (telling, episode) pair ALREADY carries an active binding — which is right
+    when that binding is a person's ``same``, and was wrong for the only case
+    the filter could not tell apart: the rung's own record from a previous run,
+    filed under the same ``identity_id`` at the other authority. That case is
+    not a second, disagreeing proposal; it is this record, and the only field
+    that would move is the one the flag owns.
+
+    Pure. Both lists are CANDIDATES: whether the filed bytes really differ by
+    nothing but ``origin`` is settled against the disk by
+    `event_identity.refile_event_identity`, which is also the only thing that
+    writes. A row whose filed counterpart is a DIFFERENT record — another
+    relation, another rule, a person's own decision — appears in neither list
+    and is filtered exactly as before.
+    """
+    import episode_fold_contract as efc_module  # noqa: PLC0415
+
+    upgrades: list = []
+    kept: list = []
+    for row in rows or ():
+        telling_ref = collapsed_text(row.get("telling_ref"))
+        container = found.get(collapsed_text(row.get("container_key")))
+        view = (views or {}).get(telling_ref)
+        if container is None or view is None:
+            continue
+        record = containment_record(row, container, view, authority=authority,
+                                    now=now)
+        for binding in (active or {}).get(telling_ref) or ():
+            if collapsed_text(binding.get("identity_id")) != record["identity_id"]:
+                continue
+            move = efc_module.origin_move(binding.get("origin"), record["origin"])
+            if move == "upgrade":
+                upgrades.append(record)
+            elif move == "downgrade":
+                kept.append(record["identity_id"])
+            break
+    return (sorted(upgrades, key=lambda row: row["identity_id"]), sorted(kept))
+
+
 def merge_containment_records(records: Sequence[object]) -> list:
     """One record per ``identity_id``, by :data:`CONTAINMENT_ORIGIN_PRECEDENCE`.
 
@@ -861,6 +908,7 @@ __all__ = [
     "EntityIndex",
     "container_episode_id",
     "containers",
+    "containment_authority_moves",
     "containment_reason",
     "containment_record",
     "containment_rows",
