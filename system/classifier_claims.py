@@ -57,12 +57,25 @@ cites a vault source (owner amendment Q2/option B) and the recorder dedupe
 below still joins on the story.
 
 IDEMPOTENCY, which is the property everything else rests on. The receipt path
-is a pure function of (source_id, revision, extractor version); the receipt's
-content is a pure function of the classification's own bytes; and
+is a pure function of (source_id, revision, extractor version); the CLAIMS the
+receipt asserts are a pure function of the classification's own bytes; and
 `temporal_store.write_receipt` keeps what is already on disk. So a second run
 writes nothing, the fold is unchanged, and `publish` republishes the same
 generation. `tests/test_classifier_claims.py` proves it on the bytes of
 `active-index.json` and `calculated-timeline.json` rather than asserting it.
+
+That holds ACROSS FRAMEWORK VERSIONS, which is the part a single-version test
+cannot see. The receipt's `extractor` block is this extraction's own
+declaration about itself, and a later version legitimately declares more about
+the identical claims — event identity I1 (v267) wired `telling_keys` and
+`document_revision` into it, so every classifier receipt filed before v267
+would otherwise have re-derived DIFFERENT bytes at its own identity and made
+this migration crash on any vault that had already run it. It does not: the
+declaration is annotation (`temporal_store.RECEIPT_ANNOTATION_KEYS`), the
+filed receipt stands as filed, and the run counts it in `receipts_kept`. A
+receipt is never back-dated into declaring something nobody declared when it
+was written; the conservative reading of a missing declaration is the one
+`event_identity.UNDECLARED_DOCUMENT_REVISION` already names.
 
 SUPERSESSION, never an edit. A re-classification produces new bytes, so a new
 `revision`, so a new receipt beside the old one — the store refuses to rewrite
@@ -654,6 +667,7 @@ def _empty_report(dry_run: bool) -> dict:
         "deduped_sources": 0,
         "receipts": 0,
         "receipts_written": 0,
+        "receipts_kept": 0,
         "superseded_claims": 0,
         "superseded_classifications": 0,
         "skipped_no_source_path": [],
@@ -806,11 +820,17 @@ def migrate_classifier_moments(
         return report
 
     for receipt in receipts:
+        # A receipt identity that is already filed is KEPT, not re-derived onto
+        # disk: the unit of assertion is the source revision, and this run is
+        # asserting nothing the filed receipt does not already say. Counted, so
+        # the no-op is visible in the report rather than inferred from a zero.
         before = store.store_path(root, tc.receipt_relative_path(
             receipt["source_ref"], CLASSIFIER_EXTRACTOR
         )).is_file()
         store.write_receipt(root, receipt, now=now)
-        if not before:
+        if before:
+            report["receipts_kept"] += 1
+        else:
             report["receipts_written"] += 1
     for correction in corrections:
         store.supersede_claims(
@@ -868,7 +888,10 @@ def describe_migration(report: object) -> list[str]:
             f"  skipped — events with no description: {row.get('skipped_empty_description')}"
         )
     if not row.get("dry_run"):
-        lines.append(f"  wrote {row.get('receipts_written')} new receipt(s)")
+        lines.append(
+            f"  wrote {row.get('receipts_written')} new receipt(s), "
+            f"kept {row.get('receipts_kept')} already filed"
+        )
     return lines
 
 
