@@ -353,7 +353,7 @@ class ListenerPromptTests(unittest.TestCase):
         self.assertIn("You are not in the conversation", prompt)
 
     def test_the_measured_size_is_pinned(self):
-        """MEASURED, not guessed: 9661 characters with an empty store.
+        """MEASURED, not guessed: 11551 characters with an empty store.
 
         The focused recorder's leaf pins at 8400 for ONE domain. This one
         carries nine domain KEY lines (~780 characters), the person-record
@@ -369,8 +369,14 @@ class ListenerPromptTests(unittest.TestCase):
         down a NAME and not making a link. 480 characters, re-measured here
         rather than rounded up — a pin that gets padded "for headroom" stops
         being a measurement of anything.
+
+        Event identity I3 moved it again, from 9661, by the `identity_
+        assertions` section: the fourth list, its own worked example, the
+        `{identity_relations}` vocabulary line and the (empty-store)
+        `{identity_candidates}` block — 1890 characters, re-measured here for
+        the same reason every prior move was.
         """
-        self.assertLess(len(self._prompt()), 9800)
+        self.assertLess(len(self._prompt()), 11800)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()

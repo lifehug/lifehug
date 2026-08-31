@@ -25,12 +25,15 @@ WHAT THEY SAID:
 WHAT THEY WERE TOLD BACK:
 {reply}
 
+EPISODES YOU MIGHT BE ASKED ABOUT — this turn's candidates, if any:
+{identity_candidates}
+
 Emit exactly one JSON object and nothing else — no prose, no fence, no
-explanation. It has THREE lists and all three are always present:
+explanation. It has FOUR lists and all four are always present:
 
   {"landmarks": [{"domain": "...", ...}], "people": [{"name": "...", ...}],
-   "claims": [{...}]}
-  {"landmarks": [], "people": [], "claims": []}
+   "claims": [{...}], "identity_assertions": [{...}]}
+  {"landmarks": [], "people": [], "claims": [], "identity_assertions": []}
 
 `claims` is the widest of the three and the one to fill first: every datable
 fact in what they said goes there, whether or not it belongs to a domain and
@@ -156,10 +159,40 @@ is most of what people actually say.
 - Never invent a subject, a date, an event or a quotation to make this list
   longer, and never split one fact into two claims to do it either.
 
+## `identity_assertions` — "that's the same thing", said in passing
+
+Sometimes a person tells you two things are (or are not) the same event
+without anyone asking — "that was the same trip as when I met Dana", "no,
+the Etherfuse launch and the Mexico trip were two different things". That is
+a real thing they said, and it goes here.
+
+  THEY SAID: "Oh, the big Etherfuse event I mentioned — that was the same
+  thing as when we launched."
+  YOU EMIT: {"identity_assertions": [
+    {"telling_hint": "the big Etherfuse event", "episode_hint": "when we
+     launched", "relation": "same"}]}
+
+- `telling_hint` and `episode_hint` are QUOTES OR CLOSE PARAPHRASES of the
+  two things they are comparing, in their own words — never a ref, never an
+  id, never something you resolved yourself. Something else, never you,
+  decides which real telling or episode a hint points at; your only job is
+  to write down what they said clearly enough that it can.
+- `relation` is one of: {identity_relations}. `same` = one thing said twice;
+  `part_of` = one is a piece inside the other ("the Mexico event, during
+  Etherfuse"); `related` = the same story, a different event; `not_same` =
+  they are explicitly two different things. There is no "not sure" here —
+  if they are not sure, they said nothing you need to record.
+- Use the candidates listed above as a guide to what a hint might mean, but
+  copy the person's OWN words, not a candidate's label — matching happens
+  afterwards, not in your head.
+- Never invent a comparison they did not make. Two things merely being
+  mentioned in the same message is not an assertion that they are the same.
+
 ## When there is nothing
 
 If they truly said nothing datable — no year, no age, no month, nothing fixed
-against anything else — emit `{"landmarks": [], "people": [], "claims": []}`.
+against anything else, and no comparison between two things — emit
+`{"landmarks": [], "people": [], "claims": [], "identity_assertions": []}`.
 Recording nothing is correct exactly there and nowhere else.
 
 Never invent a place, a date, a name, a relation, or a domain.{reminder}

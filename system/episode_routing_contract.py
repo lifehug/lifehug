@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SYSTEM_DIR = Path(__file__).resolve().parent
@@ -749,7 +750,103 @@ def reaudit(*, trigger: object, telling_ref: object, bound_episode_id: object,
     }
 
 
+# --------------------------------------------------------------------------
+# "Not sure" — an epistemic state on the PAIR, never a relation (I3, §2.2)
+# --------------------------------------------------------------------------
+
+#: §12 ruling 3, approved verbatim. Material new evidence reopens sooner —
+#: :func:`cooldown_active` is what makes "sooner" mechanical rather than a
+#: promise nobody checks.
+DEFERRAL_COOLDOWN_DAYS = 90
+
+
+def _parse_instant(value: object) -> datetime:
+    text = collapsed_text(value)
+    if not text:
+        raise TemporalContractError(
+            "deferral_needs_an_instant", "a deferral is timestamped or it cannot cool down"
+        )
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise TemporalContractError(
+            "deferral_instant_unusable", f"not a usable timestamp: {value!r}"
+        ) from exc
+
+
+def defer_pair(*, telling_ref: object, candidate_episode_id: object,
+                evidence_signature: object = None, now: object) -> dict:
+    """One "Not sure" deferral — asserts nothing about the world (§2.2).
+
+    Lives beside the pair key so it re-keys and dedupes exactly like every
+    other pair record. ``evidence_signature`` is the caller's snapshot of
+    whatever would make the pair's evidence MATERIALLY different next time —
+    each side's own dated value is what §13.4 means by "a new date on either
+    side" — so :func:`cooldown_active` can tell "the same unresolved pair"
+    from "something changed" without re-deriving anything itself.
+    """
+    telling = collapsed_text(telling_ref)
+    candidate = collapsed_text(candidate_episode_id)
+    if not telling or not candidate:
+        raise TemporalContractError(
+            "deferral_needs_a_pair", "a deferral names the pair it defers"
+        )
+    moment = _parse_instant(now)
+    return {
+        "event_key": pair_event_key(telling, candidate),
+        "telling_ref": telling,
+        "candidate_episode_id": candidate,
+        "deferred_at": collapsed_text(now),
+        "defer_until": (moment + timedelta(days=DEFERRAL_COOLDOWN_DAYS)).isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "evidence_signature": (
+            dict(evidence_signature) if isinstance(evidence_signature, dict) else {}
+        ),
+    }
+
+
+def material_new_evidence(old_signature: object, new_signature: object) -> bool:
+    """Did either side of the pair pick up a date it did not have before?
+
+    §13.4: *"reopens early on material new evidence — a new date on either
+    side."* Absence is not evidence of absence: an empty prior signature
+    (the caller had nothing to snapshot) never counts as a change, and
+    neither does an unchanged one — only a genuine disagreement between the
+    two dictionaries does.
+    """
+    old = old_signature if isinstance(old_signature, dict) else {}
+    new = new_signature if isinstance(new_signature, dict) else {}
+    if not old or not new:
+        return False
+    return old != new
+
+
+def cooldown_active(deferral: object, *, evidence_signature: object = None, now: object) -> bool:
+    """Is a "Not sure" pair still on ice?
+
+    False the moment either half of the promise stops holding: the 90 days
+    elapsed, or the evidence the deferral was taken against has materially
+    changed. A malformed or dateless deferral is never treated as active —
+    the cooldown is a courtesy to the person, not a lock the substrate can
+    use to justify never asking again.
+    """
+    row = deferral if isinstance(deferral, dict) else {}
+    until = collapsed_text(row.get("defer_until"))
+    if not until:
+        return False
+    if material_new_evidence(row.get("evidence_signature"), evidence_signature):
+        return False
+    try:
+        return _parse_instant(now) < _parse_instant(until)
+    except TemporalContractError:
+        return False
+
+
 __all__ = [
+    "DEFERRAL_COOLDOWN_DAYS",
     "DELAYED_ANSWER_OUTCOMES",
     "FORBIDDEN_REAUDIT_ACTIONS",
     "MIRROR_JUDGMENT_KIND",
@@ -767,6 +864,9 @@ __all__ = [
     "UNKNOWN_REFERENCE_RULE",
     "ReferenceRoute",
     "RoutingPlan",
+    "cooldown_active",
+    "defer_pair",
+    "material_new_evidence",
     "merge_routing",
     "pair_event_key",
     "possible_overmerge_id",

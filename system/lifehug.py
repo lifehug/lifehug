@@ -201,6 +201,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # family as era-record. --dry-run writes nothing but the command is
     # classified BY NAME, exactly as focus-autopilot and era-migrate are.
     "bind-episodes",
+    # resolve-work-item / split-episode (event identity I3): file episode
+    # operations and bindings through the same writers `bind-episodes`
+    # itself uses — same single-transaction vault mutation family.
+    "resolve-work-item", "split-episode",
     "timeline-unplace", "unretract",
 })
 
@@ -1009,6 +1013,96 @@ def cmd_bind_episodes(args: argparse.Namespace) -> int:
         print(f"✓ filed {len(filed.get('envelopes', []))} envelope(s), "
               f"{len(filed.get('proposals', []))} proposal(s); "
               f"{filed.get('created', 0)} new record group(s)")
+    return 0
+
+
+def cmd_resolve_work_item(args: argparse.Namespace) -> int:
+    """`resolve-work-item` — event identity I3's five/four answers, filed.
+
+    Dispatches by ``--kind`` (``same_event`` | ``possible_overmerge``) to
+    `identity_questions`'s two answer functions. All writes go through
+    `event_identity`'s own writers — this verb adds no vocabulary of its own,
+    exactly as `timeline-move --relation` is a closed-choice flag rather
+    than free text this command parses.
+    """
+    import json  # noqa: PLC0415
+
+    import identity_questions as iq  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    try:
+        if args.kind == "same_event":
+            result = iq.resolve_same_event_answer(
+                REPO_DIR,
+                telling_ref=args.telling_ref,
+                candidate_episode_id=args.episode_id,
+                candidate_telling_ref=args.sibling_telling_ref,
+                answer=args.answer,
+                telling_quote=args.telling_quote,
+                episode_quote=args.episode_quote,
+                source_ref=reason or None,
+            )
+        else:
+            result = iq.resolve_possible_overmerge_answer(
+                REPO_DIR,
+                telling_ref=args.telling_ref,
+                episode_id=args.episode_id,
+                answer=args.answer,
+                destinations=(
+                    dict(pair.split("=", 1) for pair in args.destination)
+                    if getattr(args, "destination", None) else None
+                ),
+                source_ref=reason or None,
+            )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return 0
+    print(f"✓ {args.kind} answered {args.answer!r}")
+    for key in ("episode_id", "relation", "created", "event_key"):
+        if key in result:
+            print(f"  {key}: {result[key]}")
+    return 0
+
+
+def cmd_split_episode(args: argparse.Namespace) -> int:
+    """`split-episode` — file one `split` envelope, then route every other
+    reference off it (design §5.5). Destinations are given as
+    ``telling_ref=standalone`` or ``telling_ref=episode:<hex>`` pairs.
+    """
+    import json  # noqa: PLC0415
+
+    import identity_questions as iq  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    destinations = dict(pair.split("=", 1) for pair in (args.destination or ()))
+    references = []
+    if getattr(args, "references_json", None):
+        try:
+            references = json.loads(args.references_json)
+        except (TypeError, ValueError) as exc:
+            print(f"Error: --references-json is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+    try:
+        result = iq.split_episode(
+            REPO_DIR, episode_id=args.episode_id, destinations=destinations,
+            references=references, source_ref=reason or None,
+        )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return 0
+    print(f"✓ split {args.episode_id} into {len(destinations)} destination(s)")
+    for route in result["routing"]["routes"]:
+        print(f"  {route['reference_kind']} {route['reference_id']} -> {route['destination']}")
+    for row in result["routing"]["mirror_judgments"]:
+        print(f"  ⚠ mirror judgment: {row['reference_kind']} {row['reference_id']}")
     return 0
 
 
@@ -2992,6 +3086,47 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Global open identity-question cap (owner knob)")
     p.add_argument("--json", action="store_true", help="Print the plan as JSON")
     p.set_defaults(func=cmd_bind_episodes)
+
+    p = sub.add_parser(
+        "resolve-work-item",
+        help="File one of same_event's five answers or possible_overmerge's four "
+             "(reason on stdin)",
+    )
+    p.add_argument("--kind", required=True, choices=("same_event", "possible_overmerge"),
+                   help="Which work-item kind this answer resolves")
+    p.add_argument("--telling-ref", dest="telling_ref", required=True,
+                   help="The telling the pair is about")
+    p.add_argument("--episode-id", dest="episode_id", required=True,
+                   help="The candidate (same_event) or bound (possible_overmerge) episode id")
+    p.add_argument("--answer", required=True,
+                   help="same|part_of|related|different|not_sure for same_event; "
+                        "keep_together|split|part_of|fix_the_date for possible_overmerge")
+    p.add_argument("--sibling-telling-ref", dest="sibling_telling_ref", default=None,
+                   help="same_event only: the other telling, when --episode-id is prospective")
+    p.add_argument("--telling-quote", dest="telling_quote", default=None,
+                   help="same_event only: the telling's own quoted words")
+    p.add_argument("--episode-quote", dest="episode_quote", default=None,
+                   help="same_event only: the episode's own quoted words")
+    p.add_argument("--destination", action="append", default=None,
+                   help="possible_overmerge --answer split only: telling_ref=standalone "
+                        "or telling_ref=episode:<hex>; repeatable")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_resolve_work_item)
+
+    p = sub.add_parser(
+        "split-episode",
+        help="File a split envelope and route every other reference off it (reason on stdin)",
+    )
+    p.add_argument("--episode-id", dest="episode_id", required=True,
+                   help="The episode being split")
+    p.add_argument("--destination", action="append", default=[], required=True,
+                   help="telling_ref=standalone or telling_ref=episode:<hex>; repeatable, "
+                        "one per departing telling")
+    p.add_argument("--references-json", dest="references_json", default=None,
+                   help="JSON list of {reference_kind, reference_id, candidates} rows "
+                        "to route (§5.5) — omit for an identity-only split")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_split_episode)
 
     p = sub.add_parser("era-list", help="List this vault's eras and their labels")
     p.add_argument("--json", action="store_true")

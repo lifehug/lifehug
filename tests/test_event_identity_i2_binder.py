@@ -1084,12 +1084,15 @@ class QuestionOutputTests(unittest.TestCase):
             if pair.verdict in ("bind", "blocked"):
                 self.assertNotIn(pair.event_key, keys)
 
-    def test_neither_new_kind_is_registered_in_work_item_kinds_yet(self):
-        """I3 owns the probe, the five answers and the filing. Registering a
-        kind whose answer nothing can file is the silent under-delivery ADR
-        0021 exists to refuse — so the absence is asserted, not assumed."""
-        self.assertNotIn(eb.SAME_EVENT_KIND, tp.WORK_ITEM_KINDS)
-        self.assertNotIn(eb.POSSIBLE_OVERMERGE_KIND, tp.WORK_ITEM_KINDS)
+    def test_both_new_kinds_are_registered_in_work_item_kinds_at_i3(self):
+        """I2 asserted the ABSENCE here on purpose — registering a kind whose
+        answer nothing can file is the silent under-delivery ADR 0021 exists
+        to refuse. I3 (`identity_questions.py`) is what can now file an
+        answer, so the absence becomes a positive registration
+        (`tests/test_event_identity_i3_questions.py` owns the rest of I3's
+        proof)."""
+        self.assertIn(eb.SAME_EVENT_KIND, tp.WORK_ITEM_KINDS)
+        self.assertIn(eb.POSSIBLE_OVERMERGE_KIND, tp.WORK_ITEM_KINDS)
         self.assertEqual(eb.SAME_EVENT_KIND, "same_event")
         self.assertIs(eb.POSSIBLE_OVERMERGE_KIND, erc.POSSIBLE_OVERMERGE_KIND)
 

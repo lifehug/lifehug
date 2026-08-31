@@ -73,6 +73,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import conversation_delivery  # noqa: E402
 import cross_dating  # noqa: E402
+import episode_fold_contract as efc  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 from lifehug_core import INTERACTIONS_DIR  # noqa: E402
@@ -471,6 +472,7 @@ def _consumed(term: str, covered: frozenset[str]) -> bool:
 def listener_heard_nothing(user_message: object, records: object,
                            people: object = (), *,
                            claims: object = (),
+                           identity_assertions: object = (),
                            findings: object = (),
                            landmarks: object = (),
                            verdict: object = None,
@@ -511,13 +513,30 @@ def listener_heard_nothing(user_message: object, records: object,
     the model to break the rule it just obeyed. :data:`DROPPED_NO_DATE` is
     the opposite — a malformed object is not a thing heard — so it clears
     nothing.
+
+    **Event identity I3: an identity assertion is a thing heard too.** It
+    joins the same union as `claims` — an ambiguous-hint REFUSAL is not a
+    miss (the candidate context genuinely had zero or two matches; the
+    ordinary `same_event` question path is what resolves it, not a retry of
+    the same prompt), so a refusal finding clears the check exactly as
+    :data:`DROPPED_NON_FAMILY` does, and is not itself added to ``heard``.
     """
     heard = [item for item in
-             (list(records or ()) + list(people or ()) + list(claims or ()))
+             (list(records or ()) + list(people or ()) + list(claims or ())
+              + list(identity_assertions or ()))
              if isinstance(item, dict) and item]
     if heard:
         return None
     if DROPPED_NON_FAMILY in tuple(findings or ()):
+        return None
+    if any(
+        collapsed.startswith(IDENTITY_ASSERTION_REFUSED_PREFIX)
+        for collapsed in (tc.collapsed_text(finding) for finding in (findings or ()))
+    ):
+        # An ambiguous or unresolved hint is structural, not a prompt miss —
+        # the candidate context did not disambiguate, and re-asking the same
+        # model the same question would not either. The ordinary
+        # `same_event` path is what resolves it.
         return None
     if verdict is None:
         verdict = may_contain_datable(user_message)
@@ -712,11 +731,38 @@ def render_all_known_entries(landmarks: object, *,
     return "\n".join(lines)
 
 
+#: No candidate context supplied — the leaf's honest read of "nothing to
+#: resolve an identity hint against", same shape as :data:`NO_KNOWN_ENTRIES`.
+NO_IDENTITY_CANDIDATES = "(no episode candidates supplied for this turn)"
+
+
+def render_identity_candidates(candidates: object) -> str:
+    """The candidate-context excerpt, as lines the leaf can read.
+
+    Event identity I3 (design §6.4): the host supplies this — never the
+    model's own guess — so a hint the model emits resolves against something
+    real or refuses. One line per candidate, its kind and its labels.
+    """
+    lines: list[str] = []
+    for row in candidates or ():
+        if not isinstance(row, dict):
+            continue
+        ref = tc.collapsed_text(row.get("ref"))
+        kind = tc.collapsed_text(row.get("kind"))
+        labels = [tc.collapsed_text(label) for label in (row.get("labels") or ())]
+        labels = [label for label in labels if label]
+        if not ref or not labels:
+            continue
+        lines.append(f"- {kind or 'candidate'}: {', '.join(labels)}")
+    return "\n".join(lines) if lines else NO_IDENTITY_CANDIDATES
+
+
 def build_listener_prompt(*, answer: str, reply: str = "",
                           landmarks: object = (),
+                          identity_candidates: object = (),
                           reminder: str = "",
                           framework_root: str | Path | None = None) -> str:
-    """The listener's whole prompt, from the leaf plus five substitutions.
+    """The listener's whole prompt, from the leaf plus its substitutions.
 
     The same discipline as `landmark_recorder.build_recorder_prompt`: no
     identity, no behavior, no examples, no transcript. What it carries that
@@ -726,7 +772,10 @@ def build_listener_prompt(*, answer: str, reply: str = "",
 
     v229 adds two more DERIVED substitutions — `temporal_claims.CLAIM_TYPES`
     and :func:`render_event_kinds` — so the claim vocabulary the leaf offers
-    is the contract's own and cannot drift from it by a hand edit.
+    is the contract's own and cannot drift from it by a hand edit. Event
+    identity I3 adds `{identity_relations}` (`episode_fold_contract.RELATIONS`,
+    the same reason) and `{identity_candidates}` (:func:`render_identity_candidates`)
+    — the host's own excerpt, never a model guess.
     """
     filled = load_listener_leaf(framework_root)
     known = render_all_known_entries(landmarks, framework_root=framework_root)
@@ -742,6 +791,8 @@ def build_listener_prompt(*, answer: str, reply: str = "",
         # This keeps the composed prompt byte-identical across that release.
         ("{claim_types}", " | ".join(tc.MODEL_CLAIM_TYPES)),
         ("{event_kinds}", render_event_kinds()),
+        ("{identity_relations}", " | ".join(efc.RELATIONS)),
+        ("{identity_candidates}", render_identity_candidates(identity_candidates)),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),
         ("{reminder}", f"\n\n{reminder.strip()}" if reminder else ""),
@@ -771,13 +822,24 @@ class Heard:
     people: tuple[dict, ...] = ()
     findings: tuple[str, ...] = ()
     claims: tuple[dict, ...] = ()
+    #: Event identity I3 (design §6.4, ADR 0029 amendment). A FOURTH typed
+    #: list, added at the end for the same reason `claims` was: a caller
+    #: that built a `Heard` positionally keeps building the same one. Each
+    #: draft is ``{telling_ref, episode_id, relation, evidence}`` — MENTIONS
+    #: resolved against the caller's own candidate-context excerpt, never
+    #: model-minted refs (see :func:`parse_identity_assertions`).
+    identity_assertions: tuple[dict, ...] = ()
 
     def __len__(self) -> int:
-        return len(self.landmarks) + len(self.people) + len(self.claims)
+        return (
+            len(self.landmarks) + len(self.people) + len(self.claims)
+            + len(self.identity_assertions)
+        )
 
 
 def parse_listener_output(raw: object, *,
-                          framework_root: str | Path | None = None) -> Heard:
+                          framework_root: str | Path | None = None,
+                          identity_candidates: object = ()) -> Heard:
     """One listener completion through the pinned validators, per record.
 
     ``landmarks`` run `conversation_delivery._parse_landmark` then
@@ -835,8 +897,12 @@ def parse_listener_output(raw: object, *,
             findings.append(finding)
     claims, refusals = parse_claims(data.get("claims"))
     findings.extend(refusals)
+    identity_assertions, identity_refusals = parse_identity_assertions(
+        data.get("identity_assertions"), candidates=identity_candidates,
+    )
+    findings.extend(identity_refusals)
     return Heard(tuple(records), tuple(people),
-                 tuple(dict.fromkeys(findings)), claims)
+                 tuple(dict.fromkeys(findings)), claims, identity_assertions)
 
 
 # --------------------------------------------------------------------------
@@ -1044,6 +1110,187 @@ def bind_claims(drafts: object, *, source_ref: object,
         claim = tc.validate_temporal_claim(payload, now=now)
         if claim not in bound:
             bound.append(claim)
+    return bound
+
+
+# --------------------------------------------------------------------------
+# 7. Identity assertions — stated bindings, from ordinary conversation
+#    (event identity I3, design §6.4, an ADR 0029 amendment)
+# --------------------------------------------------------------------------
+#
+# The settled product contract says information given in ordinary
+# conversation is usable (audit B4) — *"that was the same trip"* must be a
+# source too, not only something a Timeline conversation can hear. So the
+# listener gains a FOURTH typed output, `identity_assertions`, exactly the
+# shape `claims` arrived in at v229: the leaf emits MENTIONS — a hint at the
+# telling, a hint at the episode, and the relation the person actually
+# asserted — and this layer, never the model, resolves each hint against a
+# CANDIDATE-CONTEXT excerpt the host supplies (the episode roster and their
+# tellings' own labels, already on the page the person is looking at).
+#
+# **Zero or two matches per hint is a REFUSAL, not a guess.** An ambiguous or
+# unresolved hint mints no binding — it is reported by name
+# (:data:`IDENTITY_ASSERTION_REFUSED_PREFIX`) so the ordinary `same_event`
+# question path can pick it up instead of a wrong link firing silently (Law
+# 6). There is no draft/bind split for the RESOLUTION half — the candidate
+# context is available at PARSE time, not only at filing time — but there is
+# still a draft/bind split for what only the FILER knows:
+# `origin`/`rule_version`/`source_ref`/`created_at`. :func:`bind_identity_assertions`
+# is that filing half; :func:`event_identity.file_event_identity` is the only
+# writer either path ever reaches.
+
+#: The three fields a leaf may emit for ONE identity assertion — MENTIONS,
+#: never refs. Deliberately closed, like every other prompt-key set in this
+#: module.
+IDENTITY_ASSERTION_PROMPT_KEYS = frozenset({"telling_hint", "episode_hint", "relation"})
+
+#: The draft's own field order.
+IDENTITY_ASSERTION_DRAFT_KEYS = ("telling_ref", "episode_id", "relation", "evidence")
+
+#: A dropped identity assertion carries this prefix plus a named code — the
+#: person said something; the record must say why it did not survive.
+IDENTITY_ASSERTION_REFUSED_PREFIX = "identity_assertion_refused:"
+
+IDENTITY_ASSERTION_UNKNOWN_KEY = "identity_assertion_unknown_key"
+IDENTITY_ASSERTION_UNKNOWN_RELATION = "identity_assertion_unknown_relation"
+IDENTITY_ASSERTION_AMBIGUOUS_TELLING = "identity_assertion_ambiguous_telling_hint"
+IDENTITY_ASSERTION_AMBIGUOUS_EPISODE = "identity_assertion_ambiguous_episode_hint"
+IDENTITY_ASSERTION_UNRESOLVED_TELLING = "identity_assertion_unresolved_telling_hint"
+IDENTITY_ASSERTION_UNRESOLVED_EPISODE = "identity_assertion_unresolved_episode_hint"
+
+
+def identity_assertion_refused(code: object) -> str:
+    """The named finding a refused identity assertion carries."""
+    return f"{IDENTITY_ASSERTION_REFUSED_PREFIX}{tc.collapsed_text(code) or 'unknown'}"
+
+
+def _resolve_identity_hint(hint: object, candidates: object, *, kind: str) -> tuple[str | None, str]:
+    """``(ref, "")`` on exactly one match; ``(None, code)`` on zero or two+.
+
+    ``candidates`` is the host's own excerpt — never the model's guess —
+    of ``{"ref": telling_ref_or_episode_id, "kind": "telling" | "episode",
+    "labels": [...]}`` rows. Matching is exact-or-substring on normalized
+    text, deliberately generous: a generous MATCH is cheap to double-check
+    (it either resolves to one thing or it refuses), while a generous
+    THRESHOLD that bound something wrong would not be.
+    """
+    text = tc.collapsed_text(hint).casefold()
+    unresolved = (
+        IDENTITY_ASSERTION_UNRESOLVED_TELLING if kind == "telling"
+        else IDENTITY_ASSERTION_UNRESOLVED_EPISODE
+    )
+    if not text:
+        return None, unresolved
+    matches: set[str] = set()
+    for row in candidates or ():
+        if not isinstance(row, dict) or tc.collapsed_text(row.get("kind")) != kind:
+            continue
+        ref = tc.collapsed_text(row.get("ref"))
+        if not ref:
+            continue
+        for label in row.get("labels") or ():
+            label_text = tc.collapsed_text(label).casefold()
+            if label_text and (label_text == text or label_text in text or text in label_text):
+                matches.add(ref)
+                break
+    if len(matches) == 1:
+        return next(iter(matches)), ""
+    ambiguous = (
+        IDENTITY_ASSERTION_AMBIGUOUS_TELLING if kind == "telling"
+        else IDENTITY_ASSERTION_AMBIGUOUS_EPISODE
+    )
+    return None, (unresolved if not matches else ambiguous)
+
+
+def validate_identity_assertion_draft(
+    value: object, *, candidates: object = (),
+) -> tuple[dict | None, str]:
+    """One emitted assertion, resolved against ``candidates``. ``(draft, finding)``.
+
+    ``finding`` is ``""`` when the draft is kept. A relation outside
+    `episode_fold_contract.RELATIONS` (``same``/``part_of``/``related``/
+    ``not_same`` — never ``unknown``, which is an epistemic state on a work
+    item, not something a person STATES) is refused by name, and so is a hint
+    that resolves to zero or two-or-more candidates.
+    """
+    if not isinstance(value, dict) or not value:
+        return None, identity_assertion_refused("not_a_mapping")
+    if not set(value) <= IDENTITY_ASSERTION_PROMPT_KEYS:
+        return None, identity_assertion_refused(IDENTITY_ASSERTION_UNKNOWN_KEY)
+    relation = tc.collapsed_text(value.get("relation"))
+    if relation not in efc.RELATIONS:
+        return None, identity_assertion_refused(IDENTITY_ASSERTION_UNKNOWN_RELATION)
+    telling_ref, telling_finding = _resolve_identity_hint(
+        value.get("telling_hint"), candidates, kind="telling",
+    )
+    if telling_ref is None:
+        return None, identity_assertion_refused(telling_finding)
+    episode_id, episode_finding = _resolve_identity_hint(
+        value.get("episode_hint"), candidates, kind="episode",
+    )
+    if episode_id is None:
+        return None, identity_assertion_refused(episode_finding)
+    draft = {
+        "telling_ref": telling_ref,
+        "episode_id": episode_id,
+        "relation": relation,
+        "evidence": {
+            "telling_quote": tc.collapsed_text(value.get("telling_hint")),
+            "episode_quote": tc.collapsed_text(value.get("episode_hint")),
+        },
+    }
+    return draft, ""
+
+
+def parse_identity_assertions(
+    payload: object, *, candidates: object = (),
+) -> tuple[tuple[dict, ...], tuple[str, ...]]:
+    """A leaf's ``identity_assertions`` list, validated PER ASSERTION.
+
+    Same discipline as :func:`parse_claims`: each assertion is judged alone,
+    so one ambiguous hint never costs a sibling that resolved cleanly.
+    """
+    if isinstance(payload, dict):
+        payload = [payload]
+    if not isinstance(payload, (list, tuple)):
+        return (), ()
+    drafts: list[dict] = []
+    findings: list[str] = []
+    for candidate in payload:
+        draft, finding = validate_identity_assertion_draft(candidate, candidates=candidates)
+        if draft is not None:
+            if draft not in drafts:
+                drafts.append(draft)
+        elif finding:
+            findings.append(finding)
+    return tuple(drafts), tuple(dict.fromkeys(findings))
+
+
+def bind_identity_assertions(
+    drafts: object, *, source_ref: object = None, now: object = None,
+) -> list[dict]:
+    """Drafts, plus what only the filer knows — ``origin: "stated"`` and the
+    rule version — ready for `event_identity.file_event_identity`.
+
+    Spontaneous conversation is `stated` origin, never `confirmed`: the
+    person was not answering a directed `same_event` question (that path,
+    `identity_questions.resolve_same_event_answer`, is where `confirmed`
+    comes from). Both land beside each other under `sources/identity/` —
+    Law 7, human decisions are sources, not state.
+    """
+    import event_identity as ei  # noqa: PLC0415
+
+    bound: list[dict] = []
+    for draft in (drafts or ()):
+        if not isinstance(draft, dict) or not draft:
+            continue
+        payload = dict(draft)
+        payload["origin"] = "stated"
+        payload["rule_version"] = ei.IDENTITY_RULE_VERSION
+        payload["source_ref"] = tc.collapsed_text(source_ref) or None
+        payload["created_at"] = now
+        if payload not in bound:
+            bound.append(payload)
     return bound
 
 
