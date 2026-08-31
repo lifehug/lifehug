@@ -4,11 +4,13 @@
 contracts, v265/v266), **I1** (the fold applies bindings, v267), **I2** (the
 binder, v268, with v269's live-vault findings — one pair one row, one tally,
 the fold's own age frames, the recorder's stem), **I3** (the questions —
-five answers, the split gesture, the listener leaf, v270) and **I2b**
-(containers first — the entity signal and the containment rung, v271). I4 (R3
-model proposals, deferred) is not built. Wiring I3's generation into the
-published `work-items.json` loop, the owner-reviewed founder dry-run and the
-all-tenant backfill runbook are I-P (platform), not this repo.
+five answers, the split gesture, the listener leaf, v270), **I2b**
+(containers first — the entity signal and the containment rung, v271) and
+**I3b** (composing overlapping confirmed pairs — a real defect found
+rehearsing the founder apply pass, v272). I4 (R3 model proposals, deferred)
+is not built. Wiring I3's generation into the published `work-items.json`
+loop, the owner-reviewed founder dry-run and the all-tenant backfill runbook
+are I-P (platform), not this repo.
 **Date:** 2026-08-31.
 **Controlling design:** lifehug-platform `docs/design/event-identity.md`
 **v4.2** — that document is authoritative; this ADR records the model in this
@@ -290,6 +292,66 @@ collecting under `Etherfuse (after May 2022)` and `the idea for Etherfuse
 (after 2021)`, `Joy Labs (November 2018–January 2021)` beside them, and a
 telling dated 1999 that names Etherfuse left for the person rather than moved
 to fit.
+
+## I3b — composing overlapping confirmed pairs (v272)
+
+Rehearsing the founder apply pass on a copy surfaced a real defect I3 did not
+anticipate: the founder's own confirmed pairs OVERLAP. One telling can be the
+shared vertex of more than one confirmed `same` answer — a triangle of three
+tellings with two confirmed pairs sharing one vertex is the shape actually
+found, and I3's `resolve_same_event_answer` filed each pair independently,
+treating every answer as "create a fresh episode for this prospective pair."
+The second answer on the shared telling minted a SECOND active `same`
+binding with no supersession, and the fold correctly refused —
+`identity_conflict`, exactly Law 2/§5.4's own promise holding. The refusal
+was right; the ANSWER FLOW violated it by not composing.
+
+**The fix reads each side's CURRENT membership fresh, at filing time, never
+trusted from a report's own precomputed pair**, and routes through C2's own
+operations rather than always minting a `create`:
+
+* **Growth** (one side already in episode E, the other standalone):
+  `_bind_into_episode` files ONE bare binding into E. No new operation is
+  minted — C2's vocabulary has no `add`, and `episode_binder.
+  CLUSTER_RULE_TEXT`'s create-over-the-whole-cluster-and-alias growth path
+  is the answer for a DETERMINISTIC rule specifically because a rule must
+  stay reproducible from a digest of its own inputs; a human's confirmed
+  answer carries no such constraint and needs no id to re-derive.
+* **Merge** (both sides already in DIFFERENT episodes, including a third
+  answer joining two otherwise-mature episodes): `_merge_episodes` files ONE
+  `merge` envelope — every active member of the absorbed episode gets a
+  fresh confirmed binding into the survivor, each NAMING the old binding it
+  supersedes (the fix's own near-miss: forgetting that pointer leaves the
+  old binding "active" by its own stale `status` field forever, which
+  nothing ever flips — only a newer record's `supersedes` cross-reference
+  says a prior one no longer counts). The survivor is the adopted episode
+  when exactly one side is (`episode_fold_contract`'s own `active_binding_
+  index`/`grouping_binding` — never a raw `status == "active"` scan, which
+  is exactly the shape that let a merge's own idempotency check pass
+  against a broken build for the wrong reason mid-fix); otherwise the
+  lexicographically smaller id, so replay from either side or call order is
+  stable. Replay is found by the STABLE unordered pair of episode ids a
+  merge names in its own `canonical_inputs`, never by recomputing the
+  operation's digest — a merge's `member_refs` are the absorbed episode's
+  tellings AT FILING TIME, which become empty the instant the merge
+  succeeds, so the digest itself is not reproducible after the fact.
+* **Same episode already**: reuses growth's own existing/no-op/supersede
+  judgment — including the origin-transition case where the two sides
+  resolve to the identical episode because `candidate_episode_id` names
+  exactly the episode a prior PROPOSAL already suggested. That is "confirm
+  the proposal," not "nothing to do."
+
+`candidate_episode_id` is now OPTIONAL: a caller that only ever learned the
+counterpart's own telling ref (the rehearsal's own shape) names it in
+`candidate_telling_ref` alone, and `_resolve_counterpart` reads the vault
+fresh rather than requiring a precomputed episode id that may already be
+stale.
+
+Property-proven on the a3-triangle shape (three tellings, two confirmed
+pairs sharing one vertex, in every choice of shared vertex and every filing
+order): no permutation ever raises `identity_conflict`, and every one
+converges to one episode of three. A third confirmed answer joining two
+mature human episodes files a merge, never a refusal.
 
 ## Consequences
 

@@ -114,6 +114,7 @@ IDENTITY_QUESTIONS_ERROR_CODES = (
     "identity_overmerge_answer_unknown",
     "identity_answer_needs_sibling",
     "identity_answer_needs_episode_or_sibling",
+    "identity_merge_needs_absorbed_members",
 )
 
 
@@ -161,6 +162,86 @@ def _active_binding(
         ):
             return record
     return None
+
+
+def _grouping_index(vault_root: str | Path) -> dict:
+    """The properly-COLLAPSED active view (`episode_fold_contract.
+    active_binding_index`) — never a raw scan filtered only by each record's
+    own `status` field.
+
+    Superseding a binding never flips the OLD record's own `status` to
+    `"superseded"` — only a NEWER record's `supersedes` pointer says a prior
+    one no longer counts, and `status` alone is a different, orthogonal
+    concept (present at I0, never touched by a supersession). A raw filter
+    on `status == "active"` therefore still finds an absorbed episode's OLD
+    members after a merge, or the pre-confirmation record at a shared
+    vertex — precisely the shape that let a merge's own idempotency check
+    "pass" against a build that had lost its real short-circuit, for the
+    wrong reason. This is the ONE collapsed view every lookup in this module
+    reads from.
+    """
+    return efc.active_binding_index(ei.load_event_identities(vault_root))
+
+
+def _active_same_episode(vault_root: str | Path, telling_ref: str) -> str | None:
+    """The episode this telling is CURRENTLY `same`-bound to, if any — by a
+    GROUPING-eligible origin (`episode_fold_contract.GROUPING_ORIGINS`:
+    `stated`/`confirmed`/`deterministic`, never `proposed` — §2.3's "only
+    the first three affect grouping", applied here too: an unconfirmed
+    machine guess is not a home a composition decision should route around).
+
+    Read FRESH at filing time — never trusted from a binder report's own
+    precomputed pair. A telling confirmed into an episode by an EARLIER
+    answer in the same batch is exactly what this catches: the a3-triangle
+    defect (three tellings, two confirmed pairs sharing one telling) filed
+    each pair against the report's own stale prospective id and produced two
+    active `same` bindings on the shared telling — `identity_conflict`,
+    correctly refused, on the very first fold or binder run afterward. This
+    function is what lets the SECOND answer see what the FIRST one just did.
+    """
+    binding = efc.grouping_binding(telling_ref, _grouping_index(vault_root))
+    return collapsed_text(binding.get("episode_id")) or None if binding else None
+
+
+def _grouped_members(vault_root: str | Path, episode_id: str) -> dict[str, dict]:
+    """``{telling_ref: binding}`` for every telling CURRENTLY grouped (by a
+    grouping-eligible `same` binding) into ``episode_id`` — the merge growth
+    path's own read of "who actually still belongs here right now".
+    """
+    index = _grouping_index(vault_root)
+    found: dict[str, dict] = {}
+    for telling_ref in index:
+        binding = efc.grouping_binding(telling_ref, index)
+        if binding is not None and collapsed_text(binding.get("episode_id")) == episode_id:
+            found[telling_ref] = binding
+    return found
+
+
+def _resolve_counterpart(
+    vault_root: str | Path, *, candidate_episode_id: object, candidate_telling_ref: object,
+) -> tuple[str | None, str | None]:
+    """``(counterpart_telling_ref, counterpart_episode_id)`` — read FRESH,
+    never assumed from what a report said when it was generated.
+
+    A pair's candidate half reaches this module three ways: a REAL existing
+    episode id (§4.1's `candidate_kind == "episode"`); a raw sibling telling
+    ref with NO episode id at all — a genuinely prospective pair, or simply a
+    caller that only ever learned the counterpart's own ref (§6.1's own
+    rehearsal calls it exactly this way, so `candidate_episode_id` is
+    optional here); or a PROSPECTIVE id `episode_binder.prospective_episode_id`
+    computed at REPORT time, which an earlier answer in the same batch may
+    since have made stale. The precomputed id is trusted only when the vault
+    actually holds an episode under it — never for routing a decision.
+    """
+    episode = collapsed_text(candidate_episode_id)
+    telling = collapsed_text(candidate_telling_ref)
+    if episode and _episode_exists(vault_root, episode):
+        sibling = ei.validate_telling_ref(telling) if telling else None
+        return sibling, episode
+    if telling:
+        sibling = ei.validate_telling_ref(telling)
+        return sibling, _active_same_episode(vault_root, sibling)
+    return None, None
 
 
 def _machine_origin_to_supersede(existing: dict | None) -> str | None:
@@ -216,6 +297,167 @@ def _create_singleton(
     return episode_id
 
 
+def _bind_into_episode(
+    vault_root: str | Path, *, telling_ref: str, episode_id: str,
+    evidence: object = None, source_ref: object = None, now: object = None,
+) -> dict:
+    """One telling, bound `same` into an EXISTING episode — the growth path
+    for case (a): one side of a confirmed pair already belongs somewhere,
+    the other is standalone.
+
+    No NEW operation envelope is minted. Active bindings are the sole fold
+    authority (design §3.2); C2's operation vocabulary has no `add`, and
+    `episode_binder.CLUSTER_RULE_TEXT`'s create-over-the-whole-cluster-and-
+    alias path is the answer for a DETERMINISTIC rule specifically because a
+    rule must stay REPRODUCIBLE from a digest of its inputs — re-run the
+    binder on the same durable state and the same id must come back. A
+    human's confirmed answer carries no such constraint: it is itself the
+    durable fact, so one bare binding into the episode that already exists
+    is the complete, correct record, with no id to re-derive and nothing to
+    alias.
+    """
+    existing = _active_binding(
+        vault_root, telling_ref=telling_ref, episode_id=episode_id,
+        relation=efc.GROUPING_RELATION,
+    )
+    if existing is not None and existing.get("origin") in ei.HUMAN_ORIGINS:
+        # Already a human decision naming this exact pair — true idempotency,
+        # not a fresh supersession chain (§5.8 row 2).
+        return {"answer": "same", "episode_id": episode_id, "binding": existing, "created": False}
+    binding, created = ei.file_event_identity(
+        vault_root,
+        telling_ref=telling_ref, episode_id=episode_id, relation=efc.GROUPING_RELATION,
+        origin="confirmed", rule_version=ei.IDENTITY_RULE_VERSION,
+        supersedes=_machine_origin_to_supersede(existing),
+        evidence=evidence or {}, source_ref=source_ref, created_at=now,
+    )
+    return {"answer": "same", "episode_id": episode_id, "binding": binding, "created": created}
+
+
+def _merge_order(vault_root: str | Path, episode_a: str, episode_b: str) -> tuple[str, str]:
+    """``(survivor, absorbed)`` — deterministic, so replaying a merge (in
+    either direction, or from either side of the pair) always picks the same
+    side. An ADOPTED episode survives over an unadopted one — the human
+    growth path's own echo of `CLUSTER_RULE_TEXT`'s "an adopted episode is
+    never superseded" — because durable references (a URL, an open session,
+    a work item) may already point at it. Otherwise the lexicographically
+    smaller id survives, which is arbitrary but stable.
+    """
+    a_adopted = ei.is_adopted(vault_root, episode_a)
+    b_adopted = ei.is_adopted(vault_root, episode_b)
+    if a_adopted and not b_adopted:
+        return episode_a, episode_b
+    if b_adopted and not a_adopted:
+        return episode_b, episode_a
+    return tuple(sorted((episode_a, episode_b)))  # type: ignore[return-value]
+
+
+def _existing_merge(vault_root: str | Path, *, episode_a: str, episode_b: str) -> dict | None:
+    """A prior ACTIVE `merge` already joining these two episodes, found by
+    the STABLE unordered pair they name — never by recomputing a digest.
+
+    A merge's own `operation_id` digests `member_refs_sorted` too (C2's
+    generic operation validator does not special-case merges), and those
+    members are the absorbed episode's tellings AT FILING TIME — which
+    become EMPTY the instant the merge succeeds. Recomputing "the same"
+    digest after the fact is therefore structurally impossible once the
+    merge has run; the pair of episode ids a merge names in its own
+    `canonical_inputs.acted_on_episode_ids` is stable forever and is what
+    this searches by instead.
+    """
+    pair = sorted((collapsed_text(episode_a), collapsed_text(episode_b)))
+    for record in ei.load_episode_operations(vault_root):
+        if record.get("op") != "merge" or record.get("status") != "active":
+            continue
+        acted = sorted((record.get("canonical_inputs") or {}).get("acted_on_episode_ids") or ())
+        if acted == pair:
+            return record
+    return None
+
+
+def _merge_episodes(
+    vault_root: str | Path, *, episode_a: str, episode_b: str,
+    source_ref: object = None, now: object = None,
+) -> dict:
+    """Join two episodes into one, human authority — case (b): a confirmed
+    pair whose two sides already belong to DIFFERENT episodes (including a
+    third answer joining two otherwise-mature episodes, §12.5).
+
+    Files ONE `merge` envelope (design §3.2): every active `same` member of
+    the absorbed episode gets a fresh confirmed binding into the survivor,
+    each superseding its own prior binding, and the absorbed id resolves
+    forever via `aliases_created` (Law 5). Replaying the SAME merge — from
+    either side, in either call order — is a no-op: :func:`_existing_merge`
+    finds the prior envelope, by the STABLE pair of episode ids it names,
+    before touching a single binding — which matters because by the time a
+    replay arrives the absorbed episode legitimately has NO active members
+    left to gather (they were already moved).
+    """
+    _require(
+        collapsed_text(episode_a) and collapsed_text(episode_b),
+        "identity_merge_needs_absorbed_members",
+        "a merge needs both episode ids",
+    )
+    if episode_a == episode_b:
+        return {"answer": "same", "episode_id": episode_a, "written": False,
+                "reason": "already the same episode"}
+    survivor, absorbed = _merge_order(vault_root, episode_a, episode_b)
+    prior = _existing_merge(vault_root, episode_a=survivor, episode_b=absorbed)
+    if prior is not None:
+        return {
+            "answer": "same", "episode_id": survivor, "merged": absorbed,
+            "envelope": {"operation": prior, "bindings": [], "created": False,
+                        "operation_created": False},
+        }
+    absorbed_bindings = _grouped_members(vault_root, absorbed)
+    _require(
+        absorbed_bindings, "identity_merge_needs_absorbed_members",
+        f"{absorbed} has no active `same` members to move into {survivor}",
+    )
+    members = sorted(absorbed_bindings)
+    creates_ids: list[str] = []
+    supersedes_ids: list[str] = []
+    bindings: list[dict] = []
+    for telling in members:
+        old = absorbed_bindings[telling]
+        supersedes_ids.append(old["identity_id"])
+        # The OLD binding rides along too, exactly as `split_episode` does —
+        # an envelope's own `bindings` must include every record its
+        # `supersedes_binding_ids` names, and re-filing an unchanged one is a
+        # no-op (create-or-keep).
+        bindings.append(dict(old))
+        creates_ids.append(ei.binding_digest(
+            telling_ref=telling, episode_id=survivor,
+            relation=efc.GROUPING_RELATION, rule_version=ei.IDENTITY_RULE_VERSION,
+            supersedes=old["identity_id"],
+        ))
+        bindings.append({
+            "telling_ref": telling, "episode_id": survivor,
+            "relation": efc.GROUPING_RELATION, "origin": "confirmed",
+            "rule_version": ei.IDENTITY_RULE_VERSION,
+            # Names the OLD (absorbed-episode) binding it retires — WITHOUT
+            # this, `validate_identity_set` has no record whose `supersedes`
+            # names the old one, the old binding stays "active" forever
+            # alongside the new one, and the very next fold refuses with the
+            # `identity_conflict` this whole function exists to prevent.
+            "supersedes": old["identity_id"],
+            "source_ref": source_ref, "created_at": now,
+        })
+    envelope = ei.file_operation_envelope(
+        vault_root,
+        operation={
+            "authority": "human", "op": "merge", "rule_version": ei.IDENTITY_RULE_VERSION,
+            "episode_id": survivor, "absorbed_episode_id": absorbed,
+            "members": members, "creates_binding_ids": creates_ids,
+            "supersedes_binding_ids": supersedes_ids,
+            "aliases_created": [absorbed],
+            "source_ref": source_ref, "created_at": now,
+        },
+        bindings=bindings,
+    )
+    return {"answer": "same", "episode_id": survivor, "envelope": envelope, "merged": absorbed}
+
+
 # --------------------------------------------------------------------------
 # `same_event` — the five answers (design §6.1, §13.4)
 # --------------------------------------------------------------------------
@@ -225,8 +467,8 @@ def resolve_same_event_answer(
     vault_root: str | Path,
     *,
     telling_ref: object,
-    candidate_episode_id: object,
     answer: object,
+    candidate_episode_id: object = None,
     candidate_telling_ref: object = None,
     telling_quote: object = None,
     episode_quote: object = None,
@@ -239,6 +481,24 @@ def resolve_same_event_answer(
     interaction, stage or awaiting state (design §6.1). Returns a dict naming
     what happened; ``answer`` echoes the normalized code so a caller need not
     re-derive it.
+
+    **Composition, not a second violation of Law 2.** The founder's own
+    confirmed pairs overlap — one telling can be the shared vertex of several
+    confirmed `same` answers, arriving in any order, each one filed against
+    whatever the report said BEFORE any of them were answered. Treating every
+    answer as "create a fresh episode for this prospective pair" mints a
+    SECOND active `same` binding on the shared telling the moment two such
+    answers land, which the fold correctly refuses (`identity_conflict`).
+    This function instead reads each side's CURRENT membership fresh, at
+    filing time, and routes through C2's own operations: a standalone
+    counterpart is bound INTO an existing side's episode
+    (:func:`_bind_into_episode`); two sides already in different episodes are
+    merged (:func:`_merge_episodes`, also what a third answer joining two
+    otherwise-mature episodes does); the same episode already is a no-op;
+    and only two genuinely standalone sides mint a fresh `create`.
+    `candidate_episode_id` is OPTIONAL — a caller that only ever learned the
+    counterpart's own telling ref names it in `candidate_telling_ref` alone
+    (:func:`_resolve_counterpart`).
     """
     telling = ei.validate_telling_ref(telling_ref)
     answer_code = collapsed_text(answer)
@@ -247,29 +507,73 @@ def resolve_same_event_answer(
         "identity_answer_unknown",
         f"unknown same_event answer: {answer!r}",
     )
-    candidate_episode = collapsed_text(candidate_episode_id)
     evidence = {
         "telling_quote": collapsed_text(telling_quote),
         "episode_quote": collapsed_text(episode_quote),
     }
+    counterpart_ref, counterpart_episode = _resolve_counterpart(
+        vault_root, candidate_episode_id=candidate_episode_id,
+        candidate_telling_ref=candidate_telling_ref,
+    )
 
     if answer_code == "not_sure":
+        candidate_key = collapsed_text(candidate_episode_id) or counterpart_episode \
+            or counterpart_ref or collapsed_text(candidate_telling_ref)
+        _require(
+            candidate_key, "identity_answer_needs_episode_or_sibling",
+            "a deferral names the pair it defers",
+        )
         deferral = erc.defer_pair(
-            telling_ref=telling, candidate_episode_id=candidate_episode,
+            telling_ref=telling, candidate_episode_id=candidate_key,
             evidence_signature=evidence, now=now,
         )
         record = file_deferral(vault_root, deferral)
         return {"answer": "not_sure", "event_key": deferral["event_key"], "deferral": record}
 
-    exists = _episode_exists(vault_root, candidate_episode)
+    telling_episode = _active_same_episode(vault_root, telling)
 
-    if answer_code == "same" and not exists:
+    if answer_code == "same":
+        if telling_episode and counterpart_episode:
+            if telling_episode == counterpart_episode:
+                # Both sides already point at the SAME episode — including
+                # the origin-transition case where `candidate_episode_id` is
+                # exactly the episode a prior PROPOSAL already named: that is
+                # not "nothing to do", it is "confirm the proposal", so this
+                # reuses `_bind_into_episode`'s own existing/no-op/supersede
+                # judgment rather than a bespoke no-op here.
+                return _bind_into_episode(
+                    vault_root, telling_ref=telling, episode_id=telling_episode,
+                    evidence=evidence, source_ref=source_ref, now=now,
+                )
+            return _merge_episodes(
+                vault_root, episode_a=telling_episode, episode_b=counterpart_episode,
+                source_ref=source_ref, now=now,
+            )
+        if telling_episode and not counterpart_episode:
+            _require(
+                counterpart_ref, "identity_answer_needs_sibling",
+                "confirming Same against a standalone counterpart names its telling ref",
+            )
+            return _bind_into_episode(
+                vault_root, telling_ref=counterpart_ref, episode_id=telling_episode,
+                evidence=evidence, source_ref=source_ref, now=now,
+            )
+        if counterpart_episode and not telling_episode:
+            return _bind_into_episode(
+                vault_root, telling_ref=telling, episode_id=counterpart_episode,
+                evidence=evidence, source_ref=source_ref, now=now,
+            )
+        # Both sides standalone: a fresh `create` over exactly the two of
+        # them, `authority: human` — R1 already declined this pair, so
+        # nothing deterministic would ever re-derive it, and this id is
+        # legitimately different from the report's own prospective one
+        # (`episode_binder.prospective_episode_id`, `authority:
+        # deterministic`).
         _require(
-            collapsed_text(candidate_telling_ref), "identity_answer_needs_sibling",
+            counterpart_ref, "identity_answer_needs_sibling",
             "confirming Same against a prospective pair names the sibling telling",
         )
-        sibling = ei.validate_telling_ref(candidate_telling_ref)
-        members = sorted({telling, sibling})
+        members = sorted({telling, counterpart_ref})
         operation_id = ei.operation_digest(
             authority="human", op="create", rule_version=ei.IDENTITY_RULE_VERSION,
             member_refs=members,
@@ -304,18 +608,15 @@ def resolve_same_event_answer(
 
     relation = ANSWER_RELATION[answer_code]
 
-    if not exists:
+    if counterpart_episode:
+        episode_id = counterpart_episode
+    else:
         _require(
-            collapsed_text(candidate_telling_ref),
+            counterpart_ref,
             "identity_answer_needs_episode_or_sibling",
             f"answering {answer_code!r} against a prospective pair names the sibling telling",
         )
-        episode_id = _create_singleton(
-            vault_root, ei.validate_telling_ref(candidate_telling_ref),
-            source_ref=source_ref, now=now,
-        )
-    else:
-        episode_id = candidate_episode
+        episode_id = _create_singleton(vault_root, counterpart_ref, source_ref=source_ref, now=now)
 
     existing = _active_binding(
         vault_root, telling_ref=telling, episode_id=episode_id, relation=relation,
@@ -331,7 +632,6 @@ def resolve_same_event_answer(
         "answer": answer_code, "episode_id": episode_id, "relation": relation,
         "binding": binding, "created": created,
     }
-
 
 # --------------------------------------------------------------------------
 # "Not sure" — an epistemic state, filed and reopened (design §2.2, §13.4)
@@ -582,4 +882,19 @@ __all__ = [
     "resolve_possible_overmerge_answer",
     "resolve_same_event_answer",
     "split_episode",
+]
+
+# Not part of the public seam (no vocabulary, no new writer), but exposed for
+# the property tests this fix's own promises need: composing an overlapping
+# pair set has to be provable at the routing/merge granularity, not only at
+# the whole-answer one.
+__all__ += [
+    "_active_same_episode",
+    "_bind_into_episode",
+    "_existing_merge",
+    "_grouped_members",
+    "_grouping_index",
+    "_merge_episodes",
+    "_merge_order",
+    "_resolve_counterpart",
 ]
