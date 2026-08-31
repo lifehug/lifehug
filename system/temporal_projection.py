@@ -193,9 +193,18 @@ IDENTITY_LINK_KEYS = (
 #: not a ``missing_anchor`` because the answer is a choice between spans the
 #: substrate already holds, not a date typed from nothing — and because the
 #: question a person can actually answer is *"which time in San Diego?"*.
+#:
+#: ``same_event`` and ``possible_overmerge`` arrive with event identity I3
+#: (`docs/design/event-identity.md` v4 §6.1/§6.3). I2's binder module
+#: emitted both as pairwise OUTPUTS — the pair key, every §4.2 condition's
+#: pass/fail, and the inputs this module's own value scoring reads — but
+#: deliberately left both kinds unregistered here: a kind whose answer
+#: nothing can file is the silent under-delivery ADR 0021 refuses. I3 is the
+#: probe, the five answers and the filing (`resolve-work-item`), so the
+#: registration lands here, now that something can act on it.
 WORK_ITEM_KINDS = (
     "missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
-    "place_ambiguous",
+    "place_ambiguous", "same_event", "possible_overmerge",
 )
 
 #: ``offered`` is "shown to the person and not yet answered"; ``obsolete`` is

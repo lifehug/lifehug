@@ -663,13 +663,20 @@ def precision_so_far(session: object) -> object:
 # quiet case quiet.
 
 #: The work item kinds this stage can run a conversation about — the whole of
-#: `temporal_projection.WORK_ITEM_KINDS`. Mirror renders only two of them
+#: `temporal_projection.WORK_ITEM_KINDS`. Mirror renders only some of them
 #: (`mirror_work.MIRROR_WORK_ITEM_KINDS`) because §2.3 keeps routine
 #: incompleteness off that page; Play is not a page and has no such rule, so a
 #: precision gap the queue surfaced opens the same conversation a
 #: contradiction does.
+#:
+#: ``same_event`` and ``possible_overmerge`` join here at event identity I3 —
+#: no new Interaction, stage or awaiting state (design §6.1/§6.3): the Play
+#: kind is `work_item` exactly as it is for every sibling kind, and the five
+#: answers / the split gesture file through `resolve-work-item`, never a
+#: second conversation surface.
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
-                   "missing_anchor", "place_ambiguous", "precision_gap")
+                   "missing_anchor", "place_ambiguous", "precision_gap",
+                   "same_event", "possible_overmerge")
 
 #: How many quoted spans a work-item context block carries. The same number as
 #: `mirror_work.MAX_PLAY_EVIDENCE` and pinned equal to it
@@ -727,6 +734,34 @@ WORK_ITEM_PROBES = {
                 "than once \u2014 which of those times was this?",
         "anchored": "You've told me about {label} \u2014 was that before or "
                     "after {anchor}?",
+    },
+    # Event identity I3 (design \u00a76.1). The five answers are a CLOSED choice
+    # (`identity_questions.RELATION_ANSWERS`), not free text this probe's
+    # reply is parsed for \u2014 the same "structured payload, not prose
+    # parsing" shape `timeline-move --relation` already uses. `{cast}` is a
+    # pre-formatted suffix (e.g. " with Sarah and Tom", or "").
+    "same_event": {
+        "step": "content", "cost": 3,
+        "text": "Is \u201c{telling_quote}\u201d the same thing as "
+                "\u201c{episode_quote}\u201d{cast}? Same thing, part of it, "
+                "related but different, different, or not sure?",
+        "anchored": "Is \u201c{telling_quote}\u201d the same thing as "
+                    "\u201c{episode_quote}\u201d{cast} \u2014 that was "
+                    "around {anchor}?",
+    },
+    # \u00a74.5/\u00a76.3. An audit of a bind already made, not a proposal \u2014 the
+    # four offers are keep together / split / part of / fix the date
+    # (`identity_questions.OVERMERGE_ANSWERS`).
+    "possible_overmerge": {
+        "step": "convergence", "cost": 4,
+        "text": "I've been treating \u201c{telling_quote}\u201d and "
+                "\u201c{episode_quote}\u201d as one thing, but their dates "
+                "don't agree \u2014 keep them together, split them apart, "
+                "call one part of the other, or is a date just off?",
+        "anchored": "I've been treating \u201c{telling_quote}\u201d and "
+                    "\u201c{episode_quote}\u201d as one thing, but "
+                    "something doesn't line up around {anchor} \u2014 keep "
+                    "together, split, or fix a date?",
     },
 }
 
@@ -904,7 +939,13 @@ def work_item_target(value: object, *, aliases: object = None) -> dict | None:
         ],
     }
     for key in ("prompt_intent", "description", "requested_field",
-                "subject_ref", "event_ref", "node_ref"):
+                "subject_ref", "event_ref", "node_ref",
+                # Event identity I3: the two quoted utterances a `same_event`
+                # or `possible_overmerge` probe puts side by side, and the
+                # shared cast suffix (already formatted, e.g. " with Sarah");
+                # absent for every other kind, so every other probe's
+                # `.format()` call sees the same empty string it always did.
+                "telling_quote", "episode_quote", "cast"):
         text = str(value.get(key) or "").strip()
         if text:
             target[key] = text
@@ -926,6 +967,11 @@ def _work_item_has_material(row: dict) -> bool:
         return bool(row["candidates"])
     if kind == "precision_gap":
         return bool(row["readings"]) or bool(row.get("requested_field"))
+    if kind in ("same_event", "possible_overmerge"):
+        # Event identity I3: the pair's own two quotes ARE the question — an
+        # anchored before/after fallback would ask something the person
+        # cannot answer with one of the five relations.
+        return bool(row.get("telling_quote")) and bool(row.get("episode_quote"))
     return False
 
 
@@ -968,6 +1014,9 @@ def work_item_probe(target: object, *, anchors: object = ()) -> dict:
     text = (spec["anchored"] if anchored else spec["text"]).format(
         label=row["label"], anchor=anchor_label,
         readings=readings, candidates=candidates, field=field,
+        telling_quote=row.get("telling_quote") or row["label"],
+        episode_quote=row.get("episode_quote") or candidates,
+        cast=row.get("cast") or "",
     )
     return {
         "step": spec.get("anchored_step", spec["step"]) if anchored else spec["step"],

@@ -1,9 +1,13 @@
 # ADR 0031 — Event identity: tellings, episodes, operations and bindings
 
 **Status:** Accepted. Shipped in this repo: **I0** (records and
-contracts, v265/v266), **I1** (the fold applies bindings, v267) and **I2** (the
-binder, v268). I3 (the probe, the five answers, split) and I4 (R3 model
-proposals, deferred) are not built.
+contracts, v265/v266), **I1** (the fold applies bindings, v267), **I2** (the
+binder, v268, with v269's live-vault findings — one pair one row, one tally,
+the fold's own age frames, the recorder's stem) and **I3** (the questions —
+five answers, the split gesture, the listener leaf, v270). I4 (R3 model
+proposals, deferred) is not built. Wiring I3's generation into the published
+`work-items.json` loop, the owner-reviewed founder dry-run and the
+all-tenant backfill runbook are I-P (platform), not this repo.
 **Date:** 2026-08-30.
 **Controlling design:** lifehug-platform `docs/design/event-identity.md` **v4**
 — that document is authoritative; this ADR records the model in this repo's
@@ -104,15 +108,16 @@ step. This is the first phase that DECIDES a binding rather than applying one:
   wide-gap place mismatch is `part_of`-suggestive, never a veto). Every §5.6
   re-audit trigger runs through C4's `reaudit`, whose only two outcomes are
   *mint one item* and *do nothing*.
-* **Question OUTPUTS, not questions.** Pairs are emitted as data keyed by C4's
-  pair key with the inputs the existing work-item value scoring reads. Neither
-  `same_event` nor `possible_overmerge` is registered in
-  `temporal_projection.WORK_ITEM_KINDS`: I3 owns the probe, the five answers
-  and the filing, and a kind whose answer nothing can file is the silent
-  under-delivery ADR 0021 refuses.
+* **Question OUTPUTS, not questions — at I2.** Pairs were emitted as data
+  keyed by C4's pair key with the inputs the existing work-item value scoring
+  reads, and neither kind was registered in `temporal_projection.WORK_ITEM_KINDS`
+  because nothing could file an answer yet. I3 is the phase that ends that.
 * **`--dry-run` is the default and the scheduled step is dry by
   construction.** Rollout step 3 says no live bind before I3, so the weekly
-  loop reports and the owner's `--apply` is the only door that writes.
+  loop reports and the owner's `--apply` is the only door that writes — I3
+  builds the confirmation/split/possible_overmerge flows that step needed,
+  but the maintenance step ITSELF stays a dry run until the owner's reviewed
+  founder dry-run (§8 step 1) authorizes a live one.
 
 Three readings the design left to the phase, each named in code rather than
 found in a diff: `CLUSTER_RULE_TEXT` (§4.2 names no envelope for a telling
@@ -166,6 +171,54 @@ a **resolved-entity signal** (v221's own resolution, reused as retrieval
 evidence) is the one change that would give those pairs a genuine second
 signal. That is a design decision with the owner's name on it, not a threshold
 to quietly lower.
+
+## I3 — the questions (v270)
+
+I3 registers `same_event` and `possible_overmerge` in
+`temporal_projection.WORK_ITEM_KINDS`, gives both value-scoring defaults and
+surfaces beside the five existing kinds, seats them in `WORK_ITEM_PRECEDENCE`
+just below `contradiction`, and adds them to Mirror's allowlist (design §6.3:
+every actionable Mirror row has Play now). `episode_binder.same_event_work_items`/
+`possible_overmerge_work_items` are the pure functions that turn I2's pairwise
+outputs into ordinary work items through the SAME scoring formula every other
+kind uses — never a priority of their own (§4.1). A new module,
+`identity_questions.py`, is the phase's own home:
+
+* **`resolve_same_event_answer`** files Same (confirmed `same`, superseding a
+  MACHINE-origin proposal only — a repeated human answer is plain
+  create-or-keep idempotency, never a fresh supersession chain), Part of it
+  (confirmed `part_of` — already admitted by `validate_event_identity` at
+  confirmed/stated origin; only `deterministic` is pinned to `same`, so **no
+  C2 validator amendment was needed**), Related (confirmed `related`),
+  Different (confirmed `not_same`, pair-permanent), and Not sure (no binding
+  at all — an epistemic state, §2.2, filed as a durable bookkeeping deferral
+  under `state/`, never under `sources/identity/`). A prospective candidate's
+  Same answer files an `authority: human` create — a legitimately different
+  id than the `authority: deterministic` id the pair was keyed by, because R1
+  already declined the bind.
+* **`resolve_possible_overmerge_answer`** dispatches keep together (writes
+  nothing — `FORBIDDEN_REAUDIT_ACTIONS` already refuses a system confirm),
+  fix the date (writes nothing, names the correction path), part of
+  (supersedes `same` with `part_of`), and split (`split_episode`).
+* **`split_episode`** files one `split` envelope and calls C4's
+  `split_routing` — proven end-to-end on all seven §5.5 reference kinds,
+  including the Mirror-judgment residue row for a genuinely unattributable
+  reference.
+* **The cooldown** — `episode_routing_contract.defer_pair`/`cooldown_active`/
+  `material_new_evidence` (`DEFERRAL_COOLDOWN_DAYS = 90`, §12 ruling 3), pure,
+  home in C4 beside the pair-key/reaudit logic it sits next to.
+* **The listener hears identity too** (§6.4, an ADR 0029 amendment — audit
+  B4: ordinary conversation is a source too). `general_listener.Heard` gains a
+  fourth typed list, `identity_assertions`, at the end — the v229 `claims`
+  precedent, exactly. Hints are resolved against a candidate-context excerpt
+  the HOST supplies; zero-or-two matches is a typed refusal, not a guess, and
+  clears the backstop the same way `DROPPED_NON_FAMILY` does. A stated
+  assertion files `origin: "stated"` through the same writers a directed
+  answer uses `origin: "confirmed"` for.
+
+Two new CLI verbs, `resolve-work-item` and `split-episode`, join
+`DIRECT_MUTATION_COMMANDS` beside `bind-episodes` and never run inside
+`compile` (swept the same way `episode_binder` itself is).
 
 ## Consequences
 

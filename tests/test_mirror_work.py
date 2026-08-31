@@ -390,7 +390,13 @@ class BoundedScopeTests(MirrorWorkTestCase):
         self.publish_items(fixture["item"], self._gap_item())
         rows = mw.load_mirror_rows(self.vault)
         self.assertEqual([row.kind for row in rows], ["contradiction"])
-        self.assertEqual(mw.MIRROR_WORK_ITEM_KINDS, ("contradiction", "identity_uncertain"))
+        # Event identity I3: `same_event`/`possible_overmerge` join the
+        # allowlist (design §6.3 — every actionable Mirror row has Play now),
+        # and a routine gap still never renders regardless.
+        self.assertEqual(
+            mw.MIRROR_WORK_ITEM_KINDS,
+            ("contradiction", "identity_uncertain", "same_event", "possible_overmerge"),
+        )
 
     def test_an_item_that_does_not_allow_mirror_does_not_render(self) -> None:
         fixture = self.contradiction_fixture()

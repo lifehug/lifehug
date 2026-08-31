@@ -15,13 +15,16 @@ no embedding and no model call — R1 is arithmetic over what the tellings
 themselves say, and everything R1 declines becomes a QUESTION rather than a
 guess (Law 6: *a miss is cheap, a wrong link is not*).
 
-**Nothing here is a question.** The binder emits pairwise `same_event` and
-`possible_overmerge` OUTPUTS — rows carrying the pair key C4 pinned, the
-reasons, and the inputs the queue's existing value scoring reads. Probe text,
-the five answers and `resolve-work-item` are **I3**, and neither kind is
-registered in `temporal_projection.WORK_ITEM_KINDS` yet. That is deliberate
-and it is TESTED: registering a kind whose answer nothing can file would be
-the silent under-delivery ADR 0021 exists to refuse.
+**Nothing here is a question, by itself.** The binder emits pairwise
+`same_event` and `possible_overmerge` OUTPUTS — rows carrying the pair key C4
+pinned, the reasons, and the inputs the queue's existing value scoring reads.
+:func:`same_event_work_items` and :func:`possible_overmerge_work_items`
+(event identity **I3**) turn those rows into ordinary
+`temporal_projection.TemporalWorkItem`s through the SAME value-scoring
+formula every other kind uses (`temporal_timeline.work_item_score`) — no
+priority of their own, exactly as §4.1 requires. Probe text, the five
+answers and `resolve-work-item` live in `identity_questions.py`, I3's own
+module; this file only says what happened, never how a person answers it.
 
 **Nothing here writes by itself.** `bind_episodes(..., apply=False)` — the
 `--dry-run` the owner reviews before anything applies (§8.1) — writes not one
@@ -54,7 +57,9 @@ import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import episode_routing_contract as erc  # noqa: E402
 import event_identity as ei  # noqa: E402
+import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
+import temporal_timeline as tt  # noqa: E402
 from identity_resolution import REPEATABLE_EVENT_KINDS  # noqa: E402
 from temporal_claims import (  # noqa: E402
     TemporalContractError,
@@ -78,10 +83,9 @@ RULE_VERSION = efc.IDENTITY_RULE_VERSION
 #: later rule version or a human reading a receipt can tell what decided.
 RULE_ID = "R1"
 
-#: The work-item kind a declined pair becomes. NOT registered in
-#: `temporal_projection.WORK_ITEM_KINDS` — I3 owns the probe, the five answers
-#: and the filing, and a kind whose answer nothing can file is worse than an
-#: absent one. `test_event_identity_i2_binder.py` asserts the absence by name.
+#: The work-item kind a declined pair becomes. Registered in
+#: `temporal_projection.WORK_ITEM_KINDS` at event identity I3, once
+#: `identity_questions.py` exists to file the five answers it can be asked.
 SAME_EVENT_KIND = "same_event"
 
 #: §4.5/§5.6's second kind, defined once by C4.
@@ -1808,6 +1812,131 @@ def apply_caps(rows: Sequence[dict], *, cap: int = GLOBAL_QUESTION_CAP) -> list:
 
 
 # --------------------------------------------------------------------------
+# Event identity I3 — question rows and audit rows become WORK ITEMS
+# --------------------------------------------------------------------------
+#
+# §4.1's own ruling: identity pairs enter the EXISTING work-item value
+# scoring like every other kind, never a priority of their own. Both
+# functions below are pure — a `BinderPlan` in, `TemporalWorkItem` dicts out
+# — and neither writes anything; wiring the result into the published
+# `work-items.json` generation is a maintenance-step / platform concern
+# (I-P), exactly as R1's own decisions are filed by `apply_plan`, not by
+# `plan` itself.
+
+
+def _same_event_prompt(quotes: Mapping[str, object]) -> str:
+    telling_quote = collapsed_text(quotes.get("telling_quote"))
+    episode_quote = collapsed_text(quotes.get("episode_quote"))
+    if not telling_quote or not episode_quote:
+        return ""
+    return f"Is “{telling_quote}” the same thing as “{episode_quote}”?"
+
+
+def same_event_work_item(row: Mapping[str, object], *, now: object = None) -> dict | None:
+    """One `question_row` (§6.1), minted as an ordinary `same_event` item.
+
+    Returns ``None`` for a row this phase's value validator refuses (an
+    empty pair key, most concretely) rather than raising — a generation pass
+    over many pairs should not die on one malformed row, the same
+    `question_withheld`-shaped tolerance `_mint_work_item` extends to a
+    template that failed to render.
+    """
+    inputs = row.get("score_inputs") or {}
+    reach = min(1.0, float(inputs.get("plausibility") or 0) / len(RETRIEVAL_SIGNALS))
+    scores = tt.work_item_score(SAME_EVENT_KIND, system_value=reach)
+    quotes = row.get("quotes") or {}
+    payload = {
+        "kind": SAME_EVENT_KIND,
+        "event_ref": row.get("event_key"),
+        "allowed_surfaces": list(tt.work_item_surfaces(SAME_EVENT_KIND)),
+        "score_rule": tt.SCORE_FORMULA_VERSION,
+        "prompt_intent": _same_event_prompt(quotes) or None,
+    }
+    payload.update(scores)
+    try:
+        item = tp.validate_temporal_work_item(payload, now=now)
+    except TemporalContractError:
+        return None
+    # Additive, non-identity rendering fields (design §6.1's "quotes") — read
+    # by `timeline_interaction.work_item_probe` as a bare work item's own
+    # optional keys, never part of `WORK_ITEM_IDENTITY_KEYS`.
+    item["telling_quote"] = collapsed_text(quotes.get("telling_quote"))
+    item["episode_quote"] = collapsed_text(quotes.get("episode_quote"))
+    return item
+
+
+def same_event_work_items(result: BinderPlan, *, now: object = None) -> list[dict]:
+    """Every SURFACED `same_event` pair in ``plan.questions``, as work items.
+
+    Only ``surfaced`` rows become items — §6.1's per-telling and global caps
+    (already applied by :func:`apply_caps`) are what "surfaced" means; the
+    rest stay in ``plan.questions`` as data nobody is asked about yet, and
+    reappear here the moment a `Different` answer frees the next candidate
+    (§13.3: *at most one pair per telling is surfaced at a time*).
+    """
+    items = []
+    for row in result.questions:
+        if not row.get("surfaced"):
+            continue
+        item = same_event_work_item(row, now=now)
+        if item is not None:
+            items.append(item)
+    return items
+
+
+def _possible_overmerge_item(
+    *, item_id: object, reason: object, telling_quote: object = None,
+    episode_quote: object = None, now: object = None,
+) -> dict | None:
+    scores = tt.work_item_score(POSSIBLE_OVERMERGE_KIND, system_value=0.6)
+    payload = {
+        "kind": POSSIBLE_OVERMERGE_KIND,
+        "event_ref": item_id,
+        "allowed_surfaces": list(tt.work_item_surfaces(POSSIBLE_OVERMERGE_KIND)),
+        "score_rule": tt.SCORE_FORMULA_VERSION,
+        "prompt_intent": collapsed_text(reason) or None,
+    }
+    payload.update(scores)
+    try:
+        item = tp.validate_temporal_work_item(payload, now=now)
+    except TemporalContractError:
+        return None
+    item["telling_quote"] = collapsed_text(telling_quote)
+    item["episode_quote"] = collapsed_text(episode_quote)
+    return item
+
+
+def possible_overmerge_work_items(result: BinderPlan, *, now: object = None) -> list[dict]:
+    """`plan.overmerges` (§4.5) and `plan.reaudits`' mints (§5.6), as items.
+
+    Both producers already mint a stable, canonical identity —
+    :func:`disjoint_bounds_item_id` for a mature episode's own disjoint
+    bounds, :func:`episode_routing_contract.possible_overmerge_id` for a
+    re-audit's existing-bind-vs-new-candidate pair — so this only carries
+    that id into `derive_work_item_id`'s ``event_ref`` and runs the SAME
+    value-scoring formula every other kind uses. A `no_action` re-audit row
+    mints nothing: :data:`FORBIDDEN_REAUDIT_ACTIONS` names why there is
+    nothing else it could do.
+    """
+    items = []
+    for row in result.overmerges:
+        item = _possible_overmerge_item(
+            item_id=row.get("item_id"), reason=row.get("reason"), now=now,
+        )
+        if item is not None:
+            items.append(item)
+    for row in result.reaudits:
+        if row.get("action") != erc.REAUDIT_MINT:
+            continue
+        item = _possible_overmerge_item(
+            item_id=row.get("item_id"), reason=row.get("reason"), now=now,
+        )
+        if item is not None:
+            items.append(item)
+    return items
+
+
+# --------------------------------------------------------------------------
 # The run
 # --------------------------------------------------------------------------
 
@@ -2066,15 +2195,21 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
 #: back, which is why it lives under `state/` beside the identity index.
 BINDER_OUTPUT_FILE = f"{ei.TEMPORAL_STATE_DIR}/identity_candidates.json"
 
-#: §8.3, in one constant: **no live bind before I3.** The weekly maintenance
-#: step calls :func:`binder_step`, which is `--dry-run` by construction — a
-#: report, not a writer — and `--apply` is the owner-run door the rollout
-#: opens once confirmation, split and `possible_overmerge` exist.
+#: §8, in one constant. The weekly maintenance step calls :func:`binder_step`,
+#: which is `--dry-run` by construction — a report, not a writer — and
+#: `--apply` is the owner-run door. I3 ships the confirmation, split and
+#: `possible_overmerge` FLOWS this constant used to say were missing; what it
+#: still guards is §8's OWNER-REVIEWED DRY RUN before the founder vault is
+#: ever bound, and the all-tenant backfill being its own platform deliverable
+#: (I-P) — neither of those is a scheduled writer, and this constant is why
+#: one never becomes one by accident.
 MAINTENANCE_STEP_IS_A_DRY_RUN = (
-    "The binder runs as a maintenance step and never inside `compile`. Until "
-    "I3 ships the confirmation, split and possible_overmerge flows, the "
-    "scheduled step REPORTS and does not write: rollout step 3 says no live "
-    "bind before I3, and a scheduled writer would be one."
+    "The binder runs as a maintenance step and never inside `compile`. Even "
+    "with I3's confirmation, split and possible_overmerge flows built, the "
+    "scheduled step REPORTS and does not write: rollout step 1 requires the "
+    "owner to review every would-bind pair and its reasons on a fresh clone "
+    "before any `--apply` touches a live vault, and a scheduled writer would "
+    "skip that review."
 )
 
 
@@ -2286,6 +2421,7 @@ __all__ = [
     "plan",
     "plan_counts",
     "plausibility",
+    "possible_overmerge_work_items",
     "proper_noun_tokens",
     "prospective_episode_id",
     "question_row",
@@ -2294,6 +2430,8 @@ __all__ = [
     "reaudit_findings",
     "retrieval_signals",
     "retrieve",
+    "same_event_work_item",
+    "same_event_work_items",
     "says_it_is_inside",
     "telling_views",
     "unit_of",

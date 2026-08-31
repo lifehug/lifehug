@@ -72,11 +72,16 @@ class OneItemPerNode(unittest.TestCase):
         """`place_ambiguous` (`timeline-rules:4`, Timeline Fix 05 §8.3) sits
         ABOVE `missing_anchor`: "which time in San Diego was this?" is strictly
         more answerable than "when did this happen?" about the same node, and
-        answering it answers both — which is what this table means."""
+        answering it answers both — which is what this table means.
+
+        Event identity I3 seats `possible_overmerge`/`same_event` just below
+        `contradiction`: both are the substrate's own grouping guess meeting
+        a disagreement, and an over-merge audit (an EXISTING bind) outranks a
+        same-event pair (still a proposal nothing has committed to)."""
         self.assertEqual(
             tt.WORK_ITEM_PRECEDENCE,
-            ("identity_uncertain", "contradiction", "place_ambiguous",
-             "missing_anchor", "precision_gap"),
+            ("identity_uncertain", "contradiction", "possible_overmerge",
+             "same_event", "place_ambiguous", "missing_anchor", "precision_gap"),
         )
         ranks = [tt._precedence(kind) for kind in tt.WORK_ITEM_PRECEDENCE]  # noqa: SLF001
         self.assertEqual(ranks, sorted(ranks))

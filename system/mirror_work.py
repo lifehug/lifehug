@@ -102,7 +102,17 @@ from vault_paths import read_vault_text  # noqa: E402
 #: The ONLY work item kinds Mirror renders as actionable rows (§2.5). A
 #: ``missing_anchor`` or ``precision_gap`` is routine incompleteness and lives
 #: on Timeline; promoting it here would turn an invitation into a chore list.
-MIRROR_WORK_ITEM_KINDS = ("contradiction", "identity_uncertain")
+#:
+#: ``same_event`` and ``possible_overmerge`` join at event identity I3: both
+#: are the substrate's own grouping guess meeting a disagreement, exactly the
+#: class of row §2.5 keeps on this page — and every actionable Mirror row
+#: has Play now (design §6.3). Resolution for these two kinds does not run
+#: through :func:`resolve_mirror_item` (that is a date-correction verb); it
+#: runs through `identity_questions.resolve_same_event_answer` /
+#: `resolve_possible_overmerge_answer`, filing through `event_identity`'s own
+#: writers — this tuple only gates whether Mirror renders the row.
+MIRROR_WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
+                          "same_event", "possible_overmerge")
 
 #: The surface name a work item must allow. ``allowed_surfaces`` is the
 #: mechanism §2.4 uses to keep sensitive discovery items off a surface, so an
@@ -719,6 +729,29 @@ def row_for(item: object, index: object, *,
             if view is not None and view["conflict"] > 0
             else (0.0 if state == "resolved" else DEFAULT_CONTRADICTION_SEVERITY)
         )
+    elif normalized.kind in ("same_event", "possible_overmerge"):
+        # Event identity I3. Neither kind cites a claim disagreement — the
+        # evidence is a telling/episode PAIR, not two dates — so there is no
+        # citation to describe here; the binder's own `prompt_intent` (or a
+        # neutral fallback) is what the row shows.
+        if normalized.kind == "same_event":
+            headline = f"Is {label} the same as something else?"
+            description = normalized.prompt_intent or (
+                f"{label} looks like it could be the same event as something "
+                "else you've told me — nothing was merged, and both are kept "
+                "exactly as you said them."
+            )
+        else:
+            headline = f"Two things grouped as {label} may not match"
+            description = normalized.prompt_intent or (
+                f"{label} groups more than one telling, and their dates "
+                "don't agree — nothing was split or kept automatically."
+            )
+        severity = float(
+            normalized.scores.get("system_value", DEFAULT_IDENTITY_SEVERITY)
+            if state == "open"
+            else 0.0
+        )
     else:
         headline = f"Who is {label}?"
         description = _describe_identity(label, candidates, active)
@@ -800,6 +833,14 @@ def derive_row_state(
         if view is not None and view["dated_claims"] == len(active) and view["conflict"] <= 0:
             return "resolved"
         return "open"
+    if item.kind in ("same_event", "possible_overmerge"):
+        # Event identity I3: neither kind cites a claim disagreement (the
+        # evidence is a telling/episode pair, not a date), so there is no
+        # claim signal to read here. The item's own stored state is the
+        # only honest source — the generation that mints these items never
+        # rewrites a still-open one, and `resolve-work-item` is what
+        # retires it (§5.8 row 2: an answered pair is never re-minted).
+        return "resolved" if item.state in ("resolved", "answered", "dismissed", "obsolete") else "open"
     if not active:
         return "resolved"
     return "open" if any(_uncertain_identity(claim) for claim in active) else "resolved"

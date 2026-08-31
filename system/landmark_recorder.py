@@ -152,6 +152,15 @@ class RecorderOutcome:
     #: here. Always empty for a completion that emitted no `claims` list, so
     #: every pre-v229 stored completion parses exactly as it did.
     claims: tuple[dict, ...] = ()
+    #: Event identity I3 (design §6.4): stated identity DRAFTS the same
+    #: no-focus completion emitted — ``{telling_ref, episode_id, relation,
+    #: evidence}``, already resolved against the candidate context, unbound
+    #: until `general_listener.bind_identity_assertions` adds
+    #: `origin`/`rule_version`/`source_ref`/`created_at`. Deliberately the
+    #: LAST field, for the same "bridging, not big-bang" reason `claims` is.
+    #: Always empty in focused mode and for a completion that emitted no
+    #: `identity_assertions` list.
+    identity_assertions: tuple[dict, ...] = ()
 
     @property
     def record(self) -> dict | None:
@@ -531,6 +540,7 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
 def record_answer(*, answer: str, call, domain: str | None = None,
                   reply: str = "", question_asked: str = "",
                   landmarks: object = (), known_labels: object = (),
+                  identity_candidates: object = (),
                   model: str = DEFAULT_RECORDER_ROLE,
                   framework_root: str | Path | None = None) -> RecorderOutcome:
     """Run the recorder over one answer: extract, lint, retry once, file.
@@ -601,6 +611,14 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     `records_missing_entries` does NOT run there: it is a per-DOMAIN
     completeness class and a no-focus pass has no domain to be complete for.
 
+    **Event identity I3 adds a FOURTH typed output to the same no-focus
+    rung, never a fourth attempt.** `identity_candidates` is the host's own
+    episode-roster excerpt (never derived here); an emitted
+    `identity_assertion` whose hint resolves against it becomes a thing
+    heard exactly as a claim does, and an ambiguous or unresolved hint
+    clears the backstop by the same reasoning `DROPPED_NON_FAMILY` does —
+    see `general_listener.listener_heard_nothing`.
+
     ``known_labels`` is DERIVED, not hand-passed (v216, lifehug#230). Both
     lints take it and both were being run with an empty one, because the only
     thing that could fill it — the entries already in the store — reached this
@@ -620,11 +638,13 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     best: tuple[dict, ...] = ()
     people: tuple[dict, ...] = ()
     claims: tuple[dict, ...] = ()
+    identity_assertions: tuple[dict, ...] = ()
     findings: tuple[str, ...] = ()
     for attempt in range(1, MAX_ATTEMPTS + 1):
         prompt = (
             gl.build_listener_prompt(answer=answer, reply=reply,
                                      landmarks=landmarks, reminder=reminder,
+                                     identity_candidates=identity_candidates,
                                      framework_root=framework_root)
             if listening else
             build_recorder_prompt(
@@ -637,10 +657,11 @@ def record_answer(*, answer: str, call, domain: str | None = None,
         try:
             raw = call(prompt, model)
         except Exception as exc:  # noqa: BLE001 — provider failures are data here
-            if best or people or claims:
+            if best or people or claims or identity_assertions:
                 return RecorderOutcome(status=STATUS_RECORDED, records=best,
                                        people=people, findings=findings,
                                        claims=claims,
+                                       identity_assertions=identity_assertions,
                                        attempts=attempt, reason=str(exc),
                                        prompts=tuple(prompts))
             return RecorderOutcome(status=STATUS_UNAVAILABLE, attempts=attempt,
@@ -650,14 +671,19 @@ def record_answer(*, answer: str, call, domain: str | None = None,
             # THE NO-FOCUS RUNG of the same loop (ADR 0029). Same attempts,
             # same single retry, same withheld terminal — a different leaf, a
             # different parse and a different lint, and nothing else.
-            heard = gl.parse_listener_output(raw,
-                                             framework_root=framework_root)
+            heard = gl.parse_listener_output(
+                raw, framework_root=framework_root,
+                identity_candidates=identity_candidates,
+            )
             findings = tuple(dict.fromkeys(findings + heard.findings))
-            if len(heard) > len(best) + len(people) + len(claims):
-                best, people, claims = (heard.landmarks, heard.people,
-                                        heard.claims)
+            if len(heard) > len(best) + len(people) + len(claims) + len(identity_assertions):
+                best, people, claims, identity_assertions = (
+                    heard.landmarks, heard.people, heard.claims,
+                    heard.identity_assertions,
+                )
             finding = gl.listener_heard_nothing(
-                answer, best, people, claims=claims, findings=findings,
+                answer, best, people, claims=claims,
+                identity_assertions=identity_assertions, findings=findings,
                 landmarks=landmarks, verdict=verdict,
                 framework_root=framework_root)
             if finding is None:
@@ -669,9 +695,11 @@ def record_answer(*, answer: str, call, domain: str | None = None,
                 missed = gl.claims_missing_subjects(answer, claims)
                 if missed is None or attempt == MAX_ATTEMPTS:
                     return RecorderOutcome(
-                        status=(STATUS_RECORDED if (best or people or claims)
+                        status=(STATUS_RECORDED
+                                if (best or people or claims or identity_assertions)
                                 else STATUS_NOTHING),
                         records=best, people=people, claims=claims,
+                        identity_assertions=identity_assertions,
                         findings=findings, attempts=attempt,
                         lint_ids=((gl.CLAIMS_MISSING_SUBJECTS_LINT,) if missed
                                   else ()),
@@ -737,6 +765,7 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     return RecorderOutcome(
         status=STATUS_WITHHELD, attempts=MAX_ATTEMPTS,
         people=people, findings=findings, claims=claims,
+        identity_assertions=identity_assertions,
         lint_ids=((gl.LISTENER_HEARD_NOTHING_LINT,) if listening
                   else (li.ANSWER_MUST_RECORD_LINT,)),
         reason=str((finding or {}).get("detail", "")),
@@ -746,6 +775,7 @@ def record_answer(*, answer: str, call, domain: str | None = None,
 
 def listen_to_answer(*, answer: str, call, reply: str = "",
                      landmarks: object = (),
+                     identity_candidates: object = (),
                      model: str = gl.DEFAULT_LISTENER_ROLE,
                      framework_root: str | Path | None = None
                      ) -> RecorderOutcome:
@@ -767,8 +797,9 @@ def listen_to_answer(*, answer: str, call, reply: str = "",
     is still not that session's to record.
     """
     return record_answer(domain=None, answer=answer, call=call, reply=reply,
-                         landmarks=landmarks, model=model,
-                         framework_root=framework_root)
+                         landmarks=landmarks,
+                         identity_candidates=identity_candidates,
+                         model=model, framework_root=framework_root)
 
 
 # --------------------------------------------------------------------------

@@ -279,6 +279,12 @@ SURFACES_BY_KIND = {
     # A place ambiguity is routine incompleteness, not a disagreement, so it
     # goes where the other gaps go and stays off Mirror (§2.3).
     "place_ambiguous": ("timeline", "whisper", "daily_question"),
+    # Event identity I3 (design §6.1/§6.3). Both are a person's own words
+    # disagreeing with the substrate's grouping guess — the same class of
+    # question as `contradiction` — so both reach Mirror and the daily queue,
+    # not only Timeline's voluntary surface.
+    "same_event": ("timeline", "mirror", "daily_question"),
+    "possible_overmerge": ("timeline", "mirror", "daily_question"),
 }
 
 #: Surfaces a loss-discovery item may use. Timeline only: the system may OFFER
@@ -297,6 +303,17 @@ WORK_ITEM_VALUE_DEFAULTS = {
     # Cheaper than a bare date question and worth more: the person is choosing
     # between stretches they already told us about, not recalling a number.
     "place_ambiguous": {"person_value": 0.55, "interaction_cost": 0.2, "context_fit": 0.55},
+    # Event identity I3. `same_event` costs a beat more than an ordinary
+    # identity question — the person is comparing two whole tellings, not
+    # picking a name off a short list — and is worth slightly less than a
+    # `contradiction` because a miss here is cheap (Law 6): declining leaves
+    # two nodes standing, never a wrong merge.
+    "same_event": {"person_value": 0.55, "interaction_cost": 0.35, "context_fit": 0.45},
+    # `possible_overmerge` is the safeguard the design ships WITH R1, not
+    # after it (§4.5) — it is scored like a `contradiction` because it IS
+    # one: the substrate already grouped two tellings and something now
+    # disagrees about whether it should have.
+    "possible_overmerge": {"person_value": 0.6, "interaction_cost": 0.45, "context_fit": 0.4},
 }
 
 #: How sensitive asking about this event is, before any per-person signal. A
@@ -3071,6 +3088,36 @@ def _surfaces_for(kind: str, *, event_kind: object, subject_ref: object, resolve
     return SURFACES_BY_KIND.get(kind, ("timeline",))
 
 
+def work_item_score(
+    kind: str, *, system_value: float = 0.0, event_kind: object = None,
+    subject_ref: object = None, resolved: bool = False,
+) -> dict:
+    """The public door onto :func:`_score_components` (event identity I3).
+
+    §4.1's own ruling: "identity pairs enter the EXISTING work-item value
+    scoring like every other kind... never a score of its own." A CALLER
+    OUTSIDE THIS MODULE is not a node-derivation caller and has no business
+    reaching into an underscore-prefixed helper across a module boundary —
+    this is the one home that formula lives in, exposed rather than re-typed
+    a second time (ADR 0021). Deliberately named rather than importing this
+    module BY name in a docstring: `compile`'s own reachability sweep
+    (`test_the_binder_never_runs_inside_compile`) greps this file's bytes for
+    the identity-decision module's name, and a docstring mention would trip
+    it exactly as a real import would.
+    """
+    return _score_components(
+        kind, system_value=system_value, event_kind=event_kind,
+        subject_ref=subject_ref, resolved=resolved,
+    )
+
+
+def work_item_surfaces(
+    kind: str, *, event_kind: object = None, subject_ref: object = None, resolved: bool = False,
+) -> tuple[str, ...]:
+    """The public door onto :func:`_surfaces_for` — see :func:`work_item_score`."""
+    return _surfaces_for(kind, event_kind=event_kind, subject_ref=subject_ref, resolved=resolved)
+
+
 #: D4 (Timeline Fix 07): ONE NODE, ONE QUESTION. Two derivation paths reached
 #: the same node with different `requested_field`s and minted two rows — the
 #: founder saw "When did San Diego begin?" and "When did San Diego — span —
@@ -3080,6 +3127,13 @@ def _surfaces_for(kind: str, *, event_kind: object, subject_ref: object, resolve
 WORK_ITEM_PRECEDENCE = (
     "identity_uncertain",
     "contradiction",
+    # Event identity I3, just below `contradiction`: both are the substrate's
+    # own grouping guess meeting a disagreement, and an over-merge audit is
+    # the more urgent of the two (it names an EXISTING bind the person may
+    # need to undo) while a same-event pair is still a proposal nothing has
+    # committed to.
+    "possible_overmerge",
+    "same_event",
     # §8.3: "which time in San Diego?" is strictly more answerable than "when
     # did this happen?" about the same node, and answering it answers both.
     "place_ambiguous",
@@ -4402,6 +4456,7 @@ __all__ = [
     "SENSITIVITY_BY_EVENT_KIND",
     "SURFACES_BY_KIND",
     "TIMING_PHASES",
+    "WORK_ITEM_PRECEDENCE",
     "WORK_ITEM_VALUE_DEFAULTS",
     "CalculatedTimeline",
     "TemporalTimelineError",
@@ -4410,4 +4465,6 @@ __all__ = [
     "compose_place_ambiguity_question",
     "derive_calculated_timeline",
     "structural_signature",
+    "work_item_score",
+    "work_item_surfaces",
 ]
