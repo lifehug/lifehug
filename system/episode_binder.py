@@ -40,7 +40,7 @@ Synthetic data only; this module NEVER references any real vault.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -393,18 +393,50 @@ def proper_noun_tokens(text: object) -> frozenset[str]:
     )
 
 
-def label_stem(text: object, participants: object = ()) -> str:
+#: The recorder puts a telling's ACT in `event_kind` (`started`, `married`,
+#: `move`) and its NAME in `subject_mention` ("Etherfuse", "Boeing"), while the
+#: classifier puts both in one sentence ("Started Etherfuse"). §4.2 condition 3
+#: compares stems exactly, so reading the verb only out of prose made every
+#: recorder telling's stem a bare name and no recorder telling could ever match
+#: a classifier one — which on the founder's vault meant the DATED landmark
+#: rows, the only rows that can date anything, were unmatchable by
+#: construction. The kind is folded in as a verb when it names one, so the same
+#: rule reads the same fact from wherever a source kind keeps it. This makes a
+#: recorder stem MORE specific, never less: it can only ever refuse a match
+#: that a bare name would have allowed, and it changes no bind on the founder
+#: vault (§4.2 condition 4 still gates every one of them).
+KIND_IS_THE_VERB_FOR_A_RECORDER_TELLING = (
+    "a telling's act is a verb in its words or a kind in its record; the stem "
+    "reads whichever one the source kind carries, and never invents a second "
+    "rule for the other"
+)
+
+
+def label_stem(text: object, participants: object = (), event_kind: object = None) -> str:
     """The exact stem §4.2 condition 3 compares — `etherfuse-found`.
 
-    Subject tokens and verb stems, each sorted, joined by
-    :data:`STEM_JOIN`. Participants are REMOVED, because who was there is
-    condition 4's evidence and counting it twice would let one fact satisfy
-    two independent signals. A label with no tokens left has no stem, and a
-    telling with no stem never matches anything — absence never binds.
+    Subject tokens and verb stems, each sorted, joined by :data:`STEM_JOIN`.
+
+    Two things this has to get right that a first reading does not:
+
+    * **Participants are removed, but never down to nothing.** Who was there
+      is condition 4's evidence and counting it twice would let one fact
+      satisfy two supposedly independent signals — so "Co-founded Etherfuse
+      with AJ" drops `aj` and keeps `etherfuse-found`. But a RECORDER telling's
+      subject IS the thing ("Etherfuse", started, 2022-05), so subtracting it
+      erased the entire label and left a stem of `""` that could never match
+      anything. The cast is evidence BESIDE the label, never INSTEAD of it: if
+      the subtraction empties the stem, the unsubtracted stem stands.
+    * **The act may be a kind rather than a word**
+      (:data:`KIND_IS_THE_VERB_FOR_A_RECORDER_TELLING`).
+
+    A label with no tokens at all still has no stem, and a telling with no stem
+    never matches anything — absence never binds.
     """
     known = {normalized_mention_key(value) for value in participants or ()}
     known |= {part for value in known for part in value.split()}
     subjects: set[str] = set()
+    dropped: set[str] = set()
     verbs: set[str] = set()
     for token in label_tokens(text):
         if token in STEM_STOPWORDS:
@@ -413,8 +445,14 @@ def label_stem(text: object, participants: object = ()) -> str:
             verbs.add(EVENT_VERB_STEMS[token])
             continue
         if token in known:
+            dropped.add(token)
             continue
         subjects.add(token)
+    kind_verb = EVENT_VERB_STEMS.get(collapsed_text(event_kind))
+    if kind_verb:
+        verbs.add(kind_verb)
+    if not subjects and dropped:
+        subjects = dropped
     parts = sorted(subjects) + sorted(verbs)
     return STEM_JOIN.join(parts)
 
@@ -562,9 +600,18 @@ class Condition:
 @dataclass
 class Pair:
     """One (telling, candidate) pair: its signals, its seven conditions, its
-    verdict, and the one line a dry run prints for it."""
+    verdict, and the one line a dry run prints for it.
+
+    R1 is evaluated in BOTH directions — it has to be, because four of the
+    seven conditions are asymmetric (a repeatable-kind episode protects itself
+    only in the direction that reaches it) and because a bind requires both
+    sides to have chosen each other. But a pair is ONE thing: two tellings are
+    the same event or they are not. :attr:`units` is that identity, and
+    `plan()` reports and emits exactly one row per unit pair.
+    """
 
     telling_ref: str
+    home_key: str
     candidate_key: str
     candidate_episode_id: str
     candidate_kind: str
@@ -576,6 +623,20 @@ class Pair:
     part_of_suggestive: bool = False
     surfaced: bool = False
     reason: str = ""
+    #: The other direction's failed conditions, folded in when the two rows
+    #: collapsed — so a merged row still says everything either side refused.
+    also_failed: tuple = ()
+
+    @property
+    def units(self) -> tuple:
+        """The unordered pair of UNITS — the pair's own identity.
+
+        Not the two episode ids: for a telling measured against an existing
+        episode, the reverse direction names a *prospective* episode id built
+        out of one member and the telling, which is a different string for the
+        same question.
+        """
+        return tuple(sorted((self.home_key, self.candidate_key)))
 
     @property
     def event_key(self) -> str:
@@ -588,7 +649,9 @@ class Pair:
     def as_dict(self) -> dict:
         return {
             "telling_ref": self.telling_ref,
+            "home_key": self.home_key,
             "candidate_key": self.candidate_key,
+            "units": list(self.units),
             "candidate_episode_id": self.candidate_episode_id,
             "candidate_kind": self.candidate_kind,
             "event_key": self.event_key,
@@ -596,6 +659,7 @@ class Pair:
             "plausibility": self.plausibility,
             "conditions": [row.as_dict() for row in self.conditions],
             "failed": list(self.failed()),
+            "also_failed": list(self.also_failed),
             "verdict": self.verdict,
             "relation_hint": self.relation_hint,
             "part_of_suggestive": self.part_of_suggestive,
@@ -614,6 +678,10 @@ class BinderPlan:
     """
 
     pairs: list = field(default_factory=list)
+    #: Every row R1 actually judged, both directions. `pairs` is the collapsed
+    #: view and is what everything downstream reads; this is kept because the
+    #: asymmetric conditions are only visible here.
+    directional: list = field(default_factory=list)
     envelopes: list = field(default_factory=list)
     proposals: list = field(default_factory=list)
     questions: list = field(default_factory=list)
@@ -629,6 +697,7 @@ class BinderPlan:
             "rule_version": RULE_VERSION,
             "rule_id": RULE_ID,
             "pairs": [row.as_dict() for row in self.pairs],
+            "directional_pairs": len(self.directional),
             "envelopes": [
                 {"operation": row["operation"], "bindings": row["bindings"],
                  "aliases_created": row["operation"]["aliases_created"]}
@@ -801,7 +870,7 @@ def telling_views(claims: object, *, manifest: object = None,
             telling_ref=telling_ref,
             event_kind=_kind_of(rows_here),
             label=label,
-            stem=label_stem(label, participants),
+            stem=label_stem(label, participants, event_kind=_kind_of(rows_here)),
             tokens=proper_noun_tokens(label),
             places=frozenset(signature.get("place_set") or ()),
             participants=participants,
@@ -1002,19 +1071,42 @@ def retrieve(view: TellingView, units: Mapping[str, Candidate],
 # --------------------------------------------------------------------------
 
 
+def independent_of_the_label(view: TellingView, candidate: Candidate) -> frozenset:
+    """The shared participants that are not simply the label said again.
+
+    On a recorder telling the subject IS the thing — `Boeing`, started, 1998 —
+    so "Boeing" is at once the label and the only `participant`. Counting it as
+    condition 4 evidence beside a label match would let ONE fact satisfy two
+    signals the condition calls independent, which is the exact failure the
+    word "independent" is in the sentence to prevent. Observed live: nine
+    recorder pairs on the founder's vault reported `1 of 2: participant` where
+    the participant and the matched stem were the same token.
+    """
+    shared = view.participants & candidate.participants
+    label_tokens_here = set(view.stem.split(STEM_JOIN)) | {
+        token for stem in candidate.stems for token in stem.split(STEM_JOIN)
+    }
+    return frozenset(
+        value for value in shared
+        if not set(value.split()) <= label_tokens_here
+    )
+
+
 def independent_signals(view: TellingView, candidate: Candidate) -> tuple:
     """§4.2 condition 4's agreements — never the label, never the owner.
 
     ``bounds`` counts only when BOTH sides are dated, which is the condition's
     own wording: two undated tellings agreeing that neither knows when is not
-    evidence that they are the same thing.
+    evidence that they are the same thing. And a shared participant that is
+    just the label again is not a second signal
+    (:func:`independent_of_the_label`).
     """
     found: list[str] = []
     if view.documents & candidate.documents:
         found.append("source_document")
     if view.places & candidate.places:
         found.append("place")
-    if view.participants & candidate.participants:
+    if independent_of_the_label(view, candidate):
         found.append("participant")
     if view.dated and candidate.dated and view.bounds is not None and \
             candidate.bounds is not None and \
@@ -1129,6 +1221,27 @@ def _home_is_mature(view: TellingView, active: Mapping[str, tuple]) -> bool:
 # §4.2 — the decision
 # --------------------------------------------------------------------------
 
+#: Verdicts from most conservative to least. When the two directions of one
+#: pair disagree, the pair takes the FIRST of these either direction reached:
+#: a refusal in either direction is a refusal of the pair, because R1's whole
+#: posture is that a miss is cheap and a wrong link is not.
+VERDICT_PRECEDENCE = ("blocked", "ambiguous", "asked", "proposal", "part_of", "bind")
+
+#: §6.1 keys a work item on `(telling_ref, candidate_episode_id)`, which is
+#: directional by construction — so a pair that was evaluated twice has to pick
+#: ONE direction or it mints two items for one question. The rule, in order:
+#: a telling measured against an EXISTING episode is always the canonical
+#: direction (the reverse names a prospective episode built from one member
+#: and the telling — a different string for the same question, and a worse
+#: framing of it); otherwise the direction whose telling ref sorts first. C4's
+#: key is untouched; this only says which direction is handed to it.
+CANONICAL_DIRECTION_RULE = (
+    "one pair, one item: a telling against an existing episode is the "
+    "canonical direction; between two prospective units the lower telling ref "
+    "wins. Both directions are still EVALUATED — four of R1's conditions are "
+    "asymmetric — and the surviving row carries what either direction refused."
+)
+
 #: Why a verdict was reached, one sentence each, so a dry-run line reads as
 #: prose rather than as a set of flags.
 VERDICT_REASONS = {
@@ -1199,6 +1312,7 @@ def _pairs_for(view: TellingView, units: Mapping[str, Candidate], *, frames: obj
     pass records the seven conditions each pair actually met.
     """
     retrieved = retrieve(view, units, frames=frames)
+    home = unit_of(view.telling_ref, units)
     survivors = 0
     for candidate, signals in retrieved:
         rows = r1_conditions(view, candidate, survivors=1,
@@ -1211,6 +1325,7 @@ def _pairs_for(view: TellingView, units: Mapping[str, Candidate], *, frames: obj
                              active=active, entailed=entailed)
         pair = Pair(
             telling_ref=view.telling_ref,
+            home_key=home or view.telling_ref,
             candidate_key=candidate.key,
             candidate_episode_id=(candidate.episode_id or
                                   prospective_episode_id(
@@ -1226,6 +1341,57 @@ def _pairs_for(view: TellingView, units: Mapping[str, Candidate], *, frames: obj
         pair.reason = VERDICT_REASONS[pair.verdict]
         found.append(pair)
     return found
+
+
+def canonical_direction(rows: Sequence[Pair], units: Mapping[str, Candidate]) -> Pair:
+    """Which of a pair's two rows is THE row (:data:`CANONICAL_DIRECTION_RULE`)."""
+    against_episode = [
+        row for row in rows
+        if (units.get(row.candidate_key).kind if row.candidate_key in units else "")
+        == "episode"
+    ]
+    pool = against_episode or list(rows)
+    return sorted(pool, key=lambda row: (row.telling_ref, row.candidate_key))[0]
+
+
+def collapse_directions(rows: Sequence[Pair], units: Mapping[str, Candidate]) -> list:
+    """Two rows per pair in, ONE row per pair out.
+
+    The surviving row keeps its own conditions — they are the ones the
+    canonical question was actually judged on — and gains the other
+    direction's refusals in ``also_failed``, so nothing a direction found is
+    lost. The verdict is the more conservative of the two
+    (:data:`VERDICT_PRECEDENCE`), except that a `part_of` reading is
+    directional by nature and is never overwritten by the artifact direction's
+    opinion of it.
+    """
+    grouped: dict[tuple, list] = {}
+    for row in rows:
+        grouped.setdefault(row.units, []).append(row)
+    collapsed = []
+    for key in sorted(grouped):
+        found = grouped[key]
+        chosen = canonical_direction(found, units)
+        others = [row for row in found if row is not chosen]
+        # A COPY. The directional rows are the record of what each direction
+        # judged, and a collapse that rewrote one of them in place would erase
+        # the asymmetry it exists to summarize — the reading `direction_of`
+        # needs and the reading the person is shown are two different rows.
+        winner = replace(chosen)
+        if winner.verdict != "part_of":
+            verdicts = {row.verdict for row in found}
+            for name in VERDICT_PRECEDENCE:
+                if name in verdicts:
+                    if name != winner.verdict:
+                        winner.verdict = name
+                        winner.reason = VERDICT_REASONS[name]
+                    break
+        winner.also_failed = tuple(sorted({
+            name for row in others for name in row.failed()
+        } - set(winner.failed())))
+        winner.part_of_suggestive = any(row.part_of_suggestive for row in found)
+        collapsed.append(winner)
+    return collapsed
 
 
 def _time_decayed(view: TellingView, candidate: Candidate) -> bool:
@@ -1579,6 +1745,11 @@ def question_row(pair: Pair, view: TellingView, candidate: Candidate) -> dict:
         "kind": SAME_EVENT_KIND,
         "event_key": pair.event_key,
         "telling_ref": pair.telling_ref,
+        # BOTH sides. §6.1's "one pair per telling at a time" is a promise
+        # about a telling's workload, and after the two directions collapse a
+        # telling appears as `telling_ref` on only some of the pairs it is
+        # actually in — so the cap counts the pair against every unit in it.
+        "units": list(pair.units),
         "candidate_episode_id": pair.candidate_episode_id,
         "candidate_kind": pair.candidate_kind,
         "candidate_members": list(candidate.members),
@@ -1623,14 +1794,15 @@ def apply_caps(rows: Sequence[dict], *, cap: int = GLOBAL_QUESTION_CAP) -> list:
             row["event_key"],
         ),
     )
-    per_telling: dict[str, int] = {}
+    per_unit: dict[str, int] = {}
     surfaced = 0
     for row in ordered:
-        telling_ref = row["telling_ref"]
-        room = per_telling.get(telling_ref, 0) < SURFACED_PAIRS_PER_TELLING
+        sides = list(row.get("units") or [row["telling_ref"]])
+        room = all(per_unit.get(side, 0) < SURFACED_PAIRS_PER_TELLING for side in sides)
         row["surfaced"] = bool(room and surfaced < cap)
         if row["surfaced"]:
-            per_telling[telling_ref] = per_telling.get(telling_ref, 0) + 1
+            for side in sides:
+                per_unit[side] = per_unit.get(side, 0) + 1
             surfaced += 1
     return sorted(ordered, key=lambda row: row["event_key"])
 
@@ -1679,7 +1851,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         considered = sum(1 for key in units
                          if key != home and telling_ref not in units[key].members)
         dropped += considered - len(found)
-        result.pairs.extend(found)
+        result.directional.extend(found)
     result.dropped = dropped
 
     # --- a telling is inside at most ONE episode ---------------------------
@@ -1687,7 +1859,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     # at all. Filing both would also be `identity_conflict` on the next read,
     # since `part_of` is a grouping relation — so the ambiguity is a question.
     containers: dict[str, list] = {}
-    for pair in result.pairs:
+    for pair in result.directional:
         if pair.verdict == "part_of":
             containers.setdefault(pair.telling_ref, []).append(pair)
     for telling_ref, rows in sorted(containers.items()):
@@ -1701,14 +1873,14 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
 
     # --- accept the binds that are mutual and vertex-disjoint --------------
     chosen: dict[str, str] = {}
-    for pair in result.pairs:
+    for pair in result.directional:
         if pair.verdict == "bind":
             chosen[pair.telling_ref] = pair.candidate_key
     claimed: dict[str, list] = {}
     for telling_ref, key in sorted(chosen.items()):
         claimed.setdefault(key, []).append(telling_ref)
     accepted: set[tuple] = set()
-    for pair in result.pairs:
+    for pair in result.directional:
         if pair.verdict != "bind":
             continue
         candidate = units[pair.candidate_key]
@@ -1726,7 +1898,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         accepted.add(tuple(sorted({pair.telling_ref, *candidate.members})))
 
     seen: set[tuple] = set()
-    for pair in sorted(result.pairs, key=lambda row: (row.telling_ref, row.candidate_key)):
+    for pair in sorted(result.directional, key=lambda row: (row.telling_ref, row.candidate_key)):
         if pair.verdict != "bind":
             continue
         members = tuple(sorted({pair.telling_ref, *units[pair.candidate_key].members}))
@@ -1737,6 +1909,12 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
             views[pair.telling_ref], units[pair.candidate_key], pair=pair,
             active=active, views=views, now=now,
         ))
+
+    # --- ONE row per pair, from here on ------------------------------------
+    # Everything above needed both directions; nothing below does. A question
+    # surface that showed the same pair twice would be counting its own
+    # bookkeeping as the person's workload.
+    result.pairs = collapse_directions(result.directional, units)
 
     # --- proposals, questions, safeguards ---------------------------------
     rows = []
@@ -1752,8 +1930,12 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
 
     result.overmerges = overmerge_audit(views, units)
     result.bridges = bridge_diagnostics(episode_records)
+    # DIRECTIONAL on purpose: a re-audit is "this bound telling has a new
+    # candidate", which is a statement about one telling and one episode. The
+    # collapsed view keeps one direction per pair and would silently skip the
+    # re-audit for whichever bound telling lost the coin toss.
     result.reaudits = reaudit_findings(
-        units, result.pairs, trigger=trigger, episode_records=episode_records,
+        units, result.directional, trigger=trigger, episode_records=episode_records,
         answered_pairs=answered_pairs, open_items=open_items,
     )
     result.counts = plan_counts(result, units)
@@ -1761,8 +1943,16 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
 
 
 def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
-    """§8.1's report: candidate count, proposed questions, max candidates per
-    telling, and the WHEN items that would disappear."""
+    """§8.1's report, tallied ONCE over the collapsed pairs.
+
+    Every number below is derived from the same two sequences — the collapsed
+    pairs and the records the run would file — because the first version of
+    this function counted `proposals` off the containment RECORDS and
+    `verdicts.proposal` off the pair rows, and on the founder's vault it
+    printed `proposals: 0` beside `proposal=16`. Two tallies of one word is a
+    report nobody can trust, so there is one tally and the fields say which
+    thing they count.
+    """
     by_telling: dict[str, int] = {}
     for pair in result.pairs:
         by_telling[pair.telling_ref] = by_telling.get(pair.telling_ref, 0) + 1
@@ -1775,13 +1965,22 @@ def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
         "tellings": len(result.views),
         "eligible_tellings": sum(1 for row in result.views.values() if row.eligible),
         "units": len(units),
+        # UNIQUE pairs. `directions_judged` is the bookkeeping behind them and
+        # is reported beside it rather than instead of it, so "why is this
+        # twice that" has an answer on the page.
         "pairs": len(result.pairs),
+        "directions_judged": len(result.directional),
         "dropped_below_floor": result.dropped,
         "max_candidates_per_telling": max(by_telling.values(), default=0),
         "verdicts": verdicts,
         "would_bind_tellings": would_bind,
         "would_bind_episodes": len(result.envelopes),
-        "proposals": len(result.proposals),
+        # Named for what each one COUNTS. `proposal_pairs` is the verdict line's
+        # own number, read off the same tally; `part_of_records` is the
+        # containment bindings an apply would file, which is a different thing
+        # that used to be called "proposals" and disagreed with it in public.
+        "proposal_pairs": verdicts.get("proposal", 0),
+        "part_of_records": len(result.proposals),
         "questions": len(result.questions),
         "surfaced_questions": sum(1 for row in result.questions if row["surfaced"]),
         "possible_overmerge": len(result.overmerges),
@@ -1839,8 +2038,9 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
     counts = result.counts
     lines.append("Summary")
     for key in ("tellings", "eligible_tellings", "units", "pairs",
-                "dropped_below_floor", "max_candidates_per_telling",
-                "would_bind_tellings", "would_bind_episodes", "proposals",
+                "directions_judged", "dropped_below_floor",
+                "max_candidates_per_telling", "would_bind_tellings",
+                "would_bind_episodes", "proposal_pairs", "part_of_records",
                 "questions", "surfaced_questions", "possible_overmerge",
                 "bridges", "sole_receipts", "reaudits_minted",
                 "when_items_that_would_disappear"):
@@ -1878,56 +2078,65 @@ MAINTENANCE_STEP_IS_A_DRY_RUN = (
 )
 
 
+#: Why the binder folds before it binds. The age frames are calculated from
+#: the RESOLVED owner-birth group, and only `temporal_timeline` can identify
+#: it: subjects resolve inside the fold (v221), so a raw claim carries
+#: `subject_ref: None` and the owner's own birthday can arrive as
+#: `subject_mention: "birth"`. I2's first cut wrote its own owner predicate
+#: over raw claims, matched nothing on the founder's vault, and reported
+#: `age_frames: 0` — with the `bounds_in_frame` signal dead on all 883
+#: tellings. There is one definition of a life's age frames and this is how it
+#: is reached: ask the fold.
+FRAMES_COME_FROM_THE_FOLD = (
+    "the binder does not derive age frames; it folds once and reads the ones "
+    "the fold calculated, because the owner's birth is only identifiable "
+    "after subject resolution and a second predicate over raw claims is a "
+    "second, worse answer to a settled question"
+)
+
+
 def read_vault_inputs(vault_root: str | Path, *, now: object = None) -> dict:
     """Everything one run needs, off a vault. The only impure read here.
 
-    `episode_fold.load_episode_records` is what reads the identity records —
-    both authorities, both validated, an incomplete envelope refused — and it
-    is CALLED rather than reimplemented for the reason every other reader in
-    this program is.
+    `episode_fold.load_episode_records` reads the identity records — both
+    authorities, both validated, an incomplete envelope refused — and
+    `temporal_timeline.derive_calculated_timeline` supplies the age frames
+    (:data:`FRAMES_COME_FROM_THE_FOLD`). Both are CALLED rather than
+    reimplemented, for the reason every other reader in this program is.
+
+    The fold pass is the honest cost of that: one derivation per binder run,
+    on the records the vault already holds. §5.7's budget is the fold's own and
+    is unchanged by being read from here — and the binder is a maintenance
+    step, never a turn and never a compile.
     """
     index = store.fold_active_index(vault_root)
     claims = [row for row in (index.get("claims") or ()) if isinstance(row, dict)]
     records = ef.load_episode_records(vault_root)
-    frames = ()
-    birth = _birth_record(claims)
-    if birth is not None:
-        frames = cross_dating.age_frames(birth, as_of=now or _latest_year(claims))
-    return {"claims": claims, "episode_records": records, "frames": frames}
+    return {
+        "claims": claims,
+        "episode_records": records,
+        "frames": fold_age_frames(claims, episode_records=records, now=now),
+    }
 
 
-def _birth_record(claims: Sequence[object]):
-    """The owner's own birth interval, for the age frames. None when unstated.
+def fold_age_frames(claims: object, *, episode_records: object = (),
+                    now: object = None) -> tuple:
+    """The age frames THE FOLD calculated for these claims. Pure.
 
-    With no birth on file there are no age frames, the ``bounds_in_frame``
-    signal cannot fire, and the dry run says how many frames it had — which
-    is the honest report, not a silently weaker rule.
+    Exposed so a test can prove the binder's frames are the fold's own, and so
+    a host that already holds a `CalculatedTimeline` can hand over
+    ``result.age_frames`` instead of paying for a second pass.
     """
-    for claim in sorted(claims or (), key=lambda row: collapsed_text(
-            (row if isinstance(row, dict) else {}).get("claim_id"))):
-        row = claim if isinstance(claim, dict) else {}
-        if collapsed_text(row.get("event_kind")) != "birth":
-            continue
-        if collapsed_text(row.get("subject_ref") or row.get("subject_mention")).casefold() \
-                not in ei.OWNER_SUBJECT_KEYS:
-            continue
-        record = chrono.from_dict(row.get("temporal_value"))
-        if record is not None:
-            return record
-    return None
+    import temporal_timeline as tt  # noqa: PLC0415
 
-
-def _latest_year(claims: Sequence[object]) -> str:
-    years = []
-    for claim in claims or ():
-        row = claim if isinstance(claim, dict) else {}
-        record = chrono.from_dict(row.get("temporal_value"))
-        for value in ((record.latest, record.best) if record is not None else ()):
-            text = collapsed_text(value)
-            if text[:4].isdigit():
-                years.append(text[:4])
-                break
-    return max(years, default="")
+    rows = [dict(row) for row in (claims or ()) if isinstance(row, dict)]
+    if not rows:
+        return ()
+    result = tt.derive_calculated_timeline(
+        {"version": store.INDEX_VERSION, "claims": rows},
+        episode_records=episode_records, now=now,
+    )
+    return tuple(result.age_frames)
 
 
 def apply_plan(vault_root: str | Path, result: BinderPlan) -> dict:
@@ -2009,14 +2218,17 @@ def binder_step(vault_root: str | Path, *, now: object = None,
 __all__ = [
     "BINDER_ERROR_CODES",
     "BINDER_OUTPUT_FILE",
+    "CANONICAL_DIRECTION_RULE",
     "CLUSTER_RULE_TEXT",
     "CONTAINMENT_PHRASES",
     "CONTAINMENT_WINDOW",
     "ERA_SIGNAL_IS_SUPPLIED_BY_THE_HOST",
     "EVENT_VERB_STEMS",
+    "FRAMES_COME_FROM_THE_FOLD",
     "GLOBAL_QUESTION_CAP",
     "INDEPENDENT_SIGNALS",
     "KIND_FAMILIES",
+    "KIND_IS_THE_VERB_FOR_A_RECORDER_TELLING",
     "KIND_PRECEDENCE",
     "KIND_WILDCARD",
     "LABEL_TOKEN_MIN_CHARS",
@@ -2040,6 +2252,7 @@ __all__ = [
     "TIME_DECAY_GAP_YEARS",
     "UNFAMILIED_KINDS_ARE_ASKED",
     "VERDICTS",
+    "VERDICT_PRECEDENCE",
     "VERDICT_REASONS",
     "BinderPlan",
     "Candidate",
@@ -2053,11 +2266,15 @@ __all__ = [
     "binder_step",
     "bridge_diagnostics",
     "candidates",
+    "canonical_direction",
+    "collapse_directions",
     "containment_targets",
     "create_envelope",
     "describe",
     "describe_pair",
     "disjoint_bounds_item_id",
+    "fold_age_frames",
+    "independent_of_the_label",
     "independent_signals",
     "is_repeatable",
     "kind_families",

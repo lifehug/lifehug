@@ -123,6 +123,50 @@ choose each other and no third telling in the same run); and the containment
 record, which lands as `proposed` because C2's validator pins the narrow
 reading that a `deterministic` origin binds `same` and nothing else.
 
+### What the first live run changed (I2, the founder's vault, 883 tellings)
+
+The binder was run against a read-only clone of the founder's vault before
+anything was applied — rollout step 1's own dry run — and it found four things
+a nine-telling synthetic fixture structurally could not.
+
+* **A pair was reported twice.** R1 has to judge both directions (four of its
+  seven conditions are asymmetric), but a pair is one thing: 4 164 "pairs" were
+  2 082. The dedupe is a reporting rule and changes no decision —
+  `CANONICAL_DIRECTION_RULE` picks the direction a question is asked in, the
+  surviving row carries what either direction refused, and §6.1's per-telling
+  cap now counts a pair against **both** its units.
+* **Two tallies of one word.** The summary counted `proposals` off the
+  containment RECORDS and the verdict line counted `proposal` off the pair
+  rows; live they printed `0` and `16` side by side. One tally now, and the
+  fields are named for what they count (`proposal_pairs`, `part_of_records`).
+* **`age_frames: 0` on a vault with a stated birthday.** Subjects resolve
+  inside the fold (v221), so a raw claim carries `subject_ref: None` and the
+  owner's own birthday arrives as `subject_mention: "birth"` — the binder's
+  private owner-birth predicate matched nothing and the `bounds_in_frame`
+  signal was dead on all 883 tellings. The binder no longer owns that
+  question: `CalculatedTimeline.age_frames` hands back the frames the fold
+  calculated (in-memory, published nowhere), and `FRAMES_COME_FROM_THE_FOLD`
+  says why. **The fixture was wrong in the same way** and now files the
+  owner's birth the way the vault does.
+* **Every dated landmark row was unmatchable.** A recorder telling's subject
+  IS the thing — `Etherfuse`, started, 2022-05 — so subtracting the cast from
+  the label left a stem of `""`, and its act lives in `event_kind` rather than
+  in prose. Both are fixed in `label_stem`: the cast is evidence beside the
+  label and never instead of it, and the act is read from wherever a source
+  kind keeps it. A shared participant that is only the label again is no
+  longer counted as condition 4 evidence, which is strictly more conservative.
+
+**Zero binds was, and remains, the honest verdict of the approved floor.** All
+seventeen stem-matching pairs on the founder's vault carry at most ONE
+independent non-label signal, so every one is a proposal or a question and
+none is a bind. R1 is not mis-tuned there; it is refusing on purpose, and the
+gap it exposes is named rather than papered over: the dated landmark and the
+undated classifier occurrences of one company share only the entity's NAME, so
+a **resolved-entity signal** (v221's own resolution, reused as retrieval
+evidence) is the one change that would give those pairs a genuine second
+signal. That is a design decision with the owner's name on it, not a threshold
+to quietly lower.
+
 ## Consequences
 
 * Two new record families and two new directories; one module. No new store

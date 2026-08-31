@@ -395,6 +395,20 @@ class CalculatedTimeline:
     #: session, a Mirror row, a work item and an old URL all keep resolving
     #: after a bind (Law 5).
     node_aliases: dict = field(default_factory=dict)
+    #: The reached age frames this generation calculated, as
+    #: `cross_dating.AgeFrame` objects (eras E1). **In-memory only** — it is in
+    #: neither :meth:`to_dict` nor `structural_signature`, so it publishes
+    #: nothing and moves no fingerprint. It exists because the age frames are
+    #: derived from the RESOLVED owner-birth group, which only this function
+    #: can identify (`_owner_birth` plus `birth_origin.provisional_origin`),
+    #: and a caller that needed them had no choice but to write a second,
+    #: worse owner-birth predicate over raw claims. Event identity I2's binder
+    #: was exactly that caller and exactly that bug: on a vault whose owner
+    #: birth claim carries `subject_mention: "birth"` and no `subject_ref`, its
+    #: own predicate matched nothing, every frame was missing and the
+    #: `bounds_in_frame` retrieval signal was dead on every pair. One
+    #: definition, many readers (ADR 0021).
+    age_frames: tuple = ()
     #: ``{absorbed episode id: surviving episode id}``, read off the merge
     #: receipts' own ``aliases_created`` so the table cannot drift from the act
     #: that created it.
@@ -3708,6 +3722,10 @@ def derive_calculated_timeline(
     return CalculatedTimeline(
         nodes=tuple(nodes),
         work_items=tuple(items),
+        # In-memory only; see the field's own note. This is the ONE answer to
+        # "what are this life's age frames", handed to whoever asks instead of
+        # being re-derived by them.
+        age_frames=tuple(frames),
 # Derived, never stored (O-E6, design §7 row 6): every id these items
         # have ever been addressed by, mapped onto the id they are addressed by
         # now. Computed here so it is published in the SAME generation as the
