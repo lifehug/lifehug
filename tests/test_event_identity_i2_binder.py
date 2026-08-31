@@ -28,8 +28,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import chronology as chrono  # noqa: E402
-import cross_dating  # noqa: E402
 import episode_binder as eb  # noqa: E402
 import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
@@ -80,8 +78,17 @@ def _value(text: str) -> dict:
 
 
 def birth_claim() -> dict:
+    """The owner's birthday, filed the way the founder's vault actually files it.
+
+    ``subject_mention: "birth"`` and NO ``subject_ref`` — subjects resolve
+    inside the fold (v221), and this is the spelling the fold resolves to the
+    owner. The fixture used to say ``"I"``, which the fold does NOT resolve to
+    the owner; that went unnoticed only because the binder had its own
+    owner-birth predicate, and the predicate accepted a shape the fold would
+    have refused. One definition means the fixture has to be right too.
+    """
     day = FIXTURE["owner_birth"]
-    return _claim(claim_type="date", subject_mention="I", event_kind="birth",
+    return _claim(claim_type="date", subject_mention="birth", event_kind="birth",
                   source="landmark:entry-birth", quote="I was born on 11 July 1981.",
                   temporal_value=_value(day))
 
@@ -155,8 +162,9 @@ def claims_for(*roles: str) -> list:
 
 
 def frames():
-    return cross_dating.age_frames(chrono.from_dict(_value(FIXTURE["owner_birth"])),
-                                   as_of="2026")
+    """The age frames THE FOLD calculates for this fixture — never a private
+    copy of the arithmetic (the live `age_frames: 0` defect)."""
+    return eb.fold_age_frames(claims_for())
 
 
 def as_input(records: object) -> object:
@@ -191,18 +199,35 @@ def records_of(result: eb.BinderPlan) -> dict:
     return {"operations": operations, "bindings": bindings}
 
 
-def verdict(result: eb.BinderPlan, telling_ref: str, candidate_key: str) -> str:
-    for pair in result.pairs:
-        if pair.telling_ref == telling_ref and pair.candidate_key == candidate_key:
-            return pair.verdict
-    return ""
+def direction_of(result: eb.BinderPlan, telling_ref: str, candidate_key: str) -> eb.Pair:
+    """ONE judged direction — for the four asymmetric conditions.
+
+    R1 judges both ways; `result.pairs` keeps one row per unordered pair. A
+    test about repeatable protection, episode maturity, or a stem that matches
+    one way round has to name the direction it means.
+    """
+    for row in result.directional:
+        if row.telling_ref == telling_ref and row.candidate_key == candidate_key:
+            return row
+    raise AssertionError(f"no judged direction {telling_ref} vs {candidate_key}")
 
 
 def pair_of(result: eb.BinderPlan, telling_ref: str, candidate_key: str) -> eb.Pair:
+    """The ONE collapsed row for this pair, whichever way round it is named."""
+    wanted = tuple(sorted((telling_ref, candidate_key)))
     for row in result.pairs:
-        if row.telling_ref == telling_ref and row.candidate_key == candidate_key:
+        if row.units == wanted:
+            return row
+        if (row.telling_ref, row.candidate_key) == (telling_ref, candidate_key):
             return row
     raise AssertionError(f"no pair {telling_ref} vs {candidate_key}")
+
+
+def verdict(result: eb.BinderPlan, telling_ref: str, candidate_key: str) -> str:
+    try:
+        return pair_of(result, telling_ref, candidate_key).verdict
+    except AssertionError:
+        return ""
 
 
 ETHERFUSE = ("etherfuse_anchor", "etherfuse_same")
@@ -552,7 +577,7 @@ class R1Tests(unittest.TestCase):
         carries none of the episode's discriminator evidence."""
         records = create_records(refs("ridgeline"), kind="job")
         result = run("ridgeline", "ridgeline_undated", episode_records=records)
-        pair = pair_of(result, ref("ridgeline_undated"), records["episode_id"])
+        pair = direction_of(result, ref("ridgeline_undated"), records["episode_id"])
         by_name = {row.name: row for row in pair.conditions}
         self.assertFalse(by_name["repeatable_protection"].passed)
         self.assertNotEqual(pair.verdict, "bind")
@@ -565,7 +590,7 @@ class R1Tests(unittest.TestCase):
         claims = claims_for("ridgeline") + [telling_claim(row)]
         records = create_records(refs("ridgeline"), kind="job")
         result = eb.plan(claims, episode_records=as_input(records), frames=frames(), now=NOW)
-        pair = pair_of(result, row["telling_ref"], records["episode_id"])
+        pair = direction_of(result, row["telling_ref"], records["episode_id"])
         by_name = {r.name: r for r in pair.conditions}
         self.assertTrue(by_name["repeatable_protection"].passed)
         self.assertEqual(pair.verdict, "bind")
@@ -583,9 +608,13 @@ class R1Tests(unittest.TestCase):
         self.assertEqual(by_name["one_surviving_candidate"].detail,
                          "2 candidate(s) survive conditions 1-4")
         self.assertEqual(pair.verdict, "ambiguous")
-        named = {row["candidate_episode_id"] for row in result.questions
-                 if row["telling_ref"] == ref("ridgeline")}
-        self.assertEqual(len(named), 2)
+        # One item per PAIR, and the landmark is in two of them — named on
+        # `units`, because after the two judged directions collapse a telling
+        # is the row's `telling_ref` in only some of the pairs it is in.
+        mine = [row for row in result.questions if ref("ridgeline") in row["units"]]
+        self.assertEqual(len(mine), 2)
+        partners = {side for row in mine for side in row["units"]} - {ref("ridgeline")}
+        self.assertEqual(len(partners), 2)
 
     def test_two_of_the_same_three_do_bind(self):
         """Proven to fire: the SAME rows, one fewer rival, and R1 binds — so
@@ -621,9 +650,16 @@ class R1Tests(unittest.TestCase):
             human_binding(ref("etherfuse_same"), records["episode_id"], "not_same")
         ])
         result = run(*ETHERFUSE, episode_records=records)
-        pair = pair_of(result, ref("etherfuse_anchor"), ref("etherfuse_same"))
-        by_name = {row.name: row for row in pair.conditions}
+        # The ANCHOR's direction is the entailed one: it holds `same` to the
+        # episode the other telling was declared different from, and nothing
+        # is stored for that — C3 recomputes it every fold.
+        entailed = direction_of(result, ref("etherfuse_anchor"), ref("etherfuse_same"))
+        by_name = {row.name: row for row in entailed.conditions}
         self.assertFalse(by_name["no_not_same"].passed)
+        self.assertEqual(by_name["no_not_same"].detail,
+                         "an active or entailed not_same stands between them")
+        # …and the pair the person would ever see is blocked, from either end.
+        pair = pair_of(result, ref("etherfuse_same"), records["episode_id"])
         self.assertEqual(pair.verdict, "blocked")
         self.assertIn(
             tuple(sorted((ref("etherfuse_anchor"), ref("etherfuse_same")))),
@@ -641,7 +677,7 @@ class R1Tests(unittest.TestCase):
                    "bindings": left["bindings"] + right["bindings"]}
         result = run("ridgeline", "ridgeline_third", "ridgeline_undated",
                      episode_records=records)
-        pair = pair_of(result, ref("ridgeline"), right["episode_id"])
+        pair = direction_of(result, ref("ridgeline"), right["episode_id"])
         by_name = {row.name: row for row in pair.conditions}
         self.assertFalse(by_name["not_joining_two_mature_episodes"].passed)
         self.assertEqual(result.envelopes, [])
@@ -654,7 +690,7 @@ class R1Tests(unittest.TestCase):
         episode nobody decided pairwise."""
         result = run("ridgeline", "ridgeline_third")
         self.assertEqual(result.envelopes, [])
-        for pair in result.pairs:
+        for pair in result.directional:
             self.assertNotEqual(pair.verdict, "bind")
 
     def test_a_different_label_refuses_a_bind_the_signals_would_have_allowed(self):
@@ -698,11 +734,11 @@ class R1Tests(unittest.TestCase):
         self.assertEqual(result.envelopes, [])
 
     def test_a_bind_needs_both_sides_to_choose_each_other(self):
-        for pair in self.stage1.pairs:
+        for pair in self.stage1.directional:
             if pair.verdict != "bind":
                 continue
-            back = verdict(self.stage1, pair.candidate_key, pair.telling_ref)
-            self.assertEqual(back, "bind", "a bind was accepted one-sidedly")
+            back = direction_of(self.stage1, pair.candidate_key, pair.telling_ref)
+            self.assertEqual(back.verdict, "bind", "a bind was accepted one-sidedly")
 
 
 # ==========================================================================
@@ -999,14 +1035,15 @@ class QuestionOutputTests(unittest.TestCase):
 
     def test_at_most_one_pair_per_telling_is_surfaced(self):
         """§13.3: one pair per telling at a time; the rest stay eligible."""
-        per_telling: dict = {}
+        per_unit: dict = {}
         for row in self.result.questions:
             if row["surfaced"]:
-                per_telling[row["telling_ref"]] = per_telling.get(row["telling_ref"], 0) + 1
-        self.assertTrue(per_telling)
+                for side in row["units"]:
+                    per_unit[side] = per_unit.get(side, 0) + 1
+        self.assertTrue(per_unit)
         self.assertEqual(eb.SURFACED_PAIRS_PER_TELLING, 1)
-        for telling_ref, count in per_telling.items():
-            self.assertEqual(count, 1, telling_ref)
+        for side, count in per_unit.items():
+            self.assertEqual(count, 1, side)
         # …and a telling with several candidates really does have several.
         self.assertGreater(self.result.counts["max_candidates_per_telling"], 1)
 
@@ -1367,6 +1404,303 @@ class HostTests(unittest.TestCase):
         source = (ROOT / "system" / "episode_binder.py").read_text("utf-8")
         for forbidden in ("Workspace/dave", "lifehug/dave", "~/Workspace"):
             self.assertNotIn(forbidden, source)
+
+
+# ==========================================================================
+# The founder dry run's four findings (I2 live, 883 tellings)
+# ==========================================================================
+
+
+class LiveFindingTests(unittest.TestCase):
+    """Every one of these is a defect the SYNTHETIC fixture could not show.
+
+    The first live run against a real vault reported 4 164 "pairs" for 2 082
+    pairs, `proposals: 0` beside `proposal=16`, and `age_frames: 0` on a vault
+    holding a day-precision birthday. None of it was visible on a nine-telling
+    fixture where every telling is a classifier telling with a place, a date
+    and a sentence for a label. These tests carry the real shapes back.
+    """
+
+    # -- finding 1: one pair, one row ------------------------------------
+
+    def test_a_pair_is_reported_once_and_judged_twice(self):
+        result = run()
+        self.assertEqual(len(result.directional), 2 * len(result.pairs))
+        self.assertEqual(result.counts["directions_judged"], len(result.directional))
+        self.assertEqual(result.counts["pairs"], len(result.pairs))
+        seen = [row.units for row in result.pairs]
+        self.assertEqual(len(seen), len(set(seen)), "a pair was reported twice")
+
+    def test_one_pair_never_mints_two_items(self):
+        result = run()
+        keys = [row["event_key"] for row in result.questions]
+        self.assertEqual(len(keys), len(set(keys)))
+        by_units = [tuple(row["units"]) for row in result.questions]
+        self.assertEqual(len(by_units), len(set(by_units)))
+
+    def test_the_asymmetric_conditions_are_still_judged_both_ways(self):
+        """The dedupe is a REPORTING rule. Four of R1's seven conditions read
+        differently depending on which side is asking, and a pair that only
+        looked one way would let an undated telling in through the direction
+        that never meets the repeatable episode."""
+        records = create_records(refs("ridgeline"), kind="job")
+        result = run("ridgeline", "ridgeline_undated", episode_records=records)
+        forward = direction_of(result, ref("ridgeline_undated"), records["episode_id"])
+        self.assertFalse({row.name: row for row in forward.conditions}
+                         ["repeatable_protection"].passed)
+        pair = pair_of(result, ref("ridgeline_undated"), records["episode_id"])
+        self.assertIn("repeatable_protection",
+                      set(pair.failed()) | set(pair.also_failed))
+
+    def test_a_refusal_in_either_direction_refuses_the_pair(self):
+        self.assertEqual(eb.VERDICT_PRECEDENCE[-1], "bind")
+        self.assertEqual(eb.VERDICT_PRECEDENCE[0], "blocked")
+        rows = [
+            eb.Pair(telling_ref="a:1", home_key="a:1", candidate_key="b:2",
+                    candidate_episode_id="episode:" + "0" * 24,
+                    candidate_kind="prospective", verdict="bind"),
+            eb.Pair(telling_ref="b:2", home_key="b:2", candidate_key="a:1",
+                    candidate_episode_id="episode:" + "0" * 24,
+                    candidate_kind="prospective", verdict="asked"),
+        ]
+        units = {"a:1": eb.Candidate("a:1", "prospective", ("a:1",), "moment",
+                                     frozenset(), frozenset(), frozenset(),
+                                     frozenset(), frozenset(), frozenset()),
+                 "b:2": eb.Candidate("b:2", "prospective", ("b:2",), "moment",
+                                     frozenset(), frozenset(), frozenset(),
+                                     frozenset(), frozenset(), frozenset())}
+        collapsed = eb.collapse_directions(rows, units)
+        self.assertEqual(len(collapsed), 1)
+        self.assertEqual(collapsed[0].verdict, "asked")
+
+    def test_collapsing_never_rewrites_a_judged_direction(self):
+        """`directional` is the record of what each direction decided; a
+        collapse that edited one in place would erase the asymmetry it exists
+        to summarize."""
+        records = create_records(refs("ridgeline"), kind="job")
+        result = run("ridgeline", "ridgeline_undated", episode_records=records)
+        # Identity, not equality: a copy that still compares equal is exactly
+        # what we want, and `assertNotIn` would compare by value.
+        for pair in result.pairs:
+            self.assertFalse(any(pair is row for row in result.directional))
+
+    def test_a_telling_against_an_existing_episode_is_the_canonical_direction(self):
+        records = create_records(refs(*ETHERFUSE), kind="job")
+        result = run(*ETHERFUSE, "etherfuse_proposal", episode_records=records)
+        row = pair_of(result, ref("etherfuse_proposal"), records["episode_id"])
+        self.assertEqual(row.telling_ref, ref("etherfuse_proposal"))
+        self.assertEqual(row.candidate_key, records["episode_id"])
+        self.assertEqual(row.candidate_kind, "episode")
+
+    # -- finding 2: one tally --------------------------------------------
+
+    def test_the_summary_and_the_verdict_line_come_from_one_tally(self):
+        """The live run printed `proposals: 0` beside `proposal=16`. The two
+        numbers counted different things under one word."""
+        records = create_records(refs(*ETHERFUSE), kind="job")
+        result = run(*ETHERFUSE, "etherfuse_proposal", "etherfuse_part_of",
+                     episode_records=records)
+        counts = result.counts
+        self.assertEqual(counts["proposal_pairs"], counts["verdicts"]["proposal"])
+        self.assertEqual(counts["proposal_pairs"],
+                         sum(1 for row in result.pairs if row.verdict == "proposal"))
+        self.assertEqual(counts["part_of_records"], len(result.proposals))
+        self.assertNotIn("proposals", counts)
+        text = "\n".join(eb.describe(result))
+        self.assertIn("proposal_pairs:", text)
+        self.assertIn("part_of_records:", text)
+        self.assertIn(f"proposal={counts['proposal_pairs']}", text)
+        # The live shape, where the two numbers genuinely differ: proposals
+        # without a single containment record. This is the state the founder's
+        # own vault was in when the report said `proposals: 0` next to
+        # `proposal=16`, so it is the state the guard has to be run against.
+        live = run()
+        self.assertEqual(live.counts["part_of_records"], 0)
+        self.assertEqual(live.counts["proposal_pairs"],
+                         live.counts["verdicts"]["proposal"])
+        self.assertGreater(live.counts["proposal_pairs"], 1)
+        self.assertNotEqual(live.counts["proposal_pairs"],
+                            live.counts["part_of_records"])
+
+    def test_the_two_fields_count_genuinely_different_things(self):
+        """Proven by a state where they differ: a containment record and a
+        proposal verdict are not the same event, which is why the old single
+        word was a bug and not a typo."""
+        records = create_records(refs(*ETHERFUSE), kind="job")
+        result = run(*ETHERFUSE, "etherfuse_proposal", "etherfuse_part_of",
+                     episode_records=records)
+        self.assertEqual(result.counts["part_of_records"], 1)
+        self.assertGreater(result.counts["proposal_pairs"], 0)
+        # The containment record is not one of the proposal PAIRS: its own
+        # pair is a `part_of`, and that is the whole point — the two fields
+        # count different things and must never be one word again.
+        part_of = [row for row in result.pairs if row.verdict == "part_of"]
+        self.assertEqual(len(part_of), result.counts["part_of_records"])
+        self.assertEqual(result.counts["verdicts"]["part_of"],
+                         result.counts["part_of_records"])
+        self.assertNotEqual(result.counts["verdicts"]["part_of"],
+                            result.counts["proposal_pairs"] + 1)
+
+    # -- finding 3: the frames are the fold's ----------------------------
+
+    def test_the_frames_are_the_ones_the_fold_calculated(self):
+        """One definition. The binder folds once and reads the answer; it does
+        not own a second owner-birth predicate."""
+        claims = claims_for()
+        mine = eb.fold_age_frames(claims)
+        folded = tt.derive_calculated_timeline(
+            {"version": ts.INDEX_VERSION, "claims": [dict(row) for row in claims]},
+        )
+        self.assertTrue(mine)
+        self.assertEqual([row.band for row in mine],
+                         [row.band for row in folded.age_frames])
+
+    def test_the_owner_birth_is_found_the_way_the_founder_vault_files_it(self):
+        """The live defect, reproduced. The founder's own birth claim carries
+        `subject_mention: "birth"` and NO `subject_ref` — subjects resolve
+        inside the fold (v221) — so a predicate over raw claims that looked for
+        `self`/`me`/`i` matched nothing and every frame went missing."""
+        birth = _claim(
+            claim_type="date", subject_mention="birth", event_kind="birth",
+            source="landmark:entry-birth", quote="Born 11 July 1981.",
+            temporal_value=_value(FIXTURE["owner_birth"]),
+        )
+        claims = [birth] + [telling_claim(row) for row in tellings(*ETHERFUSE)]
+        frames_here = eb.fold_age_frames(claims)
+        self.assertTrue(frames_here, "no age frames from a stated owner birthday")
+        self.assertIn("childhood", [row.band for row in frames_here])
+
+    def test_frames_come_from_claims_and_not_from_a_published_projection(self):
+        """The fixture has no `state/temporal_claims/calculated-timeline.json`
+        and never compiles one — the frames still arrive."""
+        root = root_parent_tmp(self, ROOT, prefix="i2-frames-")
+        (root / "state").mkdir(parents=True, exist_ok=True)
+        (root / "sources").mkdir(parents=True, exist_ok=True)
+        seed_vault(root, claims_for())
+        published = root / "state" / "temporal_claims" / "calculated-timeline.json"
+        self.assertFalse(published.exists())
+        outcome = eb.bind_episodes(root, apply=False, now=NOW)
+        self.assertGreater(outcome["frames"], 0)
+        self.assertFalse(published.exists(), "the binder published a projection")
+
+    def test_no_birthday_means_no_frames_and_says_so(self):
+        claims = [telling_claim(row) for row in tellings(*ETHERFUSE)]
+        self.assertEqual(eb.fold_age_frames(claims), ())
+
+    def test_the_bounds_signal_is_alive_once_the_frames_are(self):
+        """The consequence the live run measured: with no frames the
+        `bounds_in_frame` signal cannot fire on ANY pair."""
+        views = eb.telling_views(claims_for())
+        units = eb.candidates(views)
+        pair = (ref("etherfuse_anchor"), ref("etherfuse_same"))
+        with_frames = eb.retrieval_signals(views[pair[0]], units[pair[1]],
+                                           frames=eb.fold_age_frames(claims_for()))
+        self.assertIn("bounds_in_frame", with_frames)
+        self.assertNotIn("bounds_in_frame",
+                         eb.retrieval_signals(views[pair[0]], units[pair[1]], frames=()))
+
+    # -- finding 4: the recorder's stem, and the honest floor -------------
+
+    def test_a_recorder_telling_keeps_a_stem_after_the_cast_is_removed(self):
+        """The live defect: a recorder telling's SUBJECT is the thing itself
+        ("Etherfuse", started, 2022-05), so subtracting the cast erased the
+        whole label and left a stem of `""` — and a telling with no stem
+        matches nothing. Every dated landmark row on the founder's vault was
+        unmatchable by construction."""
+        self.assertEqual(eb.label_stem("Etherfuse", ["Etherfuse"]), "etherfuse")
+        self.assertEqual(
+            eb.label_stem("Etherfuse", ["Etherfuse"], event_kind="started"),
+            EXPECTED["etherfuse_stem"],
+        )
+        # …and the cast is still removed when there is a label left without it.
+        self.assertEqual(eb.label_stem("Co-founded Etherfuse with AJ", ["AJ"]),
+                         EXPECTED["etherfuse_stem"])
+
+    def test_the_act_is_read_from_the_kind_when_the_words_do_not_carry_it(self):
+        """The recorder puts the act in `event_kind` and the classifier puts it
+        in the sentence. One rule, read from wherever the source kind keeps
+        it — and it makes a recorder stem MORE specific, never less."""
+        self.assertEqual(eb.label_stem("Boeing", ["Boeing"], event_kind="job"),
+                         "boeing")
+        self.assertEqual(eb.label_stem("Katie", ["Katie"], event_kind="married"),
+                         "katie-marry")
+        self.assertTrue(eb.KIND_IS_THE_VERB_FOR_A_RECORDER_TELLING)
+
+    def test_a_recorder_telling_and_a_classifier_telling_can_share_a_stem(self):
+        """The whole point of §1: the DATED landmark and the undated classifier
+        occurrence of one company must be able to match at all."""
+        landmark = [
+            _claim(claim_type="date", subject_mention="Etherfuse",
+                   event_kind="started", source="landmark:entry-etherfuse-live",
+                   quote="Started Etherfuse in May 2022.",
+                   temporal_value=_value("2022-05")),
+        ]
+        views = eb.telling_views(landmark + [telling_claim(tellings("etherfuse_same")[0])])
+        self.assertEqual(views["landmark:entry-etherfuse-live"].stem,
+                         EXPECTED["etherfuse_stem"])
+        self.assertEqual(views[ref("etherfuse_same")].stem, EXPECTED["etherfuse_stem"])
+
+    def test_a_participant_that_is_only_the_label_again_is_not_a_second_signal(self):
+        """Condition 4 says INDEPENDENT. On a recorder telling the subject is
+        the label, so counting it as evidence beside a stem match would let one
+        fact satisfy two signals — nine live pairs reported exactly that."""
+        rows = [
+            _claim(claim_type="date", subject_mention="Boeing", event_kind="job",
+                   source=f"landmark:entry-boeing-{n}", quote="Boeing.",
+                   temporal_value=_value(year))
+            for n, year in enumerate(("1998", "2001"))
+        ]
+        views = eb.telling_views(rows)
+        units = eb.candidates(views)
+        left, right = sorted(views)
+        self.assertIn("boeing", views[left].participants)
+        self.assertNotIn("participant",
+                         eb.independent_signals(views[left], units[right]))
+        self.assertEqual(eb.independent_of_the_label(views[left], units[right]),
+                         frozenset())
+
+    def test_a_real_second_person_is_still_a_signal(self):
+        """Proven in both directions: the rule drops the label wearing a
+        participant's coat, never an actual participant."""
+        rows = [
+            _claim(claim_type="occurrence", subject_mention="AJ",
+                   event_kind="moment", source=src, quote="With AJ.",
+                   event_mention="Built the cabin with AJ")
+            for src in ("classification:x#111111111111", "classification:y#222222222222")
+        ]
+        views = eb.telling_views(rows)
+        units = eb.candidates(views)
+        left, right = sorted(views)
+        # The label keeps a subject of its own, so the cast is genuinely a
+        # second fact rather than the same one wearing a participant's coat.
+        self.assertEqual(views[left].stem, "cabin-build")
+        self.assertEqual(eb.independent_of_the_label(views[left], units[right]),
+                         frozenset({"aj"}))
+        self.assertIn("participant", eb.independent_signals(views[left], units[right]))
+
+    def test_zero_binds_is_what_this_floor_says_on_evidence_like_the_vaults(self):
+        """The honest verdict, as a test rather than a paragraph.
+
+        A stem match plus ONE independent signal is a proposal, not a bind —
+        and on the founder's vault every one of the seventeen stem-matching
+        pairs had exactly that. R1 is not mis-tuned here; it is refusing on
+        purpose, and the question is what reaches the person.
+        """
+        rows = [
+            _claim(claim_type="occurrence", subject_mention="I",
+                   event_kind="moment", source=src, quote="Started Etherfuse.",
+                   event_mention="Started Etherfuse", place_mentions=["Mexico City"])
+            for src in ("classification:one#111111111111",
+                        "classification:two#222222222222")
+        ]
+        result = eb.plan(rows, frames=frames(), now=NOW)
+        pair = result.pairs[0]
+        self.assertEqual(pair.verdict, "proposal")
+        self.assertEqual(list(pair.failed()), ["two_independent_signals"])
+        self.assertEqual(result.envelopes, [])
+        self.assertEqual(
+            {row.name: row for row in pair.conditions}
+            ["two_independent_signals"].detail, "1 of 2: place")
 
 
 if __name__ == "__main__":  # pragma: no cover
