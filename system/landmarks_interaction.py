@@ -1914,6 +1914,85 @@ def landmark_entry_key(entry: object, row: object = None) -> str:
     return ""
 
 
+#: §3.2's threshold, in months, for "the same stay told twice" versus "a
+#: second stay at the same address". Two dated tellings of one identity that
+#: INTERSECT, or that are separated by no more than this, are one entry; more
+#: than this apart and the ladder files a second entry. Twelve rather than a
+#: rounder number because the ladder's own filling is coarse — a person who
+#: says "we were in Cedarport in the nineties" and later "1996 to 1999" has
+#: told one fact twice, and a year of slack is what absorbs that without
+#: absorbing a genuine return years later. It is an owner-facing judgment
+#: (design §7's "Judge"), named here so moving it is one edit and one test.
+SEQUENCE_ENTRY_ABUT_MONTHS = 12
+
+
+def entry_stay_interval(entry: object) -> dict | None:
+    """ONE record's own stated stretch, as a `chronology`-shaped interval.
+
+    ``None`` when the record states no start, which is the ladder's ordinary
+    incremental fill: a telling that names only the city has no stretch to
+    disagree with, and :func:`same_landmark_stay` says so.
+
+    An UNCLOSED stay is bounded by its own start here, deliberately, and this
+    is the one place the reading differs from `episode_containers.span_from_
+    claims`. That function answers *"what stretch does this telling OPEN"* for
+    a container, where an absent end honestly runs to the present. This one
+    answers *"what did the person actually state"* for an identity decision,
+    and letting an unclosed 1988 stay reach forward over a stated 1996–1999
+    one would merge two stays into a single eleven-year fiction whose start
+    and end came from different tellings. Split, both stand, and the overlap
+    becomes a question (§3.2's `residence_overlap`) rather than a silent join.
+    """
+    if not isinstance(entry, dict):
+        return None
+    span = entry.get("span") if isinstance(entry.get("span"), dict) else {}
+    start = chrono.from_dict(span.get("start"))
+    if start is None or not start.earliest:
+        return None
+    end = chrono.from_dict(span.get("end"))
+    latest = end.latest if (end is not None and end.latest) else start.latest or start.earliest
+    return {"earliest": start.earliest, "latest": latest, "best": start.best,
+            "granularity": start.granularity, "basis": start.basis,
+            "confidence": start.confidence}
+
+
+def same_landmark_stay(existing: object, record: object, row: object = None) -> bool:
+    """§3.2's INTERVAL-AWARE key: are these two records the same entry?
+
+    H1's finding, as the predicate that answers it. :func:`landmark_entry_key`
+    keys on the case-folded identity and nothing else, so two stays in the
+    same city collapsed at the LADDER — before any claim existed — and
+    `merge_landmark_entry` reconciled the two spans into one entry with the
+    loser's bounds filed as alternates. A person who lived in Cedarport twice
+    had one Cedarport.
+
+    So identity is still the first half and is unchanged; this is the second:
+
+    * a `set` or `singleton` domain keeps today's key exactly — a second
+      telling about one child is never a second child;
+    * for the three `sequence` domains, either record stating no start makes
+      them one entry (the incremental fill: the city today, the span next
+      week), and two stated stretches make them one entry when they intersect
+      or come within :data:`SEQUENCE_ENTRY_ABUT_MONTHS` of each other;
+    * two stated stretches further apart than that are TWO entries — a second
+      stay, whose promoted telling carries its own start, which is exactly the
+      discriminator the episode layer already wants
+      (`identity_resolution.derive_episode_ref`).
+
+    A duplicate this rule splits is joined by one human `same` answer (§5.4),
+    never by the key: the key's job is to stop inventing a join, not to make
+    one it cannot see.
+    """
+    if not is_sequence(row):
+        return True
+    left = entry_stay_interval(existing)
+    right = entry_stay_interval(record)
+    if left is None or right is None:
+        return True
+    gap = chrono.gap_months(left, right)
+    return gap is None or gap <= SEQUENCE_ENTRY_ABUT_MONTHS
+
+
 def entry_superseded_by(existing: object, record: object,
                         row: object) -> bool:
     """Whether filing ``record`` retires a DIFFERENT prior entry outright.

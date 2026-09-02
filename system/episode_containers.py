@@ -662,9 +662,75 @@ CONTAINMENT_UNIQUENESS_RULE_TEXT = (
 )
 
 
+#: §4.1 condition 6 (E-L2b), as the module's own sentence and as the name the
+#: refusal is reported under.
+#:
+#: The rung places; a PERSON un-places. Once they have, no rebuild, no weekly
+#: sweep and no rule-version bump may quietly file the same pair again — that
+#: is H5's finding, and the mechanism it asks for is a durable NEGATIVE rather
+#: than an undo the next run overwrites. Two ways a pair is decided, and both
+#: are read from records rather than from a cache:
+#:
+#: * an ACTIVE binding of any relation at ``stated``/``confirmed`` origin —
+#:   the person said something about this exact pair, whatever they said;
+#: * a ``none`` binding superseding a ``part_of`` on the pair — the drag-out
+#:   itself, kept as a reason even after an undo supersedes it, because the
+#:   pair is human-decided from that moment on either way.
+NO_HUMAN_DECISION_CONDITION = "no_human_decision_on_pair"
+CONTAINMENT_HUMAN_DECISION_RULE_TEXT = (
+    "the rung files nothing on a (telling, episode) pair a person has already "
+    "decided: no active stated/confirmed binding of any relation, and no "
+    "`none` superseding a prior `part_of` on the pair"
+)
+
+
+def human_decided_pairs(bindings: object) -> frozenset:
+    """``{(telling_ref, episode_id)}`` — :data:`CONTAINMENT_HUMAN_DECISION_RULE_TEXT`.
+
+    Pure, and computed from the WHOLE binding set rather than from the active
+    index: the drag-out's own ``none`` may itself have been superseded by an
+    undo, and the pair is still the person's from then on. Supersession is
+    followed exactly as `episode_fold_contract.active_binding_index` follows
+    it, so "active" means the same thing in both places.
+    """
+    import event_identity as ei  # noqa: PLC0415
+
+    rows = [row for row in (bindings or ()) if isinstance(row, dict)]
+    superseded = {
+        collapsed_text(row.get("supersedes"))
+        for row in rows if collapsed_text(row.get("supersedes"))
+    }
+    by_id = {collapsed_text(row.get("identity_id")): row for row in rows}
+    decided: set = set()
+    for row in rows:
+        telling_ref = collapsed_text(row.get("telling_ref"))
+        episode_id = collapsed_text(row.get("episode_id"))
+        if not telling_ref or not episode_id:
+            continue
+        pair = (telling_ref, episode_id)
+        identity_id = collapsed_text(row.get("identity_id"))
+        active = (collapsed_text(row.get("status") or "active") == "active"
+                  and identity_id not in superseded)
+        if active and collapsed_text(row.get("origin")) in ei.HUMAN_ORIGINS:
+            decided.add(pair)
+            continue
+        if collapsed_text(row.get("relation")) != ei.SPLIT_DEPARTURE_RELATION:
+            continue
+        prior = by_id.get(collapsed_text(row.get("supersedes")))
+        if prior is None:
+            continue
+        if (collapsed_text(prior.get("relation")) == "part_of"
+                and collapsed_text(prior.get("telling_ref")) == telling_ref
+                and collapsed_text(prior.get("episode_id")) == episode_id):
+            decided.add(pair)
+    return frozenset(decided)
+
+
 def containment_rows(views: Mapping[str, object], found: Mapping[str, Container],
                      *, question_contexts: object = None,
-                     ambiguities: object = None) -> list:
+                     ambiguities: object = None,
+                     decided_pairs: object = (),
+                     negatives: object = None) -> list:
     """Every (telling, container) placement the two evidence-grade rules make.
 
     One row per pair, `question_context` winning over `entity_span` when both
@@ -678,6 +744,12 @@ def containment_rows(views: Mapping[str, object], found: Mapping[str, Container]
     refusal and the placement are two halves of ONE walk over the same pairs,
     and computing them twice is how the two would eventually disagree about
     which pairs were refused.
+
+    ``decided_pairs`` is §4.1 condition 6 (:func:`human_decided_pairs`) and
+    ``negatives`` its own out-parameter, one row per pair this rung WOULD have
+    filed and did not because a person had already decided it. It is named and
+    reported rather than silently absent: a refusal nobody can see is
+    indistinguishable from a rule that never looked.
     """
     stamps = {
         collapsed_text(key): collapsed_text(value)
@@ -708,6 +780,22 @@ def containment_rows(views: Mapping[str, object], found: Mapping[str, Container]
                 if shared and (not dated or inside):
                     rule_id = RULE_ID_ENTITY_SPAN
             if not rule_id:
+                continue
+            # §4.1 condition 6. LAST of the pair-level conditions on purpose:
+            # everything above decides whether the rung has anything to say
+            # about this pair at all, and this decides whether it is allowed
+            # to say it. Evaluating it first would report a refusal for every
+            # pair in the vault.
+            if (telling_ref, container.episode_id) in set(decided_pairs or ()):
+                if negatives is not None:
+                    negatives.append({
+                        "telling_ref": telling_ref,
+                        "episode_id": container.episode_id,
+                        "container_key": container.key,
+                        "rule_id": rule_id,
+                        "condition": NO_HUMAN_DECISION_CONDITION,
+                        "reason": CONTAINMENT_HUMAN_DECISION_RULE_TEXT,
+                    })
                 continue
             rows.append({
                 "telling_ref": telling_ref,
@@ -995,6 +1083,7 @@ __all__ = [
     "CONTAINMENT_AUTHORITIES",
     "CONTAINMENT_DATE_RULE_TEXT",
     "CONTAINMENT_ORIGIN_PRECEDENCE",
+    "CONTAINMENT_HUMAN_DECISION_RULE_TEXT",
     "CONTAINMENT_RULE_PRECEDENCE",
     "DEFAULT_CONTAINMENT_AUTHORITY",
     "DETERMINISTIC_CONTAINMENT_RULE_IDS",
@@ -1018,6 +1107,8 @@ __all__ = [
     "containment_reason",
     "containment_record",
     "containment_rows",
+    "human_decided_pairs",
+    "NO_HUMAN_DECISION_CONDITION",
     "CONTAINMENT_UNIQUENESS_RULE_TEXT",
     "ambiguity_kind",
     "date_inside_span",

@@ -205,6 +205,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # operations and bindings through the same writers `bind-episodes`
     # itself uses — same single-transaction vault mutation family.
     "resolve-work-item", "split-episode",
+    # containment-remove (E-L2b, design §5 rules 1–2): the drag-out and its
+    # undo, filing a `none`/`part_of` binding and an adopt envelope through
+    # the same writers — same single-transaction vault mutation family.
+    "containment-remove",
     "timeline-unplace", "unretract",
 })
 
@@ -1078,6 +1082,49 @@ def cmd_resolve_work_item(args: argparse.Namespace) -> int:
     for key in ("episode_id", "relation", "created", "event_key"):
         if key in result:
             print(f"  {key}: {result[key]}")
+    return 0
+
+
+def cmd_containment_remove(args: argparse.Namespace) -> int:
+    """`containment-remove` — the drag-out and its undo (design §5 rules 1–2).
+
+    Flags rather than a JSON payload on stdin, because the gesture is two ids
+    and a switch — the same shape `timeline-move --relation` and
+    `resolve-work-item --answer` already use, and the shape a drag actually
+    produces. The optional "why" is prose on stdin and the move stands without
+    it (owner ruling: a drag saves immediately, the explanation may be closed
+    unanswered).
+    """
+    import json  # noqa: PLC0415
+
+    import identity_questions as iq  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    try:
+        if getattr(args, "undo", False):
+            result = iq.restore_to_container(
+                REPO_DIR, telling_ref=args.telling_ref, episode_id=args.episode_id,
+                reason=reason or None,
+            )
+        else:
+            result = iq.remove_from_container(
+                REPO_DIR, telling_ref=args.telling_ref, episode_id=args.episode_id,
+                container_telling_ref=getattr(args, "container_telling_ref", None),
+                reason=reason or None,
+            )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return 0
+    verb = "restored to" if result["gesture"] == "restore" else "removed from"
+    print(f"\u2713 {result['telling_ref']} {verb} {result['episode_id']}")
+    print(f"  relation: {result['relation']}")
+    print(f"  created: {result['created']}")
+    if result.get("adopted"):
+        print("  adopt: the episode is now human-authored (event identity row 3)")
     return 0
 
 
@@ -3143,6 +3190,24 @@ def build_parser() -> argparse.ArgumentParser:
                         "or telling_ref=episode:<hex>; repeatable")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_resolve_work_item)
+
+    p = sub.add_parser(
+        "containment-remove",
+        help="Take a telling OUT of a container durably, or undo that "
+             "(--undo); optional reason on stdin",
+    )
+    p.add_argument("--telling-ref", dest="telling_ref", required=True,
+                   help="The telling being removed from the container")
+    p.add_argument("--episode-id", dest="episode_id", required=True,
+                   help="The container episode it is being removed from")
+    p.add_argument("--container-telling-ref", dest="container_telling_ref", default=None,
+                   help="The telling that OPENED the container, when it has no create "
+                        "envelope (a recorder-minted residence, job or schooling) — "
+                        "carried on the adopt envelope so the id stays explainable")
+    p.add_argument("--undo", action="store_true",
+                   help="Undo a previous removal: a stated part_of superseding the none")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_containment_remove)
 
     p = sub.add_parser(
         "split-episode",

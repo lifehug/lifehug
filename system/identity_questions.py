@@ -115,7 +115,15 @@ IDENTITY_QUESTIONS_ERROR_CODES = (
     "identity_answer_needs_sibling",
     "identity_answer_needs_episode_or_sibling",
     "identity_merge_needs_absorbed_members",
+    "containment_removal_needs_part_of",
+    "containment_restore_needs_removal",
 )
+
+#: The two halves of design §5 rule 1 — the DRAG-OUT and its undo. Named as a
+#: closed pair because they are one gesture read twice, and because a host
+#: binding them (a CLI verb, a server route) should not be able to invent a
+#: third.
+CONTAINMENT_GESTURES = ("remove", "restore")
 
 
 class IdentityQuestionsError(TemporalContractError):
@@ -719,6 +727,152 @@ def resolve_same_event_answer(
         "answer": answer_code, "episode_id": episode_id, "relation": relation,
         "binding": binding, "created": created,
     }
+
+# --------------------------------------------------------------------------
+# Out of a container, and back in — design §5 rules 1 and 2, audit H5
+# --------------------------------------------------------------------------
+
+
+def _creation_inputs(vault_root: str | Path, episode_id: str,
+                     container_telling_ref: object = None) -> tuple[dict, str | None]:
+    """``(creation canonical inputs, canonical event kind)`` for an adopt.
+
+    Three cases and no guessing. An episode an operation CREATED carries its
+    own canonical inputs, and they are copied. A PARTICIPATION container —
+    a residence, a job, a schooling minted by the recorder rather than by an
+    identity operation — has no create envelope at all, and its id is the one
+    a deterministic create naming its opening telling ALONE would mint
+    (`episode_containers.container_episode_id`), so given that telling the
+    inputs are re-derived rather than remembered. Given neither, the envelope
+    carries an empty view: an adopt whose inputs are unknown is still a
+    durable record of the person's decision, and inventing inputs to fill the
+    field would make the id explainable from something nobody filed.
+    """
+    for record in ei.load_episode_operations(vault_root):
+        if record.get("status") != "active" or record.get("episode_id") != episode_id:
+            continue
+        if collapsed_text(record.get("op")) == "create":
+            return (dict(record.get("canonical_inputs") or {}),
+                    collapsed_text(record.get("canonical_event_kind")) or None)
+    telling = collapsed_text(container_telling_ref)
+    if telling:
+        return ei.canonical_operation_inputs(
+            authority="deterministic", op="create",
+            rule_version=ei.IDENTITY_RULE_VERSION,
+            member_refs=[telling],
+        ), None
+    return {}, None
+
+
+def remove_from_container(
+    vault_root: str | Path,
+    *,
+    telling_ref: object,
+    episode_id: object,
+    container_telling_ref: object = None,
+    reason: object = None,
+    source_ref: object = None,
+    now: object = None,
+) -> dict:
+    """DRAG-OUT: *this telling is not in that container any more* (§5 rule 1).
+
+    Audit finding H5, completed. Retraction of an era membership was already
+    durable and `not_same` was already consulted by the binder, but `not_same`
+    is the WRONG relation for this — it asserts the two are different EVENTS,
+    which is a claim nobody made, and the containment rung never reads it. The
+    relation that says exactly this already exists
+    (`event_identity.SPLIT_DEPARTURE_RELATION`), so a removal is a ``stated``
+    ``none`` binding on the (telling, episode) pair, superseding the active
+    ``part_of``, plus an ``adopt`` envelope when the episode had not been
+    touched by a person before (event identity's lifecycle row 3 — the moment
+    a person acts on a deterministic episode its identity becomes durable
+    human authority).
+
+    ONE vault mutation and IDEMPOTENT BY DIGEST: a second removal of the same
+    pair writes nothing and reports ``created: False``, because the record it
+    would write is the record already on disk (create-or-keep, audit A6).
+
+    The refusal is narrow and named. A pair the person confirmed ``same`` is
+    not removed by this verb — that would contradict what they said rather
+    than correct it, exactly as `_bind_into_episode`'s own comment reasons in
+    the other direction; the way out of a wrong ``same`` is a split.
+    """
+    telling = ei.validate_telling_ref(telling_ref)
+    episode = collapsed_text(episode_id)
+    existing = _pair_binding(vault_root, telling_ref=telling, episode_id=episode)
+    relation = collapsed_text(existing.get("relation")) if existing else ""
+    if relation == ei.SPLIT_DEPARTURE_RELATION:
+        return {"gesture": "remove", "episode_id": episode, "telling_ref": telling,
+                "relation": relation, "binding": existing, "created": False,
+                "adopted": False}
+    _require(
+        existing is None or relation == "part_of",
+        "containment_removal_needs_part_of",
+        f"{telling} → {episode} is an active {relation or 'absent'} binding; a "
+        "removal supersedes a `part_of` and nothing else",
+    )
+    adopted = False
+    if existing is not None and not ei.is_adopted(vault_root, episode):
+        inputs, kind = _creation_inputs(vault_root, episode, container_telling_ref)
+        ei.file_adopt_envelope(
+            vault_root, episode_id=episode, creation_canonical_inputs=inputs,
+            canonical_event_kind=kind, source_ref=source_ref, created_at=now,
+        )
+        adopted = True
+    binding, created = ei.file_event_identity(
+        vault_root,
+        telling_ref=telling, episode_id=episode,
+        relation=ei.SPLIT_DEPARTURE_RELATION, origin="stated",
+        rule_version=ei.IDENTITY_RULE_VERSION,
+        supersedes=existing["identity_id"] if existing is not None else None,
+        evidence={"reason": collapsed_text(reason)} if collapsed_text(reason) else {},
+        source_ref=source_ref, created_at=now,
+    )
+    return {"gesture": "remove", "episode_id": episode, "telling_ref": telling,
+            "relation": ei.SPLIT_DEPARTURE_RELATION, "binding": binding,
+            "created": created, "adopted": adopted}
+
+
+def restore_to_container(
+    vault_root: str | Path,
+    *,
+    telling_ref: object,
+    episode_id: object,
+    reason: object = None,
+    source_ref: object = None,
+    now: object = None,
+) -> dict:
+    """UNDO the drag-out: a ``stated`` ``part_of`` superseding the ``none``.
+
+    One tap, and from then on the pair is HUMAN-placed rather than back in the
+    rung's hands (§5 rule 1) — which is why the restored record's origin is
+    ``stated`` and not a re-run of the rule. Idempotent: restoring a pair that
+    already carries an active ``part_of`` writes nothing.
+    """
+    telling = ei.validate_telling_ref(telling_ref)
+    episode = collapsed_text(episode_id)
+    existing = _pair_binding(vault_root, telling_ref=telling, episode_id=episode)
+    relation = collapsed_text(existing.get("relation")) if existing else ""
+    if relation == "part_of":
+        return {"gesture": "restore", "episode_id": episode, "telling_ref": telling,
+                "relation": relation, "binding": existing, "created": False}
+    _require(
+        existing is not None and relation == ei.SPLIT_DEPARTURE_RELATION,
+        "containment_restore_needs_removal",
+        f"{telling} → {episode} carries no active removal to undo "
+        f"(it is {relation or 'absent'})",
+    )
+    binding, created = ei.file_event_identity(
+        vault_root,
+        telling_ref=telling, episode_id=episode, relation="part_of",
+        origin="stated", rule_version=ei.IDENTITY_RULE_VERSION,
+        supersedes=existing["identity_id"],
+        evidence={"reason": collapsed_text(reason)} if collapsed_text(reason) else {},
+        source_ref=source_ref, created_at=now,
+    )
+    return {"gesture": "restore", "episode_id": episode, "telling_ref": telling,
+            "relation": "part_of", "binding": binding, "created": created}
+
 
 # --------------------------------------------------------------------------
 # "Not sure" — an epistemic state, filed and reopened (design §2.2, §13.4)

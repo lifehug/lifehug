@@ -683,6 +683,75 @@ def intersect(*records: object) -> DateRecord | None:
                       confidence=confidence, basis=basis, anchors=anchors, provenance=provenance)
 
 
+#: What an ABSENT bound means to the interval arithmetic below. An interval
+#: with no ``earliest`` reaches back forever; one with no ``latest`` runs past
+#: today ("May 2022 – present"). Spelled as ordinals rather than as ``None``
+#: branches at four comparison sites, because the branches are where the two
+#: functions below would eventually disagree about what an open end is.
+UNBOUNDED_EARLIEST = (-9999, 1, 1)
+UNBOUNDED_LATEST = (9999, 12, 31)
+
+
+def _interval_ordinals(record: object) -> tuple[tuple[int, int, int], tuple[int, int, int]] | None:
+    """One record as ``(lo, hi)`` comparable ordinals, absent bounds filled."""
+    parsed = _as_record(record)
+    if parsed is None:
+        return None
+    lo = _ordinal(parsed.earliest, end=False) or UNBOUNDED_EARLIEST
+    hi = _ordinal(parsed.latest, end=True) or UNBOUNDED_LATEST
+    if lo > hi:
+        return None
+    return lo, hi
+
+
+def _month_index(ordinal: tuple[int, int, int]) -> int:
+    return ordinal[0] * 12 + (ordinal[1] - 1)
+
+
+def overlap_months(left: object, right: object) -> int:
+    """Whole calendar months two intervals SHARE; ``0`` when they share none.
+
+    GRAIN-HONEST, because `_ordinal` is: a year fills to its own two edges, so
+    1988 and 1988–1990 share the twelve months of 1988, while 1990 and 1991
+    share none at all. The count is inclusive of both end months, which is the
+    reading a person uses — "we overlapped June, July and August" is three.
+
+    This and :func:`gap_months` are ONE arithmetic read two ways, and they are
+    here rather than at their two call sites (the interval-aware ladder key and
+    the residence-overlap rule) because two copies of "do these stretches
+    touch" is exactly the recurring-defect class this repo keeps consolidating
+    time tables to avoid.
+    """
+    a = _interval_ordinals(left)
+    b = _interval_ordinals(right)
+    if a is None or b is None:
+        return 0
+    lo = max(a[0], b[0])
+    hi = min(a[1], b[1])
+    if lo > hi:
+        return 0
+    return _month_index(hi) - _month_index(lo) + 1
+
+
+def gap_months(left: object, right: object) -> int | None:
+    """Whole months BETWEEN two disjoint intervals; ``None`` when they overlap.
+
+    ``0`` is abutting — one ends in December and the next begins in January,
+    with no month unaccounted for between them. Anything an interval cannot
+    bound (an open end that runs past the other interval) overlaps rather than
+    gaps, so this returns ``None`` there too.
+    """
+    a = _interval_ordinals(left)
+    b = _interval_ordinals(right)
+    if a is None or b is None:
+        return None
+    lo = max(a[0], b[0])
+    hi = min(a[1], b[1])
+    if lo <= hi:
+        return None
+    return max(0, _month_index(lo) - _month_index(hi) - 1)
+
+
 def at_most(confidence: str, floor: str) -> str:
     """The weaker of two confidences (CONFIDENCES is best-first).
 

@@ -86,8 +86,8 @@ class OneItemPerNode(unittest.TestCase):
         self.assertEqual(
             tt.WORK_ITEM_PRECEDENCE,
             ("identity_uncertain", "contradiction", "possible_overmerge",
-             "same_event", "place_ambiguous", "tenure_ambiguous",
-             "missing_anchor", "precision_gap"),
+             "same_event", "residence_overlap", "place_ambiguous",
+             "tenure_ambiguous", "missing_anchor", "precision_gap"),
         )
         ranks = [tt._precedence(kind) for kind in tt.WORK_ITEM_PRECEDENCE]  # noqa: SLF001
         self.assertEqual(ranks, sorted(ranks))

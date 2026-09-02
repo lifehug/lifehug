@@ -1085,6 +1085,11 @@ WORK_ITEM_PLACEMENT_GAIN = {
     # number, so it places the node like a missing anchor at a fraction of
     # the recall cost.
     "tenure_ambiguous": 0.8,
+    # E-L2b §7.2: answering it does not place the member node it is minted on
+    # — that stay is already dated — it CORRECTS one of two spans everything
+    # else is measured against. Scored like a contradiction, which is the
+    # other kind whose answer repairs a node rather than placing it.
+    "residence_overlap": 0.7,
 }
 
 #: What an item is worth when it says nothing. Neutral on value and fit, mildly
