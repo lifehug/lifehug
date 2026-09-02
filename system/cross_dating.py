@@ -100,6 +100,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import date, timedelta
 
 import chronology as chrono
 
@@ -1291,6 +1292,183 @@ def frames_touching(frames: object, record: object) -> tuple[tuple[str, str], ..
         if span_low <= low and high <= span_high:
             return ((band, "within"),)
     return tuple((band, "overlaps") for band, _, _ in touched)
+
+
+# --------------------------------------------------------------------------
+# Frame tiling (E-L2d, design §9.1) — ONE arithmetic, half-open, grain-honest
+# --------------------------------------------------------------------------
+
+#: Design §9.1's proposal rule, written down once because a proposal that
+#: fired on a different arithmetic from the one that draws the leftover row
+#: would ask *"tell My 20s by its eras?"* about a frame with a hole in it.
+FRAME_TILING_RULE_TEXT = (
+    "A frame is TILED by its eras when the union of its dated stretch eras' "
+    "intervals, clipped to the frame's half-open definition span, leaves no "
+    "uncovered stretch inside it. Intervals are half-open and grain-honest: a "
+    "year-grain end abuts a year-grain start, so 2005 followed by 2006 is one "
+    "covered stretch and not two with a hole between them. At the frame's own "
+    "two EDGES an uncovered stretch shorter than one unit of the neighbouring "
+    "era bound's stated grain is not a hole — a person who answered \"2002 to "
+    "2011\" at year grain about a frame that opens on their July birthday did "
+    "not deliberately leave the first half of 2001 out. Interior gaps are "
+    "never tolerated, undated eras and threads never count, and NOTHING is "
+    "auto-applied: tiling proposes, the person decides (§9.1)."
+)
+
+#: One unit of each stated grain, in days, for the edge tolerance above. A
+#: `range` and an `era` grain are both capped at a year: they are the coarsest
+#: readings a bound can carry, and a tolerance wider than a year would swallow
+#: a real hole at the edge of a ten-year frame.
+FRAME_TILING_GRAIN_DAYS = {
+    "day": 1, "month": 31, "season": 92, "year": 366, "range": 366, "era": 366,
+}
+
+#: The widest edge sliver tiling forgives, whatever the grain says.
+FRAME_TILING_MAX_TOLERANCE_DAYS = 366
+
+
+def _day(bound: object, *, fallback: object = None):
+    """A `(y, m, d)` ordinal as a `datetime.date`, clamped to the calendar."""
+    if bound is None:
+        return fallback
+    year, month, day = bound
+    year = max(1, min(9999, int(year)))
+    try:
+        return date(year, int(month), int(day))
+    except ValueError:
+        return fallback
+
+
+def _half_open(record: object) -> tuple | None:
+    """A closed date record as a half-open `[start, end)` pair of days.
+
+    Half-open is what makes the arithmetic grain-honest: a year-grain end
+    fills to 31 December and the exclusive end is the following 1 January, so
+    it ABUTS a year-grain start of the next year rather than leaving it a day
+    away.
+    """
+    bounds = _bounds(record)
+    if bounds is None:
+        return None
+    low = _day(bounds[0])
+    high = _day(bounds[1])
+    if low is None or high is None or high < low:
+        return None
+    return low, high + timedelta(days=1)
+
+
+def _grain_days(record: object) -> int:
+    """One unit of a record's stated grain, in days.
+
+    A composed era span carries granularity ``range`` and its `best` is the
+    two ends' own EDTF spellings (`_era_span`), so the honest grain of each
+    END is read from that half rather than from the composed record — "2007"
+    is a year, "2007-06" a month, and the tolerance follows what the person
+    actually said.
+    """
+    parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+    if parsed is None:
+        return FRAME_TILING_GRAIN_DAYS["year"]
+    return min(
+        FRAME_TILING_GRAIN_DAYS.get(parsed.granularity, FRAME_TILING_GRAIN_DAYS["year"]),
+        FRAME_TILING_MAX_TOLERANCE_DAYS,
+    )
+
+
+def _edge_grain_days(record: object, *, end: bool) -> int:
+    """The grain of ONE end of a record — the half of `best` that end names."""
+    parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+    text = (parsed.best if parsed is not None else "") or ""
+    if "/" in text:
+        half = text.split("/")[1 if end else 0].strip()
+        if half and half != "..":
+            spelled = chrono.parse_edtf(half)
+            if spelled is not None:
+                return _grain_days(spelled)
+    return _grain_days(parsed)
+
+
+def frame_tiling(definition_span: object, era_intervals: object) -> dict:
+    """:data:`FRAME_TILING_RULE_TEXT`, applied. Pure; no vault, no model.
+
+    ``definition_span`` is the frame's own ``{"start": …, "end": …}`` with an
+    EXCLUSIVE end (`AgeFrame.to_dict`'s shape, which is what the projection
+    publishes). ``era_intervals`` are the records of the eras that COUNT —
+    dated stretches only; the caller filters, because "is this a stretch" is a
+    fact about the era's records and not about its interval.
+
+    Returns ``{"tiled", "leftover", "covered"}``. ``leftover`` is the
+    GEOMETRIC truth — every uncovered sub-interval of the frame, half-open
+    ISO days — because that is what draws the leftover row (§9.1) and a row
+    that lied about its own years would be worse than no row. The edge
+    tolerance applies to ``tiled`` alone: it decides whether to PROPOSE, never
+    what to draw.
+    """
+    span = definition_span.to_dict() if hasattr(definition_span, "to_dict") else definition_span
+    if not isinstance(span, dict):
+        return {"tiled": False, "leftover": [], "covered": []}
+    start_bounds = _bounds(span.get("start"))
+    end_bounds = _bounds(span.get("end"))
+    frame_start = _day(start_bounds[0] if start_bounds else None)
+    # The frame's end is EXCLUSIVE already, so it is used as given rather than
+    # filled to the end of its grain the way a closed bound is.
+    frame_end = _day(end_bounds[0] if end_bounds else None)
+    if frame_start is None or frame_end is None or frame_end <= frame_start:
+        return {"tiled": False, "leftover": [], "covered": []}
+
+    clipped: list[tuple] = []
+    grains: list[tuple] = []
+    for record in era_intervals or ():
+        interval = _half_open(record)
+        if interval is None:
+            continue
+        low = max(interval[0], frame_start)
+        high = min(interval[1], frame_end)
+        if high <= low:
+            continue
+        clipped.append((low, high))
+        grains.append((low, high, record))
+
+    covered: list[tuple] = []
+    for low, high in sorted(clipped):
+        if covered and low <= covered[-1][1]:
+            covered[-1] = (covered[-1][0], max(covered[-1][1], high))
+        else:
+            covered.append((low, high))
+
+    leftover: list[tuple] = []
+    cursor = frame_start
+    for low, high in covered:
+        if low > cursor:
+            leftover.append((cursor, low))
+        cursor = max(cursor, high)
+    if cursor < frame_end:
+        leftover.append((cursor, frame_end))
+
+    def tolerated(gap: tuple) -> bool:
+        """An edge sliver shorter than the neighbouring bound's own grain."""
+        low, high = gap
+        at_start = low == frame_start
+        at_end = high == frame_end
+        if not at_start and not at_end:
+            return False
+        neighbours = [row for row in grains
+                      if (at_start and row[0] == high) or (at_end and row[1] == low)]
+        if not neighbours:
+            return False
+        allowance = max(
+            _edge_grain_days(row[2], end=at_end) for row in neighbours
+        )
+        return (high - low).days < allowance
+
+    tiled = bool(covered) and all(tolerated(gap) for gap in leftover)
+    return {
+        "tiled": tiled,
+        "leftover": [{"start": low.isoformat(), "end": high.isoformat()}
+                     for low, high in leftover],
+        "covered": [{"start": low.isoformat(), "end": high.isoformat()}
+                    for low, high in covered],
+    }
 
 
 def frame_for(frames: object, record: object) -> str | None:
