@@ -326,7 +326,9 @@ tell, from the payload alone, whether it is looking at the pre-Eras,
 age-frames-only, or membership-and-relevance shape. Timeline Fix 05 §8.3 then
 took the next slot for place co-location — a rule E-L2a (v276) retired into
 the one containment rung, having found it could never fire from the landmark
-ladder — and event identity I1 took
+ladder, and whose refusal E-L2b (v277) completed with the rung's own condition
+6, `no_human_decision_on_pair`: once a person has taken a telling OUT of a
+container, no rebuild, sweep or rule bump puts it back — and event identity I1 took
 `timeline-rules:5` when grouping learned to read the identity layer, so the
 version in force is
 <!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:5 -->

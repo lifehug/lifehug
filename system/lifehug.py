@@ -205,6 +205,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # operations and bindings through the same writers `bind-episodes`
     # itself uses — same single-transaction vault mutation family.
     "resolve-work-item", "split-episode",
+    # containment-remove (E-L2b, design §5 rules 1–2): the drag-out and its
+    # undo, filing a `none`/`part_of` binding and an adopt envelope through
+    # the same writers — same single-transaction vault mutation family.
+    "containment-remove",
     "timeline-unplace", "unretract",
 })
 
