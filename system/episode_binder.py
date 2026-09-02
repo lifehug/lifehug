@@ -752,6 +752,11 @@ class BinderPlan:
     #: minters for one `place_ambiguous` row would be the same defect class
     #: this phase retired `place_co_location` to end.
     containment_ambiguities: list = field(default_factory=list)
+
+    #: §4.1 condition 6 (E-L2b). One row per pair the rung would have filed
+    #: and did not, because the person had already decided it — the drag-out's
+    #: durable negative, reported rather than merely obeyed.
+    containment_negatives: list = field(default_factory=list)
     #: §12b ruling 6's upgrade path
     #: (`episode_fold_contract.CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT`).
     #: Records this rung ALREADY filed at the weaker authority, which this run
@@ -800,6 +805,7 @@ class BinderPlan:
             self.containment_block_name: list(self.containments),
             "containment_diagnostics": list(self.containment_diagnostics),
             "containment_ambiguities": list(self.containment_ambiguities),
+            "containment_negatives": list(self.containment_negatives),
             "containment_upgrades": list(self.containment_upgrades),
             "containment_kept_stronger": list(self.containment_kept_stronger),
             "counts": dict(self.counts),
@@ -2251,9 +2257,17 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     moving = {ref for members in accepted for ref in members}
     result.containers = ec.containers(views, units, excluded_refs=moving)
     result.containment_ambiguities = []
+    result.containment_negatives = []
     containment = ec.containment_rows(
         views, result.containers, question_contexts=question_contexts,
         ambiguities=result.containment_ambiguities,
+        # §4.1 condition 6 (E-L2b / H5): a pair a person has decided is the
+        # rung's own refusal, read from the durable records rather than left
+        # to the I3c filter below — which drops a pair for a different reason
+        # (it already carries a binding) and would keep dropping it only for
+        # as long as that reason happens to coincide with this one.
+        decided_pairs=ec.human_decided_pairs(records["bindings"]),
+        negatives=result.containment_negatives,
     )
     # I3c: a telling this run already carries ANY active binding for (event
     # identity's own docstring: "never placed inside a container it is

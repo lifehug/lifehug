@@ -244,6 +244,11 @@ SURFACES_BY_KIND = {
     # goes where the other gaps go and stays off Mirror (§2.3).
     "place_ambiguous": ("timeline", "whisper", "daily_question"),
     "tenure_ambiguous": ("timeline", "whisper", "daily_question"),
+    # E-L2b §3.2. Two stays that claim the same weeks IS a disagreement
+    # between two things the person said, so it reaches Mirror like a
+    # `contradiction` does — and it stays off the daily queue, because the
+    # answer is an edit to a date the person has to be looking at.
+    "residence_overlap": ("timeline", "mirror"),
     # Event identity I3 (design §6.1/§6.3). Both are a person's own words
     # disagreeing with the substrate's grouping guess — the same class of
     # question as `contradiction` — so both reach Mirror and the daily queue,
@@ -270,6 +275,10 @@ WORK_ITEM_VALUE_DEFAULTS = {
     "place_ambiguous": {"person_value": 0.55, "interaction_cost": 0.2, "context_fit": 0.55},
     # E-L2a: an organization's tenure is the same shape of choice as a place's.
     "tenure_ambiguous": {"person_value": 0.55, "interaction_cost": 0.2, "context_fit": 0.55},
+    # E-L2b: scored like a `contradiction` because it is one — two things the
+    # person said cannot both be true — and a beat cheaper, because the fix is
+    # a date they are already looking at rather than a judgment about meaning.
+    "residence_overlap": {"person_value": 0.6, "interaction_cost": 0.4, "context_fit": 0.45},
     # Event identity I3. `same_event` costs a beat more than an ordinary
     # identity question — the person is comparing two whole tellings, not
     # picking a name off a short list — and is worth slightly less than a
@@ -1213,6 +1222,33 @@ def compose_place_ambiguity_question(places, spans, *, preposition: str = "in") 
     return f"Was this in {listed}?"
 
 
+def compose_residence_overlap_question(label: str, span: str,
+                                       others: object) -> str | None:
+    """*"You've told me you were living in two places at once — Cedarport
+    (1996–2001) and Millgate (1998–2004). Which of those dates needs fixing?"*
+
+    §3.2's `residence_overlap`, as the sentence the person answers. It names
+    BOTH stays with the stretches they were filed with, because the answer is
+    a correction to one of them and a person cannot correct a date they have
+    not been shown. It asks for a fix rather than announcing a mistake: the
+    overlap is a disagreement between two things the person said, and the
+    substrate has no opinion about which one is wrong (owner decision 2 — no
+    roles, one home at a time, fixed by editing dates).
+
+    ``None`` when a stay cannot be named or dated, which is `_mint_work_item`'s
+    withheld-reason path rather than a template leak (D3).
+    """
+    name = collapsed_text(label)
+    stretch = collapsed_text(span)
+    rows = [collapsed_text(text) for text in (others or ()) if collapsed_text(text)]
+    if not name or not stretch or not rows:
+        return None
+    listed = _english_list(rows, joiner="and")
+    return (f"You've told me you were living in two places at once — "
+            f"{name} ({stretch}) and {listed}. Which of those dates needs "
+            f"fixing — or was one of them not really a home?")
+
+
 def _english_list(items, *, joiner: str) -> str:
     """``a``, ``a or b``, ``a, b, or c`` — one spelling, so two questions in
     the same lane cannot punctuate differently."""
@@ -1775,6 +1811,115 @@ def _episode_on_owner_axis(group: dict, *, is_place_subject: bool, best: object,
         group, best=best, entry_index=entry_index, owner=owner, birth=birth
     )
     return relevance["owner_timeline_relation"] in tp.AXIS_RELATIONS
+
+
+#: The stretch two consecutive stays may overlap and still be ONE MOVE (design
+#: §3.2, owner decision 2). A person leaves one home and settles in the next
+#: over a few weeks and the two leases overlap; that is a transition, not two
+#: homes, and it mints nothing. Longer than this and both stays stand, both
+#: are drawn, and exactly one question is asked.
+RESIDENCE_MOVE_TOLERANCE_MONTHS = 3
+
+#: The domain whose episodes this rule applies to. Work and school overlap
+#: legitimately — two jobs at once is an ordinary life — and owner decision 2
+#: is about HOMES specifically: at any instant at most one active residence
+#: episode, and no role vocabulary to say otherwise (§16 names that as the
+#: follow-on).
+RESIDENCE_OVERLAP_DOMAIN = "residences"
+
+
+def _bound_is_approximate(group: dict, event_kind: str) -> bool:
+    """Did the person hedge THIS end of the stay? (§3.2, §6.)
+
+    An `approximate` bound is the person saying they are not sure — a bracket
+    in the Go Dig grammar, `about 1996` in conversation — and §2.2 forbids
+    demanding precision they already told us they do not have. Two stays whose
+    touching bounds are hedged do not disagree; they are imprecise about the
+    same move.
+    """
+    for claim in group.get("claims") or ():
+        if collapsed_text(claim.get("event_kind")) != event_kind:
+            continue
+        record = chrono.from_dict(claim.get("temporal_value"))
+        if record is not None and record.confidence != "certain":
+            return True
+    return False
+
+
+def _residence_overlaps(groups: dict, calculated: dict, *, participation: object,
+                        entry_index: dict, owner: str, birth: object,
+                        displays: dict, place_flags: dict,
+                        diagnostics: list) -> dict:
+    """§3.2's `residence_overlap` rows — one per stay that outlives its move.
+
+    ONE HOME AT A TIME (owner decision 2, put to the owner on 2026-09-01 with
+    the alternative spelled out and chosen against roles). The invariant is a
+    VALIDATION, never a refusal to store: both stays are filed, both are
+    drawn, neither is silently demoted to an alternate, and the disagreement
+    becomes one question the person resolves by correcting a date (§5 rule 7)
+    or by retracting a stay that was never a home (§5 rule 6).
+
+    The tolerance is the move itself (:data:`RESIDENCE_MOVE_TOLERANCE_MONTHS`)
+    and the hedge (:func:`_bound_is_approximate`). Both are reasons the two
+    spans do not actually disagree, so both mint nothing rather than minting a
+    question the person would have to answer "no, that's just the move".
+    """
+    stays: list[tuple[str, object]] = []
+    for node_id in sorted(groups):
+        if node_id not in participation.seeds:
+            continue
+        group = groups[node_id]
+        if collapsed_text(group.get("participation_domain")) != RESIDENCE_OVERLAP_DOMAIN:
+            continue
+        span = calculated.get(node_id, {}).get("best")
+        if span is None:
+            # M3: an undated stay overlaps nothing. It has its own span
+            # question already and inventing a second one about a stretch
+            # nobody stated would be the guess this substrate refuses.
+            continue
+        if not _episode_on_owner_axis(
+            group,
+            is_place_subject=bool(place_flags.get(node_id)),
+            best=span, entry_index=entry_index, owner=owner, birth=birth,
+        ):
+            continue
+        stays.append((node_id, span))
+
+    stays.sort(key=lambda row: (getattr(row[1], "earliest", "") or "",
+                               getattr(row[1], "latest", "") or "", row[0]))
+    found: dict[str, dict] = {}
+    for index, (node_id, span) in enumerate(stays):
+        partners: list[str] = []
+        for other_id, other_span in stays[index + 1:]:
+            months = chrono.overlap_months(span, other_span)
+            if months <= RESIDENCE_MOVE_TOLERANCE_MONTHS:
+                continue
+            if _bound_is_approximate(groups[node_id], "ended") or \
+                    _bound_is_approximate(groups[other_id], "started"):
+                continue
+            partners.append(other_id)
+        if not partners:
+            continue
+        found[node_id] = {
+            "node_id": node_id,
+            "kind": "residence_overlap",
+            "label": displays.get(node_id, "") or collapsed_text(
+                groups[node_id].get("subject")),
+            "span": chrono.display_date(span, with_basis=False),
+            "overlapping_node_ids": list(partners),
+            "overlapping": [
+                f"{displays.get(other, '') or collapsed_text(groups[other].get('subject'))}"
+                f" ({chrono.display_date(calculated[other]['best'], with_basis=False)})"
+                for other in partners
+            ],
+        }
+        diagnostics.append({
+            "finding": "residence_overlap",
+            "node_id": node_id,
+            "overlapping_node_ids": list(partners),
+            "tolerance_months": RESIDENCE_MOVE_TOLERANCE_MONTHS,
+        })
+    return found
 
 
 def _apply_entity_ambiguity(groups: dict, calculated: dict, *,
@@ -3138,6 +3283,10 @@ WORK_ITEM_PRECEDENCE = (
     "same_event",
     # §8.3: "which time in San Diego?" is strictly more answerable than "when
     # did this happen?" about the same node, and answering it answers both.
+    # E-L2b: above the ambiguity pair and below `contradiction`. A stay whose
+    # dates are wrong makes every question that reads its span wrong too, so
+    # it is asked before "which time in Cedarport was this".
+    "residence_overlap",
     "place_ambiguous",
     "tenure_ambiguous",
     "missing_anchor",
@@ -3537,6 +3686,20 @@ def derive_calculated_timeline(
         place_flags=place_flags,
         diagnostics=diagnostics,
     )
+    # §3.2's other half of "one home at a time": the rung's refusal asks WHICH
+    # stay a story belongs to; this asks the person to reconcile two stays that
+    # claim the same weeks. Both read the person's own reconciled spans, both
+    # are pure, and neither writes a value.
+    overlaps = _residence_overlaps(
+        groups, calculated,
+        participation=participation,
+        entry_index=entry_index,
+        owner=owner,
+        birth=birth,
+        displays=displays,
+        place_flags=place_flags,
+        diagnostics=diagnostics,
+    )
     timings["reconcile"] = clock() - mark
 
     mark = clock()
@@ -3805,6 +3968,7 @@ def derive_calculated_timeline(
         place_flags=place_flags,
         roster_snapshot=roster_snapshot,
         ambiguity=ambiguity,
+        residence_overlaps=overlaps,
         containment_conflicts=containment_conflicts,
         owner=owner,
         now=now,
@@ -4059,7 +4223,7 @@ def _dated_node_for(groups: dict, placed: dict, ref: str, event_kind: str) -> st
 def _derive_work_items(
     *, groups, calculated, placed, edges, diagnostics, records, by_mention, displays,
     whats=None, owner_flags=None, place_flags=None, roster_snapshot=(),
-    ambiguity=None, containment_conflicts=None, owner, now
+    ambiguity=None, residence_overlaps=None, containment_conflicts=None, owner, now
 ):
     """Everything the substrate currently implies a question about (§5.4, D2).
 
@@ -4080,6 +4244,7 @@ def _derive_work_items(
     place_flags = place_flags or {}
     ambiguity = ambiguity or {}
     containment_conflicts = containment_conflicts or {}
+    residence_overlaps = residence_overlaps or {}
 
     def sentence(item_kind, node_id, group, **extra):
         """This node's question through the ONE composer (D3)."""
@@ -4353,6 +4518,54 @@ def _derive_work_items(
         )
         if item_id:
             reach[item_id] = raw
+
+    # -- two homes at once (§3.2, owner decision 2) ------------------------
+    #
+    # Both stays are filed and both are drawn; what is asked is which of the
+    # two dates needs fixing. The item is keyed on the EARLIER stay, so a
+    # person who overlapped three homes is asked once per stay that outlives
+    # its move rather than once per pair — and the moment the overlap is gone
+    # (a date corrected, a stay retracted) the next generation simply does not
+    # mint it, which is how every derived item closes.
+    for node_id in sorted(residence_overlaps):
+        row = residence_overlaps[node_id]
+        group = groups.get(node_id)
+        if group is None:
+            continue
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="residence_overlap",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="date",
+            subject_resolved=group["resolved"],
+            prompt_intent=compose_residence_overlap_question(
+                row.get("label") or "", row.get("span") or "",
+                row.get("overlapping") or (),
+            ),
+            # The claims that disagree are the two stays' own dated claims —
+            # the same shape §4.2's empty-intersection row uses, and for the
+            # same reason: neither stay is wrong on its own, the two of them
+            # are wrong together.
+            claim_refs=[
+                *_dated_claim_refs(group),
+                *[
+                    ref
+                    for other in row.get("overlapping_node_ids") or ()
+                    for ref in _dated_claim_refs(groups.get(other) or {"claims": []})
+                ],
+            ],
+            evidence_refs=_evidence_refs(group),
+            system_value=1.0,
+            by_node=by_node,
+            diagnostics=diagnostics,
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = len(row.get("overlapping_node_ids") or ())
 
     # -- contradictions ---------------------------------------------------
     for node_id in sorted(groups):

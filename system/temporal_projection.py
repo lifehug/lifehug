@@ -209,9 +209,16 @@ IDENTITY_LINK_KEYS = (
 #: nothing can file is the silent under-delivery ADR 0021 refuses. I3 is the
 #: probe, the five answers and the filing (`resolve-work-item`), so the
 #: registration lands here, now that something can act on it.
+#: ``residence_overlap`` arrives with E-L2b (§7.2, owner decision 2): two
+#: stays that claim the same weeks beyond a move. It is its own kind and not a
+#: ``contradiction`` because the disagreement is not between two readings of
+#: ONE fact — both stays are true as far as the substrate knows — and because
+#: its answer is a correction to one of two dates or a retraction of a stay,
+#: which is a different Play from "which of these readings is right".
 WORK_ITEM_KINDS = (
     "missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
-    "place_ambiguous", "tenure_ambiguous", "same_event", "possible_overmerge",
+    "place_ambiguous", "tenure_ambiguous", "residence_overlap",
+    "same_event", "possible_overmerge",
 )
 
 #: ``offered`` is "shown to the person and not yet answered"; ``obsolete`` is

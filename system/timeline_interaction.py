@@ -676,7 +676,7 @@ def precision_so_far(session: object) -> object:
 #: second conversation surface.
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
                    "missing_anchor", "place_ambiguous", "precision_gap",
-                   "tenure_ambiguous",
+                   "residence_overlap", "tenure_ambiguous",
                    "same_event", "possible_overmerge")
 
 #: How many quoted spans a work-item context block carries. The same number as
@@ -745,6 +745,19 @@ WORK_ITEM_PROBES = {
                 "once \u2014 which of those times was this?",
         "anchored": "You've told me about {label} \u2014 was that before or "
                     "after {anchor}?",
+    },
+    # E-L2b \u00a73.2. Two stays claiming the same weeks. The probe names both and
+    # asks for a CORRECTION, never for an explanation: owner decision 2 keeps
+    # one home at a time and fixes an overlap by editing a date, so the three
+    # offers are this stay's dates, the other's, or "that was not a home"
+    # (a `retract` correction on the entry's promoted source, \u00a75 rule 6).
+    "residence_overlap": {
+        "step": "convergence", "cost": 3,
+        "text": "Two of the places you've told me about overlap \u2014 {label} and "
+                "the next one. Which dates need fixing, or was one of them "
+                "not really a home?",
+        "anchored": "Two of the places you've told me about overlap \u2014 "
+                    "{label} \u2014 was that before or after {anchor}?",
     },
     # Event identity I3 (design \u00a76.1). The five answers are a CLOSED choice
     # (`identity_questions.RELATION_ANSWERS`), not free text this probe's

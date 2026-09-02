@@ -1176,9 +1176,19 @@ def save_landmark(domain: str, record: object) -> dict:
     )
 
     drawn = redraw_landmarks()
-    for entry in (drawn.get("domains") or {}).get(key) or ():
-        if landmarks_interaction.landmark_entry_key(entry, row) == entry_key:
+    # The interval-aware key (E-L2b, design §3.2): one identity may now be
+    # SEVERAL entries — two stays at one address — so the entry this write
+    # landed in is the one that shares the record's identity AND its stretch.
+    # Matching on identity alone would return the person's FIRST stay to a
+    # caller that just filed their second.
+    drawn_entries = list((drawn.get("domains") or {}).get(key) or ())
+    same_key = [entry for entry in drawn_entries
+                if landmarks_interaction.landmark_entry_key(entry, row) == entry_key]
+    for entry in same_key:
+        if landmarks_interaction.same_landmark_stay(entry, record, row):
             return entry
+    if same_key:
+        return same_key[0]
     return landmarks_interaction.merge_landmark_entry(None, record)
 
 

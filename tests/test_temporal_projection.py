@@ -88,7 +88,7 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(
             tp.WORK_ITEM_KINDS,
             ("missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
-             "place_ambiguous", "tenure_ambiguous",
+             "place_ambiguous", "tenure_ambiguous", "residence_overlap",
              "same_event", "possible_overmerge"),
         )
         self.assertEqual(

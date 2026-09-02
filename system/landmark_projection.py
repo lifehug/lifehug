@@ -835,6 +835,64 @@ def load_landmark_sources(vault_root: str | Path) -> list[dict]:
     return rows
 
 
+def stay_slots(sources: object) -> dict:
+    """``{source_id: (domain, entry_key, slot)}`` — the INTERVAL-AWARE key.
+
+    Design §3.2 / audit finding H1, applied where it can actually be applied.
+    The identity half of the key (`landmarks_interaction.landmark_entry_key`)
+    is a pure function of ONE record and is written on the promoted source's
+    own frontmatter at filing time; the interval half is a property of a
+    record AND its siblings, which no per-record function can know. So the
+    split happens HERE, in the fold, over the filing-ordered sources: the
+    stored frontmatter never moves, no promoted source is rewritten, no
+    digest churns, and a vault filed years ago splits its second stay on its
+    next redraw with no migration at all (M11 answered by derivation).
+
+    The walk is filing order and the predicate is
+    `landmarks_interaction.same_landmark_stay`; the running fold of a slot is
+    `merge_landmark_entry` — the SAME function the projection will use to
+    build the entry — so the interval a record is compared against is exactly
+    the interval the entry it would join actually has.
+
+    A record with no stated start joins the FIRST slot it is compatible with,
+    which is the earliest-filed one. That is today's behaviour preserved
+    exactly (before this function every record of one identity joined the one
+    and only slot), and it is deliberately not a re-attribution rule: this
+    key only ever SPLITS records that are provably disjoint. Choosing which
+    of two stays an undated telling belongs to is the guess §4.1 condition 4
+    refuses, and it is asked there rather than decided here.
+    """
+    rows: dict[str, list[dict]] = {}
+    slots: dict[str, tuple[str, str, int]] = {}
+    domain_rows: dict[str, object] = {}
+    for source in sources or ():
+        if not isinstance(source, dict):
+            continue
+        domain = collapsed_text(source.get("domain"))
+        source_id = collapsed_text(source.get("source_id"))
+        if not source_id:
+            continue
+        entry_key = collapsed_text(source.get("entry_key"))
+        record = source.get("record") if isinstance(source.get("record"), dict) else {}
+        if domain not in domain_rows:
+            domain_rows[domain] = domain_row_or_none(domain)
+        row = domain_rows[domain]
+        key = f"{domain}\x00{entry_key}"
+        held = rows.setdefault(key, [])
+        chosen = None
+        for index, folded in enumerate(held):
+            if landmarks_interaction.same_landmark_stay(folded, record, row):
+                chosen = index
+                break
+        if chosen is None:
+            held.append(landmarks_interaction.merge_landmark_entry(None, record))
+            chosen = len(held) - 1
+        else:
+            held[chosen] = landmarks_interaction.merge_landmark_entry(held[chosen], record)
+        slots[source_id] = (domain, entry_key, chosen)
+    return slots
+
+
 def participation_kinds_by_telling(landmark_entries: object) -> dict:
     """``{telling ref: episode kind}`` for every participation entry.
 
@@ -901,6 +959,7 @@ class ParticipationEpisodes:
         self.seeds: dict[str, dict] = {}
         self.unplaced: set[str] = set()
 
+        slots = stay_slots(landmark_entries)
         entries = {}
         for row in (landmark_entries or ()):
             if not isinstance(row, dict):
@@ -911,12 +970,16 @@ class ParticipationEpisodes:
                 continue
             entries[source_id] = {
                 "domain": domain,
-                # The ladder's own grouping key, published on the promoted
-                # source's frontmatter. Several tellings of ONE entry (the
+                # The ladder's own grouping key — :func:`stay_slots`, which is
+                # the identity published on the promoted source's frontmatter
+                # PLUS §3.2's interval half. Several tellings of ONE entry (the
                 # ladder fills a stay incrementally — the city first, the span
                 # later) share it, which is what lets a start stated in a
-                # second breath reach the episode the first breath minted.
-                "entry_key": collapsed_text(row.get("entry_key")) or source_id,
+                # second breath reach the episode the first breath minted; two
+                # disjoint stays at one address no longer do, which is what
+                # lets the second one exist.
+                "entry_key": slots.get(source_id) or (domain, collapsed_text(
+                    row.get("entry_key")) or source_id, 0),
             }
         if not entries:
             return
@@ -949,7 +1012,7 @@ class ParticipationEpisodes:
                 "subject": subject,
                 "kind": PARTICIPATION_EPISODE_KINDS[entry["domain"]],
                 "domain": entry["domain"],
-                "group": (entry["domain"], entry["entry_key"], subject),
+                "group": (entry["entry_key"], subject),
                 "start": _span_start_value(rows),
             })
 
@@ -957,11 +1020,12 @@ class ParticipationEpisodes:
         #: entry over several breaths, so a telling that names only the city
         #: and a telling that gives the span are ONE stay — and the second one
         #: is what re-keys the episode from its source id to its start date
-        #: (design §3.2 M3). It resolves only when the entry key has exactly
-        #: ONE start: two disjoint stays at one address share a ladder key
-        #: today (the interval-aware key is its own phase), and attributing an
-        #: undated telling to one of two stays would be the guess this whole
-        #: substrate refuses.
+        #: (design §3.2 M3). It resolves only when the stay key has exactly
+        #: ONE start. Since E-L2b that key is interval-aware, so two disjoint
+        #: stays at one address are two keys rather than one key with two
+        #: starts — and a telling that genuinely cannot be attributed (an
+        #: undated telling the interval half could not separate) still gets
+        #: its own unplaced episode rather than a guess.
         starts: dict[tuple, set] = {}
         for row in tellings:
             if row["start"]:
@@ -1126,13 +1190,19 @@ def project_landmark_entries(active_index: object, *, sources: object) -> dict:
         if source_id:
             by_source.setdefault(source_id, []).append(row)
 
-    groups: dict[tuple[str, str], dict] = {}
-    order: list[tuple[str, str]] = []
+    slots = stay_slots(sources)
+    groups: dict[tuple[str, str, int], dict] = {}
+    order: list[tuple[str, str, int]] = []
     for source in sources or ():
         claims = by_source.get(source["source_id"]) or []
         if not any(claim.get("claim_type") == "identity" for claim in claims):
             continue
-        key = (source["domain"], source["entry_key"])
+        # THE INTERVAL-AWARE KEY (design §3.2). Two stays at one address share
+        # the identity half of the key and differ in the interval half, so
+        # they are two groups here and two entries below — where before H1's
+        # fix the second stay's bounds landed in the first one's
+        # `span_alternates` and the second stay ceased to exist.
+        key = slots.get(source["source_id"]) or (source["domain"], source["entry_key"], 0)
         if key not in groups:
             groups[key] = {"skeletons": [], "claims": []}
             order.append(key)
@@ -1141,7 +1211,7 @@ def project_landmark_entries(active_index: object, *, sources: object) -> dict:
 
     domains: dict[str, list[dict]] = {}
     for key in order:
-        domain, _entry_key = key
+        domain = key[0]
         group = groups[key]
         entry: dict = {}
         for skeleton in group["skeletons"]:
@@ -1291,17 +1361,30 @@ def next_ordinal(vault_root: str | Path) -> int:
     return (max((row["ordinal"] for row in rows), default=0)) + 1
 
 
-def entry_source_ids(sources: object, *, domain: str, entry_key: str) -> set[str]:
-    """The promoted sources that are tellings of ONE entry."""
-    return {
-        source["source_id"]
-        for source in (sources or ())
-        if source.get("domain") == domain and source.get("entry_key") == entry_key
-    }
+def entry_source_ids(sources: object, *, domain: str, entry_key: str,
+                     slot: object = None) -> set[str]:
+    """The promoted sources that are tellings of ONE entry.
+
+    ``slot`` narrows it to ONE STAY of that identity (:func:`stay_slots`).
+    Since the interval-aware key an identity may be several entries — two
+    stays at one address — so "the sources of the Millgate entry" is an
+    ambiguous question the moment a person lived there twice, and a caller
+    retiring the second stay must not retire the first. ``None`` keeps the
+    identity-wide reading, which is what the domain-level rules
+    (`landmarks_interaction.entry_superseded_by`) actually mean.
+    """
+    rows = [source for source in (sources or ())
+            if source.get("domain") == domain and source.get("entry_key") == entry_key]
+    if slot is not None:
+        slots = stay_slots(sources)
+        wanted = int(slot)
+        rows = [source for source in rows
+                if (slots.get(source["source_id"]) or (domain, entry_key, 0))[2] == wanted]
+    return {source["source_id"] for source in rows}
 
 
 def active_claim_ids_for_entry(
-    vault_root: str | Path, *, domain: str, entry_key: str
+    vault_root: str | Path, *, domain: str, entry_key: str, slot: object = None
 ) -> list[str]:
     """Every ACTIVE claim id standing behind one projected entry, sorted.
 
@@ -1311,7 +1394,8 @@ def active_claim_ids_for_entry(
     """
     index = store.read_active_index(vault_root) or store.fold_active_index(vault_root)
     ids = entry_source_ids(
-        load_landmark_sources(vault_root), domain=domain, entry_key=entry_key
+        load_landmark_sources(vault_root), domain=domain, entry_key=entry_key,
+        slot=slot,
     )
     found = []
     for row in store.active_claims(index):
@@ -1327,6 +1411,7 @@ def retire_entry(
     domain: str,
     entry_key: str,
     reason: str,
+    slot: object = None,
     occurred_at: object = None,
 ) -> object | None:
     """Supersede every claim behind one entry, so the projection drops it.
@@ -1340,9 +1425,14 @@ def retire_entry(
 
     ``None`` when the entry has no active claims to retire — a no-op, not an
     error, so replaying a write cannot fail on the second pass.
+
+    ``slot`` is E-L2b's *"this stay was not a home"* (§5 rule 6): ONE stay of
+    an identity a person lived at twice, retired without touching the other.
+    Omit it and the identity-wide reading stands, which is what the
+    cross-entry domain rules mean and what every existing caller passes.
     """
     claim_ids = active_claim_ids_for_entry(
-        vault_root, domain=domain, entry_key=entry_key
+        vault_root, domain=domain, entry_key=entry_key, slot=slot
     )
     if not claim_ids:
         return None

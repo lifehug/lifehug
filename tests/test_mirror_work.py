@@ -395,7 +395,8 @@ class BoundedScopeTests(MirrorWorkTestCase):
         # and a routine gap still never renders regardless.
         self.assertEqual(
             mw.MIRROR_WORK_ITEM_KINDS,
-            ("contradiction", "identity_uncertain", "same_event", "possible_overmerge"),
+            ("contradiction", "identity_uncertain", "residence_overlap",
+         "same_event", "possible_overmerge"),
         )
 
     def test_an_item_that_does_not_allow_mirror_does_not_render(self) -> None:

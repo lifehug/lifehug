@@ -111,7 +111,12 @@ from vault_paths import read_vault_text  # noqa: E402
 #: runs through `identity_questions.resolve_same_event_answer` /
 #: `resolve_possible_overmerge_answer`, filing through `event_identity`'s own
 #: writers — this tuple only gates whether Mirror renders the row.
+#: ``residence_overlap`` joins at E-L2b: two stays claiming the same weeks is
+#: exactly §2.5's class of row — two things the person said that cannot both
+#: be true — and its Play is a date correction on either stay or a retraction
+#: of one (design §3.2, §5 rules 6 and 7).
 MIRROR_WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
+                          "residence_overlap",
                           "same_event", "possible_overmerge")
 
 #: The surface name a work item must allow. ``allowed_surfaces`` is the
