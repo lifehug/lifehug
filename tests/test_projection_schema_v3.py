@@ -284,6 +284,12 @@ class TheLaneTable(unittest.TestCase):
         with self.assertRaises(tp.TimelineNodeError):
             tp.validate_lane_row({"group_id": "age:self:20s", "lane": "loitered"})
 
+    def test_the_two_lane_refusals_are_declared(self):
+        """`ERROR_CODES` is the module's own list of what it can raise; a
+        refusal missing from it is a reason no caller can route on."""
+        self.assertIn("lane_needs_group", tp.ERROR_CODES)
+        self.assertIn("unknown_lane", tp.ERROR_CODES)
+
     def test_members_are_sorted_so_two_hosts_publish_the_same_bytes(self):
         out = tp.validate_lane_row({
             "group_id": "age:self:20s", "lane": "lived",

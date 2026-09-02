@@ -398,6 +398,10 @@ ERROR_CODES = (
     "unknown_life_view",
     "unknown_occurrence_subject_scope",
     "unknown_owner_timeline_relation",
+    # Schema v3 (E-L2d): a lane row that names no row group, or a lane
+    # outside the three §9.2 declares.
+    "lane_needs_group",
+    "unknown_lane",
     "membership_not_a_mapping",
     "membership_needs_member",
     "membership_needs_era",
