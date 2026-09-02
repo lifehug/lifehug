@@ -476,6 +476,10 @@ class Container:
     opened_by: str
     open_ended: bool = False
     kind: str = "prospective"
+    #: The container's own EVENT kind — `residence`, `job`, `school`,
+    #: `military` for a participation episode, whatever the telling declared
+    #: otherwise. Read by the uniqueness rule below and by nothing else.
+    event_kind: str = ""
 
     def display_span(self) -> str:
         try:
@@ -488,6 +492,7 @@ class Container:
             "container_key": self.key,
             "episode_id": self.episode_id,
             "label": self.label,
+            "event_kind": self.event_kind,
             "entities": sorted(self.entities),
             "span": self.display_span(),
             "span_open_ended": self.open_ended,
@@ -526,7 +531,7 @@ def containment_reason(rule_id: object, container: Container, *,
 # breaks one documented surface rather than a dozen silent `getattr`s.
 
 VIEW_FIELDS_READ = (
-    "telling_ref", "label", "eligible", "dated", "bounds",
+    "telling_ref", "label", "eligible", "dated", "bounds", "event_kind",
     "entities", "subject_entities", "span", "span_open_ended",
 )
 UNIT_FIELDS_READ = ("key", "kind", "members", "episode_id", "adopted", "authority")
@@ -613,6 +618,9 @@ def containers(views: Mapping[str, object], units: Mapping[str, object],
             opened_by=opened_by,
             open_ended=open_ended,
             kind=collapsed_text(getattr(unit, "kind", "")) or "prospective",
+            event_kind=collapsed_text(
+                getattr(views.get(opened_by), "event_kind", "")
+            ),
         )
     return found
 
@@ -632,14 +640,44 @@ def resolves_to(stamp: object, container: Container) -> bool:
     return text in {container.episode_id, container.key, container.opened_by}
 
 
+#: §4.1 condition 4 (E-L2a), as the module's own sentence.
+#:
+#: The rung places a telling inside a container it shares an entity with. What
+#: it may NOT do is choose between two stays at ONE entity: a person who lived
+#: in Cedarport twice has two residence episodes, and an undated story that
+#: names Cedarport belongs to one of them and nobody knows which. Picking the
+#: earlier, the longer or the first-filed would be a guess wearing a rule's
+#: clothes — the exact sentence the retired co-location pass used about the
+#: same case, kept because it was right about it.
+#:
+#: So the refusal is per ENTITY, not per telling: a story that names Cedarport
+#: (two stays) and Tidewheel Works (one tenure) still lands inside the tenure.
+#: One fact being unanswerable does not make the other one unknown.
+CONTAINMENT_UNIQUENESS_RULE_TEXT = (
+    "given the telling's date, or its absence, EXACTLY ONE episode of a "
+    "shared entity must be compatible; several compatible episodes of one "
+    "entity place nothing for that entity and are asked instead "
+    "(place_ambiguous for places, tenure_ambiguous for organizations and "
+    "schools), while every other entity the telling shares still places"
+)
+
+
 def containment_rows(views: Mapping[str, object], found: Mapping[str, Container],
-                     *, question_contexts: object = None) -> list:
+                     *, question_contexts: object = None,
+                     ambiguities: object = None) -> list:
     """Every (telling, container) placement the two evidence-grade rules make.
 
     One row per pair, `question_context` winning over `entity_span` when both
     fire (:data:`CONTAINMENT_RULE_PRECEDENCE`). A telling may appear in several
     rows for several containers — a membership is a receipt, not a bound — and
     a telling is never placed inside a container it is already a member of.
+
+    ``ambiguities`` is an optional list this function APPENDS to, one row per
+    (telling, entity) that :data:`CONTAINMENT_UNIQUENESS_RULE_TEXT` refused.
+    It is an out-parameter rather than a second function on purpose: the
+    refusal and the placement are two halves of ONE walk over the same pairs,
+    and computing them twice is how the two would eventually disagree about
+    which pairs were refused.
     """
     stamps = {
         collapsed_text(key): collapsed_text(value)
@@ -684,8 +722,76 @@ def containment_rows(views: Mapping[str, object], found: Mapping[str, Container]
                     date_outside=bool(dated and not inside),
                 ),
             })
+    rows = _unique_entity_rows(rows, found, refused=ambiguities)
     rows.sort(key=lambda row: (row["telling_ref"], row["episode_id"]))
     return rows
+
+
+def _unique_entity_rows(rows: list, found: Mapping[str, Container],
+                        *, refused: object = None) -> list:
+    """:data:`CONTAINMENT_UNIQUENESS_RULE_TEXT`, applied to one run's rows.
+
+    A row survives when every entity it was matched ON has exactly one
+    compatible container for that telling. `question_context` rows are never
+    touched: the person's own session named the container, so there is
+    nothing to be ambiguous about — that is the same precedence
+    :data:`CONTAINMENT_RULE_PRECEDENCE` already states, applied one layer
+    down.
+
+    **Only REPEATABLE containers contest.** The rule is about a person who was
+    somewhere more than once, and `identity_resolution.REPEATABLE_EVENT_KINDS`
+    is the substrate's own list of the kinds that can happen twice — the same
+    list `derive_episode_ref` refuses to mint without a discriminator. Two
+    open-ended spans about one THEME are not two stays; they are §13.5's
+    *"a member of two containers renders in both"*, which is unchanged and
+    still a receipt rather than a bound. Narrowing it here rather than
+    everywhere is what lets both promises stand at once.
+    """
+    by_entity: dict[tuple, list] = {}
+    for row in rows:
+        if row["rule_id"] != RULE_ID_ENTITY_SPAN:
+            continue
+        container = found.get(row["container_key"])
+        if container is None or not ir.is_repeatable_event(container.event_kind):
+            continue
+        for entity in row["entities"]:
+            by_entity.setdefault((row["telling_ref"], entity), []).append(row)
+
+    contested = {key: group for key, group in by_entity.items() if len(group) > 1}
+    dropped = {id(row) for group in contested.values() for row in group}
+    if refused is not None:
+        for (telling_ref, entity), group in sorted(contested.items()):
+            refused.append({
+                "telling_ref": telling_ref,
+                "entity": entity,
+                "kind": ambiguity_kind(entity),
+                "episode_ids": sorted({row["episode_id"] for row in group}),
+                "container_keys": sorted({row["container_key"] for row in group}),
+                "labels": sorted({
+                    found[row["container_key"]].label for row in group
+                    if row["container_key"] in found
+                }),
+                "spans": sorted({
+                    found[row["container_key"]].display_span() for row in group
+                    if row["container_key"] in found
+                }),
+                "reason": CONTAINMENT_UNIQUENESS_RULE_TEXT,
+            })
+    return [row for row in rows if id(row) not in dropped]
+
+
+#: Which question an ambiguous entity owes. The split is the ROSTER TYPE's, not
+#: a guess about the word: a `place` ref asks "which time in", everything else
+#: — a company, a school, whatever type a vault files organizations under —
+#: asks "which time at". `temporal_projection.WORK_ITEM_KINDS` declares both.
+AMBIGUITY_KIND_BY_ENTITY_TYPE = {"place": "place_ambiguous"}
+DEFAULT_AMBIGUITY_KIND = "tenure_ambiguous"
+
+
+def ambiguity_kind(entity_ref: object) -> str:
+    """``place_ambiguous`` or ``tenure_ambiguous`` for one roster ref."""
+    entity_type = collapsed_text(entity_ref).partition("/")[0]
+    return AMBIGUITY_KIND_BY_ENTITY_TYPE.get(entity_type, DEFAULT_AMBIGUITY_KIND)
 
 
 def unresolved_question_contexts(views: Mapping[str, object],
@@ -912,6 +1018,8 @@ __all__ = [
     "containment_reason",
     "containment_record",
     "containment_rows",
+    "CONTAINMENT_UNIQUENESS_RULE_TEXT",
+    "ambiguity_kind",
     "date_inside_span",
     "describe_containments",
     "entity_index",

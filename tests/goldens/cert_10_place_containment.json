@@ -1,0 +1,127 @@
+{
+  "calculation_rule_version": "timeline-rules:5",
+  "cases": {
+    "no_episode": {
+      "expected": {
+        "contained_nodes": 0,
+        "place_ambiguous_items": 0,
+        "residence_episodes": 0
+      },
+      "moments": [
+        {
+          "mention": "The long Victorville drive",
+          "quote": "the long drive out",
+          "source": "classification:answers-victorville#victorville"
+        }
+      ],
+      "stays": []
+    },
+    "one_dated_episode": {
+      "expected": {
+        "contained_nodes": 3,
+        "node_basis": "order",
+        "place_ambiguous_items": 0,
+        "provenance_claim": "sometime during San Diego 1988–1990",
+        "provenance_source_prefix": "containment:",
+        "residence_episodes": 1,
+        "rule_id": "entity_span",
+        "window": {
+          "earliest": "1988",
+          "latest": "1990"
+        }
+      },
+      "moments": [
+        {
+          "mention": "The San Diego zoo trip",
+          "quote": "we went to the zoo",
+          "source": "classification:answers-zoo#zoo"
+        },
+        {
+          "mention": "Saturdays on the San Diego beach",
+          "quote": "the beach every Saturday",
+          "source": "classification:answers-beach#beach"
+        },
+        {
+          "mention": "The San Diego school on the hill",
+          "quote": "the school on the hill",
+          "source": "classification:answers-chool#chool"
+        }
+      ],
+      "stays": [
+        {
+          "city": "San Diego",
+          "domain": "residences",
+          "label": "San Diego",
+          "span": {
+            "end": "1990",
+            "start": "1988"
+          }
+        }
+      ]
+    },
+    "two_episodes_same_place": {
+      "expected": {
+        "contained_nodes": 0,
+        "place_ambiguous_items": 1,
+        "prompt_intent": "Which time in San Diego was this — 1988–1990 or 1996–1999?",
+        "residence_episodes": 2,
+        "work_item_kind": "place_ambiguous"
+      },
+      "moments": [
+        {
+          "mention": "The San Diego zoo trip",
+          "quote": "we went to the zoo",
+          "source": "classification:answers-zoo#zoo"
+        }
+      ],
+      "stays": [
+        {
+          "city": "San Diego",
+          "domain": "residences",
+          "label": "San Diego",
+          "span": {
+            "end": "1990",
+            "start": "1988"
+          }
+        },
+        {
+          "city": "San Diego",
+          "domain": "residences",
+          "label": "San Diego",
+          "span": {
+            "end": "1999",
+            "start": "1996"
+          }
+        }
+      ]
+    }
+  },
+  "certification": "CERT-10",
+  "contract": "lifehug-platform docs/design/timeline-eras.md v2.1 §4.1 and acceptance rows 5, 6 and 24",
+  "note": "E-L2a retired `place_co_location` into the ONE containment rung. The three cases are unchanged in substance and changed completely in construction: they now run through the REAL path — the landmark recorder's own writer, the promoted source, the receipt, the active index, `bind-episodes --apply` and the fold — because the retired pass's own cases were built from claims by hand that no pipeline produced (design §0.2 M1). A member is no longer given the stay's span as a best value; it is filed `part_of` the stay and renders the span as a POSSIBLE outer range, which is the same fact said honestly. The platform's scripts/eras/certify_eras.py owns the CERT-10 ROW; this file is the synthetic vault it certifies against and the expected values it asserts, and `tests/test_place_containment.py` proves the same numbers in the package so the two hosts read one fixture (ADR 0021).",
+  "owner": "episode containment through the entity_span rung (E-L2a)",
+  "owner_birth": "1981-07-11",
+  "place_roster": {
+    "entities": [
+      {
+        "aliases": [
+          "SD",
+          "the coast house"
+        ],
+        "name": "San Diego",
+        "slug": "san-diego"
+      },
+      {
+        "aliases": [],
+        "name": "Victorville",
+        "slug": "victorville"
+      }
+    ],
+    "type": "place"
+  },
+  "placement_score": {
+    "arithmetic": "credit_i = (L - w_i)/(n*L); an inferred placement earns half of it, i.e. w'_i = (L + w_i)/2",
+    "inferred_weight": 0.5,
+    "score_formula_version": "placement-score:2"
+  }
+}

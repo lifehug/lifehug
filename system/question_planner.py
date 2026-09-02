@@ -1080,6 +1080,11 @@ WORK_ITEM_PLACEMENT_GAIN = {
     # is a choice between spans the substrate already holds — so it places the
     # node like a missing anchor does, at a fraction of the recall cost.
     "place_ambiguous": 0.8,
+    # E-L2a §7.2: the same arithmetic for the same reason — the person is
+    # choosing between tenures the substrate already holds, not recalling a
+    # number, so it places the node like a missing anchor at a fraction of
+    # the recall cost.
+    "tenure_ambiguous": 0.8,
 }
 
 #: What an item is worth when it says nothing. Neutral on value and fit, mildly

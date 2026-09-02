@@ -115,7 +115,11 @@ JOINS = (
     "birth",          # the moment IS the person's birth
     "move_in",        # the moment IS a residence span's start
     "move_out",       # the moment IS a residence span's end
-    "graduation",     # the moment IS a schooling span's end
+    "job_start",      # the moment IS a work span's start
+    "job_end",        # the moment IS a work span's end
+    "school_start",   # the moment IS a schooling span's start
+    "school_end",     # the moment IS a schooling span's end
+    "graduation",     # the moment IS a schooling span's end, said as graduating
     "named_anchor",   # the classifier's own `anchor` names an indexed landmark
     "age",            # an explicit age statement against the birthday
     "place",          # inside a place whose span is known
@@ -167,6 +171,13 @@ RESIDENCE_KINDS = ("residence",)
 #: `"<domain>-<slug>"`; the birthday is the bare key `birth`).
 RESIDENCE_PREFIX = "residences-"
 SCHOOL_PREFIX = "schools-"
+#: E-L2a / design §4.4 (M6). The prefix `landmarks_interaction._anchor_key`
+#: mints for the work domain. v1 of the eras plan asserted *"right after I
+#: started at Apple is after June 8, 2015 — cross-dating already does this"*
+#: and it was false: :data:`JOINS` had the two residence joins and graduation
+#: and nothing for work at all, so a person's own job dates — the second-best
+#: evidenced partition axis after residence — dated nothing.
+WORK_PREFIX = "work-"
 BIRTH_KEY = "birth"
 
 
@@ -290,6 +301,40 @@ _MOVE_OUT_RES = (
     re.compile(r"\b(?:we|i) left\b", re.IGNORECASE),
 )
 
+#: The START of a work span: the moment IS that job's first day.
+_JOB_START_RES = (
+    re.compile(r"\b(?:start(?:ed|ing)?|began|begun|join(?:ed|ing)?)\s+(?:work(?:ing)?\s+)?(?:at|for|with)\b", re.IGNORECASE),
+    re.compile(r"\b(?:my )?first day (?:at|on the job|of work)\b", re.IGNORECASE),
+    re.compile(r"\b(?:got|took) (?:the|a|my) job\b", re.IGNORECASE),
+    re.compile(r"\bwas hired (?:at|by)\b", re.IGNORECASE),
+)
+
+#: The END of a work span. "Left" is deliberately absent — `_MOVE_OUT_RES`
+#: already owns *"we left"* for a residence, and a bare "left" that named a
+#: work landmark rather than a home would be the two rungs racing each other
+#: over one sentence. A leaving that says WHERE ("left Tidewheel Works")
+#: still matches through `quit`/`resigned`/`last day` or through the named
+#: landmark itself; a leaving that says nothing more is honestly ambiguous.
+_JOB_END_RES = (
+    re.compile(r"\b(?:quit|resign(?:ed|ing)?|retired)\b", re.IGNORECASE),
+    re.compile(r"\b(?:was |got )?laid off\b", re.IGNORECASE),
+    re.compile(r"\b(?:my )?last day (?:at|on the job|of work)\b", re.IGNORECASE),
+    re.compile(r"\bleft (?:my job|the company)\b", re.IGNORECASE),
+)
+
+#: The START of a schooling span.
+_SCHOOL_START_RES = (
+    re.compile(r"\b(?:start(?:ed|ing)?|began|begun|enrolled)\s+(?:at|in|school|college|university)\b", re.IGNORECASE),
+    re.compile(r"\b(?:my )?first day (?:at|of) (?:school|college|university)\b", re.IGNORECASE),
+)
+
+#: The END of a schooling span that is not said as graduating.
+_SCHOOL_END_RES = (
+    re.compile(r"\b(?:finish(?:ed|ing)?|left)\s+(?:school|college|university)\b", re.IGNORECASE),
+    re.compile(r"\b(?:my )?last day (?:at|of) (?:school|college|university)\b", re.IGNORECASE),
+    re.compile(r"\bdropped out\b", re.IGNORECASE),
+)
+
 #: The end of a schooling span.
 _GRADUATION_RES = (
     re.compile(r"\bgraduat(?:ed|ion|ing)\b", re.IGNORECASE),
@@ -381,15 +426,28 @@ def definitional(event: object, anchors: object) -> Derivation | None:
                 label=_label_of(birth) or "your birthday",
                 provenance="from your birthday")
 
-    # (b) A move — the boundary of a residence span the moment names.
-    for patterns, end, join, phrase in (
-        (_MOVE_IN_RES, False, "move_in", "from when you moved to {label}"),
-        (_MOVE_OUT_RES, True, "move_out", "from when you left {label}"),
+    # (b) A span boundary the moment names — a move, a job's start or end, a
+    #     schooling's start or end. ONE table, one walk: E-L2a's §4.4 adds the
+    #     four work/school rows beside the two residence rows rather than a
+    #     second copy of this loop, so a join added here is a join every
+    #     reader of :data:`JOINS` already knows about.
+    for patterns, end, join, prefix, kinds, phrase in (
+        (_MOVE_IN_RES, False, "move_in", RESIDENCE_PREFIX, RESIDENCE_KINDS,
+         "from when you moved to {label}"),
+        (_MOVE_OUT_RES, True, "move_out", RESIDENCE_PREFIX, RESIDENCE_KINDS,
+         "from when you left {label}"),
+        (_JOB_START_RES, False, "job_start", WORK_PREFIX, (),
+         "from when you started at {label}"),
+        (_JOB_END_RES, True, "job_end", WORK_PREFIX, (),
+         "from when you left {label}"),
+        (_SCHOOL_START_RES, False, "school_start", SCHOOL_PREFIX, (),
+         "from when you started at {label}"),
+        (_SCHOOL_END_RES, True, "school_end", SCHOOL_PREFIX, (),
+         "from when {label} ended"),
     ):
         if not _matches(text, patterns):
             continue
-        found = _named_landmark(text, rows, prefix=RESIDENCE_PREFIX,
-                                kinds=RESIDENCE_KINDS)
+        found = _named_landmark(text, rows, prefix=prefix, kinds=kinds)
         if found is None:
             continue
         key, row = found
