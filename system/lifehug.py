@@ -214,6 +214,13 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # same single-transaction vault mutation family as era-record.
     "frame-display",
     "timeline-unplace", "unretract",
+    # go-dig-record / go-dig-import (E-L3, design §10): the one Go Dig unit
+    # writer and its deterministic import — both file through
+    # `timeline.save_landmark` (the ONE landmark writer) plus roster/note
+    # promotion, same single-transaction vault mutation family as
+    # era-record. `go-dig-import --preview` writes nothing but is still
+    # classified BY NAME, exactly as era-migrate/bind-episodes are.
+    "go-dig-record", "go-dig-import",
 })
 
 
@@ -977,6 +984,97 @@ def cmd_era_record(args: argparse.Namespace) -> int:
         print(json.dumps(summary, indent=2, sort_keys=True, default=str))
     else:
         print("\n".join(era_record.describe(summary)))
+    return 0
+
+
+def cmd_go_dig_record(args: argparse.Namespace) -> int:
+    """`go-dig-record` — one JSON payload on stdin, one Go Dig unit filed.
+
+    Design §10.3. Same stdin-payload shape as `era-record`: the payload
+    nests a landmark record plus an optional note and import identity, and
+    flattening that into flags would invent a second serialization.
+    """
+    import json  # noqa: PLC0415
+
+    import go_dig_writer as go_dig  # noqa: PLC0415
+
+    raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    try:
+        payload = json.loads(raw or "{}")
+    except ValueError as exc:
+        print(f"Error: go-dig-record reads one JSON payload on stdin ({exc})",
+              file=sys.stderr)
+        return 1
+    try:
+        summary = go_dig.record_unit(payload)
+    except go_dig.GoDigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    else:
+        entry = summary.get("entry") or {}
+        label = entry.get("label") or summary.get("domain")
+        print(f"✓ recorded {summary['domain']}: {label}")
+        if summary.get("place_ref"):
+            print(f"  place: {summary['place_ref']}")
+        if summary.get("note_source"):
+            print(f"  note filed: {summary['note_source']['source_id']}")
+    return 0
+
+
+def cmd_go_dig_import(args: argparse.Namespace) -> int:
+    """`go-dig-import` — the deterministic §10.6 grammar, preview or apply.
+
+    Preview by DEFAULT (the design's own emphasis, §10.4: "nothing files
+    until the person presses Import") — `--apply` is the only thing that
+    writes, and it requires `--import-operation-id` (H4's identity).
+    """
+    import json  # noqa: PLC0415
+
+    import go_dig_writer as go_dig  # noqa: PLC0415
+
+    if args.from_file:
+        try:
+            text = Path(args.from_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"Error: cannot read {args.from_file}: {exc}", file=sys.stderr)
+            return 1
+    else:
+        text = "" if sys.stdin.isatty() else sys.stdin.read()
+
+    if getattr(args, "apply", False):
+        if not args.import_operation_id:
+            print("Error: --apply needs --import-operation-id", file=sys.stderr)
+            return 1
+        try:
+            summary = go_dig.apply_import(text, import_operation_id=args.import_operation_id)
+        except go_dig.GoDigError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+        else:
+            print(f"✓ filed {summary['filed']} block(s), "
+                  f"{summary['needs_a_hand']} needs a hand, "
+                  f"{summary['school_tenures']} school tenure(s), "
+                  f"{summary['work_tenures']} work tenure(s)")
+            for overlap in summary["overlaps"]:
+                print(f"  ⚠ overlap: block {overlap['a_ordinal']} / "
+                      f"block {overlap['b_ordinal']} ({overlap['months']} months)")
+        return 0
+
+    preview = go_dig.preview_import(text)
+    if getattr(args, "json", False):
+        print(json.dumps(preview, indent=2, sort_keys=True, default=str))
+    else:
+        for block in preview["blocks"]:
+            print(f"block {block['ordinal']} ({block['block_local_id']}): {block['status']}")
+            for err in block["errors"]:
+                print(f"  ! {err}")
+        for overlap in preview["overlaps"]:
+            print(f"  ⚠ overlap: block {overlap['a_ordinal']} / "
+                  f"block {overlap['b_ordinal']} ({overlap['months']} months)")
     return 0
 
 
@@ -3220,6 +3318,28 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Create/name/date an era in ONE act (JSON payload on stdin)")
     p.add_argument("--json", action="store_true", help="Print the summary as JSON")
     p.set_defaults(func=cmd_era_record)
+
+    p = sub.add_parser(
+        "go-dig-record",
+        help="File one Go Dig unit (JSON payload on stdin, design §10.3)",
+    )
+    p.add_argument("--json", action="store_true", help="Print the summary as JSON")
+    p.set_defaults(func=cmd_go_dig_record)
+
+    p = sub.add_parser(
+        "go-dig-import",
+        help="Parse a Go Dig paste deterministically; --preview (default) or --apply",
+    )
+    p.add_argument("--from-file", dest="from_file", default=None,
+                   help="Read the paste from this file (default: stdin)")
+    p.add_argument("--preview", action="store_true",
+                   help="Parse and report only — writes nothing (the default)")
+    p.add_argument("--apply", action="store_true",
+                   help="File every block (needs --import-operation-id)")
+    p.add_argument("--import-operation-id", dest="import_operation_id", default=None,
+                   help="This import's identity — retry-safe under the same id")
+    p.add_argument("--json", action="store_true", help="Print the report as JSON")
+    p.set_defaults(func=cmd_go_dig_import)
 
     p = sub.add_parser(
         "bind-episodes",

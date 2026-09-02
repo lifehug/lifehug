@@ -421,8 +421,9 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Claims, both passes (v229) | `general_listener.CLAIM_PROMPT_KEYS`, `validate_claim_draft`, `parse_claims`, `bind_claims`, `render_event_kinds`, `claim_refused`; `landmark_recorder.parse_recorder_claims`, `RecorderOutcome.claims`. The contract is `system/temporal_claims.py` — one door, one vocabulary |
 | Their retryable lint (v229) | `general_listener.CLAIMS_MISSING_SUBJECTS_LINT`, `claims_missing_subjects`, `every_claim_reminder` — a BINDING of v214's `_name_groups`/`_record_terms`, never a second copy |
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
-| The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py` |
+| Go Dig's own door (E-L3, v280) | `system/go_dig_grammar.py` (the deterministic §10.6 block grammar; no model) and `system/go_dig_writer.py` (`record_unit` — files through this SAME `timeline.save_landmark`, resolves/mints the roster place, files the nickname alias, promotes an optional note as `type: go_dig_note` stamped with the unit's own `question_context`; `plan_import`/`preview_import`/`apply_import` — a whole pasted document, filed in order, retry-safe on `(import_operation_id, block content digest, unit kind, discriminator)` rather than the filing ordinal) |
+| The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals`, `lifehug.py go-dig-record` (v280), `lifehug.py go-dig-import --preview\|--apply` (v280) |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_go_dig.py` (v280) |
 
 ## 8. Decisions
 
