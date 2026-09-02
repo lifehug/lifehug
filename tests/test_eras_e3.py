@@ -1032,7 +1032,7 @@ class EraStageTests(unittest.TestCase):
         rung = ti.era_ladder_rung(thread, rows=[])
         self.assertNotEqual((rung or {}).get("rung"), "bounds")
 
-    def test_the_ladder_walks_residence_then_leverage_then_precision(self):
+    def test_the_ladder_walks_residence_then_events_then_leverage_then_precision(self):
         bounded = {**self.TARGET, "bounded": True}
         residence = {"kind": "place_span", "label": "the house on Elm", "key": "p1"}
         moment = {"kind": "moment", "label": "the letter", "key": "m1"}
@@ -1040,22 +1040,42 @@ class EraStageTests(unittest.TestCase):
             ti.era_ladder_rung(bounded, rows=[moment, residence])["rung"],
             "residence",
         )
+        # E-L2c: the new "events" rung fires once residence is closed, and
+        # only until the caller says it has already been asked.
         self.assertEqual(
-            ti.era_ladder_rung(bounded, rows=[moment])["rung"], "leverage"
+            ti.era_ladder_rung(bounded, rows=[moment])["rung"], "events"
         )
-        self.assertEqual(ti.era_ladder_rung(bounded, rows=[])["rung"], "precision")
+        self.assertEqual(
+            ti.era_ladder_rung(bounded, rows=[moment], events_asked=True)["rung"],
+            "leverage",
+        )
+        self.assertEqual(
+            ti.era_ladder_rung(bounded, rows=[], events_asked=True)["rung"],
+            "precision",
+        )
+
+    def test_the_events_rung_is_never_a_daily_send(self):
+        # §7.3: asked once per era, re-openable, never queued like an
+        # ordinary bank question — that policy lives with whatever surfaces
+        # this rung (Play only), and here it is pinned that the rung is
+        # reachable at all and gated purely by the caller's own marker.
+        bounded = {**self.TARGET, "bounded": True}
+        rung = ti.era_ladder_rung(bounded, rows=[])
+        self.assertEqual(rung["rung"], "events")
+        self.assertEqual(rung["step"], "events")
 
     def test_precision_stops_the_moment_a_rung_is_held(self):
         bounded = {**self.TARGET, "bounded": True}
         self.assertIsNone(
-            ti.era_ladder_rung(bounded, rows=[], precision_so_far="month")
+            ti.era_ladder_rung(bounded, rows=[], precision_so_far="month",
+                              events_asked=True)
         )
 
     def test_the_precision_rungs_are_the_stated_four(self):
         self.assertEqual(ti.ERA_PRECISION_RUNGS,
                          ("era", "year", "season", "month"))
         self.assertEqual(ti.ERA_LADDER,
-                         ("bounds", "residence", "leverage", "precision"))
+                         ("bounds", "residence", "events", "leverage", "precision"))
 
     def test_a_no_era_moment_opens_on_the_open_question(self):
         # T-CV-13. Never "before or after you were born".

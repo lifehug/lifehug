@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import chronology as chrono  # noqa: E402
 import conversation_delivery as engine  # noqa: E402
+import landmark_projection as lp  # noqa: E402
 import landmarks_evals  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
 from tempdirs import root_parent_tmp  # noqa: E402
@@ -3822,3 +3823,139 @@ class ProvenanceSurvivesTests(unittest.TestCase):
         self.assertIsNone(empty["best_supported"])
         self.assertIsNone(li.landmark_date({"domain": "residences"},
                                            bound="start")["best_supported"])
+
+
+class AdditiveLadderFieldTests(unittest.TestCase):
+    """E-L2c (design §3.2, §10.3): approximate, ongoing, place_ref, nickname,
+    link — all additive, none gates an existing rung."""
+
+    def test_approximate_sets_the_dates_own_confidence(self):
+        record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                       "date": "1990", "approximate": True})
+        self.assertEqual(record["date"]["confidence"], "approximate")
+        self.assertEqual(record["date"]["granularity"], "year")
+
+    def test_a_record_with_no_approximate_flag_stays_certain(self):
+        record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                       "date": "1990"})
+        self.assertEqual(record["date"]["confidence"], "certain")
+
+    def test_approximate_reaches_each_span_end_independently(self):
+        record = li.validate_landmark({
+            "domain": "residences", "label": "Mesa",
+            "span": {"start": "1990", "end": "1994", "start_approximate": True},
+        })
+        self.assertEqual(record["span"]["start"]["confidence"], "approximate")
+        self.assertEqual(record["span"]["end"]["confidence"], "certain")
+
+    def test_ongoing_is_kept_only_when_the_span_has_no_end(self):
+        record = li.validate_landmark({
+            "domain": "residences", "label": "Mesa",
+            "span": {"start": "1990"}, "ongoing": True,
+        })
+        self.assertTrue(record["ongoing"])
+        self.assertNotIn("end", record["span"])
+
+    def test_ongoing_true_is_dropped_when_an_end_is_also_stated(self):
+        # An entry cannot be both ongoing and ended; the stated end wins,
+        # and `ongoing: true` never lands beside it.
+        record = li.validate_landmark({
+            "domain": "residences", "label": "Mesa",
+            "span": {"start": "1990", "end": "1994"}, "ongoing": True,
+        })
+        self.assertNotIn("ongoing", record)
+
+    def test_an_end_never_carries_ongoing_unless_asked(self):
+        # An ordinary answer that never mentions `ongoing` at all leaves the
+        # field untouched — no new key appears on a ladder answer this
+        # release did not change the shape of.
+        record = li.validate_landmark({
+            "domain": "work", "label": "Etherfuse",
+            "span": {"start": "2021", "end": "2024"},
+        })
+        self.assertNotIn("ongoing", record)
+
+    def test_ongoing_false_explicitly_clears_a_stale_prior_marker(self):
+        # `merge_landmark_entry`'s generic dict merge only overwrites a key
+        # the incoming record actually carries — a caller CLOSING OUT a
+        # previously-ongoing stay (Go Dig's own grammar, §10.6) says
+        # `ongoing: false` explicitly, and only then does it land, so a
+        # stale `true` from an earlier turn cannot survive the merge.
+        record = li.validate_landmark({
+            "domain": "work", "label": "Etherfuse",
+            "span": {"start": "2021", "end": "2024"}, "ongoing": False,
+        })
+        self.assertIn("ongoing", record)
+        self.assertFalse(record["ongoing"])
+
+    def test_no_end_claim_is_ever_filed_for_an_ongoing_entry(self):
+        record = li.validate_landmark({
+            "domain": "work", "label": "Etherfuse",
+            "span": {"start": "2021"}, "ongoing": True,
+        })
+        source_ref = {"source_id": "landmark:entry-test", "revision": "sha256:" + "0" * 64,
+                      "source_path": "sources/landmarks/entry-test.md"}
+        claims = lp.entry_claims("work", record, source_ref=source_ref)
+        kinds = {c.get("event_kind") for c in claims}
+        self.assertNotIn("ended", kinds)
+        self.assertIn("started", kinds)
+
+    def test_place_ref_is_kept_verbatim(self):
+        record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                       "place_ref": "place/mesa-house"})
+        self.assertEqual(record["place_ref"], "place/mesa-house")
+
+    def test_a_nickname_with_no_parenthetical_binds_whole(self):
+        record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                       "nickname": "The Fish House"})
+        self.assertEqual(record["nickname"], "The Fish House")
+        self.assertNotIn("note", record)
+
+    def test_a_nickname_parenthetical_moves_to_the_note(self):
+        record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                       "nickname": "The Blue House (rented)"})
+        self.assertEqual(record["nickname"], "The Blue House")
+        self.assertEqual(record["note"], "rented")
+
+    def test_an_explicit_note_and_a_nickname_note_both_survive(self):
+        record = li.validate_landmark({
+            "domain": "residences", "label": "Mesa",
+            "nickname": "The Blue House (rented)",
+            "note": "with James and Sarah",
+        })
+        self.assertIn("rented", record["note"])
+        self.assertIn("with James and Sarah", record["note"])
+
+    def test_strip_nickname_parenthetical_is_directly_testable(self):
+        self.assertEqual(li.strip_nickname_parenthetical("The Blue House (rented)"),
+                         ("The Blue House", "rented"))
+        self.assertEqual(li.strip_nickname_parenthetical("The Blue House"),
+                         ("The Blue House", None))
+
+    def test_an_https_link_is_kept(self):
+        record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                       "link": "https://maps.example.com/x"})
+        self.assertEqual(record["link"], "https://maps.example.com/x")
+
+    def test_a_non_https_link_is_never_stored(self):
+        for bad in ("http://example.com", "javascript:alert(1)", "ftp://x"):
+            with self.subTest(bad=bad):
+                record = li.validate_landmark({"domain": "residences", "label": "Mesa",
+                                               "link": bad})
+                self.assertNotIn("link", record or {})
+
+    def test_a_record_with_only_a_new_field_still_validates(self):
+        record = li.validate_landmark({"domain": "residences", "nickname": "The Ranch"})
+        self.assertEqual(record, {"domain": "residences", "nickname": "The Ranch"})
+
+    def test_none_of_the_new_fields_leak_into_an_unrelated_domain_record(self):
+        # A domain the model answers ordinarily still validates exactly as
+        # it did before this release when none of the new fields are sent.
+        record = li.validate_landmark({"domain": "family", "label": "Jackie",
+                                       "relation": "sibling"})
+        self.assertEqual(record, {"domain": "family", "label": "Jackie",
+                                  "relation": "sibling"})
+
+
+if __name__ == "__main__":
+    unittest.main()

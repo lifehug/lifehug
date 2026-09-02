@@ -127,13 +127,22 @@ ENTITY_SIGNAL_INDEPENDENCE_TEXT = (
 ENTITY_KEY_MIN_CHARS = 4
 
 #: Which rosters are read. All of them: §12b ruling 1 says *people and
-#: organizations alike*, and this repo's `entity_roster.ENTITY_TYPES` has no
-#: `organization` — a company lands in `theme` or `object` and a named stretch
-#: of life lands in `period`, so restricting the read to `person` would refuse
-#: the exact entity the amendment was written about.
-ENTITY_ROSTER_TYPES = ir.ENTITY_TYPES if hasattr(ir, "ENTITY_TYPES") else (
-    "person", "place", "period", "object", "theme",
-)
+#: organizations alike*. `entity_roster.ENTITY_TYPES` still has no
+#: `organization` — widening that global tuple would pull the AI-assisted
+#: candidate pipeline, wiki thresholds and graduation rules into a type none
+#: of them has a template for (`roster_relations`'s module docstring says
+#: why that is out of this program's scope) — so E-L2c adds `organization`
+#: HERE, to the containment binder's own read list, in the exact JSON-
+#: snapshot shape (`state/entity_rosters/organization.json`,
+#: `identity_resolution.roster_index` reads it exactly as it reads every
+#: other type) every other roster already uses. A vault with no such file
+#: reads as an EMPTY roster, never an error (`load_entity_index` below).
+ENTITY_ROSTER_TYPES = tuple(dict.fromkeys((
+    *(ir.ENTITY_TYPES if hasattr(ir, "ENTITY_TYPES") else (
+        "person", "place", "period", "object", "theme",
+    )),
+    "organization",
+)))
 
 
 # --------------------------------------------------------------------------

@@ -1090,6 +1090,12 @@ WORK_ITEM_PLACEMENT_GAIN = {
     # else is measured against. Scored like a contradiction, which is the
     # other kind whose answer repairs a node rather than placing it.
     "residence_overlap": 0.7,
+    # E-L2c §7.2/§8: a chain gap places a whole NEW stretch nobody has told
+    # us about — closer to a missing anchor than to a choice between spans
+    # already held (`place_ambiguous`), but the answer is likely to be a
+    # whole new entry rather than one date, so it is scored a little below
+    # `missing_anchor`'s single-node recall.
+    "chain_gap": 0.6,
 }
 
 #: What an item is worth when it says nothing. Neutral on value and fit, mildly

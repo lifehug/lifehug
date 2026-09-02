@@ -981,6 +981,69 @@ _TEXT_CAPS = {"label": 120, "place": 120, "subject": 120, "birth_order": 60}
 _BOOL_RUNGS = frozenset({"living"})
 _RUNG_MAX_CHARS = 32
 
+# --------------------------------------------------------------------------
+# E-L2c: additive ladder fields (design §3.2, §10.3)
+# --------------------------------------------------------------------------
+#
+# Five fields the ladder never asked for before, all ADDITIVE — none of them
+# gates an existing rung, and a record that carries none of them validates
+# exactly as it did before this release:
+#
+#   approximate           a bracketed date/span-end (§6). Never a second
+#                          confidence system: it sets the SAME
+#                          ``chronology`` confidence a hand-typed ``~``
+#                          qualifier already sets, at the grain the date was
+#                          stated.
+#   ongoing                the end is absent because the stay has not ended,
+#                          not because it is unknown. No end claim is filed
+#                          either way (``entry_claims`` already skips an
+#                          absent bound); this only tells a later reader
+#                          WHICH absence it is looking at.
+#   place_ref              the roster place/organization this entry names.
+#                          A plain string here (a name or an existing ref);
+#                          resolving or minting the roster entity is
+#                          `roster_relations.resolve_or_create`'s job, not
+#                          this closed validator's.
+#   nickname                writes a roster ALIAS decision on ``place_ref``
+#                          (§4.3) — never a ladder identity of its own. A
+#                          trailing parenthetical is not a name anybody would
+#                          say back, so :func:`strip_nickname_parenthetical`
+#                          moves it to ``note`` instead of silently dropping
+#                          it.
+#   link                    display-only, ``https:`` only; anything else is
+#                          simply not stored (an owner ruling would be needed
+#                          to accept unsafe schemes, and none was asked for).
+_PLACE_REF_MAX_CHARS = 120
+_NICKNAME_MAX_CHARS = 120
+_LINK_MAX_CHARS = 500
+_NOTE_MAX_CHARS = 500
+
+_NICKNAME_PARENTHETICAL_RE = re.compile(r"^(.*?)\s*\(([^()]*)\)\s*$")
+
+
+def strip_nickname_parenthetical(nickname: str) -> tuple[str, str | None]:
+    """A trailing ``(parenthetical)`` moves to the entry's note (§10.6).
+
+    ``"The Blue House (rented)"`` binds as the alias ``"The Blue House"``;
+    ``"(rented)"`` is not a name anybody would say back, so it survives as a
+    note instead of vanishing. A nickname with no parenthetical returns
+    whole, with no note.
+    """
+    text = str(nickname or "").strip()
+    match = _NICKNAME_PARENTHETICAL_RE.match(text)
+    if not match:
+        return text, None
+    clean = match.group(1).strip()
+    note = match.group(2).strip()
+    return (clean or text), (note or None)
+
+
+def _merged_note(existing: object, addition: str) -> str:
+    """Every free-text overflow lands in ONE note field, never several."""
+    prior = existing.strip() if isinstance(existing, str) else ""
+    parts = [part for part in (prior, addition.strip()) if part]
+    return "; ".join(parts)[:_NOTE_MAX_CHARS]
+
 
 def validate_landmark(value: object, *,
                       framework_root: str | Path | None = None) -> dict | None:
@@ -1027,6 +1090,46 @@ def validate_landmark(value: object, *,
                 bounds[bound] = parsed
         if bounds:
             record["span"] = bounds
+    # E-L2c additive fields — see the block above `validate_landmark`.
+    if value.get("approximate") is True and "date" in record:
+        record["date"] = {**record["date"], "confidence": "approximate"}
+    if isinstance(span, dict) and "span" in record:
+        approx_span = dict(record["span"])
+        if span.get("start_approximate") is True and "start" in approx_span:
+            approx_span["start"] = {**approx_span["start"], "confidence": "approximate"}
+        if span.get("end_approximate") is True and "end" in approx_span:
+            approx_span["end"] = {**approx_span["end"], "confidence": "approximate"}
+        record["span"] = approx_span
+    if value.get("ongoing") is True and "span" in record and "end" not in record["span"]:
+        record["ongoing"] = True
+    elif value.get("ongoing") is False and "span" in record and "end" in record["span"]:
+        # `merge_landmark_entry`'s generic dict merge (`{**prior,
+        # **incoming}`) only overwrites a key the incoming record actually
+        # carries, so a stale `ongoing: true` from an earlier turn would
+        # otherwise survive an answer that ends the stay. A CALLER that
+        # knows it is closing out an open stay (Go Dig's own grammar always
+        # does — §10.6's "now"/"present" is the only path to `ongoing:
+        # true` in the first place) says `ongoing: false` explicitly to
+        # clear it; an ordinary answer that never mentions `ongoing` at all
+        # leaves the field untouched, matching every other generic field's
+        # merge behavior in this record.
+        record["ongoing"] = False
+    place_ref = value.get("place_ref")
+    if isinstance(place_ref, str) and place_ref.strip():
+        record["place_ref"] = place_ref.strip()[:_PLACE_REF_MAX_CHARS]
+    nickname = value.get("nickname")
+    if isinstance(nickname, str) and nickname.strip():
+        clean, parenthetical = strip_nickname_parenthetical(nickname)
+        if clean:
+            record["nickname"] = clean[:_NICKNAME_MAX_CHARS]
+        if parenthetical:
+            record["note"] = _merged_note(record.get("note"), parenthetical)
+    note = value.get("note")
+    if isinstance(note, str) and note.strip():
+        record["note"] = _merged_note(record.get("note"), note.strip())
+    link = value.get("link")
+    if isinstance(link, str) and link.strip().lower().startswith("https:"):
+        record["link"] = link.strip()[:_LINK_MAX_CHARS]
     for rung in row["ladder"]:
         if rung in ("span", "date"):
             continue
@@ -2709,6 +2812,266 @@ def residence_gaps(landmarks: object) -> tuple[dict, ...]:
                           first=first, second=second, years=years)},
         })
     return tuple(rows)
+
+
+# --------------------------------------------------------------------------
+# Chain coverage, gaps and closure (E-L2c; design §8, §12 rows 19/25/33)
+# --------------------------------------------------------------------------
+#
+# `residence_gaps` above answers one question: the interior holes in the
+# residence chain, year-grain, nothing before the first stay or after the
+# last. Design §8 (H9) asks for the same SHAPE of answer for THREE chains
+# (residences, work, schools), with a target window that differs per chain —
+# residences run birth -> `as_of`; work runs its own earliest recorded start
+# -> `as_of`, so nothing before the first job is ever a gap; schools carry NO
+# target window at all, no "from age five" — and it asks for the answer
+# NAMED CONCRETELY, never as a percentage (`chronology-vis.md` consequences
+# 5/8).
+#
+# `residence_gaps` is left byte-for-byte untouched: `timeline.py` reads it by
+# name and by its `RESIDENCE_GAP_KIND` string, and rewiring that read path
+# without an end-to-end regression harness for it is exactly the kind of
+# fold-adjacent surgery this release stays out of. The generalization lives
+# entirely in the functions below, which are new and additive — the
+# `mirror_item` precedent (v235 deleted an OSS read alias after exactly one
+# version) is the shape kept here: the OLD kind stays readable for
+# `timeline.py` unchanged, and the NEW kind (`CHAIN_GAP_KIND`) is what a new
+# reader (the coverage strip, the chain chooser below) consumes.
+
+CHAIN_DOMAINS = ("residences", "work", "schools")
+CHAIN_GAP_KIND = "chain_gap"
+CHAIN_GAP_POSITIONS = ("before_first", "interior", "after_last")
+CHAIN_CLOSURE_STATUSES = ("closed_for_now", "open")
+
+#: How a chain's unknown stretch names itself (§8: "1990 has no home" —
+#: concrete, never a count, never a percentage).
+_CHAIN_NOUN = {"residences": "home", "work": "work", "schools": "school"}
+_CHAIN_GAP_STEP = "chain"
+
+#: One opener per domain, position-independent — "around {years}" reads
+#: naturally whether the stretch is before the first stay, between two, or
+#: after the last, so no position needs its own phrasing (unlike
+#: :data:`RESIDENCE_GAP_OPENER`, which names the two entries the gap sits
+#: between; `chain_coverage`'s stretches carry only years, not entry labels,
+#: which is the accepted trade the generalization to three chains makes).
+_CHAIN_GAP_OPENERS = {
+    "residences": "Where did you live around {years}?",
+    "work": "What were you doing for work around {years}?",
+    "schools": "Were you in school around {years}?",
+}
+
+
+def _chain_entry_bounds(entry: object) -> tuple[int, int | None, bool] | None:
+    """``(start_year, end_year_or_None, ongoing)`` for one span entry.
+
+    ``None`` when the entry has no usable start. An entry with a start and no
+    end that is not marked :func:`validate_landmark`'s ``ongoing`` is a stay
+    whose true end is simply not known yet (§3.2, M3 territory) — it is
+    counted as neither covered nor a gap boundary here.
+    """
+    if not isinstance(entry, dict):
+        return None
+    span = entry.get("span") if isinstance(entry.get("span"), dict) else {}
+    start = chrono.year_of(chrono.from_dict(span.get("start")))
+    if start is None:
+        return None
+    ongoing = bool(entry.get("ongoing"))
+    end_record = span.get("end")
+    if end_record is None:
+        if not ongoing:
+            return None
+        return int(start), None, True
+    end = chrono.year_of(chrono.from_dict(end_record), end=True)
+    if end is None:
+        return None
+    start_i, end_i = int(start), int(end)
+    if end_i < start_i:
+        start_i, end_i = end_i, start_i
+    return start_i, end_i, False
+
+
+def _chain_intervals(domain: str, landmarks: object, *,
+                     as_of_year: int | None) -> list[tuple[int, int]]:
+    """Every entry's interval, merged where they touch or overlap.
+
+    An open (``ongoing``) entry with no ``as_of_year`` supplied is dropped
+    rather than guessed open forever — the same refusal-to-invent-precision
+    rule every other reader in this module holds to.
+
+    Deliberately whole-YEAR arithmetic, matching :func:`residence_gaps`'s own
+    established grain rather than `chronology.overlap_months`/`gap_months`
+    (E-L2b, `chronology.py:711-753`): those compare ONE interval against
+    another and this function folds a SORTED SEQUENCE of many into
+    contiguous runs, which needs the same "do these touch" question asked
+    repeatedly rather than a single pairwise call — and `chain_coverage`
+    reports at whole-year grain either way ("1990 has no home", §8), so a
+    month-grain merge underneath would buy precision this function's own
+    output throws away. `overlap_months` still governs whether two stays
+    OVERLAP at all for the (E-L2b) `residence_overlap` item; this function's
+    "counts once" merge — `start <= merged[-1][1] + 1` — is deliberately
+    coarser and answers a different question: not "how much do they
+    overlap" but "is there daylight between them at year grain".
+    """
+    filed = landmarks if isinstance(landmarks, dict) else {}
+    intervals: list[tuple[int, int]] = []
+    for entry in filed.get(domain) or ():
+        bounds = _chain_entry_bounds(entry)
+        if bounds is None:
+            continue
+        start, end, ongoing = bounds
+        if ongoing or end is None:
+            if as_of_year is None:
+                continue
+            end = max(as_of_year, start)
+        intervals.append((start, end))
+    intervals.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _chain_target(domain: str, merged: list[tuple[int, int]], *,
+                  birth_year: int | None,
+                  as_of_year: int | None) -> tuple[int, int] | None:
+    if domain == "residences":
+        if birth_year is None or as_of_year is None:
+            return None
+        return int(birth_year), int(as_of_year)
+    if domain == "work":
+        # "before the first job is not a gap" (§8): the target's own start
+        # IS the earliest recorded job, so a before_first stretch can never
+        # arise for this domain by construction.
+        if not merged or as_of_year is None:
+            return None
+        return merged[0][0], int(as_of_year)
+    return None  # schools: no target window at all (§8).
+
+
+def _chain_stretch(domain: str, position: str, start: int, end: int, noun: str) -> dict:
+    label = (f"{start} has no {noun}" if start == end
+             else f"{start}–{end} has no {noun}")
+    return {"domain": domain, "position": position, "start": start, "end": end,
+            "label": label}
+
+
+def _int_or_none(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def chain_coverage(domain: object, landmarks: object, *,
+                   birth_year: object = None, as_of_year: object = None) -> dict:
+    """A pure read model: one chain's covered and unknown stretches (§8, H9).
+
+    ``landmarks`` is the same per-domain dict every reader in this module
+    takes (:func:`residence_gaps`'s ``filed``). Year-grain interval algebra,
+    half-open at the year boundary (an overlap or an abutting pair of spans
+    counts as covered once — the same "end + 1 >= start" rule
+    :func:`residence_gaps` already uses, generalized to three chains and to
+    open ends). Never a percentage: the output is stretches, named
+    concretely.
+
+    Returns ``{"domain", "target": {"start","end"} | None, "covered":
+    [{"start","end"}, ...], "unknown": [{"domain","position","start","end",
+    "label"}, ...]}``.
+    """
+    name = str(domain or "").strip()
+    if name not in CHAIN_DOMAINS:
+        raise LandmarkInteractionError(f"unknown chain domain: {domain!r}")
+    birth = _int_or_none(birth_year)
+    as_of = _int_or_none(as_of_year)
+    merged = _chain_intervals(name, landmarks, as_of_year=as_of)
+    target = _chain_target(name, merged, birth_year=birth, as_of_year=as_of)
+    noun = _CHAIN_NOUN[name]
+    unknown: list[dict] = []
+    if target is not None:
+        if merged and merged[0][0] > target[0]:
+            unknown.append(_chain_stretch(name, "before_first",
+                                          target[0], merged[0][0] - 1, noun))
+        elif not merged:
+            unknown.append(_chain_stretch(name, "before_first",
+                                          target[0], target[1], noun))
+    for (_, end), (start, _) in zip(merged, merged[1:]):
+        if end + 1 >= start:
+            continue
+        unknown.append(_chain_stretch(name, "interior", end + 1, start - 1, noun))
+    if target is not None and merged and merged[-1][1] < target[1]:
+        unknown.append(_chain_stretch(name, "after_last",
+                                      merged[-1][1] + 1, target[1], noun))
+    return {
+        "domain": name,
+        "target": {"start": target[0], "end": target[1]} if target else None,
+        "covered": [{"start": s, "end": e} for s, e in merged],
+        "unknown": unknown,
+    }
+
+
+def chain_gaps(domain: object, landmarks: object, *,
+              birth_year: object = None, as_of_year: object = None) -> tuple[dict, ...]:
+    """:func:`chain_coverage`'s unknown stretches, as concrete unknowns.
+
+    Generalizes :func:`residence_gaps` (§7.2/§8) to three chains and to
+    before/after gaps. Each row is the NEW additive :data:`CHAIN_GAP_KIND`,
+    carrying ``domain`` and ``position`` (:data:`CHAIN_GAP_POSITIONS`); the
+    old :data:`RESIDENCE_GAP_KIND` rows :func:`residence_gaps` emits are
+    untouched and keep reading exactly as they did.
+    """
+    coverage = chain_coverage(domain, landmarks, birth_year=birth_year, as_of_year=as_of_year)
+    name = coverage["domain"]
+    rows: list[dict] = []
+    for stretch in coverage["unknown"]:
+        position = stretch["position"]
+        start, end = stretch["start"], stretch["end"]
+        years = f"{start}" if start == end else f"{start}–{end}"
+        text = _CHAIN_GAP_OPENERS[name].format(years=years)
+        rows.append({
+            "kind": CHAIN_GAP_KIND,
+            "domain": name,
+            "position": position,
+            "key": f"{CHAIN_GAP_KIND}:{name}:{position}:{start}:{end}",
+            "label": stretch["label"],
+            "years": [str(start), str(end)],
+            "probe": {"step": _CHAIN_GAP_STEP, "cost": 2, "text": text},
+        })
+    return tuple(rows)
+
+
+def active_chain_closures(closures: object) -> dict:
+    """Fold a list of chain-closure records to the newest ACTIVE one per
+    domain — the same "a record with no `supersedes` naming it is active"
+    fold every other correction record in this package already uses, never
+    recency alone.
+    """
+    records = [c for c in (closures or ()) if isinstance(c, dict)]
+    superseded = {c.get("supersedes") for c in records if c.get("supersedes")}
+    active: dict[str, dict] = {}
+    for record in records:
+        source_id = record.get("source_id")
+        if source_id and source_id in superseded:
+            continue
+        domain = str(record.get("domain") or "").strip()
+        if domain not in CHAIN_DOMAINS:
+            continue
+        active[domain] = record
+    return active
+
+
+def chain_is_closed(domain: object, closures: object) -> bool:
+    """Whether ``domain``'s chain is ``closed_for_now`` under the active fold.
+
+    §8: closure suppresses ROUTINE prompting only — the daily queue and the
+    era Play chain rung consult this; :func:`chain_gaps` never does, because
+    the gaps stay computed and drawn regardless (Timeline, Go Dig).
+    """
+    active = active_chain_closures(closures)
+    record = active.get(str(domain or "").strip())
+    return bool(record) and record.get("status") == "closed_for_now"
 
 
 # --------------------------------------------------------------------------
