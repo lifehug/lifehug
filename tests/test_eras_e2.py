@@ -704,8 +704,13 @@ class OwnerRelevanceTests(VaultTestCase):
                             "basis": "stated"}},
         })
         result = self.fold()
+        # E-L2a: a residence entry's two ends are ONE `residence` episode now,
+        # not two loose `started`/`ended` points
+        # (`landmark_projection.PARTICIPATION_EPISODE_KINDS`). What this test
+        # is about — that the owner's own life domains never reach the
+        # subject question — is unchanged and is asserted on the same node.
         residence_nodes = [n for n in result.nodes
-                          if n.get("event_kind") in ("started", "ended")]
+                          if n.get("event_kind") == "residence"]
         self.assertTrue(residence_nodes)
         for node in residence_nodes:
             self.assertEqual(node["occurrence_subject_scope"], "owner")

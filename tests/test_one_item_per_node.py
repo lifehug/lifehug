@@ -77,11 +77,17 @@ class OneItemPerNode(unittest.TestCase):
         Event identity I3 seats `possible_overmerge`/`same_event` just below
         `contradiction`: both are the substrate's own grouping guess meeting
         a disagreement, and an over-merge audit (an EXISTING bind) outranks a
-        same-event pair (still a proposal nothing has committed to)."""
+        same-event pair (still a proposal nothing has committed to).
+
+        E-L2a seats `tenure_ambiguous` immediately after `place_ambiguous`:
+        it is the same question about an employer or a school rather than a
+        place, so it answers exactly what its sibling answers and belongs at
+        the same rung, one step down only so the order is total."""
         self.assertEqual(
             tt.WORK_ITEM_PRECEDENCE,
             ("identity_uncertain", "contradiction", "possible_overmerge",
-             "same_event", "place_ambiguous", "missing_anchor", "precision_gap"),
+             "same_event", "place_ambiguous", "tenure_ambiguous",
+             "missing_anchor", "precision_gap"),
         )
         ranks = [tt._precedence(kind) for kind in tt.WORK_ITEM_PRECEDENCE]  # noqa: SLF001
         self.assertEqual(ranks, sorted(ranks))

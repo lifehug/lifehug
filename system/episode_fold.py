@@ -56,6 +56,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import chronology as chrono  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import event_identity as ei  # noqa: E402
 from temporal_claims import TemporalContractError, collapsed_text  # noqa: E402
@@ -538,6 +539,42 @@ class EpisodeIdentity:
             block["proposed_links"] = proposed
         return block
 
+    # -- participation episodes (E-L2a) -----------------------------------
+
+    def adopt_participation_episodes(self, mapping: object) -> None:
+        """Teach the fold which node a landmark-minted episode is drawn as.
+
+        A participation episode (`landmark_projection.ParticipationEpisodes`)
+        is minted by the RECORDER's own entry rather than by an identity
+        operation, so it has no create envelope and never appears in
+        :attr:`episodes` — and until this map existed the ``part_of`` record
+        the `entity_span` rung files named an ``episode_id`` the projection
+        had no node for. :func:`containment_value` then found no span and drew
+        no window, which is why a residence a person filed in conversation
+        could not contain a story (design §0.2 M1).
+
+        Only ``node_of_episode`` is extended. ``episode_of_node`` is left
+        alone ON PURPOSE: :func:`node_block` reads it to publish
+        ``telling_count`` and ``identity_origins``, and a participation
+        episode has no member tellings of its own, so registering it there
+        would publish a ``telling_count: 0`` nobody filed.
+
+        An episode an operation CREATED always wins: the real episode is the
+        identity layer's, and this is the answer for the one that is not. An
+        episode known only from a BINDING is the prospective-container case,
+        and `episode_fold_contract.episode_node_id` mints that one a node id
+        no group ever lands on — a synthetic id pointing at nothing, which is
+        exactly what a dangling ``episode_node_id`` on a containment row was.
+        """
+        for episode_id, node_id in sorted(dict(mapping or {}).items()):
+            key, value = collapsed_text(episode_id), collapsed_text(node_id)
+            if not key or not value:
+                continue
+            view = self.episodes.get(key)
+            if view is not None and view.created_by:
+                continue
+            self.node_of_episode[key] = value
+
     # -- containment ------------------------------------------------------
 
     def containing_episodes(self, telling_refs: object) -> list:
@@ -564,13 +601,56 @@ class EpisodeIdentity:
             if span is None:
                 continue
             found.append((episode_id, node_id, span))
-        if len(found) != 1:
+        if not found:
             return None
-        episode_id, node_id, span = found[0]
-        return efc.possible_outer_range(
-            None, span, episode_id=episode_id,
-            episode_label=(labels or {}).get(node_id) or episode_id,
+        # E-L2a §4.2 — SEVERAL CONTAINMENTS INTERSECT. A story in Bothell at
+        # Boeing is inside a residence episode AND an employment episode, and
+        # both are the person's own dated claims, so the honest window is
+        # where they overlap. Each single containment is still "never narrower
+        # than the span" (§5.3, unchanged); the intersection is narrower only
+        # because two person-dated spans BOTH hold.
+        narrowed = found[0][2]
+        for _episode_id, _node_id, span in found[1:]:
+            narrowed = chrono.intersect(narrowed, span)
+            if narrowed is None:
+                # An empty intersection draws NOTHING and is reported as a
+                # material contradiction citing both containments (§4.2). The
+                # old rule's `len(found) != 1 -> None` said the same thing for
+                # this case and said it silently, which is the half of it that
+                # was wrong: a member the substrate cannot place is a question,
+                # not a shrug.
+                return None
+        episode_id, node_id, _span = found[0]
+        label = ", ".join(
+            (labels or {}).get(row[1]) or row[0] for row in found
         )
+        return efc.possible_outer_range(
+            None, narrowed, episode_id=episode_id, episode_label=label,
+        )
+
+    def containment_conflict(self, telling_refs: object, *, placed: object) -> list:
+        """The containments whose spans do NOT overlap, for §4.2's row.
+
+        Returns the ``[(episode_id, node_id, span), ...]`` a contradiction
+        should cite, or ``[]`` when the windows intersect (or when there is
+        nothing to intersect). Separate from :func:`containment_value` because
+        a value function that also minted questions would have two jobs and
+        one return type.
+        """
+        found = []
+        for episode_id in self.containing_episodes(telling_refs):
+            node_id = self.node_of_episode.get(episode_id)
+            span = (placed or {}).get(node_id) if node_id else None
+            if span is not None:
+                found.append((episode_id, node_id, span))
+        if len(found) < 2:
+            return []
+        narrowed = found[0][2]
+        for row in found[1:]:
+            narrowed = chrono.intersect(narrowed, row[2])
+            if narrowed is None:
+                return found
+        return []
 
 
 # --------------------------------------------------------------------------

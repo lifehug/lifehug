@@ -145,6 +145,51 @@ LIVE_EXTRACTOR = extractor_version_string("landmark-record", rule_version="1")
 SPAN_START_EVENT_KIND = "started"
 SPAN_END_EVENT_KIND = "ended"
 
+#: E-L2a (design §3.2, M1/M2). THE LANDMARK DOMAIN IS THE EPISODE'S KIND.
+#:
+#: A residence, a job, a schooling and a stint of service are *participation
+#: episodes*: stretches the person was somewhere, doing something. The two
+#: claims :func:`entry_claims` files for one of them say ``started`` and
+#: ``ended`` and nothing else, so below the promoted source NOTHING could tell
+#: a move-in from a job start — and the fold drew two loose point nodes per
+#: stay, neither of which is a stretch anything can be inside. That is why the
+#: retired ``place_co_location`` pass could never fire: it wanted an episode of
+#: kind ``residence`` and no producer in this package ever emitted one.
+#:
+#: The fix is READ-SIDE and takes no migration, which is the whole reason it is
+#: spelled as a table over the DOMAIN rather than as new event kinds on the
+#: claim. The claims on disk are immutable and stay exactly as they are; the
+#: promoted landmark source already records which domain it was filed under
+#: (``landmark_domain`` in its frontmatter, published by
+#: :func:`load_landmark_sources`), so every vault written since the flip —
+#: including every legacy-imported one — folds into participation episodes on
+#: the next read with nothing rewritten and nothing re-harvested.
+#:
+#: The four kinds are `identity_resolution.REPEATABLE_EVENT_KINDS`' own words,
+#: which is what makes a second stay at one place a second episode
+#: (:func:`identity_resolution.derive_episode_ref` refuses a repeatable kind
+#: with no discriminator) rather than a silent merge.
+PARTICIPATION_EPISODE_KINDS = {
+    "residences": "residence",
+    "work": "job",
+    "schools": "school",
+    "military": "military",
+}
+
+PARTICIPATION_EPISODE_RULE_TEXT = (
+    "A landmark entry of a span domain IS a participation episode: its "
+    "promoted telling's own domain names the episode's kind (residences -> "
+    "residence, work -> job, schools -> school, military -> military), its "
+    "identity mention names the subject, and its stated start is the "
+    "discriminator that keeps a second stay at one place from merging into "
+    "the first. An entry with no stated start is discriminated by its "
+    "promoted source id instead, folds unplaced, and is never a container - "
+    "no span, no window. The claims are never rewritten: the domain rides on "
+    "the promoted source, so an existing vault folds into episodes with no "
+    "migration."
+)
+
+
 #: The event kind for an entry's own ``date`` when its domain dates SEVERAL
 #: events. ``partnerships`` declares ``first_met|dating_started|married`` and
 #: the pre-flip ladder stored ONE date without saying which of the three it
@@ -788,6 +833,238 @@ def load_landmark_sources(vault_root: str | Path) -> list[dict]:
         )
     rows.sort(key=lambda row: (row["ordinal"], row["source_id"]))
     return rows
+
+
+def participation_kinds_by_telling(landmark_entries: object) -> dict:
+    """``{telling ref: episode kind}`` for every participation entry.
+
+    The SAME table :class:`ParticipationEpisodes` folds with, handed to the
+    binder so the fold and the binder cannot disagree about what a residence
+    is (ADR 0021). Without it the binder's own ``_kind_of`` reads a landmark
+    telling's ``started``/``ended`` claims and its family table files a
+    residence under ``work`` — the misfiling design §0.2 M1 names.
+
+    That module's name is deliberately not written in this file: `compile`
+    reaches this module, and `test_the_binder_never_runs_inside_compile`
+    sweeps the modules compile reaches for exactly that string. The guard is
+    textual on purpose — an import is what it is there to catch — so the
+    honest way past it is to not name the module, never to loosen the sweep.
+    """
+    import event_identity as identity  # noqa: PLC0415
+
+    found: dict[str, str] = {}
+    for row in (landmark_entries or ()):
+        if not isinstance(row, dict):
+            continue
+        domain = collapsed_text(row.get("domain"))
+        source_id = collapsed_text(row.get("source_id"))
+        kind = PARTICIPATION_EPISODE_KINDS.get(domain)
+        if not kind or not source_id:
+            continue
+        entry_id = source_id.partition(":")[2] or source_id
+        found[identity.landmark_telling_ref(entry_id)] = kind
+    return found
+
+
+class ParticipationEpisodes:
+    """:data:`PARTICIPATION_EPISODE_RULE_TEXT`, applied. Pure; no vault, no model.
+
+    Built once per fold from the RESOLVED claims and
+    :func:`load_landmark_sources`' rows, and read three ways:
+
+    * :meth:`node_for` — the node id a claim of a participation entry groups
+      under, so an entry's ``started`` and ``ended`` claims land on ONE
+      episode node instead of two loose points;
+    * :meth:`seed_groups` — the group an entry with no dated claim still gets,
+      which is how an UNDATED stay exists as a node at all (design §3.2 M3);
+    * :attr:`node_aliases` — ``former node id -> node id`` for a stay that
+      has since been dated, so every id an undated stay was ever cited under
+      still resolves (Law 5's shape, derived rather than remembered);
+    * :attr:`node_of_episode` — ``container episode id -> node id``, the join
+      the containment window needs. A container the binder has not bound is
+      named by `episode_containers.container_episode_id`, and until this map
+      existed the record the rung filed pointed at an episode the projection
+      had no node for, so no window could ever be drawn.
+
+    Nothing here writes and nothing here guesses: an entry reaches this class
+    only through its own promoted source's ``landmark_domain``.
+    """
+
+    def __init__(self, claims: object = (), landmark_entries: object = ()) -> None:
+        import episode_containers as ec  # noqa: PLC0415
+        import event_identity as identity  # noqa: PLC0415
+        import identity_resolution as ident  # noqa: PLC0415
+
+        self.node_of_claim: dict[str, str] = {}
+        self.node_of_episode: dict[str, str] = {}
+        self.node_aliases: dict[str, str] = {}
+        self.seeds: dict[str, dict] = {}
+        self.unplaced: set[str] = set()
+
+        entries = {}
+        for row in (landmark_entries or ()):
+            if not isinstance(row, dict):
+                continue
+            domain = collapsed_text(row.get("domain"))
+            source_id = collapsed_text(row.get("source_id"))
+            if not source_id or domain not in PARTICIPATION_EPISODE_KINDS:
+                continue
+            entries[source_id] = {
+                "domain": domain,
+                # The ladder's own grouping key, published on the promoted
+                # source's frontmatter. Several tellings of ONE entry (the
+                # ladder fills a stay incrementally — the city first, the span
+                # later) share it, which is what lets a start stated in a
+                # second breath reach the episode the first breath minted.
+                "entry_key": collapsed_text(row.get("entry_key")) or source_id,
+            }
+        if not entries:
+            return
+
+        by_source: dict[str, list] = {}
+        for claim in (claims or ()):
+            if not isinstance(claim, dict):
+                continue
+            ref = claim.get("source_ref")
+            source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+            if source_id in entries:
+                by_source.setdefault(source_id, []).append(claim)
+
+        tellings: list[dict] = []
+        for source_id in sorted(by_source):
+            rows = sorted(by_source[source_id],
+                          key=lambda row: collapsed_text(row.get("claim_id")))
+            subject = ""
+            for row in rows:
+                subject = (collapsed_text(row.get("subject_ref"))
+                           or collapsed_text(row.get("subject_mention")))
+                if subject:
+                    break
+            if not subject:
+                continue
+            entry = entries[source_id]
+            tellings.append({
+                "source_id": source_id,
+                "claims": rows,
+                "subject": subject,
+                "kind": PARTICIPATION_EPISODE_KINDS[entry["domain"]],
+                "domain": entry["domain"],
+                "group": (entry["domain"], entry["entry_key"], subject),
+                "start": _span_start_value(rows),
+            })
+
+        #: Which stay a telling with no start belongs to. The ladder fills one
+        #: entry over several breaths, so a telling that names only the city
+        #: and a telling that gives the span are ONE stay — and the second one
+        #: is what re-keys the episode from its source id to its start date
+        #: (design §3.2 M3). It resolves only when the entry key has exactly
+        #: ONE start: two disjoint stays at one address share a ladder key
+        #: today (the interval-aware key is its own phase), and attributing an
+        #: undated telling to one of two stays would be the guess this whole
+        #: substrate refuses.
+        starts: dict[tuple, set] = {}
+        for row in tellings:
+            if row["start"]:
+                starts.setdefault(row["group"], set()).add(row["start"])
+
+        for row in sorted(tellings, key=lambda item: item["source_id"]):
+            group = row["group"]
+            known = starts.get(group) or set()
+            discriminator = row["start"]
+            if not discriminator and len(known) == 1:
+                discriminator = next(iter(known))
+            # M3: an undated stay is still an episode. Its discriminator is
+            # the promoted source id — durable, minted by the recorder, unique
+            # per telling — so two undated stays at one place stay two.
+            unplaced = not discriminator
+            if unplaced:
+                discriminator = row["source_id"]
+            try:
+                node_id = ident.derive_episode_ref(
+                    event_kind=row["kind"], subject_mention=row["subject"],
+                    discriminator=discriminator,
+                )
+            except ident.IdentityResolutionError:
+                continue
+            if not unplaced and not row["start"]:
+                # THE RE-KEY, DERIVED RATHER THAN REMEMBERED. This telling
+                # gave no start and its entry's other telling did, so the id
+                # this telling would have carried alone still resolves. Both
+                # ids are pure functions of the same records, so the alias
+                # survives a `state/` deletion exactly as event identity's own
+                # Law 5 aliases do — nothing is carried in state to lose.
+                try:
+                    self.node_aliases[ident.derive_episode_ref(
+                        event_kind=row["kind"], subject_mention=row["subject"],
+                        discriminator=row["source_id"],
+                    )] = node_id
+                except ident.IdentityResolutionError:
+                    pass
+            entry_id = row["source_id"].partition(":")[2] or row["source_id"]
+            telling_ref = identity.landmark_telling_ref(entry_id)
+            self.node_of_episode[ec.container_episode_id(telling_ref)] = node_id
+            if unplaced:
+                self.unplaced.add(node_id)
+            else:
+                self.unplaced.discard(node_id)
+            self.seeds.setdefault(node_id, {
+                "node_id": node_id,
+                "event_kind": row["kind"],
+                "node_kind": "episode",
+                "subject": row["subject"],
+                "subjects": [],
+                "resolved": False,
+                "claims": [],
+                "participation_domain": row["domain"],
+                "participation_source_id": row["source_id"],
+            })
+            for claim in row["claims"]:
+                claim_id = collapsed_text(claim.get("claim_id"))
+                if claim_id:
+                    self.node_of_claim[claim_id] = node_id
+
+    def __bool__(self) -> bool:
+        return bool(self.node_of_claim)
+
+    def node_for(self, claim: object) -> str:
+        """The participation node this claim belongs to, or ``""``."""
+        if not self.node_of_claim:
+            return ""
+        return self.node_of_claim.get(
+            collapsed_text((claim or {}).get("claim_id")), ""
+        )
+
+    def seed_groups(self) -> dict:
+        """A fresh copy of the seeds, so a caller may mutate its own groups."""
+        return {
+            node_id: {**row, "subjects": list(row["subjects"]),
+                      "claims": list(row["claims"])}
+            for node_id, row in self.seeds.items()
+        }
+
+    def is_unplaced(self, node_id: object) -> bool:
+        return collapsed_text(node_id) in self.unplaced
+
+
+def _span_start_value(claims: object) -> str:
+    """The stated start of a participation entry, as the episode discriminator.
+
+    ``identity_resolution.episode_discriminator``'s own reading of a start
+    value, applied to the ONE claim that carries it. A start the person did
+    not state is not a discriminator — it is the absence M3 mints an unplaced
+    episode for.
+    """
+    import identity_resolution as ident  # noqa: PLC0415
+
+    for claim in claims or ():
+        if not isinstance(claim, dict):
+            continue
+        if collapsed_text(claim.get("event_kind")) != SPAN_START_EVENT_KIND:
+            continue
+        value = ident.episode_discriminator(claim.get("temporal_value"))
+        if value:
+            return value
+    return ""
 
 
 def _as_int(value: object) -> int:

@@ -324,7 +324,9 @@ decided over both.
 O-E2 moved the calculation rule version to `timeline-rules:3` so a reader can
 tell, from the payload alone, whether it is looking at the pre-Eras,
 age-frames-only, or membership-and-relevance shape. Timeline Fix 05 §8.3 then
-took the next slot for place co-location, and event identity I1 took
+took the next slot for place co-location — a rule E-L2a (v276) retired into
+the one containment rung, having found it could never fire from the landmark
+ladder — and event identity I1 took
 `timeline-rules:5` when grouping learned to read the identity layer, so the
 version in force is
 <!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:5 -->

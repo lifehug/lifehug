@@ -676,6 +676,7 @@ def precision_so_far(session: object) -> object:
 #: second conversation surface.
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
                    "missing_anchor", "place_ambiguous", "precision_gap",
+                   "tenure_ambiguous",
                    "same_event", "possible_overmerge")
 
 #: How many quoted spans a work-item context block carries. The same number as
@@ -732,6 +733,16 @@ WORK_ITEM_PROBES = {
         "step": "content", "cost": 2,
         "text": "You've told me about {label}, and you were in that place more "
                 "than once \u2014 which of those times was this?",
+        "anchored": "You've told me about {label} \u2014 was that before or "
+                    "after {anchor}?",
+    },
+    # E-L2a §7.2. The place probe's sibling for an employer or a school: the
+    # same converging move on the same kind of choice, in the words that fit
+    # an organization ("worked there", not "were in that place").
+    "tenure_ambiguous": {
+        "step": "content", "cost": 2,
+        "text": "You've told me about {label}, and you were there more than "
+                "once \u2014 which of those times was this?",
         "anchored": "You've told me about {label} \u2014 was that before or "
                     "after {anchor}?",
     },

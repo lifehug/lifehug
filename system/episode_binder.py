@@ -58,6 +58,7 @@ import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import episode_routing_contract as erc  # noqa: E402
 import event_identity as ei  # noqa: E402
+import landmark_projection as lp  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
@@ -743,6 +744,14 @@ class BinderPlan:
     containments: list = field(default_factory=list)
     #: Stamps that named no container this run knows (`question_context`).
     containment_diagnostics: list = field(default_factory=list)
+    #: E-L2a §4.1 condition 4: the (telling, entity) pairs the rung REFUSED to
+    #: place because the person was at that entity more than once. A REPORT,
+    #: not a question: the question is minted once, in the fold
+    #: (`temporal_timeline._apply_entity_ambiguity`), where every other work
+    #: item is minted and where the published projection can carry it. Two
+    #: minters for one `place_ambiguous` row would be the same defect class
+    #: this phase retired `place_co_location` to end.
+    containment_ambiguities: list = field(default_factory=list)
     #: §12b ruling 6's upgrade path
     #: (`episode_fold_contract.CONTAINMENT_AUTHORITY_UPGRADE_RULE_TEXT`).
     #: Records this rung ALREADY filed at the weaker authority, which this run
@@ -790,6 +799,7 @@ class BinderPlan:
             "containment_authority": self.containment_authority,
             self.containment_block_name: list(self.containments),
             "containment_diagnostics": list(self.containment_diagnostics),
+            "containment_ambiguities": list(self.containment_ambiguities),
             "containment_upgrades": list(self.containment_upgrades),
             "containment_kept_stronger": list(self.containment_kept_stronger),
             "counts": dict(self.counts),
@@ -931,7 +941,8 @@ def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
 
 
 def telling_views(claims: object, *, manifest: object = None,
-                  era_memberships: object = None, entity_index: object = None) -> dict:
+                  era_memberships: object = None, entity_index: object = None,
+                  participation_kinds: object = None) -> dict:
     """``{telling_ref: TellingView}`` — pure, over the claims and nothing else.
 
     The claim→telling map is `episode_fold.claim_telling_index`, which is C1's
@@ -942,6 +953,16 @@ def telling_views(claims: object, *, manifest: object = None,
     rather than a read: era membership is decided by the fold over records
     this module does not own, and re-deriving it here would be a second copy
     of the eras fold living inside the binder.
+
+    ``participation_kinds`` (E-L2a) is
+    `landmark_projection.participation_kinds_by_telling`' map, and it is an
+    argument for the third time for the same reason. A landmark entry of a
+    span domain has ``started``/``ended`` claims and nothing else, so
+    :func:`_kind_of` called a residence ``started`` — which
+    :data:`KIND_FAMILIES` files under ``work``, so a house and a job were the
+    same family and a house was in no family of its own. The domain is the
+    kind (design §3.2); it is read off the promoted source's own frontmatter
+    and never guessed from the words.
 
     ``entity_index`` (I2b) is the vault's rosters as one
     `episode_containers.EntityIndex`, and is an argument for the same reason —
@@ -963,9 +984,15 @@ def telling_views(claims: object, *, manifest: object = None,
         for key, values in dict(era_memberships or {}).items()
     }
 
+    kinds_by_telling = {
+        collapsed_text(key): collapsed_text(value)
+        for key, value in dict(participation_kinds or {}).items()
+    }
+
     views: dict[str, TellingView] = {}
     for telling_ref in sorted(by_telling):
         rows_here = by_telling[telling_ref]
+        event_kind = kinds_by_telling.get(telling_ref) or _kind_of(rows_here)
         signature = ei.telling_signature(rows_here)
         label = _label_of(rows_here)
         participants = frozenset(signature.get("participant_set") or ())
@@ -988,9 +1015,9 @@ def telling_views(claims: object, *, manifest: object = None,
         all_era_bound = bool(rows_here) and len(era_bound) == len(rows_here)
         views[telling_ref] = TellingView(
             telling_ref=telling_ref,
-            event_kind=_kind_of(rows_here),
+            event_kind=event_kind,
             label=label,
-            stem=label_stem(label, participants, event_kind=_kind_of(rows_here)),
+            stem=label_stem(label, participants, event_kind=event_kind),
             tokens=proper_noun_tokens(label),
             places=frozenset(signature.get("place_set") or ()),
             participants=participants,
@@ -2099,7 +2126,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
          question_cap: int = GLOBAL_QUESTION_CAP, trigger: str = "maintenance_sweep",
          answered_pairs: Sequence = (), open_items: Sequence = (),
          entity_index: object = None, question_contexts: object = None,
-         containment_authority: object = None,
+         containment_authority: object = None, landmark_entries: object = (),
          now: object = None) -> BinderPlan:
     """One binder run, decided and not written. Pure.
 
@@ -2117,8 +2144,11 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     authority = collapsed_text(containment_authority) or ec.DEFAULT_CONTAINMENT_AUTHORITY
     # Refuse an unknown flag HERE, before a whole run is decided against it.
     efc.containment_origin(authority)
-    views = telling_views(claims, manifest=manifest, era_memberships=era_memberships,
-                          entity_index=entity_index)
+    views = telling_views(
+        claims, manifest=manifest, era_memberships=era_memberships,
+        entity_index=entity_index,
+        participation_kinds=lp.participation_kinds_by_telling(landmark_entries),
+    )
     units = candidates(views, episode_records=episode_records)
     records = ef.normalize_episode_records(episode_records)
     active = efc.active_binding_index(records["bindings"])
@@ -2220,8 +2250,10 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     # same run wrote.
     moving = {ref for members in accepted for ref in members}
     result.containers = ec.containers(views, units, excluded_refs=moving)
+    result.containment_ambiguities = []
     containment = ec.containment_rows(
         views, result.containers, question_contexts=question_contexts,
+        ambiguities=result.containment_ambiguities,
     )
     # I3c: a telling this run already carries ANY active binding for (event
     # identity's own docstring: "never placed inside a container it is
@@ -2352,6 +2384,7 @@ def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
         "containment_upgrades": len(result.containment_upgrades),
         "containment_kept_stronger": len(result.containment_kept_stronger),
         "unresolved_question_contexts": len(result.containment_diagnostics),
+        "containment_ambiguities": len(result.containment_ambiguities),
         "questions": len(result.questions),
         "surfaced_questions": sum(1 for row in result.questions if row["surfaced"]),
         "possible_overmerge": len(result.overmerges),
@@ -2517,6 +2550,7 @@ def read_vault_inputs(vault_root: str | Path, *, now: object = None) -> dict:
         "frames": fold_age_frames(claims, episode_records=records, now=now),
         "entity_index": ec.load_entity_index(vault_root),
         "question_contexts": read_question_contexts(vault_root, claims),
+        "landmark_entries": lp.load_landmark_sources(vault_root),
     }
 
 
@@ -2663,6 +2697,7 @@ def bind_episodes(vault_root: str | Path, *, apply: bool = False,
         frames=inputs["frames"], era_memberships=era_memberships,
         entity_index=inputs["entity_index"],
         question_contexts=inputs["question_contexts"],
+        landmark_entries=inputs["landmark_entries"],
         containment_authority=containment_authority,
         question_cap=question_cap, trigger=trigger, now=now,
     )
@@ -2703,6 +2738,7 @@ def binder_step(vault_root: str | Path, *, now: object = None,
         # under the name the authority flag earns.
         result.containment_block_name: list(result.containments),
         "containment_diagnostics": list(result.containment_diagnostics),
+        "containment_ambiguities": list(result.containment_ambiguities),
         # The dry run says what an `--apply` at this authority WOULD move, so
         # the owner-reviewed dry run the rollout gate requires can be reviewed
         # for the upgrade too, not only for new placements.

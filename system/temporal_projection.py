@@ -187,6 +187,13 @@ IDENTITY_LINK_KEYS = (
     "origin",
 )
 
+#: ``tenure_ambiguous`` is E-L2a's sibling of ``place_ambiguous`` for the two
+#: domains whose entity is an ORGANIZATION rather than a place (§7.2). One
+#: kind could not carry both: *"which time in Cedarport was this"* and *"which
+#: time at Tidewheel Works was this"* are different sentences about different
+#: nouns, and a host that wants to route or count them apart — Mirror does —
+#: cannot do it from a `reason` string.
+#:
 #: ``place_ambiguous`` arrives with Timeline Fix 05 §8.3 (``timeline-rules:4``):
 #: a moment names a place the person was in MORE THAN ONCE, so the co-location
 #: rule declines to infer and asks WHICH TIME instead. It is its own kind and
@@ -204,7 +211,7 @@ IDENTITY_LINK_KEYS = (
 #: registration lands here, now that something can act on it.
 WORK_ITEM_KINDS = (
     "missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
-    "place_ambiguous", "same_event", "possible_overmerge",
+    "place_ambiguous", "tenure_ambiguous", "same_event", "possible_overmerge",
 )
 
 #: ``offered`` is "shown to the person and not yet answered"; ``obsolete`` is

@@ -106,6 +106,7 @@ import birth_origin as bo  # noqa: E402
 import chronology as chrono  # noqa: E402
 import conversation_lints as cl  # noqa: E402
 import cross_dating as cd  # noqa: E402
+import episode_containers as ec  # noqa: E402
 import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import event_binding as eb
@@ -156,59 +157,22 @@ from temporal_claims import (  # noqa: E402
 #: :4 rules is stale everywhere, not only where a binding landed.
 CALCULATION_RULE_VERSION = "timeline-rules:5"
 
-#: The rule id every co-location provenance entry carries, so a reader can
-#: filter for "what did the SYSTEM put here" without parsing prose.
-COLOCATION_RULE_ID = "place_co_location"
-
-#: §8.3's rule, verbatim, as the module's own statement of what it promises.
-#: Written down rather than described because the owner's ask ("if something's
-#: calculated from San Diego, all the other calculated San Diego things should
-#: be inferred to be around that range") has three cases and only one of them
-#: is the interesting one.
-COLOCATION_RULE_TEXT = (
-    "A node with no temporal value whose claims carry place mentions that "
-    "resolve — by normalized mention key, through the place roster where one "
-    "exists — to exactly ONE dated residence or work episode on the owner's "
-    "axis receives that episode's span as its best temporal value, with "
-    "basis: inferred and a provenance clause naming the episode "
-    "(\"you lived in <place> <span>\", rule place_co_location). Two or more "
-    "such episodes: no inference, and one place_ambiguous work item asking "
-    "which time it was. Zero: unchanged. An inferred value is never narrower "
-    "than the episode span, never overrides an explicit or calculated value, "
-    "and is never stored — it is recomputed from the receipts on every "
-    "rebuild and disappears the moment the node gains a value of its own."
+#: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
+#: episode-kind list, its provenance sentences and its ``order`` basis are all
+#: gone, and this note is deliberately left in their place: the pass fired only
+#: on episode groups whose ``event_kind`` was one of
+#: ``("residence", "move", "span", "job", "work")`` and NOTHING in this package
+#: ever produced one of those, so on a real vault it yielded nothing for its
+#: whole life. Its two jobs now have one home each — a member's window is the
+#: possible outer range of the containment record the `entity_span` rung filed
+#: (`episode_fold_contract.possible_outer_range`), and its refusal-to-guess is
+#: :func:`_apply_entity_ambiguity`'s question. Two definitions of "an undated
+#: thing during a dated stay" was the defect class; there is now one.
+COLOCATION_RETIRED = (
+    "place_co_location was retired into the one containment rung at E-L2a; "
+    "the window is the filed part_of record's possible outer range and the "
+    "ambiguity is place_ambiguous / tenure_ambiguous"
 )
-
-#: Episodes the rule may infer FROM (§8.3: "residence, move(+span), job/work").
-#: A repeated stint is exactly what `identity_resolution.REPEATABLE_EVENT_KINDS`
-#: refuses to collapse, and this is the same list narrowed to the kinds that
-#: put a person SOMEWHERE — school and military are stints too, but "you were
-#: at school" is not evidence about where a zoo trip happened.
-COLOCATION_EPISODE_KINDS = ("residence", "move", "span", "job", "work")
-
-#: The subset whose SUBJECT is the place itself — a residence's subject is
-#: "San Diego", a job's subject is the employer. For the rest the place comes
-#: only from the claim's own `place_mentions`.
-COLOCATION_PLACE_SUBJECT_KINDS = ("residence", "move", "span")
-
-#: The sentence the provenance clause reads, per episode family. §8.3 names
-#: the residence form; a JOB episode whose place arrived as a mention did not
-#: say the person LIVED there, and writing that it did would be a fact nobody
-#: stated — the defect class this whole substrate exists to prevent.
-COLOCATION_CLAIM_SENTENCES = {
-    "lived": "you lived in {place} {span}",
-    "were": "you were in {place} {span}",
-}
-
-#: How the interval reached the record, in `chronology.BASES` terms. A
-#: co-location is a CONTAINMENT statement — "during the stretch you were
-#: there" — which is what ``order`` means, and `temporal_claims.
-#: CLAIM_BASIS_BY_DATE_BASIS` already publishes ``order`` as ``inferred``, the
-#: exact class §8.3 asks the row to render as. No new basis is minted: a
-#: seventh entry in `chronology.BASES` would reach the conversation prompt's
-#: own basis vocabulary (`conversation_delivery`) and invite a model to write
-#: it, and nothing about this rule involves a model.
-COLOCATION_DATE_BASIS = "order"
 
 #: The combined-score formula's own version, separate from the rules above
 #: because scoring is recalibrated on a different cadence from the arithmetic.
@@ -279,6 +243,7 @@ SURFACES_BY_KIND = {
     # A place ambiguity is routine incompleteness, not a disagreement, so it
     # goes where the other gaps go and stays off Mirror (§2.3).
     "place_ambiguous": ("timeline", "whisper", "daily_question"),
+    "tenure_ambiguous": ("timeline", "whisper", "daily_question"),
     # Event identity I3 (design §6.1/§6.3). Both are a person's own words
     # disagreeing with the substrate's grouping guess — the same class of
     # question as `contradiction` — so both reach Mirror and the daily queue,
@@ -303,6 +268,8 @@ WORK_ITEM_VALUE_DEFAULTS = {
     # Cheaper than a bare date question and worth more: the person is choosing
     # between stretches they already told us about, not recalling a number.
     "place_ambiguous": {"person_value": 0.55, "interaction_cost": 0.2, "context_fit": 0.55},
+    # E-L2a: an organization's tenure is the same shape of choice as a place's.
+    "tenure_ambiguous": {"person_value": 0.55, "interaction_cost": 0.2, "context_fit": 0.55},
     # Event identity I3. `same_event` costs a beat more than an ordinary
     # identity question — the person is comparing two whole tellings, not
     # picking a name off a short list — and is worth slightly less than a
@@ -1214,7 +1181,7 @@ def compose_question(
     return text
 
 
-def compose_place_ambiguity_question(places, spans) -> str | None:
+def compose_place_ambiguity_question(places, spans, *, preposition: str = "in") -> str | None:
     """*"Which time in San Diego was this — 1988–1990, or 1996–1999?"*
 
     Two shapes and no third: ONE place the person was in more than once, and
@@ -1222,6 +1189,12 @@ def compose_place_ambiguity_question(places, spans) -> str | None:
     as a choice between things already on the table, which is the same move a
     contradiction's probe makes and the opposite of naming one and inviting a
     yes (`go-deep.md` §4.3).
+
+    ``preposition`` is E-L2a's one concession to English: a person is *in*
+    Cedarport and *at* Tidewheel Works, and the caller knows which because the
+    landmark domain says so. It is a preposition and nothing else — the shapes,
+    the refusals and the "choice already on the table" move are identical for
+    both kinds, which is why this stayed one composer rather than becoming two.
 
     ``None`` when there is nothing to name — the caller mints the item with a
     withheld reason rather than a template, exactly as every other composer's
@@ -1235,7 +1208,7 @@ def compose_place_ambiguity_question(places, spans) -> str | None:
         if not stretches:
             return None
         listed = _english_list(stretches, joiner="or")
-        return f"Which time in {names[0]} was this — {listed}?"
+        return f"Which time {preposition} {names[0]} was this — {listed}?"
     listed = _english_list(names, joiner="or")
     return f"Was this in {listed}?"
 
@@ -1373,7 +1346,7 @@ def _era_groups(era_views: object, *, owner_ref: str) -> dict:
 
 
 def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
-                  identity: object = None) -> dict:
+                  identity: object = None, participation: object = None) -> dict:
     """Claims → ``node_id -> group``, in one deterministic pass.
 
     The grouping key is the EPISODE's node id when an active ``same`` binding
@@ -1399,17 +1372,29 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     the claims about it happen to be called.
     """
     groups: dict[str, dict] = _era_groups(era_views, owner_ref=owner_ref)
+    # E-L2a (design §3.2). A landmark entry of a span domain seeds ITS OWN
+    # episode group before any claim is read, which is what gives an UNDATED
+    # stay a node — it has no dated claim to mint one from, and "I lived in
+    # Yucaipa, not sure when" must still be a row a person can place.
+    if participation is not None:
+        groups.update(participation.seed_groups())
     for claim in claims:
-        if claim.get("claim_type") == "identity":
+        # A participation entry's `identity` claim is the ONE identity claim
+        # that reaches a group: it is the entry's own assertion that this stay
+        # happened, and without it an undated entry would carry no evidence at
+        # all. Every other identity claim still asserts *who*, not *when*.
+        stay = participation.node_for(claim) if participation is not None else ""
+        if claim.get("claim_type") == "identity" and not stay:
             continue
         event_kind = collapsed_text(claim.get("event_kind"))
         subject = _subject_handle(claim)
-        if not event_kind or not subject:
+        if not subject or (not event_kind and not stay):
             continue
         episode_node = identity.episode_node_for(claim) if identity is not None else ""
-        node_id = episode_node or collapsed_text(claim.get("event_ref")) or _mint_node_id(
-            event_kind=event_kind, subject=subject, owner_ref=owner_ref
-        )
+        node_id = episode_node or stay or collapsed_text(claim.get("event_ref")) \
+            or _mint_node_id(
+                event_kind=event_kind, subject=subject, owner_ref=owner_ref
+            )
         group = groups.get(node_id)
         if group is None:
             episode_id = (
@@ -1610,6 +1595,45 @@ def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> Non
 
 
 # --------------------------------------------------------------------------
+# Participation episodes (E-L2a, design §3.2)
+# --------------------------------------------------------------------------
+
+
+def _apply_participation_span(group: dict, calculated: dict, *, diagnostics: list) -> None:
+    """A stay's two ends are ONE stretch, not two rival readings of a date.
+
+    `episode_containers.span_from_claims` is the ONE definition of "the span
+    this telling's own words open" — the containment rung already reads it to
+    decide what a container IS — so the node's value is that same record and
+    not a second reading of the same two claims. Reusing it is what keeps the
+    stretch the Timeline DRAWS and the stretch the rung places INSIDE from
+    ever disagreeing (the recurring-defect doctrine, and ADR 0021's one
+    definition).
+
+    Reconciliation is deliberately overruled here rather than taught a new
+    case. ``reconcile`` ranks RIVAL readings of one fact and would read June
+    1996 and August 2001 as two irreconcilable answers to "when?", which at
+    ``MATERIAL_CONFLICT`` mints a contradiction about a stay nobody disagrees
+    about. A start and an end are not rivals; they are two ends, and the
+    alternates and the conflict score are cleared for exactly that reason and
+    for no other — every claim stays on disk and stays in ``claim_refs``.
+    """
+    span, open_ended = ec.span_from_claims(group.get("claims") or ())
+    if span is None:
+        return
+    calculated["best"] = span
+    calculated["alternates"] = []
+    calculated["conflict"] = 0.0
+    calculated["span_open_ended"] = bool(open_ended)
+    diagnostics.append({
+        "finding": "participation_span_applied",
+        "node_id": group["node_id"],
+        "event_kind": collapsed_text(group.get("event_kind")),
+        "open_ended": bool(open_ended),
+    })
+
+
+# --------------------------------------------------------------------------
 # Place co-location (`timeline-rules:4`, Timeline Fix 05 §8.3)
 # --------------------------------------------------------------------------
 
@@ -1650,8 +1674,8 @@ def _place_ref_index(roster_snapshot: object) -> dict:
     return out
 
 
-def _colocation_place_key(text: object, place_refs: dict) -> str:
-    """The identity a place mention folds to.
+def _entity_mention_key(text: object, place_refs: dict) -> str:
+    """The identity a place or organization mention folds to.
 
     The roster's ref when the roster knows the name, else the normalized
     mention key itself. The fallback is deliberate: most vaults have no place
@@ -1685,67 +1709,48 @@ def _group_place_mentions(group: dict) -> list[str]:
     return out
 
 
-def _episode_place_names(group: dict, display: str) -> list[str]:
-    """The places one episode puts the person in.
+def _episode_entity_names(group: dict, display: str) -> list[str]:
+    """The names one participation episode answers to.
 
-    Its SUBJECT when the kind is one whose subject is a place (a residence is
-    *"San Diego"*), plus whatever its own claims named — which is how a job
-    episode contributes a city it never had as a subject.
+    Its SUBJECT always — a residence's subject is the place, a job's is the
+    employer, a schooling's is the school — plus whatever places its own
+    claims named, which is how a job episode contributes a city it never had
+    as a subject. This is the same list the retired co-location pass built,
+    widened from "kinds whose subject is a place" to every participation kind,
+    because that is precisely what M1 found missing: an employer is an
+    identity a story can name, and refusing to read it was refusing the
+    `tenure_ambiguous` question before it could be asked.
     """
     names: list[str] = []
-    if collapsed_text(group.get("event_kind")) in COLOCATION_PLACE_SUBJECT_KINDS:
-        for candidate in (display, group.get("subject")):
-            text = collapsed_text(candidate)
-            if text and text not in names:
-                names.append(text)
+    for candidate in (display, group.get("subject")):
+        text = collapsed_text(candidate)
+        if text and text not in names:
+            names.append(text)
     for mention in _group_place_mentions(group):
         if mention not in names:
             names.append(mention)
     return names
 
 
-def _colocation_sentence(event_kind: object, place: str, span: object) -> str:
-    """*"you lived in San Diego 1988–1990"* — the clause the row shows.
+def _member_names_entity(group: dict, display: str, name: str) -> bool:
+    """Does this member NAME that episode's entity, as a whole word?
 
-    `chronology.display_date(..., with_basis=False)` renders the interval, so
-    the sentence and the date on the row can never be two renderings.
+    Exact substring on a word boundary, the identical conservatism
+    `cross_dating._names` applies to a landmark label: "Mesa" matches "we
+    moved to Mesa" and does not match "Mesabi". A one- or two-character name
+    matches nothing at all.
     """
-    form = ("lived" if collapsed_text(event_kind) in COLOCATION_PLACE_SUBJECT_KINDS
-            else "were")
-    return COLOCATION_CLAIM_SENTENCES[form].format(
-        place=place, span=chrono.display_date(span, with_basis=False)
-    )
-
-
-def _colocation_record(span: object, *, place: str, episode_id: str,
-                       event_kind: object) -> chrono.DateRecord | None:
-    """The episode's span, re-stamped as an inference and nothing else.
-
-    NEVER NARROWER (§8.3) is structural rather than checked: the bounds are
-    the episode's OWN bounds, copied. What changes is how the record describes
-    itself — ``basis`` becomes :data:`COLOCATION_DATE_BASIS` (published as
-    ``inferred``), ``confidence`` becomes ``inferred``, the episode's
-    provenance is DROPPED (its sources dated the residence, not this moment)
-    and one clause naming the episode takes its place.
-    """
-    record = span if isinstance(span, chrono.DateRecord) else chrono.from_dict(span)
-    if record is None:
-        return None
-    return chrono.DateRecord(
-        best=record.best,
-        earliest=record.earliest,
-        latest=record.latest,
-        granularity=record.granularity,
-        confidence="inferred",
-        basis=COLOCATION_DATE_BASIS,
-        anchors=(),
-        provenance=({
-            "basis": chrono.INFERRED_PROVENANCE_BASIS,
-            "rule": COLOCATION_RULE_ID,
-            "claim": _colocation_sentence(event_kind, place, record),
-            "source": f"co-location:{episode_id}",
-        },),
-    )
+    text = collapsed_text(name)
+    if len(text) < 3:
+        return False
+    pattern = re.compile(rf"(?<!\w){re.escape(text)}(?!\w)", re.IGNORECASE)
+    fields = [display, collapsed_text(group.get("subject"))]
+    for claim in group.get("claims") or ():
+        fields.append(collapsed_text(claim.get("event_mention")))
+        for evidence in claim.get("evidence") or ():
+            if isinstance(evidence, dict):
+                fields.append(collapsed_text(evidence.get("quote")))
+    return any(field and pattern.search(field) for field in fields)
 
 
 def _episode_on_owner_axis(group: dict, *, is_place_subject: bool, best: object,
@@ -1772,134 +1777,131 @@ def _episode_on_owner_axis(group: dict, *, is_place_subject: bool, best: object,
     return relevance["owner_timeline_relation"] in tp.AXIS_RELATIONS
 
 
-def _apply_colocation(groups: dict, calculated: dict, *, roster_snapshot: object,
-                      entry_index: dict, owner: str, birth: object,
-                      displays: dict, place_flags: dict, diagnostics: list) -> dict:
-    """:data:`COLOCATION_RULE_TEXT`, applied. Deterministic; no model call.
+def _apply_entity_ambiguity(groups: dict, calculated: dict, *,
+                            participation: object, roster_snapshot: object,
+                            entry_index: dict, owner: str, birth: object,
+                            displays: dict, place_flags: dict,
+                            diagnostics: list) -> dict:
+    """§4.1 condition 4, as the question it owes. Deterministic; no model call.
 
-    Runs after :func:`_apply_durations` and before the edges, so an inferred
-    span is an ordinary seed for the fixpoint: a later ordering claim may
-    NARROW it, which is more information rather than less, and the promise
-    this rule makes is about its own output.
+    What is LEFT of `place_co_location` after E-L2a retired it. The pass used
+    to do two things: infer a member's span from the one stay that could hold
+    it, and refuse to infer when several could. The first is now the
+    containment rung's `part_of` record and its possible outer range — one
+    definition of "an undated thing during a dated stay", which is the whole
+    point of the retirement — and the second is this, because a refusal that
+    asks nothing is a refusal nobody can act on.
 
-    Two whole classes of node are deliberately ineligible as TARGETS:
+    So this pass NEVER writes a value. It finds members that name a
+    participation entity the person visited more than once, and hands
+    :func:`_derive_work_items` the candidates for one `place_ambiguous`
+    (places) or `tenure_ambiguous` (organizations and schools) row.
 
-    * an ``episode`` or a ``period`` — inferring an undated San Diego stint
-      into a dated one is precisely the collapse
-      `identity_resolution.REPEATABLE_EVENT_KINDS` exists to refuse, and an
-      age frame is the coordinate system, not a thing to be placed;
-    * anything that already has a value. The rule reads ``best is None`` and
-      nothing else, which is what makes *"discarded the moment the node gains
-      an explicit or calculated value"* structural: the inference is never
-      stored, so the next rebuild simply does not produce it.
-
-    Returns ``{"inferred": {node_id: {...}}, "ambiguous": {node_id: {...}}}``
-    for :func:`_derive_work_items`, which owes the ambiguous ones a question
-    and owes the inferred ones their date question STILL — an inference is a
-    bound, not an answer.
+    The binder's own rung refuses the same pairs on the same rule
+    (`episode_containers.ambiguous_entities`), so nothing is filed that this
+    then contradicts; the two hosts differ only in how they FIND candidates —
+    the rung through the vault's full roster entity index, this pass through
+    the place roster and the episode's own filed label — which is named here
+    rather than hidden.
     """
     place_refs = _place_ref_index(roster_snapshot)
 
-    # -- the episodes that can date something else ------------------------
-    by_place: dict[str, list[str]] = {}
-    place_names: dict[str, str] = {}
+    by_entity: dict[str, list[str]] = {}
+    entity_names: dict[str, str] = {}
+    entity_kinds: dict[str, str] = {}
     for node_id in sorted(groups):
-        group = groups[node_id]
-        if collapsed_text(group.get("event_kind")) not in COLOCATION_EPISODE_KINDS:
+        if node_id not in participation.seeds:
             continue
+        group = groups[node_id]
         span = calculated.get(node_id, {}).get("best")
         if span is None:
+            # M3: an undated stay is never a container, so it is never one of
+            # the stays a question chooses between either.
             continue
         if not _episode_on_owner_axis(
             group,
             is_place_subject=bool(place_flags.get(node_id)),
             best=span, entry_index=entry_index, owner=owner, birth=birth,
         ):
-            # Somebody else's residence is not evidence about where the owner
-            # was (eras §5 — a relative's history never rides in on a stated
-            # relationship alone).
             continue
-        for name in _episode_place_names(group, displays.get(node_id, "")):
-            key = _colocation_place_key(name, place_refs)
+        domain = collapsed_text(group.get("participation_domain"))
+        for name in _episode_entity_names(group, displays.get(node_id, "")):
+            key = _entity_mention_key(name, place_refs)
             if not key:
                 continue
-            place_names.setdefault(key, name)
-            if node_id not in by_place.setdefault(key, []):
-                by_place[key].append(node_id)
+            entity_names.setdefault(key, name)
+            entity_kinds.setdefault(key, domain)
+            if node_id not in by_entity.setdefault(key, []):
+                by_entity[key].append(node_id)
 
-    inferred: dict[str, dict] = {}
     ambiguous: dict[str, dict] = {}
-    if not by_place:
-        return {"inferred": inferred, "ambiguous": ambiguous}
+    if not by_entity:
+        return ambiguous
 
-    # -- the moments those episodes can date ------------------------------
     for node_id in sorted(groups):
         group = groups[node_id]
         if group.get("node_kind") in ("episode", "period"):
             continue
         if calculated.get(node_id, {}).get("best") is not None:
             continue
+        display = displays.get(node_id, "")
         matched: list[str] = []
-        matched_places: list[str] = []
-        for mention in _group_place_mentions(group):
-            key = _colocation_place_key(mention, place_refs)
-            episodes = by_place.get(key)
-            if not episodes:
+        matched_keys: list[str] = []
+        for key in sorted(by_entity):
+            name = entity_names[key]
+            named = any(
+                _entity_mention_key(mention, place_refs) == key
+                for mention in _group_place_mentions(group)
+            ) or _member_names_entity(group, display, name)
+            if not named:
                 continue
-            if key not in matched_places:
-                matched_places.append(key)
-            for episode_id in episodes:
+            if len(by_entity[key]) < 2:
+                # Exactly one compatible stay: the rung places it. Nothing to
+                # ask, and nothing inferred here — that is the record's job.
+                continue
+            if key not in matched_keys:
+                matched_keys.append(key)
+            for episode_id in by_entity[key]:
                 if episode_id not in matched:
                     matched.append(episode_id)
-        if not matched:
+        if not matched_keys:
             continue
-        if len(matched) > 1:
-            # Moved away and came back, or two places each with a stint of
-            # their own: either way the substrate cannot say which, and
-            # picking one would be a guess wearing a rule's clothes.
-            ambiguous[node_id] = {
-                "node_id": node_id,
-                "episode_node_ids": sorted(matched),
-                "place_keys": list(matched_places),
-                "places": [place_names.get(key, key) for key in matched_places],
-                "spans": [
-                    chrono.display_date(calculated[episode_id]["best"], with_basis=False)
-                    for episode_id in sorted(matched)
-                ],
-            }
-            diagnostics.append({
-                "finding": "place_colocation_ambiguous",
-                "node_id": node_id,
-                "places": [place_names.get(key, key) for key in matched_places],
-                "episode_node_ids": sorted(matched),
-            })
-            continue
-        episode_id = matched[0]
-        episode = groups[episode_id]
-        place = place_names.get(matched_places[0], matched_places[0])
-        record = _colocation_record(
-            calculated[episode_id]["best"],
-            place=place,
-            episode_id=episode_id,
-            event_kind=episode.get("event_kind"),
-        )
-        if record is None:
-            continue
-        calculated[node_id]["best"] = record
-        inferred[node_id] = {
+        organization = any(entity_kinds.get(key) in ("work", "schools")
+                           for key in matched_keys)
+        kind = "tenure_ambiguous" if organization else "place_ambiguous"
+        ambiguous[node_id] = {
             "node_id": node_id,
-            "episode_node_id": episode_id,
-            "place": place,
-            "claim": record.provenance[0]["claim"],
+            "kind": kind,
+            "preposition": "at" if organization else "in",
+            "episode_node_ids": sorted(matched),
+            "place_keys": list(matched_keys),
+            "places": [entity_names.get(key, key) for key in matched_keys],
+            # CHRONOLOGICAL, not node-id order. The sentence reads "which
+            # time … — 1988–1990 or 1996–1999?", and a person answering it is
+            # scanning a life, not a digest. `sorted(matched)` stays the
+            # identity list; this is the one place order is a reading
+            # decision rather than a determinism one, and it is deterministic
+            # either way because the tie-break is the node id.
+            "spans": [
+                chrono.display_date(calculated[episode_id]["best"], with_basis=False)
+                for episode_id in sorted(
+                    matched,
+                    key=lambda ref: (
+                        getattr(calculated[ref]["best"], "earliest", "") or "",
+                        getattr(calculated[ref]["best"], "latest", "") or "",
+                        ref,
+                    ),
+                )
+            ],
         }
         diagnostics.append({
-            "finding": "place_colocation_inferred",
+            "finding": "participation_entity_ambiguous",
             "node_id": node_id,
-            "episode_node_id": episode_id,
-            "place": place,
-            "rule": COLOCATION_RULE_ID,
+            "kind": kind,
+            "places": [entity_names.get(key, key) for key in matched_keys],
+            "episode_node_ids": sorted(matched),
         })
-    return {"inferred": inferred, "ambiguous": ambiguous}
+    return ambiguous
 
 
 # --------------------------------------------------------------------------
@@ -3137,6 +3139,7 @@ WORK_ITEM_PRECEDENCE = (
     # §8.3: "which time in San Diego?" is strictly more answerable than "when
     # did this happen?" about the same node, and answering it answers both.
     "place_ambiguous",
+    "tenure_ambiguous",
     "missing_anchor",
     "precision_gap",
 )
@@ -3443,8 +3446,22 @@ def derive_calculated_timeline(
     timings["resolve"] = clock() - mark
 
     mark = clock()
+    # E-L2a: the landmark index is built HERE rather than at its old reader
+    # below, because participation episodes are grouping input and grouping is
+    # the first thing that reads it. One index, three readers.
+    entry_index = _landmark_entry_index(landmark_entries)
+    participation = lp.ParticipationEpisodes(resolved, landmark_entries)
+    # The join the containment window needs: a container the binder has not
+    # bound is named by `episode_containers.container_episode_id`, and without
+    # this the `part_of` record the rung files names an episode the projection
+    # has no node for — which is exactly why a residence could never contain a
+    # story. Only `node_of_episode` is extended, never `episode_of_node`: a
+    # participation episode is minted by the recorder's own entry rather than
+    # by an identity operation, so it has no member tellings of its own and
+    # publishing `telling_count: 0` on it would be a fact nobody filed.
+    identity.adopt_participation_episodes(participation.node_of_episode)
     groups = _group_claims(resolved, owner_ref=owner, era_views=era_views,
-                           identity=identity)
+                           identity=identity, participation=participation)
     roster_names = _roster_names(roster_snapshot)
     displays = {
         node_id: _subject_display(group["subject"], group["claims"], roster_names)
@@ -3498,14 +3515,20 @@ def derive_calculated_timeline(
     }
     for node_id, group in sorted(groups.items()):
         _apply_durations(group, calculated[node_id], diagnostics=diagnostics)
-    # `timeline-rules:4` (Timeline Fix 05 §8.3). After the durations, because a
-    # duration is what gives a residence its far end and the rule needs the
-    # whole span; before the edges, because an inferred span is an ordinary
-    # seed for the fixpoint. The landmark index is built here rather than at
-    # its second reader below so both read ONE index of the same rows.
-    entry_index = _landmark_entry_index(landmark_entries)
-    colocation = _apply_colocation(
+    # After the durations (a duration is what gives an open-ended stay its far
+    # end) and before the edges (a span is an ordinary seed for the fixpoint).
+    for node_id in sorted(participation.seeds):
+        if node_id in groups:
+            _apply_participation_span(groups[node_id], calculated[node_id],
+                                      diagnostics=diagnostics)
+    # E-L2a retires `place_co_location` into the ONE containment rung
+    # (design §0.2 M1, §4.1). What the pass could still do that the rung
+    # cannot — ask WHICH of several stays a mention belongs to — stays here as
+    # its own pass, and the inference half is gone: a member's window is now
+    # the containment record's outer range, computed from what was FILED.
+    ambiguity = _apply_entity_ambiguity(
         groups, calculated,
+        participation=participation,
         roster_snapshot=roster_snapshot,
         entry_index=entry_index,
         owner=owner,
@@ -3658,6 +3681,7 @@ def derive_calculated_timeline(
         )
         for node_id in sorted(groups)
     }
+    containment_conflicts: dict[str, list] = {}
     # Event identity I1, §5.3 — CONTAINMENT'S INHERITED VALUE. A member the
     # person put INSIDE an episode and never dated renders the episode's own
     # span as a POSSIBLE outer range: it lands in `possible_temporal_value`
@@ -3670,12 +3694,26 @@ def derive_calculated_timeline(
         for node_id in sorted(groups):
             if possibilities.get(node_id) is not None or placed.get(node_id) is not None:
                 continue
+            tellings = {identity.telling_for(claim)
+                        for claim in groups[node_id]["claims"]}
             contained = identity.containment_value(
-                {identity.telling_for(claim) for claim in groups[node_id]["claims"]},
-                placed=placed, labels=labels,
+                tellings, placed=placed, labels=labels,
             )
             if contained is not None:
                 possibilities[node_id] = contained
+                continue
+            # §4.2: containments whose person-dated spans cannot both hold.
+            # No window is drawn — that is `containment_value` returning None,
+            # unchanged — AND the disagreement is now said out loud, which is
+            # the half the old "more than one container, so nothing" swallowed.
+            conflict = identity.containment_conflict(tellings, placed=placed)
+            if conflict:
+                containment_conflicts[node_id] = [
+                    {"episode_id": episode_id, "episode_node_id": episode_node_id,
+                     "span": chrono.display_date(span, with_basis=False),
+                     "label": labels.get(episode_node_id) or episode_id}
+                    for episode_id, episode_node_id, span in conflict
+                ]
     identity_blocks = {
         node_id: identity.node_block(node_id, groups[node_id]["claims"])
         for node_id in sorted(groups)
@@ -3766,7 +3804,8 @@ def derive_calculated_timeline(
         owner_flags=owner_flags,
         place_flags=place_flags,
         roster_snapshot=roster_snapshot,
-        colocation=colocation,
+        ambiguity=ambiguity,
+        containment_conflicts=containment_conflicts,
         owner=owner,
         now=now,
     )
@@ -3789,7 +3828,11 @@ def derive_calculated_timeline(
         # Event identity I1 (§3.5). All four are derived from `episode_records`
         # in this same generation, so a reader can never hold a table that
         # describes a different drawing.
-        node_aliases=identity.node_aliases(),
+        # E-L2a: the identity layer's aliases, plus a participation stay's
+        # own re-key when its first stated start moved its discriminator. The
+        # identity layer wins a collision: a person's decision outranks an
+        # arithmetic one, and this map is read to FOLLOW citations.
+        node_aliases={**participation.node_aliases, **identity.node_aliases()},
         episode_aliases=identity.episode_aliases(),
         identity_rule_version=efc.IDENTITY_RULE_VERSION,
         identity_diagnostics=identity.identity_diagnostics(),
@@ -4016,7 +4059,7 @@ def _dated_node_for(groups: dict, placed: dict, ref: str, event_kind: str) -> st
 def _derive_work_items(
     *, groups, calculated, placed, edges, diagnostics, records, by_mention, displays,
     whats=None, owner_flags=None, place_flags=None, roster_snapshot=(),
-    colocation=None, owner, now
+    ambiguity=None, containment_conflicts=None, owner, now
 ):
     """Everything the substrate currently implies a question about (§5.4, D2).
 
@@ -4035,14 +4078,8 @@ def _derive_work_items(
     whats = whats or {}
     owner_flags = owner_flags or {}
     place_flags = place_flags or {}
-    colocation = colocation or {}
-    #: `timeline-rules:4`: nodes the co-location rule placed. They are placed
-    #: by ARITHMETIC OVER SOMEBODY ELSE'S DATE, not by anything said about
-    #: them, so they stay in `unplaced` (an anchor's reach still counts them)
-    #: and they still want their own date. An inference is a bound, not an
-    #: answer, and a rule that quietly retired the ▸ would have made the
-    #: Timeline LESS answerable by knowing more.
-    inferred_nodes = set(colocation.get("inferred") or ())
+    ambiguity = ambiguity or {}
+    containment_conflicts = containment_conflicts or {}
 
     def sentence(item_kind, node_id, group, **extra):
         """This node's question through the ONE composer (D3)."""
@@ -4056,8 +4093,7 @@ def _derive_work_items(
             **extra,
         )
 
-    unplaced = {node_id for node_id in groups
-                if placed.get(node_id) is None or node_id in inferred_nodes}
+    unplaced = {node_id for node_id in groups if placed.get(node_id) is None}
 
     node_reach: dict[str, int] = {}
     for edge in edges:
@@ -4241,7 +4277,12 @@ def _derive_work_items(
     # -- precision gaps ---------------------------------------------------
     for node_id in sorted(groups):
         group = groups[node_id]
-        best = None if node_id in inferred_nodes else placed.get(node_id)
+        # §7.1 / H6: render-placeable is not date-resolved. A member drawn
+        # inside a container has a WINDOW, never a value of its own, so
+        # `placed` holds nothing for it and the precision question survives —
+        # structurally, rather than by an exclusion list a later pass could
+        # forget to update.
+        best = placed.get(node_id)
         if not _wants_precision(best, group["event_kind"]):
             continue
         # D5: an age frame's boundary is arithmetic off the birth origin, never
@@ -4275,15 +4316,16 @@ def _derive_work_items(
         if item_id:
             reach[item_id] = raw
 
-    # -- place ambiguity (`timeline-rules:4`, §8.3) ------------------------
+    # -- entity ambiguity (§4.1 condition 4) -------------------------------
     #
-    # The person was in that place more than once, so the co-location rule
-    # declined to infer. What it can do is ask the question the substrate CAN
-    # answer: not "when did this happen" — they clearly do not remember the
-    # year — but "which of the times you were there was this?", with the
-    # stretches they already told us about named in the sentence.
-    for node_id in sorted(colocation.get("ambiguous") or {}):
-        row = (colocation.get("ambiguous") or {})[node_id]
+    # The person was at that place — or at that employer, or that school —
+    # more than once, so the containment rung declined to place the telling.
+    # What the substrate CAN answer is not "when did this happen" (they
+    # clearly do not remember the year) but "which of the times you were there
+    # was this?", with the stretches they already told us about named in the
+    # sentence.
+    for node_id in sorted(ambiguity):
+        row = ambiguity[node_id]
         group = groups.get(node_id)
         if group is None or collapsed_text(group["event_kind"]) in UNASKABLE_EVENT_KINDS:
             continue
@@ -4291,7 +4333,7 @@ def _derive_work_items(
         item_id = _mint_work_item(
             items,
             components,
-            kind="place_ambiguous",
+            kind=collapsed_text(row.get("kind")) or "place_ambiguous",
             event_ref=node_id,
             node_ref=node_id,
             event_kind=group["event_kind"],
@@ -4299,7 +4341,8 @@ def _derive_work_items(
             requested_field="date",
             subject_resolved=group["resolved"],
             prompt_intent=compose_place_ambiguity_question(
-                row.get("places") or (), row.get("spans") or ()
+                row.get("places") or (), row.get("spans") or (),
+                preposition=collapsed_text(row.get("preposition")) or "in",
             ),
             claim_refs=_evidence_claim_refs(group),
             evidence_refs=_evidence_refs(group),
@@ -4345,6 +4388,60 @@ def _derive_work_items(
         )
         if item_id:
             reach[item_id] = len(refs)
+
+    # -- containments that cannot both hold (E-L2a §4.2) -------------------
+    #
+    # Two person-dated containers whose spans do not overlap, with one telling
+    # inside both. `MATERIAL_CONFLICT` is untouched: this is material BY
+    # CONSTRUCTION — the person's own two stated spans are disjoint and one
+    # story cannot have been in both — so it never passes through the
+    # reconcile score at all. The row cites both containments so the answer
+    # can be "fix a date" or "remove one containment" rather than a bare
+    # "when was this?".
+    for node_id in sorted(containment_conflicts):
+        group = groups.get(node_id)
+        if group is None or collapsed_text(group["event_kind"]) in UNASKABLE_EVENT_KINDS:
+            continue
+        rows = containment_conflicts[node_id]
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="contradiction",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="date",
+            subject_resolved=group["resolved"],
+            prompt_intent=sentence(
+                "contradiction", node_id, group,
+                readings=_english_list(
+                    [f"{row['label']} ({row['span']})" for row in rows],
+                    joiner="and",
+                ),
+            ),
+            # The claims that disagree are the two CONTAINERS' own dated
+            # claims, not the member's — the member said nothing about when.
+            # `contradiction_needs_two_claims` is satisfied by the person's
+            # own two spans, which is exactly what the row is about.
+            claim_refs=[
+                *_evidence_claim_refs(group),
+                *[
+                    ref
+                    for row in rows
+                    for ref in _dated_claim_refs(
+                        groups.get(row["episode_node_id"]) or {"claims": []}
+                    )
+                ],
+            ],
+            evidence_refs=_evidence_refs(group),
+            system_value=1.0,
+            by_node=by_node,
+            diagnostics=diagnostics,
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = len(rows)
 
     # -- a birth origin its own evidence contradicts (E-BO) ---------------
     for row in diagnostics:
@@ -4434,12 +4531,7 @@ def _derive_work_items(
 
 __all__ = [
     "CALCULATION_RULE_VERSION",
-    "COLOCATION_CLAIM_SENTENCES",
-    "COLOCATION_DATE_BASIS",
-    "COLOCATION_EPISODE_KINDS",
-    "COLOCATION_PLACE_SUBJECT_KINDS",
-    "COLOCATION_RULE_ID",
-    "COLOCATION_RULE_TEXT",
+    "COLOCATION_RETIRED",
     "DEFAULT_OWNER_REF",
     "DEFAULT_PRECISION_TARGET",
     "DEFAULT_SENSITIVITY",

@@ -128,9 +128,11 @@ closed vocabulary.
 
 ### Containment (§5.3)
 
-`possible_outer_range()` mirrors `temporal_timeline._colocation_record`'s
-discipline exactly, which is why it is written against
-`chronology.DateRecord` and not against a shape of its own. Every clause is
+`possible_outer_range()` inherited its discipline from
+`temporal_timeline._colocation_record`, which is why it is written against
+`chronology.DateRecord` and not against a shape of its own. E-L2a (v276)
+retired that function along with the rest of `place_co_location`, so this is
+now the ONE place a window is drawn from a containing episode's span. Every clause is
 structural rather than checked afterwards: the bounds are the episode's own
 bounds copied (never narrower); the function reads `member_value is None` and
 nothing else (never overrides, and "discarded the moment the node gains a
