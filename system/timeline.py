@@ -1108,7 +1108,7 @@ def flip_landmarks_if_needed() -> dict | None:
     return summary
 
 
-def save_landmark(domain: str, record: object) -> dict:
+def save_landmark(domain: str, record: object, *, digest_override: str | None = None) -> dict:
     """Add or replace ONE landmark entry, keyed by its identity in a domain.
 
     The signature, the return value and the MEANING are v214's. What changed in
@@ -1116,6 +1116,14 @@ def save_landmark(domain: str, record: object) -> dict:
     source and its temporal assertions are filed as claims with a receipt, and
     then the store is REDRAWN from the substrate. Nothing writes an entry into
     the file any more.
+
+    ``digest_override`` is E-L3's (design §10.4, H4): a Go Dig unit filed as
+    part of an import carries an identity of its own —
+    ``(import_operation_id, block_local_id, canonical block bytes)`` — that
+    must survive a crash-and-retry regardless of which ordinal the retry
+    lands on, so it bypasses the ordinary ordinal-keyed digest entirely.
+    ``None`` (every caller before E-L3) is byte-identical to today's
+    behavior.
 
     Replacement is by identity because the ladder revisits the same subject —
     a city today, an address next week, a span after that, each pass adding
@@ -1173,6 +1181,7 @@ def save_landmark(domain: str, record: object) -> dict:
         filed,
         ordinal=landmark_projection.next_ordinal(root),
         extractor_version=landmark_projection.LIVE_EXTRACTOR,
+        digest=digest_override,
     )
 
     drawn = redraw_landmarks()

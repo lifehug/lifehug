@@ -634,19 +634,31 @@ def promote_landmark_entry(
     *,
     ordinal: int,
     filed_at: object = None,
+    digest: str | None = None,
 ) -> SourceRef:
     """File one landmark record as a durable vault source and return its ref.
 
     Amendment 2's pairing rule, applied to the ladder: the record becomes an
     ordinary source document BEFORE any claim cites it, so a crash between the
     two leaves a re-runnable state and never a receipt citing a source that is
-    not in the vault. Idempotent on :func:`entry_promotion_digest`.
+    not in the vault. Idempotent on :func:`entry_promotion_digest` — or, when
+    ``digest`` is supplied, on that digest instead.
 
     The frontmatter carries the grouping key and the filing order because they
     are facts about the FILING — which domain it was filed under, which entry
     it is a telling of, and when in the sequence it arrived. The projection
     needs all three and may not re-derive them later from a drawing it is
     itself responsible for producing.
+
+    ``digest``, when given, REPLACES :func:`entry_promotion_digest` as this
+    source's identity. E-L3 (design §10.4, H4) is the reason it exists: an
+    imported block's identity is ``(import_operation_id, block_local_id,
+    canonical block bytes)`` — never the filing ordinal, because
+    ``next_ordinal`` shifts on every retry as earlier blocks in the same
+    import land, and a digest keyed on it would mint a duplicate source for
+    every block already filed before a crash. ``ordinal`` is still recorded
+    in the frontmatter for filing order — retry safety just no longer runs
+    through it.
     """
     name = collapsed_text(domain)
     if not name:
@@ -659,7 +671,7 @@ def promote_landmark_entry(
         )
 
     row = domain_row_or_none(name)
-    digest = entry_promotion_digest(name, entry, ordinal=ordinal)
+    digest = collapsed_text(digest) or entry_promotion_digest(name, entry, ordinal=ordinal)
     relative = landmark_source_relative_path(digest)
     payload = f"{canonical_json(entry)}\n"
 
@@ -722,15 +734,19 @@ def file_landmark_record(
     ordinal: int,
     extractor_version: str = LIVE_EXTRACTOR,
     now: object = None,
+    digest: str | None = None,
 ) -> dict:
     """Promote one record and file its receipt. The pairing rule, in one call.
 
     Returns ``{"source_ref", "receipt_path", "claims"}``. Source first, then
     receipt, both idempotent — the identical ordering
     `temporal_store.file_message_extraction` uses, for the identical reason.
+
+    ``digest`` passes straight through to :func:`promote_landmark_entry` — see
+    its own docstring (E-L3, design §10.4).
     """
     source_ref = promote_landmark_entry(
-        vault_root, domain, entry, ordinal=ordinal, filed_at=now
+        vault_root, domain, entry, ordinal=ordinal, filed_at=now, digest=digest
     )
     claims = entry_claims(
         domain,

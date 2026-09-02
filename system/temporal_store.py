@@ -493,6 +493,8 @@ def promote_conversational_source(
     vault_root: str | Path,
     message_text: str,
     metadata: object = None,
+    *,
+    source_type: str | None = None,
 ) -> SourceRef:
     """File a claim-bearing message as a durable vault source and return its ref.
 
@@ -510,6 +512,14 @@ def promote_conversational_source(
     ``turn_ref``, ``speaker``, ``channel``/``source_medium``, ``occurred_at``,
     ``title``, ``visibility`` and — event identity **I2b** —
     ``question_context``. Only the first two participate in identity.
+
+    ``source_type`` overrides the frontmatter ``type`` this source carries,
+    defaulting to :data:`CONVERSATION_SOURCE_TYPE` (unchanged behavior for
+    every existing caller). E-L3 (timeline-eras design §10.3) uses it to file
+    a Go Dig unit's free-text note as ``type: go_dig_note`` while reusing this
+    function's storage path, digest and ``question_context`` mechanics
+    whole — the note is still an ordinary promoted conversational source in
+    every way that matters to the fold, just labeled for what produced it.
 
     **``question_context`` is the recorder's stamp** (event-identity amendment
     v4.2 §12b ruling 5): the CONTAINER the session's question targeted — the
@@ -537,7 +547,7 @@ def promote_conversational_source(
 
     frontmatter: dict = {
         "title": title,
-        "type": CONVERSATION_SOURCE_TYPE,
+        "type": collapsed_text(source_type) or CONVERSATION_SOURCE_TYPE,
         "source_id": f"conversation:msg-{digest[:FILENAME_DIGEST_LENGTH]}",
         "source_medium": collapsed_text(meta.get("channel") or meta.get("source_medium"))
         or "conversation",
