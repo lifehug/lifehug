@@ -107,9 +107,9 @@ import chronology as chrono  # noqa: E402
 import conversation_lints as cl  # noqa: E402
 import cross_dating as cd  # noqa: E402
 import episode_containers as ec  # noqa: E402
-import era_memberships as era  # noqa: E402
 import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
+import era_memberships as era  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import landmark_projection as lp  # noqa: E402
