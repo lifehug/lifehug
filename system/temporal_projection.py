@@ -58,6 +58,7 @@ Controlling contract: the audited final timeline build plan, §5.3, §5.4, §6.5
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -280,7 +281,90 @@ AGE_FRAME_ID_PREFIX = "age"
 #: change would be the opposite of additive. Readers are tolerant of both — a
 #: v1 node simply lacks the v2 keys — and the writer is the platform's flag to
 #: turn off (§7.8 step 3).
+#:
+#: **This is the WRITER's default and E-L2d does not move it.** Schema v3 is
+#: declared (:data:`PROJECTION_SCHEMA_VERSION_LATEST`) and written only when
+#: the flag says so (:func:`projection_schema_version`) — the same §7.8
+#: rollout discipline the eras program used for v2: tolerant readers first,
+#: writer behind a flag, rollback = flag off.
 PROJECTION_SCHEMA_VERSION = 2
+
+#: The newest node/projection shape this package knows how to WRITE.
+PROJECTION_SCHEMA_VERSION_LATEST = 3
+
+#: Every projection schema a reader in this package tolerates. v1 is "no v2
+#: keys", v2 is today's writer, v3 is E-L2d's additive shape.
+PROJECTION_SCHEMA_VERSIONS = (1, 2, 3)
+
+#: The flag. An environment variable rather than an argument because the
+#: choice is a DEPLOYMENT's, not a caller's: every writer in a process must
+#: agree, or one job publishes v3 nodes and the next republishes them as v2.
+#: Unset — or set to anything that is not a version this package writes —
+#: means :data:`PROJECTION_SCHEMA_VERSION`, so a typo rolls BACK rather than
+#: crashing a deploy, which is the direction §7.8 step 3 wants a mistake to
+#: fall.
+PROJECTION_SCHEMA_FLAG = "LIFEHUG_PROJECTION_SCHEMA_VERSION"
+
+#: The versions the flag may select. v1 is a READ shape (a projection written
+#: before the eras program), never a writer target: nothing in this package
+#: can un-write `definition_span`.
+PROJECTION_SCHEMA_WRITABLE = (2, 3)
+
+
+def projection_schema_version() -> int:
+    """The schema this process WRITES — :data:`PROJECTION_SCHEMA_VERSION`
+    unless :data:`PROJECTION_SCHEMA_FLAG` selects another writable one.
+
+    Read at call time rather than at import, so a test (and an operator) can
+    flip the flag without reloading the package, and so the whole of v3 is one
+    switch rather than a constant somebody has to remember to move in four
+    modules.
+    """
+    raw = os.environ.get(PROJECTION_SCHEMA_FLAG)
+    try:
+        chosen = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return PROJECTION_SCHEMA_VERSION
+    if chosen not in PROJECTION_SCHEMA_WRITABLE:
+        return PROJECTION_SCHEMA_VERSION
+    return chosen
+
+
+#: What a published node's ``value_shape`` may say (design §3.4, H3).
+#:
+#: The distinction already existed structurally — `definition_span` (a period's
+#: duration), `best_temporal_value` (an occurrence), `possible_temporal_value`
+#: (an era `within` a frame, or a containment's outer range) — in four fields
+#: with four "never a bound" comments and NO single tag, so a renderer could
+#: read a window as a bar and did. This is that one tag.
+VALUE_SHAPES = ("duration", "point", "window", "none")
+
+#: The three lanes a row group draws (design §9.2), keyed by the participation
+#: episode's own event kind. ``military`` draws in ``worked``: a stint of
+#: service is time served somewhere, and giving it a fourth lane of its own
+#: would put one bar in a lane most lives never open.
+#:
+#: The KEYS are the one definition of "which event kinds are participation
+#: episodes", and `tests/test_projection_schema_v3.py` pins them against
+#: `landmark_projection.PARTICIPATION_EPISODE_KINDS`' own values, so a fifth
+#: span domain fails the build here instead of drawing in no lane.
+LANES_BY_EVENT_KIND = {
+    "residence": "lived",
+    "job": "worked",
+    "school": "schooled",
+    "military": "worked",
+}
+
+#: The lanes themselves, in the order §9.2 names them.
+LANES = ("lived", "worked", "schooled")
+
+#: The event kinds :data:`LANES_BY_EVENT_KIND` covers — a participation
+#: episode's own interval is a ``duration`` (design §3.4).
+PARTICIPATION_EVENT_KINDS = tuple(sorted(LANES_BY_EVENT_KIND))
+
+#: What one lane row says (schema v3, design §9.6).
+LANE_ROW_KEYS = ("group_id", "lane", "episode_node_ids")
+
 
 #: FROZEN for schema version 1.
 NODE_IDENTITY_KEYS = ("node_kind", "event_kind", "subject_keys", "discriminator")
@@ -314,6 +398,10 @@ ERROR_CODES = (
     "unknown_life_view",
     "unknown_occurrence_subject_scope",
     "unknown_owner_timeline_relation",
+    # Schema v3 (E-L2d): a lane row that names no row group, or a lane
+    # outside the three §9.2 declares.
+    "lane_needs_group",
+    "unknown_lane",
     "membership_not_a_mapping",
     "membership_needs_member",
     "membership_needs_era",
@@ -583,6 +671,13 @@ class CalculatedTimelineNode:
     containments: tuple[dict, ...] = ()
     related: tuple[dict, ...] = ()
     proposed_links: tuple[dict, ...] = ()
+    #: v3, additive, DERIVED (design §3.4, H3). Which of the four fields above
+    #: says when this node happened — see :func:`derive_value_shape`. It is
+    #: never an input: the validator recomputes it from the node every time,
+    #: so it cannot drift from the fields it describes. Absent on v1 and v2
+    #: nodes, and absent means "derive it yourself", which every tolerant
+    #: reader can do because the function is pure.
+    value_shape: str | None = None
     schema_version: int = PROJECTION_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -633,6 +728,8 @@ class CalculatedTimelineNode:
                           ("proposed_links", self.proposed_links)):
             if rows:
                 payload[key] = [dict(row) for row in rows]
+        if self.value_shape:
+            payload["value_shape"] = self.value_shape
         return payload
 
 
@@ -757,9 +854,10 @@ def validate_calculated_timeline_node(value: object) -> dict:
             "end": _normalized_node_value(span.get("end")),
         }
 
+    schema_version = projection_schema_version()
     normalized: dict = {
         "node_id": node_id,
-        "schema_version": PROJECTION_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "node_kind": node_kind,
         "subject_refs": list(_ref_tuple(value.get("subject_refs"))),
         "best_temporal_value": best,
@@ -831,6 +929,11 @@ def validate_calculated_timeline_node(value: object) -> dict:
     relation_refs = _ref_tuple(value.get("relation_evidence_refs"))
     if relation_refs:
         normalized["relation_evidence_refs"] = list(relation_refs)
+    # THE ONE DERIVATION (design §3.4). Recomputed from the normalized node,
+    # never copied from the input, and written only by the v3 writer — a v2
+    # publication stays byte-identical (§7.8 step 3's rollback).
+    if schema_version >= 3:
+        normalized["value_shape"] = derive_value_shape(normalized)
     return normalized
 
 
@@ -907,8 +1010,73 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         containments=tuple(dict(row) for row in normalized.get("containments") or ()),
         related=tuple(dict(row) for row in normalized.get("related") or ()),
         proposed_links=tuple(dict(row) for row in normalized.get("proposed_links") or ()),
+        value_shape=normalized.get("value_shape"),
         schema_version=int(normalized.get("schema_version") or PROJECTION_SCHEMA_VERSION),
     )
+
+
+def derive_value_shape(node: object) -> str:
+    """Design §3.4's ONE tag, derived from the node and nothing else.
+
+    Never an input. A caller that hands in a ``value_shape`` has it
+    overwritten, because the whole point of H3's fix is that the shape is a
+    FUNCTION of the three fields that already exist rather than a fifth field
+    somebody can set inconsistently with them.
+
+    The order of the branches is the contract, and the third one is the one
+    the audit caught (§12 row 8): a POINT event that gained a containment
+    window carries a window record whose interval is the containing episode's
+    — years wide — and reading its width would draw it as a bar across a
+    decade of somebody's life. A possible value is a window whatever its
+    width, always.
+
+    * ``duration`` — the node's OWN interval: a frame's ``definition_span``,
+      or a participation episode's ``started``/``ended`` pair (its event kind
+      is in :data:`LANES_BY_EVENT_KIND`, which is what says the value came
+      from `episode_containers.span_from_claims` rather than from a date).
+    * ``point`` — a ``best_temporal_value``, drawn as a mark as wide as its
+      stated grain and never wider.
+    * ``window`` — no value of its own: a ``possible_temporal_value``, which
+      is either an era `within` a frame (§4.2) or the containment outer range
+      (the intersection when there are several).
+    * ``none`` — unplaced; the cloud.
+    """
+    row = node.to_dict() if hasattr(node, "to_dict") else node
+    if not isinstance(row, dict):
+        return "none"
+    if isinstance(row.get("definition_span"), dict):
+        return "duration"
+    if row.get("best_temporal_value") is not None:
+        if (collapsed_text(row.get("node_kind")) == "episode"
+                and collapsed_text(row.get("event_kind")) in LANES_BY_EVENT_KIND):
+            return "duration"
+        return "point"
+    if row.get("possible_temporal_value") is not None:
+        return "window"
+    return "none"
+
+
+def validate_lane_row(value: object) -> dict:
+    """One ``lanes`` row, normalized (schema v3, design §9.2/§9.6).
+
+    A row is a row GROUP's lane, not a node's: ``group_id`` is the frame or
+    era node the lane is drawn inside, and ``episode_node_ids`` are the
+    participation episodes that belong to it. Sorted here so two hosts
+    assembling the same group in two orders publish the same bytes.
+    """
+    row = value if isinstance(value, dict) else {}
+    group_id = collapsed_text(row.get("group_id"))
+    lane = collapsed_text(row.get("lane"))
+    if not group_id:
+        raise TimelineNodeError("lane_needs_group", "a lane row names its row group")
+    if lane not in LANES:
+        raise TimelineNodeError("unknown_lane", f"unknown lane: {lane!r}")
+    members = _ref_tuple(row.get("episode_node_ids"))
+    return {
+        "group_id": group_id,
+        "lane": lane,
+        "episode_node_ids": sorted(members),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -1412,7 +1580,16 @@ __all__ = [
     "MEMBERSHIP_RELATIONS",
     "ORIGIN_BASES",
     "PERIOD_EVENT_KINDS",
+    "PROJECTION_SCHEMA_FLAG",
     "PROJECTION_SCHEMA_VERSION",
+    "PROJECTION_SCHEMA_VERSIONS",
+    "PROJECTION_SCHEMA_VERSION_LATEST",
+    "PROJECTION_SCHEMA_WRITABLE",
+    "LANES",
+    "LANES_BY_EVENT_KIND",
+    "LANE_ROW_KEYS",
+    "PARTICIPATION_EVENT_KINDS",
+    "VALUE_SHAPES",
     "TEMPORAL_STATES",
     "ERROR_CODES",
     "NODE_IDENTITY_KEYS",
@@ -1439,7 +1616,10 @@ __all__ = [
     "derive_input_fingerprint",
     "derive_membership_id",
     "derive_node_id",
+    "derive_value_shape",
     "derive_work_item_id",
+    "projection_schema_version",
+    "validate_lane_row",
     "membership_from_dict",
     "node_from_dict",
     "surfaces_conflict",

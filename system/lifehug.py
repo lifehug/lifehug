@@ -209,6 +209,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # undo, filing a `none`/`part_of` binding and an adopt envelope through
     # the same writers — same single-transaction vault mutation family.
     "containment-remove",
+    # frame-display (E-L2d, design §9.1): one presentation decision per age
+    # frame, filed as an immutable source and republished in the same act —
+    # same single-transaction vault mutation family as era-record.
+    "frame-display",
     "timeline-unplace", "unretract",
 })
 
@@ -1125,6 +1129,79 @@ def cmd_containment_remove(args: argparse.Namespace) -> int:
     print(f"  created: {result['created']}")
     if result.get("adopted"):
         print("  adopt: the episode is now human-authored (event identity row 3)")
+    return 0
+
+
+def cmd_frame_display(args: argparse.Namespace) -> int:
+    """`frame-display` — how ONE age frame is told (design §9.1, §15.1).
+
+    One JSON payload on stdin, the `era-record` shape: ``{"frame_id": …,
+    "mode": "eras"|"frame", "reason": …, "frame_label": …, "supersedes": …}``.
+    ``--undo`` files a superseding ``frame`` decision rather than deleting
+    anything, because putting a frame back is a decision the person made and
+    a decision is a record (§5).
+
+    Idempotent by digest: pressing twice writes one file. Publishing is part
+    of the act — the frame row must stop offering the proposal it just
+    answered — and it is the ONE publisher, `temporal_publication.publish`.
+    """
+    import json  # noqa: PLC0415
+
+    import era_memberships as era  # noqa: PLC0415
+    import temporal_publication as pub  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    try:
+        payload = json.loads(raw or "{}")
+    except ValueError as exc:
+        print(f"Error: frame-display reads one JSON payload on stdin ({exc})",
+              file=sys.stderr)
+        return 1
+    if not isinstance(payload, dict):
+        print("Error: frame-display reads one JSON OBJECT on stdin", file=sys.stderr)
+        return 1
+
+    frame_id = payload.get("frame_id") or getattr(args, "frame_id", None)
+    supersedes = payload.get("supersedes")
+    mode = payload.get("mode")
+    if getattr(args, "undo", False):
+        # THE UNDO IS A DECISION. It supersedes the active `eras` decision for
+        # this frame — found here rather than typed, so a person who taps undo
+        # does not have to know a digest.
+        mode = "frame"
+        if not supersedes:
+            active = era.frame_display_rows_by_frame(
+                era.active_frame_displays(REPO_DIR)
+            ).get(str(frame_id or "").strip())
+            supersedes = (active or {}).get("decision_id")
+    try:
+        record = era.file_frame_display(
+            REPO_DIR,
+            frame_id=frame_id,
+            mode=mode,
+            reason=payload.get("reason"),
+            evidence=payload.get("evidence") or (),
+            supersedes=supersedes,
+            frame_label=payload.get("frame_label"),
+            title=payload.get("title"),
+            author=payload.get("author"),
+            occurred_at=payload.get("occurred_at"),
+        )
+        summary = pub.publish(REPO_DIR)
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"decision": record, "publication": summary},
+                         indent=2, sort_keys=True, default=str))
+        return 0
+    told = "by its eras" if record["mode"] == "eras" else "as one frame"
+    print(f"\u2713 {record['frame_id']} is told {told}")
+    print(f"  decision: {record['decision_id']}")
+    if record.get("supersedes"):
+        print(f"  supersedes: {record['supersedes']}")
+    print(f"  {pub.publication_report_line(summary)}")
     return 0
 
 
@@ -3223,6 +3300,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "to route (§5.5) — omit for an identity-only split")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_split_episode)
+
+    p = sub.add_parser(
+        "frame-display",
+        help="Tell one age frame by its eras, or put it back (--undo); "
+             "JSON payload on stdin",
+    )
+    p.add_argument("--frame-id", dest="frame_id", default=None,
+                   help="The frame, when the payload does not name it "
+                        "(age:self:<band>)")
+    p.add_argument("--undo", action="store_true",
+                   help="File a superseding `frame` decision for this frame")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON")
+    p.set_defaults(func=cmd_frame_display)
 
     p = sub.add_parser("era-list", help="List this vault's eras and their labels")
     p.add_argument("--json", action="store_true")

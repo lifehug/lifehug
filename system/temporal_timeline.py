@@ -109,6 +109,7 @@ import cross_dating as cd  # noqa: E402
 import episode_containers as ec  # noqa: E402
 import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
+import era_memberships as era  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import landmark_projection as lp  # noqa: E402
@@ -388,6 +389,17 @@ class CalculatedTimeline:
     #: reasoning as ``memberships`` and the same phase discipline: the key
     #: lands declared and empty in E1/`O-E1b`, E3 fills the rows.
     chapter_overlays: tuple[dict, ...] = ()
+    #: E-L2d (design §9.2, §9.6). The three peer lanes inside each row group:
+    #: ``{group_id, lane, episode_node_ids}``. Derived from the memberships and
+    #: the participation episodes' own kinds, so a stay that belongs to two
+    #: frames draws in both and nothing here picks a winner — that is the
+    #: display role's job.
+    lanes: tuple[dict, ...] = ()
+    #: E-L2d (design §9.1, §15.1). One row per age frame: how it is told, and
+    #: whether the system has something to propose. NOTHING here is applied —
+    #: `proposal_pending` is the one line the frame row offers, and the
+    #: decision is the person's.
+    frame_display: tuple[dict, ...] = ()
     #: ``{legacy_work_item_id: canonical_work_item_id}`` — O-E6's derived
     #: migration map, so a bank marker, a session or a Play target minted under
     #: an older identity still resolves to the item it was always about.
@@ -488,6 +500,12 @@ def structural_signature(result: object) -> dict:
         "work_items": items,
         "memberships": [dict(row) for row in current.memberships],
         "chapter_overlays": [dict(row) for row in current.chapter_overlays],
+        # E-L2d: both are DERIVED — from the memberships, the episodes' kinds
+        # and the frame display decisions — so a rebuild reproduces them
+        # exactly and a drift is a signature diff, whichever schema the writer
+        # is publishing.
+        "lanes": [dict(row) for row in current.lanes],
+        "frame_display": [dict(row) for row in current.frame_display],
         # Derived from the items above, so a rebuild reproduces it exactly and
         # a drift between the map and the set it describes is a signature diff.
         "work_item_aliases": dict(current.work_item_aliases),
@@ -2995,6 +3013,119 @@ def _apply_display_roles(memberships: list[dict], *, decisions: object,
     return out
 
 
+# --------------------------------------------------------------------------
+# Lanes and the frame display proposal (E-L2d, design §9.1-§9.2)
+# --------------------------------------------------------------------------
+
+
+def lane_rows(nodes: list[dict], memberships: object) -> list[dict]:
+    """The Lived · Worked · Schooled lanes of every row group (design §9.2).
+
+    A lane is a property of a ROW GROUP, not of a node: the same stay draws in
+    every frame and era it belongs to, which is what its memberships already
+    say, so this reads them rather than re-deciding containment. An
+    ``associated_with`` membership is deliberately skipped — §3.3: an
+    association is a rendered link and never chronology, and a lane is a bar
+    on a life axis.
+
+    Nothing is invented and nothing is dropped: a participation episode with
+    no membership (undated, or off the owner's axis) simply has no lane, which
+    is the same absence `_frame_memberships` files for it.
+    """
+    kinds = {
+        collapsed_text(row.get("node_id")): collapsed_text(row.get("event_kind"))
+        for row in nodes
+        if row.get("node_kind") == "episode"
+        and collapsed_text(row.get("event_kind")) in tp.LANES_BY_EVENT_KIND
+    }
+    if not kinds:
+        return []
+    grouped: dict[tuple[str, str], set] = {}
+    for row in memberships or ():
+        if not isinstance(row, dict):
+            continue
+        if collapsed_text(row.get("relation")) == "associated_with":
+            continue
+        member = collapsed_text(row.get("member_node_id"))
+        group = collapsed_text(row.get("era_node_id"))
+        kind = kinds.get(member)
+        if not kind or not group:
+            continue
+        grouped.setdefault((group, tp.LANES_BY_EVENT_KIND[kind]), set()).add(member)
+    return [
+        tp.validate_lane_row({
+            "group_id": group, "lane": lane, "episode_node_ids": sorted(members),
+        })
+        for (group, lane), members in sorted(
+            grouped.items(), key=lambda item: (item[0][0], tp.LANES.index(item[0][1]))
+        )
+    ]
+
+
+def _era_is_a_dated_stretch(group: object) -> bool:
+    """Does this era COUNT toward tiling (design §9.1)?
+
+    Two conditions and no third: it is a ``stretch`` (a thread has no honest
+    end, ruling 21), and the person gave it BOTH bounds. A thread and an
+    undated era never count — an era nobody dated cannot tile anything, and
+    reading a bound off the moments sorted into it is the founder's own
+    "College 1990–1991 before High School" all over again.
+    """
+    row = group if isinstance(group, dict) else {}
+    if collapsed_text(row.get("era_kind")) != "stretch":
+        return False
+    found = set()
+    for claim in row.get("claims") or ():
+        kind = collapsed_text(claim.get("event_kind"))
+        if (kind in PERIOD_BOUND_EVENT_KINDS
+                and collapsed_text(claim.get("claim_type")) in tc.DATED_CLAIM_TYPES):
+            found.add(kind)
+    return set(PERIOD_BOUND_EVENT_KINDS) <= found
+
+
+def frame_display_rows(nodes: list[dict], groups: dict, *, decisions: object) -> list[dict]:
+    """One row per age frame: how it is told, and what may be proposed.
+
+    `era_memberships.FRAME_DISPLAY_RULE_TEXT`, applied. The mode comes from
+    the person's own decision and defaults to ``frame``; ``proposal_pending``
+    is TRUE only when there is no active ``eras`` decision AND the frame's
+    dated stretch eras tile it (`cross_dating.frame_tiling`, the one
+    arithmetic). ``leftover`` is the geometric truth — the frame's uncovered
+    sub-intervals — because that is what the leftover row draws, and naming
+    that row is the host's job, not this one's.
+
+    Nothing here applies anything. A proposal is a line on a frame row.
+    """
+    chosen = era.frame_display_rows_by_frame(decisions)
+    intervals = [
+        node.get("best_temporal_value")
+        for node in nodes
+        if node.get("event_kind") == tp.NAMED_ERA_EVENT_KIND
+        and node.get("best_temporal_value") is not None
+        and _era_is_a_dated_stretch(groups.get(collapsed_text(node.get("node_id"))))
+    ]
+    rows: list[dict] = []
+    for node in nodes:
+        if node.get("event_kind") != tp.AGE_FRAME_EVENT_KIND:
+            continue
+        frame_id = collapsed_text(node.get("node_id"))
+        span = node.get("definition_span")
+        if not frame_id or not isinstance(span, dict):
+            continue
+        tiling = cd.frame_tiling(span, intervals)
+        decision = chosen.get(frame_id) or {}
+        mode = collapsed_text(decision.get("mode")) or era.FRAME_DISPLAY_DEFAULT_MODE
+        rows.append({
+            "frame_id": frame_id,
+            "frame_display": mode,
+            "proposal_pending": bool(mode != "eras" and tiling["tiled"]),
+            "leftover": [dict(row) for row in tiling["leftover"]],
+            "decision_id": collapsed_text(decision.get("decision_id")) or None,
+        })
+    rows.sort(key=lambda row: row["frame_id"])
+    return rows
+
+
 def observed_envelope(memberships: object, node_index: dict, era_node_id: str) -> dict | None:
     """One named era's COVERAGE of its explicit members — never a bound.
 
@@ -3516,6 +3647,7 @@ def derive_calculated_timeline(
     constraints: object = (),
     membership_assertions: object = (),
     display_decisions: object = (),
+    frame_display_decisions: object = (),
     landmark_entries: object = (),
     birth_date: object = None,
     owner_ref: object = None,
@@ -3527,8 +3659,9 @@ def derive_calculated_timeline(
     ``active_index`` is ``temporal_store.fold_active_index``'s mapping (or its
     ``claims`` list, or a bare list of claim mappings). ``constraints`` are the
     :class:`~temporal_claims.OrderingConstraint` records a drag wrote.
-    ``membership_assertions`` and ``display_decisions`` are
-    ``era_memberships.active_era_memberships`` / ``active_era_displays``' rows,
+    ``membership_assertions``, ``display_decisions`` and
+    ``frame_display_decisions`` are ``era_memberships.active_era_memberships``
+    / ``active_era_displays`` / ``active_frame_displays``' rows,
     and ``landmark_entries`` are ``landmark_projection.load_landmark_sources``'.
     All three arrive as ARGUMENTS rather than being read here, for the reason
     ``roster_snapshot`` does: this function must stay a pure function of what it
@@ -3960,6 +4093,12 @@ def derive_calculated_timeline(
             nodes[index] = tp.validate_calculated_timeline_node(
                 {**row, "observed_envelope": envelope}
             )
+    # E-L2d (design §9.1-§9.2). Both are pure functions of what the fold has
+    # already decided — the memberships above, the episodes' own kinds, and
+    # the person's own display decisions — so they cost one pass and nothing
+    # else, and they are the same on every rebuild.
+    lanes = lane_rows(nodes, memberships)
+    frames_display = frame_display_rows(nodes, groups, decisions=frame_display_decisions)
     timings["memberships"] = clock() - mark
 
     mark = clock()
@@ -3988,6 +4127,8 @@ def derive_calculated_timeline(
     return CalculatedTimeline(
         nodes=tuple(nodes),
         work_items=tuple(items),
+        lanes=tuple(lanes),
+        frame_display=tuple(frames_display),
         # In-memory only; see the field's own note. This is the ONE answer to
         # "what are this life's age frames", handed to whoever asks instead of
         # being re-derived by them.
