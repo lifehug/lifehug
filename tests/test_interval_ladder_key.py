@@ -206,6 +206,53 @@ class TheIncrementalFillStillWorks(LadderCase):
         self.assertTrue(self.timeline().node_aliases)
 
 
+class AnUndatedTellingWithTwoStaysIsRefused(LadderCase):
+    """§4.1 condition 4's posture, applied to the ladder rather than a story.
+
+    E-L2a wrote the refusal down: *attributing an undated telling to one of
+    two stays would be the guess this whole substrate refuses.* Joining the
+    earliest-filed compatible slot would have reversed it silently, so a
+    record compatible with SEVERAL slots opens its own instead — an undated
+    stay, which M3 already knows how to be.
+    """
+
+    ENTRIES = (
+        ("residences", {"label": "Cedarport", "city": "Cedarport",
+                        "span": span("1988", "1990")}),
+        ("residences", {"label": "Cedarport", "city": "Cedarport",
+                        "span": span("1996", "1999")}),
+        ("residences", {"label": "Cedarport", "address": "12 Elm Row"}),
+    )
+
+    def test_it_is_its_own_entry_rather_than_the_earlier_stays_address(self):
+        rows = self.entries("residences")
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([row.get("address") for row in rows],
+                         [None, None, "12 Elm Row"])
+
+    def test_it_folds_unplaced_rather_than_borrowing_a_stretch(self):
+        stays = [row for row in self.timeline().nodes
+                 if row["event_kind"] == "residence"]
+        self.assertEqual(len(stays), 3)
+        undated = [row for row in stays if row.get("best_temporal_value") is None]
+        self.assertEqual(len(undated), 1)
+
+    def test_no_episode_id_churns_for_the_refused_telling(self):
+        """The reason the extra entry is worth it. An undated telling in a
+        group that already held two starts was discriminated by its own
+        promoted source id before this key existed, and still is."""
+        import identity_resolution as ident  # noqa: PLC0415
+
+        sources = lp.load_landmark_sources(self.root)
+        undated = [row for row in sources if not (row["record"].get("span") or {})]
+        self.assertEqual(len(undated), 1)
+        expected = ident.derive_episode_ref(
+            event_kind="residence", subject_mention="Cedarport",
+            discriminator=undated[0]["source_id"],
+        )
+        self.assertIn(expected, {row["node_id"] for row in self.timeline().nodes})
+
+
 class ARefilledSpanIsStillOneStay(LadderCase):
     """Two tellings of ONE stay whose stated stretches differ but touch."""
 
