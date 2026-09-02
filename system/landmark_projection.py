@@ -854,13 +854,21 @@ def stay_slots(sources: object) -> dict:
     build the entry — so the interval a record is compared against is exactly
     the interval the entry it would join actually has.
 
-    A record with no stated start joins the FIRST slot it is compatible with,
-    which is the earliest-filed one. That is today's behaviour preserved
-    exactly (before this function every record of one identity joined the one
-    and only slot), and it is deliberately not a re-attribution rule: this
-    key only ever SPLITS records that are provably disjoint. Choosing which
-    of two stays an undated telling belongs to is the guess §4.1 condition 4
-    refuses, and it is asked there rather than decided here.
+    EXACTLY ONE compatible slot joins; zero or several open a new one. That is
+    §4.1 condition 4's own posture — *several compatible episodes of one entity
+    place nothing* — applied to the ladder rather than to a story, and it is
+    what keeps E-L2a's refusal true instead of quietly reversing it: an
+    undated telling that names a place a person lived at twice belongs to one
+    of those stays and NOBODY KNOWS WHICH. Rather than attributing it to the
+    earlier one, it becomes its own undated stay — unplaced, never a
+    container, carrying its own span question (M3) — and one human `same`
+    answer joins it (§5.4). The incremental fill is untouched, because while
+    there is one slot there is nothing to be ambiguous about.
+
+    The practical consequence, and the reason it is worth the extra entry: NO
+    EPISODE ID CHURNS. An undated telling in a group that already held two
+    starts was `unplaced` before this function existed and is `unplaced`
+    after it, discriminated by the same promoted source id.
     """
     rows: dict[str, list[dict]] = {}
     slots: dict[str, tuple[str, str, int]] = {}
@@ -879,16 +887,14 @@ def stay_slots(sources: object) -> dict:
         row = domain_rows[domain]
         key = f"{domain}\x00{entry_key}"
         held = rows.setdefault(key, [])
-        chosen = None
-        for index, folded in enumerate(held):
-            if landmarks_interaction.same_landmark_stay(folded, record, row):
-                chosen = index
-                break
-        if chosen is None:
+        compatible = [index for index, folded in enumerate(held)
+                      if landmarks_interaction.same_landmark_stay(folded, record, row)]
+        if len(compatible) == 1:
+            chosen = compatible[0]
+            held[chosen] = landmarks_interaction.merge_landmark_entry(held[chosen], record)
+        else:
             held.append(landmarks_interaction.merge_landmark_entry(None, record))
             chosen = len(held) - 1
-        else:
-            held[chosen] = landmarks_interaction.merge_landmark_entry(held[chosen], record)
         slots[source_id] = (domain, entry_key, chosen)
     return slots
 

@@ -35,7 +35,6 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import episode_binder as eb  # noqa: E402
 import episode_containers as ec  # noqa: E402
-import episode_fold as ef  # noqa: E402
 import event_identity as ei  # noqa: E402
 import identity_questions as iq  # noqa: E402
 import landmark_projection as lp  # noqa: E402
