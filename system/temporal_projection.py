@@ -215,9 +215,18 @@ IDENTITY_LINK_KEYS = (
 #: ONE fact — both stays are true as far as the substrate knows — and because
 #: its answer is a correction to one of two dates or a retraction of a stay,
 #: which is a different Play from "which of these readings is right".
+#: ``chain_gap`` arrives with E-L2c (§7.2/§8), generalizing the ladder's own
+#: `residence_gap` to three chains (residences, work, schools) and to
+#: before/after gaps, not only interior ones. It is routine incompleteness
+#: like ``place_ambiguous``/``tenure_ambiguous`` — never a disagreement — so
+#: it never reaches Mirror; unlike them it is produced OUTSIDE the fold, by
+#: `landmarks_interaction.chain_gaps` reading landmark entries directly
+#: (the same shape `residence_gap` already has), so this registration is
+#: what lets a `chain_gap` row become a Play target through the ordinary
+#: work-item machinery rather than a second one.
 WORK_ITEM_KINDS = (
     "missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
-    "place_ambiguous", "tenure_ambiguous", "residence_overlap",
+    "place_ambiguous", "tenure_ambiguous", "residence_overlap", "chain_gap",
     "same_event", "possible_overmerge",
 )
 

@@ -249,6 +249,10 @@ SURFACES_BY_KIND = {
     # `contradiction` does — and it stays off the daily queue, because the
     # answer is an edit to a date the person has to be looking at.
     "residence_overlap": ("timeline", "mirror"),
+    # E-L2c §7.2/§8. A chain gap is routine incompleteness like
+    # `place_ambiguous` — nothing disagrees, a stretch simply has no entry
+    # yet — so it goes where the other gaps go and stays off Mirror.
+    "chain_gap": ("timeline", "whisper", "daily_question"),
     # Event identity I3 (design §6.1/§6.3). Both are a person's own words
     # disagreeing with the substrate's grouping guess — the same class of
     # question as `contradiction` — so both reach Mirror and the daily queue,
@@ -279,6 +283,11 @@ WORK_ITEM_VALUE_DEFAULTS = {
     # person said cannot both be true — and a beat cheaper, because the fix is
     # a date they are already looking at rather than a judgment about meaning.
     "residence_overlap": {"person_value": 0.6, "interaction_cost": 0.4, "context_fit": 0.45},
+    # E-L2c: a beat cheaper than an identity choice — the question names its
+    # own stretch (`landmarks_interaction.chain_gaps`' own `label`), and
+    # "what was going on then" fits an ordinary conversation the way "which
+    # of these two times" does not need to.
+    "chain_gap": {"person_value": 0.5, "interaction_cost": 0.25, "context_fit": 0.5},
     # Event identity I3. `same_event` costs a beat more than an ordinary
     # identity question — the person is comparing two whole tellings, not
     # picking a name off a short list — and is worth slightly less than a

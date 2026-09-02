@@ -676,7 +676,7 @@ def precision_so_far(session: object) -> object:
 #: second conversation surface.
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
                    "missing_anchor", "place_ambiguous", "precision_gap",
-                   "residence_overlap", "tenure_ambiguous",
+                   "residence_overlap", "tenure_ambiguous", "chain_gap",
                    "same_event", "possible_overmerge")
 
 #: How many quoted spans a work-item context block carries. The same number as
@@ -758,6 +758,16 @@ WORK_ITEM_PROBES = {
                 "not really a home?",
         "anchored": "Two of the places you've told me about overlap \u2014 "
                     "{label} \u2014 was that before or after {anchor}?",
+    },
+    # E-L2c \u00a77.2/\u00a78. A stretch none of the three chains covers \u2014 the target
+    # already NAMES what it is missing (`label`, from
+    # `landmarks_interaction.chain_gaps`), so the probe just asks it, exactly
+    # as `residence_gap`'s own opener does. Routine incompleteness, not a
+    # disagreement \u2014 it never reaches Mirror (`temporal_timeline.SURFACES_BY_KIND`).
+    "chain_gap": {
+        "step": "chain", "cost": 2,
+        "text": "{label} \u2014 what was going on then?",
+        "anchored": "{label} \u2014 was that before or after {anchor}?",
     },
     # Event identity I3 (design \u00a76.1). The five answers are a CLOSED choice
     # (`identity_questions.RELATION_ANSWERS`), not free text this probe's
@@ -1938,14 +1948,21 @@ def build_timeline_plan(data: dict, *, era: str | None = None,
 #: 2. **residence** — the residence chain inside it. Where somebody lived is
 #:    the strongest ordinary anchor there is and it dates several things at
 #:    once.
-#: 3. **leverage** — the highest-leverage undated moment inside it, which is
+#: 3. **events** — E-L2c (design §7.3): "what major events happened during
+#:    {era}?", asked ONCE per era and re-openable, never a daily send. It is
+#:    gated by `events_asked` (a caller-supplied marker, the same shape
+#:    `precision_so_far` already is for the precision rung below — this
+#:    module decides the NEXT rung given the asked-state; persisting that
+#:    state durably is the caller's job, exactly as it already is for
+#:    precision).
+#: 4. **leverage** — the highest-leverage undated moment inside it, which is
 #:    `timeline.row_leverage`'s own number and not a second one.
-#: 4. **precision** — and only while cheap: era → year → season → month, stop
+#: 5. **precision** — and only while cheap: era → year → season → month, stop
 #:    at the first rung held WITHOUT hedging.
 #:
 #: A `thread` skips rung 1 outright: it has no honest end, and asking for one
 #: is the question §4.5's whole kind distinction exists to stop asking.
-ERA_LADDER = ("bounds", "residence", "leverage", "precision")
+ERA_LADDER = ("bounds", "residence", "events", "leverage", "precision")
 
 #: The precision ladder, ascending, and it stops the moment the person holds a
 #: rung without hedging. "Somewhere in the early nineties" IS an answer.
@@ -1958,6 +1975,12 @@ ERA_PROBES = {
     "residence": {"step": "residence", "cost": 2,
                   "text": "Where were you living during {label}?",
                   "anchored": "During {label}, were you still at {anchor}?"},
+    # E-L2c §7.3. Asked once per era, never a daily send — the ladder's
+    # `events_asked` gate is what makes this rung close after its one ask.
+    "events": {"step": "events", "cost": 3,
+              "text": "What major events happened during {label}?",
+              "anchored": "What major events happened during {label}, "
+                          "around {anchor}?"},
     "leverage": {"step": "parallel_domain", "cost": 4,
                  "text": "What else was going on during {label} — home, work, "
                          "anyone new around?",
@@ -2000,13 +2023,22 @@ def era_target(value: object) -> dict | None:
 
 
 def era_ladder_rung(target: object, *, rows: object = (),
-                    precision_so_far: object = None) -> dict | None:
+                    precision_so_far: object = None,
+                    events_asked: bool = False) -> dict | None:
     """The first OPEN rung of :data:`ERA_LADDER` for this era, or ``None``.
 
     ``rows`` are the era's own unknown rows (`build_timeline_plan(era=…)`'s
     `unknowns`), already leverage-ordered. ``None`` means every rung this
     conversation could climb is held, which is a real answer and the reason
     the stage can close on its own.
+
+    ``events_asked`` gates the E-L2c "events" rung (§7.3): ``False`` (the
+    default — a brand-new era) lets it fire once the residence rung is
+    closed; a caller that has already asked it passes ``True`` and the
+    ladder falls straight through to ``leverage``, exactly the pre-E-L2c
+    sequence. Persisting that marker durably, per era, is the caller's job —
+    the same division of labor this function already has with
+    ``precision_so_far``.
     """
     row = era_target(target)
     if row is None:
@@ -2024,6 +2056,10 @@ def era_ladder_rung(target: object, *, rows: object = (),
             if found is not None:
                 return {"rung": rung, "row": found, **ERA_PROBES[rung]}
             continue
+        if rung == "events":
+            if events_asked:
+                continue
+            return {"rung": rung, **ERA_PROBES[rung]}
         if rung == "leverage":
             found = next((item for item in ordered
                           if str(item.get("kind")) != "place_span"), None)
@@ -2104,12 +2140,13 @@ def _era_event_kinds() -> str:
 
 
 def era_plan(data: dict, *, target: object, rows: object = None,
-             limit: int | None = None) -> dict:
+             limit: int | None = None, events_asked: bool = False) -> dict:
     """One era's Play plan: the era, its open rows, and the rung to ask next.
 
     `build_timeline_plan(era=…)` already scopes and orders the rows; this adds
     the era's own identity and the explicit ladder on top, so the caller does
     not re-derive either. Nothing here reads a vault or calls a model.
+    ``events_asked`` passes straight through to :func:`era_ladder_rung`.
     """
     row = era_target(target)
     if row is None:
@@ -2117,7 +2154,7 @@ def era_plan(data: dict, *, target: object, rows: object = None,
     scoped = (rows if rows is not None
               else build_timeline_plan(data, era=row["era_id"], limit=limit))
     offered = list(scoped.get("offered") or ())
-    rung = era_ladder_rung(row, rows=offered)
+    rung = era_ladder_rung(row, rows=offered, events_asked=events_asked)
     return {
         "target": {"kind": ERA_STAGE, "ref": row["era_id"], "label": row["label"]},
         "era": row,
@@ -2127,6 +2164,62 @@ def era_plan(data: dict, *, target: object, rows: object = None,
         "rung": rung,
         "plan_n": int(scoped.get("plan_n") or 0),
     }
+
+
+# --------------------------------------------------------------------------
+# The chain chooser — ONE definition, many hosts (E-L2c, §7.3, M7, ADR 0021)
+# --------------------------------------------------------------------------
+#
+# "Go Dig's 'next, next, next' is the same walk" as the era Play ladder's
+# residence rung (design M7): both ask "what is the next uncovered stretch
+# in this chain?" over `landmarks_interaction.chain_coverage`. Under ADR
+# 0021 that walk is defined ONCE and bound to both hosts, or it is a build
+# failure — this function IS that one definition. `test_chain_coverage.py`'s
+# `test_two_hosts_calling_the_one_function_pick_the_same_unit` proves two
+# independent callers over one fixture vault pick the same next unit by
+# construction: they call this function and nothing else. Wiring a real
+# host to it — the era ladder's own "residence" rung
+# (which still reads pre-computed `place_span` rows today, unchanged by
+# this release) and a Go Dig page — is E-L4's and E-L6's, named here rather
+# than silently assumed.
+
+
+def next_chain_unit(landmarks: object, *, domain: object = None,
+                    birth_year: object = None, as_of_year: object = None,
+                    closures: object = ()) -> dict | None:
+    """The next uncovered stretch across the chains, oldest first.
+
+    ``domain`` narrows to one chain (`landmarks_interaction.CHAIN_DOMAINS`);
+    ``None`` walks all three and returns the single earliest stretch across
+    them, chain order breaking a tie. A chain the person has told to close
+    for now (`landmarks_interaction.chain_is_closed`) is skipped here —
+    closure suppresses ROUTINE prompting only (§8); the chain's gaps stay
+    computed and drawn everywhere else, because this function is never the
+    only reader of `chain_gaps`.
+
+    ``None`` when every open chain is fully covered (or every chain is
+    closed) — a real answer, not a degraded one.
+    """
+    import landmarks_interaction as li  # noqa: PLC0415
+
+    if domain:
+        wanted = str(domain).strip()
+        domains = (wanted,) if wanted in li.CHAIN_DOMAINS else ()
+    else:
+        domains = li.CHAIN_DOMAINS
+    candidates: list[dict] = []
+    for name in domains:
+        if li.chain_is_closed(name, closures):
+            continue
+        rows = li.chain_gaps(name, landmarks, birth_year=birth_year, as_of_year=as_of_year)
+        if rows:
+            candidates.append(rows[0])
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (
+        int(row["years"][0]), li.CHAIN_DOMAINS.index(row["domain"]), row["key"],
+    ))
+    return candidates[0]
 
 
 #: A moment that belongs to no era stays a row in Unknowns with NO question of

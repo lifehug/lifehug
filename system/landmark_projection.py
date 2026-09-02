@@ -1483,3 +1483,173 @@ def flip_if_needed(vault_root: str | Path, landmarks: object, *, now: object = N
     if not any(entries for entries in (landmarks or {}).values()):
         return None
     return import_legacy_landmarks(vault_root, landmarks, now=now)
+
+
+# --------------------------------------------------------------------------
+# Chain closure (E-L2c; design §8, §12 row 19, §14.3)
+# --------------------------------------------------------------------------
+#
+# "That is all for now" for one chain (residences, work, schools) is a
+# decision RECORD, not a deletion and not a silent flag on the projection.
+# It suppresses ROUTINE prompting only — the daily queue and the era Play
+# chain rung skip a closed chain's gaps — and nothing else:
+# `landmarks_interaction.chain_gaps` keeps computing every unknown stretch
+# and Timeline/Go Dig keep drawing it. A later fact files normally.
+# Reopening is a SUPERSEDING record, never an edit — the same shape every
+# other correction in this package already holds to.
+#
+# `sources/landmarks/closures/` is a subdirectory of `LANDMARK_SOURCES_DIR`,
+# already registered in `vault_contract.json` as a `directory`-kind entry —
+# `vault_paths.classify_contract_path` treats any path under a registered
+# directory as durable data, so no separate contract entry is needed here
+# (verified against `classify_contract_path`'s own `candidate in
+# relative.parents` rule rather than assumed).
+
+CLOSURE_SOURCES_DIR = f"{LANDMARK_SOURCES_DIR}/closures"
+CHAIN_CLOSURE_SOURCE_TYPE = "chain_closure"
+
+
+def chain_closure_digest(*, domain: object, status: object, as_of: object,
+                         supersedes: object = None) -> str:
+    """The sha256 identifying one closure decision.
+
+    A pure function of what the decision ASSERTS — domain, status, the day
+    it was made, and what it supersedes — the same shape
+    `temporal_store.move_digest` gives a drag, so a re-filed identical
+    closure finds its own existing record rather than minting a sibling.
+    """
+    payload = {
+        "domain": collapsed_text(domain),
+        "status": collapsed_text(status),
+        "as_of": collapsed_text(as_of),
+        "supersedes": collapsed_text(supersedes) or None,
+    }
+    return store.payload_sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+
+
+def chain_closure_relative_path(digest: str) -> str:
+    """``sources/landmarks/closures/closure-<24 hex>.md`` — a pure function
+    of the record, exactly like every other immutable source this package
+    writes."""
+    text = collapsed_text(digest).lower()
+    if len(text) < store.FILENAME_DIGEST_LENGTH or not all(
+        c in "0123456789abcdef" for c in text
+    ):
+        raise LandmarkProjectionError(
+            "chain_closure_malformed", f"not a sha256 digest: {digest!r}"
+        )
+    return f"{CLOSURE_SOURCES_DIR}/closure-{text[:store.FILENAME_DIGEST_LENGTH]}.md"
+
+
+def file_chain_closure(
+    vault_root: str | Path,
+    *,
+    domain: object,
+    status: object,
+    as_of: object,
+    reason: object = None,
+    supersedes: object = None,
+    now: object = None,
+) -> dict:
+    """File one closure decision; idempotent on :func:`chain_closure_digest`.
+
+    ``supersedes`` names the ``source_id`` of the closure this one amends or
+    reopens (design §5 rule 10: "a superseding `chain_closure` with `status:
+    open`"). Returns the normalized record (:func:`read_chain_closure`'s
+    shape).
+    """
+    name = collapsed_text(domain)
+    if name not in landmarks_interaction.CHAIN_DOMAINS:
+        raise LandmarkProjectionError(
+            "chain_closure_domain_unknown", f"unknown chain domain: {domain!r}"
+        )
+    verb = collapsed_text(status)
+    if verb not in landmarks_interaction.CHAIN_CLOSURE_STATUSES:
+        raise LandmarkProjectionError(
+            "chain_closure_status_unknown", f"unknown closure status: {status!r}"
+        )
+    as_of_text = collapsed_text(as_of)
+    if not as_of_text:
+        raise LandmarkProjectionError(
+            "chain_closure_as_of_required", "a closure needs an as_of date"
+        )
+    supersedes_id = collapsed_text(supersedes) or None
+    digest = chain_closure_digest(domain=name, status=verb, as_of=as_of_text,
+                                  supersedes=supersedes_id)
+    relative = chain_closure_relative_path(digest)
+    heading = f"{name} chain: {verb.replace('_', ' ')}"
+    prose = collapsed_text(reason) or f"{heading}, as of {as_of_text}."
+    payload = f"# {heading}\n\n{prose}\n"
+    frontmatter: dict = {
+        "title": heading,
+        "type": CHAIN_CLOSURE_SOURCE_TYPE,
+        "source_id": f"chain_closure:closure-{digest[:store.FILENAME_DIGEST_LENGTH]}",
+        "source_medium": "owner",
+        "domain": name,
+        "status": verb,
+        "as_of": as_of_text,
+        "captured_at": normalized_timestamp(now, error=LandmarkProjectionError),
+        "visibility": "owner_only",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": relative,
+        "content_sha256": store.payload_sha256(payload),
+    }
+    if supersedes_id:
+        frontmatter["supersedes"] = supersedes_id
+    store.create_or_keep(
+        vault_root, relative, f"{store.format_frontmatter(frontmatter)}\n\n{payload}"
+    )
+    record = read_chain_closure(vault_root, relative)
+    if record is None:  # pragma: no cover - the create above guarantees it
+        raise LandmarkProjectionError(
+            "chain_closure_malformed", f"{relative} vanished during filing"
+        )
+    return record
+
+
+def read_chain_closure(vault_root: str | Path, relative: str) -> dict | None:
+    """Read one closure source back, or ``None`` when it is not one of ours."""
+    text = store.read_store_text(vault_root, relative)
+    if text is None:
+        return None
+    metadata, _ = store.split_frontmatter(text)
+    if not metadata or metadata.get("type") != CHAIN_CLOSURE_SOURCE_TYPE:
+        return None
+    domain = collapsed_text(metadata.get("domain"))
+    status = collapsed_text(metadata.get("status"))
+    as_of = collapsed_text(metadata.get("as_of"))
+    if not domain or not status or not as_of:
+        return None
+    return {
+        "domain": domain,
+        "status": status,
+        "as_of": as_of,
+        "source_id": collapsed_text(metadata.get("source_id")),
+        "supersedes": collapsed_text(metadata.get("supersedes")) or None,
+        "captured_at": collapsed_text(metadata.get("captured_at")),
+        "source_path": relative,
+    }
+
+
+def load_chain_closures(vault_root: str | Path) -> list[dict]:
+    """Every filed closure decision, in no particular order.
+
+    The caller folds them with :func:`landmarks_interaction.active_chain_closures`
+    to find the active one per domain — this function does no folding of its
+    own, matching :func:`load_landmark_sources`'s own "read raw, fold
+    elsewhere" shape.
+    """
+    root = _root(vault_root)
+    base = store.store_path(root, CLOSURE_SOURCES_DIR)
+    if not base.is_dir():
+        return []
+    rows: list[dict] = []
+    for path in sorted(base.glob("closure-*.md")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        record = read_chain_closure(vault_root, relative)
+        if record is not None:
+            rows.append(record)
+    return rows
