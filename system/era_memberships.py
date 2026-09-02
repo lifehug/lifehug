@@ -84,11 +84,30 @@ DISPLAY_SOURCES_DIR = f"{ERA_SOURCES_DIR}/display"
 ERA_MEMBERSHIP_TYPE = "era_membership"
 ERA_DISPLAY_TYPE = "era_display"
 
+#: E-L2d (timeline-eras design §9.1, §15.1; eras A1 as amended 2026-09-01). A
+#: FRAME's own display decision — "tell My 20s by its eras" — filed beside the
+#: member-level `era_display` decisions because it is the same kind of fact
+#: about the same layer: presentation, superseded rather than edited, never
+#: chronology. It is a separate TYPE and not a flag on `era_display` because
+#: its subject is a frame rather than a member, and a reader that had to
+#: branch on "which id is in `member_node_id`" would be guessing.
+FRAME_DISPLAY_TYPE = "frame_display"
+
 #: Id prefixes. They are digests, not readable strings, because unlike an age
 #: frame's id (which is a deep-link key a person reads) these are never typed
 #: by anybody — they are cited by other records.
 ASSERTION_ID_PREFIX = "assertion"
 DECISION_ID_PREFIX = "display"
+FRAME_DECISION_ID_PREFIX = "frame_display"
+
+#: What a frame's display decision may SAY (design §9.1). ``eras`` replaces
+#: the frame's heading row with its era rows; ``frame`` is the default
+#: presentation and is also what an undo files — a decision, not a deletion.
+FRAME_DISPLAY_MODES = ("eras", "frame")
+
+#: The mode a frame is in when nobody has decided (§9.1: *"a frame without
+#: that decision renders exactly as in Frames"*).
+FRAME_DISPLAY_DEFAULT_MODE = "frame"
 
 #: What an ASSERTION may say. Deliberately narrower than
 #: ``temporal_projection.MEMBERSHIP_RELATIONS``: ``overlaps`` and ``starts_in``
@@ -124,6 +143,16 @@ DISPLAY_IDENTITY_KEYS = (
     "supersedes",
 )
 
+#: FROZEN. What makes two frame display decisions the same decision. Same
+#: shape and same reason as :data:`DISPLAY_IDENTITY_KEYS`: "put it back the
+#: way it was" is a genuinely new decision, so ``supersedes`` is in the set
+#: and an undo is a file of its own rather than a re-file of the first.
+FRAME_DISPLAY_IDENTITY_KEYS = (
+    "frame_id",
+    "mode",
+    "supersedes",
+)
+
 #: Cap on the explanation either record carries in its body — the same bound
 #: :data:`temporal_store.MOVE_REASON_MAX_CHARS` puts on a move's, for the same
 #: reason: an unbounded field in an immutable source is a file nobody reviews.
@@ -138,6 +167,9 @@ ERROR_CODES = (
     "display_member_required",
     "display_container_required",
     "display_target_unsafe",
+    "frame_display_frame_required",
+    "frame_display_mode_unknown",
+    "frame_display_target_unsafe",
 )
 
 
@@ -202,6 +234,21 @@ def display_digest(
     return _digest(payload, DISPLAY_IDENTITY_KEYS)
 
 
+def frame_display_digest(
+    *,
+    frame_id: object,
+    mode: object,
+    supersedes: object = None,
+) -> str:
+    """The sha256 that identifies one frame display decision."""
+    payload = {
+        "frame_id": collapsed_text(frame_id),
+        "mode": collapsed_text(mode).lower(),
+        "supersedes": collapsed_text(supersedes) or None,
+    }
+    return _digest(payload, FRAME_DISPLAY_IDENTITY_KEYS)
+
+
 def _source_key(source_ref: object) -> str:
     """``<source_id>@<revision>`` — a source AT a revision, as one string."""
     row = source_ref
@@ -225,6 +272,13 @@ def membership_relative_path(digest: str) -> str:
 
 def display_relative_path(digest: str) -> str:
     """``sources/eras/display/<24 hex>.md``."""
+    return _relative_path(DISPLAY_SOURCES_DIR, digest)
+
+
+def frame_display_relative_path(digest: str) -> str:
+    """``sources/eras/display/<24 hex>.md`` — the same directory as a member's
+    display decision, because they are the same kind of record about the same
+    layer, and the frontmatter ``type`` is what tells the two readers apart."""
     return _relative_path(DISPLAY_SOURCES_DIR, digest)
 
 
@@ -252,6 +306,14 @@ def assertion_id_of(digest: str) -> str:
 def decision_id_of(digest: str) -> str:
     """``display:<24 hex>`` for a display digest."""
     return f"{DECISION_ID_PREFIX}:{collapsed_text(digest)[:store.FILENAME_DIGEST_LENGTH]}"
+
+
+def frame_decision_id_of(digest: str) -> str:
+    """``frame_display:<24 hex>`` for a frame display digest."""
+    return (
+        f"{FRAME_DECISION_ID_PREFIX}:"
+        f"{collapsed_text(digest)[:store.FILENAME_DIGEST_LENGTH]}"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -598,6 +660,177 @@ def active_era_displays(vault_root: str | Path) -> list[dict]:
 
 
 # --------------------------------------------------------------------------
+# Frame display decisions (E-L2d, design §9.1)
+# --------------------------------------------------------------------------
+
+FRAME_DISPLAY_RULE_TEXT = (
+    "A frame's row is replaced by its era rows only by a per-frame decision "
+    "the person confirmed from a system proposal, reversible, with the frame "
+    "kept on the ruler, as a tag on each era row and as the name of the row "
+    "holding any years no era claims. No coverage arithmetic decides "
+    "presentation: tiling PROPOSES and the person decides. Undo is a "
+    "superseding `frame` decision, never a deletion."
+)
+
+
+def file_frame_display(
+    vault_root: str | Path,
+    *,
+    frame_id: str,
+    mode: str,
+    reason: str | None = None,
+    evidence: object = (),
+    supersedes: str | None = None,
+    frame_label: str | None = None,
+    title: str | None = None,
+    author: str | None = None,
+    occurred_at: object = None,
+) -> dict:
+    """File one frame display decision; return the normalized record.
+
+    :data:`FRAME_DISPLAY_RULE_TEXT`, applied. Presentation and nothing else:
+    the fold reads it for one published string per frame and for no date, no
+    order and no membership, exactly as it reads a member's `era_display`.
+
+    Idempotent by digest — filing the same decision twice writes one file, so
+    a retried tap, a replayed job and an optimistic client all land on the
+    same record — and corrected by SUPERSESSION, never by an edit.
+    """
+    frame = collapsed_text(frame_id)
+    chosen = collapsed_text(mode).lower()
+    if not frame:
+        raise EraReceiptError(
+            "frame_display_frame_required", "a frame display decision names its frame"
+        )
+    if chosen not in FRAME_DISPLAY_MODES:
+        raise EraReceiptError(
+            "frame_display_mode_unknown",
+            f"a frame is told by {' or '.join(FRAME_DISPLAY_MODES)}; got {mode!r}",
+        )
+    previous = (
+        _id_guard(supersedes, FRAME_DECISION_ID_PREFIX, "frame_display_target_unsafe")
+        if supersedes
+        else None
+    )
+
+    digest = frame_display_digest(frame_id=frame, mode=chosen, supersedes=previous)
+    relative = frame_display_relative_path(digest)
+    name = collapsed_text(frame_label) or frame
+    sentence = (
+        f"{name} is told by its eras."
+        if chosen == "eras"
+        else f"{name} is told as one frame."
+    )
+    heading = collapsed_text(title) or sentence
+    prose = collapsed_text(reason)[:REASON_MAX_CHARS] or sentence
+    payload = f"# {heading}\n\n{prose}\n"
+
+    raw_evidence = evidence
+    if isinstance(raw_evidence, (str, dict)) or hasattr(raw_evidence, "to_dict"):
+        raw_evidence = [raw_evidence]
+    spans = [validate_evidence_span(span) for span in (raw_evidence or ())]
+
+    frontmatter = {
+        "title": heading,
+        "type": FRAME_DISPLAY_TYPE,
+        "source_id": f"era:frame-display-{digest[:store.FILENAME_DIGEST_LENGTH]}",
+        "source_medium": collapsed_text(author) or "owner",
+        "decision_id": frame_decision_id_of(digest),
+        "frame_id": frame,
+        "mode": chosen,
+        "evidence": spans,
+        "captured_at": normalized_timestamp(occurred_at, error=EraReceiptError),
+        "visibility": "owner_only",
+        "status": "raw",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": relative,
+        "content_sha256": store.payload_sha256(payload),
+    }
+    if previous:
+        frontmatter["supersedes"] = previous
+
+    store._create_or_keep(  # noqa: SLF001
+        vault_root, relative, f"{store.format_frontmatter(frontmatter)}\n\n{payload}"
+    )
+    row = read_frame_display(vault_root, relative)
+    if row is None:  # pragma: no cover
+        raise EraReceiptError(
+            "source_frontmatter_missing", f"{relative} vanished during filing"
+        )
+    return row
+
+
+def read_frame_display(vault_root: str | Path, relative: str) -> dict | None:
+    """Read one frame display decision back; ``None`` when it is not ours."""
+    metadata = _frontmatter(vault_root, relative, FRAME_DISPLAY_TYPE)
+    if metadata is None:
+        return None
+    frame = collapsed_text(metadata.get("frame_id"))
+    mode = collapsed_text(metadata.get("mode")).lower()
+    if not frame or mode not in FRAME_DISPLAY_MODES:
+        return None
+    own = store.read_source_ref(vault_root, relative)
+    return {
+        "decision_id": collapsed_text(metadata.get("decision_id")),
+        "frame_id": frame,
+        "mode": mode,
+        "supersedes": collapsed_text(metadata.get("supersedes")) or None,
+        "source_ref": own.to_dict() if own is not None else None,
+        "relative_path": relative,
+        "created_at": collapsed_text(metadata.get("captured_at")),
+        "status": "active",
+        "marks": [],
+    }
+
+
+def load_frame_displays(vault_root: str | Path) -> list[dict]:
+    """Every filed frame display decision, with its status resolved.
+
+    Same supersession fold as :func:`load_era_displays`, so an undo leaves
+    both files on disk and exactly one of them active.
+    """
+    return _load(
+        vault_root,
+        directory=DISPLAY_SOURCES_DIR,
+        reader=read_frame_display,
+        id_key="decision_id",
+        scope=MEMBERSHIP_CORRECTION_SCOPE,
+        supersedes_key="supersedes",
+    )
+
+
+def active_frame_displays(vault_root: str | Path) -> list[dict]:
+    """The frame display decisions rendering must honour — status ``active``."""
+    return [row for row in load_frame_displays(vault_root) if row["status"] == "active"]
+
+
+def frame_display_rows_by_frame(decisions: object) -> dict:
+    """``{frame_id: decision row}`` over active decisions — the fold's lookup.
+
+    Later decisions win over earlier ones for one frame if a vault somehow
+    holds two actives (two independent chains, neither superseding the other);
+    ordering is by ``created_at`` then ``decision_id``, so the answer is the
+    same on every rebuild rather than filesystem-ordered.
+    """
+    rows = [row for row in (decisions or ())
+            if isinstance(row, dict) and collapsed_text(row.get("frame_id"))
+            and collapsed_text(row.get("mode")).lower() in FRAME_DISPLAY_MODES]
+    chosen: dict[str, dict] = {}
+    for row in sorted(rows, key=lambda item: (collapsed_text(item.get("created_at")),
+                                              collapsed_text(item.get("decision_id")))):
+        chosen[collapsed_text(row.get("frame_id"))] = dict(row)
+    return chosen
+
+
+def frame_display_modes(decisions: object) -> dict:
+    """``{frame_id: mode}`` — the same fold, reduced to the one string a
+    caller that only renders needs."""
+    return {frame: collapsed_text(row.get("mode")).lower()
+            for frame, row in frame_display_rows_by_frame(decisions).items()}
+
+
+# --------------------------------------------------------------------------
 # Shared reading
 # --------------------------------------------------------------------------
 
@@ -673,6 +906,21 @@ def _load(
 
 __all__ = [
     "ASSERTION_ID_PREFIX",
+    "FRAME_DECISION_ID_PREFIX",
+    "FRAME_DISPLAY_DEFAULT_MODE",
+    "FRAME_DISPLAY_IDENTITY_KEYS",
+    "FRAME_DISPLAY_MODES",
+    "FRAME_DISPLAY_RULE_TEXT",
+    "FRAME_DISPLAY_TYPE",
+    "active_frame_displays",
+    "file_frame_display",
+    "frame_decision_id_of",
+    "frame_display_digest",
+    "frame_display_modes",
+    "frame_display_relative_path",
+    "frame_display_rows_by_frame",
+    "load_frame_displays",
+    "read_frame_display",
     "ASSERTION_RELATIONS",
     "DECISION_ID_PREFIX",
     "DISPLAY_IDENTITY_KEYS",

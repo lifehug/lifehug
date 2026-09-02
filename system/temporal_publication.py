@@ -292,7 +292,7 @@ def _envelope(result: tt.CalculatedTimeline, *, published_at: str, input_digest:
     return {
         "version": PUBLICATION_VERSION,
         "schema_version": SCHEMA_VERSION,
-        "projection_schema_version": tp.PROJECTION_SCHEMA_VERSION,
+        "projection_schema_version": tp.projection_schema_version(),
         "reached_frame_epoch": reached_frame_epoch(result),
         "projection_generation": result.projection_generation,
         "published_at": published_at,
@@ -311,6 +311,13 @@ def projection_payload(result: tt.CalculatedTimeline, *, published_at: str,
                         timings=timings)
     payload.update(body)
     payload["memberships"] = [dict(row) for row in result.memberships]
+    # SCHEMA V3, BEHIND THE FLAG (design §9.6, eras §7.8 step 2). The fold
+    # always derives these; only the WRITER is gated, so rollback is the flag
+    # and nothing else — the v2 file is byte-identical to the one this package
+    # published before E-L2d, which `tests/test_projection_schema_v3.py` pins.
+    if tp.projection_schema_version() >= 3:
+        payload["lanes"] = [dict(row) for row in result.lanes]
+        payload["frame_display"] = [dict(row) for row in result.frame_display]
     payload["counts"] = {
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
@@ -408,6 +415,7 @@ def publish(
     constraints: object = None,
     membership_assertions: object = None,
     display_decisions: object = None,
+    frame_display_decisions: object = None,
     landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
@@ -460,6 +468,11 @@ def publish(
         membership_assertions = era.active_era_memberships(vault_root)
     if display_decisions is None:
         display_decisions = era.active_era_displays(vault_root)
+    if frame_display_decisions is None:
+        # E-L2d: same `None` means "read them" rule — the tap that files
+        # "tell My 20s by its eras" must publish a projection that HAS it,
+        # or the frame row keeps offering the proposal it just answered.
+        frame_display_decisions = era.active_frame_displays(vault_root)
     if landmark_entries is None:
         landmark_entries = lp.load_landmark_sources(vault_root)
     if episode_records is None:
@@ -480,6 +493,7 @@ def publish(
         constraints=constraints,
         membership_assertions=membership_assertions,
         display_decisions=display_decisions,
+        frame_display_decisions=frame_display_decisions,
         landmark_entries=landmark_entries,
         birth_date=birth_date,
         owner_ref=owner_ref,
@@ -623,6 +637,12 @@ EMPTY_VIEW = {
     "work_items": (),
     "memberships": (),
     "chapter_overlays": (),
+    # E-L2d, schema v3 (design §9.6). Served EMPTY on a v1/v2 payload and on a
+    # v3 payload with nothing in them — tolerant by construction, exactly like
+    # the v2 node fields: absent means "this projection carries none", never
+    # "this projection is unreadable".
+    "lanes": (),
+    "frame_display": (),
     "work_item_aliases": {},
     # Event identity I1 (design §3.5). Served, because a host that cannot see
     # them cannot resolve a node id a bind superseded — which is exactly the
@@ -696,6 +716,28 @@ PUBLISHED_KEYS_NOT_SERVED = {
 }
 
 
+#: Schema v3 keys that are DECLARED and deliberately not written yet, with the
+#: contract that owns each. They are named here rather than left unmentioned so
+#: that the next PR adds a writer to a key a reader already knows about — the
+#: same "the key lands first" discipline `memberships` and `chapter_overlays`
+#: followed — and so nobody invents a second spelling for them.
+#:
+#: They are NOT in :data:`EMPTY_VIEW`: a key that is served must be served with
+#: a meaning, and "coverage of a chain nothing computes yet" is an empty tuple
+#: that reads like an answer. The reader lands with the writer, in E-L2c.
+RESERVED_SCHEMA_V3_KEYS = {
+    "coverage": (
+        "`chain_coverage` per chain (design §8, H9) — covered stretches, "
+        "unknown stretches named concretely, and the target window. E-L2c."
+    ),
+    "closures": (
+        "the `chain_closure` decisions (design §8): a chain the person "
+        "declared closed for now, which suppresses routine prompting and "
+        "deletes nothing. E-L2c."
+    ),
+}
+
+
 def view_block_keys() -> tuple[str, ...]:
     """The view's declared key set — what a host pins itself against."""
     return tuple(EMPTY_VIEW)
@@ -740,6 +782,11 @@ def calculated_view(vault_root: str | Path) -> dict:
         "work_items": tuple(payload.get("work_items") or ()),
         "memberships": tuple(payload.get("memberships") or ()),
         "chapter_overlays": tuple(payload.get("chapter_overlays") or ()),
+        # TOLERANT BY CONSTRUCTION, the §7.8 step-1 discipline again: a
+        # projection published at schema 2 carries neither key and reads here
+        # as two empty tuples, which is what it is.
+        "lanes": tuple(payload.get("lanes") or ()),
+        "frame_display": tuple(payload.get("frame_display") or ()),
         "work_item_aliases": dict(payload.get("work_item_aliases") or {}),
         # Tolerant by construction, exactly like the v1/v2 node fields above:
         # a projection published before event identity I1 carries none of
@@ -784,6 +831,10 @@ def verify(
     era_views: object = None,
     roster_snapshot: object = (),
     constraints: object = None,
+    membership_assertions: object = None,
+    display_decisions: object = None,
+    frame_display_decisions: object = None,
+    landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
     now: object = None,
@@ -818,6 +869,20 @@ def verify(
         era_views = ei.era_views(vault_root)
     if episode_records is None:
         episode_records = ef.load_episode_records(vault_root)
+    # THE ORACLE READS EVERYTHING THE PUBLISHER READS (E-L2d). Four inputs
+    # `publish` loads by the same `None` means "read them" rule were missing
+    # here, so on any vault holding a membership receipt, a display decision
+    # or a landmark entry the oracle re-derived a DIFFERENT projection and
+    # reported the publication broken. A rebuild oracle that does not fold the
+    # same inputs is not an oracle; §12 row 20 is exactly this comparison.
+    if membership_assertions is None:
+        membership_assertions = era.active_era_memberships(vault_root)
+    if display_decisions is None:
+        display_decisions = era.active_era_displays(vault_root)
+    if frame_display_decisions is None:
+        frame_display_decisions = era.active_frame_displays(vault_root)
+    if landmark_entries is None:
+        landmark_entries = lp.load_landmark_sources(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
@@ -826,6 +891,10 @@ def verify(
         era_views=era_views,
         roster_snapshot=roster_snapshot,
         constraints=constraints,
+        membership_assertions=membership_assertions,
+        display_decisions=display_decisions,
+        frame_display_decisions=frame_display_decisions,
+        landmark_entries=landmark_entries,
         birth_date=birth_date,
         owner_ref=owner_ref,
         projection_generation=_generation_of(published),
