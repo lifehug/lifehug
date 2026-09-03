@@ -213,6 +213,11 @@ TEMPORAL_RESOLUTIONS_DIR = _data("temporal_resolutions")
 # (system/temporal_publication.py owns every write).
 TEMPORAL_CALCULATED_TIMELINE_FILE = _data("temporal_calculated_timeline")
 TEMPORAL_WORK_ITEMS_FILE = _data("temporal_work_items")
+# Cut 4c: one realized-gain receipt per published generation — the
+# before/after diff of THAT publish, kept as an audit trail rather than
+# overwritten the way the two files above are (system/temporal_receipts.py
+# owns every write, from inside `temporal_publication.publish`).
+TEMPORAL_PUBLICATION_RECEIPTS_DIR = _data("temporal_publication_receipts")
 NEIGHBORHOODS_FILE = _data("neighborhoods")
 FOCUS_RECS_FILE = _data("focus_recommendations")
 LEGACY_FOCUS_RECS_FILE = _data("legacy_focus_recommendations")

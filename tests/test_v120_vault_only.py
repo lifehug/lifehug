@@ -97,6 +97,9 @@ EXPECTED_DATA_PATHS = {
     "classify_cursor",
     "temporal_claims_state",
     "temporal_receipts",
+    # Cut 4c: one realized-gain receipt per published generation, a
+    # distinct directory from the extraction-receipt store above.
+    "temporal_publication_receipts",
     "timeline_placements",
     "wiki",
     "wiki_synthesis_cache",
@@ -213,12 +216,13 @@ class VaultContractTests(unittest.TestCase):
         # Moves only when the CONTRACT moves, which is why it lags the
         # framework version: v231 published the projection, E3 (eras) added
         # `sources/eras` and `state/temporal_claims/resolutions`, O-C
-        # (stale-first classification) added `state/classify_cursor.json`, and
+        # (stale-first classification) added `state/classify_cursor.json`,
         # v260 (Timeline Fix 01) took the `landmarks` entry's `embedded_path`
-        # away — one store per vault, `vault-contract-v13`.
+        # away, and v285 (Cut 4c) added `state/temporal_claims/
+        # publication_receipts` — one store per vault, `vault-contract-v14`.
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 260)
+        self.assertEqual(exported["identity"]["framework_version"], 285)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

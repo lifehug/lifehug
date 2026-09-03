@@ -85,6 +85,10 @@ READ_ONLY_COMMANDS = frozenset({
     "landmarks-evals",
     # E3 (eras §4.1): the era list is a pure read of sources/eras/.
     "era-list",
+    # Cut 4c: the realized-gain receipt is a pure read of one published
+    # generation's file — `temporal_receipts.write_receipt` is the only
+    # writer, and it runs inside `temporal_publication.publish`, never here.
+    "timeline-receipt",
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
@@ -1334,6 +1338,38 @@ def cmd_split_episode(args: argparse.Namespace) -> int:
         print(f"  {route['reference_kind']} {route['reference_id']} -> {route['destination']}")
     for row in result["routing"]["mirror_judgments"]:
         print(f"  ⚠ mirror judgment: {row['reference_kind']} {row['reference_id']}")
+    return 0
+
+
+def cmd_timeline_receipt(args: argparse.Namespace) -> int:
+    """`timeline-receipt` — the realized-gain receipt for one published
+    generation (Cut 4c), as JSON.
+
+    Pure read. `--generation N` prints that generation's receipt; omitted,
+    prints the latest one this vault has published. The one writer is
+    `temporal_receipts.write_receipt`, called from inside `temporal_
+    publication.publish` — this command never writes.
+    """
+    import json  # noqa: PLC0415
+
+    import temporal_receipts as trcpt  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    generation = getattr(args, "generation", None)
+    if generation is None:
+        generation = trcpt.latest_receipt_generation(REPO_DIR)
+        if generation is None:
+            print("No realized-gain receipt has been published yet.", file=sys.stderr)
+            return 1
+    try:
+        receipt = trcpt.read_receipt(REPO_DIR, generation)
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if receipt is None:
+        print(f"No receipt for generation {generation}.", file=sys.stderr)
+        return 1
+    print(json.dumps(receipt, indent=2, sort_keys=True, default=str))
     return 0
 
 
@@ -3415,6 +3451,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="File a superseding `frame` decision for this frame")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_frame_display)
+
+    p = sub.add_parser(
+        "timeline-receipt",
+        help="Print the realized-gain receipt for a published generation (JSON; Cut 4c)",
+    )
+    p.add_argument("--generation", type=int, default=None,
+                   help="Which generation's receipt to print (default: the latest)")
+    p.set_defaults(func=cmd_timeline_receipt)
 
     p = sub.add_parser("era-list", help="List this vault's eras and their labels")
     p.add_argument("--json", action="store_true")

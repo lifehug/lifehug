@@ -2,9 +2,9 @@
   "contract_version": 1,
   "identity": {
     "framework": "lifehug/lifehug",
-    "framework_version": 260,
-    "revision": "vault-contract-v13",
-    "content_digest": "sha256:3f54925bac5c06f7b08a62ce15c7b9e6ce978e65c6963feb9885eed4194078f4"
+    "framework_version": 285,
+    "revision": "vault-contract-v14",
+    "content_digest": "sha256:3388a23a053316b35d170dc6d1af23352822b131b951ac1096faf40d7c81ef31"
   },
   "special_file_policy": {
     "regular_files": "allow",
@@ -836,6 +836,19 @@
       "tracked": true,
       "schema": {
         "format": "markdown_family",
+        "version_field": "schema_version",
+        "supported": [
+          1
+        ]
+      }
+    },
+    "temporal_publication_receipts": {
+      "path": "state/temporal_claims/publication_receipts",
+      "kind": "directory",
+      "required": false,
+      "tracked": true,
+      "schema": {
+        "format": "json_family",
         "version_field": "schema_version",
         "supported": [
           1

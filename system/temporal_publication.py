@@ -65,6 +65,14 @@ them and this module passes whatever its caller supplies.
 
 Controlling contract: the audited final timeline build plan §3, §7, §7.1, §10
 ("Rebuild, parity, and operations"), wave D.
+
+Cut 4c (timeline-unification decision record §4.5, §7 Cut 4) adds one more
+file to what a real publish writes: `temporal_receipts.write_receipt` files
+the realized-gain receipt — the before/after diff of this publish against
+whatever was published previously — after the projection pair lands. It is
+not part of :data:`PUBLICATION_ORDER`'s own atomicity guarantee (see
+:func:`publish`); a reader that only needs the truth is unaffected either
+way.
 """
 
 from __future__ import annotations
@@ -86,6 +94,7 @@ import event_binding as eb  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_placement as tpl  # noqa: E402
 import temporal_projection as tp  # noqa: E402
+import temporal_receipts as trcpt  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 from temporal_claims import (  # noqa: E402
@@ -442,12 +451,23 @@ def publish(
     birth_date: object = None,
     owner_ref: object = None,
     now: object = None,
+    correction_ref: object = None,
 ) -> dict:
     """Derive the whole calculated timeline and publish it. THE ONE WRITER.
 
     Returns a summary — generation, counts, the files it wrote, and the §7.1
     phase timings — which is what a compile log prints (see
     :func:`publication_report_line`) rather than a caller re-measuring.
+
+    Cut 4c: every publish that actually writes a new generation also writes
+    that generation's realized-gain receipt (`temporal_receipts.write_
+    receipt`) — the before/after diff of intervals against whatever was
+    published previously (`None` on a vault's first publish). ``correction_
+    ref`` is optional and does nothing on its own: a caller that just filed
+    a correction (a drag, an undo) and is republishing in the same act may
+    pass that correction's own receipt id here, and it rides into the
+    written receipt as ``correction_ref`` — omitted, the receipt carries no
+    such key, and every existing caller's behaviour is unchanged.
 
     ``active_index`` defaults to a fresh fold of this vault's receipts and
     corrections, which is also what re-publishes the index itself; pass one in
@@ -465,6 +485,11 @@ def publish(
     """
     started = time.perf_counter()
     timings: dict[str, float] = {}
+
+    # Cut 4c: read BEFORE anything is written — the receipt's "before" half
+    # is what a reader could see up to this instant, never a value this same
+    # call is about to overwrite.
+    previous_projection = read_projection(vault_root)
 
     mark = time.perf_counter()
     index = (
@@ -559,9 +584,22 @@ def publish(
     timings["publish"] = time.perf_counter() - mark
     timings["publication_total"] = time.perf_counter() - started
 
+    # Cut 4c: the receipt lands AFTER the projection pair, through its own
+    # writer (`temporal_receipts.write_receipt`) rather than `_write` — a
+    # third file, deliberately not part of :data:`PUBLICATION_ORDER`'s own
+    # atomicity guarantee, so a crash between the pair and the receipt
+    # leaves the truth current and only the audit trail one generation
+    # behind, never the other way round.
+    receipt = trcpt.diff_projections(previous_projection, payloads[PROJECTION_FILE])
+    if correction_ref is not None:
+        text_ref = str(correction_ref).strip()
+        if text_ref:
+            receipt = {**receipt, "correction_ref": text_ref}
+    trcpt.write_receipt(vault_root, receipt)
+
     return _summary(result, generation=generation, unchanged=False,
                     published_at=published_at, digest=digest, timings=timings,
-                    paths=written)
+                    paths=written, receipt=receipt)
 
 
 def _published_at_of(vault_root: str | Path) -> str | None:
@@ -601,7 +639,8 @@ def _unchanged_generation(vault_root: str | Path, payloads: dict) -> int | None:
 
 
 def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
-             published_at: str, digest: str, timings: dict, paths: list) -> dict:
+             published_at: str, digest: str, timings: dict, paths: list,
+             receipt: dict | None = None) -> dict:
     return {
         "generation": generation,
         "unchanged": unchanged,
@@ -609,6 +648,10 @@ def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
         "input_digest": digest,
         "files": list(PUBLICATION_ORDER),
         "paths": list(paths),
+        # Cut 4c: `None` on the unchanged no-op path (nothing new to diff —
+        # the standing generation's receipt from when IT was published still
+        # stands), the fresh receipt otherwise.
+        "receipt": receipt,
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
         "work_items": len(result.work_items),
