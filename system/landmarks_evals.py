@@ -25,8 +25,9 @@ REQUIRED_GOLDEN_IDS = frozenset({
     "landmarks-losses-offered-never-pressed",
     "landmarks-one-domain-per-turn",
     "landmarks-never-invents-a-domain",
-    # v198 (go-deep.md §4.3): reporting the derivation is right;
-    # naming a date and inviting agreement is the banned move.
+    # v198 (ADR 0025's suggestive-interviewing hazard): reporting the
+    # derivation is right; naming a date and inviting agreement is the
+    # banned move.
     "landmarks-reports-the-arithmetic-never-asks-agreement",
     # v202 (family-landmark): the ninth domain, and the two "unknowns are
     # concrete" rulings that came with it.
@@ -65,8 +66,9 @@ _ALWAYS_APPLICABLE_LINTS = frozenset({
     "accepts_vague",
     "no_form_voice",
     "one_domain_per_turn",
-    # v198 (go-deep.md §4.3): unconditional. There is no domain, not even
-    # `birth`, where naming a date and inviting agreement is correct.
+    # v198 (ADR 0025's suggestive-interviewing hazard): unconditional. There
+    # is no domain, not even `birth`, where naming a date and inviting
+    # agreement is correct.
     "never_proposes_a_date",
 })
 

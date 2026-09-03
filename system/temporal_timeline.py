@@ -1224,7 +1224,7 @@ def compose_place_ambiguity_question(places, spans, *, preposition: str = "in") 
     two or more DIFFERENT places each with a stretch of their own. Both read
     as a choice between things already on the table, which is the same move a
     contradiction's probe makes and the opposite of naming one and inviting a
-    yes (`go-deep.md` §4.3).
+    yes (ADR 0025's suggestive-interviewing hazard).
 
     ``preposition`` is E-L2a's one concession to English: a person is *in*
     Cedarport and *at* Tidewheel Works, and the caller knows which because the

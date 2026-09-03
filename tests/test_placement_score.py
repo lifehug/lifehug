@@ -142,7 +142,7 @@ class UnknownYearsTests(unittest.TestCase):
 
 
 class UnknownWidthFloorTests(unittest.TestCase):
-    """§A — the 1.0 no-interval floor STAYS, so go-deep.md §8.2's degeneration
+    """§A — the 1.0 no-interval floor STAYS, so ADR 0026's degeneration
     property still holds on a birthless vault."""
 
     def test_a_row_with_no_interval_still_weighs_one(self):
@@ -593,7 +593,6 @@ class NoBirthNoBlockTests(VaultFixture):
         data = self.data(landmarks=False)
         self.assertTrue(data["unknowns"])
         self.assertTrue(data["periods"])
-        self.assertIn("reading_room", data)
 
     def test_a_broken_landmark_store_leaves_the_timeline_standing(self):
         broken = self.root / "state" / "broken.json"
@@ -608,7 +607,6 @@ class NoBirthNoBlockTests(VaultFixture):
             data = self.data()
         self.assertNotIn("placement", data)
         self.assertTrue(data["keystones"])
-        self.assertIn("reading_room", data)
 
     def test_the_block_is_present_when_the_birthday_is(self):
         self.assertIn("placement", self.data())

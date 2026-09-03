@@ -1,8 +1,8 @@
 # Contract — the Family landmark: siblings as anchors, elders as witnesses (v202)
 
 **Research:** `system/research/landmarks.md` (v198 → amended here, §2.9 "The
-family constellation"), `system/research/go-deep.md` §7 (the *witness*
-vocabulary).
+family constellation"); the *witness* vocabulary this builds on shipped as
+ADR 0025 (retired 2026-09-03, dated note).
 **Builds on:** `docs/pr-specs/landmarks.md` (v199, the eight-domain set),
 `docs/pr-specs/place-no-stories-arcs.md` (v200), ADR 0013 (entity owner
 verdicts and the two identity facts), ADR 0024 (chronology with basis).

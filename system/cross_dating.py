@@ -18,7 +18,7 @@ un-derives what it used to support. There is nothing to migrate and nothing to
 repair.
 
 **The ladder, strongest first** (``system/research/chronology.md`` §1 and §6;
-``system/research/go-deep.md`` §7):
+ADR 0026):
 
 1. **Definitional joins** — the moment *is* a landmark fact. A birth moment
    IS the birth landmark; a move IS a residence-span boundary; a graduation IS
@@ -1884,8 +1884,8 @@ def derivable_moments(*, event_lineup: object, unplaced_events: object = (),
 # does not have to wait for it.
 # ---------------------------------------------------------------------------
 
-#: Small counts read as words, exactly as the Reading Room has always said
-#: them. Beyond twelve the digits are clearer than the word.
+#: Small counts read as words. Beyond twelve the digits are clearer than the
+#: word.
 NUMBER_WORDS_SPOKEN = ("no", "one", "two", "three", "four", "five", "six",
                        "seven", "eight", "nine", "ten", "eleven", "twelve")
 
@@ -1901,8 +1901,8 @@ def spoken_count(count: object) -> str:
 
 def moment_clause(count: object) -> str:
     """``"dates nine moments"`` — the ONE clause every gain sentence is built
-    from, so `reading_room.placement_gain_sentence` and the landmark/timeline
-    filing beat can never drift into two ways of saying the same true thing."""
+    from, so the landmark and timeline filing beats can never drift into two
+    ways of saying the same true thing."""
     try:
         value = max(int(count), 0)
     except (TypeError, ValueError):
@@ -1937,8 +1937,7 @@ def gain_sentence(moments: object = 0, bands: object = ()) -> str:
 
     The whole sentence, or ``""`` when an answer placed nothing beyond itself —
     and ``""`` is the right answer far more often than not. A count of what
-    REMAINS is never said here (`reading_room.placement_gain_sentence`'s own
-    rule, and the owner's).
+    REMAINS is never said here (the owner's rule).
     """
     try:
         count = max(int(moments or 0), 0)

@@ -135,9 +135,9 @@ class RenderingTests(unittest.TestCase):
         self.assertNotIn("someone who was there", line)
 
     def test_the_line_never_proposes_a_date(self):
-        """go-deep.md §4.3 / Lindsay et al. 2004 — ONE definition, now three
-        callers. Reporting the span they gave us is right; asking for a yes
-        is the banned move."""
+        """ADR 0025's suggestive-interviewing hazard / Lindsay et al. 2004 —
+        ONE definition, now three callers. Reporting the span they gave us is
+        right; asking for a yes is the banned move."""
         self.assertIsNone(ti.proposes_a_date(li.render_place_no_stories(self._intent())))
 
     def test_the_line_never_demands_a_year(self):

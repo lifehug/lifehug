@@ -556,7 +556,7 @@ class KeystoneStarTests(unittest.TestCase):
 
 
 class GreedyKeystoneTests(unittest.TestCase):
-    """go-deep.md §8.2/§8.3: the plan is greedy over the RESIDUAL graph.
+    """ADR 0026: the plan is greedy over the RESIDUAL graph.
 
     The defect this replaces, reproduced from the real-vault analysis: two
     anchors where one's resolve set is a strict subset of the other's. Ranked
@@ -632,7 +632,8 @@ class GreedyKeystoneTests(unittest.TestCase):
 
 
 class NeverProposesADateTests(unittest.TestCase):
-    """go-deep.md §4.3 (Lindsay et al. 2004): one definition, two lanes.
+    """ADR 0025's suggestive-interviewing hazard (Lindsay et al. 2004): one
+    definition, two lanes.
 
     True photographs plus suggestive interviewing produced false memories in
     about two thirds of participants. A dating probe backed by the person's
@@ -706,7 +707,7 @@ class NeverProposesADateTests(unittest.TestCase):
 
 
 class WitnessTests(unittest.TestCase):
-    """go-deep.md §7: a witness is someone living who was there.
+    """ADR 0026: a witness is someone living who was there.
 
     No new state — the residence ladder's own `household` rung already holds
     them, and a place with no stories carries them because the people who were

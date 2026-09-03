@@ -5,6 +5,15 @@
 Date: 2026-08-24
 Status: proposed
 
+> **Retired 2026-09-03 (owner):** removed with Go Dig and Go Deep; Add
+> Landmark replaces this line of work. See the timeline-unification
+> decision record, ruling R4a. The mechanisms this ADR describes that
+> other things still depend on — cross-dating (ADR 0026), the placement
+> score (ADR 0027), and the landmark recorder (ADR 0028) — are unaffected
+> and stay. The Reading Room interaction, `dig_plan`, and
+> `system/research/go-deep.md` are deleted (timeline-unification 2c);
+> this document is kept for provenance and is not edited below.
+
 ## Context
 
 By v202 the timeline could rank *which* unknown was worth the most and had

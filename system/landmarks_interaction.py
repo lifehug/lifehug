@@ -12,9 +12,8 @@ lints are all deterministic functions over data the caller supplies, exactly
 as `timeline_interaction` and `arc_walk` are.
 
 The mechanic these answers enable has a name: **cross-dating** — dating an
-undated sequence by matching it against an already-dated one
-(`system/research/go-deep.md` §7's terminology table). The landmarks are the
-dated sequence; every other memory is the undated one.
+undated sequence by matching it against an already-dated one (ADR 0026). The
+landmarks are the dated sequence; every other memory is the undated one.
 
 **Naming** (owner-set, 2026-08-23): **Landmarks** is the product word AND the
 package/module/CLI name, so there is one name from the surface down to this
@@ -1166,9 +1165,10 @@ LANDMARK_LINT_CLASSES = (
     "landmark_gates.no_form_voice",
     "landmark_gates.one_domain_per_turn",
     "landmark_gates.never_presses_sensitive",
-    # v198 (go-deep.md §4.3): a session never names a date and asks for
-    # agreement. The DEFINITION is `timeline_interaction.proposes_a_date` —
-    # one definition, two callers, per the recurring-defect doctrine.
+    # v198 (ADR 0025's suggestive-interviewing hazard): a session never
+    # names a date and asks for agreement. The DEFINITION is
+    # `timeline_interaction.proposes_a_date` — one definition, two callers,
+    # per the recurring-defect doctrine.
     "landmark_gates.never_proposes_a_date",
     # v212 (lifehug#221): recording is the turn's FIRST job. A turn that
     # replies warmly to a real answer and emits no `landmark` has lost the
@@ -1239,11 +1239,10 @@ _PRESSURE_RES = (
 def pressure(text: object) -> object:
     """The first span where a reply refuses a skip or leans on the person.
 
-    ONE definition, TWO callers (recurring-defect doctrine): the landmarks
-    lane runs it on a sensitive domain, and the Reading Room runs it on every
-    turn, because "are you sure?" over somebody's photo album is the same
-    defect as "are you sure?" over a loss. `reading_room.lint_reading_room_reply`
-    is the second caller.
+    The landmarks lane runs it on a sensitive domain: "are you sure?" over a
+    loss is the pressure defect this catches. (Retired 2026-09-03: the
+    Reading Room, ADR 0025, was the other caller — it ran this on every turn
+    because the same defect applied to a photo album — and is removed.)
     """
     body = text if isinstance(text, str) else ""
     for pattern in _PRESSURE_RES:
@@ -1784,7 +1783,8 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
                 "span": [match.start(), match.end()],
             })
 
-    # go-deep.md §4.3: the shared rule, from the shared definition.
+    # The shared rule, from the shared definition (ADR 0025's suggestive-
+    # interviewing hazard: Lindsay et al. 2004).
     import timeline_interaction as _ti  # noqa: PLC0415
 
     proposal = _ti.proposes_a_date(body)
@@ -1792,8 +1792,7 @@ def lint_landmark_reply(text: object, *, stage: str, domain: object = None,
         findings.append({
             "lint": "landmark_gates.never_proposes_a_date",
             "detail": "never name a date and ask them to agree — ask, bound, "
-                      "and do the arithmetic (go-deep.md §4.3, Lindsay et al. "
-                      "2004)",
+                      "and do the arithmetic (Lindsay et al. 2004)",
             "span": [proposal.start(), proposal.end()],
         })
 
@@ -2168,12 +2167,12 @@ def landmark_invocation(record: object) -> list[str] | None:
     it: `timeline_interaction.place_invocation` — the `PlaceInvocation(argv,
     stdin_text)` case — puts ``--basis`` and its anchors on ARGV and reserves
     ``stdin_text`` for the free prose `timeline-place` reads off stdin.
-    `landmark-record` reads nothing on stdin (`reading_room.filing_invocations`
-    says so and wraps this argv as ``PlaceInvocation(argv, "")``), and this
-    function's bare-argv return is JSON-serialized into the ``invocations``
-    field of two CLI contracts hosts already consume (`landmark_recorder`,
-    `general_listener`). A stdin payload would change that returned shape in
-    three modules and split "how a landmark files" into two recipes.
+    `landmark-record` reads nothing on stdin — every caller wraps this argv as
+    ``PlaceInvocation(argv, "")`` — and this function's bare-argv return is
+    JSON-serialized into the ``invocations`` field of two CLI contracts hosts
+    already consume (`landmark_recorder`, `general_listener`). A stdin
+    payload would change that returned shape in three modules and split "how
+    a landmark files" into two recipes.
     """
     if not isinstance(record, dict) or record.get("skipped"):
         return None
@@ -2266,7 +2265,7 @@ def anchors_from_landmarks(landmarks: object) -> dict:
     question set is **Landmarks**; `anchor` already names the derived index in
     code (`anchor_index`, `basis: "anchor"`, `from_anchor`). This function is
     where one becomes the other, and **cross-dating** is the name of what
-    happens next (`go-deep.md` §7).
+    happens next (ADR 0026).
     """
     filed = landmarks if isinstance(landmarks, dict) else {}
     index: dict[str, dict] = {}
@@ -2650,7 +2649,7 @@ WITNESS_CAN_SUPPLY = ("residences", "schools")
 def witness_candidates(landmarks: object) -> tuple[dict, ...]:
     """Living family members, as witnesses for the ask-the-living hooks.
 
-    A **witness** is a living person who was there (`go-deep.md` §7). v200's
+    A **witness** is a living person who was there (ADR 0026). v200's
     `places_without_stories` sources witnesses from the residence `household`
     rung — a narrower and better claim about ONE house, deliberately left
     alone. This is the other source: the family constellation, which is where
@@ -2775,7 +2774,8 @@ def residence_gaps(landmarks: object) -> tuple[dict, ...]:
     * **A hole needs a whole year in it** — ``end + 1 >= start`` is not a hole,
       so abutting, overlapping and consecutive-year spans mint nothing.
     * The years are **REPORTED** — the interval the person's own spans imply —
-      never a date named and offered for agreement (`go-deep.md` §4.3).
+      never a date named and offered for agreement (ADR 0025's
+      suggestive-interviewing hazard).
 
     This is NOT `timeline.era_gap`: that is a hole between two dated wiki
     PERIODS. Both can surface for the same years; they are different questions
@@ -3097,8 +3097,8 @@ def places_without_stories(landmarks: object, event_places: object = ()) -> tupl
     them exactly like every other unknown.
 
     ``witnesses`` carries the people who were there — a witness being a living
-    person who was there (`system/research/go-deep.md` §7; the term is law's
-    and oral history's, "warm, honest, and free of collisions"). It comes from
+    person who was there (the term is law's and oral history's, "warm,
+    honest, and free of collisions"). It comes from
     the residence ladder's own `household` rung, so no new state exists: the
     person already told us who was in the house, and those are exactly the
     people who can answer about it when they cannot.
@@ -3110,7 +3110,8 @@ def places_without_stories(landmarks: object, event_places: object = ()) -> tupl
       it (`chronology.display_date`, basis clause suppressed). It is what makes
       the arc-card line concrete ("they lived in Costa Mesa, 1990–1993"),
       and it is a REPORT of what they said, never a date proposed for
-      agreement (`timeline_interaction.proposes_a_date`, go-deep.md §4.3).
+      agreement (`timeline_interaction.proposes_a_date`, ADR 0025's
+      suggestive-interviewing hazard).
     * ``landmark`` — ``{"domain": "residences", "label": ...}``, the reference
       back to the landmark entry this gap came from. `save_landmark` merges by
       label, so (domain, label) IS a landmark's identity.

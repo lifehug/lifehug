@@ -251,7 +251,7 @@ the argv; the host runs it.
 
 ---
 
-## K. Folded in from `system/research/go-deep.md` (v197)
+## K. Folded in from the sibling corpus review (v197; retired 2026-09-03 — the source doc shipped as ADR 0025/0026's groundwork, see ADR 0025's dated note)
 
 Three findings from the sibling corpus land here rather than waiting for the
 dig session, because they change code this contract already touches.

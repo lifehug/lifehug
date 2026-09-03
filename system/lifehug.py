@@ -85,10 +85,6 @@ READ_ONLY_COMMANDS = frozenset({
     "landmarks-evals",
     # E3 (eras §4.1): the era list is a pure read of sources/eras/.
     "era-list",
-    # the Reading Room (v204, ADR 0025): both are pure reads — the seat gate
-    # scores committed goldens, and the plan recomputes the dig plan and the
-    # per-witness lists from the vault and prints them.
-    "reading-room-evals", "reading-room-plan",
     "book-chapter", "book-status",
     "candidates-list", "candidates-review", "candidates-stats", "chapters-exercise",
     "connector-audit", "connector-report",
@@ -2067,20 +2063,6 @@ def cmd_landmarks_evals(args: argparse.Namespace) -> int:
     return run_python("landmarks_evals.py", flags)
 
 
-def cmd_reading_room_evals(args: argparse.Namespace) -> int:
-    flags = ["--json"] if args.json else []
-    if args.live:
-        flags.append("--live")
-    return run_python("reading_room_evals.py", flags)
-
-
-def cmd_reading_room_plan(args: argparse.Namespace) -> int:
-    flags = ["--json"] if args.json else []
-    if args.k:
-        flags += ["--k", str(args.k)]
-    return run_python("reading_room.py", flags)
-
-
 def cmd_landmark_record(args: argparse.Namespace) -> int:
     """File one landmark answer (v197). The only writer for the landmark set."""
     import chronology as _chrono  # noqa: PLC0415
@@ -3721,18 +3703,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_landmarks_evals)
-
-    p = sub.add_parser("reading-room-evals", help="Run Reading Room Interaction evals")
-    p.add_argument("--live", action="store_true")
-    p.add_argument("--json", action="store_true")
-    p.set_defaults(func=cmd_reading_room_evals)
-
-    p = sub.add_parser("reading-room-plan",
-                       help="Print the Reading Room plan and the dig lists")
-    p.add_argument("--json", action="store_true")
-    p.add_argument("--k", type=int, default=0,
-                   help="how many asks (default: the interaction's own k)")
-    p.set_defaults(func=cmd_reading_room_plan)
 
     p = sub.add_parser("landmark-record",
                        help="File one landmark answer (the always-present dating set)")

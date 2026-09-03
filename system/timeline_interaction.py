@@ -1019,7 +1019,8 @@ def work_item_probe(target: object, *, anchors: object = ()) -> dict:
     The probe NAMES what it is about, like every rung of the ladder does, and
     it never proposes a date to be agreed with: a contradiction puts BOTH
     readings in the same sentence and asks which, which is the opposite move
-    from naming one and inviting a yes (`go-deep.md` §4.3).
+    from naming one and inviting a yes (ADR 0025's suggestive-interviewing
+    hazard).
     """
     row = work_item_target(target)
     if row is None:
@@ -1678,10 +1679,11 @@ TIMELINE_LINT_CLASSES = (
     # is the one rule a single reply cannot see on its own — the caller
     # counts, exactly as it counts `no_new_bound_streak`.
     "one_per_conversation",
-    # v198 (go-deep.md §4.3, Lindsay et al. 2004): a session NEVER proposes a
-    # date and asks for agreement. True photographs plus suggestive
-    # interviewing produced false memories in 65-66% of participants — "the
-    # highest rate in any previously published study" — and a dating probe
+    # v198 (ADR 0025's suggestive-interviewing hazard, Lindsay et al. 2004):
+    # a session NEVER proposes a date and asks for agreement. True photographs
+    # plus suggestive interviewing produced false memories in 65-66% of
+    # participants — "the highest rate in any previously published study" —
+    # and a dating probe
     # backed by the person's own evidence is precisely that configuration. The
     # system elicits readings and does the arithmetic; the person supplies
     # evidence, never confirmations. Shared verbatim with the landmarks lane
@@ -1711,8 +1713,8 @@ def proposes_a_date(text: object) -> object:
     """The first span where a reply names a date and invites agreement.
 
     One definition, two callers: the timeline lane and the landmarks lane both
-    run it, because "was it 1984?" is the same defect in both
-    (`system/research/go-deep.md` §4.3).
+    run it, because "was it 1984?" is the same defect in both (ADR 0025's
+    suggestive-interviewing hazard).
     """
     body = text if isinstance(text, str) else ""
     for pattern in PROPOSES_A_DATE_RES:
@@ -1856,8 +1858,7 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
         findings.append({
             "lint": "timeline_gates.never_proposes_a_date",
             "detail": "never name a date and ask them to agree — elicit the "
-                      "evidence and do the arithmetic (go-deep.md §4.3, "
-                      "Lindsay et al. 2004)",
+                      "evidence and do the arithmetic (Lindsay et al. 2004)",
             "span": [proposal.start(), proposal.end()],
         })
 

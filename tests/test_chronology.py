@@ -44,8 +44,9 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(ch.BASES, ("stated", "age", "anchor", "order",
                                     "public_event", "connector",
                                     "document", "photo", "relative"))
-        # v204 (the Reading Room): the three evidence bases are the tail of
-        # BASES and their own tuple, and every one of them is weighted.
+        # v204 (ADR 0025, retired 2026-09-03): the three evidence bases are
+        # the tail of BASES and their own tuple, and every one of them is
+        # weighted.
         self.assertEqual(ch.EVIDENCE_BASES, ("document", "photo", "relative"))
         self.assertEqual(ch.BASES[-3:], ch.EVIDENCE_BASES)
         self.assertEqual(set(ch.BASIS_WEIGHT), set(ch.BASES))

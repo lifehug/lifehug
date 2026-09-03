@@ -1138,16 +1138,6 @@ class GainSentenceTests(unittest.TestCase):
     def test_big_counts_read_as_digits(self):
         self.assertEqual(xd.gain_sentence(40), "Got it — that dates 40 moments.")
 
-    def test_the_moment_clause_is_the_reading_rooms_own(self):
-        """One definition: the Reading Room's sentence and the filing beat's
-        can never drift into two wordings of the same true thing."""
-        rr = load("reading_room")
-        self.assertEqual(rr.placement_gain_sentence({"remaining": 14}, {"remaining": 5}),
-                         "That dates nine moments.")
-        self.assertIn(xd.moment_clause(9),
-                      rr.placement_gain_sentence({"remaining": 14}, {"remaining": 5}))
-        self.assertIn(xd.moment_clause(9), xd.gain_sentence(9))
-
     def test_nonsense_places_nothing_rather_than_raising(self):
         self.assertEqual(xd.gain_sentence(None), "")
         self.assertEqual(xd.gain_sentence("nine"), "")
