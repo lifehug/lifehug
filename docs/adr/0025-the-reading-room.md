@@ -1,5 +1,7 @@
 # ADR 0025: The Reading Room — evidence-driven dating sessions
 
+**Retired 2026-09-03 (owner ruling R4a, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`):** removed together with Go Dig and Go Deep; the interaction, `dig_plan`, research and CLI verbs are deleted in Cut 2c; Add Landmark (an `offer` mode of `landmarks`, Cut 6a) replaces this line of work. Body kept as history.
+
 Date: 2026-08-24
 Status: proposed
 

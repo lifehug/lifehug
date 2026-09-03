@@ -1,5 +1,7 @@
 # The Reading Room (v204)
 
+**Removed 2026-09-03 (owner ruling R4a, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`):** the Reading Room / Go Deep leaves the product together with Go Dig; this file is deleted in Cut 2c. Add Landmark (an `offer` mode of `landmarks`, Cut 6a) replaces this line of work. Kept as history until then.
+
 Contract for `feat/reading-room`. Design authority: `docs/adr/0025-the-reading-room.md`.
 Research: `system/research/go-deep.md` (v197), `system/research/landmarks.md` (v198).
 Owner rulings: lifehug-platform#593 (2026-08-24).

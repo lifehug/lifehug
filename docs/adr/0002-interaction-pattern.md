@@ -149,3 +149,16 @@ Two bounds keep it from becoming a second machine: it takes the SAME
 `arc_planner.DEFAULT_GAP_MAX` budget as the timeline whisper (no second
 dial), and it is ranked after `timeline_gap` for the card's single gap slot
 — a conversation carries at most one second agenda.
+
+## Amendment 2026-09-03 (owner ruling R2): landmarks may enter the queue by value
+
+**Amendment 2026-09-03.** The clause above — a `place_no_stories` aside, like
+any landmark question, "is never minted as a bank question" — is superseded
+on queue eligibility only. Owner ruling R2 (`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`)
+rules that landmark and timeline questions may enter the daily queue, and may
+surface as whispers, when they pass the shared value threshold; they are
+evaluated by value, not by ladder completion. What stays: an open landmark is
+a resting state, not a debt; it never nags, never sends a reminder, and never
+appears as a count. The `DEFAULT_GAP_MAX` budget and the single gap slot per
+card are unchanged. Lands in Cut 5b (tracking #573/#586). The text above is
+kept as history.

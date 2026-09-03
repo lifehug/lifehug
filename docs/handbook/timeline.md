@@ -6,6 +6,8 @@ nav_order: 11
 
 # The Timeline & Chronology
 
+**Note 2026-09-03:** the platform program ports the placement score, per-year band, leverage/resolves, keystones and landmark rows into the calculated projection (`temporal_projection` / `temporal_publication`) in Cuts 2–5 and retires the legacy `timeline_data()` projection in Cut 7 (owner ruling R4, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`). The arithmetic is unchanged; the `system/timeline.py` locations named below are the legacy home until then. Queue eligibility for landmark and timeline questions is owner ruling R2 (same record, Cut 5b).
+
 ## 1. What it does & what it's for
 
 The timeline is not a feature for storing dates. It is the page where you
@@ -173,8 +175,10 @@ asks you for a year.
   moments attached. A **story** gap, not a dating one — it asks what life was
   like there, never when it was. It rides an arc card exactly as a whisper
   does, ranked after the whisper, at most one per card, counted within the
-  same weekly `arc_planner.DEFAULT_GAP_MAX`, and it is never minted as a bank
-  question. `timeline.timeline_data()["place_no_stories"]` →
+  same weekly `arc_planner.DEFAULT_GAP_MAX`; like any landmark question it may
+  enter the daily queue only above the shared value threshold (owner ruling R2,
+  2026-09-03, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`;
+  Cut 5b) and is never a reminder. `timeline.timeline_data()["place_no_stories"]` →
   `arc_planner.collect_places_without_stories` →
   `landmarks_interaction.render_place_no_stories`.
   <!-- parity: arc_planner.DEFAULT_GAP_MAX = 3 -->
@@ -481,6 +485,10 @@ moment lands in it, which is the recomputation `timeline_data()` already does
 on every read.
 
 ## 6. Where it lives
+
+The `system/timeline.py` rows below name the legacy projection; per the note at
+the top (owner ruling R4, 2026-09-03) they move into the calculated projection
+in Cuts 2–5 and this table is rewritten at Cut 7b.
 
 | Concern | Location |
 |---|---|

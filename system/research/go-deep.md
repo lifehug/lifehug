@@ -1,5 +1,7 @@
 # Go Deep: evidence-driven dating sessions
 
+**Removed 2026-09-03 (owner ruling R4a, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`):** the Reading Room / Go Deep leaves the product together with Go Dig; this file is deleted in Cut 2c. Add Landmark (an `offer` mode of `landmarks`, Cut 6a) replaces this line of work. Kept as history until then.
+
 *Research-only literature review (v197). Every claim is sourced; nothing here
 is implemented. It extends `system/research/chronology.md` — the domain
 knowledge behind the timeline — toward two questions that document does not

@@ -142,6 +142,8 @@ Status: items 1–12 ingested (v198); 13–18 queued.
 
 ## Go Deep (from `system/research/go-deep.md`, v197)
 
+**Retired 2026-09-03 (owner ruling R4a, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`):** Go Deep / the Reading Room is removed from the product and deleted in Cut 2c; nothing below is queued for ingestion any more. Kept as history.
+
 Priority order within this topic. Nothing here is implemented; ingestion means
 adding the raw or excerpted source under `system/research/<topic>/`.
 

@@ -1,5 +1,7 @@
 # Contract — landmarks: the always-present dating question set (v199)
 
+**Stage:** amended 2026-09-03 — ruling 2 ("never in the queue") superseded by owner ruling R2 (lifehug-platform decision record, `docs/decisions/2026-09-03-timeline-unification/decision-record.md`); kept as history.
+
 **Research:** `system/research/landmarks.md` (v198, PR lifehug/lifehug#202, merged).
 **Builds on:** ADR 0024 (chronology with basis), v195's `timeline`
 Interaction, v196's whispers and keystone questions.

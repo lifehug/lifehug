@@ -8,7 +8,7 @@ nav_order: 8
 
 ## 1. What it does
 
-Landmarks is the always-present dating question set: the handful of dated
+Landmarks is the universal dating question set: the handful of dated
 facts that everything else in a life story hangs on. When were you born.
 Where did you live, in order. Which schools. Who did you marry, and who did
 you make. It is the sixth child of Conversation, and its one goal is
@@ -36,8 +36,11 @@ failure.
 
 **An open landmark is a resting state, not a debt.** A landmark that is
 unanswered, or answered below its target rung, stays on the Timeline forever,
-answerable whenever. It never enters the daily question queue, never sends a
-reminder, and never appears as a count of what remains.
+answerable whenever. It may enter the daily queue or a whisper when it passes
+the shared value threshold (owner ruling R2, 2026-09-03,
+`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`;
+lands in Cut 5b, tracking #573/#586); it is never a reminder, never nags, and
+never appears as a count of what remains.
 
 **"That never happened" is a finished answer.** Four of the nine domains —
 `partnerships`, `children`, `military`, `losses` — open with a yes/no, and
@@ -259,9 +262,19 @@ nothing to anchor, and nothing is invented.
 
 Onboarding asks the five `onboarding: true` domains in generalities and takes
 a skip without comment. Everything else lives under the Timeline as an
-always-open row. `lifehug.py arc-plan-target --landmarks` walks the open ones
-as an episode, keystone first, then by ladder cost, with sensitive domains
-last.
+always-open row, and a landmark question may also reach the daily queue or a
+whisper by value (owner ruling R2, 2026-09-03; Cut 5b). `lifehug.py
+arc-plan-target --landmarks` walks the open ones as an episode, keystone
+first, then by ladder cost, with sensitive domains last.
+
+**Planned: the `offer` mode — Add Landmark (owner ruling R3b, 2026-09-03,
+`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5; Cut 6a).**
+The person volunteers text; the listener classifies it into domains and
+units; each domain's recorder proposes entries with the known entries in
+view; the worker shows the interpretation and asks for confirmation; confirmed
+entries file through the landmark recorder as stated facts. The manifest
+gains the roster, the existing episodes and eras, and the age frames. Not
+built yet; `interaction.yaml` still declares `modes: collect` only.
 
 ## 6. The behavior authority
 
