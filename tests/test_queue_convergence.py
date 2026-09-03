@@ -651,6 +651,41 @@ class AnswerabilityTests(unittest.TestCase):
         self.assertIn("contradiction", tcand.MIRROR_OWNED_KINDS)
 
 
+class TheOneWriterIsHookedTests(unittest.TestCase):
+    """Every landmark write reaches `timeline.save_landmark`, so the hook is
+    there rather than in any one caller — `landmark-record`, the recorder's
+    `landmark_invocations`, a `none` terminal, and Cut 6a's Add Landmark apply
+    all inherit it."""
+
+    def test_save_landmark_retires_the_matching_bank_row(self):
+        source = (SYSTEM / "timeline.py").read_text(encoding="utf-8")
+        body = source[source.index("def save_landmark("):]
+        body = body[:body.index("\ndef ", 1)]
+        self.assertIn("_retire_answered_timeline_candidates(key, filed)", body)
+
+    def test_the_hook_is_guarded_so_a_bank_problem_never_breaks_a_write(self):
+        import timeline as tl  # noqa: PLC0415
+
+        self.assertEqual(tl._retire_answered_timeline_candidates("residences", None), [])
+
+    def test_the_landmark_record_verb_goes_through_that_one_writer(self):
+        source = (SYSTEM / "lifehug.py").read_text(encoding="utf-8")
+        body = source[source.index("def cmd_landmark_record"):]
+        body = body[:body.index("\ndef ", 1)]
+        self.assertIn("_timeline.save_landmark(", body)
+
+    def test_a_none_terminal_retires_every_open_row_in_its_domain(self):
+        """"There were none" answers every open question the domain had."""
+        block = view(opportunities=[
+            opportunity(id="lo:" + "7" * 24, domain="military",
+                        label="the Navy",
+                        question="When did you go into the Navy?"),
+            opportunity(id="lo:" + "8" * 24, domain="residences"),
+        ])
+        matched = tcand.identities_for_landmark("military", {"none": True}, view=block)
+        self.assertEqual(matched, ["lo:" + "7" * 24])
+
+
 class TheOwnerCanSayNoTests(unittest.TestCase):
     def test_the_cli_verb_exists_and_is_classified(self):
         source = (SYSTEM / "lifehug.py").read_text(encoding="utf-8")
