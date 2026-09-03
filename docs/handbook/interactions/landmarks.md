@@ -50,8 +50,8 @@ ambiguous episode — each with Cut 3a's own `leverage`/`resolves` and a
 question generated from the actual gap ("When did you move out of the Mesa
 house?"), and publishes `landmark_opportunities` / `landmark_sufficiency` in
 the projection. A domain whose best remaining opportunity is below the
-QUEUE's dial (`question_planner.DEFAULT_LANE_POLICY["timeline_leverage_per_
-story"]`, read and never copied) is `sufficient` and publishes nothing, so a
+QUEUE's dial (`timeline_leverage_per_story` in
+`question_planner.DEFAULT_LANE_POLICY`, read and never copied) is `sufficient` and publishes nothing, so a
 host's surface collapses on its own instead of announcing that everything is
 filled in. The `status`/`complete_at` ladder below is unchanged and still
 drives the collect mode; what changed is who may say a domain is *done*.

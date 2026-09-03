@@ -777,8 +777,8 @@ def sufficiency(rows: object, state: object = None, *, threshold: object = None,
        leverage, which is published beside it either way.
     2. A domain the graph names **no gap** in — ``nothing_remaining``. There
        is nothing to be privileged about.
-    3. A **closed list the person declared finished** — ``list_declared_
-       finished``. Family and children keep their finishable semantics: *"that
+    3. A **closed list the person declared finished** —
+       ``list_declared_finished``. Family and children keep their finishable semantics: *"that
        is everyone"* finishes the list even with rungs unfilled.
 
        **Declared closure closes a LIST, not a graph.** It never silences an

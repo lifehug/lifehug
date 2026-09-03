@@ -49,8 +49,8 @@ len(resolves)` for every Timeline-owned item over the calculated dependency
 graph, plus the `dependency_index` those numbers came from; v219 gave every
 enumerating domain a per-event, subject-named question
 (`landmarks_interaction.event_questions`); and the daily queue has had ONE
-timeline dial since v196, `question_planner.DEFAULT_LANE_POLICY["timeline_
-leverage_per_story"]` — the exchange rate that says how many timeline unknowns
+timeline dial since v196 — `timeline_leverage_per_story` in
+`question_planner.DEFAULT_LANE_POLICY`, the exchange rate that says how many timeline unknowns
 one answer must place to be worth one ordinary story answer.
 
 ## Decision
