@@ -656,22 +656,19 @@ _WIKI_QUESTION_BOILERPLATE = (
     re.compile(r"^what has gone unsaid between .+\??$", re.IGNORECASE),
 )
 
+#: The marker a retired feature (v204-v280, ADR 0025) once rendered into a
+#: witness's own `## Open Questions` wiki section, addressed to THEM rather
+#: than the vault's owner. Kept as a literal, dated compatibility filter —
+#: not a live definition — so a wiki page compiled before the 2026-09-03
+#: retirement never leaks "What year did we move?" into the owner's own
+#: daily queue on a later harvest.
+_RETIRED_DIG_LIST_MARKER = "Reading Room"
+
+
 def _is_dig_list_line(question: str) -> bool:
-    """True for a Reading Room dig-list row (v204, ADR 0025).
-
-    A dig list renders into the WITNESS's `## Open Questions` section but is
-    addressed to THEM, not to the vault's owner. Harvesting it would put
-    "What year did we move?" into the owner's own daily queue — the one
-    question they cannot answer, and the whole reason the row exists.
-    One definition of the marker: `timeline.DIG_LIST_MARKER`.
-    """
-    try:
-        import timeline  # noqa: PLC0415
-
-        marker = timeline.DIG_LIST_MARKER
-    except Exception:  # noqa: BLE001
-        marker = "Reading Room"
-    return question.lstrip("*").strip().lower().startswith(marker.lower())
+    """True for a pre-retirement dig-list row (see `_RETIRED_DIG_LIST_MARKER`)."""
+    return question.lstrip("*").strip().lower().startswith(
+        _RETIRED_DIG_LIST_MARKER.lower())
 
 
 WIKI_HARVEST_CAP = 3  # per weekly run — the wiki should whisper, not flood

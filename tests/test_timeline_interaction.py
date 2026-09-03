@@ -51,7 +51,6 @@ class RegistrationTests(unittest.TestCase):
                 ("arc_walk", "arc_walk"),
                 ("timeline", "timeline"),
                 ("landmarks", "landmarks"),
-            ("reading_room", "reading_room"),
             ],
         )
         self.assertEqual(registry.audit_interaction_package("timeline"), [])

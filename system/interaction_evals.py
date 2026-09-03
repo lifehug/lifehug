@@ -988,7 +988,8 @@ def _check_place_no_stories_asked_openly(golden: dict) -> list[str]:
        `year_question_detector` already runs over every golden turn in Layer 1,
        so this checker asserts the complementary half) and no date proposed for
        agreement — `timeline_interaction.proposes_a_date`, the ONE definition
-       shared with the timeline and landmarks lanes (go-deep.md §4.3).
+       shared with the timeline and landmarks lanes (ADR 0025's
+       suggestive-interviewing hazard).
     3. Exactly one question, since the aside is an ask, not an interrogation.
     """
     errors = []

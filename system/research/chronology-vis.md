@@ -2,16 +2,17 @@
 
 *Research-only literature review (v206). Every claim is sourced; nothing here
 is implemented. It is the fourth corpus in the chronology topic and it assumes
-the other three: `system/research/chronology.md` (v194 — how you place ONE
-memory in time), `system/research/landmarks.md` (v198 — the small set of facts
-that makes placing every other memory cheap), and `system/research/go-deep.md`
-(v197 — the evidence-driven session, and §8's arithmetic for what resolving an
-unknown is worth). Where this document and go-deep.md §8 touch — the width-sum,
-the submodularity warnings, the STP frame — **go-deep.md is the authority and
-this document defers to it**; what is new here is the *display* and the *level*
-where go-deep.md gave the *ranking* and the *margin*. It feeds a platform
-design issue (lifehug-platform, "The certainty line") and `system/research.md`
-§4a.*
+the other two still current: `system/research/chronology.md` (v194 — how you
+place ONE memory in time) and `system/research/landmarks.md` (v198 — the small
+set of facts that makes placing every other memory cheap). (A third,
+`system/research/go-deep.md`, v197 — the evidence-driven session, and §8's
+arithmetic for what resolving an unknown is worth — was the authority this
+document deferred to on the width-sum, the submodularity warnings and the STP
+frame; it is retired with the Reading Room, 2026-09-03, ADR 0025's dated note,
+and its arithmetic now lives in ADR 0027, the placement score, unchanged.)
+What is new here is the *display* and the *level* where it gave the *ranking*
+and the *margin*. It feeds a platform design issue (lifehug-platform, "The
+certainty line") and `system/research.md` §4a.*
 
 ---
 
@@ -836,11 +837,11 @@ information between y and θ given ξ… or the expected Kullback-Leibler
 divergence from the posterior to the prior"
 ([Rainforth, Foster, Ivanova & Bickford Smith, *Modern Bayesian Experimental
 Design*, *Statistical Science*; arXiv:2302.14545 §2.1](https://arxiv.org/pdf/2302.14545),
-after [Lindley, 1956](https://doi.org/10.1214/aoms/1177728069)). go-deep.md
-§8.4 already rules it out as the ranking objective for the right reason — it
+after [Lindley, 1956](https://doi.org/10.1214/aoms/1177728069)). ADR 0027
+already rules it out as the ranking objective for the right reason — it
 needs a prior the vault does not have — and nothing here changes that.
 
-**And go-deep.md §8.4's warning 2 applies to the score, not just the plan.**
+**And ADR 0027's warning applies to the score, not just the plan.**
 Summing marginal interval widths measures "the smallest hypercube containing"
 the feasible polytope, so where ordering constraints exist it **overestimates**
 — three events each in [0,50] with `t₁ ≤ t₂ ≤ t₃` give a marginal sum of 150
@@ -1034,7 +1035,7 @@ Numbered so a contract can cite them.
    Keep the wide interval visible underneath the placed mark, permanently.
 2. **The score is a level and the leverage is its margin — one arithmetic, two
    readings.** `timeline.unknown_width` already ranks on width reduction
-   (go-deep.md §8.4 warning 3); the score is the same widths summed and
+   (ADR 0027); the score is the same widths summed and
    normalised. Building them apart would be the promise/delivery drift the
    dating-dataflow audit already found once.
 3. **Score on WIDTH, never on presence.** A field-filled meter is an improper

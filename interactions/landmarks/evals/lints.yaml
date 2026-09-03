@@ -9,9 +9,9 @@ landmark_gates.accepts_vague.compliance: 1.0
 landmark_gates.no_form_voice.compliance: 1.0
 landmark_gates.one_domain_per_turn.compliance: 1.0
 landmark_gates.never_presses_sensitive.compliance: 1.0
-# v198 (go-deep.md §4.3, Lindsay et al. 2004): the shared rule — a session
-# never names a date and asks for agreement. Definition:
-# timeline_interaction.proposes_a_date, run by both lanes.
+# v198 (ADR 0025's suggestive-interviewing hazard, Lindsay et al. 2004): the
+# shared rule — a session never names a date and asks for agreement.
+# Definition: timeline_interaction.proposes_a_date, run by both lanes.
 landmark_gates.never_proposes_a_date.compliance: 1.0
 # v212 (lifehug#221): the BLOCKING one. Recording is the turn's first job —
 # a turn that answers a real answer and files nothing has lost the recording

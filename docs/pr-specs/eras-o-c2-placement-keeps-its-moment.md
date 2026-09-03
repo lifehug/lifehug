@@ -57,9 +57,10 @@ vocabulary would then be deleted, not repurposed.
   `source_integrity.py correct <source> --kind date --source fix` and stores
   the returned correction path on the placement row. It is the ONLY placement
   filing path: `jobs.py:611`, `timeline_interaction.place_invocation`,
-  `conversation_delivery._file_placement`, `serve_wiki.py:3612` and
-  `reading_room.py` all build argv for `lifehug.py timeline-place`, so a flag
-  added inside the command reaches every host.
+  `conversation_delivery._file_placement` and `serve_wiki.py:3612` build argv
+  for `lifehug.py timeline-place`, so a flag added inside the command reaches
+  every host. (At the time this was written, `reading_room.py` was a third
+  such caller; it was retired 2026-09-03, ADR 0025.)
 * `source_integrity.create_linked_source` (`:946`) is the one writer of a
   correction record and the one caller of `classify_story.mark_stale`
   (`:1025`), which is the one writer of `stale`/`stale_reason`/`stale_at`.

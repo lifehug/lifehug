@@ -9,11 +9,13 @@ Where chronology.md answers "how do you place ONE memory in time," this
 answers "what small set of facts, asked once, makes placing every OTHER
 memory cheap." It feeds `system/research.md` §4a, closes the "full EHC
 onboarding survey deferred" note there, and proposes a sixth child
-interaction (§7). Its sibling corpus `system/research/go-deep.md` (v197)
-covers the *evidence-driven* dating session; where the two touch — the greedy
-plan over the residual dependency graph, and the rule that a session never
-proposes a date for confirmation — go-deep.md is the authority and this
-document defers to it. The owner's question, 2026-08-23: "is there a primary set
+interaction (§7). (A sibling corpus, `system/research/go-deep.md` (v197),
+covered the *evidence-driven* dating session and was the authority this
+document deferred to on the greedy plan over the residual dependency graph
+and the rule that a session never proposes a date for confirmation; it is
+retired with the Reading Room, 2026-09-03 — see ADR 0025's dated note and
+ADR 0026 for the surviving mechanism.) The owner's question, 2026-08-23: "is
+there a primary set
 that always sits under the timeline — birth, marriage, graduation — that a
 person can Play and answer, and does the rest by arithmetic?"*
 
@@ -619,9 +621,9 @@ date of a memory being placed: "What year was Jackie born?" is legitimate;
 "What year was that trip?" is not. This is not a loosening of chronology.md §6
 rule 1 — that rule forbids demanding a year for a *reconstructed* memory, and
 a birth year is not one. Nothing here touches the separate, unconditional rule
-that **no date is ever proposed for agreement** (§`go-deep.md` 4.3; Lindsay et
-al. 2004), which applies to a sibling's birth year exactly as to everything
-else.
+that **no date is ever proposed for agreement** (ADR 0025's
+suggestive-interviewing hazard; Lindsay et al. 2004), which applies to a
+sibling's birth year exactly as to everything else.
 
 **A third closed list — of people.** §2.7 argues that residences and schools
 are special because they are *closed lists*: enumerable, finite, ordered,

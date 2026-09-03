@@ -139,8 +139,8 @@ the Bell house lands between '84 and '90 now" states a derivation and shows its
 working. Naming a date and asking for agreement is forbidden in every domain,
 including the birthday: true photographs plus suggestive interviewing produce
 false memories in about two thirds of participants, and a dating probe backed
-by the person's own evidence is that configuration exactly
-(`system/research/go-deep.md` §4.3, Lindsay et al. 2004). The lint is shared
+by the person's own evidence is that configuration exactly (ADR 0025's
+suggestive-interviewing hazard, Lindsay et al. 2004). The lint is shared
 with the timeline lane from one definition.
 
 **The mechanic has a name: cross-dating** — dating an undated sequence by
@@ -192,7 +192,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The gap they reveal | `landmarks_interaction.places_without_stories(landmarks, event_places=…)`, `PLACE_NO_STORIES_KIND`; `timeline.timeline_data()["place_no_stories"]` |
 | The gaps the SET reveals (v202) | `landmarks_interaction.incomplete_subjects(landmarks)` → `LANDMARK_SUBJECT_KIND`, one NAMED unknown per half-filled subject in an ENUMERATION domain (v219: `landmarks_interaction.enumerates_subjects` — `collection` is `set`/`sequence`, the ladder is `per_entry_ladder`, and the domain names its subjects; eight of the nine); `residence_gaps(landmarks)` → `RESIDENCE_GAP_KIND`, one per interior hole between two dated residence spans. Both reach `timeline.unknowns()` carrying the ladder's own subject-named question |
 | The roster join and the witnesses (v202; v217 person dates) | `landmarks_interaction.family_members`, `lost_people(landmarks)`, `person_roster_invocations(landmarks)` (pre-v217 name `family_roster_invocations`, the same function) → `lifehug.py entity-verdict person <slug> clear [--relationship …] [--living|--not-living] [--born <edtf> --born-basis …] [--died <edtf> --died-basis …] --ensure`. The family tiers carry their STATED BIRTH YEAR (`--born`) and the `losses` people finally reach the roster at all, carrying `--died` and `--not-living`; `witness_candidates(landmarks)`, `timeline.timeline_data()["witnesses"]` |
-| The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`, the SAME definition `reading_room.placement_gain_sentence` says. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
+| The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
 | The offer verb (PLANNED, Cut 6a; owner ruling R3b, 2026-09-03) | `lifehug.py landmark-offer` — not built; see "Planned: the `offer` mode" below |

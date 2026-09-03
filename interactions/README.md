@@ -205,12 +205,11 @@ repeat. Deviating from it is a design defect, not a variant.
    never raises) and closed in the child's own module (owns the roster —
    though not always the roster's contents: `entity_setup.maps_to` is
    checked against slugs the CALLER supplies). The rule's INTENT is *no new
-   vocabulary per child*, and v204 is the one case that reads it in the
-   strict direction: `reading_room` mints NO field and REUSES two that
-   already exist — `placed` and `landmark` — behind its single `TurnShape`
-   gate. Reuse is always better than a third shape for the same fact; a
-   child inventing a field a sibling already owns is the defect this rule
-   exists to prevent.
+   vocabulary per child*: reuse is always better than a third shape for the
+   same fact, and a child inventing a field a sibling already owns is the
+   defect this rule exists to prevent. (v204's `reading_room`, retired
+   2026-09-03 per ADR 0025, was the strict-direction case: it minted no
+   field of its own and reused `placed` and `landmark` behind one gate.)
 5. **Its own lints, goldens, and evals harness.** `<child>-evals` is the
    seat gate; passing Conversation alone never seats a model in a child.
 6. **Its own version bump, ADR amendment row, and `framework_files`
@@ -242,7 +241,7 @@ Play on a Foundation row does NOT approve anything — the questions already
 exist — so the "approve + start" half is a no-op there and only the
 conversation side runs.
 
-### The seven children
+### The six children
 
 | Child | The one goal | Additive output field | Stages | Stage source | Closed validator | Lints |
 |---|---|---|---|---|---|---|
@@ -253,11 +252,9 @@ conversation side runs.
 | `timeline` (v195, amended v196, v233) | **placing a memory in time** — without ever demanding a year | `placed: DateRecord-shaped \| null` (a range with a basis is first-class; there is no deferral shape) | `open` · `place` · `close` · `work_item` | `timeline_interaction.timeline_stage_for_session(session, …, work_item=…)` | `timeline_interaction.validate_placed` (`chronology.GRANULARITIES\|CONFIDENCES\|BASES`, EDTF parseability, exact membership in the caller-supplied anchors) | six `timeline_gates.*` |
 | `landmarks` (v197) | **the universal dating question set** — the handful of dated facts every other memory hangs on | `landmark: {domain, label, rung values, date?, span?, skipped?} \| null` (a vague answer is an answer) | `open` · `ask` · `close` | `landmarks_interaction.landmark_stage_for_session` | `landmarks_interaction.validate_landmark` (closed domain set from `questions.yaml`, ladder rungs only, every date normalized through `chronology.parse_edtf`) | five `landmark_gates.*` |
 
-| `reading_room` (v204) | **dating from evidence** — turn what is physically in the room into dated facts | NONE of its own: it REUSES `placed` (the timeline lane's) and `landmark` (the landmarks lane's), both opened by one gate | `open` · `work` · `close` | `reading_room.reading_room_stage_for_session` | `reading_room.validate_evidence` (delegates the vocabularies to `timeline_interaction.validate_placed`, then applies each evidence basis's own honesty ceiling) + `landmarks_interaction.validate_landmark` | five `reading_room_gates.*`, two of them SHARED (`never_proposes_a_date` = `timeline_interaction.proposes_a_date`, `no_pressure` = `landmarks_interaction.pressure`) |
-
 The `TurnShape` gates, in order: `placement_stage` · `focus_stage` ·
-`entity_stage` · `arc_stage` · `timeline_stage` · `landmark_stage` ·
-`reading_room_stage`. Every one defaults to `None`.
+`entity_stage` · `arc_stage` · `timeline_stage` · `landmark_stage`. Every
+one defaults to `None`.
 
 `timeline`'s fourth stage, `work_item` (v233, ADR 0024's 2026-08-26
 amendment), is the one place a NEW child was considered and deliberately not
@@ -269,12 +266,6 @@ selector, prompt kwargs, validation, lints, a `Turn` field and a filer — in th
 package and in every host — to say what an existing lane already says is a
 parallel implementation, not a child. The test for "should this be the eighth
 child?" is whether it brings a new output vocabulary.
-
-`reading_room` is the one child that RECOMPUTES its own plan mid-session —
-evidence → record → recompute → next ask — which is why it is a session
-rather than a question. The plan is a pure function of the graph
-(`timeline.dig_plan`, the same greedy `keystones` runs, extended to `k`) and
-is never persisted, exactly as `arc_walk`'s is not.
 
 `arc_walk` is the one child whose "roster" is computed rather than read:
 its plan is rebuilt from the bank at every Play and never persisted

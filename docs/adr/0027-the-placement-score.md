@@ -198,3 +198,14 @@ fixed by storing history.
 
 All new fields are additive; the platform's `TimelineData` gains `placement`
 (default `{}`) only — every other addition rides existing `JsonObject` rows.
+
+---
+
+## Amendment (2026-09-03, owner-ruled — R4a, timeline-unification 2c)
+
+The Reading Room (v204, ADR 0025) is retired; see ADR 0025's dated note.
+The placement score is unaffected — `unknown_width` is general arithmetic
+the score itself still uses, not Reading Room code. One stale reference:
+`system/research/go-deep.md` §8.4, cited above for the width-sum-not-a-
+threshold-count argument, is deleted with the Reading Room; the argument
+stands and is unchanged.

@@ -69,8 +69,9 @@ State as of `60b5f9a` (v199), the commit this contract ships against.
   the seventh kind in the set. The new rendering therefore uses the same
   probe-present gate.
 - **Never propose a date** (`timeline_interaction.proposes_a_date`, the ONE
-  definition shared by the timeline and landmarks lanes, go-deep.md §4.3 /
-  Lindsay et al. 2004) applies here too: the rendered line may REPORT the span
+  definition shared by the timeline and landmarks lanes, ADR 0025's
+  suggestive-interviewing hazard / Lindsay et al. 2004) applies here too: the
+  rendered line may REPORT the span
   the person gave us ("you lived there around 1990–1993"), and may never name
   a date and invite agreement.
 - **`arc_planner.BANNED_PHRASE = "what year"`** is unchanged and the new probe

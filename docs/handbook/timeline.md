@@ -50,8 +50,8 @@ asks you for a year.
   out rather than one the person asserted.
 - **Basis** — *how* the system came to believe it: `stated` (they said it),
   `age` (their age against their birthday), `anchor` (a landmark plus a
-  before/after), `order` (sequence only), `public_event`, `connector`. The
-  Reading Room adds the three **evidence** bases: `document` (a date printed
+  before/after), `order` (sequence only), `public_event`, `connector`, plus
+  three **evidence** bases (v204, ADR 0025): `document` (a date printed
   on paper, read out), `photo` (a contextual date, which is a *window* by
   construction and says so on the record), and `relative` (someone else's
   memory, relayed, with the witness named in provenance).

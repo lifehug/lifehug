@@ -53,8 +53,8 @@ CONFIDENCES = ("certain", "approximate", "inferred", "conjectural")
 #: relative sequence only; `public_event` is the living-in-history route;
 #: `connector` is institutional evidence (timeline_corroboration).
 #:
-#: v204 (the Reading Room, ADR 0025) adds the three EVIDENCE bases, whose
-#: warrant is none of the six above (`system/research/go-deep.md` §10):
+#: v204 (ADR 0025, retired 2026-09-03) adds the three EVIDENCE bases, whose
+#: warrant is none of the six above:
 #: `document` is a printed date read off paper — near-certain and often exact
 #: to the day; `photo` is a contextual date, which is a WINDOW by construction
 #: (§5.1) and an interval by default; `relative` is the person relaying
@@ -65,7 +65,7 @@ BASES = (
     "document", "photo", "relative",
 )
 
-#: The three evidence bases of the Reading Room, in one place so a caller can
+#: The three evidence bases, in one place so a caller can
 #: ask "did this come out of an artifact?" without re-listing them.
 EVIDENCE_BASES = ("document", "photo", "relative")
 
@@ -98,10 +98,10 @@ VERBATIM_PROVENANCE_BASES = (CALCULATED_PROVENANCE_BASIS, INFERRED_PROVENANCE_BA
 #: How much each basis is trusted when two claims disagree (ruling 3).
 #:
 #: The three v204 weights are FLAT — one number each, no era-conditional
-#: term (Reading Room ruling 5). `document` outranks `stated` because a
+#: term (ADR 0025 ruling 5). `document` outranks `stated` because a
 #: printed date is not a reconstruction; `relative` sits just under `stated`
 #: because proxy report is meant to be used *with* the index report and not
-#: instead of it (Straughen et al. 2013, go-deep.md §6.4); `photo` sits under
+#: instead of it (Straughen et al. 2013); `photo` sits under
 #: both because a contextual date bounds rather than names. The research's
 #: "relatives beat self for childhood" nuance stays a research note, NOT a
 #: mechanism.
@@ -523,9 +523,9 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
         return body
     if claim_basis == "age":
         return f"{body} — you said you were {claim}"
-    # v204 (the Reading Room): the three evidence bases each name their own
-    # warrant, and `photo` says out loud that it is a window (go-deep.md
-    # §11.21 — "the system should say so on the record it writes").
+    # v204 (ADR 0025, retired 2026-09-03): the three evidence bases each
+    # name their own warrant, and `photo` says out loud that it is a window
+    # ("the system should say so on the record it writes").
     if claim_basis == "document":
         return f"{body} — printed on {claim}"
     if claim_basis == "photo":
@@ -1829,7 +1829,7 @@ def date_from_argv(edtf: object, *, basis: object = None, granularity: object = 
 
 
 # --------------------------------------------------------------------------
-# The witness (v204, the Reading Room — ADR 0025)
+# The witness (v204, ADR 0025 — retired 2026-09-03, dated note)
 # --------------------------------------------------------------------------
 
 #: A provenance entry whose `source` names the living person who told us the

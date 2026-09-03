@@ -1184,69 +1184,6 @@ def task_sources(desc: dict, limit: int = 14, cap: int = 1500) -> list[dict]:
     return out
 
 
-def dig_lists_by_slug() -> dict[str, list[str]]:
-    """``{person_slug: [markdown lines]}`` — every witness's dig list.
-
-    Re-derived from `timeline.timeline_data()["reading_room"]`, never stored
-    (Reading Room design consequence 13: homework is an ordinary vault note,
-    re-derived; no deferral state, no inbox). Degrades to ``{}`` on any
-    failure — a timeline that cannot be read must never stop the wiki
-    compiling.
-    """
-    try:
-        import timeline as tl_mod  # noqa: PLC0415
-
-        with tl_mod.vault_roots(
-            CLASSIFICATIONS_DIR=CLASSIFICATIONS_DIR,
-            CONNECTORS_STATE_DIR=CONNECTORS_STATE_DIR,
-            ENTITY_ROSTERS_DIR=ENTITY_ROSTERS_DIR,
-            MANUAL_SOURCES_DIR=MANUAL_SOURCES_DIR,
-            PLACEMENTS_FILE=TIMELINE_PLACEMENTS_FILE,
-            STATE_DIR=STATE_DIR,
-            WIKI_DIR=WIKI_DIR,
-        ):
-            data = tl_mod.timeline_data()
-        plan = data.get("reading_room") or {}
-        lists = {}
-        for slug, entry in (plan.get("witness_lists") or {}).items():
-            lines = tl_mod.render_dig_list(entry)
-            if lines:
-                lists[str(slug)] = lines
-        return lists
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def apply_dig_lists(descs: list[dict], lists: dict | None = None) -> int:
-    """Append each witness's dig list to their own person page's questions.
-
-    Idempotent: any dig-list row already on the descriptor is dropped first,
-    so a re-derived list REPLACES the previous one rather than stacking.
-    Returns how many pages were touched.
-    """
-    lists = dig_lists_by_slug() if lists is None else lists
-    if not lists:
-        return 0
-    try:
-        import timeline as tl_mod  # noqa: PLC0415
-
-        marker = tl_mod.DIG_LIST_MARKER
-    except Exception:  # noqa: BLE001
-        marker = "Reading Room"
-    touched = 0
-    for desc in descs:
-        if desc.get("type") != "person":
-            continue
-        lines = lists.get(str(desc.get("slug") or ""))
-        if not lines:
-            continue
-        kept = [row for row in (desc.get("open_questions") or [])
-                if marker not in str(row)]
-        desc["open_questions"] = kept + list(lines)
-        touched += 1
-    return touched
-
-
 def build_synthesis_prompt(desc: dict, roster: list[dict], mission: str) -> str:
     src_lines = []
     has_witness = False
@@ -1757,12 +1694,6 @@ def main():
     for entity_type in ("person", "place", "period", "object"):
         descs += plan_entities(entity_type, answers, manual_sources,
                                load_roster(entity_type), taken_slugs)
-
-    # v204 (the Reading Room, ADR 0025, ruling 3): each witness's dig list
-    # renders into THAT person's existing `## Open Questions` section. No new
-    # page type and no new state — the list is re-derived from the timeline
-    # graph on every compile, exactly like a keystone is.
-    apply_dig_lists(descs)
 
     slug_title = {d["slug"]: d["title"] for d in descs}
     roster = [{"slug": d["slug"], "title": d["title"], "type": d["type"]} for d in descs]

@@ -19,7 +19,7 @@ run as a conversation.
 lane exists to protect: the coarse answer that is received rather than
 sharpened, and the decline that is never asked twice.
 
-`landmarks-reports-the-arithmetic-never-asks-agreement` pins the line the go-deep research draws (§4.3, Lindsay et al. 2004): saying what the
+`landmarks-reports-the-arithmetic-never-asks-agreement` pins the line ADR 0025's suggestive-interviewing hazard research draws (Lindsay et al. 2004): saying what the
 arithmetic gives you is right — *"anything at the Bell house lands between '84 and '90 now"* — and naming a date to be agreed with is the
 banned move. `timeline_interaction.proposes_a_date` is the one definition, run by both lanes.
 

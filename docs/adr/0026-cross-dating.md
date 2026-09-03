@@ -349,3 +349,24 @@ the pages catch up in a minute or two, and the person hears the good news now.
 | `period["date_derived"]` on band rows | none to render correctly; **optional** to render *well* — take the provenance line beside the span, the same way the moment rows already do |
 | `counts.periods_cross_dated`, `cross_dating.bands` in the report | none — additive keys |
 | `{filing_gain}` on the landmark and timeline leaves | the engine fills the kwarg **after** it files the turn's record, from the timeline payload it already holds, with `cross_dating.gain_sentence_for_record` → `render_filing_gain`; `""` (or omitting it) on every other turn keeps the prompt byte-identical. Additive — nothing else about the REPLAY moves. |
+
+---
+
+## Amendment (2026-09-03, owner-ruled — R4a, timeline-unification 2c)
+
+The Reading Room (v204, ADR 0025) is retired; see ADR 0025's dated note.
+Nothing in this ADR's mechanism depended on it, so nothing here changes
+except three references that are now stale text rather than live code:
+
+- `dig_plan()`, cited above beside `keystones()` as "untouched" by the
+  vector-index split, no longer exists. `keystones()`, `dependency_index`
+  and the greedy plan (`_scored_anchors`/`_greedy_plan`) are exactly as
+  described and remain the house home for this ladder.
+- `system/research/go-deep.md`, cited in "Decisions this one rests on" for
+  its §7 genealogy discussion, is deleted with the Reading Room. The
+  elicitation-playbook and bounding-before-pinning citations to
+  `system/research/chronology.md` are unaffected.
+- `reading_room.placement_gain_sentence`, cited below beside
+  `cross_dating.moment_clause` as the second definition kept in sync with
+  it, is gone; `cross_dating.moment_clause`/`gain_sentence` are now
+  consumed only by the landmark and timeline filing beats, unchanged.
