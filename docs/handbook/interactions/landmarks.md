@@ -42,6 +42,20 @@ the shared value threshold (owner ruling R2, 2026-09-03,
 lands in Cut 5b, tracking #573/#586); it is never a reminder, never nags, and
 never appears as a count of what remains.
 
+**Landed v286 (Cut 5a, ADR 0032): a domain leaves the surface on VALUE, not on
+completion.** `system/landmark_opportunities.py` derives the gaps the
+calculated graph can name — an episode with an open or missing bound, a
+missing birth origin, a person the ladder enumerates with no dated anchor, an
+ambiguous episode — each with Cut 3a's own `leverage`/`resolves` and a
+question generated from the actual gap ("When did you move out of the Mesa
+house?"), and publishes `landmark_opportunities` / `landmark_sufficiency` in
+the projection. A domain whose best remaining opportunity is below the
+QUEUE's dial (`question_planner.DEFAULT_LANE_POLICY["timeline_leverage_per_
+story"]`, read and never copied) is `sufficient` and publishes nothing, so a
+host's surface collapses on its own instead of announcing that everything is
+filled in. The `status`/`complete_at` ladder below is unchanged and still
+drives the collect mode; what changed is who may say a domain is *done*.
+
 **"That never happened" is a finished answer.** Four of the nine domains —
 `partnerships`, `children`, `military`, `losses` — open with a yes/no, and
 *no* completes them outright. A person with no military service is DONE with

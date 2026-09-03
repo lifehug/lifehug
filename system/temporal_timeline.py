@@ -112,6 +112,7 @@ import episode_fold_contract as efc  # noqa: E402
 import era_memberships as era  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
+import landmark_opportunities as lo  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -449,6 +450,18 @@ class CalculatedTimeline:
     #: ``tl:<anchor-slug>`` identity the legacy star has always used. The host
     #: stars ``keystones[0]``.
     keystones: tuple[dict, ...] = ()
+    #: Cut 5a (R2, ADR 0032). The landmark gaps the GRAPH can name — a stay
+    #: with an open bound, a missing birth origin, a person the ladder
+    #: enumerates with no dated anchor, an episode the containment rung found
+    #: ambiguous — each with the same `resolves`/`leverage` Cut 3a computed for
+    #: the anchor it would supply, and a question generated from the actual
+    #: gap. A domain whose best remaining gap is below the shared threshold is
+    #: SUFFICIENT and publishes none of them.
+    landmark_opportunities: tuple[dict, ...] = ()
+    #: Cut 5a. ``{domain: {sufficient, best_leverage, reason}}`` over all nine
+    #: domains, so a collapsed surface is checkable rather than mysterious.
+    #: This is what replaces "all filled in" (audit F7).
+    landmark_sufficiency: dict = field(default_factory=dict)
     diagnostics: dict = field(default_factory=dict)
     calculation_rule_version: str = CALCULATION_RULE_VERSION
     score_formula_version: str = SCORE_FORMULA_VERSION
@@ -483,6 +496,9 @@ class CalculatedTimeline:
             "reach": dict(self.reach),
             "dependency_index": {k: list(v) for k, v in self.dependency_index.items()},
             "keystones": [dict(row) for row in self.keystones],
+            "landmark_opportunities": [dict(row) for row in self.landmark_opportunities],
+            "landmark_sufficiency": {k: dict(v)
+                                     for k, v in self.landmark_sufficiency.items()},
             "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "diagnostics": dict(self.diagnostics),
         }
@@ -536,6 +552,14 @@ def structural_signature(result: object) -> dict:
         # signature diff rather than a number nobody can check.
         "dependency_index": {k: list(v) for k, v in current.dependency_index.items()},
         "keystones": [dict(row) for row in current.keystones],
+        # Cut 5a: derived from the nodes, the items and the gain of this same
+        # generation plus the ladder store the fold was handed, so a rebuild
+        # reproduces both exactly — and an opportunity id that moved between
+        # two rebuilds of one substrate is a signature diff rather than a
+        # question the person is asked twice.
+        "landmark_opportunities": [dict(row) for row in current.landmark_opportunities],
+        "landmark_sufficiency": {k: dict(v)
+                                 for k, v in current.landmark_sufficiency.items()},
         "diagnostics": dict(current.diagnostics),
     }
 
@@ -4159,6 +4183,29 @@ def derive_calculated_timeline(
     )
     items = tg.apply_gain(items, dependencies)
     keystone_rows = tg.keystones(items, dependencies)
+
+    # LANDMARK OPPORTUNITIES AND SUFFICIENCY (Cut 5a, R2, ADR 0032). Computed
+    # from the graph that was just built, not from a checklist: the same
+    # `dependency_index` above answers "what would this anchor place", and the
+    # ladder store supplies the words and the closed-list semantics. The
+    # ladder state is DRAWN from the promoted sources this fold was handed
+    # (`landmark_projection.project_landmark_entries`) rather than read off a
+    # vault, so the function stays pure and a test that hands in two receipts
+    # gets the entries those receipts imply. Guarded like every other derived
+    # block: a landmark problem must never take a projection down.
+    try:
+        ladder_state = lp.project_landmark_entries(
+            active_index if isinstance(active_index, dict) else {},
+            sources=landmark_entries,
+        )
+        opportunities, sufficiency = lo.surface(
+            {"nodes": nodes, "work_items": items, "dependency_index": dependencies},
+            ladder_state,
+            roster_snapshot,
+            owner=owner,
+        )
+    except Exception:  # noqa: BLE001
+        opportunities, sufficiency = [], {}
     timings["work_items"] = round(timings["work_items"] + (clock() - mark), 9)
     timings["total"] = clock() - started
 
@@ -4197,6 +4244,10 @@ def derive_calculated_timeline(
         # and a rebuild reproduces both exactly.
         dependency_index=dependencies,
         keystones=tuple(keystone_rows),
+        # Cut 5a. Same generation, same graph: an opportunity's leverage and
+        # the Needs Placing row that shares its anchor are one number.
+        landmark_opportunities=tuple(opportunities),
+        landmark_sufficiency=dict(sufficiency),
         diagnostics={
             "findings": diagnostics,
             "claims": len(claims),

@@ -722,6 +722,14 @@ EMPTY_VIEW = {
     # projection's plan to do it; an empty tuple is "nothing would place
     # anything else", which is what it is.
     "keystones": (),
+    # Cut 5a (R2, ADR 0032). SERVED, and this is the point of the cut: the
+    # host that rendered nine legacy ladder rows and "all filled in" (audit
+    # F7) renders these instead. An empty tuple is "nothing here is worth a
+    # privileged surface right now", which is a real answer and the one a
+    # settled vault should give; `landmark_sufficiency` says why, per domain,
+    # so the collapse is checkable rather than mysterious.
+    "landmark_opportunities": (),
+    "landmark_sufficiency": {},
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
                "unplaced": 0},
@@ -884,6 +892,12 @@ def calculated_view(vault_root: str | Path) -> dict:
         # tuple — "nothing has enough reach to be starred", which is true of a
         # vault with one undated thing in it.
         "keystones": tuple(payload.get("keystones") or ()),
+        # Tolerant by construction, like every additive key above: a projection
+        # published before Cut 5a carries neither, and reads here as "no
+        # opportunities and nothing said about sufficiency" — which is what a
+        # generation that never measured it knows.
+        "landmark_opportunities": tuple(payload.get("landmark_opportunities") or ()),
+        "landmark_sufficiency": dict(payload.get("landmark_sufficiency") or {}),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None
         },
