@@ -221,6 +221,16 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # era-record. `go-dig-import --preview` writes nothing but is still
     # classified BY NAME, exactly as era-migrate/bind-episodes are.
     "go-dig-record", "go-dig-import",
+    # landmark-offer (Cut 6a, ADR 0033): Add Landmark, the `offer` mode of
+    # the landmarks interaction. `--apply` files through `timeline.save_
+    # landmark` and republishes, and `--retract` files a durable correction
+    # and republishes — the same single-transaction vault mutation family as
+    # era-record. `--propose` does NOT file a landmark, but it is not
+    # read-only either: it writes the proposal, which carries the person's
+    # submitted text as durable evidence from the moment it is submitted
+    # (owner ruling R3). One command, one honest classification, by name —
+    # exactly as `go-dig-import --preview` and `era-migrate --dry-run` are.
+    "landmark-offer",
 })
 
 
@@ -2174,6 +2184,37 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_landmark_offer(args: argparse.Namespace) -> int:
+    """`landmark-offer` — Add Landmark (Cut 6a, ADR 0033, decision record §5).
+
+    Three verbs on one command, because they are three steps of one act:
+    `--propose` reads volunteered text off stdin and prints the proposal;
+    `--apply` files the units the person confirmed; `--retract` undoes an
+    applied one. The proposal is printed as JSON in every case, which is what
+    a host surface consumes.
+    """
+    argv: list[str] = []
+    if args.retract:
+        argv.extend(["--retract", args.retract])
+    elif args.apply:
+        argv.extend(["--apply", args.apply])
+        if args.all_units:
+            argv.append("--all")
+        if args.units:
+            argv.extend(["--units", args.units])
+    else:
+        argv.append("--propose")
+        if args.from_file:
+            argv.extend(["--from-file", args.from_file])
+        if args.dry_run:
+            argv.append("--dry-run")
+    if args.reason:
+        argv.extend(["--reason", args.reason])
+    if getattr(args, "model", None):
+        argv.extend(["--model", args.model])
+    return run_python("landmark_offer.py", argv)
+
+
 def cmd_arc_plan_target(args: argparse.Namespace) -> int:
     # v195 (ADR 0024): `--timeline` plans over timeline UNKNOWNS, not bank
     # questions, so it dispatches to the timeline plan builder rather than
@@ -3747,6 +3788,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_landmarks_evals)
+
+    p = sub.add_parser(
+        "landmark-offer",
+        help="Add Landmark: propose landmark units from text you paste, "
+             "confirm them, or undo a confirmation",
+    )
+    p.add_argument("--propose", action="store_true",
+                   help="Read text on stdin and print the proposal (the "
+                        "default); files no landmark")
+    p.add_argument("--apply", default=None, metavar="PROPOSAL_ID",
+                   help="File the confirmed units of this proposal")
+    p.add_argument("--retract", default=None, metavar="RECEIPT_ID",
+                   help="Undo an applied offer; evidence and receipt remain")
+    p.add_argument("--units", default="",
+                   help="With --apply: the unit ids to file, comma-separated")
+    p.add_argument("--all", dest="all_units", action="store_true",
+                   help="With --apply: file every unit in the proposal")
+    p.add_argument("--from-file", dest="from_file", default=None,
+                   help="With --propose: read the text from this file")
+    p.add_argument("--reason", default=None,
+                   help="Why (recorded on the receipt or the retraction)")
+    p.add_argument("--model", default=None,
+                   help="Override the model role for both extraction passes")
+    p.add_argument("--dry-run", action="store_true",
+                   help="With --propose: print the composed listener prompt "
+                        "and call nothing")
+    p.set_defaults(func=cmd_landmark_offer)
 
     p = sub.add_parser("landmark-record",
                        help="File one landmark answer (the always-present dating set)")

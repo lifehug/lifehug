@@ -218,6 +218,14 @@ TEMPORAL_WORK_ITEMS_FILE = _data("temporal_work_items")
 # overwritten the way the two files above are (system/temporal_receipts.py
 # owns every write, from inside `temporal_publication.publish`).
 TEMPORAL_PUBLICATION_RECEIPTS_DIR = _data("temporal_publication_receipts")
+# Cut 6a (ADR 0033): Add Landmark's proposals and their apply receipts.
+# Durable and tracked because the person's SUBMITTED TEXT lives here from
+# the moment it is submitted and before anything is confirmed (owner ruling
+# R3) — losing it would be losing the only copy of what they said.
+# `system/landmark_offer.py` owns every write, and addresses the directory
+# relative to a vault root rather than through this process binding, so one
+# process can read a second vault's offers.
+LANDMARK_OFFERS_DIR = _data("landmark_offers")
 NEIGHBORHOODS_FILE = _data("neighborhoods")
 FOCUS_RECS_FILE = _data("focus_recommendations")
 LEGACY_FOCUS_RECS_FILE = _data("legacy_focus_recommendations")

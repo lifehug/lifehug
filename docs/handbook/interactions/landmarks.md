@@ -281,14 +281,64 @@ whisper by value (owner ruling R2, 2026-09-03; Cut 5b). `lifehug.py
 arc-plan-target --landmarks` walks the open ones as an episode, keystone
 first, then by ladder cost, with sensitive domains last.
 
-**Planned: the `offer` mode — Add Landmark (owner ruling R3b, 2026-09-03,
-`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5; Cut 6a).**
-The person volunteers text; the listener classifies it into domains and
-units; each domain's recorder proposes entries with the known entries in
-view; the worker shows the interpretation and asks for confirmation; confirmed
-entries file through the landmark recorder as stated facts. The manifest
-gains the roster, the existing episodes and eras, and the age frames. Not
-built yet; `interaction.yaml` still declares `modes: collect` only.
+## 5a. Add Landmark — the `offer` mode (v287, ADR 0033)
+
+Owner rulings R3, R3a and R3b, 2026-09-03 (`lifehug-platform
+docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5).
+`interaction.yaml` declares `modes: collect|offer`. The `collect` mode asks;
+the `offer` mode is the same interaction read backwards — **the person hands
+over ordinary text and the system says what it read before anything is
+filed.**
+
+```bash
+echo "I lived in Mesa from 1990 to 1992." | \
+    python3 system/lifehug.py landmark-offer --propose
+python3 system/lifehug.py landmark-offer --apply lmo:… --all
+python3 system/lifehug.py landmark-offer --retract lmr:…
+```
+
+`--propose` files no landmark. It writes ONE file,
+`state/landmarks/offers/<proposal_id>.json`, which carries the submitted text
+from the moment it is submitted — evidence is durable before confirmation
+(R3), landmarks are not — plus the units, the stories, the spans nothing
+recognized, and the open questions. It writes that file on failure too, so a
+provider outage never costs the person their words.
+
+**Three passes, none of them new.** A deterministic block grammar runs first
+over text it fully matches (zero model calls, so a thirty-block residence
+document costs nothing); then the general listener (§7, ADR 0029) with no
+domain; then the focused recorder (§6, ADR 0028) once per domain the listener
+named, with `{known_entries}` in view — which is what makes a second stay in a
+city the vault already knows a second entry rather than a merge.
+
+**Stated versus inferred is decided from the bytes**, not from the completion
+(decision record §4.2). `landmark_offer.date_evidence` re-reads every bound of
+every proposed date against the person's own text — the year in full
+(`1990`) or in the two-digit form people write (`'91`), and a finer grain with
+its month named. A bound the text carries files `basis: stated`; a bound it
+does not carries `confidence: inferred` and a verbatim inferred provenance
+clause, whatever the model declared.
+
+**Filing is the road an answer already takes.** A confirmed unit files through
+`timeline.save_landmark`, so an offer and an answer are indistinguishable
+downstream. Identity is `(proposal_id, unit_id)` through the existing
+`digest_override` seam — never a filing ordinal — so `--apply` twice files
+nothing twice and reads the standing receipt back. The receipt carries Cut
+4c's realized-gain sentence and says which Cut 5a opportunities closed.
+`--retract` files a durable retraction over exactly the claims the filed units
+stand on and republishes; the evidence, the receipts and the proposal all stay
+on disk.
+
+**Nothing is dropped and nothing is refused.** Every span of a submission is a
+unit's quote, a story, or an explicitly unrecognized span, and a lint asserts
+the three cover the text between them. Non-landmark text is routed as a story
+and the worker says so (R3a).
+
+The manifest gains three deterministic blocks (§5.2): the roster with its
+aliases, the published projection's episodes and eras with their spans, and
+the age frames with the birth origin they are counted from —
+`landmarks_interaction.render_roster` / `render_known_spans` /
+`render_age_frames`. The model interprets; it does not fetch.
 
 ## 6. The behavior authority
 
@@ -448,9 +498,10 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Claims, both passes (v229) | `general_listener.CLAIM_PROMPT_KEYS`, `validate_claim_draft`, `parse_claims`, `bind_claims`, `render_event_kinds`, `claim_refused`; `landmark_recorder.parse_recorder_claims`, `RecorderOutcome.claims`. The contract is `system/temporal_claims.py` — one door, one vocabulary |
 | Their retryable lint (v229) | `general_listener.CLAIMS_MISSING_SUBJECTS_LINT`, `claims_missing_subjects`, `every_claim_reminder` — a BINDING of v214's `_name_groups`/`_record_terms`, never a second copy |
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
-| Go Dig's own door (E-L3, v280) | `system/go_dig_grammar.py` (the deterministic §10.6 block grammar; no model) and `system/go_dig_writer.py` (`record_unit` — files through this SAME `timeline.save_landmark`, resolves/mints the roster place, files the nickname alias, promotes an optional note as `type: go_dig_note` stamped with the unit's own `question_context`; `plan_import`/`preview_import`/`apply_import` — a whole pasted document, filed in order, retry-safe on `(import_operation_id, block content digest, unit kind, discriminator)` rather than the filing ordinal) |
-| The verbs | `lifehug.py landmark-record`, `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals`, `lifehug.py go-dig-record` (v280), `lifehug.py go-dig-import --preview\|--apply` (v280) |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_go_dig.py` (v280) |
+| The `offer` mode (v287, ADR 0033) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `stories`, `unrecognized`, `questions`) · `apply(proposal_id, unit_ids, vault_root)` → the receipt, idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
+| Its internal extractors (v287) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import`/`record_unit`, reached ONLY through `landmark_offer` — retained under owner ruling R4 as extractors, with nothing user-facing naming the product they came from |
+| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_go_dig.py` |
 
 ## 8. Decisions
 

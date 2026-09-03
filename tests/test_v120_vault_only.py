@@ -100,6 +100,10 @@ EXPECTED_DATA_PATHS = {
     # Cut 4c: one realized-gain receipt per published generation, a
     # distinct directory from the extraction-receipt store above.
     "temporal_publication_receipts",
+    # Cut 6a (ADR 0033): Add Landmark's proposals and their receipts. Durable
+    # and tracked because the person's submitted text lives here from the
+    # moment it is submitted, before anything is confirmed (owner ruling R3).
+    "landmark_offers",
     "timeline_placements",
     "wiki",
     "wiki_synthesis_cache",
@@ -218,11 +222,13 @@ class VaultContractTests(unittest.TestCase):
         # `sources/eras` and `state/temporal_claims/resolutions`, O-C
         # (stale-first classification) added `state/classify_cursor.json`,
         # v260 (Timeline Fix 01) took the `landmarks` entry's `embedded_path`
-        # away, and v285 (Cut 4c) added `state/temporal_claims/
-        # publication_receipts` — one store per vault, `vault-contract-v14`.
+        # away, v285 (Cut 4c) added `state/temporal_claims/
+        # publication_receipts`, and v287 (Cut 6a) added
+        # `state/landmarks/offers` — one store per vault,
+        # `vault-contract-v15`.
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 285)
+        self.assertEqual(exported["identity"]["framework_version"], 287)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

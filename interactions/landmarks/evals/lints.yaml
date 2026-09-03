@@ -19,3 +19,19 @@ landmark_gates.never_proposes_a_date.compliance: 1.0
 # message, because that is the only honest evidence the lint can read
 # (`landmarks_interaction.answer_shape`; ambiguity fails toward skip).
 landmark_gates.answer_must_record.compliance: 1.0
+# Cut 6a (ADR 0033, decision record §5): the `offer` mode's four gates,
+# scored by `landmarks_evals.score_offer_goldens` over the five §5.6 goldens.
+# The first is the one R3's "never invent a date" rests on: a proposed date
+# must be in the person's own text or be marked as an inference, and the check
+# is `landmark_offer.date_evidence` over the bytes — never the completion's
+# own `basis` field.
+landmark_offer_gates.no_fabricated_date.compliance: 1.0
+# Every span of a submission is a unit, a story or an explicitly unrecognized
+# span. A proposal that quietly loses half a paste is the failure this mode
+# replaces.
+landmark_offer_gates.nothing_dropped.compliance: 1.0
+# R3a: non-landmark text is accepted and routed as a story, never refused.
+landmark_offer_gates.never_refuses.compliance: 1.0
+# The landmarks stop rules, in offer clothing: no form voice, no homework, no
+# pressure, and never naming a date and inviting agreement with it.
+landmark_offer_gates.keeps_stop_rules.compliance: 1.0

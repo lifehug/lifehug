@@ -1,0 +1,286 @@
+[
+  {
+    "fixture_id": "offer-residence-stated-certain",
+    "why": "decision record §5.6 example 1 — one residence unit, stated, certain, proposed, quoted.",
+    "source_text": "I lived in Mesa from 1990 to 1992.",
+    "completions": {
+      "listener": {
+        "landmarks": [
+          {
+            "domain": "residences",
+            "label": "Mesa",
+            "city": "Mesa",
+            "span": {
+              "start": {
+                "best": "1990",
+                "earliest": null,
+                "latest": null,
+                "granularity": "year",
+                "confidence": "certain",
+                "basis": "stated",
+                "anchors": [],
+                "provenance": []
+              },
+              "end": {
+                "best": "1992",
+                "earliest": null,
+                "latest": null,
+                "granularity": "year",
+                "confidence": "certain",
+                "basis": "stated",
+                "anchors": [],
+                "provenance": []
+              }
+            }
+          }
+        ],
+        "claims": [
+          {
+            "claim_type": "range",
+            "subject_mention": "Mesa",
+            "event_kind": "move",
+            "temporal_value": "1990/1992",
+            "evidence": "I lived in Mesa from 1990 to 1992."
+          }
+        ]
+      },
+      "recorders": {
+        "residences": {
+          "landmarks": [
+            {
+              "domain": "residences",
+              "label": "Mesa",
+              "city": "Mesa",
+              "span": {
+                "start": {
+                  "best": "1990",
+                  "earliest": null,
+                  "latest": null,
+                  "granularity": "year",
+                  "confidence": "certain",
+                  "basis": "stated",
+                  "anchors": [],
+                  "provenance": []
+                },
+                "end": {
+                  "best": "1992",
+                  "earliest": null,
+                  "latest": null,
+                  "granularity": "year",
+                  "confidence": "certain",
+                  "basis": "stated",
+                  "anchors": [],
+                  "provenance": []
+                }
+              }
+            }
+          ],
+          "claims": []
+        }
+      }
+    },
+    "expected": {
+      "state": "proposed",
+      "units": [
+        {
+          "domain": "residences",
+          "kind": "residence",
+          "subject": "Mesa",
+          "basis": "stated",
+          "confidence": "certain",
+          "start": "1990",
+          "end": "1992",
+          "quote": "I lived in Mesa from 1990 to 1992.",
+          "auto_file_eligible": true
+        }
+      ],
+      "questions": [],
+      "stories": [],
+      "unrecognized": []
+    },
+    "reply": "Reading this as a stay in Mesa, 1990 to 1992 — from “I lived in Mesa from 1990 to 1992.” Does this look right?"
+  },
+  {
+    "fixture_id": "offer-tenure-approximate-organization",
+    "why": "§5.6 example 2 — one tenure unit, approximate, organization matched against the roster or proposed as new.",
+    "source_text": "I worked at the Boatworks from about '91 to '92.",
+    "completions": {
+      "listener": {
+        "landmarks": [
+          {
+            "domain": "work",
+            "label": "the Boatworks",
+            "what": "boat building",
+            "span": {
+              "start": {
+                "best": "1991",
+                "earliest": null,
+                "latest": null,
+                "granularity": "year",
+                "confidence": "approximate",
+                "basis": "stated",
+                "anchors": [],
+                "provenance": []
+              },
+              "end": {
+                "best": "1992",
+                "earliest": null,
+                "latest": null,
+                "granularity": "year",
+                "confidence": "approximate",
+                "basis": "stated",
+                "anchors": [],
+                "provenance": []
+              }
+            }
+          }
+        ],
+        "claims": [
+          {
+            "claim_type": "range",
+            "subject_mention": "the Boatworks",
+            "event_kind": "job",
+            "temporal_value": "1991/1992",
+            "evidence": "I worked at the Boatworks from about '91 to '92."
+          }
+        ]
+      },
+      "recorders": {
+        "work": {
+          "landmarks": [
+            {
+              "domain": "work",
+              "label": "the Boatworks",
+              "what": "boat building",
+              "span": {
+                "start": {
+                  "best": "1991",
+                  "earliest": null,
+                  "latest": null,
+                  "granularity": "year",
+                  "confidence": "approximate",
+                  "basis": "stated",
+                  "anchors": [],
+                  "provenance": []
+                },
+                "end": {
+                  "best": "1992",
+                  "earliest": null,
+                  "latest": null,
+                  "granularity": "year",
+                  "confidence": "approximate",
+                  "basis": "stated",
+                  "anchors": [],
+                  "provenance": []
+                }
+              }
+            }
+          ],
+          "claims": []
+        }
+      }
+    },
+    "expected": {
+      "state": "proposed",
+      "units": [
+        {
+          "domain": "work",
+          "kind": "tenure",
+          "subject": "the Boatworks",
+          "basis": "stated",
+          "confidence": "approximate",
+          "start": "1991",
+          "end": "1992",
+          "quote": "I worked at the Boatworks from about '91 to '92.",
+          "entity_confidence": "new",
+          "auto_file_eligible": false
+        }
+      ],
+      "questions": [],
+      "stories": [],
+      "unrecognized": []
+    },
+    "reply": "I have the Boatworks from about '91 to '92 — roughly, the way you said it. The Boatworks is new here. Does this look right?"
+  },
+  {
+    "fixture_id": "offer-vague-move-asks-where",
+    "why": "§5.6 example 3 — retained as evidence; no residence and no year fabricated; one question, and it asks where.",
+    "source_text": "We moved around a lot after Dad changed jobs.",
+    "completions": {
+      "listener": {
+        "landmarks": [],
+        "claims": [
+          {
+            "claim_type": "relative_order",
+            "subject_mention": "we",
+            "event_kind": "move",
+            "temporal_value": {
+              "relation": "after",
+              "anchors": [
+                "Dad changed jobs"
+              ]
+            },
+            "evidence": "We moved around a lot after Dad changed jobs."
+          }
+        ]
+      },
+      "recorders": {}
+    },
+    "expected": {
+      "state": "needs_clarification",
+      "units": [],
+      "questions": [
+        {
+          "domain": "residences"
+        }
+      ],
+      "stories": [
+        "We moved around a lot after Dad changed jobs."
+      ],
+      "unrecognized": []
+    },
+    "reply": "I have kept that. I can't place it yet — do you remember where you lived then?"
+  },
+  {
+    "fixture_id": "offer-story-not-a-landmark",
+    "why": "§5.6 example 4 — not a landmark; accepted, routed as a story, and the worker says so. Never refused.",
+    "source_text": "My dog died that summer.",
+    "completions": {
+      "listener": {
+        "landmarks": [],
+        "claims": []
+      },
+      "recorders": {}
+    },
+    "expected": {
+      "state": "proposed",
+      "units": [],
+      "questions": [],
+      "stories": [
+        "My dog died that summer."
+      ],
+      "unrecognized": []
+    },
+    "reply": "That is not one of the dated anchors — I have kept it as a story."
+  },
+  {
+    "fixture_id": "offer-document-many-units",
+    "why": "§5.6 example 5 — a residence document pasted whole: the deterministic grammar runs first, and nothing it does not recognize is discarded.",
+    "source_text": "Dates: 1960 - 1961\nCity/State: Town00, ST\n\nDates: 1961 - 1962\nCity/State: Town01, ST\n\nDates: 1962 - 1963\nCity/State: Town02, ST\n\nDates: 1963 - 1964\nCity/State: Town03, ST\n\nDates: 1964 - 1965\nCity/State: Town04, ST\n\nDates: 1965 - 1966\nCity/State: Town05, ST\n\nDates: 1966 - 1967\nCity/State: Town06, ST\n\nDates: 1967 - 1968\nCity/State: Town07, ST\n\nDates: 1968 - 1969\nCity/State: Town08, ST\n\nDates: 1969 - 1970\nCity/State: Town09, ST\n\nDates: 1970 - 1971\nCity/State: Town10, ST\n\nDates: 1971 - 1972\nCity/State: Town11, ST\n\nDates: 1972 - 1973\nCity/State: Town12, ST\n\nDates: 1973 - 1974\nCity/State: Town13, ST\n\nDates: 1974 - 1975\nCity/State: Town14, ST\n\nDates: 1975 - 1976\nCity/State: Town15, ST\n\nDates: 1976 - 1977\nCity/State: Town16, ST\n\nDates: 1977 - 1978\nCity/State: Town17, ST\n\nDates: 1978 - 1979\nCity/State: Town18, ST\n\nDates: 1979 - 1980\nCity/State: Town19, ST\n\nDates: 1980 - 1981\nCity/State: Town20, ST\n\nDates: 1981 - 1982\nCity/State: Town21, ST\n\nDates: 1982 - 1983\nCity/State: Town22, ST\n\nDates: 1983 - 1984\nCity/State: Town23, ST\n\nDates: 1984 - 1985\nCity/State: Town24, ST\n\nDates: 1985 - 1986\nCity/State: Town25, ST\n\nDates: 1986 - 1987\nCity/State: Town26, ST\n\nDates: 1987 - 1988\nCity/State: Town27, ST\n\nDates: 1988 - 1989\nCity/State: Town28, ST\n\nDates: 1989 - 1990\nCity/State: Town29, ST",
+    "completions": {
+      "listener": {
+        "landmarks": [],
+        "claims": []
+      },
+      "recorders": {}
+    },
+    "expected": {
+      "state": "proposed",
+      "unit_count": 30,
+      "questions": [],
+      "stories": [],
+      "unrecognized": []
+    },
+    "reply": "That is thirty stays, 1960 through 1990. Does this look right?"
+  }
+]

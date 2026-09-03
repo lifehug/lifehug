@@ -195,27 +195,41 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
-| The offer verb (PLANNED, Cut 6a; owner ruling R3b, 2026-09-03) | `lifehug.py landmark-offer` — not built; see "Planned: the `offer` mode" below |
+| The offer verb (v287, ADR 0033) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>`. Module: `system/landmark_offer.py`; leaf: `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
 | The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete] [--none]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
 writes it.
 
-## Planned: the `offer` mode (Add Landmark)
+## The `offer` mode (Add Landmark, v287)
 
 Owner rulings R3/R3a/R3b, 2026-09-03 (`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5;
-Cut 6a). Add Landmark is a second mode, `offer`, of THIS interaction beside
-`collect` — not a new interaction kind. The person volunteers ordinary text,
-from one dated event to a whole residence history; the listener classifies it
-into domains and units; each domain's recorder proposes entries with that
-domain's known entries in view, so a second stay in the same city is a second
-entry, not a merge; the worker shows the interpretation in plain language and
-asks for confirmation; confirmed entries file through the landmark recorder as
-**stated** facts, count toward sufficiency and retire the matching open
-question. The manifest gains the roster (people, places, organizations,
-aliases), the existing episodes and eras, and the age frames. A `landmark-offer`
-CLI verb is planned. Nothing here is built yet: `interaction.yaml` still
-declares `modes: collect` only, and Cut 6a adds `offer`.
+ADR 0033). Add Landmark is a second mode, `offer`, of THIS interaction beside
+`collect` — **not a new interaction kind**, and `interactions/registry.json` is
+untouched. The person volunteers ordinary text, from one dated event to a whole
+residence history; a deterministic block grammar runs first over text it fully
+matches; the listener classifies the rest into domains and units; each domain's
+recorder proposes entries with that domain's known entries in view, so a second
+stay in the same city is a second entry, not a merge; the worker shows the
+interpretation in plain language and asks *"does this look right?"*; confirmed
+entries file through `timeline.save_landmark` as **stated** facts, count toward
+sufficiency and retire the matching opportunity by closing its gap.
+
+`interaction.yaml` carries `modes: collect|offer` and
+`composition.offer_turn: prompt/turn-instructions-offer.md` — a third slot
+beside `composition.recorder` and `composition.listener`, for the same reason
+those two are their own: a leaf that never joins the conversation's load order
+is a different prompt, not an override of `composition.leaf`. The manifest
+gains the roster (people, places, organizations, aliases), the existing
+episodes and eras with their spans, and the age frames with their birth
+origin, all rendered deterministically by the caller.
+
+Three promises the mode keeps, each with a lint behind it: **no proposed date
+is absent from the person's own text unless it is marked as an inference**
+(`landmark_offer.date_evidence`, read off the bytes and never off the
+completion's own `basis`); **every span of a submission is a unit, a story or
+an explicitly unrecognized span**; and **non-landmark text is never refused** —
+it is accepted, routed as a story, and said so.
 
 Run the deterministic seat gate with:
 
