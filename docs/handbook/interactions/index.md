@@ -50,7 +50,7 @@ runs it. Ten exist today, each with its own handbook page:
 [Entity Candidate](entity-candidate.md) (identity),
 [Arc Walk](arc-walk.md) (arc walking), and
 [Timeline](timeline.md) (placing a memory in time), and
-[Landmarks](landmarks.md) (the always-present dating question set), and
+[Landmarks](landmarks.md) (the universal dating question set), and
 [Reading Room](reading-room.md) (dating from evidence).
 
 **The child-interaction paradigm.** Conversation is the parent; a child

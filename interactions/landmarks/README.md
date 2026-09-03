@@ -1,7 +1,7 @@
 # Landmarks Interaction
 
 `landmarks` is an independently registered, auditable Interaction for the
-**always-present dating question set**. It exact-composes Conversation by
+**universal dating question set**. It exact-composes Conversation by
 reference and owns only the one goal Conversation cannot carry: **collect the
 small set of dated facts that makes every other memory cheap to place.**
 
@@ -21,8 +21,11 @@ inside (Allen 1983's "reference intervals"); the third is the one made of
 **people**, so its members go to the entity roster as PERSON entries with the
 relationship fact rather than into a parallel store. All three are domains a
 living relative can supply outright — and the family domain is where we learn
-**who those relatives are**. Everything else is an open set. That asymmetry is
-why family, residences and schools come first (`landmarks.md` §2.7 + §2.9).
+**who those relatives are**. Everything else is an open set, governed by
+**sufficiency**: an open domain leaves the privileged surface when its remaining
+questions have low marginal placement value, not when every field is filled
+(owner ruling R2, 2026-09-03; Cut 5a). That asymmetry is why family,
+residences and schools come first (`landmarks.md` §2.7 + §2.9).
 
 **A vague answer is an answer.** "Somewhere outside Dayton, the eighties"
 bounds everything it overlaps. The **specificity ladder** — city → address →
@@ -32,8 +35,11 @@ ask for the decade and enter the mid year."
 
 **An open landmark is a resting state, not a debt** (owner ruling 2). A
 landmark that is unanswered or below its target rung stays open on the
-Timeline forever, answerable at any time, and never enters the daily question
-queue. No reminders. No counts in prose. The `landmark_gates.no_form_voice`
+Timeline forever, answerable at any time. It may enter the daily queue or a
+whisper when it passes the shared value threshold (owner ruling R2,
+2026-09-03, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`;
+lands in Cut 5b, tracking #573/#586); it is never a reminder and never nags.
+No reminders. No counts in prose. The `landmark_gates.no_form_voice`
 lint is the mechanical form of that rule.
 
 **Never ask for a year — except a person's birthday.** A birth date is
@@ -189,10 +195,27 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`, the SAME definition `reading_room.placement_gain_sentence` says. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
+| The offer verb (PLANNED, Cut 6a; owner ruling R3b, 2026-09-03) | `lifehug.py landmark-offer` — not built; see "Planned: the `offer` mode" below |
 | The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete] [--none]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
 writes it.
+
+## Planned: the `offer` mode (Add Landmark)
+
+Owner rulings R3/R3a/R3b, 2026-09-03 (`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5;
+Cut 6a). Add Landmark is a second mode, `offer`, of THIS interaction beside
+`collect` — not a new interaction kind. The person volunteers ordinary text,
+from one dated event to a whole residence history; the listener classifies it
+into domains and units; each domain's recorder proposes entries with that
+domain's known entries in view, so a second stay in the same city is a second
+entry, not a merge; the worker shows the interpretation in plain language and
+asks for confirmation; confirmed entries file through the landmark recorder as
+**stated** facts, count toward sufficiency and retire the matching open
+question. The manifest gains the roster (people, places, organizations,
+aliases), the existing episodes and eras, and the age frames. A `landmark-offer`
+CLI verb is planned. Nothing here is built yet: `interaction.yaml` still
+declares `modes: collect` only, and Cut 6a adds `offer`.
 
 Run the deterministic seat gate with:
 

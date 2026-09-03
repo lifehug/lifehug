@@ -168,6 +168,10 @@ merge time, not at branch time.
   (`🤖 Generated with Claude Sonnet 5 via Claude Code` where Sonnet actually
   wrote the final text) rather than blocking on Opus availability.
 
+## Decided 2026-09-03 — TIMELINE UNIFICATION (platform program)
+
+Controlling record: `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`. One personal timeline, one published projection. R2: landmark and timeline questions may enter the daily queue or a whisper by value (Cut 5b; #573/#586) — still never nagging, never a count. R4a: Go Dig, Go Deep and the Reading Room are removed; the OSS interaction, `dig_plan` and verbs are deleted in Cut 2c (ADR 0025 retired, kept as history). R3b: Add Landmark arrives as an `offer` mode of `landmarks` in Cut 6a (`interaction.yaml` unchanged until then). R4: the legacy `timeline_data()` projection is ported into the calculated projection in Cuts 2–5 and retired in Cut 7.
+
 Then decide:
 
 1. **Fresh install?** → If `system/question-bank.md` has no project categories (only A-E), run the First Session setup flow from CLAUDE.md.

@@ -1,4 +1,4 @@
-# interactions/landmarks/questions.yaml — the always-present dating question
+# interactions/landmarks/questions.yaml — the universal dating question
 # set, as DATA. Flat scalar subset only (lifehug_core._parse_simple_yaml),
 # same convention as interaction.yaml.
 #

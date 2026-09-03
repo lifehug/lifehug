@@ -1,5 +1,7 @@
 # Landmarks: the always-present dating question set
 
+**Note 2026-09-03:** research, kept as history. Where this document says the queue never carries landmark questions (§ "resting state" passages, the ruling summaries near the end), owner ruling R2 (2026-09-03, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`) now controls: landmark questions may enter the daily queue or a whisper by value above the shared threshold (Cut 5b); "resting state, not a debt", no nagging and no counts stand. Body untouched.
+
 *Research-only literature review (v198). Every claim is sourced; nothing here
 is implemented yet. This is the second corpus in the chronology topic — it
 assumes `system/research/chronology.md` (v194) and does not re-derive it.

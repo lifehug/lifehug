@@ -1,5 +1,7 @@
 # Reading Room Interaction
 
+**Removed 2026-09-03 (owner ruling R4a, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`):** the Reading Room / Go Deep leaves the product together with Go Dig; this file is deleted in Cut 2c. Add Landmark (an `offer` mode of `landmarks`, Cut 6a) replaces this line of work. Kept as history until then.
+
 `reading_room` is an independently registered, auditable Interaction for the
 **evidence-driven dating session**. It exact-composes Conversation by
 reference and owns only the one goal Conversation cannot carry: **turn what

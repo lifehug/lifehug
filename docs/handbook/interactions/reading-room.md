@@ -6,6 +6,8 @@ nav_order: 9
 
 # Reading Room Interaction
 
+**Removed 2026-09-03 (owner ruling R4a, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`):** the Reading Room / Go Deep leaves the product together with Go Dig; this file is deleted in Cut 2c. Add Landmark (an `offer` mode of `landmarks`, Cut 6a) replaces this line of work. Kept as history until then.
+
 ## 1. What it does
 
 **The user's case.** *"I have my mother's photo albums in a box in the closet.
