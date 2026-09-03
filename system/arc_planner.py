@@ -275,7 +275,32 @@ def collect_timeline_gaps(*, payload: dict | None = None) -> list[dict]:
     # one. This is what makes whispers leverage-ranked instead of
     # era-affinity-ranked — the same number `build_timeline_plan` computes,
     # read from the assembled payload so the two can never disagree.
-    return _with_leverage(consumed, payload)
+    #
+    # Cut 5b (R2, lifehug-platform#573/#586): the CALCULATED projection's own
+    # candidates ride the same lane, ahead of the legacy gaps because they
+    # carry the graph's measured leverage and the question generated from the
+    # named gap. They are the SAME items the daily queue is choosing from —
+    # one identity, two surfaces — so `_timeline_gap_intent`'s existing
+    # suppression rule already refuses to whisper the day's own question.
+    return _timeline_gain_gaps(payload) + _with_leverage(consumed, payload)
+
+
+def _timeline_gain_gaps(payload: object) -> list[dict]:
+    """Cut 5b's candidates as gap rows — GUARDED, ranked by leverage.
+
+    Everything host-specific about the whisper stays where it was: the
+    per-card limit, the weekly `DEFAULT_GAP_MAX`, the no-calendar-year rule
+    (`timeline_candidates.whisper_gaps` applies :data:`BANNED_PHRASE` at the
+    source) and the stop rules inside the interaction. What changed is only
+    the supply.
+    """
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        view = timeline_candidates.load_view(payload)
+        return timeline_candidates.whisper_gaps(view)
+    except Exception:  # noqa: BLE001 — a timeline problem is a silent no-op
+        return []
 
 
 def _with_leverage(gaps: list[dict], payload: dict) -> list[dict]:
@@ -671,7 +696,11 @@ def _timeline_gap_intent(item: dict, material: dict, used: dict) -> list[dict]:
         )
 
     for gap in sorted(gaps, key=rank):
-        key = (str(gap.get("kind")), str(gap.get("period") or ""))
+        # Cut 5b: the identity joins the never-twice key. A legacy gap carries
+        # none and keys exactly as it did; two landmark opportunities are two
+        # different questions and must not collapse into one "kind".
+        key = (str(gap.get("kind")), str(gap.get("period") or ""),
+               str(gap.get("question_id") or ""))
         if key in used["gap_keys"]:
             continue
         used["gap_keys"].add(key)
@@ -688,6 +717,12 @@ def _gap_work_item_id(gap: dict) -> str:
     same question, and two derivations of "the same question" is exactly the
     drift plan §2.3 exists to forbid.
     """
+    published = str(gap.get("work_item_id") or "").strip()
+    if published:
+        # Cut 5b: a candidate that arrived from the projection already IS the
+        # substrate's item — deriving a second id from its anchor would be the
+        # drift this function exists to forbid.
+        return published
     try:
         from question_planner import timeline_work_item_id  # noqa: PLC0415
 
@@ -713,9 +748,11 @@ def _whisper_intent(gap: dict) -> dict:
     # Stamped BEFORE the probe work below — `whisper_from_keystone` names no
     # such field, so the keystone's payload enriches the whisper without ever
     # being able to change which item it is about.
-    work_item_id = _gap_work_item_id(gap)
+    work_item_id = str(gap.get("work_item_id") or "") or _gap_work_item_id(gap)
     if work_item_id:
         intent["work_item_id"] = work_item_id
+    if gap.get("provenance"):
+        intent["provenance"] = str(gap["provenance"])
     try:
         import timeline_interaction  # noqa: PLC0415
 
@@ -735,9 +772,15 @@ def _whisper_intent(gap: dict) -> dict:
                 anchors=gap.get("anchors") or (),
             )
         anchor = str(gap.get("anchor") or "")
+        # Cut 5b: a candidate that arrived with its own published identity
+        # (`lo:` / `tl:`) is asked under THAT id, so the whisper and the queue
+        # entry are one thing (#586). A legacy gap derives one from its anchor,
+        # exactly as before.
+        identity = str(gap.get("question_id") or "")
         intent.update({
             "anchor": anchor,
-            "question_id": timeline_interaction.keystone_question_id(anchor) if anchor else "",
+            "question_id": identity or (
+                timeline_interaction.keystone_question_id(anchor) if anchor else ""),
             "probe": str(probe.get("text") or ""),
             "probe_step": str(probe.get("step") or ""),
             "anchors": list(gap.get("anchors") or []),

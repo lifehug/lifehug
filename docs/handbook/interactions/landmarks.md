@@ -36,11 +36,12 @@ failure.
 
 **An open landmark is a resting state, not a debt.** A landmark that is
 unanswered, or answered below its target rung, stays on the Timeline forever,
-answerable whenever. It may enter the daily queue or a whisper when it passes
-the shared value threshold (owner ruling R2, 2026-09-03,
+answerable whenever. It enters the daily queue or a whisper when it passes
+the shared value threshold, and only then (owner ruling R2, 2026-09-03,
 `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`;
-lands in Cut 5b, tracking #573/#586); it is never a reminder, never nags, and
-never appears as a count of what remains.
+shipped v288, Cut 5b, closing #573/#586 — `system/timeline_candidates.py`,
+provenance `timeline-gain`, one landmark question per queue build); it is never
+a reminder, never nags, and never appears as a count of what remains.
 
 **Landed v286 (Cut 5a, ADR 0032): a domain leaves the surface on VALUE, not on
 completion.** `system/landmark_opportunities.py` derives the gaps the
@@ -276,8 +277,11 @@ nothing to anchor, and nothing is invented.
 
 Onboarding asks the five `onboarding: true` domains in generalities and takes
 a skip without comment. Everything else lives under the Timeline as an
-always-open row, and a landmark question may also reach the daily queue or a
-whisper by value (owner ruling R2, 2026-09-03; Cut 5b). `lifehug.py
+always-open row, and a landmark question also reaches the daily queue or a
+whisper by value (owner ruling R2, 2026-09-03; shipped v288, Cut 5b: the
+published opportunity's own `lo:` id is the bank row's identity AND the
+whisper's, so the two are one question; filing the answer through any writer
+checks the row off). `lifehug.py
 arc-plan-target --landmarks` walks the open ones as an episode, keystone
 first, then by ladder cost, with sensitive domains last.
 

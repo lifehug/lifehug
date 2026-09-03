@@ -36,6 +36,34 @@ ever putting an unreviewed idea in front of you as a daily question, and
 guarantee that a genuinely good idea reaches the bank whether or not you
 personally look at it.
 
+**One lane does not pass through this buffer, and it is worth saying why.**
+Since v288 (Cut 5b; owner ruling R2, 2026-09-03,
+`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`)
+the Timeline's own measured gaps reach the bank directly, through
+`system/timeline_candidates.py`, with provenance `timeline-gain`. They skip
+the review buffer because they are not *proposals*: a landmark opportunity or
+a keystone is a deterministic statement about the dependency graph — this
+anchor is missing, and knowing it would place six other things — computed by
+the fold, not written by a model. There is no craft to score and no phrasing
+to second-guess; the question is generated from the named gap. What replaces
+the quality gate is a **value** gate, and it is deliberately narrow:
+
+* the gap's `leverage` must reach `timeline_leverage_per_story` (6) — the one
+  dial the Timeline surface, the queue's weight and this door all read;
+* it must not be `offer_only` (losses are offered, never asked);
+* it must not already be in the bank, answered or open, under any of its
+  names (`lo:`, `tl:`, or the substrate's `work:`);
+* it must not have been dismissed by the owner — a human negative persists in
+  `state/timeline_candidates.json` across every rebuild.
+
+At most **one** landmark question is minted per queue build
+(`timeline_candidates.LANDMARK_MINT_CAP`), on top of the keystone plan's own
+cap of two, and `GROUP_CAPS["timeline"]` still bounds the week at one asked
+timeline question. Everything below the bar stays a Timeline invitation and
+never becomes a question at all. When the landmark is filed, the bank row is
+checked off (answered, not deleted) by `timeline.save_landmark`, so it is
+never asked twice and never re-minted.
+
 ## 2. The nouns
 
 A **candidate** is a proposed question sitting in the review buffer

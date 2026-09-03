@@ -116,6 +116,12 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # state/arc_cards.json, so they take the writer lock like the rest of the
     # weekly/monthly learning-loop family.
     "arc-plan", "arc-thread-offers",
+    # timeline-candidates (Cut 5b): --dismiss / --undismiss append one row to
+    # state/timeline_candidates.json, the owner's durable "no" for a timeline
+    # question. Same single-file writer-lock family as focus-dismiss; the
+    # default run (--list) writes nothing but the command is classified BY
+    # NAME, exactly as focus-autopilot and era-migrate are.
+    "timeline-candidates",
     "book-offers", "candidates-auto-promote", "candidates-promote",
     "candidates-promotion-receipt",
     "focus-candidate-complete", "entity-candidate-complete",
@@ -1715,6 +1721,22 @@ def cmd_arc_thread_offers(args: argparse.Namespace) -> int:
     if getattr(args, "dry_run", False):
         flags.append("--dry-run")
     return run_python("arc_planner.py", flags)
+
+
+def cmd_timeline_candidates(args: argparse.Namespace) -> int:
+    """Cut 5b: what the timeline would ask, and the owner's veto over it."""
+    flags: list[str] = []
+    if args.dismiss:
+        flags += ["--dismiss", args.dismiss]
+        if args.reason:
+            flags += ["--reason", args.reason]
+    elif args.undismiss:
+        flags += ["--undismiss", args.undismiss]
+    else:
+        flags.append("--list")
+    if args.json:
+        flags.append("--json")
+    return run_python("timeline_candidates.py", flags)
 
 
 def cmd_conversation_open(args: argparse.Namespace) -> int:
@@ -3659,6 +3681,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None, help="Max offers this month (default 1)")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_arc_thread_offers)
+
+    p = sub.add_parser("timeline-candidates",
+                       help="The timeline questions above the shared threshold; dismiss one for good")
+    p.add_argument("--dismiss", metavar="ID", help="Record an owner's no for a lo:/tl: identity")
+    p.add_argument("--undismiss", metavar="ID", help="Lift a dismissal")
+    p.add_argument("--reason", default="", help="Why (recorded beside the dismissal)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_timeline_candidates)
 
     p = sub.add_parser("conversation-open", help="Open a new conversation session; prints its id and document path")
     p.add_argument("--mode", required=True, choices=["chat", "conversation"])

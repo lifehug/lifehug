@@ -307,6 +307,19 @@ run_learning_step "auto_promote" python3 "$SCRIPT_DIR/lifehug.py" candidates-aut
 # shellcheck disable=SC2034
 PROMOTE_OUT="$LAST_STEP_OUT"
 
+# planner-queue mints the timeline's OWN earned questions before it builds the
+# week (v196; generalized in v288, Cut 5b). The supply is the served calculated
+# projection: `landmark_opportunities` (`lo:`, Cut 5a) and `keystones` (`tl:`,
+# Cut 3a), read through `system/timeline_candidates.py` and minted with
+# provenance `timeline-gain` only when `leverage` clears
+# `timeline_leverage_per_story`, never when `offer_only`, never when the bank
+# already holds the identity, and never when the owner dismissed it. At most
+# one landmark question per build; `GROUP_CAPS["timeline"]` still bounds the
+# week at one asked. A vault with no published projection falls back to the
+# legacy keystone path (Cut 7b deletes it). It runs AFTER the auto-promote
+# step and BEFORE the arc-card step below, so a minted row is an ordinary
+# pending bank question by the time the queue scores it, and this week's cards
+# whisper the same identities the queue just chose from.
 run_learning_step "planner_queue" python3 "$SCRIPT_DIR/lifehug.py" planner-queue --limit "$QUEUE_LIMIT" --arc-max "$ARC_MAX" --expires-days "$EXPIRES_DAYS"
 # Read indirectly by the report section table below.
 # shellcheck disable=SC2034

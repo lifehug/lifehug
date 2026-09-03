@@ -35,10 +35,11 @@ ask for the decade and enter the mid year."
 
 **An open landmark is a resting state, not a debt** (owner ruling 2). A
 landmark that is unanswered or below its target rung stays open on the
-Timeline forever, answerable at any time. It may enter the daily queue or a
-whisper when it passes the shared value threshold (owner ruling R2,
-2026-09-03, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`;
-lands in Cut 5b, tracking #573/#586); it is never a reminder and never nags.
+Timeline forever, answerable at any time. It enters the daily queue or a
+whisper when it passes the shared value threshold, and only then (owner ruling
+R2, 2026-09-03, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`;
+shipped v288, Cut 5b, closing #573/#586 — `system/timeline_candidates.py`,
+provenance `timeline-gain`); it is never a reminder and never nags.
 No reminders. No counts in prose. The `landmark_gates.no_form_voice`
 lint is the mechanical form of that rule.
 

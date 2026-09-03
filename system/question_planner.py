@@ -701,6 +701,23 @@ def accepted_candidate_recommendations(candidates: list[dict], limit: int = 8) -
     return rows[:limit]
 
 
+def timeline_probe_weight(leverage: object, *, policy: object = None) -> float:
+    """THE weight a minted timeline question carries — one definition.
+
+    v196's exchange rate, unchanged by Cut 5b and named here so it is testable
+    rather than inlined: ``leverage / timeline_leverage_per_story``, quoted in
+    exactly the currency `DEFAULT_LANE_POLICY["objective_boost"]` is. An
+    answer that would place as many unknowns as the dial names is worth one
+    ordinary story answer, and the queue weighs it as one.
+    """
+    lane = {**DEFAULT_LANE_POLICY, **(policy if isinstance(policy, dict) else {})}
+    try:
+        per_story = float(lane.get("timeline_leverage_per_story") or 0)
+        return (float(leverage) / per_story) if per_story > 0 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _week_seed(generated_at: str) -> int:
     """Stable per-week seed so each weekly rebuild varies, but a given week is
     reproducible (good for tests and idempotent re-runs within the week)."""
@@ -762,8 +779,12 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
             # injected index behaves exactly like the vault's own.
             "work_item_id": str(probe.get("work_item_id")
                                 or timeline_work_item_id(anchor=probe.get("anchor")) or ""),
+            # Cut 5b: which lane minted it. Absent on a pre-5b row, which is
+            # honest — that row came from the keystone lane, before there was
+            # more than one.
+            "provenance": str(probe.get("provenance") or ""),
         }
-        question["timeline_boost"] = (leverage / per_story) if per_story > 0 else 0.0
+        question["timeline_boost"] = timeline_probe_weight(leverage, policy=policy)
 
     # Per-Focus item caps (max share of the week any one Focus may take).
     focus_max = {
@@ -819,6 +840,9 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         work_item_id = str((selected.get("timeline_probe") or {}).get("work_item_id") or "")
         if work_item_id:
             entry["work_item_id"] = work_item_id
+        provenance = str((selected.get("timeline_probe") or {}).get("provenance") or "")
+        if provenance:
+            entry["provenance"] = provenance
         queue.append(entry)
 
     def eligible(q: dict, *, enforce_arc: bool = True, enforce_story: bool = True) -> bool:
@@ -980,15 +1004,19 @@ def current_timeline_probes() -> dict:
         # on a bank minted by any version.
         table = published_work_item_aliases()
         markers = {
-            row["bank_id"]: row["work_item_id"]
+            row["bank_id"]: row
             for row in bank_work_items(text, aliases=table).values()
         }
         for bank_id, row in index.items():
-            identity = markers.get(bank_id) or timeline_work_item_id(
+            marked = markers.get(bank_id) or {}
+            identity = marked.get("work_item_id") or timeline_work_item_id(
                 anchor=row.get("anchor"), anchor_kind=row.get("anchor_kind")
             )
             if identity:
                 row["work_item_id"] = identity
+            # Cut 5b: the lane that minted the row travels onto the queue entry.
+            if marked.get("provenance"):
+                row["provenance"] = marked["provenance"]
         return index
     except Exception:  # noqa: BLE001
         return {}
@@ -1128,6 +1156,13 @@ WORK_ITEM_REACH_SATURATION_FACTOR = 2.0
 DAILY_QUESTION_SURFACE = "daily_question"
 WHISPER_SURFACE = "whisper"
 
+#: Cut 5b: the provenance a candidate minted from the served projection's
+#: `landmark_opportunities` / `keystones` carries — spelled once in
+#: `timeline_candidates.PROVENANCE` and mirrored here so this module never
+#: needs that import to recognize one. `tests/test_queue_convergence.py` pins
+#: the two to one definition.
+TIMELINE_GAIN_PROVENANCE = "timeline-gain"
+
 #: §2.4, hard: loss discovery is OFFER-ONLY. The generic "have you lost
 #: someone?" opener may live on Timeline and may be offered; it never becomes a
 #: daily question, no matter what it scores and no matter what surfaces its
@@ -1240,6 +1275,15 @@ _WORK_ITEM_MARKER_RE = re.compile(
     WORK_ITEM_BANK_MARKER + r":\s*(?P<work_item_id>[A-Za-z0-9:._-]+)"
 )
 
+#: Cut 5b's second additive field on the same comment: which lane minted the
+#: row. Absent on every row minted before this cut, which reads as "the
+#: keystone lane", because that is what it was.
+PROVENANCE_BANK_MARKER = "provenance"
+
+_PROVENANCE_MARKER_RE = re.compile(
+    PROVENANCE_BANK_MARKER + r":\s*(?P<provenance>[A-Za-z0-9._-]+)"
+)
+
 
 def _clamp_unit(value: object, default: float = 0.0) -> float:
     """`0.0..1.0`, or `default`. One definition (`temporal_work_items`)."""
@@ -1349,25 +1393,71 @@ def work_item_from_keystone(keystone: object, *, now: str | None = None) -> dict
     return item
 
 
-def current_work_items(*, timeline_payload: object = None) -> list[dict]:
+def current_work_items(*, timeline_payload: object = None,
+                       calculated_view: object = None) -> list[dict]:
     """Every work item this vault currently implies — GUARDED, deduped by id.
 
-    Two sources today, in precedence order:
+    Three sources, in precedence order:
 
-    1. `state/temporal_claims/work-items.json`, wave D's published projection.
-       Nothing writes it yet — D1 mints work items from the calculated timeline
-       and the stitch that publishes them is a follow-up — so this read is
-       normally empty and is deliberately written to tolerate that.
-    2. the timeline's own keystones, which is the whole supply today.
+    1. **Cut 5b's timeline-gain candidates** — the served projection's
+       `landmark_opportunities` and `keystones`, above the shared threshold and
+       under `timeline_candidates.LANDMARK_MINT_CAP`. They win the tie because
+       they are the richest record of the SAME item: an opportunity carries the
+       question generated from the named gap (*"When did you move out of the
+       Mesa house?"*) where the raw row carries the fold's own composed
+       sentence, and it reuses the published item's identity rather than
+       minting a second one — so this is a better description of one question,
+       never a second question.
+    2. `state/temporal_claims/work-items.json`, wave D's published projection:
+       every other Timeline-owned gap, with the claims behind it.
+    3. **the LEGACY keystone adapter** (`timeline.keystones` over the legacy
+       payload), used only when the published projection carries no gain at
+       all — a vault that has never published one. Cut 7b deletes it.
 
-    The projection wins a tie because it is the richer record: it knows the
-    claims behind the item and the person value of the subject, where a
-    keystone knows only reach.
+    The three are deduped by canonical identity, first source winning, so a
+    keystone that the calculated view and the legacy payload both name is one
+    row and one question.
     """
+    view = timeline_candidates_view(timeline_payload, calculated_view)
+    gain_items = _timeline_gain_work_items(view)
+    published = _published_work_items()
+    legacy = () if _view_has_projection(view) else _keystone_work_items(timeline_payload)
     return _dedupe_work_items(
-        _published_work_items() + _keystone_work_items(timeline_payload),
+        list(gain_items) + published + list(legacy),
         aliases=published_work_item_aliases(),
     )
+
+
+def timeline_candidates_view(timeline_payload: object = None,
+                             calculated_view: object = None) -> dict:
+    """The served `calculated_view` block this build reads — GUARDED."""
+    if isinstance(calculated_view, dict):
+        return calculated_view
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        return timeline_candidates.load_view(timeline_payload)
+    except Exception:  # noqa: BLE001 — a projection problem is "no timeline items"
+        return {}
+
+
+def _view_has_projection(view: object) -> bool:
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        return timeline_candidates.view_has_projection(view)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _timeline_gain_work_items(view: object) -> list[dict]:
+    """Cut 5b: the served view's opportunities and keystones, or `[]`."""
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        return timeline_candidates.from_view(view)
+    except Exception:  # noqa: BLE001 — a timeline problem is "no timeline items"
+        return []
 
 
 def work_items_from_projection(payload: object) -> list[dict]:
@@ -1609,6 +1699,7 @@ def bank_work_items(question_bank_text: object, *, aliases: object = None) -> di
         if not tag:
             continue
         marker = _WORK_ITEM_MARKER_RE.search(lines[position + 1])
+        lane = _PROVENANCE_MARKER_RE.search(lines[position + 1])
         anchor = tag.group("anchor").strip()
         work_item_id = resolve_work_item_id(
             marker.group("work_item_id") if marker else timeline_work_item_id(anchor=anchor),
@@ -1624,6 +1715,7 @@ def bank_work_items(question_bank_text: object, *, aliases: object = None) -> di
             "leverage": int(tag.group("leverage")),
             "text": bank_row.group("text").strip(),
             "answered": bank_row.group(1) == "x",
+            "provenance": lane.group("provenance") if lane else "",
         })
     return rows
 
@@ -1697,10 +1789,25 @@ def queue_candidates(items: object = None, *, question_bank_text: object = None,
     table = _aliases_for(question_bank_text, aliases)
     known = bank_work_items(text, aliases=table)
     candidates: list[dict] = []
+    per_story = float(lane.get("timeline_leverage_per_story",
+                               DEFAULT_LANE_POLICY["timeline_leverage_per_story"]) or 0)
     for item in rows:
         if not isinstance(item, dict):
             continue
         if is_loss_discovery(item):
+            continue
+        # Cut 5b, R2: `offer_only` is a REFUSAL, not a weight (§4.6 — "losses
+        # stay offer-only"). It rides the item because the opportunity that
+        # minted it said so; the generic-opener refusal above stays as the
+        # backstop for an item that never passed through this module.
+        if item.get("offer_only"):
+            continue
+        # Cut 5b, R2's entry rule, stated once here so it holds however the
+        # item arrived: a TIMELINE-GAIN candidate enters the bank only when its
+        # leverage clears the one dial. The combined score below still decides
+        # whether it earns the slot; this decides whether it may compete.
+        if (str(item.get("provenance") or "") == TIMELINE_GAIN_PROVENANCE
+                and per_story > 0 and work_item_reach(item) < per_story):
             continue
         surfaces = item.get("allowed_surfaces") or ()
         if DAILY_QUESTION_SURFACE not in surfaces:
@@ -1767,6 +1874,18 @@ def mint_work_item_question(item: object, *, next_question_id: object,
         minted["work_item_id"] = identity
         minted["line"] = minted["line"].replace(
             " -->", f"; {WORK_ITEM_BANK_MARKER}: {identity} -->", 1)
+    # Cut 5b: where this question CAME from, on the row itself, so the queue
+    # entry can say so without a second ledger. Additive, exactly like the
+    # work-item marker above: every existing reader still sees a
+    # `timeline_probe` row with an anchor and a leverage.
+    provenance = str(row.get("provenance") or "").strip()
+    if provenance:
+        minted["provenance"] = provenance
+        minted["line"] = minted["line"].replace(
+            " -->", f"; {PROVENANCE_BANK_MARKER}: {provenance} -->", 1)
+    candidate_id = str(row.get("timeline_candidate_id") or "")
+    if candidate_id:
+        minted["timeline_candidate_id"] = candidate_id
     minted["combined_score"] = row.get("combined_score")
     return minted
 
@@ -1801,14 +1920,27 @@ def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
 
         minted: list[dict] = []
         seen = set(bank_work_items(text, aliases=table))
+        # Cut 5b, R2's cadence safeguard: at most ONE landmark-opportunity
+        # question per queue build, on top of the keystone plan's own cap
+        # (`timeline_gain.KEYSTONE_CAP`, 2). Deliberately conservative — the
+        # acceptance criterion beside R2 is "ordinary gaps do not flood the
+        # queue" (§8.2.10) — and it is a cap on MINTING; the weekly
+        # `GROUP_CAPS["timeline"]` still bounds the week at one asked question.
+        landmark_cap = _landmark_mint_cap()
+        landmarks = 0
         for candidate in candidates:
             if resolve_work_item_id(candidate.get("work_item_id"), aliases=table) in seen:
+                continue
+            is_landmark = str(candidate.get("timeline_candidate_source") or "") == "landmark_opportunity"
+            if is_landmark and landmarks >= landmark_cap:
                 continue
             row = mint_work_item_question(
                 candidate,
                 next_question_id=lambda category: next_question_id(text, category))
             if not row:
                 continue
+            if is_landmark:
+                landmarks += 1
             text = timeline_interaction.insert_keystone_question(text, row)
             seen.add(resolve_work_item_id(candidate.get("work_item_id"), aliases=table))
             minted.append(row)
@@ -1823,6 +1955,16 @@ def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
         if question_bank_text is None:
             record_learning_failure("question_planner", "mint_queue_questions", exc)
         return []
+
+
+def _landmark_mint_cap() -> int:
+    """`timeline_candidates.LANDMARK_MINT_CAP`, read — GUARDED, one definition."""
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        return max(0, int(timeline_candidates.LANDMARK_MINT_CAP))
+    except Exception:  # noqa: BLE001
+        return 1
 
 
 def mint_keystone_questions(*, dry_run: bool = False) -> list[dict]:
