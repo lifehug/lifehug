@@ -231,8 +231,10 @@ pass-completion prompts too.
    synthesis task)
 9. `candidates-auto-promote` — the dynamic-cap promotion pass ([Question
    Candidates](question-candidates.md) §3)
-10. `planner-queue` — mints any earned **keystone question** (v196), then
-    builds next week's delivery queue
+10. `planner-queue` — mints any earned **timeline question** (v196; v288
+    generalized the supply to the calculated projection's
+    `landmark_opportunities` and `keystones`, provenance `timeline-gain`),
+    then builds next week's delivery queue
 11. `arc-plan` — plans this week's arc cards, directly after the queue so
     cards expire with it
 12. `research_expand.py --gaps --dry-run` (a preview only — no
@@ -382,16 +384,28 @@ there is deliberately no score, because v196's `leverage` counts what a DATE
 would place and a story gap places nothing.
 <!-- parity: arc_planner.DEFAULT_GAP_MAX = 3 -->
 
-**The timeline gets asked two ways, and neither is a candidate.** The timeline
-whisper is the week's arc card carrying a keystone's real probe and the
-person's own landmarks into an ordinary conversation — raised only where it
-fits, at most once per conversation, any precision accepted (a range places
-things), never pressed, never opening with a year. A **keystone question** is
-that same probe minted as an ordinary bank row in the `timeline` group and
-asked as the day's question; it is minted only when its leverage clears
+**The timeline gets asked two ways, and they are ONE candidate.** The timeline
+whisper is the week's arc card carrying the probe and the person's own
+landmarks into an ordinary conversation — raised only where it fits, at most
+once per conversation, any precision accepted (a range places things), never
+pressed, never opening with a year. A **timeline question** is that same probe
+minted as an ordinary bank row in the `timeline` group and asked as the day's
+question; it is minted only when its leverage clears
 `timeline_leverage_per_story` (6) — the one dial, an exchange rate saying how
 many unknowns one answer must place to be worth one ordinary story answer —
-and the group cap keeps it to one a week. Either way the answer files through
+and the group cap keeps it to one a week. Since v288 (Cut 5b, owner ruling R2)
+the supply for both is the CALCULATED projection: `system/timeline_candidates.py`
+reads the served view's `landmark_opportunities` (`lo:<24 hex>`, Cut 5a) and
+`keystones` (`tl:<anchor-slug>`, Cut 3a) and mints candidates with provenance
+`timeline-gain`, carrying the published question, leverage and resolves. The
+whisper and the queue entry share that identity, so they are the same thing on
+two surfaces and answering either closes both. Weight in the queue is
+`leverage / timeline_leverage_per_story`; at most one landmark question is
+minted per queue build (`timeline_candidates.LANDMARK_MINT_CAP`, 1) on top of
+the keystone plan's own cap of two; `offer_only` never enters; an owner
+dismissal persists in `state/timeline_candidates.json`; and every landmark
+write reaches `timeline.save_landmark`, which checks the matching bank row off
+(answered, not deleted) so a rebuild mints nothing in its place. Either way the answer files through
 `timeline-place` and the next compile re-derives the Timeline, and either way
 "I'll find out" is just an answer: nothing files, nothing is remembered, the
 unknown keeps its star.
@@ -406,9 +420,12 @@ kinds, of which exactly three are consumed as arc-card intents —
 are **display-only**: they name a curation chore on the viewer's Timeline
 surface, not a question (`system/arc_planner.py:89–91`;
 `date_contradiction` originates in
-`system/timeline_corroboration.py:222`). Gap findings shape *how* a
+`system/timeline_corroboration.py:222`). LEGACY gap findings shape *how* a
 queued question is asked, and what the viewer nudges you to fix — they do
-not themselves enter the bank. The same is true of the place aside: v200
+not themselves enter the bank. What does enter the bank, since v288, is the
+CALCULATED projection's measured gain above the shared threshold (the
+paragraph above): a graph-named gap worth six unknowns is a question, and a
+graph-named gap worth two is still only a Timeline invitation. The same is true of the place aside: v200
 added a second consumer of the assembled timeline payload
 (`arc_planner.collect_places_without_stories`), and it too shapes how a
 queued question is asked rather than becoming a question of its own.

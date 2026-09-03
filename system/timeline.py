@@ -1183,6 +1183,7 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
         extractor_version=landmark_projection.LIVE_EXTRACTOR,
         digest=digest_override,
     )
+    _retire_answered_timeline_candidates(key, filed)
 
     drawn = redraw_landmarks()
     # The interval-aware key (E-L2b, design §3.2): one identity may now be
@@ -1199,6 +1200,29 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
     if same_key:
         return same_key[0]
     return landmarks_interaction.merge_landmark_entry(None, record)
+
+
+def _retire_answered_timeline_candidates(domain: str, record: dict) -> list[str]:
+    """Cut 5b: the answer closes the loop on the QUEUE side — GUARDED.
+
+    5a already guarantees the opportunity side: a filled gap is not a gap, so
+    the next projection does not regenerate it. This is the other half — the
+    bank row that was minted from it is checked off (answered, not deleted), so
+    it is never asked again and never re-minted, wherever the answer arrived
+    from. Every landmark write in the product reaches this one function
+    (`landmark-record`, the recorder's `landmark_invocations`, a `none`
+    terminal, and Cut 6a's Add Landmark apply), which is why the hook is here
+    rather than in any one caller.
+
+    A bank problem never breaks a landmark write: the exception path files
+    nothing and the record still stands.
+    """
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        return timeline_candidates.retire_for_landmark(domain, record)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def save_landmarks(domain: str, records: object) -> list[dict]:
