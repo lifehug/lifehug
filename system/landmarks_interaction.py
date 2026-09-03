@@ -3385,6 +3385,179 @@ def known_entry_labels(landmarks: object, domain: object, *,
     return tuple(names)
 
 
+# --------------------------------------------------------------------------
+# The `offer` mode's context blocks (R3b, decision record §5.2)
+# --------------------------------------------------------------------------
+#
+# Add Landmark reverses the direction of the collect mode: the person hands
+# over text, and the model has to be able to say "that overlaps your Boatworks
+# years" or "this looks like a second stay in Phoenix" WITHOUT being able to
+# fetch anything. So the manifest gains three blocks, and — exactly as
+# `render_known_entries` already does for the recorder — they are rendered
+# DETERMINISTICALLY by the caller from what the vault holds. The model
+# interprets; it does not fetch.
+#
+# All three are pure functions of data the caller supplies, which is why they
+# live here beside `render_known_entries` rather than in the offer module: no
+# reads, no writes, no model, testable from a literal.
+
+#: How many rows each context block may carry. A roster is a prompt block, not
+#: a database dump: the point is that a volunteered name RESOLVES, and past a
+#: few dozen entries the block stops helping and starts crowding the evidence.
+ROSTER_BLOCK_LIMIT = 40
+SPAN_BLOCK_LIMIT = 24
+FRAME_BLOCK_LIMIT = 16
+
+NO_ROSTER = "(no people, places or organizations on file yet)"
+NO_KNOWN_SPANS = "(no episodes or eras on file yet)"
+NO_AGE_FRAMES = "(no birthday on file, so there are no age frames yet)"
+
+#: Which landmark domains name an ORGANIZATION. Read from the question set's
+#: own `identity_kind` rather than listed, so a tenth domain that names one
+#: joins the roster block without a second edit.
+def organization_domains(framework_root: str | Path | None = None) -> tuple[str, ...]:
+    return tuple(row["domain"] for row in load_questions(framework_root)
+                 if row.get("identity_kind") == "organization")
+
+
+def _roster_lines(entities: object, kind: str) -> list[str]:
+    lines: list[str] = []
+    rows = entities if isinstance(entities, list) else (
+        (entities or {}).get("entities") if isinstance(entities, dict) else None)
+    for entity in (rows or ()):
+        if not isinstance(entity, dict):
+            continue
+        name = str(entity.get("name") or "").strip()
+        if not name:
+            continue
+        aliases = [str(alias).strip() for alias in (entity.get("aliases") or ())
+                   if str(alias).strip()]
+        suffix = f" (also: {', '.join(aliases)})" if aliases else ""
+        lines.append(f"- {kind}: {name}{suffix}")
+    return lines
+
+
+def render_roster(roster: object, *, landmarks: object = (),
+                  limit: int = ROSTER_BLOCK_LIMIT,
+                  framework_root: str | Path | None = None) -> str:
+    """The people, places, organizations and aliases the vault already knows.
+
+    ``roster`` is ``{"person": snapshot, "place": snapshot, "organization":
+    snapshot}`` in `entity_roster.load_roster`'s own shape. Organizations that
+    have not reached the roster are still NAMED here, from the landmark
+    entries of the domains whose `identity_kind` is `organization` — a school
+    or an employer the person has already told us about must resolve on the
+    second telling whether or not anything minted an entity for it.
+    """
+    lines: list[str] = []
+    snapshot = roster if isinstance(roster, dict) else {}
+    for key, word in (("person", "person"), ("place", "place"),
+                      ("organization", "organization")):
+        lines.extend(_roster_lines(snapshot.get(key), word))
+    known = {line.split(": ", 1)[1].split(" (also:")[0].casefold()
+             for line in lines}
+    for domain in organization_domains(framework_root):
+        row = domain_row(domain, framework_root=framework_root)
+        for entry in landmark_entries(landmarks, domain):
+            name = entry_name(entry, row)
+            if name and name.casefold() not in known:
+                known.add(name.casefold())
+                lines.append(f"- organization: {name} (from your {domain})")
+    if not lines:
+        return NO_ROSTER
+    ceiling = max(int(limit), 0)
+    shown = lines[:ceiling]
+    hidden = len(lines) - len(shown)
+    if hidden > 0:
+        shown.append(f"- …and {hidden} more already on file")
+    return "\n".join(shown)
+
+
+def _node_interval_text(node: object) -> str:
+    row = node if isinstance(node, dict) else {}
+    for key in ("best_temporal_value", "possible_temporal_value"):
+        value = row.get(key)
+        text = chrono.display_date(value, with_basis=False) if value else ""
+        if text.strip():
+            return text.strip() + (" (undated on its own; it sits inside a "
+                                   "frame)" if key.startswith("possible") else "")
+    span = row.get("definition_span")
+    if isinstance(span, dict):
+        start, end = span.get("start"), span.get("end")
+        if start or end:
+            return f"{start or '?'}–{end or 'now'}"
+    return "no dates"
+
+
+def _projection_nodes(projection: object) -> list[dict]:
+    rows = (projection or {}).get("nodes") if isinstance(projection, dict) else None
+    return [node for node in (rows or ()) if isinstance(node, dict)]
+
+
+def render_known_spans(projection: object, *, limit: int = SPAN_BLOCK_LIMIT) -> str:
+    """The episodes and named eras already on the timeline, with their spans.
+
+    Read from the PUBLISHED projection — the one materialized truth every
+    other surface reads — so what the model is told about the person's own
+    timeline is exactly what the page shows them. Age frames are deliberately
+    not in this block; they are their own coordinate system and have their own
+    (:func:`render_age_frames`).
+    """
+    lines: list[str] = []
+    for node in _projection_nodes(projection):
+        kind = str(node.get("node_kind") or "")
+        event_kind = str(node.get("event_kind") or "")
+        if event_kind == "age_frame":
+            continue
+        if kind not in ("episode", "period"):
+            continue
+        label = str(node.get("label") or "").strip()
+        if not label:
+            continue
+        word = "era" if event_kind == "named_era" else "episode"
+        lines.append(f"- {word}: {label} — {_node_interval_text(node)}")
+    if not lines:
+        return NO_KNOWN_SPANS
+    lines.sort()
+    ceiling = max(int(limit), 0)
+    shown = lines[:ceiling]
+    hidden = len(lines) - len(shown)
+    if hidden > 0:
+        shown.append(f"- …and {hidden} more on the timeline")
+    return "\n".join(shown)
+
+
+def render_age_frames(projection: object, *, limit: int = FRAME_BLOCK_LIMIT) -> str:
+    """The age frames and the birth origin they are counted from.
+
+    This is what gives an age-relative phrase a coordinate: *"when I was about
+    ten"* means nothing without a birthday, and means a year with one. The
+    origin's own basis travels with it, so a frame set drawn on a CALCULATED
+    origin never reads as one the person stated.
+    """
+    frames = [node for node in _projection_nodes(projection)
+              if str(node.get("event_kind") or "") == "age_frame"]
+    if not frames:
+        return NO_AGE_FRAMES
+    lines: list[str] = []
+    origin = None
+    for node in frames:
+        if origin is None and node.get("origin_basis"):
+            origin = str(node.get("origin_basis"))
+        label = str(node.get("label") or "").strip() or str(node.get("node_id") or "")
+        lines.append(f"- {label}: {_node_interval_text(node)}")
+    lines.sort()
+    ceiling = max(int(limit), 0)
+    shown = lines[:ceiling]
+    hidden = len(lines) - len(shown)
+    if hidden > 0:
+        shown.append(f"- …and {hidden} more frames")
+    if origin:
+        shown.insert(0, f"- counted from a birth origin that is {origin}")
+    return "\n".join(shown)
+
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse  # noqa: PLC0415
     import json  # noqa: PLC0415

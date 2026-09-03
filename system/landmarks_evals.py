@@ -16,6 +16,16 @@ EVALS_DIR = INTERACTIONS_DIR / "landmarks" / "evals"
 
 FIXTURES_FILE = "landmark_fixtures.json"
 SAMPLE_PREDICTIONS_FILE = "landmark_sample_predictions.json"
+#: Cut 6a (ADR 0033). The `offer` mode's own goldens — one per example in
+#: decision record §5.6. They are a DIFFERENT SHAPE from the reply goldens
+#: above and are scored by a different function, because they judge a
+#: different artifact: a PROPOSAL (with its units, questions, stories and
+#: unrecognized spans) and the worker's reply about it, not a landmark turn.
+#: Each fixture carries the RECORDED completions of both extraction passes, so
+#: `score_offer_goldens` replays the real `landmark_offer.propose` — the
+#: grammar pass, the listener, the per-domain recorder, the basis rule and the
+#: partition — rather than scoring a transcript of what it once did.
+OFFER_FIXTURES_FILE = "offer_fixtures.json"
 REQUIRED_GOLDEN_IDS = frozenset({
     "landmarks-open-birthday",
     "landmarks-residence-chain",
@@ -120,9 +130,206 @@ def load_sample_predictions(*, framework_root: str | Path | None = None) -> list
     return value
 
 
+REQUIRED_OFFER_GOLDEN_IDS = frozenset({
+    # Decision record §5.6, in order.
+    "offer-residence-stated-certain",
+    "offer-tenure-approximate-organization",
+    "offer-vague-move-asks-where",
+    "offer-story-not-a-landmark",
+    "offer-document-many-units",
+})
+
+_OFFER_FIXTURE_KEYS = {"fixture_id", "why", "source_text", "completions",
+                       "expected", "reply"}
+
+
+def load_offer_fixtures(*, framework_root: str | Path | None = None) -> list[dict]:
+    value = json.loads(
+        (_root(framework_root) / "goldens" / OFFER_FIXTURES_FILE).read_text(
+            encoding="utf-8")
+    )
+    if not isinstance(value, list) or not value:
+        raise ValueError("offer fixtures must be a non-empty list")
+    return value
+
+
+def validate_offer_fixtures(fixtures: list[dict]) -> list[str]:
+    """Deterministic fixture-shape errors for the offer goldens."""
+    errors: list[str] = []
+    seen: set[str] = set()
+    domains = {row["domain"] for row in landmarks_interaction.load_questions()}
+    for index, row in enumerate(fixtures):
+        if not isinstance(row, dict) or set(row) != _OFFER_FIXTURE_KEYS:
+            errors.append(f"offer fixture[{index}] keys invalid")
+            continue
+        fixture_id = row["fixture_id"]
+        if not isinstance(fixture_id, str) or not fixture_id:
+            errors.append(f"offer fixture[{index}] has no id")
+            continue
+        if fixture_id in seen:
+            errors.append(f"duplicate offer fixture id: {fixture_id}")
+        seen.add(fixture_id)
+        if not str(row.get("source_text") or "").strip():
+            errors.append(f"{fixture_id}: source_text is required")
+        completions = row.get("completions")
+        if not isinstance(completions, dict) or "listener" not in completions:
+            errors.append(f"{fixture_id}: completions need a listener")
+            continue
+        for domain in (completions.get("recorders") or {}):
+            if domain not in domains:
+                errors.append(f"{fixture_id}: unknown domain {domain!r}")
+        expected = row.get("expected")
+        if not isinstance(expected, dict) or "state" not in expected:
+            errors.append(f"{fixture_id}: expected needs a state")
+    missing = REQUIRED_OFFER_GOLDEN_IDS - seen
+    if missing:
+        errors.append("missing required offer goldens: "
+                      + ", ".join(sorted(missing)))
+    return errors
+
+
+class _RecordedCall:
+    """One recorded ``call`` over both extraction passes.
+
+    Dispatch is on the composed prompt's own header — the recorder leaf names
+    its domain and the listener leaf does not — so a golden is written the way
+    a host's REPLAY reads it, and a prompt nobody recorded answers empty
+    rather than borrowing another domain's completion.
+    """
+
+    EMPTY = '{"landmarks": [], "claims": []}'
+
+    def __init__(self, completions: dict) -> None:
+        self._listener = completions.get("listener")
+        self._recorders = dict(completions.get("recorders") or {})
+
+    @staticmethod
+    def _as_text(value: object) -> str:
+        return value if isinstance(value, str) else json.dumps(value)
+
+    def __call__(self, prompt: str, model: str) -> str:
+        for domain, payload in self._recorders.items():
+            if f"DOMAIN BEING ASKED ABOUT: {domain}\n" in prompt:
+                return self._as_text(payload)
+        if "DOMAIN BEING ASKED ABOUT:" in prompt:
+            return self.EMPTY
+        return self._as_text(self._listener)
+
+
+def _offer_unit_matches(unit: dict, expected: dict) -> bool:
+    dates = unit.get("dates") or {}
+    checks = [
+        ("domain", unit.get("domain")),
+        ("kind", unit.get("kind")),
+        ("subject", unit.get("subject")),
+        ("basis", dates.get("basis")),
+        ("confidence", dates.get("confidence")),
+        ("start", dates.get("start")),
+        ("end", dates.get("end")),
+        ("auto_file_eligible", unit.get("auto_file_eligible")),
+    ]
+    for key, actual in checks:
+        if key in expected and expected[key] != actual:
+            return False
+    if "quote" in expected:
+        quote = unit.get("quote") or {}
+        if quote.get("text") != expected["quote"]:
+            return False
+    if "entity_confidence" in expected:
+        found = [row.get("confidence")
+                 for row in (unit.get("entity_candidates") or ())]
+        if expected["entity_confidence"] not in found:
+            return False
+    return True
+
+
+def score_offer_goldens(fixtures: list[dict]) -> dict:
+    """Replay `landmark_offer.propose` over the offer goldens and score it.
+
+    No vault and no live model: the fixture supplies the recorded completions
+    and the vault context is empty and explicit, which is what makes
+    ``propose`` a pure function here (see its own docstring). The four
+    `landmark_gates.offer_*` classes are scored per fixture — two over the
+    PROPOSAL and two over the worker's reply — and ``_offer_accuracy`` is the
+    fraction of fixtures whose reading matched the golden exactly.
+    """
+    import landmark_offer as offer  # noqa: PLC0415
+
+    counts = {name.split(".", 1)[1]: [0, 0] for name in offer.OFFER_LINT_CLASSES}
+    correct = 0
+    total = 0
+    mismatched: list[str] = []
+    for fixture in fixtures:
+        fixture_id = str(fixture.get("fixture_id") or "")
+        expected = fixture.get("expected") or {}
+        proposal = offer.propose(
+            fixture["source_text"], None,
+            call=_RecordedCall(fixture.get("completions") or {}),
+            write=False, landmarks={}, roster={}, generation=0,
+        )
+        proposal_findings = {row["lint"] for row
+                             in offer.lint_offer_proposal(proposal)}
+        reply_findings = {row["lint"] for row
+                          in offer.lint_offer_reply(fixture.get("reply") or "")}
+        found = proposal_findings | reply_findings
+        for name in offer.OFFER_LINT_CLASSES:
+            key = name.split(".", 1)[1]
+            counts[key][1] += 1
+            counts[key][0] += name not in found
+        total += 1
+        matched = proposal.get("state") == expected.get("state")
+        units = [unit for unit in (proposal.get("units") or ())]
+        if "unit_count" in expected:
+            matched = matched and len(units) == expected["unit_count"]
+        if "units" in expected:
+            matched = matched and len(units) == len(expected["units"])
+            if matched:
+                matched = all(_offer_unit_matches(unit, want)
+                              for unit, want in zip(units, expected["units"]))
+        if "questions" in expected:
+            asked = [row.get("domain") for row in (proposal.get("questions") or ())]
+            matched = matched and asked == [row.get("domain") for row
+                                            in expected["questions"]]
+        for key in ("stories", "unrecognized"):
+            if key in expected:
+                spans = [row.get("text") for row in (proposal.get(key) or ())]
+                matched = matched and spans == list(expected[key])
+        correct += bool(matched)
+        if not matched:
+            mismatched.append(fixture_id)
+    scores: dict[str, object] = {
+        f"{name}.compliance": (values[0] / values[1] if values[1] else 1.0)
+        for name, values in counts.items()
+    }
+    scores["_offer_accuracy"] = correct / total if total else 0.0
+    scores["_offer_mismatched"] = mismatched
+    return scores
+
+
 def load_gates(*, framework_root: str | Path | None = None) -> dict[str, float]:
     raw = _parse_simple_yaml(_root(framework_root) / "lints.yaml")
     prefix = "landmark_gates."
+    return {
+        key.removeprefix(prefix): float(value)
+        for key, value in raw.items()
+        if key.startswith(prefix)
+    }
+
+
+def load_offer_gates(*, framework_root: str | Path | None = None) -> dict[str, float]:
+    """The `offer` mode's own gates, from its own namespace.
+
+    Cut 6a. `landmark_gates.*` is one-to-one with
+    `landmarks_interaction.LANDMARK_LINT_CLASSES` and is scored over the
+    collect-mode reply goldens; the offer classes judge a proposal and are
+    scored over the offer goldens, so they carry
+    `landmark_offer.OFFER_GATE_PREFIX` and are loaded — and checked — apart.
+    Same `check_gates`, two vocabularies kept honest.
+    """
+    import landmark_offer as offer  # noqa: PLC0415
+
+    raw = _parse_simple_yaml(_root(framework_root) / "lints.yaml")
+    prefix = f"{offer.OFFER_GATE_PREFIX}."
     return {
         key.removeprefix(prefix): float(value)
         for key, value in raw.items()
@@ -274,6 +481,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     fixtures = load_fixtures()
     fixture_errors = validate_fixtures(fixtures)
+    # Cut 6a: the offer goldens are scored on the SAME seat run, in both
+    # modes. They spend no completion — the fixture carries the recorded
+    # ones — so there is no `--live` half of this half and nothing to skip.
+    offer_fixtures = load_offer_fixtures()
+    fixture_errors = fixture_errors + validate_offer_fixtures(offer_fixtures)
+    offer_scores = ({} if fixture_errors
+                    else score_offer_goldens(offer_fixtures))
     skipped = None
     try:
         predictions = (
@@ -284,6 +498,14 @@ def main(argv: list[str] | None = None) -> int:
         skipped = str(exc)
     scores = score_goldens(fixtures, predictions) if not skipped else {}
     failures = fixture_errors + ([] if skipped else check_gates(scores, load_gates()))
+    failures = failures + ([] if fixture_errors
+                          else check_gates(offer_scores, load_offer_gates()))
+    # The two families share one report and must not share one key: the offer
+    # classes are scored against `load_offer_gates`, and the report prefixes
+    # them so a reader can tell `no_form_voice` (a reply lint) from
+    # `offer_nothing_dropped` (a proposal lint) at a glance.
+    scores.update({(f"offer_{key}" if key.endswith(".compliance") else key): value
+                   for key, value in offer_scores.items()})
     result = {
         "interaction": "landmarks",
         "mode": "live" if args.live else "recorded",

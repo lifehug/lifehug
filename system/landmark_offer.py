@@ -1,0 +1,2049 @@
+#!/usr/bin/env python3
+"""Add Landmark — the `offer` mode of the Landmarks Interaction (v287).
+
+Owner rulings R3, R3a and R3b of 2026-09-03 (`lifehug-platform
+docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5), ADR
+0033. The `collect` mode asks a question and files the answer. This mode
+reverses the direction: **the person hands the system ordinary text** — one
+dated event, a residence history, a work history, a pasted document — and the
+same three passes read it, propose landmark units with evidence, and file the
+confirmed ones through the SAME landmark writer a conversation answer uses.
+
+It is a MODE, not an interaction kind (R3b). Nothing here composes a second
+listener, a second recorder or a second writer:
+
+  1. **A deterministic first pass**, for text a grammar fully matches. Zero
+     model calls (:func:`grammar_units`). It is an internal extractor and
+     nothing user-facing names it — R4 retired the product it came from, and
+     kept the parse.
+  2. **The general listener** (`landmark_recorder.listen_to_answer`, ADR
+     0029) with no domain: what does this text touch at all.
+  3. **The focused recorder** (`landmark_recorder.record_answer`, ADR 0028),
+     ONCE PER DOMAIN the listener named, with that domain's already-filed
+     entries in view — which is why a second stay in a city the vault
+     already knows becomes a second entry rather than a merge.
+
+**Nothing files before a person confirms.** :func:`propose` writes exactly one
+file, the proposal, and the submitted text is retained inside it from the
+moment it is submitted (R3: evidence is durable before confirmation, and the
+Codex audit's "nothing durable until confirmed" is narrowed by that ruling).
+:func:`apply` files the units the person named and NOTHING else.
+
+**A confirmed unit is a STATED fact** (decision record §4.2) — but only where
+the person's own words carry the date. This module never trusts a model's
+self-declared basis: :func:`date_evidence` re-reads every bound against the
+source text, and a bound the text does not carry files as an INFERENCE
+(`confidence: inferred`, a verbatim `inferred` provenance clause) no matter
+what the completion said. A model's reading of the person's words is stated; a
+model's guess beyond the words is not, and the difference is decided here,
+deterministically, from the bytes.
+
+**Idempotency.** A unit's identity is content-addressed
+(:func:`derive_unit_id`) from its domain, kind, subject, dates and quote, so
+the same text proposed twice yields the same unit ids. Filing goes through
+`go_dig_writer.record_unit`'s ``digest_override`` seam — the identity is
+``(proposal_id, unit_id)``, never a filing ordinal — so applying the same
+units twice promotes the same source, derives the same claims, and files
+nothing a second time. The apply receipt is content-addressed the same way
+and is written once.
+
+**Model tiers, and format repair.** Both extraction passes are the ones the
+interaction already declares — `role.listener` and `role.recorder`, both
+Haiku-class — and the worker that shows the reading back is `role.worker`,
+Sonnet-class. There is no separate repair prompt and there is deliberately no
+place for one: a paste the grammar cannot read is not "malformed input" to be
+fixed before reading, it is ordinary text, and the Haiku-class listener is
+what reads it. **No model call recalculates a date.** Every interval that
+files is `chronology`'s, derived from what the person wrote.
+
+**Undo** is `temporal_store.retract_claims` over exactly the claims the filed
+units stand on, then a republish. The evidence and the receipt stay on disk;
+the retraction is its own immutable file beside the receipt, never an edit of
+it.
+
+Pure except for the injected ``call`` and the three functions that name a
+vault (:func:`propose`, :func:`apply`, :func:`retract`).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+_SYSTEM_DIR = Path(__file__).resolve().parent
+if str(_SYSTEM_DIR) not in sys.path:
+    sys.path.insert(0, str(_SYSTEM_DIR))
+
+import chronology as chrono  # noqa: E402
+import general_listener as gl  # noqa: E402
+import landmark_projection as lp  # noqa: E402
+import landmark_recorder as recorder  # noqa: E402
+import landmarks_interaction as li  # noqa: E402
+import temporal_claims as tc  # noqa: E402
+import temporal_publication as pub  # noqa: E402
+import temporal_receipts as trcpt  # noqa: E402
+import temporal_store as store  # noqa: E402
+from lifehug_core import INTERACTIONS_DIR  # noqa: E402
+from vault_paths import atomic_write_vault_text  # noqa: E402
+from temporal_claims import collapsed_text, normalized_timestamp  # noqa: E402
+
+# --------------------------------------------------------------------------
+# The mode, the states, the failures
+# --------------------------------------------------------------------------
+
+#: The two modes of the ONE landmarks interaction (R3b). `interaction.yaml`
+#: carries the same pair as `modes: collect|offer` and
+#: `tests/test_landmark_offer.py` pins them equal, so declaring a mode and
+#: naming it in code stay one edit.
+COLLECT_MODE = "collect"
+OFFER_MODE = "offer"
+MODES = (COLLECT_MODE, OFFER_MODE)
+
+#: Decision record §5.3 — the six states the interface must distinguish. The
+#: OSS side owns three of them as a proposal's own `state`
+#: (`needs_clarification`, `proposed`, `failed`); `submitted`, `applying` and
+#: `published` are transitions the host renders around a call into this
+#: module. Named here in one tuple so 6b's surface and this module cannot
+#: drift into two vocabularies.
+OFFER_STATES = (
+    "submitted", "needs_clarification", "proposed", "applying", "published",
+    "failed",
+)
+
+#: The states a PROPOSAL file may carry.
+PROPOSAL_STATES = ("needs_clarification", "proposed", "failed")
+
+#: §5.3 state 6 — the failure classes a host must be able to tell apart. A
+#: caller never sees a collapsed "could not do that right now" from this
+#: module: every raise carries one of these on `.code`.
+FAILURE_CLASSES = (
+    "content_ambiguity", "unsupported_input", "model_failure",
+    "service_unavailable", "write_failure",
+)
+
+
+class LandmarkOfferError(ValueError):
+    """An offer could not be proposed, applied or retracted.
+
+    ``code`` is one of :data:`FAILURE_CLASSES` — the honest failure class
+    §5.3 requires, never a collapsed string.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code if code in FAILURE_CLASSES else "write_failure"
+
+
+# --------------------------------------------------------------------------
+# Where it lives
+# --------------------------------------------------------------------------
+
+#: `vault_contract.json` registers this directory as durable, tracked data:
+#: the submitted text lives in it before anything is confirmed, which is the
+#: whole of R3's "retained as durable evidence from the moment it is
+#: submitted". Receipts are a subdirectory, and a registered directory covers
+#: its children (`vault_paths.classify_contract_path`).
+OFFERS_DIR = "state/landmarks/offers"
+OFFER_RECEIPTS_DIR = f"{OFFERS_DIR}/receipts"
+
+PROPOSAL_SCHEMA_VERSION = 1
+OFFER_RECEIPT_SCHEMA_VERSION = 1
+
+#: The source type the submitted text is promoted under when units are
+#: applied. An ordinary promoted conversational source in every other
+#: respect, so the text enters classification and the listener like any other
+#: (`temporal_store.promote_conversational_source`).
+OFFER_SOURCE_TYPE = "landmark_offer"
+OFFER_CHANNEL = "landmark_offer"
+
+PROPOSAL_ID_PREFIX = "lmo"
+UNIT_ID_PREFIX = "lmu"
+RECEIPT_ID_PREFIX = "lmr"
+_DIGEST_LENGTH = 24
+
+_ID_RE = re.compile(r"^(lmo|lmu|lmr):[0-9a-f]{%d}$" % _DIGEST_LENGTH)
+
+
+def _digest(payload: object) -> str:
+    return store.payload_sha256(lp.canonical_json(payload))[:_DIGEST_LENGTH]
+
+
+def valid_id(value: object) -> bool:
+    """Whether ``value`` is one of this module's content-addressed ids."""
+    return bool(_ID_RE.fullmatch(str(value or "")))
+
+
+def proposal_path(vault_root: str | Path, proposal_id: str) -> Path:
+    if not valid_id(proposal_id) or not str(proposal_id).startswith(
+            f"{PROPOSAL_ID_PREFIX}:"):
+        raise LandmarkOfferError("unsupported_input",
+                                 f"not a proposal id: {proposal_id!r}")
+    name = str(proposal_id).split(":", 1)[1]
+    return store.store_path(vault_root, f"{OFFERS_DIR}/{name}.json")
+
+
+def offer_receipt_path(vault_root: str | Path, receipt_id: str) -> Path:
+    if not valid_id(receipt_id) or not str(receipt_id).startswith(
+            f"{RECEIPT_ID_PREFIX}:"):
+        raise LandmarkOfferError("unsupported_input",
+                                 f"not a receipt id: {receipt_id!r}")
+    name = str(receipt_id).split(":", 1)[1]
+    return store.store_path(vault_root, f"{OFFER_RECEIPTS_DIR}/{name}.json")
+
+
+def retraction_path(vault_root: str | Path, receipt_id: str) -> Path:
+    """The retraction beside the receipt. A SEPARATE file, deliberately:
+    §5.4's undo keeps the receipt, so nothing rewrites it."""
+    return offer_receipt_path(vault_root, receipt_id).with_suffix(
+        ".retracted.json")
+
+
+# --------------------------------------------------------------------------
+# The vocabulary of a unit
+# --------------------------------------------------------------------------
+
+#: What ONE unit IS, per landmark domain — the word the proposal says out loud
+#: ("one residence unit", "one tenure unit", decision record §5.6). Derived
+#: from nothing: it is the product's own noun for a domain's entry, and the
+#: import-time guard in `tests/test_landmark_offer.py` pins the key set equal
+#: to the question set's domains so a tenth domain cannot arrive unnamed.
+UNIT_KIND_BY_DOMAIN = {
+    "birth": "birth",
+    "family": "family_member",
+    "residences": "residence",
+    "schools": "schooling",
+    "partnerships": "relationship",
+    "children": "child",
+    "work": "tenure",
+    "military": "service",
+    "losses": "loss",
+}
+
+#: The unit kind of text that is not a landmark at all (R3a: non-landmark
+#: input is never refused — it is accepted, routed as a story, and the worker
+#: says so).
+STORY_KIND = "story"
+
+#: Which landmark domain a CLAIM the listener heard belongs to, where the
+#: claim's own event kind says so unambiguously. Used only to ask a focused
+#: question about a fact no unit could carry — "we moved around a lot after
+#: Dad changed jobs" is a real thing the person said, it fabricates no
+#: residence and no year, and the honest response is the residence domain's
+#: own opening question.
+#:
+#: Deliberately partial. `birth` is absent because a birth event is the
+#: owner's, a sibling's or a child's and the kind alone cannot say which;
+#: guessing there is exactly the fabrication this mode exists to avoid.
+DOMAIN_BY_EVENT_KIND = {
+    "move": "residences",
+    "job": "work",
+    "school": "schools",
+    "graduation": "schools",
+    "military": "military",
+    "child_born": "children",
+    "loss": "losses",
+    "death": "losses",
+    "first_met": "partnerships",
+    "dating_started": "partnerships",
+    "married": "partnerships",
+    "engaged": "partnerships",
+    "separated": "partnerships",
+    "divorced": "partnerships",
+    "reconciled": "partnerships",
+}
+
+#: Words that make a date the person's own approximation rather than their
+#: assertion. Read off the QUOTE, never off the model's `confidence` field.
+_HEDGE_RE = re.compile(
+    r"\b(about|around|roughly|approximately|sometime|somewhere around|"
+    r"or so|circa|maybe|probably|i think|thereabouts|ish)\b|~",
+    re.IGNORECASE,
+)
+
+#: A four-digit year, and the two-digit form people actually write ("'91").
+_YEAR_RE = re.compile(r"\b(1[6-9]\d{2}|20\d{2})\b")
+_SHORT_YEAR_RE = re.compile(r"['’](\d{2})\b")
+
+_MONTH_NAMES = (
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december",
+)
+
+#: How many characters of context a quote may carry around the words that
+#: fixed the fact. A quotation is evidence, not the document.
+QUOTE_MAX_CHARS = 400
+
+#: Spans shorter than this, or carrying no letters, are `unrecognized` rather
+#: than `stories`: a fragment is not prose somebody offered.
+STORY_MIN_WORDS = 3
+
+#: §3.2's own threshold, reused: two dated stretches that overlap by more
+#: than this many months are a conflict a person should see before filing.
+CONFLICT_OVERLAP_MONTHS = 3
+
+
+# --------------------------------------------------------------------------
+# Spans of the source text — nothing is silently dropped
+# --------------------------------------------------------------------------
+
+_SPAN_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n{2,}|\n")
+
+
+def source_spans(text: str) -> list[dict]:
+    """Every sentence-ish span of the submitted text, with its own offsets.
+
+    The unit of accounting. Every span of the source ends up under exactly
+    one of a unit's quote, `stories` or `unrecognized`, and
+    `tests/test_landmark_offer.py` asserts that the three cover the text
+    between them — which is what "never silently dropped" has to mean if it
+    is to be testable at all.
+    """
+    body = text or ""
+    spans: list[dict] = []
+    cursor = 0
+    for piece in _SPAN_SPLIT_RE.split(body):
+        if piece is None:
+            continue
+        offset = body.find(piece, cursor) if piece else cursor
+        if offset < 0:
+            offset = cursor
+        cursor = offset + len(piece)
+        stripped = piece.strip()
+        if not stripped:
+            continue
+        start = offset + piece.find(stripped)
+        spans.append({"text": stripped, "offset": start,
+                      "length": len(stripped)})
+    return spans
+
+
+def _overlaps(a_offset: int, a_length: int, b_offset: int, b_length: int) -> bool:
+    return a_offset < b_offset + b_length and b_offset < a_offset + a_length
+
+
+def claim_evidence_text(claim: object) -> str:
+    """The QUOTATION a claim carries, whichever accepted shape it is in.
+
+    `general_listener.parse_claims` normalizes a model's ``"evidence": "..."``
+    into the contract's own ``[{"quote": "..."}]``, so a caller that reads the
+    raw key gets a list where it expected a sentence — and then silently fails
+    to find it in the source. One reader, here, for every shape the contract
+    accepts.
+    """
+    value = claim.get("evidence") if isinstance(claim, dict) else claim
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return str(value.get("quote") or "")
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            text = claim_evidence_text({"evidence": item})
+            if text:
+                return text
+    return ""
+
+
+def locate(text: str, quote: object, *, hint: int = 0) -> dict | None:
+    """One quotation, located in the source. ``None`` when it is not there.
+
+    A quote that is not IN the text is not evidence of anything, so it is
+    refused rather than stored with a made-up offset.
+    """
+    needle = " ".join(str(quote or "").split())
+    if not needle:
+        return None
+    body = text or ""
+    index = body.find(needle, max(int(hint), 0))
+    if index < 0:
+        index = body.find(needle)
+    if index < 0:
+        # Whitespace in the source may not match the model's transcription of
+        # it; fall back to a whitespace-tolerant search before giving up.
+        pattern = re.compile(r"\s+".join(re.escape(word)
+                                         for word in needle.split()))
+        match = pattern.search(body)
+        if match is None:
+            return None
+        return {"text": body[match.start():match.end()][:QUOTE_MAX_CHARS],
+                "offset": match.start(), "length": match.end() - match.start()}
+    return {"text": needle[:QUOTE_MAX_CHARS], "offset": index,
+            "length": len(needle)}
+
+
+# --------------------------------------------------------------------------
+# Stated, or inferred — decided from the bytes, never from the completion
+# --------------------------------------------------------------------------
+
+def _year_tokens(value: object) -> set[str]:
+    text = str(value or "")
+    return set(_YEAR_RE.findall(text))
+
+
+def date_evidence(record: object, quote: object, source_text: str) -> bool:
+    """Does the person's own text carry this date?
+
+    Every bound the record states — ``best``, ``earliest``, ``latest`` — must
+    have its YEAR present in the evidence, either in full (``1990``) or in the
+    two-digit form people write (``'91``); where the grain is finer than a
+    year, the month must be named too. Read off the quote first and the whole
+    submitted text second, because a model may quote one sentence of a
+    paragraph that dates the fact in the next one.
+
+    This is the whole of decision record §4.2's dividing line, and it is
+    deliberately a BYTES question rather than a model question: a completion
+    that declares ``basis: stated`` over a year nobody typed is answered here,
+    not believed.
+    """
+    parsed = chrono.from_dict(record)
+    if parsed is None:
+        return False
+    haystacks = [str((quote or {}).get("text") or "") if isinstance(quote, dict)
+                 else str(quote or ""), str(source_text or "")]
+    present_years: set[str] = set()
+    present_short: set[str] = set()
+    lowered = ""
+    for haystack in haystacks:
+        present_years.update(_YEAR_RE.findall(haystack))
+        present_short.update(_SHORT_YEAR_RE.findall(haystack))
+        lowered += " " + haystack.lower()
+    bounds = [value for value in (parsed.best, parsed.earliest, parsed.latest)
+              if value]
+    if not bounds:
+        return False
+    for bound in bounds:
+        years = _year_tokens(bound)
+        if not years:
+            return False
+        for year in years:
+            if year not in present_years and year[2:] not in present_short:
+                return False
+        if parsed.granularity in ("month", "day"):
+            parts = str(bound).split("-")
+            if len(parts) < 2:
+                return False
+            try:
+                month_name = _MONTH_NAMES[int(parts[1]) - 1]
+            except (ValueError, IndexError):
+                return False
+            numeric = f"-{parts[1]}"
+            if month_name not in lowered and numeric not in lowered:
+                return False
+    return True
+
+
+def _hedged(quote: object) -> bool:
+    text = (quote or {}).get("text") if isinstance(quote, dict) else quote
+    return bool(_HEDGE_RE.search(str(text or "")))
+
+
+#: The provenance clause an inferred bound carries. Rendered VERBATIM
+#: (`chronology.INFERRED_PROVENANCE_BASIS`), so nothing attributes an
+#: inference to the person.
+INFERRED_CLAUSE = "read from the text you gave; you did not name this date"
+
+
+def _closed(payload: dict) -> dict:
+    """A bound with BOTH ends, derived from ``best`` when the model gave one.
+
+    A model routinely emits ``{"best": "1990"}`` and nothing else. That is a
+    date to a reader and NOT AN INTERVAL to the fold: `entry_stay_interval`
+    returns nothing for it, so `same_landmark_stay` cannot tell a second stay
+    at an address from the first, and the interval-aware key silently
+    collapses two stays into one. The bounds a bare year implies are not a
+    guess — `chronology.parse_edtf` derives them from the grain — so they are
+    filled here, once, on the way in.
+    """
+    if payload.get("earliest") and payload.get("latest"):
+        return payload
+    best = payload.get("best")
+    if not best:
+        return payload
+    implied = chrono.parse_edtf(str(best), basis=payload.get("basis") or "stated")
+    if implied is None:
+        return payload
+    payload["earliest"] = payload.get("earliest") or implied.earliest
+    payload["latest"] = payload.get("latest") or implied.latest
+    return payload
+
+
+def _restate(record: object, *, stated: bool, hedged: bool) -> dict | None:
+    """One date bound, re-based on the evidence. Never on the completion."""
+    parsed = chrono.from_dict(record)
+    if parsed is None:
+        return None
+    payload = _closed(parsed.to_dict())
+    if stated:
+        payload["basis"] = "stated"
+        confidence = payload.get("confidence")
+        if hedged or confidence == "approximate":
+            payload["confidence"] = "approximate"
+        elif confidence not in ("certain", "approximate"):
+            payload["confidence"] = "certain"
+        return payload
+    payload["basis"] = "anchor"
+    payload["confidence"] = "inferred"
+    provenance = [dict(item) for item in (payload.get("provenance") or ())]
+    clause = {"basis": chrono.INFERRED_PROVENANCE_BASIS,
+              "claim": INFERRED_CLAUSE}
+    if clause not in provenance:
+        provenance.append(clause)
+    payload["provenance"] = provenance
+    return payload
+
+
+def _bounds_of(record: dict) -> list[tuple[str, object]]:
+    """``[(path, value)]`` for every date bound a landmark record carries."""
+    rows: list[tuple[str, object]] = []
+    if isinstance(record.get("date"), dict):
+        rows.append(("date", record["date"]))
+    span = record.get("span")
+    if isinstance(span, dict):
+        for bound in ("start", "end"):
+            if isinstance(span.get(bound), dict):
+                rows.append((f"span.{bound}", span[bound]))
+    return rows
+
+
+def _set_bound(record: dict, path: str, value: object) -> None:
+    if path == "date":
+        record["date"] = value
+        return
+    record.setdefault("span", {})[path.split(".", 1)[1]] = value
+
+
+def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, dict]:
+    """``(record, dates)`` — the filed record, and the unit's own date block.
+
+    Every bound is re-based by :func:`date_evidence`; the unit's summary
+    ``basis`` is ``stated`` only when EVERY bound it carries is carried by the
+    person's words, and ``inferred`` otherwise. The per-bound truth is not
+    lost by that summary — it rides on the record, which is what files.
+    """
+    filed = json.loads(json.dumps(record))
+    hedged = _hedged(quote)
+    bounds = _bounds_of(filed)
+    stated_all = bool(bounds)
+    precision = None
+    start = end = None
+    confidence = "certain"
+    for path, value in bounds:
+        stated = date_evidence(value, quote, source_text)
+        stated_all = stated_all and stated
+        restated = _restate(value, stated=stated, hedged=hedged)
+        if restated is None:
+            continue
+        _set_bound(filed, path, restated)
+        parsed = chrono.from_dict(restated)
+        if parsed is None:
+            continue
+        grain = parsed.granularity
+        # The COARSEST grain any bound carries. A span whose start is a year
+        # and whose end is a month is a YEAR-precision span: reporting the
+        # finer of the two would promise a precision the other half does not
+        # have, which is the false precision the ladder exists to refuse.
+        if precision is None or chrono.GRANULARITIES.index(grain) > \
+                chrono.GRANULARITIES.index(precision):
+            precision = grain
+        if parsed.confidence != "certain":
+            confidence = parsed.confidence
+        display = parsed.best or parsed.earliest or parsed.latest
+        if path in ("date", "span.start"):
+            start = start or display
+        if path == "span.end":
+            end = display
+    dates = {
+        "start": start,
+        "end": end,
+        "precision": precision,
+        "basis": "stated" if stated_all else "inferred",
+        "confidence": confidence,
+    }
+    return filed, dates
+
+
+# --------------------------------------------------------------------------
+# Identity
+# --------------------------------------------------------------------------
+
+def derive_unit_id(*, domain: object, kind: object, subject: object,
+                   dates: object, quote: object) -> str:
+    """One unit's content-addressed identity.
+
+    Domain, kind, subject, the dates as the person's words fixed them, and the
+    quotation they came from. Two proposals over the same text yield the same
+    ids; a unit whose date or evidence changed is a DIFFERENT unit, which is
+    what makes "apply exactly these" safe to retry.
+    """
+    dates_row = dates if isinstance(dates, dict) else {}
+    quote_row = quote if isinstance(quote, dict) else {}
+    payload = {
+        "domain": collapsed_text(domain),
+        "kind": collapsed_text(kind),
+        "subject": collapsed_text(subject).casefold(),
+        "start": collapsed_text(dates_row.get("start")),
+        "end": collapsed_text(dates_row.get("end")),
+        "precision": collapsed_text(dates_row.get("precision")),
+        "basis": collapsed_text(dates_row.get("basis")),
+        "quote": collapsed_text(quote_row.get("text")),
+    }
+    return f"{UNIT_ID_PREFIX}:{_digest(payload)}"
+
+
+def derive_proposal_id(text: object, generation: object) -> str:
+    """The proposal's identity: the submitted text, against the vault
+    generation it was read against.
+
+    The generation is in it deliberately. The same paragraph offered again
+    after the timeline moved is a NEW reading — the known entries the recorder
+    saw are different, so the duplicates and conflicts it reports are
+    different — and pretending otherwise would hand somebody yesterday's
+    proposal for today's vault.
+    """
+    payload = {"text": store.normalize_payload(str(text or "")),
+               "generation": int(generation or 0)}
+    return f"{PROPOSAL_ID_PREFIX}:{_digest(payload)}"
+
+
+def derive_receipt_id(proposal_id: object, unit_ids: object) -> str:
+    """The apply receipt's identity: the proposal, and exactly which units.
+
+    Applying the same units of the same proposal twice lands on the same
+    receipt id and therefore on the same file; applying a SECOND, larger set
+    is a second act with a receipt of its own, and the units the two share
+    were already filed under their own ``(proposal_id, unit_id)`` digests, so
+    nothing files twice either way.
+    """
+    payload = {"proposal_id": collapsed_text(proposal_id),
+               "unit_ids": sorted({collapsed_text(value)
+                                   for value in (unit_ids or ()) if value})}
+    return f"{RECEIPT_ID_PREFIX}:{_digest(payload)}"
+
+
+def landmark_opportunity_id(*, domain: object, subject: object, kind: object,
+                            event: object = None) -> str:
+    """Cut 5a's opportunity identity: ``domain`` + ``kind`` + ``subject``.
+
+    A NAMED DOOR onto `landmark_opportunities.opportunity_id`, never a second
+    definition of it (ADR 0021, ADR 0032). This exists so the offer side can
+    say what it is addressing at its own call sites; the digest is 5a's, and
+    `tests/test_landmark_offer.py` pins the two equal.
+    """
+    import landmark_opportunities as lop  # noqa: PLC0415
+
+    return lop.opportunity_id(domain=domain, kind=kind, subject=subject,
+                              event=event)
+
+
+# --------------------------------------------------------------------------
+# The deterministic first pass (R4: the parse kept, the product gone)
+# --------------------------------------------------------------------------
+
+def _grammar_block_quote(text: str, block: dict, *, cursor: int) -> dict | None:
+    return locate(text, block.get("raw"), hint=cursor)
+
+
+def _date_dict(bound: object, *, ongoing: bool = False) -> dict | None:
+    """One grammar-parsed bound as a `chronology` record dict."""
+    if ongoing or not isinstance(bound, dict):
+        return None
+    edtf = bound.get("edtf")
+    if not edtf:
+        return None
+    parsed = chrono.parse_edtf(str(edtf), basis="stated")
+    if parsed is None:
+        return None
+    payload = parsed.to_dict()
+    grain = bound.get("grain")
+    if grain in chrono.GRANULARITIES:
+        payload["granularity"] = grain
+    payload["confidence"] = "certain"
+    return payload
+
+
+def grammar_units(text: str) -> tuple[list[dict], set[int]]:
+    """``(units, consumed_offsets)`` — the model-free extractor.
+
+    The deterministic block grammar runs FIRST over text it fully matches
+    (decision record §5.6, last example: *"anything it does not recognize goes
+    to the listener rather than being discarded"*). A block qualifies only
+    when it parsed cleanly AND every one of its lines was a field the grammar
+    knows — a block with a stray prose line is handed on whole, because half a
+    parse is a guess.
+
+    Zero model calls, by construction: nothing on this path consults a
+    completion, and a 30-block residence document therefore proposes 30 units
+    for the cost of a string split.
+    """
+    import go_dig_writer as _writer  # noqa: PLC0415 — internal extractor only
+
+    body = text or ""
+    plan = _writer.plan_import(body)
+    blocks = plan["blocks"]
+    clean = {block["ordinal"]: block for block in blocks
+             if not block["errors"] and not block["note_lines"]
+             and block["status"] == "ready"}
+    units: list[dict] = []
+    consumed: set[int] = set()
+    cursor = 0
+    for block in blocks:
+        if block["ordinal"] not in clean:
+            continue
+        quote = _grammar_block_quote(body, block, cursor=cursor)
+        if quote is None:
+            continue
+        cursor = quote["offset"] + quote["length"]
+        consumed.add(block["ordinal"])
+        place = block.get("place_name")
+        dates = block.get("dates") or {}
+        if not place:
+            consumed.discard(block["ordinal"])
+            continue
+        record: dict = {"domain": "residences", "label": place, "city": place}
+        if block.get("address"):
+            record["address"] = block["address"]
+        if block.get("nickname"):
+            record["nickname"] = block["nickname"]
+        start = _date_dict((dates or {}).get("start"))
+        end = _date_dict((dates or {}).get("end"),
+                         ongoing=bool((dates.get("end") or {}).get("ongoing")))
+        span = {key: value for key, value in (("start", start), ("end", end))
+                if value}
+        if span:
+            record["span"] = span
+        validated = li.validate_landmark(record)
+        if validated is None:
+            consumed.discard(block["ordinal"])
+            continue
+        units.append(_unit(domain="residences", record=validated,
+                           subject=place, quote=quote, source_text=body,
+                           extractor="grammar"))
+    return units, consumed
+
+
+# --------------------------------------------------------------------------
+# One unit
+# --------------------------------------------------------------------------
+
+def _subject_of(record: dict, domain: str) -> str:
+    try:
+        row = li.domain_row(domain)
+    except li.LandmarkInteractionError:
+        row = None
+    if row is not None:
+        named = li.identity_named(record, row)
+        if named:
+            return named
+    for field in li.IDENTITY_FIELDS:
+        value = record.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _unit(*, domain: str, record: dict, subject: str, quote: object,
+          source_text: str, extractor: str) -> dict:
+    filed, dates = rebase_record(record, quote, source_text)
+    kind = UNIT_KIND_BY_DOMAIN.get(domain, domain)
+    return {
+        "unit_id": derive_unit_id(domain=domain, kind=kind, subject=subject,
+                                  dates=dates, quote=quote),
+        "domain": domain,
+        "kind": kind,
+        "subject": subject,
+        "entity_candidates": [],
+        "dates": dates,
+        "quote": quote,
+        "duplicates": [],
+        "conflicts": [],
+        "questions": [],
+        "auto_file_eligible": False,
+        "extractor": extractor,
+        "record": filed,
+    }
+
+
+#: The exact key set of a unit. Named so a reader — and 6b's typed surface —
+#: has one place to read the contract from.
+UNIT_KEYS = (
+    "unit_id", "domain", "kind", "subject", "entity_candidates", "dates",
+    "quote", "duplicates", "conflicts", "questions", "auto_file_eligible",
+    "extractor", "record",
+)
+
+
+# --------------------------------------------------------------------------
+# What the vault already knows: duplicates, conflicts, entity candidates
+# --------------------------------------------------------------------------
+
+def entry_id(domain: object, entry_key: object) -> str:
+    return f"{collapsed_text(domain)}/{collapsed_text(entry_key)}"
+
+
+def annotate_against_known(unit: dict, landmarks: object) -> dict:
+    """Duplicates and conflicts against what is already filed.
+
+    * A **duplicate** is an entry of the same identity that the merge would
+      fold this record INTO — same key, and `same_landmark_stay` says the two
+      tellings are one stay. Filing it again adds nothing.
+    * A **second stay** at a known identity is neither a duplicate nor a
+      conflict. It is a second entry, and the interval-aware key
+      (`landmarks_interaction.landmark_entry_key` + `same_landmark_stay`) is
+      what makes it one — which is exactly why the recorder is shown the
+      domain's filed entries before it proposes anything.
+    * A **conflict** is a dated stretch that overlaps a DIFFERENT identity's
+      by more than :data:`CONFLICT_OVERLAP_MONTHS`, or a record that
+      contradicts a standing "that never happened".
+    """
+    domain = unit["domain"]
+    try:
+        row = li.domain_row(domain)
+    except li.LandmarkInteractionError:
+        return unit
+    record = unit["record"]
+    key = li.landmark_entry_key(record, row)
+    mine = li.entry_stay_interval(record)
+    duplicates: list[str] = []
+    conflicts: list[dict] = []
+    for existing in li.landmark_entries(landmarks, domain):
+        existing_key = li.landmark_entry_key(existing, row)
+        if li.is_none_entry(existing, row) and li.asserts_happened(record):
+            conflicts.append({
+                "entry_id": entry_id(domain, existing_key),
+                "kind": "contradicts_none",
+                "detail": f"{domain} is filed as never having happened",
+            })
+            continue
+        if existing_key == key:
+            if li.same_landmark_stay(existing, record, row):
+                duplicates.append(entry_id(domain, existing_key))
+            continue
+        theirs = li.entry_stay_interval(existing)
+        if mine and theirs and chrono.overlap_months(mine, theirs) > \
+                CONFLICT_OVERLAP_MONTHS:
+            conflicts.append({
+                "entry_id": entry_id(domain, existing_key),
+                "kind": "overlapping_span",
+                "detail": (f"overlaps {li.entry_name(existing, row) or 'a filed entry'} "
+                           f"by more than {CONFLICT_OVERLAP_MONTHS} months"),
+            })
+    unit["duplicates"] = sorted(dict.fromkeys(duplicates))
+    unit["conflicts"] = sorted(conflicts, key=lambda row_: (row_["kind"],
+                                                            row_["entry_id"]))
+    return unit
+
+
+#: Which roster type a domain's subject is an entity of. Read from the
+#: question set's own `identity_kind` (`landmarks_interaction.IDENTITY_KINDS`)
+#: rather than re-declared, with the two roster types that exist
+#: (`entity_roster.ENTITY_TYPES` for people and places,
+#: `roster_relations.ORGANIZATION_ENTITY_TYPE` for organizations).
+ROSTER_TYPE_BY_IDENTITY_KIND = {
+    "person": "person",
+    "place": "place",
+    "organization": "organization",
+    "relationship_edge": "person",
+    "episode": None,
+}
+
+
+def annotate_entities(unit: dict, roster: object) -> dict:
+    """Roster matches for the unit's subject, with an honest confidence.
+
+    ``match`` is the same name, normalized; ``possible`` is an alias of some
+    other entity — which is a thing to SHOW, never to resolve silently
+    (`roster_relations.alias_decision` owns that judgment); ``new`` is a name
+    the roster has never seen, proposed rather than minted.
+    """
+    import identity_resolution as ir  # noqa: PLC0415
+    import roster_relations as rr  # noqa: PLC0415
+
+    subject = unit.get("subject") or ""
+    if not subject:
+        return unit
+    try:
+        row = li.domain_row(unit["domain"])
+    except li.LandmarkInteractionError:
+        return unit
+    roster_type = ROSTER_TYPE_BY_IDENTITY_KIND.get(row.get("identity_kind"))
+    if roster_type is None:
+        return unit
+    snapshot = (roster or {}).get(roster_type) if isinstance(roster, dict) else None
+    entities = rr.roster_entities(snapshot)
+    key = ir.normalized_mention_key(subject)
+    candidates: list[dict] = []
+    for entity in entities:
+        name = entity.get("name")
+        if ir.normalized_mention_key(name) == key:
+            candidates.append({"ref": rr.entity_ref(roster_type, entity),
+                               "name": name, "type": roster_type,
+                               "confidence": "match"})
+            continue
+        aliases = entity.get("aliases")
+        if isinstance(aliases, list) and any(
+                ir.normalized_mention_key(alias) == key for alias in aliases):
+            candidates.append({"ref": rr.entity_ref(roster_type, entity),
+                               "name": name, "type": roster_type,
+                               "confidence": "possible"})
+    if not candidates:
+        candidates.append({"ref": None, "name": subject, "type": roster_type,
+                           "confidence": "new"})
+    unit["entity_candidates"] = candidates
+    return unit
+
+
+# --------------------------------------------------------------------------
+# Questions — asked, never guessed
+# --------------------------------------------------------------------------
+
+def unit_questions(unit: dict, landmarks: object) -> list[str]:
+    """The focused clarifications MATERIAL ambiguity earns. Nothing else.
+
+    §5.3's "needs clarification" is about a person, place, event,
+    relationship or date that cannot be RESOLVED — not about a ladder rung
+    that is merely unfilled. A residence with a city and a span is a good
+    landmark whether or not anybody ever names the street, and asking for the
+    address on a confirmation screen would turn the proposal into the form
+    this Interaction exists not to be. So exactly three things ask:
+
+    * a unit whose domain names a subject and whose subject is missing;
+    * a unit whose domain dates its entries and that carries no date at all —
+      asked with `landmarks_interaction.event_questions`, so a partnership
+      asks its three distinct events by name rather than one flattened
+      "when";
+    * a date this module INFERRED. A date the person did not say is the one
+      thing that must be checked before it is filed — and it is checked with
+      the domain's OWN question, never by naming the inferred value and
+      inviting agreement with it. Showing an inference on the confirmation
+      screen is honest (the leaf requires it, marked as an inference); asking
+      *"was it 1991?"* is the suggestive-interviewing hazard ADR 0025 named,
+      and it stays banned in this mode exactly as in the other one.
+    """
+    try:
+        row = li.domain_row(unit["domain"])
+    except li.LandmarkInteractionError:
+        return []
+    record = unit["record"]
+    subject = unit.get("subject") or ""
+    asks: list[str] = []
+    if li.identity_rung(row) and not li.identity_named(record, row):
+        opening = li.next_rung((), row)
+        if opening is not None:
+            asks.append(opening["text"])
+    elif not _bounds_of(record) and li.date_semantics(row):
+        asks.extend(question["text"] for question
+                    in li.event_questions(row, subject))
+    if unit["dates"].get("basis") == "inferred":
+        events = [question["text"] for question
+                  in li.event_questions(row, subject)]
+        if events:
+            asks.extend(events)
+        else:
+            opening = li.next_rung((), row)
+            if opening is not None:
+                asks.append(opening["text"])
+    return list(dict.fromkeys(asks))
+
+
+def open_claim_questions(claims: object, units: object, landmarks: object,
+                         source_text: str) -> list[dict]:
+    """One question per datable thing the person said that no unit carries.
+
+    *"We moved around a lot after Dad changed jobs"* fabricates no residence
+    and no year (§5.6). It is a real claim about moving, so the honest
+    response is the residences ladder's own opening question — asked once,
+    against the domain, from `next_rung`, and never with a year in it.
+    """
+    covered: list[tuple[int, int]] = [
+        (unit["quote"]["offset"], unit["quote"]["length"])
+        for unit in (units or ())
+        if isinstance(unit.get("quote"), dict)
+    ]
+    asked: dict[str, dict] = {}
+    for claim in claims or ():
+        if not isinstance(claim, dict):
+            continue
+        domain = DOMAIN_BY_EVENT_KIND.get(collapsed_text(claim.get("event_kind")))
+        if domain is None or domain in asked:
+            continue
+        located = locate(source_text, claim_evidence_text(claim))
+        if located is not None and any(
+                _overlaps(located["offset"], located["length"], offset, length)
+                for offset, length in covered):
+            continue
+        try:
+            row = li.domain_row(domain)
+        except li.LandmarkInteractionError:
+            continue
+        rung = li.next_rung(li.landmark_entries(landmarks, domain), row)
+        if rung is None:
+            continue
+        asked[domain] = {"domain": domain, "text": rung["text"],
+                         "quote": located,
+                         "why": "you mentioned this but did not say when or where"}
+    return [asked[key] for key in sorted(asked)]
+
+
+# --------------------------------------------------------------------------
+# The vault this offer belongs to
+# --------------------------------------------------------------------------
+
+def _write_json(vault_root: str | Path, path: Path, payload: dict) -> Path:
+    """One writer for the three files this module owns, atomic and no-follow.
+
+    Every vault write in this package goes through `vault_paths`'
+    symlink-refusing authority — `tests/test_v120_vault_only.py` sweeps the
+    AST of every module in `system/` to keep it that way — and the bytes are
+    `landmark_projection.canonical_json`'s, so two runs over identical inputs
+    produce identical files.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        atomic_write_vault_text(path, lp.canonical_json(payload) + "\n",
+                                vault_root=Path(vault_root))
+    except (OSError, ValueError) as exc:
+        raise LandmarkOfferError("write_failure", str(exc)) from exc
+    return path
+
+
+def _bound_vault(vault_root: str | Path) -> Path:
+    """The vault, checked against the landmark store's own binding.
+
+    `timeline.LANDMARKS_STORE` is the seam every caller and every test
+    rebinds, and `timeline._projection_vault_root` derives the substrate root
+    FROM it precisely so a drawing and its evidence cannot land in two
+    different vaults. This module writes proposals beside that substrate and
+    files through that writer, so it refuses rather than straddles.
+    """
+    import timeline  # noqa: PLC0415
+
+    root = Path(str(vault_root)).expanduser().resolve()
+    bound = Path(str(timeline._projection_vault_root())).expanduser().resolve()  # noqa: SLF001
+    if root != bound:
+        raise LandmarkOfferError(
+            "write_failure",
+            f"landmark offers write beside the landmark store; this process is "
+            f"bound to {bound}, not {root}")
+    return root
+
+
+def _known_landmarks() -> dict:
+    import timeline  # noqa: PLC0415
+
+    return timeline.load_landmarks()
+
+
+def _roster_snapshot() -> dict:
+    import entity_roster  # noqa: PLC0415
+
+    snapshot: dict = {}
+    for roster_type in ("person", "place", "organization"):
+        try:
+            snapshot[roster_type] = entity_roster.load_roster(roster_type)
+        except Exception:  # noqa: BLE001 — a roster problem is "no roster"
+            snapshot[roster_type] = {"entities": []}
+    return snapshot
+
+
+# --------------------------------------------------------------------------
+# propose
+# --------------------------------------------------------------------------
+
+def _claim_quote(claims: object, subject: str, source_text: str) -> dict | None:
+    key = " ".join(str(subject or "").split()).casefold()
+    if not key:
+        return None
+    for claim in claims or ():
+        if not isinstance(claim, dict):
+            continue
+        mention = " ".join(str(claim.get("subject_mention") or "").split())
+        if mention.casefold() != key:
+            continue
+        located = locate(source_text, claim_evidence_text(claim))
+        if located is not None:
+            return located
+    return None
+
+
+def _span_quote(source_text: str, subject: str) -> dict | None:
+    key = " ".join(str(subject or "").split()).casefold()
+    if not key:
+        return None
+    for span in source_spans(source_text):
+        if key in span["text"].casefold():
+            return {"text": span["text"][:QUOTE_MAX_CHARS],
+                    "offset": span["offset"], "length": span["length"]}
+    return None
+
+
+def _auto_file_eligible(unit: dict) -> bool:
+    """The existing extraction policy, applied to a unit.
+
+    Explicit (every bound the person's own words carry), high-confidence
+    (nothing hedged), nothing already filed that this would merge into, and
+    nothing it contradicts. It depends on the EVIDENCE, never on a model
+    saying it is confident (§5.3), and the owner has not asked for
+    auto-filing — so this is a flag a host may read, not a permission this
+    module exercises. :func:`apply` files what a person named and nothing
+    else.
+
+    An unfilled ladder rung is deliberately NOT disqualifying: "I lived in
+    Mesa from 1990 to 1992" is a complete, explicit residence whether or not
+    anybody ever names the street, and the ladder will ask for the address in
+    its own time through the collect mode.
+    """
+    dates = unit.get("dates") or {}
+    return bool(
+        dates.get("basis") == "stated"
+        and dates.get("confidence") == "certain"
+        and dates.get("start")
+        and not unit.get("duplicates")
+        and not unit.get("conflicts")
+    )
+
+
+def _partition_text(source_text: str, units: list[dict]) -> tuple[list[dict], list[dict]]:
+    """``(stories, unrecognized)`` — every span no unit's quote covers.
+
+    R3a: non-landmark input is never refused. Prose the person offered is a
+    STORY and says so; a fragment with nothing to route is ``unrecognized``
+    and is still carried, because a proposal that quietly loses half a paste
+    is the failure this whole mode replaces.
+    """
+    covered = [(unit["quote"]["offset"], unit["quote"]["length"])
+               for unit in units if isinstance(unit.get("quote"), dict)]
+    stories: list[dict] = []
+    unknown: list[dict] = []
+    for span in source_spans(source_text):
+        if any(_overlaps(span["offset"], span["length"], offset, length)
+               for offset, length in covered):
+            continue
+        words = [word for word in re.split(r"\s+", span["text"]) if word]
+        if len(words) >= STORY_MIN_WORDS and re.search(r"[A-Za-z]", span["text"]):
+            stories.append({**span, "route": STORY_KIND})
+        else:
+            unknown.append(dict(span))
+    return stories, unknown
+
+
+def propose(text: str, vault_root: object = None, *, call,
+            model: object = None, listener_model: object = None,
+            recorder_model: object = None, now: object = None,
+            write: bool = True, landmarks: object = None,
+            roster: object = None, generation: object = None) -> dict:
+    """Read volunteered text; propose landmark units. Files NOTHING.
+
+    ``call(prompt, model) -> str`` is injected exactly as the recorder's is,
+    so this loop is testable, replayable and host-routable. ``model`` sets
+    both passes at once; ``listener_model``/``recorder_model`` override each.
+
+    Writes exactly one file — ``state/landmarks/offers/<proposal_id>.json`` —
+    carrying the submitted text, the units, the stories, the spans nothing
+    recognized and the questions. That file IS R3's durable evidence: it
+    exists before anybody confirms anything, and a failure writes it too, so
+    the input is never the thing that gets lost.
+
+    ``landmarks``, ``roster`` and ``generation`` are the vault context. They
+    default to this vault's, and supplying ALL THREE with ``write=False``
+    makes the whole function pure over data the caller holds — which is how
+    the eval harness replays recorded completions against fixed context
+    without a vault at all.
+    """
+    body = str(text or "")
+    if not body.strip():
+        raise LandmarkOfferError("unsupported_input",
+                                 "an offer needs some text")
+    supplied = (landmarks is not None and roster is not None
+                and generation is not None)
+    root = None if (not write and supplied) else _bound_vault(vault_root)
+    generation = (pub.published_generation(root) if generation is None
+                  else int(generation))
+    proposal_id = derive_proposal_id(body, generation)
+    landmarks = _known_landmarks() if landmarks is None else landmarks
+    roster = _roster_snapshot() if roster is None else roster
+    stamp = normalized_timestamp(now, error=tc.TemporalContractError)
+
+    units, _consumed = grammar_units(body)
+    findings: list[str] = []
+    failure: dict | None = None
+    claims: tuple[dict, ...] = ()
+
+    heard = None
+    try:
+        heard = recorder.listen_to_answer(
+            answer=body, call=call, landmarks=landmarks,
+            model=str(listener_model or model or gl.DEFAULT_LISTENER_ROLE))
+    except Exception as exc:  # noqa: BLE001 — a provider failure is data here
+        failure = {"class": "service_unavailable", "detail": str(exc)}
+    if heard is not None:
+        findings.extend(heard.findings)
+        claims = heard.claims
+        if heard.status == recorder.STATUS_UNAVAILABLE:
+            failure = {"class": "service_unavailable",
+                       "detail": heard.reason or "the listener was unavailable"}
+
+    domains = sorted({collapsed_text(row.get("domain"))
+                      for row in (heard.records if heard else ())
+                      if isinstance(row, dict) and row.get("domain")})
+    for domain in domains:
+        try:
+            row = li.domain_row(domain)
+        except li.LandmarkInteractionError:
+            continue
+        try:
+            outcome = recorder.record_answer(
+                domain=domain, answer=body, call=call, landmarks=landmarks,
+                question_asked=str(row.get("ask") or ""),
+                model=str(recorder_model or model or recorder.DEFAULT_RECORDER_ROLE))
+        except Exception as exc:  # noqa: BLE001
+            failure = failure or {"class": "model_failure", "detail": str(exc)}
+            outcome = None
+        records = list(outcome.records) if outcome is not None else []
+        if not records:
+            records = [row_ for row_ in (heard.records if heard else ())
+                       if isinstance(row_, dict) and row_.get("domain") == domain]
+        if outcome is not None:
+            findings.extend(outcome.findings)
+        for record in records:
+            subject = _subject_of(record, domain)
+            quote = (_claim_quote(claims, subject, body)
+                     or _span_quote(body, subject)
+                     or _claim_quote(claims, record.get("label"), body))
+            unit = _unit(domain=domain, record=record, subject=subject,
+                         quote=quote, source_text=body, extractor="recorder")
+            if any(existing["unit_id"] == unit["unit_id"] for existing in units):
+                continue
+            units.append(unit)
+
+    for unit in units:
+        annotate_against_known(unit, landmarks)
+        annotate_entities(unit, roster)
+        unit["questions"] = unit_questions(unit, landmarks)
+        unit["auto_file_eligible"] = _auto_file_eligible(unit)
+
+    units.sort(key=lambda row_: (
+        row_["quote"]["offset"] if isinstance(row_.get("quote"), dict) else 1 << 30,
+        row_["domain"], row_["unit_id"]))
+
+    questions = open_claim_questions(claims, units, landmarks, body)
+    stories, unrecognized = _partition_text(body, units)
+
+    if failure is not None:
+        state = "failed"
+    elif units:
+        state = "proposed"
+    elif questions:
+        state = "needs_clarification"
+    else:
+        state = "proposed"
+
+    proposal = {
+        "schema_version": PROPOSAL_SCHEMA_VERSION,
+        "proposal_id": proposal_id,
+        "mode": OFFER_MODE,
+        "interaction": "landmarks",
+        "created_at": stamp,
+        "vault_generation": int(generation),
+        "state": state,
+        "source_text": body,
+        "source_digest": f"sha256:{store.payload_sha256(store.normalize_payload(body))}",
+        "units": units,
+        "stories": stories,
+        "unrecognized": unrecognized,
+        "questions": questions,
+        "findings": sorted(dict.fromkeys(findings)),
+        "failure": failure,
+        "extractors": _extractors(listener_model or model,
+                                  recorder_model or model),
+    }
+    if write:
+        _save_proposal(root, proposal)
+    return proposal
+
+
+def _extractors(listener_model: object, recorder_model: object) -> list[dict]:
+    """Which prompt bytes and which model read this text.
+
+    §4.2 of the audited claim plan requires a receipt to name the extractor's
+    prompt, schema and model version; both passes carry their own
+    (`general_listener.claim_extractor`), and editing a leaf is a NEW
+    extractor rather than a cache rebuild.
+    """
+    rows = []
+    try:
+        rows.append(gl.listener_extractor(
+            model=str(listener_model or gl.DEFAULT_LISTENER_ROLE)))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        rows.append(recorder.recorder_extractor(
+            model=str(recorder_model or recorder.DEFAULT_RECORDER_ROLE)))
+    except Exception:  # noqa: BLE001
+        pass
+    return rows
+
+
+def _save_proposal(vault_root: Path, proposal: dict) -> Path:
+    """Write the proposal once. A FAILED one is replaced by a later reading.
+
+    Content-addressed, so a retry of the same text against the same
+    generation lands on the same path: two readings of one submission are one
+    proposal, and the first successful reading stands. A proposal that FAILED
+    is the one exception — a retry after the provider came back must be able
+    to replace it, or the failure becomes permanent.
+    """
+    relative = f"{OFFERS_DIR}/{proposal['proposal_id'].split(':', 1)[1]}.json"
+    path = store.store_path(vault_root, relative)
+    if path.is_file():
+        try:
+            standing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            standing = None
+        if isinstance(standing, dict) and standing.get("state") != "failed":
+            return path
+    _write_json(vault_root, path, proposal)
+    return path
+
+
+def read_proposal(vault_root: str | Path, proposal_id: str) -> dict:
+    path = proposal_path(vault_root, proposal_id)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise LandmarkOfferError("unsupported_input",
+                                 f"no such proposal: {proposal_id}") from exc
+    if not isinstance(value, dict):
+        raise LandmarkOfferError("unsupported_input",
+                                 f"unreadable proposal: {proposal_id}")
+    return value
+
+
+# --------------------------------------------------------------------------
+# apply — the SAME writer a conversation answer files through
+# --------------------------------------------------------------------------
+
+def unit_filing_digest(proposal_id: object, unit: dict) -> str:
+    """``(proposal_id, unit_id)`` as the promoted record's own identity.
+
+    The idempotency key, and the reason a retry files nothing twice: it is a
+    function of what the person offered and which unit they confirmed, never
+    of the filing ORDINAL, which moves under a retry as earlier units land.
+    It rides into `timeline.save_landmark` through the ``digest_override``
+    seam that already exists for exactly this problem.
+    """
+    import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
+
+    return _writer.go_dig_unit_digest(
+        import_operation_id=collapsed_text(proposal_id),
+        block_content_digest=collapsed_text(unit.get("unit_id")),
+        unit_kind=collapsed_text(unit.get("domain")),
+        discriminator="",
+    )
+
+
+def unit_source_relative_path(proposal_id: object, unit: dict) -> str:
+    """Where the record this unit files lands, computed before it is filed."""
+    return lp.landmark_source_relative_path(unit_filing_digest(proposal_id, unit))
+
+
+def _source_id_for(vault_root: Path, proposal_id: str, unit: dict) -> str | None:
+    ref = store.read_source_ref(vault_root,
+                               unit_source_relative_path(proposal_id, unit))
+    return ref.source_id if ref is not None else None
+
+
+def _place_name_for(unit: dict) -> str | None:
+    """The roster place a unit names, where its domain has one.
+
+    Only `residences` mints a place from a unit today, and only from the city
+    rung — the same narrow rule the one-unit writer already applies. A domain
+    whose subject is an organization proposes it as an entity candidate and
+    leaves the minting to the roster's own resolver.
+    """
+    if unit.get("domain") != "residences":
+        return None
+    record = unit.get("record") or {}
+    city = record.get("city") or record.get("label")
+    return str(city).strip() or None if isinstance(city, str) else None
+
+
+def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
+          now: object = None, reason: object = None) -> dict:
+    """File the units a person confirmed. Idempotent by ``(proposal, unit)``.
+
+    Every unit goes through the SAME road a landmark ANSWER takes —
+    `timeline.save_landmark`, the one landmark writer — so a confirmed offer
+    and an answered question are indistinguishable downstream, which is the
+    whole of R3a ("same unit, same landmark recorder, same value
+    calculation"). The submitted text is promoted once as an ordinary vault
+    source so no filed claim's only citation is a proposal file.
+
+    Returns the receipt: what was filed, the generations either side, the
+    realized-gain diff Cut 4c publishes, and its sentence.
+    """
+    import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
+
+    root = _bound_vault(vault_root)
+    proposal = read_proposal(root, proposal_id)
+    by_id = {unit["unit_id"]: unit for unit in proposal.get("units") or ()
+             if isinstance(unit, dict) and unit.get("unit_id")}
+    wanted = [collapsed_text(value) for value in (unit_ids or ()) if value]
+    unknown = [value for value in wanted if value not in by_id]
+    if unknown:
+        raise LandmarkOfferError(
+            "unsupported_input",
+            f"{proposal_id} has no unit(s) {', '.join(sorted(unknown))}")
+    chosen = [by_id[value] for value in dict.fromkeys(wanted)]
+    if not chosen:
+        raise LandmarkOfferError("content_ambiguity",
+                                 "confirm at least one unit before applying")
+
+    receipt_id = derive_receipt_id(proposal_id, [u["unit_id"] for u in chosen])
+    stamp = normalized_timestamp(now, error=tc.TemporalContractError)
+    before = pub.read_projection(root)
+    open_before = open_opportunity_ids(root, projection=before)
+
+    # R3: the words are evidence, and they become an ordinary vault source the
+    # moment anything is filed from them — promoted ONCE, idempotent by its
+    # own content digest, so a retry adds no second copy.
+    text_ref = store.promote_conversational_source(
+        root, proposal.get("source_text") or "",
+        {"channel": OFFER_CHANNEL, "visibility": "owner_only",
+         "session_ref": f"landmark-offer:{proposal_id}"},
+        source_type=OFFER_SOURCE_TYPE,
+    )
+
+    filed: list[dict] = []
+    for unit in sorted(chosen, key=lambda row_: row_["unit_id"]):
+        payload = {
+            "landmark": dict(unit["record"]),
+            "import_operation_id": proposal_id,
+            "block_content_digest": unit["unit_id"],
+            "session_ref": f"landmark-offer:{proposal_id}",
+        }
+        place_name = _place_name_for(unit)
+        if place_name:
+            payload["landmark"]["place_name"] = place_name
+        try:
+            summary = _writer.record_unit(payload, now=now)
+        except Exception as exc:  # noqa: BLE001 — every write failure is typed
+            raise LandmarkOfferError("write_failure",
+                                     f"{unit['unit_id']} did not file: {exc}") from exc
+        entry = summary.get("entry") or {}
+        try:
+            row = li.domain_row(unit["domain"])
+        except li.LandmarkInteractionError:
+            row = None
+        filed.append({
+            "unit_id": unit["unit_id"],
+            "domain": unit["domain"],
+            "kind": unit["kind"],
+            "subject": unit["subject"],
+            "entry_key": li.landmark_entry_key(entry or unit["record"], row),
+            "basis": (unit.get("dates") or {}).get("basis"),
+            "filing_digest": unit_filing_digest(proposal_id, unit),
+            "source_id": _source_id_for(root, proposal_id, unit),
+            "place_ref": summary.get("place_ref"),
+        })
+
+    after = pub.read_projection(root)
+    gain = trcpt.diff_projections(before, after) if after is not None else {}
+    open_after = open_opportunity_ids(root, projection=after)
+    retired = [retire_matching_opportunity(unit, root, open_before=open_before,
+                                           open_after=open_after)
+               for unit in chosen]
+
+    receipt = {
+        "schema_version": OFFER_RECEIPT_SCHEMA_VERSION,
+        "receipt_id": receipt_id,
+        "proposal_id": proposal_id,
+        "created_at": stamp,
+        "reason": collapsed_text(reason) or None,
+        "unit_ids": sorted(unit["unit_id"] for unit in chosen),
+        "filed": filed,
+        "evidence_ref": text_ref.to_dict(),
+        "generation_before": pub._generation_of(before) if before else 0,  # noqa: SLF001
+        "generation_after": pub._generation_of(after) if after else 0,  # noqa: SLF001
+        "gain": gain,
+        "sentence": trcpt.render_realized_gain(gain),
+        "retired_opportunities": retired,
+    }
+    return _save_receipt(root, receipt)
+
+
+def _save_receipt(vault_root: Path, receipt: dict) -> dict:
+    """Write the apply receipt once; a retry reads the standing one back.
+
+    The receipt is the record of an ACT, so the first one stands: a second
+    apply of the same units files nothing (the promoted sources are already
+    there under the same digests) and must therefore not claim to have gained
+    anything a second time.
+    """
+    name = receipt["receipt_id"].split(":", 1)[1]
+    path = store.store_path(vault_root, f"{OFFER_RECEIPTS_DIR}/{name}.json")
+    if path.is_file():
+        try:
+            standing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            standing = None
+        if isinstance(standing, dict):
+            return standing
+    _write_json(vault_root, path, receipt)
+    return receipt
+
+
+def read_offer_receipt(vault_root: str | Path, receipt_id: str) -> dict:
+    path = offer_receipt_path(vault_root, receipt_id)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise LandmarkOfferError("unsupported_input",
+                                 f"no such receipt: {receipt_id}") from exc
+    if not isinstance(value, dict):
+        raise LandmarkOfferError("unsupported_input",
+                                 f"unreadable receipt: {receipt_id}")
+    return value
+
+
+# --------------------------------------------------------------------------
+# The 5a seam
+# --------------------------------------------------------------------------
+
+def opportunity_ids_for(unit: dict) -> list[str]:
+    """Every Cut 5a opportunity id this unit could be the answer to.
+
+    An opportunity's identity is its GAP — domain, kind, subject — and one
+    filed unit can close several kinds of gap about the same subject: a
+    residence with both bounds answers `span_missing`, `span_open_start` and
+    `span_open_end` alike. So the unit names all of them and
+    :func:`retire_matching_opportunity` reports which ones actually closed.
+    """
+    import landmark_opportunities as lop  # noqa: PLC0415
+
+    domain = unit.get("domain")
+    subject = unit.get("subject")
+    if not domain or not subject:
+        return []
+    return [lop.opportunity_id(domain=domain, kind=kind, subject=subject)
+            for kind in lop.OPPORTUNITY_KINDS]
+
+
+def open_opportunity_ids(vault_root: str | Path, *,
+                         projection: object = None) -> set[str]:
+    """The ids of the opportunities the PUBLISHED projection is offering.
+
+    Read from the published block Cut 5a writes (`landmark_opportunities`) —
+    the same bytes the page and the queue read — never re-derived here. A
+    generation published before 5a carries none, which reads as "nothing is
+    being offered", and that is what a generation that never measured it
+    knows.
+    """
+    payload = (pub.read_projection(vault_root) if projection is None
+               else projection) or {}
+    rows = payload.get("landmark_opportunities") or ()
+    return {collapsed_text(row.get("id")) for row in rows
+            if isinstance(row, dict) and row.get("id")}
+
+
+def retire_matching_opportunity(unit: dict, vault_root: str | Path, *,
+                                open_before: object = None,
+                                open_after: object = None) -> dict:
+    """Which landmark opportunity this filed unit retired (R3a, §5.4).
+
+    A confirmed Add Landmark counts toward landmark sufficiency and retires
+    the matching open question. It does so by CLOSING THE GAP, not by setting
+    a flag: Cut 5a derives its opportunities from the calculated graph on
+    every publish, so a stay that now has both its bounds simply stops
+    generating `span_open_end` — and a retirement that is measured against
+    the published generations either side of the filing cannot claim
+    something the graph does not agree with.
+
+    ``open_before``/``open_after`` are the published opportunity ids either
+    side of the act (:func:`open_opportunity_ids`). Called without a
+    ``open_before``, NOTHING is claimed retired and the currently open
+    candidates are reported instead — an unmeasured before cannot support the
+    claim that something closed, and overclaiming here would put a
+    retirement on a receipt that the graph does not agree with.
+    """
+    candidates = opportunity_ids_for(unit)
+    after = (set(open_after) if open_after is not None
+             else open_opportunity_ids(vault_root))
+    before = set(open_before) if open_before is not None else set(after)
+    retired = sorted((set(candidates) & before) - after)
+    return {
+        "unit_id": unit.get("unit_id"),
+        "opportunity_ids": candidates,
+        "retired": retired,
+        "still_open": sorted(set(candidates) & after),
+    }
+
+
+# --------------------------------------------------------------------------
+# retract — the undo that marks rather than deletes
+# --------------------------------------------------------------------------
+
+RETRACTION_REASON = "the person undid an Add Landmark"
+
+
+def _claim_ids_for_sources(vault_root: Path, source_ids: object) -> list[str]:
+    wanted = {collapsed_text(value) for value in (source_ids or ()) if value}
+    if not wanted:
+        return []
+    index = store.read_active_index(vault_root) or store.fold_active_index(vault_root)
+    found = []
+    for row in store.active_claims(index):
+        ref = row.get("source_ref")
+        if isinstance(ref, dict) and collapsed_text(ref.get("source_id")) in wanted:
+            found.append(str(row.get("claim_id")))
+    return sorted(dict.fromkeys(found))
+
+
+def retract(receipt_id: str, vault_root: str | Path, *, reason: object = None,
+            now: object = None) -> dict:
+    """Undo an applied offer. The evidence and the receipt stay on disk.
+
+    §5.4's undo, through the correction machinery every other undo in this
+    package uses: `temporal_store.retract_claims` names exactly the claims the
+    filed units stand on — found by the promoted SOURCE each unit wrote, so
+    undoing the second stay at an address never touches the first — and the
+    projection is republished by the one writer. Nothing is deleted: the
+    promoted sources, their receipts and this offer's own receipt all remain,
+    and the retraction is a new immutable file beside the receipt.
+    """
+    import timeline  # noqa: PLC0415
+
+    root = _bound_vault(vault_root)
+    receipt = read_offer_receipt(root, receipt_id)
+    path = retraction_path(root, receipt_id)
+    if path.is_file():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    why = collapsed_text(reason) or RETRACTION_REASON
+    corrections: list[dict] = []
+    by_domain: dict[str, list[str]] = {}
+    for row in receipt.get("filed") or ():
+        if not isinstance(row, dict):
+            continue
+        by_domain.setdefault(collapsed_text(row.get("domain")), []).append(
+            collapsed_text(row.get("source_id")))
+    for domain in sorted(by_domain):
+        claim_ids = _claim_ids_for_sources(root, by_domain[domain])
+        if not claim_ids:
+            continue
+        correction = store.retract_claims(
+            root, claim_ids, reason=f"{why} ({receipt_id})",
+            scope=f"landmarks/{domain}" if domain else "landmarks",
+            occurred_at=now,
+        )
+        corrections.append({"domain": domain,
+                            "correction_id": correction.correction_id,
+                            "claim_ids": list(claim_ids)})
+    # The one writer: redraw the landmark store from the substrate and
+    # republish the calculated projection in the same act.
+    timeline.redraw_landmarks()
+    after = pub.read_projection(root)
+    retraction = {
+        "schema_version": OFFER_RECEIPT_SCHEMA_VERSION,
+        "receipt_id": receipt_id,
+        "proposal_id": receipt.get("proposal_id"),
+        "retracted_at": normalized_timestamp(now, error=tc.TemporalContractError),
+        "reason": why,
+        "corrections": corrections,
+        "generation_after": pub._generation_of(after) if after else 0,  # noqa: SLF001
+    }
+    _write_json(root, path, retraction)
+    return retraction
+
+
+def receipt_is_retracted(vault_root: str | Path, receipt_id: str) -> bool:
+    return retraction_path(vault_root, receipt_id).is_file()
+
+
+# --------------------------------------------------------------------------
+# The lints — deterministic, run over a proposal and over the worker's reply
+# --------------------------------------------------------------------------
+
+#: The offer gate NAMESPACE. Deliberately its own, not `landmark_gates.`:
+#: that family is the closed set `landmarks_interaction.LANDMARK_LINT_CLASSES`
+#: scored by `landmarks_evals.score_goldens` over the collect-mode REPLY
+#: goldens, and `load_gates` is one-to-one with it by test. These four judge a
+#: different artifact (a PROPOSAL, and a reply about one) over a different
+#: golden set, scored by a different function — so they get a prefix of their
+#: own rather than making the older contract mean two things.
+OFFER_GATE_PREFIX = "landmark_offer_gates"
+
+OFFER_LINT_CLASSES = (
+    # A proposed date must be in the person's own text, or be marked as an
+    # inference. This is the class R3's whole "never invent a date" rests on.
+    f"{OFFER_GATE_PREFIX}.no_fabricated_date",
+    # Every span of the submission is a unit, a story or an explicitly
+    # unrecognized span. Nothing is silently dropped.
+    f"{OFFER_GATE_PREFIX}.nothing_dropped",
+    # R3a: non-landmark text is accepted and routed as a story, never refused.
+    f"{OFFER_GATE_PREFIX}.never_refuses",
+    # The stop rules, in offer clothing: no form voice, no homework, no
+    # pressure, no "are you sure".
+    f"{OFFER_GATE_PREFIX}.keeps_stop_rules",
+)
+
+NO_FABRICATED_DATE_LINT = OFFER_LINT_CLASSES[0]
+NOTHING_DROPPED_LINT = OFFER_LINT_CLASSES[1]
+NEVER_REFUSES_LINT = OFFER_LINT_CLASSES[2]
+KEEPS_STOP_RULES_LINT = OFFER_LINT_CLASSES[3]
+
+#: What a refusal sounds like. Any of these in the worker's reply is the
+#: R3a violation: the person handed over something real and was told no.
+_REFUSAL_RES = (
+    re.compile(r"\b(?:I )?can'?t (?:use|accept|read|parse|process|do anything with)\b",
+               re.IGNORECASE),
+    re.compile(r"\bcould(?:\s+not|n['’]?t)\s+"
+               r"(?:parse|read|use|understand|process|make anything)\b",
+               re.IGNORECASE),
+    re.compile(r"\b(?:that|this) (?:is )?(?:isn'?t|is not) (?:a )?(?:valid|supported|"
+               r"something I can)\b", re.IGNORECASE),
+    re.compile(r"\bplease (?:use|try) (?:the )?(?:correct|proper|right) format\b",
+               re.IGNORECASE),
+    re.compile(r"\bnot (?:a )?landmark[,.]? (?:so )?(?:I )?(?:can'?t|won'?t|will not)\b",
+               re.IGNORECASE),
+)
+
+
+def lint_offer_proposal(proposal: object) -> list[dict]:
+    """Deterministic findings over one proposal. Empty is clean.
+
+    ``[{"lint", "detail"}]``, one row per finding, sorted — the same shape
+    `landmarks_interaction.lint_landmark_reply` returns, so a host runs both
+    through one reporter.
+    """
+    findings: list[dict] = []
+    row = proposal if isinstance(proposal, dict) else {}
+    text = str(row.get("source_text") or "")
+    units = [unit for unit in (row.get("units") or ()) if isinstance(unit, dict)]
+    for unit in units:
+        dates = unit.get("dates") or {}
+        if dates.get("basis") != "stated":
+            continue
+        for _path, bound in _bounds_of(unit.get("record") or {}):
+            if not date_evidence(bound, unit.get("quote"), text):
+                findings.append({
+                    "lint": NO_FABRICATED_DATE_LINT,
+                    "detail": (f"{unit.get('unit_id')} files a stated date the "
+                               f"text does not carry"),
+                })
+                break
+    covered = [(unit["quote"]["offset"], unit["quote"]["length"])
+               for unit in units if isinstance(unit.get("quote"), dict)]
+    covered += [(span["offset"], span["length"])
+                for group in ("stories", "unrecognized")
+                for span in (row.get(group) or ())
+                if isinstance(span, dict) and "offset" in span]
+    for span in source_spans(text):
+        if not any(_overlaps(span["offset"], span["length"], offset, length)
+                   for offset, length in covered):
+            findings.append({
+                "lint": NOTHING_DROPPED_LINT,
+                "detail": f"nothing accounts for offset {span['offset']}",
+            })
+    return sorted(findings, key=lambda item: (item["lint"], item["detail"]))
+
+
+def lint_offer_reply(text: object, *, stage: str = "ask",
+                     domain: object = None, sensitive: bool = False) -> list[dict]:
+    """The worker's reply, in offer mode. Empty is clean.
+
+    The landmarks stop rules are not re-implemented here — they are
+    `landmarks_interaction.lint_landmark_reply`'s, run whole and reported
+    under this mode's own stop-rule class, plus the one rule this mode adds:
+    a reply may never refuse what the person handed over.
+    """
+    body = text if isinstance(text, str) else ""
+    findings: list[dict] = []
+    for pattern in _REFUSAL_RES:
+        match = pattern.search(body)
+        if match:
+            findings.append({"lint": NEVER_REFUSES_LINT,
+                             "detail": match.group(0)})
+            break
+    for finding in li.lint_landmark_reply(body, stage=stage, domain=domain,
+                                          sensitive=sensitive):
+        findings.append({"lint": KEEPS_STOP_RULES_LINT,
+                         "detail": f"{finding['lint']}: {finding.get('span') or ''}".strip()})
+    return sorted(findings, key=lambda item: (item["lint"], item["detail"]))
+
+
+# --------------------------------------------------------------------------
+# What the worker is shown
+# --------------------------------------------------------------------------
+
+def _date_phrase(dates: object) -> str:
+    row = dates if isinstance(dates, dict) else {}
+    start, end = row.get("start"), row.get("end")
+    if start and end:
+        body = f"{start}–{end}"
+    elif start:
+        body = f"from {start}"
+    elif end:
+        body = f"until {end}"
+    else:
+        return "no dates"
+    if row.get("basis") == "inferred":
+        return f"{body} (read from the text; you did not say a date)"
+    if row.get("confidence") == "approximate":
+        return f"{body}, roughly"
+    return body
+
+
+def render_unit(unit: object) -> str:
+    """ONE proposed unit, in plain language, with the words it came from."""
+    row = unit if isinstance(unit, dict) else {}
+    subject = row.get("subject") or "(unnamed)"
+    lines = [f"- {row.get('kind')}: {subject} — {_date_phrase(row.get('dates'))}"]
+    quote = row.get("quote")
+    if isinstance(quote, dict) and quote.get("text"):
+        lines.append(f"  from your words: “{quote['text']}”")
+    for candidate in row.get("entity_candidates") or ():
+        if candidate.get("confidence") == "new":
+            lines.append(f"  {candidate.get('name')} is new to your roster")
+        elif candidate.get("confidence") == "possible":
+            lines.append(f"  this may be {candidate.get('name')}, already on your roster")
+    for duplicate in row.get("duplicates") or ():
+        lines.append(f"  already filed as {duplicate}")
+    for conflict in row.get("conflicts") or ():
+        lines.append(f"  conflicts: {conflict.get('detail')}")
+    for question in row.get("questions") or ():
+        lines.append(f"  to check: {question}")
+    return "\n".join(lines)
+
+
+NO_UNITS = "(nothing in this reads as a landmark)"
+
+
+def render_proposal(proposal: object) -> str:
+    """The whole reading, as the worker leaf's ``{proposed_units}`` block."""
+    row = proposal if isinstance(proposal, dict) else {}
+    blocks = [render_unit(unit) for unit in (row.get("units") or ())
+              if isinstance(unit, dict)]
+    lines = blocks or [NO_UNITS]
+    stories = [span for span in (row.get("stories") or ()) if isinstance(span, dict)]
+    if stories:
+        lines.append("")
+        lines.append("Read as story, not as a landmark:")
+        lines.extend(f"- “{span['text']}”" for span in stories[:8])
+    unknown = [span for span in (row.get("unrecognized") or ())
+               if isinstance(span, dict)]
+    if unknown:
+        lines.append("")
+        lines.append("Kept, but nothing was made of it:")
+        lines.extend(f"- “{span['text']}”" for span in unknown[:8])
+    questions = [item for item in (row.get("questions") or ())
+                 if isinstance(item, dict)]
+    if questions:
+        lines.append("")
+        lines.append("Still open:")
+        lines.extend(f"- {item['text']}" for item in questions)
+    return "\n".join(lines)
+
+
+#: The `offer` mode's turn leaf. `interaction.yaml` carries the same file name
+#: under `composition.offer_turn` and `tests/test_landmark_offer.py` pins them
+#: equal, so declaring the slot and naming it in code stay one edit — the
+#: discipline `landmark_recorder.RECORDER_PROMPT` already keeps.
+OFFER_TURN_PROMPT = "turn-instructions-offer.md"
+
+NO_OPEN_QUESTIONS = "(nothing is unresolved)"
+
+
+def _offer_leaf_path(framework_root: str | Path | None = None) -> Path:
+    base = (Path(framework_root) / "interactions" / "landmarks"
+            if framework_root else INTERACTIONS_DIR / "landmarks")
+    return base / "prompt" / OFFER_TURN_PROMPT
+
+
+def load_offer_leaf(framework_root: str | Path | None = None) -> str:
+    """The offer turn leaf, verbatim. A host REPLAYs exactly this text."""
+    try:
+        return _offer_leaf_path(framework_root).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise LandmarkOfferError("unsupported_input",
+                                 f"no offer turn leaf: {exc}") from exc
+
+
+def render_open_questions(proposal: object) -> str:
+    """The leaf's ``{open_questions}`` block — the proposal's own, and the
+    units' own, in one list."""
+    row = proposal if isinstance(proposal, dict) else {}
+    lines = [f"- {item['text']}" for item in (row.get("questions") or ())
+             if isinstance(item, dict) and item.get("text")]
+    for unit in (row.get("units") or ()):
+        if not isinstance(unit, dict):
+            continue
+        for question in unit.get("questions") or ():
+            line = f"- {question}"
+            if line not in lines:
+                lines.append(line)
+    return "\n".join(lines) if lines else NO_OPEN_QUESTIONS
+
+
+def build_offer_turn(proposal: object, *, landmark_stage: str = "ask",
+                     filing_gain: str = "",
+                     framework_root: str | Path | None = None) -> str:
+    """The composed offer turn, from the leaf plus its substitutions.
+
+    ``.replace``, never ``.format`` — the leaf carries the person's own words
+    and their braces. The two substitutions this mode adds are
+    ``{proposed_units}`` (:func:`render_proposal`) and ``{open_questions}``
+    (:func:`render_open_questions`); ``{landmark_stage}`` and
+    ``{filing_gain}`` are the collect mode's own and mean the same thing here.
+    """
+    filled = load_offer_leaf(framework_root)
+    for token, value in (
+        ("{landmark_stage}", str(landmark_stage or "ask")),
+        ("{proposed_units}", render_proposal(proposal)),
+        ("{open_questions}", render_open_questions(proposal)),
+        ("{filing_gain}", str(filing_gain or "")),
+    ):
+        filled = filled.replace(token, value)
+    return filled
+
+
+def offer_context(vault_root: str | Path) -> dict:
+    """The `offer` mode's three manifest additions (decision record §5.2).
+
+    ``{"roster", "known_spans", "age_frames"}`` — rendered DETERMINISTICALLY
+    by the caller, from the roster and the published projection, never fetched
+    by the model. The renderers live in `landmarks_interaction` beside
+    `render_known_entries` because they are the same kind of thing: a pure
+    function from what the vault holds to the block a leaf carries.
+    """
+    root = _bound_vault(vault_root)
+    roster = _roster_snapshot()
+    projection = pub.read_projection(root) or {}
+    landmarks = _known_landmarks()
+    return {
+        "roster": li.render_roster(roster, landmarks=landmarks),
+        "known_spans": li.render_known_spans(projection),
+        "age_frames": li.render_age_frames(projection),
+    }
+
+
+# --------------------------------------------------------------------------
+# CLI — the stdin-text path `lifehug.py landmark-offer` dispatches to
+# --------------------------------------------------------------------------
+
+def _unit_ids_from(args, proposal: dict) -> list[str]:
+    if getattr(args, "all_units", False):
+        return [unit["unit_id"] for unit in (proposal.get("units") or ())
+                if isinstance(unit, dict) and unit.get("unit_id")]
+    raw = getattr(args, "units", "") or ""
+    return [piece.strip() for piece in raw.split(",") if piece.strip()]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``landmark_offer.py --propose|--apply <id>|--retract <id>``.
+
+    ``--propose`` reads the text on stdin and prints the proposal as JSON.
+    ``--dry-run`` prints the composed listener prompt and calls nothing, which
+    is how a host verifies its own REPLAY against these leaves without
+    spending a completion.
+    """
+    import argparse  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(description="Add Landmark — the offer mode")
+    parser.add_argument("--propose", action="store_true")
+    parser.add_argument("--apply", dest="apply_id", default=None)
+    parser.add_argument("--retract", dest="retract_id", default=None)
+    parser.add_argument("--units", default="")
+    parser.add_argument("--all", dest="all_units", action="store_true")
+    parser.add_argument("--from-file", dest="from_file", default=None)
+    parser.add_argument("--reason", default=None)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+
+    from lifehug_core import REPO_DIR  # noqa: PLC0415
+
+    root = REPO_DIR
+    try:
+        if args.retract_id:
+            print(json.dumps(retract(args.retract_id, root,
+                                     reason=args.reason), indent=2,
+                             sort_keys=True))
+            return 0
+        if args.apply_id:
+            proposal = read_proposal(root, args.apply_id)
+            unit_ids = _unit_ids_from(args, proposal)
+            print(json.dumps(apply(args.apply_id, unit_ids, root,
+                                   reason=args.reason), indent=2,
+                             sort_keys=True))
+            return 0
+        text = (Path(args.from_file).read_text(encoding="utf-8")
+                if args.from_file else sys.stdin.read())
+        if args.dry_run:
+            print(gl.build_listener_prompt(answer=text))
+            return 0
+        from ai_provider import call_ai  # noqa: PLC0415
+
+        proposal = propose(text, root, call=call_ai, model=args.model)
+        print(json.dumps(proposal, indent=2, sort_keys=True))
+        return 0 if proposal.get("state") != "failed" else 1
+    except LandmarkOfferError as exc:
+        print(json.dumps({"error": str(exc), "class": exc.code}, indent=2))
+        return 1
+    except OSError as exc:
+        print(json.dumps({"error": str(exc), "class": "unsupported_input"},
+                         indent=2))
+        return 1
+
+
+__all__ = [
+    "COLLECT_MODE",
+    "FAILURE_CLASSES",
+    "LandmarkOfferError",
+    "MODES",
+    "OFFERS_DIR",
+    "OFFER_GATE_PREFIX",
+    "OFFER_LINT_CLASSES",
+    "OFFER_MODE",
+    "OFFER_RECEIPTS_DIR",
+    "OFFER_STATES",
+    "PROPOSAL_STATES",
+    "UNIT_KEYS",
+    "UNIT_KIND_BY_DOMAIN",
+    "annotate_against_known",
+    "annotate_entities",
+    "claim_evidence_text",
+    "apply",
+    "date_evidence",
+    "derive_proposal_id",
+    "derive_receipt_id",
+    "derive_unit_id",
+    "grammar_units",
+    "landmark_opportunity_id",
+    "lint_offer_proposal",
+    "lint_offer_reply",
+    "OFFER_TURN_PROMPT",
+    "build_offer_turn",
+    "load_offer_leaf",
+    "offer_context",
+    "open_opportunity_ids",
+    "opportunity_ids_for",
+    "propose",
+    "read_offer_receipt",
+    "read_proposal",
+    "receipt_is_retracted",
+    "render_open_questions",
+    "render_proposal",
+    "render_unit",
+    "retire_matching_opportunity",
+    "retract",
+    "source_spans",
+    "unit_filing_digest",
+    "unit_source_relative_path",
+]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

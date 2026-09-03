@@ -3,7 +3,7 @@ interaction: landmarks
 version: 1.0.0
 extends: conversation
 extends.version: 1.0.0
-modes: collect
+modes: collect|offer
 load_order: identity|behavior|examples|landmarks|conversation|turn_instructions
 composition.append: prompt/identity.md|prompt/behavior.md|prompt/examples.md|router/router.md|router/deflection.md
 composition.leaf: prompt/turn-instructions.md|context/manifest.md
@@ -18,6 +18,16 @@ composition.recorder: prompt/recorder.md
 # needs none of the one domain's ask, ladder or none-rule. Same loop, same one
 # retry; a different leaf. It never joins the conversation's load order either.
 composition.listener: prompt/listener.md
+# v287 (R3b, ADR 0033): the `offer` mode — Add Landmark. The person hands the
+# system ordinary text and the WORKER shows what was read back before
+# anything is filed, so the offer turn needs its own leaf: the collect leaf
+# asks the next rung, and this one asks "does this look right?". It is a
+# THIRD composition slot for the same reason `composition.recorder` and
+# `composition.listener` are their own — a leaf that never joins the
+# conversation's load order is not an override of `composition.leaf`, it is a
+# different prompt. No new interaction kind, no second registry row: one
+# interaction, two modes.
+composition.offer_turn: prompt/turn-instructions-offer.md
 role.router: haiku-class
 role.worker: sonnet-class
 role.planner: sonnet-class
@@ -49,6 +59,10 @@ budget.examples: 1400
 budget.landmarks: 900
 budget.conversation: 1600
 budget.turn_instructions: 1400
+# The offer leaf carries the proposed units, their evidence and the four
+# answers it must accept, where the collect leaf carries one question. The
+# ceiling is measured in tests/test_landmark_offer.py, not rounded up.
+budget.offer_turn: 1600
 # v229: the recorder leaf gained the whole `claims` contract (the claim types,
 # the seed event vocabulary, the raw-mention and quotation rules, and the two
 # repeals — relative time is kept, anyone's date counts), so the honest
