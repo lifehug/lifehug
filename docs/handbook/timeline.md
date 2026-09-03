@@ -6,7 +6,7 @@ nav_order: 11
 
 # The Timeline & Chronology
 
-**Note 2026-09-03:** the platform program ports the placement score, per-year band, leverage/resolves, keystones and landmark rows into the calculated projection (`temporal_projection` / `temporal_publication`) in Cuts 2–5 and retires the legacy `timeline_data()` projection in Cut 7 (owner ruling R4, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`). The arithmetic is unchanged; the `system/timeline.py` locations named below are the legacy home until then. Queue eligibility for landmark and timeline questions is owner ruling R2 (same record, Cut 5b).
+**Note 2026-09-03:** the platform program ports the placement score, per-year band, leverage/resolves, keystones and landmark rows into the calculated projection (`temporal_projection` / `temporal_publication`) in Cuts 2–5 and retires the legacy `timeline_data()` projection in Cut 7 (owner ruling R4, `lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md`). The arithmetic is unchanged; the `system/timeline.py` locations named below are the legacy home until then. Queue eligibility for landmark and timeline questions is owner ruling R2 (same record, Cut 5b). **Landed v284 (Cut 3a):** the leverage/resolves and keystone half is now ALSO published from the calculated projection by `system/timeline_gain.py` — every Timeline-owned work item carries `resolves` and `leverage = 1 + len(resolves)`, the projection carries `keystones` (`tl:<anchor-slug>`, cap 2) and the `dependency_index` they were computed from, and Mirror-owned kinds keep `combined_score` alone. Same arithmetic, second graph; the legacy home below still stands until Cut 7.
 
 ## 1. What it does & what it's for
 
@@ -496,6 +496,7 @@ in Cuts 2–5 and this table is rewritten at Cut 7b.
 | The cross-dating pass | `system/cross_dating.py` (`derive`, `cross_date`, `derivable_moments`, `stamp_prior_spans`) |
 | The placement score and the interval it counts | `system/timeline.py` (`placement_score`, `unknown_years`, `unknown_anchor`) |
 | The model, bands, unknowns, leverage, keystones | `system/timeline.py` |
+| The same leverage/resolves and keystone plan over the CALCULATED graph (v284) | `system/timeline_gain.py` |
 | Corroboration windows | `system/timeline_corroboration.py` |
 | The elicitation | `interactions/timeline/`, `system/timeline_interaction.py` |
 | The classifier's claim | `system/classify_story.py` (`events[].title`, `events[].date`) |

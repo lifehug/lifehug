@@ -209,3 +209,45 @@ the score itself still uses, not Reading Room code. One stale reference:
 `system/research/go-deep.md` §8.4, cited above for the width-sum-not-a-
 threshold-count argument, is deleted with the Reading Room; the argument
 stands and is unchanged.
+
+## Amendment (2026-09-03, v284 — leverage and the keystone are published from the calculated projection too)
+
+**Status: additive. Nothing above is changed, superseded, or re-derived.**
+
+The `resolves` / `leverage` pair and the `keystones` greedy plan this ADR
+describes were computed only over the LEGACY projection (`timeline.row_leverage`,
+`timeline.dependency_index`, `timeline.keystones`). The calculated projection
+published `combined_score` on its work items instead — a different number on a
+different scale — so a host showing both read two incomparable rankings and put
+a category order on top of them. That is the ordering defect the timeline-
+unification decision record names (`lifehug-platform
+docs/decisions/2026-09-03-timeline-unification/decision-record.md`, §7 Cut 3).
+
+Cut 3a therefore publishes the SAME arithmetic from the calculated fold:
+
+- `system/timeline_gain.py` — the dependency index over the calculated graph
+  (five rules, D1–D5, stated in the module docstring), `item_gain`
+  (`resolves`, `leverage = 1 + len(resolves)`) and `keystones` (greedy over the
+  residual, `KEYSTONE_CAP`, `tl:<anchor-slug>`);
+- every Timeline-owned work item carries `resolves` and `leverage`, refused by
+  `validate_temporal_work_item` when the two disagree
+  (`work_item_gain_inconsistent`);
+- the projection publishes `keystones` (served by `calculated_view`) and
+  `dependency_index` (the working, kept in the file so the number is
+  checkable);
+- Mirror-owned kinds (`contradiction`, `identity_uncertain`) are untouched and
+  keep `combined_score` alone.
+
+**This is a PORT, not a new metric.** Precision weighting — a wide inferred
+range earning less than a narrow stated date — stays exactly where this ADR and
+the review left it (§2.5 of `sources/02-review-fable.md`): a later tier, built
+only if v1 is measured insufficient. The `INFERRED_PLACEMENT_WEIGHT` half-credit
+above applies to the placement SCORE and does not enter leverage, in either
+projection.
+
+**Known and deliberate asymmetry.** A legacy anchor's identity is a readable
+slug (`tl:the-lost-years`); a calculated anchor's is a node digest
+(`tl:0691b7fb…`), because a calculated node's identity IS a digest. Both plans
+star the same thing on the same facts and both row numbers agree exactly
+(`tests/test_timeline_gain.py::ParityTwinTests`); the two `tl:` strings do not,
+and nothing is invented to make them.

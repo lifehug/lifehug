@@ -116,6 +116,7 @@ import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
+import timeline_gain as tg  # noqa: E402
 from temporal_claims import (  # noqa: E402
     TemporalContractError,
     collapsed_text,
@@ -438,6 +439,16 @@ class CalculatedTimeline:
     timings: dict = field(default_factory=dict)
     score_components: dict = field(default_factory=dict)
     reach: dict = field(default_factory=dict)
+    #: Cut 3a (ADR 0027 amendment). ``{anchor_ref: [node ids]}`` — the graph
+    #: the per-item ``resolves``/``leverage`` and the keystone plan were
+    #: computed from, published so the numbers on the page are checkable
+    #: rather than asserted. The rules are `timeline_gain`'s D1-D5.
+    dependency_index: dict = field(default_factory=dict)
+    #: Cut 3a. The greedy plan over the residual graph, at most
+    #: `timeline_gain.KEYSTONE_CAP` rows, each under the same
+    #: ``tl:<anchor-slug>`` identity the legacy star has always used. The host
+    #: stars ``keystones[0]``.
+    keystones: tuple[dict, ...] = ()
     diagnostics: dict = field(default_factory=dict)
     calculation_rule_version: str = CALCULATION_RULE_VERSION
     score_formula_version: str = SCORE_FORMULA_VERSION
@@ -470,6 +481,8 @@ class CalculatedTimeline:
             "identity_rule_version": self.identity_rule_version,
             "identity_diagnostics": dict(self.identity_diagnostics),
             "reach": dict(self.reach),
+            "dependency_index": {k: list(v) for k, v in self.dependency_index.items()},
+            "keystones": [dict(row) for row in self.keystones],
             "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "diagnostics": dict(self.diagnostics),
         }
@@ -517,6 +530,12 @@ def structural_signature(result: object) -> dict:
         "identity_rule_version": current.identity_rule_version,
         "identity_diagnostics": dict(current.identity_diagnostics),
         "reach": dict(current.reach),
+        # Cut 3a: both are derived from the nodes, the items and the edges of
+        # this same generation, so a rebuild reproduces them exactly and a
+        # drift between the gain and the graph it claims to come from is a
+        # signature diff rather than a number nobody can check.
+        "dependency_index": {k: list(v) for k, v in current.dependency_index.items()},
+        "keystones": [dict(row) for row in current.keystones],
         "diagnostics": dict(current.diagnostics),
     }
 
@@ -4102,7 +4121,7 @@ def derive_calculated_timeline(
     timings["memberships"] = clock() - mark
 
     mark = clock()
-    items, components, reach = _derive_work_items(
+    items, components, reach, anchor_nodes = _derive_work_items(
         groups=groups,
         calculated=calculated,
         placed=placed,
@@ -4122,6 +4141,25 @@ def derive_calculated_timeline(
         now=now,
     )
     timings["work_items"] = clock() - mark
+
+    # ONE GAIN FOR EVERY TIMELINE ROW (Cut 3a, ADR 0027). The dependency graph
+    # is already computed — the resolved ordering edges, the published
+    # containments, and the two anchor shapes with no node of their own — so
+    # this pass reads it rather than deriving a second one, and stamps the same
+    # `resolves`/`leverage` the legacy projection has published since v208. The
+    # keystone is the same greedy plan over the residual, at the same cap,
+    # under the same `tl:<anchor-slug>` identity.
+    mark = clock()
+    unplaced_ids = sorted(node_id for node_id in groups if placed.get(node_id) is None)
+    dependencies = tg.dependency_index(
+        nodes=nodes,
+        ordering=[(edge.subject, edge.anchors) for edge in edges],
+        anchors=anchor_nodes,
+        universe=tg.gain_universe(nodes=nodes, items=items, unplaced=unplaced_ids),
+    )
+    items = tg.apply_gain(items, dependencies)
+    keystone_rows = tg.keystones(items, dependencies)
+    timings["work_items"] = round(timings["work_items"] + (clock() - mark), 9)
     timings["total"] = clock() - started
 
     return CalculatedTimeline(
@@ -4154,15 +4192,18 @@ def derive_calculated_timeline(
         timings={phase: round(timings.get(phase, 0.0), 9) for phase in TIMING_PHASES},
         score_components=components,
         reach=reach,
+        # Cut 3a. Derived from the graph above in this same generation, so a
+        # reader can never hold a plan that describes a different set of items,
+        # and a rebuild reproduces both exactly.
+        dependency_index=dependencies,
+        keystones=tuple(keystone_rows),
         diagnostics={
             "findings": diagnostics,
             "claims": len(claims),
             "nodes": len(nodes),
             "memberships": len(memberships),
             "edges": len(edges),
-            "unplaced": sorted(
-                node_id for node_id in groups if placed.get(node_id) is None
-            ),
+            "unplaced": unplaced_ids,
         },
         projection_generation=projection_generation,
     )
@@ -4387,6 +4428,12 @@ def _derive_work_items(
     items: dict[str, dict] = {}
     components: dict[str, dict] = {}
     reach: dict[str, int] = {}
+    #: Cut 3a: ``{anchor_ref: [node ids]}`` for the two anchor shapes that have
+    #: no node of their own — an unresolved anchor handle (D4) and the birth
+    #: origin (D3). Recorded at the mint site, where the item's own key and the
+    #: node set are both in hand, so `timeline_gain` never has to rebuild the
+    #: handle table from the diagnostics a second time.
+    anchor_nodes: dict[str, list[str]] = {}
     #: D4: node ref -> the ONE item id standing for it.
     by_node: dict[str, str] = {}
     whats = whats or {}
@@ -4500,11 +4547,12 @@ def _derive_work_items(
             if item_id:
                 reach[item_id] = raw
             continue
+        handle_ref = ident.unresolved_subject_ref(text)
         item_id = _mint_work_item(
             items,
             components,
             kind="missing_anchor",
-            subject_ref=ident.unresolved_subject_ref(text),
+            subject_ref=handle_ref,
             requested_field="date",
             prompt_intent=compose_anchor_question(text),
             claim_refs=refs,
@@ -4515,6 +4563,10 @@ def _derive_work_items(
         )
         if item_id:
             reach[item_id] = raw
+            # D4: this handle is the anchor those nodes are waiting on.
+            anchor_nodes[collapsed_text(handle_ref)] = sorted(
+                node_id for node_id in handle_reach.get(key, ()) if node_id
+            )
 
     # -- the birth origin: the coordinate system, open until somebody says it -
     #
@@ -4533,6 +4585,17 @@ def _derive_work_items(
             row.get("claim_id")
             for row in diagnostics
             if row.get("finding") == "age_without_birth_anchor" and row.get("claim_id")
+        }
+    )
+    # D3 (Cut 3a): the NODES those age claims belong to. The origin is the
+    # coordinate system every one of them is counted from, so it is the anchor
+    # they depend on — the claim ids answer "how do we know", the node ids
+    # answer "what would move".
+    age_nodes = sorted(
+        {
+            row.get("node_id")
+            for row in diagnostics
+            if row.get("finding") == "age_without_birth_anchor" and row.get("node_id")
         }
     )
     if not _has_explicit_owner_birth(groups, placed, owner):
@@ -4560,6 +4623,7 @@ def _derive_work_items(
         )
         if item_id:
             reach[item_id] = counted
+            anchor_nodes[tg.origin_anchor(owner)] = list(age_nodes)
 
     # -- missing anchors: a duration with no start ------------------------
     for row in sorted(
@@ -4889,7 +4953,7 @@ def _derive_work_items(
             row.get("work_item_id") or "",
         ),
     )
-    return ordered, components, reach
+    return ordered, components, reach, anchor_nodes
 
 
 __all__ = [

@@ -416,6 +416,8 @@ ERROR_CODES = (
     "unknown_work_item_state",
     "unknown_work_item_surface",
     "work_item_needs_surface",
+    # Cut 3a: the published gain disagreeing with the ids it names.
+    "work_item_gain_inconsistent",
     "work_item_needs_subject_or_event",
     "work_item_needs_requested_field",
     "contradiction_needs_two_claims",
@@ -1362,6 +1364,19 @@ class TemporalWorkItem:
     #: and a reader that does not know it is unaffected. It is deliberately NOT
     #: in :data:`WORK_ITEM_IDENTITY_KEYS` — a re-scored item is the same item.
     score_rule: str | None = None
+    #: Cut 3a (ADR 0027 amendment, 2026-09-03). ONE comparable gain for every
+    #: Timeline-owned item: the node ids that would gain a bounded or narrower
+    #: interval if this item were answered, and ``1 + len(resolves)`` — the
+    #: same self-inclusive arithmetic `timeline.row_leverage` has published for
+    #: the legacy projection since v208, computed by `timeline_gain` over the
+    #: calculated dependency graph. Additive and optional: an item written
+    #: before the fields existed reads as ``None``/``()``, and a Mirror-owned
+    #: kind (``contradiction``, ``identity_uncertain``) deliberately carries
+    #: neither — it keeps ``combined_score`` and nothing else changes. They are
+    #: NOT in :data:`WORK_ITEM_IDENTITY_KEYS`: a re-scored item is the same
+    #: item.
+    resolves: tuple[str, ...] = ()
+    leverage: int | None = None
     scores: dict = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
@@ -1390,6 +1405,9 @@ class TemporalWorkItem:
         ):
             if value is not None:
                 payload[key] = value
+        if self.leverage is not None:
+            payload["resolves"] = list(self.resolves)
+            payload["leverage"] = int(self.leverage)
         return payload
 
 
@@ -1520,6 +1538,33 @@ def validate_temporal_work_item(value: object, *, now: object = None) -> dict:
     ))
     if superseded:
         normalized["superseded_kinds"] = list(superseded)
+    # Cut 3a: the gain, when the fold computed one. The pair travels together
+    # and the invariant is CHECKED rather than trusted — a `leverage` that does
+    # not equal `1 + len(resolves)` is the "could place N" number disagreeing
+    # with the ids it names, which is the one thing this field exists to make
+    # impossible (`work_item_gain_inconsistent`).
+    if value.get("resolves") is not None or value.get("leverage") is not None:
+        resolves = _ref_tuple(value.get("resolves"))
+        raw = value.get("leverage")
+        try:
+            leverage = 1 + len(resolves) if raw is None else int(raw)
+        except (TypeError, ValueError):
+            raise TemporalWorkItemError(
+                "work_item_gain_inconsistent", f"leverage is not a number: {raw!r}"
+            ) from None
+        if leverage != 1 + len(resolves):
+            raise TemporalWorkItemError(
+                "work_item_gain_inconsistent",
+                f"leverage {leverage} does not match {len(resolves)} resolved ids",
+            )
+        own_node = optional_text(value.get("node_ref"))
+        if own_node and own_node in resolves:
+            raise TemporalWorkItemError(
+                "work_item_gain_inconsistent",
+                "an item cannot resolve the node it is about",
+            )
+        normalized["resolves"] = list(resolves)
+        normalized["leverage"] = leverage
     return normalized
 
 
@@ -1541,6 +1586,8 @@ def work_item_from_dict(value: object) -> TemporalWorkItem | None:
         requested_field=normalized.get("requested_field"),
         prompt_intent=normalized.get("prompt_intent"),
         score_rule=normalized.get("score_rule"),
+        resolves=tuple(normalized.get("resolves") or ()),
+        leverage=normalized.get("leverage"),
         allowed_surfaces=tuple(normalized["allowed_surfaces"]),
         scores={k: normalized[k] for k in WORK_ITEM_SCORE_FIELDS if k in normalized},
         created_at=normalized["created_at"],

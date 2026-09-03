@@ -364,6 +364,10 @@ def work_items_payload(result: tt.CalculatedTimeline, *, published_at: str,
     # describes a different set. Atomic publish already gives it the pairing.
     payload["work_item_aliases"] = dict(result.work_item_aliases)
     payload["reach"] = dict(result.reach)
+    # Cut 3a: the star travels with the items it was planned over, in the SAME
+    # generation, for the reason `work_item_aliases` does — a reader can never
+    # hold a plan that describes a different set.
+    payload["keystones"] = [dict(row) for row in result.keystones]
     payload["score_components"] = {
         key: dict(value) for key, value in result.score_components.items()
     }
@@ -669,6 +673,12 @@ EMPTY_VIEW = {
     "episode_aliases": {},
     "identity_rule_version": efc.IDENTITY_RULE_VERSION,
     "reach": {},
+    # Cut 3a (ADR 0027 amendment). The greedy plan over the residual
+    # dependency graph, at most `timeline_gain.KEYSTONE_CAP` rows. SERVED,
+    # because the host stars `keystones[0]` and had been reading the legacy
+    # projection's plan to do it; an empty tuple is "nothing would place
+    # anything else", which is what it is.
+    "keystones": (),
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
                "unplaced": 0},
@@ -734,6 +744,13 @@ PUBLISHED_KEYS_NOT_SERVED = {
         "kind. They are a maintainer's surface and a work item's input, and "
         "putting them on a person's page would be the system talking about "
         "itself."
+    ),
+    "dependency_index": (
+        "Cut 3a: the GRAPH the gain was computed from, `{anchor_ref: [node "
+        "ids]}`. The rendering inputs are the per-item `resolves`/`leverage` "
+        "and `keystones`, both served; this is the working the page never "
+        "shows, kept in the file so an oracle, a test or a maintainer can "
+        "check that 'could place 18' names eighteen real nodes."
     ),
 }
 
@@ -819,6 +836,11 @@ def calculated_view(vault_root: str | Path) -> dict:
             payload.get("identity_rule_version") or efc.IDENTITY_RULE_VERSION
         ),
         "reach": dict(payload.get("reach") or {}),
+        # Tolerant by construction, like every additive key above: a projection
+        # published before Cut 3a carries no plan and reads here as an empty
+        # tuple — "nothing has enough reach to be starred", which is true of a
+        # vault with one undated thing in it.
+        "keystones": tuple(payload.get("keystones") or ()),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None
         },
