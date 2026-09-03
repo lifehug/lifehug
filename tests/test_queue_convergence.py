@@ -604,6 +604,60 @@ class TheMesaHouseReachesTheQueue(MesaVault):
 # --------------------------------------------------------------------------
 
 
+class AnswerabilityTests(unittest.TestCase):
+    """§4.6's host-specific safeguard, expressed as the substrate's own field.
+
+    "Not everything the graph wants is something the person can answer." The
+    mechanism already exists and is not re-decided here: a work item's
+    ``allowed_surfaces``. A gap the fold marked as not for the daily question —
+    a witness-supplied fact, a Mirror-owned contradiction, the loss opener —
+    stays off it, and better wording never buys a surface.
+    """
+
+    def _base(self, surfaces):
+        import temporal_projection as tp  # noqa: PLC0415
+
+        return tp.validate_temporal_work_item(
+            {"kind": "missing_anchor", "state": "open", "subject_ref": "node:mesa",
+             "node_ref": "node:mesa", "requested_field": "date",
+             "prompt_intent": "Do you know the year for the Mesa house?",
+             "allowed_surfaces": list(surfaces), "created_at": NOW}, now=NOW)
+
+    def test_a_candidate_never_widens_the_substrates_surfaces(self):
+        base = self._base(["timeline"])
+        [item] = tcand.work_items([opportunity(subject="node:mesa")],
+                                  published=[base], now=NOW)
+        self.assertEqual(item["allowed_surfaces"], ["timeline"])
+
+    def test_an_unanswerable_gap_is_refused_by_name(self):
+        base = self._base(["timeline"])
+        [item] = tcand.work_items([opportunity(subject="node:mesa")],
+                                  published=[base], now=NOW)
+        self.assertEqual(qp.queue_candidates([item], question_bank_text=EMPTY_BANK), [])
+
+    def test_the_same_gap_on_the_daily_surface_is_admitted(self):
+        base = self._base(["timeline", "whisper", "daily_question"])
+        [item] = tcand.work_items([opportunity(subject="node:mesa")],
+                                  published=[base], now=NOW)
+        self.assertEqual([c["work_item_id"] for c in
+                          qp.queue_candidates([item], question_bank_text=EMPTY_BANK)],
+                         [item["work_item_id"]])
+
+    def test_a_mirror_owned_contradiction_is_never_a_timeline_gain_candidate(self):
+        """Mirror's daily convergence is deferred; #573 gets no hook here."""
+        import temporal_timeline as tt  # noqa: PLC0415
+
+        self.assertNotIn("daily_question", tt.SURFACES_BY_KIND["contradiction"])
+        self.assertIn("contradiction", tcand.MIRROR_OWNED_KINDS)
+
+
+class TheOwnerCanSayNoTests(unittest.TestCase):
+    def test_the_cli_verb_exists_and_is_classified(self):
+        source = (SYSTEM / "lifehug.py").read_text(encoding="utf-8")
+        self.assertIn('"timeline-candidates",', source)
+        self.assertIn('sub.add_parser("timeline-candidates"', source)
+
+
 class TheModuleIsShippedTests(unittest.TestCase):
     def test_the_new_module_is_a_framework_file(self):
         version = json.loads((SYSTEM / "version.json").read_text(encoding="utf-8"))

@@ -81,6 +81,22 @@ projection's own items wherever the graph already holds one for the same gap,
 so an answer on any surface closes the item on all of them
 (`question_planner.close_answered_work_items`).
 
+What Mirror gets (lifehug-platform#573's other half)
+---------------------------------------------------
+
+Nothing, deliberately, and by a mechanism that already existed. A
+contradiction is Mirror work: `temporal_timeline.SURFACES_BY_KIND` never lists
+`daily_question` for it, `timeline_gain.MIRROR_OWNED_KINDS` keeps it out of
+the Timeline's own gain, and Mirror's daily convergence is deferred (decision
+record §2.5, lifehug-platform#663). So the Mirror half of #573 needs no hook
+here: when that convergence lands, a Mirror item widens its own surfaces and
+walks through the same door, scored by the same components.
+
+Answerability is the same mechanism read the other way: a gap the fold marked
+as not for the daily question stays off it, this module never widens a
+published item's ``allowed_surfaces``, and better wording never buys a
+surface.
+
 Pure where it can be: every vault read is guarded and degrades to "no timeline
 questions this week", which is exactly the pre-R2 behaviour.
 
@@ -125,6 +141,23 @@ SOURCE_KEYSTONE = "keystone"
 
 #: §4.6's sensitivity value that is a REFUSAL rather than a weight.
 OFFER_ONLY = "offer_only"
+
+#: MIRROR's own kinds, re-exported from `timeline_gain` so this module names
+#: them without redeclaring them. Nothing here ever mints one: a contradiction
+#: is Mirror work, its `allowed_surfaces` never lists `daily_question`
+#: (`temporal_timeline.SURFACES_BY_KIND`), and Mirror's daily convergence is
+#: deferred (decision record §2.5, lifehug-platform#663). That is the whole of
+#: #573's Mirror half in this cut: no hook, by the existing mechanism.
+def _mirror_owned_kinds() -> tuple:
+    try:
+        from timeline_gain import MIRROR_OWNED_KINDS  # noqa: PLC0415
+
+        return tuple(MIRROR_OWNED_KINDS)
+    except Exception:  # noqa: BLE001
+        return ("contradiction", "identity_uncertain")
+
+
+MIRROR_OWNED_KINDS = _mirror_owned_kinds()
 
 #: At most this many LANDMARK opportunities are minted per queue build, on top
 #: of the keystone plan. See the module docstring — one, conservatively.
@@ -590,11 +623,13 @@ def work_items(candidates: object, *, published: object = (),
             payload = dict(base)
             payload["state"] = "open"
             payload["prompt_intent"] = candidate["question"]
-            surfaces = list(payload.get("allowed_surfaces") or ())
-            for surface in ("timeline", qp.WHISPER_SURFACE, qp.DAILY_QUESTION_SURFACE):
-                if surface not in surfaces:
-                    surfaces.append(surface)
-            payload["allowed_surfaces"] = surfaces
+            # ANSWERABILITY, and it is the substrate's call, not this module's
+            # (§4.6's host-specific safeguards; §2.4's own mechanism). The base
+            # item's `allowed_surfaces` is deliberately left ALONE: a gap the
+            # fold marked as not for the daily question — a witness-supplied
+            # fact, a Mirror-owned contradiction, a loss opener — stays off it,
+            # and `question_planner.queue_candidates` refuses it by name
+            # (`surface_not_allowed`). Better wording never buys a surface.
             payload.setdefault("created_at", stamp)
             try:
                 item = temporal_projection.validate_temporal_work_item(payload, now=stamp)
@@ -800,6 +835,7 @@ def main(argv: object = None) -> int:
 
 __all__ = [
     "DISMISSALS_FILE",
+    "MIRROR_OWNED_KINDS",
     "LANDMARK_MINT_CAP",
     "OFFER_ONLY",
     "PLACEMENT_GAIN_BY_KIND",
