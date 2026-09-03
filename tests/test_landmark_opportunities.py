@@ -184,6 +184,63 @@ class OpenBoundTests(unittest.TestCase):
                                  lo.SPAN_END_TEXTS[domain].format(label="Northrop"))
 
 
+class BirthOriginTests(unittest.TestCase):
+    """R-Q4: the coordinate system. Nothing else in the graph reaches as far."""
+
+    def test_no_birthday_is_an_opportunity_under_the_origin_anchor(self) -> None:
+        nodes, ordering = anchored("", tg.origin_anchor("self"), BAR)
+        row = lo.landmark_opportunities(graph(nodes, ordering=ordering), {}, ())[0]
+        self.assertEqual(row["domain"], "birth")
+        self.assertEqual(row["kind"], "birth_origin")
+        self.assertEqual(row["question"], li.RUNG_TEXTS[("birth", "year")])
+        self.assertEqual(row["subject"], tg.origin_anchor("self"))
+        self.assertEqual(row["leverage"], BAR + 1)
+
+    def test_a_filed_birthday_owes_nothing(self) -> None:
+        nodes, ordering = anchored("", tg.origin_anchor("self"), BAR)
+        state = {"birth": [{"domain": "birth", "year": "1970", "month": "03",
+                            "day": "02"}]}
+        self.assertEqual(
+            lo.landmark_opportunities(graph(nodes, ordering=ordering), state, ()), [])
+
+
+class AmbiguousEpisodeTests(unittest.TestCase):
+    """R-Q6: the fold already wrote the sentence; this reuses it."""
+
+    def item(self, kind: str, prompt: str) -> dict:
+        return {"work_item_id": "work:abc", "kind": kind, "state": "open",
+                "allowed_surfaces": ["timeline", "whisper", "daily_question"],
+                "node_ref": "node:zoo", "subject_ref": "the zoo trip",
+                "requested_field": "date", "prompt_intent": prompt,
+                "resolves": [f"node:d{n}" for n in range(BAR)], "leverage": BAR + 1}
+
+    def test_the_items_own_sentence_is_the_question(self) -> None:
+        prompt = "Which time in Phoenix was that — 1988-1990 or 1996-1999?"
+        found = lo.landmark_opportunities(
+            graph(items=[self.item("place_ambiguous", prompt)]), {}, ())
+        self.assertEqual(len(found), 1)
+        row = found[0]
+        self.assertEqual(row["domain"], "residences")
+        self.assertEqual(row["kind"], "ambiguous_episode")
+        self.assertEqual(row["question"], prompt)
+        self.assertIsNone(row["ladder_rung"])
+        self.assertEqual(row["leverage"], BAR + 1)
+        self.assertEqual(row["work_item_id"], "work:abc")
+
+    def test_an_organization_ambiguity_finds_the_domain_it_names(self) -> None:
+        prompt = "Which time at Roosevelt High was that — 1984-1986 or 1988-1990?"
+        state = {"schools": [{"domain": "schools", "label": "Roosevelt High"}]}
+        row = lo.landmark_opportunities(
+            graph(items=[self.item("tenure_ambiguous", prompt)]), state, ())[0]
+        self.assertEqual(row["domain"], "schools")
+
+    def test_an_organization_ambiguity_falls_back_to_work(self) -> None:
+        prompt = "Which time at the Boatworks was that — 1991-1992 or 1997-1999?"
+        row = lo.landmark_opportunities(
+            graph(items=[self.item("tenure_ambiguous", prompt)]), {}, ())[0]
+        self.assertEqual(row["domain"], "work")
+
+
 class SufficiencyTests(unittest.TestCase):
     """R2: a domain leaves the privileged surface on VALUE, not on completion."""
 
