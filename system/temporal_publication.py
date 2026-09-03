@@ -84,6 +84,7 @@ import era_identity as ei  # noqa: E402
 import era_memberships as era  # noqa: E402
 import event_binding as eb  # noqa: E402
 import landmark_projection as lp  # noqa: E402
+import temporal_placement as tpl  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
@@ -325,6 +326,23 @@ def projection_payload(result: tt.CalculatedTimeline, *, published_at: str,
         "memberships": len(result.memberships),
         "unplaced": len((result.diagnostics or {}).get("unplaced") or ()),
     }
+    # Cut 2a (ADR 0027, decision record §4.3/§7): the per-year placement
+    # certainty band, published alongside the nodes it is computed from.
+    # ADDITIVE — a v1/v2 reader that has never heard of `placement` is
+    # unaffected, and `projection_schema_version` is untouched: this is a
+    # top-level envelope key like `counts`/`memberships`, not a per-node
+    # field, so it needs no schema-version gate. `None` (an undated or
+    # birthless projection) is published as absence, not as a null key, the
+    # same way `timeline.placement_score` reports nothing rather than a
+    # dead payload block. Guarded exactly like the legacy call site
+    # (`timeline.timeline_data`, v208): a scoring problem must never take a
+    # publish down.
+    try:
+        placement = tpl.placement_for_projection(payload)
+    except Exception:  # noqa: BLE001
+        placement = None
+    if placement is not None:
+        payload["placement"] = placement
     return payload
 
 
@@ -654,6 +672,10 @@ EMPTY_VIEW = {
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
                "unplaced": 0},
+    # Cut 2a (ADR 0027). `None` exactly as the published file omits the key
+    # rather than writing a null one — "nothing to score" reads the same way
+    # on both sides of the seam.
+    "placement": None,
 }
 
 
@@ -814,6 +836,11 @@ def calculated_view(vault_root: str | Path) -> dict:
             "claims": int(counts.get("claims") or 0),
             "unplaced": int(counts.get("unplaced") or 0),
         },
+        # Cut 2a (ADR 0027, decision record §4.3/§7): served under its own
+        # name, not renamed and not excused — a host reading `calculated_view`
+        # is the platform's Timeline overview, and `placement: None` here means
+        # exactly what it means in the file: nothing to score yet.
+        "placement": payload.get("placement"),
     }
 
 
