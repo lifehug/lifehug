@@ -70,6 +70,22 @@ about nothing — the F7 sentence is *"never 'When did this part begin?'"*:
   the place and both stays (*"which time in Phoenix — 1988–1990 or
   1996–1999?"*). Reused, never re-composed.
 
+Deliberately NOT opportunity kinds
+----------------------------------
+
+* **A bound that exists but is coarse.** "About 1990" is a `precision_gap`,
+  which the fold already mints as a Timeline-owned work item carrying Cut 3a's
+  leverage. Minting a second identity for it here would be the *one question
+  asked twice* defect the substrate exists to prevent (ADR 0030, D2). A
+  landmark opportunity is about a bound that is MISSING.
+* **A chain gap** — a stretch of years no residence, job or school covers. It
+  is `chain_gap`, another Timeline-owned kind with its own identity and its
+  own composed question (E-L2c), ranked beside everything else by Cut 3a. A
+  chain the person closed *for now* is skipped by ROUTINE prompting only
+  (`landmarks_interaction.chain_is_closed`), and the gaps stay drawn — which
+  is why closure records are not read here either.
+* **A rung whose answer would be a name.** See below.
+
 **An opportunity always names its subject.** A rung whose answer would BE the
 name (``who``, ``city``, ``what``) is deliberately not an opportunity: it has
 no anchor in the graph, so it has no measurable leverage, and asking it is the

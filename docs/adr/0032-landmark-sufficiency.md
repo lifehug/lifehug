@@ -139,6 +139,15 @@ one answer must place to be worth one ordinary story answer.
   raising it collapses them sooner. It is not tuned here and it is not
   per-domain — residence's preference stays a tie-break, never an override of
   a larger measured gain (§4.6).
+* Two gap shapes are deliberately NOT opportunity kinds, because each already
+  has one identity elsewhere and a second would be the same question asked
+  twice: a bound that exists but is COARSE is a `precision_gap`, and a stretch
+  of years no chain covers is a `chain_gap`. Both are Timeline-owned work
+  items carrying Cut 3a's leverage and their own composed questions, ranked
+  beside everything else in Needs Placing. A landmark opportunity is about a
+  bound that is MISSING. For the same reason the durable chain-closure records
+  are not read here: closure suppresses ROUTINE prompting only
+  (`landmarks_interaction.chain_is_closed`) and the gaps stay drawn.
 * The `tenure_ambiguous` split between `work` and `schools` is decided by
   which domain's filed entries the fold's own sentence names, falling back to
   `work`. The fold's item does not publish the episodes it was choosing
