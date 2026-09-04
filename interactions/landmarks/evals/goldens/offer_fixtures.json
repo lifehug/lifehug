@@ -838,7 +838,156 @@
     "expected": {
       "state": "proposed",
       "unit_count": 42,
-      "questions": []
+      "questions": [],
+      "groups": [
+        {
+          "unit": "The Farmhouse",
+          "members": []
+        },
+        {
+          "unit": "Bellhollow",
+          "members": []
+        },
+        {
+          "unit": "Cormorant",
+          "members": [
+            "unit:Kestrel Elementary"
+          ]
+        },
+        {
+          "unit": "Grandma's place",
+          "members": []
+        },
+        {
+          "unit": "Elkhorn",
+          "members": [
+            "event:Grandpa Ames died"
+          ]
+        },
+        {
+          "unit": "Fernwick",
+          "members": [
+            "unit:Marlow Middle School"
+          ]
+        },
+        {
+          "unit": "The Blue House",
+          "members": []
+        },
+        {
+          "unit": "Havenridge",
+          "members": []
+        },
+        {
+          "unit": "Ironvale",
+          "members": [
+            "unit:Northgate High School"
+          ]
+        },
+        {
+          "unit": "Juniper Flats",
+          "members": [
+            "unit:Delaney Hardware"
+          ]
+        },
+        {
+          "unit": "Kestrelton",
+          "members": [
+            "unit:Delaney Hardware"
+          ]
+        },
+        {
+          "unit": "The Yellow Duplex",
+          "members": [
+            "unit:Delaney Hardware"
+          ]
+        },
+        {
+          "unit": "Mossbank",
+          "members": []
+        },
+        {
+          "unit": "Northgate",
+          "members": [
+            "unit:Vellacourt Community College"
+          ]
+        },
+        {
+          "unit": "Oxbow",
+          "members": [
+            "unit:Riverbend Feed",
+            "unit:Pell & Sons"
+          ]
+        },
+        {
+          "unit": "Pinewater",
+          "members": []
+        },
+        {
+          "unit": "Quarryfield",
+          "members": [
+            "event:our daughter Wren was born"
+          ]
+        },
+        {
+          "unit": "The Cabin",
+          "members": []
+        },
+        {
+          "unit": "Stonewall",
+          "members": []
+        },
+        {
+          "unit": "Thistledown",
+          "members": [
+            "unit:Stonewall State"
+          ]
+        },
+        {
+          "unit": "Umberly",
+          "members": [
+            "unit:Thorne Logistics"
+          ]
+        },
+        {
+          "unit": "Vellacourt",
+          "members": []
+        },
+        {
+          "unit": "Aunt Odette's",
+          "members": []
+        },
+        {
+          "unit": "Yarrowfield",
+          "members": []
+        },
+        {
+          "unit": "Zephyr Bend",
+          "members": []
+        },
+        {
+          "unit": "Alderbury",
+          "members": [
+            "unit:Thorne Logistics"
+          ]
+        },
+        {
+          "unit": "Brackenmoor",
+          "members": []
+        },
+        {
+          "unit": "The Brick House",
+          "members": []
+        },
+        {
+          "unit": "Dovecote",
+          "members": []
+        },
+        {
+          "unit": "Emberly",
+          "members": []
+        }
+      ]
     },
     "reply": "That is thirty stays, 1960 to now, with the schools and jobs read inside the stay each one belongs to. Does this look right?"
   },
@@ -900,7 +1049,16 @@
       }
     },
     "expected": {
-      "state": "proposed"
+      "state": "proposed",
+      "groups": [
+        {
+          "unit": "the blue house",
+          "members": [
+            "unit:Lincoln Elementary",
+            "event:Dad started at the mill"
+          ]
+        }
+      ]
     },
     "reply": "Reading this as a stay on Elm you called the blue house, 1990 to 1992, with Lincoln Elementary inside it, and your Dad starting at the mill with no date I could read. Does this look right?"
   },
@@ -928,7 +1086,15 @@
     },
     "expected": {
       "state": "proposed",
-      "units": []
+      "units": [],
+      "groups": [
+        {
+          "unit": null,
+          "members": [
+            "event:Wren was born"
+          ]
+        }
+      ]
     },
     "reply": "I have Wren born on 12 May 1991. Nothing in this told me when you were at Hollow Creek. Does this look right?"
   },
@@ -954,6 +1120,14 @@
       "units": [],
       "stories": [
         "The dog died that summer."
+      ],
+      "groups": [
+        {
+          "unit": null,
+          "members": [
+            "story:The dog died that summer."
+          ]
+        }
       ]
     },
     "reply": "That is not one of the dated anchors — I have kept it as a story."
@@ -1040,7 +1214,26 @@
       }
     },
     "expected": {
-      "state": "proposed"
+      "state": "proposed",
+      "groups": [
+        {
+          "unit": "The Brick House",
+          "members": [
+            "unit:Pell & Sons"
+          ]
+        },
+        {
+          "unit": "Bellhollow",
+          "members": []
+        },
+        {
+          "unit": null,
+          "members": [
+            "event:my brother Owen was born",
+            "event:we moved around a lot"
+          ]
+        }
+      ]
     },
     "reply": "I have the Brick House in Ashgrove from 2001 to an estimated March 2004, with Pell & Sons inside it, and Bellhollow with no dates I could read. Does this look right?"
   }

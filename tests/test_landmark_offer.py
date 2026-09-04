@@ -298,6 +298,44 @@ ELM_READING = reading(
              "quote": "and Dad started at the mill that spring."}])
 
 
+#: ONE block of the shape people actually paste, carrying every one of R7's
+#: cases at once: a stay with a nickname (with a parenthetical), a city and an
+#: address; a school inside it with no dates of its own; a DATED event; an
+#: UNDATED one; and a story told about the same stay. Invented throughout.
+ORCHARD_STAY = ("Dates: June 1986 - March 1988\n"
+                "City/State: Riverbend, ST\n"
+                "Nickname: the Orchard House (we rented the top floor)\n"
+                "Address: 14 Orchard Lane, Riverbend, ST")
+ORCHARD = (ORCHARD_STAY + "\n"
+           "School: Kestrel Elementary, 3rd and 4th grade\n"
+           "Events: Wren was born 12 May 1987; the winter the creek froze\n"
+           "We left the keys with the neighbours.")
+ORCHARD_READING = reading(
+    units=[
+        read_unit("u1", "residences", "the Orchard House", ORCHARD_STAY,
+                  record={"city": "Riverbend", "label": "the Orchard House"},
+                  names={"nickname": "the Orchard House (we rented the top floor)",
+                         "city": "Riverbend",
+                         "address": "14 Orchard Lane, Riverbend, ST"},
+                  dates=read_dates("1986-06", "1988-03")),
+        read_unit("u2", "schools", "Kestrel Elementary",
+                  "School: Kestrel Elementary, 3rd and 4th grade",
+                  record={"name": "Kestrel Elementary",
+                          "label": "Kestrel Elementary",
+                          "grades": "3rd and 4th grade"}, within="u1"),
+    ],
+    events=[
+        {"ref": "e1", "text": "Wren was born", "kind": "child_born",
+         "subject_mention": "Wren", "date": "1987-05-12", "within": "u1",
+         "quote": "Wren was born 12 May 1987"},
+        {"ref": "e2", "text": "the winter the creek froze", "kind": "flood",
+         "subject_mention": "self", "date": None, "within": "u1",
+         "quote": "the winter the creek froze"},
+    ],
+    stories=[{"quote": "We left the keys with the neighbours.",
+              "within": "u1"}])
+
+
 class OneReadingTests(OfferVaultCase):
     """R6/R9: one prompt, one completion, and everything after it
     deterministic."""
@@ -656,6 +694,92 @@ class KnownEntriesTests(OfferVaultCase):
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# groups[] — the proposal read BY STAY (§3.2, Cut 6g)
+# --------------------------------------------------------------------------
+
+
+class GroupTests(OfferVaultCase):
+    def _orchard(self) -> dict:
+        return self.propose(ORCHARD, ScriptedCall(reading=ORCHARD_READING))
+
+    def test_a_group_heads_one_stay_and_holds_everything_inside_it(self):
+        proposal = self._orchard()
+        self.assertEqual(len(proposal["groups"]), 1)
+        group = proposal["groups"][0]
+        self.assertEqual(sorted(group), sorted(lo.GROUP_KEYS))
+        stay = next(unit for unit in proposal["units"]
+                    if unit["subject"] == "the Orchard House")
+        self.assertEqual(group["unit_id"], stay["unit_id"])
+        self.assertEqual([member["kind"] for member in group["members"]],
+                         ["unit", "event", "event", "story"])
+        self.assertLessEqual({member["kind"] for member in group["members"]},
+                             set(lo.MEMBER_KINDS))
+
+    def test_a_story_carries_a_stable_content_addressed_id(self):
+        first = self._orchard()
+        second = self.propose(ORCHARD, ScriptedCall(reading=ORCHARD_READING))
+        ids = [story["story_id"] for story in first["stories"]]
+        self.assertEqual(ids, [story["story_id"] for story in second["stories"]])
+        self.assertTrue(all(lo.valid_id(value) for value in ids))
+
+    def test_a_school_inside_a_stay_brings_its_own_events(self):
+        """Membership is TRANSITIVE: one card per stay, not one per level."""
+        nested = reading(
+            units=list(ORCHARD_READING["units"]),
+            events=[{**ORCHARD_READING["events"][0], "within": "u2"},
+                    ORCHARD_READING["events"][1]],
+            stories=list(ORCHARD_READING["stories"]))
+        proposal = self.propose(ORCHARD, ScriptedCall(reading=nested))
+        self.assertEqual(len(proposal["groups"]), 1)
+        kinds = [member["kind"] for member in proposal["groups"][0]["members"]]
+        self.assertEqual(kinds, ["unit", "event", "event", "story"])
+
+    def test_what_belongs_to_nothing_is_the_last_group(self):
+        proposal = self.propose(MOVED, ScriptedCall(reading=MOVED_READING))
+        self.assertEqual(proposal["groups"][-1]["unit_id"], None)
+        self.assertEqual([member["kind"]
+                          for member in proposal["groups"][-1]["members"]],
+                         ["event"])
+
+    def test_a_reading_with_no_relations_is_one_group_per_unit(self):
+        proposal = self.propose(MESA, ScriptedCall(reading=MESA_READING))
+        self.assertEqual([group["unit_id"] for group in proposal["groups"]],
+                         [proposal["units"][0]["unit_id"]])
+        self.assertEqual(proposal["groups"][0]["members"], [])
+
+    def test_the_thirty_block_document_reads_as_thirty_cards(self):
+        """The owner's own complaint, measured: ~30 cards, not ~90 rows."""
+        import landmarks_evals as ev  # noqa: PLC0415
+
+        fixture = next(row for row in ev.load_offer_fixtures()
+                       if row["fixture_id"] == "offer-residence-document")
+        proposal = lo.propose(fixture["source_text"], None,
+                              call=ev._RecordedCall(fixture["completions"]),  # noqa: SLF001
+                              write=False, landmarks={}, roster={}, generation=0)
+        self.assertEqual(len(proposal["units"]), 42)
+        self.assertEqual(len(proposal["groups"]), 30)
+        self.assertTrue(all(group["unit_id"] for group in proposal["groups"]))
+
+    def test_the_proposal_renders_by_group_with_members_indented(self):
+        proposal = self._orchard()
+        rendered = lo.render_proposal(proposal)
+        lines = rendered.splitlines()
+        self.assertTrue(lines[0].startswith("- residence: the Orchard House"))
+        self.assertIn("  - schooling: Kestrel Elementary", rendered)
+        self.assertIn("  - Wren was born", rendered)
+        self.assertIn("  - “We left the keys with the neighbours.”", rendered)
+        # The stay is rendered ONCE, as the head of its own group.
+        self.assertEqual(sum(1 for line in lines
+                             if line.startswith("- residence:")), 1)
+
+    def test_a_proposal_written_before_groups_still_renders(self):
+        """R5: an older pin's document is a flat list and must still show."""
+        proposal = self._orchard()
+        flat = {key: value for key, value in proposal.items() if key != "groups"}
+        self.assertIn("the Orchard House", lo.render_proposal(flat))
+
+
 class ApplyTests(OfferVaultCase):
     def _mesa_proposal(self) -> dict:
         return self.propose(MESA, ScriptedCall(reading=MESA_READING))
@@ -740,6 +864,241 @@ class ApplyTests(OfferVaultCase):
         self.assertEqual(caught.exception.code, "content_ambiguity")
 
 
+# --------------------------------------------------------------------------
+# What a confirmed stay HOLDS (Cut 6g, R7): names, inherited spans, the
+# events, the moments and the stories, and the graph they end up in
+# --------------------------------------------------------------------------
+
+
+class FilingTests(OfferVaultCase):
+    """The whole of R7's filing, proved over the CALCULATED projection.
+
+    `bind_episodes` is run explicitly where a containment is asserted, because
+    filing an `event_identity` binding is the BINDER's act and never `apply`'s
+    — `apply` stamps the group's slice with the stay it was told about
+    (`question_context`, event identity §12b ruling 5) and the binder's own
+    deterministic rung turns that stamp into a `part_of`.
+    """
+
+    def _applied(self) -> dict:
+        proposal = self.propose(ORCHARD, ScriptedCall(reading=ORCHARD_READING))
+        receipt = lo.apply(proposal["proposal_id"],
+                           [unit["unit_id"] for unit in proposal["units"]],
+                           self.root, now=NOW)
+        self.proposal = proposal
+        return receipt
+
+    def _nodes(self) -> list[dict]:
+        projection = pub.read_projection(self.root) or {}
+        return [node for node in (projection.get("nodes") or ())
+                if isinstance(node, dict)]
+
+    def _node(self, event_kind: str) -> dict:
+        found = [node for node in self._nodes()
+                 if node.get("event_kind") == event_kind]
+        self.assertEqual(len(found), 1, event_kind)
+        return found[0]
+
+    def _bind(self) -> None:
+        import episode_binder as eb  # noqa: PLC0415
+
+        eb.bind_episodes(self.root, apply=True, now=NOW,
+                         containment_authority="applied")
+        timeline.redraw_landmarks()
+
+    # -- names -----------------------------------------------------------
+
+    def test_the_nickname_becomes_a_roster_alias_and_the_address_a_name(self):
+        """§3 "why names matter": without this, "the Orchard House" in a later
+        story finds nothing."""
+        receipt = self._applied()
+        entry = self.entries("residences")[0]
+        self.assertEqual(entry["city"], "Riverbend")
+        self.assertEqual(entry["address"], "14 Orchard Lane, Riverbend, ST")
+        self.assertEqual(entry["nickname"], "the Orchard House")
+        # The parenthetical is not a name anybody would say back; it survives
+        # as the entry's note rather than vanishing (E-L2c).
+        self.assertIn("we rented the top floor", entry["note"])
+        place = entity_roster.load_roster("place")["entities"][0]
+        self.assertEqual(place["name"], "Riverbend")
+        self.assertIn("the Orchard House", place["aliases"])
+        self.assertEqual(receipt["filed_names"][0]["place_ref"],
+                         entry["place_ref"])
+        self.assertTrue(receipt["filed_names"][0]["alias"]["changed"])
+
+    def test_applying_the_same_receipt_twice_adds_no_second_name(self):
+        first = self._applied()
+        before = entity_roster.load_roster("place")
+        second = lo.apply(first["proposal_id"], first["unit_ids"], self.root,
+                          now=NOW)
+        self.assertEqual(first, second)
+        self.assertEqual(entity_roster.load_roster("place")["entities"],
+                         before["entities"])
+        self.assertEqual(len(self.entries("residences")), 1)
+        self.assertEqual(len(lp.load_landmark_sources(self.root)), 2)
+
+    # -- inherited units -------------------------------------------------
+
+    def test_an_inherited_unit_files_its_bounds_with_the_clause_intact(self):
+        """R7 rule 4 through the writer: every bound `basis: anchor`,
+        `confidence: inferred`, and the verbatim provenance preserved."""
+        self._applied()
+        entry = self.entries("schools")[0]
+        clause = "from the dates of the the Orchard House stay"
+        for bound in ("start", "end"):
+            record = entry["span"][bound]
+            self.assertEqual(record["basis"], "anchor")
+            self.assertEqual(record["confidence"], "inferred")
+            self.assertIn({"basis": "inferred", "claim": clause},
+                          record["provenance"])
+        self.assertEqual(entry["span"]["start"]["best"], "1986-06")
+        self.assertEqual(entry["span"]["end"]["best"], "1988-03")
+
+    def test_a_unit_with_no_date_read_files_without_dates(self):
+        text = "We were in Cedarport for a while."
+        call = ScriptedCall(reading=reading(units=[read_unit(
+            "u1", "residences", "Cedarport", text,
+            record={"city": "Cedarport", "label": "Cedarport"})]))
+        proposal = self.propose(text, call)
+        self.assertEqual(proposal["units"][0]["dates"]["basis"], "none")
+        lo.apply(proposal["proposal_id"],
+                 [proposal["units"][0]["unit_id"]], self.root, now=NOW)
+        entry = self.entries("residences")[0]
+        self.assertNotIn("span", entry)
+        self.assertNotIn("date", entry)
+
+    # -- events, moments and stories -------------------------------------
+
+    def test_a_group_files_one_slice_of_the_persons_own_words(self):
+        receipt = self._applied()
+        self.assertEqual(len(receipt["filed_slices"]), 1)
+        row = receipt["filed_slices"][0]
+        self.assertEqual(row["unit_id"], self.proposal["groups"][0]["unit_id"])
+        self.assertTrue((self.root / row["relative_path"]).is_file())
+        body = (self.root / row["relative_path"]).read_text(encoding="utf-8")
+        self.assertIn("Kestrel Elementary", body)
+        self.assertIn("the winter the creek froze", body)
+        # The stay's own words are their OWN source, never the whole paste's:
+        # a place join has to overlap with the stay and not with everything
+        # the person ever pasted (`timeline._place_for_event`).
+        self.assertNotEqual(row["source_id"],
+                            receipt["evidence_ref"]["source_id"])
+        # It is stamped with the stay it was told about, which is what makes
+        # the containment deterministic rather than a guess.
+        filed = [unit for unit in receipt["filed"]
+                 if unit["unit_id"] == row["unit_id"]][0]
+        self.assertEqual(row["question_context"], filed["telling_ref"])
+
+    def test_two_stays_get_two_slices_and_neither_is_the_whole_paste(self):
+        text = (ORCHARD + "\n\n"
+                "Dates: April 1988 - September 1990\n"
+                "City/State: Thornbury, ST\n"
+                "Events: the summer the well ran dry")
+        second = read_unit("u3", "residences", "Thornbury",
+                           "Dates: April 1988 - September 1990\n"
+                           "City/State: Thornbury, ST",
+                           record={"city": "Thornbury", "label": "Thornbury"},
+                           names={"city": "Thornbury"},
+                           dates=read_dates("1988-04", "1990-09"))
+        call = ScriptedCall(reading=reading(
+            units=list(ORCHARD_READING["units"]) + [second],
+            events=list(ORCHARD_READING["events"]) + [
+                {"ref": "e3", "text": "the summer the well ran dry",
+                 "kind": "drought", "subject_mention": "self", "date": None,
+                 "within": "u3", "quote": "the summer the well ran dry"}],
+            stories=list(ORCHARD_READING["stories"])))
+        proposal = self.propose(text, call)
+        self.assertEqual(len(proposal["groups"]), 2)
+        receipt = lo.apply(proposal["proposal_id"],
+                           [unit["unit_id"] for unit in proposal["units"]],
+                           self.root, now=NOW)
+        self.assertEqual(len(receipt["filed_slices"]), 2)
+        for row in receipt["filed_slices"]:
+            self.assertLess(row["length"], len(text))
+        bodies = [(self.root / row["relative_path"]).read_text(encoding="utf-8")
+                  for row in receipt["filed_slices"]]
+        self.assertEqual([("Thornbury" in body) for body in bodies],
+                         [False, True])
+
+    def test_the_receipt_counts_every_kind_of_thing_it_filed(self):
+        receipt = self._applied()
+        self.assertEqual(receipt["counts"],
+                         {"units": 2, "names": 1, "claims": 1, "moments": 1,
+                          "stories": 1})
+        self.assertTrue(receipt["sentence"])
+
+    def test_a_dated_event_is_a_claim_placed_at_its_date(self):
+        self._applied()
+        node = self._node("child_born")
+        self.assertEqual(node["node_kind"], "event")
+        self.assertEqual(node["best_temporal_value"]["best"], "1987-05-12")
+
+    def test_an_undated_event_takes_the_stays_bounds_by_containment(self):
+        self._applied()
+        self._bind()
+        node = self._node("flood")
+        self.assertIsNone(node["best_temporal_value"])
+        window = node["possible_temporal_value"]
+        self.assertEqual(window["earliest"], "1986-06")
+        self.assertEqual(window["latest"], "1988-03")
+        self.assertEqual(window["confidence"], "inferred")
+        stay = self._node("residence")
+        self.assertEqual([row["relation"] for row in node["containments"]],
+                         ["part_of"])
+        self.assertEqual(node["containments"][0]["episode_node_id"],
+                         stay["node_id"])
+        self.assertEqual(node["containments"][0]["origin"], "deterministic")
+
+    def test_the_stay_is_an_episode_with_the_span_the_person_stated(self):
+        self._applied()
+        stay = self._node("residence")
+        self.assertEqual(stay["node_kind"], "episode")
+        self.assertEqual(stay["label"], "the Orchard House")
+        self.assertEqual(stay["basis"], "explicit")
+        self.assertEqual(stay["best_temporal_value"]["best"], "1986-06/1988-03")
+
+    def test_the_school_is_an_episode_over_the_stays_own_span(self):
+        """§4 "Done when": the school INSIDE its bounds, not a point at its
+        start — and never `explicit`, because nobody stated it."""
+        self._applied()
+        school = self._node("school")
+        self.assertEqual(school["node_kind"], "episode")
+        stay = self._node("residence")
+        self.assertEqual(school["best_temporal_value"]["best"],
+                         stay["best_temporal_value"]["best"])
+        self.assertEqual(school["best_temporal_value"]["basis"], "anchor")
+        self.assertNotEqual(school["basis"], "explicit")
+
+    def test_the_thirty_block_document_files_as_thirty_stays(self):
+        """The owner's own document shape, applied end to end."""
+        import landmarks_evals as ev  # noqa: PLC0415
+        import temporal_claims as tc_  # noqa: PLC0415
+
+        fixture = next(row for row in ev.load_offer_fixtures()
+                       if row["fixture_id"] == "offer-residence-document")
+        proposal = lo.propose(fixture["source_text"], self.root,
+                              call=ev._RecordedCall(fixture["completions"]),  # noqa: SLF001
+                              now=NOW)
+        # One unit of this synthetic document is named "Pell & Sons", which
+        # `temporal_claims.split_subject_enumeration` reads as two subjects and
+        # the claim contract refuses by name. That refusal is the substrate's,
+        # not this mode's, and it is filed as its own finding rather than
+        # papered over here.
+        confirmable = [unit["unit_id"] for unit in proposal["units"]
+                       if len(tc_.split_subject_enumeration(unit["subject"])) == 1]
+        receipt = lo.apply(proposal["proposal_id"], confirmable, self.root,
+                           now=NOW)
+        self.assertEqual(len(proposal["groups"]), 30)
+        self.assertEqual(receipt["counts"]["units"], 41)
+        self.assertEqual(receipt["counts"]["names"], 30)
+        self.assertEqual(receipt["counts"]["claims"], 2)
+        self.assertEqual(len(self.entries("residences")), 30)
+        aliases = {alias for entity
+                   in entity_roster.load_roster("place")["entities"]
+                   for alias in (entity.get("aliases") or ())}
+        self.assertIn("The Blue House", aliases)
+
+
 class RetractTests(OfferVaultCase):
     def test_undo_keeps_the_evidence_and_the_receipt(self):
         call = ScriptedCall(reading=MESA_READING)
@@ -763,6 +1122,54 @@ class RetractTests(OfferVaultCase):
             self.assertTrue((self.root / relative).is_file(), relative)
         self.assertTrue(lo.receipt_is_retracted(self.root,
                                                 receipt["receipt_id"]))
+
+    def test_undo_takes_back_the_names_the_events_and_the_moments(self):
+        """v292: everything `apply` filed, and the immutable sources stay."""
+        proposal = self.propose(ORCHARD, ScriptedCall(reading=ORCHARD_READING))
+        receipt = lo.apply(proposal["proposal_id"],
+                           [unit["unit_id"] for unit in proposal["units"]],
+                           self.root, now=NOW)
+        slice_path = receipt["filed_slices"][0]["relative_path"]
+        claim_ids = {row["claim_id"] for row in receipt["filed_slices"][0]["events"]}
+        self.assertTrue(claim_ids)
+        self.assertIn("the Orchard House",
+                      entity_roster.load_roster("place")["entities"][0]["aliases"])
+
+        retraction = lo.retract(receipt["receipt_id"], self.root, now=NOW)
+
+        self.assertEqual(self.entries("residences"), [])
+        self.assertEqual(self.entries("schools"), [])
+        # The alias came off the roster place; the place itself stays.
+        place = entity_roster.load_roster("place")["entities"][0]
+        self.assertEqual(place["aliases"], [])
+        self.assertEqual([row["removed"] for row in retraction["aliases"]],
+                         [True])
+        # Every claim the events and moments stood on is retracted, not
+        # deleted, and the slice they cite is still on disk.
+        retracted = {value for row in retraction["corrections"]
+                     for value in row["claim_ids"]}
+        self.assertTrue(claim_ids <= retracted)
+        self.assertIn(lo.EVENTS_SCOPE,
+                      [row["domain"] for row in retraction["corrections"]])
+        self.assertTrue((self.root / slice_path).is_file())
+        index = ts.fold_active_index(self.root)
+        self.assertEqual([row for row in ts.active_claims(index)
+                          if row["claim_id"] in claim_ids], [])
+
+    def test_undo_leaves_an_alias_the_place_already_answered_to(self):
+        """A name this apply did not file is not this apply's to take away."""
+        proposal = self.propose(ORCHARD, ScriptedCall(reading=ORCHARD_READING))
+        receipt = lo.apply(proposal["proposal_id"],
+                           [unit["unit_id"] for unit in proposal["units"]],
+                           self.root, now=NOW)
+        # Somebody else names the same place the same way afterwards.
+        snapshot = entity_roster.load_roster("place")
+        entity_roster.write_roster("place", [
+            {**entity, "aliases": [*(entity.get("aliases") or ()), "the orchard"]}
+            for entity in snapshot["entities"]])
+        lo.retract(receipt["receipt_id"], self.root, now=NOW)
+        place = entity_roster.load_roster("place")["entities"][0]
+        self.assertEqual(place["aliases"], ["the orchard"])
 
     def test_undo_is_idempotent(self):
         call = ScriptedCall(reading=MESA_READING)

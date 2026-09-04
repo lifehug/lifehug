@@ -351,6 +351,27 @@ class ContainerRuleTests(unittest.TestCase):
         self.assertEqual(chrono.display_date(span, with_basis=False),
                          "November 2018–January 2021")
 
+    def test_an_inherited_stretch_is_a_stretch_but_never_a_container(self):
+        """v292 (R7): a schooling that took its stay's two ends HAS two ends —
+        drawing only its start would publish a stretch nobody claimed as a
+        point nobody named — but a container is opened *in the person's own
+        words*, and an inherited span is not those. One body, one knob."""
+        bounds = [
+            claim(source=HALCYON_END, claim_type="date",
+                  subject_mention="Kestrel Elementary", event_kind="started",
+                  temporal_value=value("1986-06", basis="anchor")),
+            claim(source=HALCYON_END, claim_type="date",
+                  subject_mention="Kestrel Elementary", event_kind="ended",
+                  temporal_value=value("1988-03", basis="anchor")),
+        ]
+        self.assertEqual(ec.span_from_claims(bounds), (None, False))
+        span, open_ended = ec.span_from_claims(bounds, require_stated=False)
+        self.assertFalse(open_ended)
+        self.assertEqual((span.earliest, span.latest), ("1986-06", "1988-03"))
+        # It says out loud that it was inherited rather than being stamped
+        # with the person's own authority.
+        self.assertEqual(span.basis, "anchor")
+
     def test_a_point_dated_moment_is_not_a_container(self):
         """The negative that keeps four hundred moments from becoming
         containers. `Wren Alder, born 2010-12-21` has a stated date and a

@@ -1724,7 +1724,13 @@ def _apply_participation_span(group: dict, calculated: dict, *, diagnostics: lis
     alternates and the conflict score are cleared for exactly that reason and
     for no other — every claim stays on disk and stays in ``claim_refs``.
     """
-    span, open_ended = ec.span_from_claims(group.get("claims") or ())
+    # v292 (R7): `require_stated=False` — a schooling or a tenure that
+    # INHERITED its stay's two ends still has two ends, and drawing only its
+    # start would publish a stretch nobody claimed as a point nobody named.
+    # The record comes back carrying the inherited basis, so nothing here
+    # promotes an inference to a statement.
+    span, open_ended = ec.span_from_claims(group.get("claims") or (),
+                                           require_stated=False)
     if span is None:
         return
     calculated["best"] = span

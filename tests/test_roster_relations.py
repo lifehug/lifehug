@@ -140,6 +140,50 @@ class AliasDecisionTests(unittest.TestCase):
                          ["The Fish House"])
 
 
+class RetractAliasTests(unittest.TestCase):
+    """v292: the undo of an alias decision, for Add Landmark's own `retract`."""
+
+    def _aliased(self) -> tuple[str, dict]:
+        ref, snap, _ = rr.resolve_or_create("place", "Cedarport", _snapshot("place"))
+        result = rr.alias_decision("place", ref, "The Fish House", snap)
+        return ref, result["snapshot"]
+
+    def test_an_alias_this_act_filed_comes_back_off(self):
+        ref, snap = self._aliased()
+        result = rr.retract_alias("place", ref, "The Fish House", snap)
+        self.assertTrue(result["applied"])
+        self.assertTrue(result["changed"])
+        self.assertEqual(rr.find_by_ref("place", result["snapshot"], ref)["aliases"],
+                         [])
+
+    def test_retracting_twice_removes_nothing_twice(self):
+        ref, snap = self._aliased()
+        once = rr.retract_alias("place", ref, "The Fish House", snap)
+        twice = rr.retract_alias("place", ref, "The Fish House", once["snapshot"])
+        self.assertTrue(twice["applied"])
+        self.assertFalse(twice["changed"])
+
+    def test_it_matches_the_same_alias_the_decision_refused_a_duplicate_by(self):
+        ref, snap = self._aliased()
+        result = rr.retract_alias("place", ref, "the fish house", snap)
+        self.assertTrue(result["changed"])
+
+    def test_other_aliases_are_left_alone(self):
+        ref, snap = self._aliased()
+        snap = rr.alias_decision("place", ref, "The Dock", snap)["snapshot"]
+        result = rr.retract_alias("place", ref, "The Fish House", snap)
+        self.assertEqual(rr.find_by_ref("place", result["snapshot"], ref)["aliases"],
+                         ["The Dock"])
+
+    def test_an_unknown_entity_and_an_empty_alias_are_refused_by_name(self):
+        _ref, snap = self._aliased()
+        self.assertEqual(
+            rr.retract_alias("place", "place/nowhere", "X", snap)["reason"],
+            "entity_not_found")
+        self.assertEqual(rr.retract_alias("place", "place/cedarport", " ", snap)["reason"],
+                         "alias_empty")
+
+
 class LocatedInTests(unittest.TestCase):
     """Design §3.3/§4.1 city rule: `located_in` (home -> city -> region)."""
 

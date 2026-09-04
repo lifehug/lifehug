@@ -48,6 +48,20 @@ rendered through the same `_restate` path every other inference goes through.
 A unit with no dates and no dated parent is ``basis: "none"`` and says "no date
 read"; it never says "inferred", because nothing was read.
 
+**And a span is what gets FILED (v292).** The proposal is GROUPED — one entry
+per top-level unit, its members the units, events and stories whose ``within``
+resolves to it transitively (:func:`build_groups`) — and :func:`apply` files a
+group, not a list of units. The names go through the E-L2c road (nickname ⇒ a
+roster alias on the place the city minted; without it "the Orchard House" in a
+story told next year joins to nothing, because the place join is provable
+source overlap and never a keyword). The group's own words are promoted as
+their own slice, stamped with the stay's telling ref, and the dated events on
+it file as claims, the undated ones as ``occurrence`` moments and the stories
+as themselves against THAT source rather than against the whole paste.
+Episode-in-episode containment is not a relation the calculated graph holds, so
+a school inside a stay is a date inheritance and nothing here pretends
+otherwise (ADR 0033 amendment 2).
+
 **Idempotency.** A unit's identity is content-addressed
 (:func:`derive_unit_id`) from its domain, kind, subject, dates and quote, so
 the same text proposed twice yields the same unit ids. Filing goes through
@@ -171,9 +185,13 @@ PROPOSAL_ID_PREFIX = "lmo"
 UNIT_ID_PREFIX = "lmu"
 EVENT_ID_PREFIX = "lme"
 RECEIPT_ID_PREFIX = "lmr"
+#: v292: a STORY's own id. `groups[]` names its members by id, and a story
+#: had none — the only row in the proposal that was identified by its
+#: position in a list. Content-addressed like every other id here.
+STORY_ID_PREFIX = "lms"
 _DIGEST_LENGTH = 24
 
-_ID_RE = re.compile(r"^(lmo|lmu|lme|lmr):[0-9a-f]{%d}$" % _DIGEST_LENGTH)
+_ID_RE = re.compile(r"^(lmo|lmu|lme|lmr|lms):[0-9a-f]{%d}$" % _DIGEST_LENGTH)
 
 
 def _digest(payload: object) -> str:
@@ -742,6 +760,23 @@ def derive_event_id(*, kind: object, subject: object, date: object,
         "quote": collapsed_text(quote_row.get("text")),
     }
     return f"{EVENT_ID_PREFIX}:{_digest(payload)}"
+
+
+def derive_story_id(*, offset: object, length: object, quote: object) -> str:
+    """One STORY's content-addressed identity (v292).
+
+    A story is a span of the person's own text that no unit and no event
+    covers, so its identity is that span: where it starts, how long it is, and
+    what it says. The same shape :func:`derive_event_id` uses, and for the same
+    reason — `groups[]` names its members by id, and 6g's filing has to be able
+    to say which story it filed and which one a retraction undoes.
+    """
+    payload = {
+        "offset": int(offset or 0),
+        "length": int(length or 0),
+        "quote": collapsed_text(quote),
+    }
+    return f"{STORY_ID_PREFIX}:{_digest(payload)}"
 
 
 def derive_proposal_id(text: object, generation: object) -> str:
@@ -1318,7 +1353,10 @@ def _partition_text(source_text: str, units: list[dict],
                 (value for offset, length, value in within_by_span
                  if value and _overlaps(span["offset"], span["length"],
                                         offset, length)), None)
-            stories.append({**span, "route": STORY_KIND, "within": within})
+            stories.append({**span, "route": STORY_KIND, "within": within,
+                            "story_id": derive_story_id(
+                                offset=span["offset"], length=span["length"],
+                                quote=span["text"])})
         else:
             unknown.append(dict(span))
     return stories, unknown
@@ -1331,19 +1369,30 @@ EVENT_KEYS = ("event_id", "text", "kind", "subject_mention", "date", "within",
               "quote", "filing")
 
 
-def _event_row(read_event: object, by_ref: dict) -> dict:
-    """One reading event as the proposal carries it (§3.2 item 3)."""
+def _event_row(read_event: object, by_ref: dict, source_text: str = "") -> dict:
+    """One reading event as the proposal carries it (§3.2 item 3).
+
+    The date is re-read against the person's own bytes, exactly as a unit's
+    bounds are (:func:`date_evidence`, §3.1 rule 2): a year the submission does
+    not carry is DROPPED and the event files as a moment instead of as a dated
+    claim. `filing` therefore says what will actually happen to it, which is
+    the only thing that makes it safe for `apply` to act on.
+    """
     date = read_event.date
     parent = by_ref.get(read_event.within) if read_event.within else None
     slim = None
-    if isinstance(date, dict):
+    if isinstance(date, dict) and date_evidence(date, read_event.quote,
+                                                source_text):
         slim = {"best": date.get("best"),
                 "granularity": date.get("granularity"),
                 "confidence": date.get("confidence")}
     return {
+        # The id is derived from what the PROPOSAL carries, never from what
+        # the completion said: an event whose date the text does not carry is
+        # a different event from one whose date it does.
         "event_id": derive_event_id(kind=read_event.kind,
                                     subject=read_event.subject_mention,
-                                    date=date, quote=read_event.quote),
+                                    date=slim, quote=read_event.quote),
         "text": read_event.text,
         "kind": read_event.kind,
         "subject_mention": read_event.subject_mention,
@@ -1352,6 +1401,120 @@ def _event_row(read_event: object, by_ref: dict) -> dict:
         "quote": read_event.quote,
         "filing": "claim" if slim else "moment",
     }
+
+
+#: The `groups[]` list's exact key set (§3.2 of the reading plan) and the three
+#: kinds of thing a group can hold. Named here so a host — and 6j's renderer —
+#: reads the contract from one place.
+GROUP_KEYS = ("unit_id", "members")
+MEMBER_KINDS = ("unit", "event", "story")
+
+
+def _text_offset(row: object) -> int:
+    """Where a unit, an event or a story starts in the submitted text.
+
+    A unit and an event carry a located ``quote``; a story IS a located span
+    and carries ``offset`` itself. One reader for the three, because `groups`
+    orders all three against the same axis — the person's own text.
+    """
+    if not isinstance(row, dict):
+        return 1 << 30
+    quote = row.get("quote")
+    if isinstance(quote, dict) and isinstance(quote.get("offset"), int):
+        return quote["offset"]
+    if isinstance(row.get("offset"), int):
+        return row["offset"]
+    return 1 << 30
+
+
+def _head_unit_id(unit: dict, by_id: dict) -> str | None:
+    """The TOP-LEVEL unit this one belongs to, walking ``within`` upward.
+
+    Transitive by design (§3.2): a school inside a stay is the stay's member,
+    and so is an event inside that school — one group per stay is what the
+    owner asked for ("~30 cards, not ~90 rows"), not one card per nesting
+    level. The walk is bounded by a seen-set so a caller that skipped
+    `landmark_reading.parse_reading`'s cycle cut degrades to "no head" rather
+    than looping forever.
+    """
+    cursor = unit
+    seen = {cursor.get("unit_id")}
+    while cursor is not None and cursor.get("within"):
+        parent = by_id.get(cursor["within"])
+        if parent is None or parent.get("unit_id") in seen:
+            return None
+        seen.add(parent.get("unit_id"))
+        cursor = parent
+    return cursor.get("unit_id") if cursor is not None else None
+
+
+def build_groups(units: object, events: object, stories: object) -> list[dict]:
+    """§3.2's ``groups[]`` — the proposal read BY STAY rather than as a list.
+
+    Every unit with ``within: None`` heads exactly one group, in text order.
+    Its ``members`` are the units, events and stories whose ``within`` resolves
+    to it TRANSITIVELY — a school inside a stay is a member, and so is an event
+    inside that school — each named ``{kind, id}`` and ordered by where it sits
+    in the person's own text. A trailing ``{unit_id: None}`` group holds the
+    events and stories that belong to nothing, so a renderer that walks
+    `groups` alone never loses a row (`unrecognized` spans are not members:
+    nothing was made of them, and they render as themselves).
+
+    This is what 6j renders and what 6g files against: one promoted slice per
+    group, so a moment read inside a stay cites that stay's own words and not
+    the whole submission.
+    """
+    unit_rows = [row for row in (units or ()) if isinstance(row, dict)
+                 and row.get("unit_id")]
+    by_id = {row["unit_id"]: row for row in unit_rows}
+    members: dict[str, list[dict]] = {}
+    order: dict[str, tuple] = {}
+    heads: list[dict] = []
+    for row in unit_rows:
+        if row.get("within"):
+            continue
+        members[row["unit_id"]] = []
+        order[row["unit_id"]] = (_text_offset(row), row["unit_id"])
+        heads.append(row)
+    loose: list[dict] = []
+
+    def _place(kind: str, identity: object, offset: int, head: object) -> None:
+        row = {"kind": kind, "id": collapsed_text(identity)}
+        bucket = members.get(collapsed_text(head)) if head else None
+        (loose if bucket is None else bucket).append((offset, row))
+
+    for row in unit_rows:
+        if not row.get("within"):
+            continue
+        _place("unit", row["unit_id"], _text_offset(row),
+               _head_unit_id(row, by_id))
+    for row in (events or ()):
+        if not isinstance(row, dict) or not row.get("event_id"):
+            continue
+        parent = by_id.get(row.get("within"))
+        head = _head_unit_id(parent, by_id) if parent is not None else None
+        _place("event", row["event_id"], _text_offset(row), head)
+    for row in (stories or ()):
+        if not isinstance(row, dict) or not row.get("story_id"):
+            continue
+        parent = by_id.get(row.get("within"))
+        head = _head_unit_id(parent, by_id) if parent is not None else None
+        _place("story", row["story_id"], _text_offset(row), head)
+
+    groups = [{"unit_id": head["unit_id"],
+               "members": [row for _offset, row
+                           in sorted(members[head["unit_id"]],
+                                     key=lambda item: (item[0], item[1]["kind"],
+                                                       item[1]["id"]))]}
+              for head in sorted(heads, key=lambda row: order[row["unit_id"]])]
+    if loose:
+        groups.append({"unit_id": None,
+                       "members": [row for _offset, row
+                                   in sorted(loose,
+                                             key=lambda item: (item[0],
+                                                               item[1]["kind"],
+                                                               item[1]["id"]))]})
+    return groups
 
 
 def _units_from_reading(reading: object, source_text: str, *,
@@ -1476,7 +1639,8 @@ def propose(text: str, vault_root: object = None, *, call,
         row_["quote"]["offset"] if isinstance(row_.get("quote"), dict) else 1 << 30,
         row_["domain"], row_["unit_id"]))
 
-    events = [_event_row(read_event, by_ref) for read_event in reading.events]
+    events = [_event_row(read_event, by_ref, body)
+              for read_event in reading.events]
     events.sort(key=lambda row_: (row_["quote"]["offset"], row_["event_id"]))
 
     told = [{"quote": story.quote,
@@ -1485,6 +1649,7 @@ def propose(text: str, vault_root: object = None, *, call,
     questions = open_claim_questions(open_event_claims(events), units,
                                      landmarks, body)
     stories, unrecognized = _partition_text(body, units, events, told)
+    groups = build_groups(units, events, stories)
 
     if failure is not None:
         state = "failed"
@@ -1508,6 +1673,7 @@ def propose(text: str, vault_root: object = None, *, call,
         "units": units,
         "events": events,
         "stories": stories,
+        "groups": groups,
         "unrecognized": unrecognized,
         "questions": questions,
         "findings": sorted(dict.fromkeys(findings)),
@@ -1619,6 +1785,310 @@ def _place_name_for(unit: dict) -> str | None:
     return str(city).strip() or None if isinstance(city, str) else None
 
 
+# --------------------------------------------------------------------------
+# R7 filing: a group's own words, and what rides on them
+# --------------------------------------------------------------------------
+#
+# A submission is promoted whole, because R3 says the person's words are
+# evidence the moment they are handed over. That whole-paste source is the
+# wrong thing for one stay's events to cite, though: a later reader joining a
+# moment to a place does it by PROVABLE SOURCE OVERLAP with the roster place
+# (`timeline._place_for_event`, and the containment rung's own
+# `question_context` seam), and a source that is the whole document overlaps
+# with every place in it. So `apply` also promotes ONE SLICE PER GROUP — the
+# head unit's own words, extended to cover the words of everything inside it —
+# and the events, moments and stories that group holds cite that.
+#
+# The slice carries `question_context` = the stay's own telling ref, which is
+# `episode_binder`'s deterministic containment rung (`QUESTION_CONTEXT_SEAM`,
+# event identity §12b ruling 5): "this was told about that stay" is a FACT
+# about what was said, not an inference from it, so the binder files it as a
+# `part_of` rather than proposing it. Filing that binding is the BINDER's act,
+# not this one — `bind-episodes --apply` is an owner-reviewed step and calling
+# it from here would be a second writer of the identity substrate.
+
+#: This module's own deterministic rule version, for a proposal that recorded
+#: no reading extractor (a failed reading, or a leaf that could not be read).
+FILING_RULE_VERSION = "1"
+
+
+def _filing_extractor(proposal: object) -> tuple[dict, str]:
+    """``(extractor block, extractor_version)`` for the claims one apply files.
+
+    The READING is the extractor: these events are the ones it read, so they
+    name its prompt bytes and its model — the block `propose` already recorded
+    (`landmark_reading.reading_extractor`). A proposal that recorded none names
+    this module's own deterministic rule instead of filing an unnamed
+    extractor, which `temporal_claims.validate_temporal_claim` refuses outright.
+    """
+    import general_listener as gl  # noqa: PLC0415 — the one version renderer
+
+    rows = (proposal or {}).get("extractors") or ()
+    block = next((row for row in rows
+                  if isinstance(row, dict) and row.get("name")), None)
+    if block is None:
+        block = {"name": "landmark_offer", "schema_version": tc.SCHEMA_VERSION,
+                 "rule_version": FILING_RULE_VERSION, "deterministic": True}
+    return dict(block), gl.claim_extractor_version(block)
+
+
+def _promotion_metadata(proposal_id: object, *, turn_ref: object = None,
+                        question_context: object = None) -> dict:
+    """The metadata every source this mode promotes carries.
+
+    ``session_ref`` and ``turn_ref`` are the identity keys
+    (`temporal_store.PROMOTION_IDENTITY_KEYS`); ``question_context`` is not, so
+    stamping a slice with the stay it was told about never moves its digest or
+    its path.
+
+    A GROUP's slice carries the head unit's id as its ``turn_ref``, and it has
+    to: a submission that IS one stay ("I lived on Elm from 1990 to 1992, we
+    called it the blue house…") has a slice whose bytes are the whole
+    submission's, and without a distinct turn the slice would promote onto the
+    whole submission's own file — which is already there, without the stamp,
+    because promotion keeps the standing file. Same proposal, same unit, same
+    turn: a retry still lands on one source.
+    """
+    meta = {"channel": OFFER_CHANNEL, "visibility": "owner_only",
+            "session_ref": f"landmark-offer:{collapsed_text(proposal_id)}"}
+    turn = collapsed_text(turn_ref)
+    if turn:
+        meta["turn_ref"] = turn
+    stamp = collapsed_text(question_context)
+    if stamp:
+        meta[store.QUESTION_CONTEXT_KEY] = stamp
+    return meta
+
+
+def _span_of(row: object) -> tuple[int, int] | None:
+    """``(offset, length)`` for a unit, an event or a story."""
+    if not isinstance(row, dict):
+        return None
+    quote = row.get("quote")
+    if isinstance(quote, dict) and isinstance(quote.get("offset"), int):
+        return int(quote["offset"]), int(quote.get("length") or 0)
+    if isinstance(row.get("offset"), int):
+        return int(row["offset"]), int(row.get("length") or 0)
+    return None
+
+
+def group_members(proposal: object, group: object) -> list[tuple[str, dict]]:
+    """``[(kind, row)]`` — the proposal rows one group's members name.
+
+    `groups[]` carries ids, not rows, because it is a wire shape a host
+    transports verbatim. This is the one place that resolves them back, so
+    `apply`, `render_proposal` and a test never each write their own lookup.
+    """
+    row = proposal if isinstance(proposal, dict) else {}
+    tables = {
+        "unit": {item.get("unit_id"): item for item in (row.get("units") or ())
+                 if isinstance(item, dict)},
+        "event": {item.get("event_id"): item for item in (row.get("events") or ())
+                  if isinstance(item, dict)},
+        "story": {item.get("story_id"): item for item in (row.get("stories") or ())
+                  if isinstance(item, dict)},
+    }
+    found: list[tuple[str, dict]] = []
+    for member in ((group or {}).get("members") or ()):
+        if not isinstance(member, dict):
+            continue
+        table = tables.get(collapsed_text(member.get("kind")))
+        item = table.get(collapsed_text(member.get("id"))) if table else None
+        if item is not None:
+            found.append((collapsed_text(member.get("kind")), item))
+    return found
+
+
+def group_slice(proposal: object, group: object) -> dict | None:
+    """``{offset, length, text}`` — the words ONE group is made of.
+
+    The head unit's own quote, extended to cover every member's quote. Not the
+    whole submission (that is promoted separately and is nobody's stay) and not
+    the head's quote alone (an event read inside the stay has to be inside the
+    slice its claim cites, or the quotation is evidence for nothing).
+    """
+    row = proposal if isinstance(proposal, dict) else {}
+    text = str(row.get("source_text") or "")
+    head = {item.get("unit_id"): item for item in (row.get("units") or ())
+            if isinstance(item, dict)}.get(
+                collapsed_text((group or {}).get("unit_id")))
+    if head is None:
+        return None
+    spans = [span for span in
+             [_span_of(head)] + [_span_of(item) for _kind, item
+                                 in group_members(row, group)]
+             if span is not None and span[1] > 0]
+    if not spans:
+        return None
+    start = min(offset for offset, _length in spans)
+    end = max(offset + length for offset, length in spans)
+    body = text[start:end]
+    return {"offset": start, "length": len(body), "text": body}
+
+
+def group_source_relative_path(proposal_id: object, unit_id: object,
+                               slice_text: object) -> str:
+    """Where a group's slice lands, computed BEFORE it is promoted.
+
+    The sibling of :func:`unit_source_relative_path` — that one names the path
+    the landmark RECORD files to, this one names the path the group's own words
+    file to. Both are pure functions of what the person offered, which is what
+    makes a receipt readable before anything has been written and a retry
+    recognisable afterwards.
+    """
+    return store.conversation_source_relative_path(
+        store.promotion_digest(str(slice_text or ""),
+                               _promotion_metadata(proposal_id,
+                                                   turn_ref=unit_id)))
+
+
+def _claim_draft(event: dict, *, parent: object, origin: int) -> dict | None:
+    """One read event as a claim draft — dated or not.
+
+    A DATED event is a ``date`` claim; an UNDATED one is an ``occurrence``, the
+    claim type that asserts a thing happened and asserts nothing about when
+    (`temporal_claims.OCCURRENCE_CLAIM_TYPE`). That choice is the SYSTEM's and
+    is made from the bytes: `occurrence` is withheld from every model-facing
+    vocabulary (`temporal_claims.MODEL_CLAIM_TYPES`) and the reading leaf never
+    names a claim type at all — it reports an event and whether the person
+    dated it, exactly as `classifier_claims.temporal_reading` decides the same
+    thing over a classification it did not make.
+
+    **The stay rides on ``place_mentions``, not on ``event_mention``** — the
+    one place this build departs from §3.1 rule 7's letter, for a verified
+    reason. `temporal_timeline._node_what` publishes the longest
+    ``event_mention`` as the node's own HUMAN TEXT ("what a person would call
+    this thing"), so putting the stay's name there labels *"Dad started at the
+    mill"* as *"the blue house"* on the person's own timeline — the same class
+    of defect as D2's cities-as-labels. The rule's INTENT is the join, and
+    `place_mentions` is the field the join actually reads
+    (`event_identity`'s entity signal, `temporal_timeline._group_place_mentions`),
+    so the stay's names go there and the event keeps its own words.
+    ``question_context`` on the group's slice carries the containment itself.
+    """
+    quote = event.get("quote") if isinstance(event.get("quote"), dict) else {}
+    text = collapsed_text(quote.get("text"))
+    kind = collapsed_text(event.get("kind"))
+    subject = collapsed_text(event.get("subject_mention"))
+    if not text or not kind or not subject:
+        return None
+    start = max(int(quote.get("offset") or 0) - int(origin or 0), 0)
+    draft: dict = {
+        "claim_type": ("date" if event.get("filing") == "claim"
+                       else tc.OCCURRENCE_CLAIM_TYPE),
+        "subject_mention": subject,
+        "event_kind": kind,
+        "evidence": [{"quote": text, "start": start,
+                      "end": start + max(int(quote.get("length") or 0), 1)}],
+        "basis": "explicit",
+        "confidence": 1.0,
+    }
+    draft["event_mention"] = collapsed_text(event.get("text")) or text
+    places = [name for name in
+              (collapsed_text((parent or {}).get("subject")),
+               _place_name_for(parent) if isinstance(parent, dict) else None)
+              if name]
+    if places:
+        draft["place_mentions"] = list(dict.fromkeys(places))
+    if draft["claim_type"] == "date":
+        value = chrono.normalized_date(event.get("date"))
+        if value is None:
+            return None
+        draft["temporal_value"] = value
+    return draft
+
+
+def _file_group(vault_root: Path, proposal: dict, group: dict, *,
+                telling_ref: object, extractor: dict, version: str,
+                now: object) -> dict | None:
+    """Promote one group's slice and file the events and stories it holds.
+
+    Returns the receipt row for the slice, or ``None`` when the group holds
+    nothing to file. Idempotent twice over: the slice is content-addressed, so
+    a second apply promotes no second file, and the claims derive their ids
+    from that same source, so the receipt lands on the path it already
+    occupies and `temporal_store.write_receipt` keeps the standing one.
+    """
+    body = group_slice(proposal, group)
+    if body is None:
+        return None
+    by_unit = {row.get("unit_id"): row for row in (proposal.get("units") or ())
+               if isinstance(row, dict)}
+    events: list[tuple[dict, dict]] = []
+    stories: list[dict] = []
+    for kind, row in group_members(proposal, group):
+        if kind == "event":
+            draft = _claim_draft(row, parent=by_unit.get(row.get("within")),
+                                 origin=body["offset"])
+            if draft is not None:
+                events.append((row, draft))
+        elif kind == "story":
+            stories.append(row)
+    if not events and not stories:
+        return None
+
+    metadata = _promotion_metadata(proposal["proposal_id"],
+                                   turn_ref=group.get("unit_id"),
+                                   question_context=telling_ref)
+    try:
+        slice_ref = store.promote_conversational_source(
+            vault_root, body["text"], metadata, source_type=OFFER_SOURCE_TYPE)
+    except Exception as exc:  # noqa: BLE001 — every write failure is typed
+        raise LandmarkOfferError(
+            "write_failure",
+            f"{group.get('unit_id')} slice did not promote: {exc}") from exc
+
+    claims: list[dict] = []
+    if events:
+        import general_listener as gl  # noqa: PLC0415 — the one claim binder
+
+        try:
+            claims = gl.bind_claims([draft for _row, draft in events],
+                                    source_ref=slice_ref,
+                                    extractor_version=version, now=now)
+            store.write_receipt(vault_root, {
+                "source_ref": slice_ref.to_dict(),
+                "extractor_version": version,
+                "extractor": dict(extractor),
+                "claims": claims,
+                "idempotency_key": store.derive_extraction_idempotency_key(
+                    session_ref=metadata.get("session_ref"),
+                    turn_ref=metadata.get("turn_ref"),
+                    source_ref=slice_ref, recorder=None,
+                    extractor_version=version),
+            }, now=now)
+        except Exception as exc:  # noqa: BLE001 — every write failure is typed
+            raise LandmarkOfferError(
+                "write_failure",
+                f"{group.get('unit_id')} events did not file: {exc}") from exc
+
+    # `bind_claims` drops a draft that duplicates another exactly, so a claim
+    # is looked up by WHAT IT ASSERTS rather than by its position in the list.
+    by_assertion = {(claim.get("claim_type"), claim.get("subject_mention"),
+                     claim.get("event_kind")): claim.get("claim_id")
+                    for claim in claims}
+    return {
+        "unit_id": group.get("unit_id"),
+        "source_id": slice_ref.source_id,
+        "relative_path": group_source_relative_path(
+            proposal["proposal_id"], group.get("unit_id"), body["text"]),
+        "question_context": collapsed_text(telling_ref) or None,
+        "offset": body["offset"],
+        "length": body["length"],
+        "events": [{"event_id": row.get("event_id"),
+                    "filing": row.get("filing"),
+                    "kind": row.get("kind"),
+                    "subject_mention": row.get("subject_mention"),
+                    "within": row.get("within"),
+                    "claim_id": by_assertion.get(
+                        (draft["claim_type"], draft["subject_mention"],
+                         draft.get("event_kind")))}
+                   for row, draft in events],
+        "stories": [{"story_id": row.get("story_id"),
+                     "within": row.get("within")} for row in stories],
+    }
+
+
 def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
           now: object = None, reason: object = None) -> dict:
     """File the units a person confirmed. Idempotent by ``(proposal, unit)``.
@@ -1630,8 +2100,17 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
     calculation"). The submitted text is promoted once as an ordinary vault
     source so no filed claim's only citation is a proposal file.
 
-    Returns the receipt: what was filed, the generations either side, the
-    realized-gain diff Cut 4c publishes, and its sentence.
+    **A confirmed unit files what is ON ITS CARD (v292, R7).** The unit's
+    `names` ride on the record through the E-L2c road, so the nickname lands as
+    a roster ALIAS on the place its city minted and the address lands as the
+    place's own field. The GROUP that unit heads is filed with it: one promoted
+    slice of the person's own words, the dated events on it as claims, the
+    undated ones as moments, the stories as themselves. A group whose head
+    nobody confirmed files nothing — an event rides its stay.
+
+    Returns the receipt: what was filed (units, names, slices and the events,
+    moments and stories on them, with `counts`), the generations either side,
+    the realized-gain diff Cut 4c publishes, and its sentence.
     """
     import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
 
@@ -1660,12 +2139,12 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
     # own content digest, so a retry adds no second copy.
     text_ref = store.promote_conversational_source(
         root, proposal.get("source_text") or "",
-        {"channel": OFFER_CHANNEL, "visibility": "owner_only",
-         "session_ref": f"landmark-offer:{proposal_id}"},
-        source_type=OFFER_SOURCE_TYPE,
+        _promotion_metadata(proposal_id), source_type=OFFER_SOURCE_TYPE,
     )
 
     filed: list[dict] = []
+    names: list[dict] = []
+    telling_refs: dict[str, str] = {}
     for unit in sorted(chosen, key=lambda row_: row_["unit_id"]):
         payload = {
             "landmark": dict(unit["record"]),
@@ -1686,6 +2165,9 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
             row = li.domain_row(unit["domain"])
         except li.LandmarkInteractionError:
             row = None
+        telling = collapsed_text(summary.get("telling_ref"))
+        if telling:
+            telling_refs[unit["unit_id"]] = telling
         filed.append({
             "unit_id": unit["unit_id"],
             "domain": unit["domain"],
@@ -1696,7 +2178,51 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
             "filing_digest": unit_filing_digest(proposal_id, unit),
             "source_id": _source_id_for(root, proposal_id, unit),
             "place_ref": summary.get("place_ref"),
+            "telling_ref": telling or None,
         })
+        # The NAMES the record carried (§3 "why names matter"): the E-L2c
+        # fields rode on the record through the one writer, and `record_unit`
+        # filed the nickname as a roster ALIAS on the place the city minted.
+        # What is reported here is what the ENTRY ended up with, never what
+        # the reading asked for — a name the validator dropped was not filed.
+        filed_names = {key: entry[key] for key in lr.NAME_FIELDS
+                       if isinstance(entry, dict) and entry.get(key)}
+        alias = summary.get("alias") if isinstance(summary.get("alias"), dict) else None
+        if filed_names or alias:
+            names.append({
+                "unit_id": unit["unit_id"],
+                "place_ref": summary.get("place_ref"),
+                "names": filed_names,
+                "alias": ({"applied": bool(alias.get("applied")),
+                           "changed": bool(alias.get("changed")),
+                           "alias": collapsed_text(entry.get("nickname")),
+                           "reason": alias.get("reason")}
+                          if alias else None),
+            })
+
+    # R7: what each confirmed stay HOLDS — the events read inside it, the
+    # moments it dates, the stories told about it — filed against that stay's
+    # own words rather than against the whole submission. A group whose head
+    # unit the person did not confirm files nothing: an event rides its stay,
+    # and an unconfirmed stay carries nothing.
+    extractor, version = _filing_extractor(proposal)
+    confirmed = {unit["unit_id"] for unit in chosen}
+    slices: list[dict] = []
+    for group in (proposal.get("groups") or ()):
+        if not isinstance(group, dict) or group.get("unit_id") not in confirmed:
+            continue
+        row = _file_group(root, proposal, group,
+                          telling_ref=telling_refs.get(group["unit_id"]),
+                          extractor=extractor, version=version, now=now)
+        if row is not None:
+            slices.append(row)
+    if slices:
+        # The one writer: the claims just filed become the current substrate
+        # and the calculated projection is republished from it, exactly as
+        # `save_landmark` does for a landmark record.
+        import timeline as _timeline  # noqa: PLC0415 — the one republisher
+
+        _timeline.redraw_landmarks()
 
     after = pub.read_projection(root)
     gain = trcpt.diff_projections(before, after) if after is not None else {}
@@ -1713,6 +2239,19 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
         "reason": collapsed_text(reason) or None,
         "unit_ids": sorted(unit["unit_id"] for unit in chosen),
         "filed": filed,
+        # v292: everything else this act filed, so Cut 4c's realized-gain
+        # sentence can count it and `retract` can undo exactly it.
+        "filed_names": names,
+        "filed_slices": slices,
+        "counts": {
+            "units": len(filed),
+            "names": len(names),
+            "claims": sum(1 for row in slices for event in row["events"]
+                          if event["filing"] == "claim"),
+            "moments": sum(1 for row in slices for event in row["events"]
+                           if event["filing"] == "moment"),
+            "stories": sum(len(row["stories"]) for row in slices),
+        },
         "evidence_ref": text_ref.to_dict(),
         "generation_before": pub._generation_of(before) if before else 0,  # noqa: SLF001
         "generation_after": pub._generation_of(after) if after else 0,  # noqa: SLF001
@@ -1850,6 +2389,47 @@ def _claim_ids_for_sources(vault_root: Path, source_ids: object) -> list[str]:
     return sorted(dict.fromkeys(found))
 
 
+#: The scope a retraction files the EVENTS and MOMENTS of an offer under.
+#: Not a domain — a moment held inside a stay belongs to no landmark ladder,
+#: and filing it under one would claim a domain nobody named.
+EVENTS_SCOPE = "events"
+
+
+def _retract_aliases(receipt: dict) -> list[dict]:
+    """Take back the roster aliases this receipt's apply added. Idempotent.
+
+    Only an alias the apply itself CHANGED is removed: a nickname the place
+    already answered to was not this act's to file and is not this act's to
+    take away. `roster_relations.retract_alias` is the one definition of
+    removing one; this only decides which.
+    """
+    import entity_roster  # noqa: PLC0415 — process-bound roster, as everywhere
+    import roster_relations as rr  # noqa: PLC0415
+
+    wanted = [row for row in (receipt.get("filed_names") or ())
+              if isinstance(row, dict) and isinstance(row.get("alias"), dict)
+              and row["alias"].get("changed") and row.get("place_ref")
+              and collapsed_text(row["alias"].get("alias"))]
+    if not wanted:
+        return []
+    snapshot = entity_roster.load_roster("place")
+    removed: list[dict] = []
+    changed = False
+    for row in wanted:
+        result = rr.retract_alias("place", row["place_ref"],
+                                  row["alias"]["alias"], snapshot)
+        if result.get("applied") and result.get("changed"):
+            snapshot = result["snapshot"]
+            changed = True
+        removed.append({"place_ref": row["place_ref"],
+                        "alias": collapsed_text(row["alias"].get("alias")),
+                        "removed": bool(result.get("changed"))})
+    if changed:
+        entity_roster.write_roster("place",
+                                   list(snapshot.get("entities") or ()))
+    return removed
+
+
 def retract(receipt_id: str, vault_root: str | Path, *, reason: object = None,
             now: object = None) -> dict:
     """Undo an applied offer. The evidence and the receipt stay on disk.
@@ -1880,6 +2460,17 @@ def retract(receipt_id: str, vault_root: str | Path, *, reason: object = None,
             continue
         by_domain.setdefault(collapsed_text(row.get("domain")), []).append(
             collapsed_text(row.get("source_id")))
+    # v292: the events, moments and stories the confirmed stays HELD stand on
+    # their group's own promoted slice, not on any unit's record source, so
+    # they are named by that slice and retracted under their own scope. The
+    # slice itself stays on disk — it is an immutable promoted source, and the
+    # discipline for one of those is to retract what stands on it, never to
+    # delete it.
+    slice_sources = [collapsed_text(row.get("source_id"))
+                     for row in (receipt.get("filed_slices") or ())
+                     if isinstance(row, dict) and row.get("source_id")]
+    if slice_sources:
+        by_domain.setdefault(EVENTS_SCOPE, []).extend(slice_sources)
     for domain in sorted(by_domain):
         claim_ids = _claim_ids_for_sources(root, by_domain[domain])
         if not claim_ids:
@@ -1892,6 +2483,10 @@ def retract(receipt_id: str, vault_root: str | Path, *, reason: object = None,
         corrections.append({"domain": domain,
                             "correction_id": correction.correction_id,
                             "claim_ids": list(claim_ids)})
+    # The NAMES: a nickname this apply added to a roster place is taken back
+    # off it. Only one this apply actually CHANGED — an alias that was already
+    # there was not filed by this act and is not this act's to remove.
+    aliases = _retract_aliases(receipt)
     # The one writer: redraw the landmark store from the substrate and
     # republish the calculated projection in the same act.
     timeline.redraw_landmarks()
@@ -1903,6 +2498,7 @@ def retract(receipt_id: str, vault_root: str | Path, *, reason: object = None,
         "retracted_at": normalized_timestamp(now, error=tc.TemporalContractError),
         "reason": why,
         "corrections": corrections,
+        "aliases": aliases,
         "generation_after": pub._generation_of(after) if after else 0,  # noqa: SLF001
     }
     _write_json(root, path, retraction)
@@ -2147,23 +2743,86 @@ def render_event(event: object) -> str:
     return line
 
 
-def render_proposal(proposal: object) -> str:
-    """The whole reading, as the worker leaf's ``{proposed_units}`` block."""
+#: What the group with no head unit is called. Its members are real — they were
+#: read out of the person's own words — they just belong to no stay.
+UNPLACED_GROUP = "- not part of anything you named:"
+
+
+def _indent(block: str) -> str:
+    """One member's lines, moved under the head they belong to."""
+    return "\n".join(f"  {line}" if line else line
+                      for line in str(block or "").splitlines())
+
+
+def render_story(story: object) -> str:
+    """ONE story span, in plain language."""
+    row = story if isinstance(story, dict) else {}
+    return f"- “{row.get('text')}”"
+
+
+def render_group(proposal: object, group: object) -> str:
+    """ONE group — the stay, and everything read inside it, indented under it.
+
+    This is the shape the owner asked for: a thirty-stay document reads as
+    thirty cards with their schools, jobs, events and stories under them, not
+    as ninety flat rows. The group with no head unit holds what belongs to
+    nothing, and says so.
+    """
     row = proposal if isinstance(proposal, dict) else {}
-    blocks = [render_unit(unit) for unit in (row.get("units") or ())
-              if isinstance(unit, dict)]
+    head = {item.get("unit_id"): item for item in (row.get("units") or ())
+            if isinstance(item, dict)}.get(
+                collapsed_text((group or {}).get("unit_id")))
+    lines = [render_unit(head)] if head is not None else [UNPLACED_GROUP]
+    for kind, member in group_members(row, group):
+        if kind == "unit":
+            lines.append(_indent(render_unit(member)))
+        elif kind == "event":
+            lines.append(_indent(render_event(member)))
+        else:
+            lines.append(_indent(render_story(member)))
+    return "\n".join(lines)
+
+
+def render_proposal(proposal: object) -> str:
+    """The whole reading, as the worker leaf's ``{proposed_units}`` block.
+
+    Rendered BY GROUP since v292 (§3.2): one head per group with its members
+    indented under it. A proposal written before `groups` existed — one read
+    back off disk at an older pin — still renders, as the flat list it is.
+
+    The headless group is deliberately NOT rendered as a card. Its members
+    belong to no stay, and the two sections below already say what they are in
+    the person's own terms ("things that happened", "read as story"); giving
+    them a card headed "not part of anything you named" would make the absence
+    of a stay louder than the thing they said.
+    """
+    row = proposal if isinstance(proposal, dict) else {}
+    groups = [group for group in (row.get("groups") or ())
+              if isinstance(group, dict) and group.get("unit_id")]
+    grouped = {collapsed_text(member.get("id"))
+               for group in groups
+               for member in (group.get("members") or ())
+               if isinstance(member, dict)}
+    if groups:
+        blocks = [render_group(row, group) for group in groups]
+    else:
+        blocks = [render_unit(unit) for unit in (row.get("units") or ())
+                  if isinstance(unit, dict)]
     lines = blocks or [NO_UNITS]
     events = [event for event in (row.get("events") or ())
-              if isinstance(event, dict)]
+              if isinstance(event, dict)
+              and event.get("event_id") not in grouped]
     if events:
         lines.append("")
         lines.append("Things that happened, read out of the same text:")
         lines.extend(render_event(event) for event in events[:12])
-    stories = [span for span in (row.get("stories") or ()) if isinstance(span, dict)]
+    stories = [span for span in (row.get("stories") or ())
+               if isinstance(span, dict)
+               and span.get("story_id") not in grouped]
     if stories:
         lines.append("")
         lines.append("Read as story, not as a landmark:")
-        lines.extend(f"- “{span['text']}”" for span in stories[:8])
+        lines.extend(render_story(span) for span in stories[:8])
     unknown = [span for span in (row.get("unrecognized") or ())
                if isinstance(span, dict)]
     if unknown:
@@ -2592,10 +3251,18 @@ __all__ = [
     "apply",
     "DATE_KEYS",
     "EVENT_KEYS",
+    "GROUP_KEYS",
+    "MEMBER_KINDS",
     "UNIT_BASES",
+    "UNPLACED_GROUP",
+    "build_groups",
+    "group_members",
+    "group_slice",
+    "group_source_relative_path",
     "date_evidence",
     "derive_event_id",
     "derive_proposal_id",
+    "derive_story_id",
     "derive_receipt_id",
     "derive_unit_id",
     "grammar_units",
@@ -2620,8 +3287,10 @@ __all__ = [
     "read_proposal",
     "receipt_is_retracted",
     "render_event",
+    "render_group",
     "render_open_questions",
     "render_proposal",
+    "render_story",
     "render_unit",
     "retire_matching_opportunity",
     "retract",

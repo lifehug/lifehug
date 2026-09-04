@@ -413,3 +413,121 @@ the first.
 Accepted for the offer path at v291. Cut 6g adds filing for relations, names
 and events; Cut 6h deletes `grammar_units`, `_date_dict` and the
 `go_dig_writer.plan_import` import.
+
+## Amendment 2, 2026-09-04 (v292) — R7's filing: relations, names and what a stay holds
+
+Controlling record: `lifehug-platform
+docs/decisions/2026-09-03-timeline-unification/add-landmark-reading-plan.md`
+§2 (R7), §3.2 and §4's "6g". v291 READ relations, names and events and carried
+them on the proposal. This amendment FILES them.
+
+### R7, as the system does it
+
+> "Any information with a span should be connected to that time span."
+
+- **The proposal is grouped.** `groups[]` is `[{unit_id, members: [{kind, id}]}]`
+  — one entry per unit with `within: null`, in text order, whose `members` are
+  the units, events and stories whose `within` resolves to it **transitively**
+  (a school inside a stay brings its own events), plus a trailing
+  `{unit_id: null}` entry for what belongs to nothing. `landmark_offer.build_groups`
+  computes it; `render_proposal` renders one head per group with its members
+  indented; the five offer goldens pin it. Stories gained `story_id`
+  (`derive_story_id`, content-addressed on the span they are) because a member
+  is named by an id and a story had none.
+- **`apply` files a group, not a list of units.** Confirming a stay files what
+  is on its card. A group whose head unit the person did not confirm files
+  nothing: an event rides its stay.
+- **Names file through the E-L2c road.** The reading's `names` are already on
+  the record (`landmark_reading._record_for`), so the one writer files them:
+  `city` mints or finds the roster place, `nickname` becomes an ALIAS decision
+  on that place (`go_dig_writer.record_unit` → `roster_relations.alias_decision`,
+  the trailing parenthetical moved to the entry's note), `address` and `link`
+  are the entry's own fields. Without the alias, "the Orchard House" in a later
+  story joins to nothing — the place join is provable source overlap with the
+  roster place (`timeline._place_for_event`), never a keyword.
+- **An inherited unit files with its provenance intact.** Every bound carries
+  `basis: anchor`, `confidence: inferred` and the verbatim clause; the writer
+  keeps them (`chronology.normalized_date` preserves `provenance` and
+  `landmarks_interaction.validate_landmark` passes it through). A unit with
+  `basis: "none"` files with no dates at all.
+- **One promoted slice per group.** The whole submission is still promoted (R3:
+  the words are evidence on submit). The group's own words — the head unit's
+  quote extended to cover its members' — are promoted SEPARATELY, and the
+  events, moments and stories that group holds cite that. A source that is the
+  whole document overlaps with every place in it; a slice overlaps with one
+  stay. The slice carries the head unit's `unit_id` as its `turn_ref`, which is
+  what keeps it its own utterance when a submission IS one stay.
+- **Dated events file as claims, undated ones as moments.** A dated event is a
+  `date` claim; an undated one is `temporal_claims.OCCURRENCE_CLAIM_TYPE` — the
+  type that asserts a thing happened and asserts nothing about when. That
+  choice is the SYSTEM's, made from the bytes: `occurrence` is withheld from
+  every model-facing vocabulary (`MODEL_CLAIM_TYPES`) and the reading leaf names
+  no claim type at all, exactly as `classifier_claims.temporal_reading` decides
+  the same thing over a classification it did not make. Both go through
+  `general_listener.bind_claims` and `temporal_store.write_receipt` — the same
+  road every other claim in this vault takes.
+- **An event's date is evidenced like a unit's.** `_event_row` re-reads it with
+  `date_evidence`; a year the submission does not carry is dropped and the event
+  files as a moment. `filing` therefore says what will actually happen to it,
+  which is the only thing that makes it safe for `apply` to act on.
+
+### Two decisions §3.1 did not settle
+
+1. **The stay rides on `place_mentions`, not on `event_mention`.** §3.1 rule 7
+   says an event's `event_mention` is the `within` unit's subject.
+   `temporal_timeline._node_what` publishes the longest `event_mention` as the
+   node's own human text ("what a person would call this thing"), so obeying the
+   letter labels *"Dad started at the mill"* as *"the blue house"* on the
+   person's own timeline — D2's class of defect. The rule's intent is the JOIN,
+   and `place_mentions` is the field the join reads (`event_identity`'s entity
+   signal, `temporal_timeline._group_place_mentions`), so the stay's names go
+   there and the event keeps its own words.
+2. **An inherited stretch is a stretch, but never a container.**
+   `episode_containers.span_from_claims` read a stretch only out of bounds the
+   person STATED, which is right for deciding what a container is (a container
+   is opened in the person's own words) and wrong for drawing a node: a
+   schooling with two inherited ends was published as a point at its start. It
+   gains `require_stated`, defaulting to today's behaviour;
+   `_apply_participation_span` asks for the stretch whatever its basis, and the
+   record carries the inherited basis rather than being stamped `stated`.
+
+### Containment: what the graph can hold, and what it cannot (§6 open item 1)
+
+Verified against the code, not assumed. The calculated projection's relation
+block (`containments` / `related` / `proposed_links`, keyed
+`temporal_projection.IDENTITY_LINK_KEYS`, relations
+`episode_fold_contract.RELATIONS`) is built by
+`episode_fold.EpisodeIdentity.node_block` out of a node's TELLINGS. It is a
+telling→episode relation. **There is no episode→episode edge**, so a
+school-inside-a-stay is a DATE INHERITANCE and not a rendered containment —
+6g does not fake one.
+
+What a stay CAN contain is a telling, and that road is deterministic: the
+group's promoted slice carries `question_context` = the stay's own telling ref
+(`temporal_store.QUESTION_CONTEXT_KEY`, `episode_binder.QUESTION_CONTEXT_SEAM`,
+event-identity §12b ruling 5 — "the session records which container its
+question targeted", a fact about what was told and not an inference from it).
+`episode_binder`'s deterministic containment rung turns that stamp into a
+`part_of` binding, and the fold then gives the undated moment the stay's bounds
+as its `possible_temporal_value` with the provenance *"sometime during …"*.
+
+Filing that binding is the BINDER's act, never `apply`'s.
+`event_identity.file_event_identity` is reachable only from
+`bind-episodes --apply` (owner-reviewed, per I2b's rollout gate) and from a
+person's own answer in `identity_questions`; calling it from `apply` would put
+a second writer on the identity substrate. `apply` stamps; the binder files.
+
+### Undo
+
+`retract` takes back everything the apply filed: the units' claims (unchanged),
+the events' and moments' claims under the `landmarks/events` scope
+(`landmark_offer.EVENTS_SCOPE`), and the roster ALIAS — but only one this apply
+actually CHANGED, because a nickname the place already answered to was not this
+act's to file and is not this act's to remove (`roster_relations.retract_alias`).
+The promoted sources — the submission and every slice — stay on disk. Nothing
+immutable is deleted.
+
+### Status
+
+Accepted at v292. Cut 6h deletes `grammar_units`, `_date_dict` and the
+`go_dig_writer.plan_import` import; 6j renders `groups` on the page.

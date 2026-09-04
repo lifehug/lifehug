@@ -197,13 +197,13 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
-| The offer verb (v287, ADR 0033; host-run reading protocol v291, Cut 6f) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>` · `--propose --prompts` (prints the ONE reading prompt; calls no model) · `--propose --completions FILE` (`{"reading": <completion>}`; runs and writes the proposal from it) · `--context FILE` for `{landmarks, roster, generation}` on any of the above. Modules: `system/landmark_offer.py`, `system/landmark_reading.py`; leaves: `prompt/reading.md` (`composition.reading`, `role.reading`) and `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
+| The offer verb (v287, ADR 0033; host-run reading protocol v291, Cut 6f) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>` (undoes the names, the claims, the moments and the stories that apply filed; deletes nothing) · `--propose --prompts` (prints the ONE reading prompt; calls no model) · `--propose --completions FILE` (`{"reading": <completion>}`; runs and writes the proposal from it) · `--context FILE` for `{landmarks, roster, generation}` on any of the above. Modules: `system/landmark_offer.py`, `system/landmark_reading.py`; leaves: `prompt/reading.md` (`composition.reading`, `role.reading`) and `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
 | The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete] [--none]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
 writes it.
 
-## The `offer` mode (Add Landmark, v287; ONE reading since v291)
+## The `offer` mode (Add Landmark, v287; ONE reading since v291; R7 filing since v292)
 
 Owner rulings R3/R3a/R3b, 2026-09-03 (`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5;
 ADR 0033) and **R6–R9, 2026-09-04** (that program's
@@ -245,6 +245,24 @@ card. A unit with no dates and no dated parent is `basis: "none"` and says
 **"no date read"**; it never says "inferred". **Estimation is the
 interaction's convention and `approximate` is the system's word (R8):** a
 bracketed or hedged bound renders "estimated, as you marked it".
+
+**And the span is what gets FILED (v292, R7).** The proposal carries `groups[]`
+— one entry per top-level unit, in text order, whose `members` are the units,
+events and stories whose `within` resolves to it transitively, plus a trailing
+`{unit_id: null}` entry for what belongs to nothing. A thirty-block document
+reads as thirty cards. Confirming a stay files what is on its card: the
+nickname as an ALIAS on the roster place the city minted (without it, "the
+Orchard House" in a later story joins to nothing — the place join is provable
+source overlap, never a keyword), the city and address as the place's own
+names, an inherited span with every bound's provenance clause intact, a dated
+event as a claim at its date, an undated one as an `occurrence` moment, and one
+promoted SLICE per group — the stay's own words, not the whole paste — as the
+source all of them cite. The slice is stamped with the stay's telling ref, which
+is `episode_binder`'s deterministic containment rung; the binder files the
+`part_of`, `apply` never does. `retract` takes all of it back, alias included,
+and deletes nothing. Episode-in-episode containment is NOT a relation the
+calculated graph holds, so a school inside a stay is a date inheritance and not
+a rendered edge (ADR 0033 amendment 2).
 
 Six promises the mode keeps, each with a lint behind it: **no date a unit
 carries is absent from the person's own text** (`landmark_offer.date_evidence`,

@@ -250,6 +250,42 @@ def _offer_unit_matches(unit: dict, expected: dict) -> bool:
     return True
 
 
+def offer_group_rows(proposal: dict) -> list[dict]:
+    """A proposal's ``groups`` in a shape a person can read and check by eye.
+
+    ``[{"unit": <head subject or None>, "members": ["unit:<subject>",
+    "event:<text>", "story:<text>"]}]``. A golden pins WHAT belongs to WHICH
+    stay, never the content-addressed ids the wire carries — those move
+    whenever a quote or a date moves, and a fixture nobody can read is a
+    fixture nobody checks.
+    """
+    units = {row.get("unit_id"): row for row in (proposal.get("units") or ())
+             if isinstance(row, dict)}
+    events = {row.get("event_id"): row for row in (proposal.get("events") or ())
+              if isinstance(row, dict)}
+    stories = {row.get("story_id"): row for row in (proposal.get("stories") or ())
+               if isinstance(row, dict)}
+    labels = {"unit": lambda row: row.get("subject"),
+              "event": lambda row: row.get("text"),
+              "story": lambda row: row.get("text")}
+    tables = {"unit": units, "event": events, "story": stories}
+    rows: list[dict] = []
+    for group in (proposal.get("groups") or ()):
+        if not isinstance(group, dict):
+            continue
+        head = units.get(group.get("unit_id"))
+        members: list[str] = []
+        for member in (group.get("members") or ()):
+            if not isinstance(member, dict):
+                continue
+            kind = member.get("kind")
+            found = (tables.get(kind) or {}).get(member.get("id"))
+            members.append(f"{kind}:{labels[kind](found) if found else None}")
+        rows.append({"unit": head.get("subject") if head else None,
+                     "members": members})
+    return rows
+
+
 def _within_subject(unit: dict, by_id: dict) -> str | None:
     """The SUBJECT of the unit this one belongs to, for a readable golden.
 
@@ -314,6 +350,9 @@ def score_offer_goldens(fixtures: list[dict]) -> dict:
                       "within": (by_id.get(row.get("within")) or {}).get("subject")}
                      for row in (proposal.get("events") or ())]
             matched = matched and found == list(expected["events"])
+        if "groups" in expected:
+            matched = matched and offer_group_rows(proposal) == \
+                list(expected["groups"])
         if "findings" in expected:
             matched = matched and list(proposal.get("findings") or ()) == \
                 list(expected["findings"])
