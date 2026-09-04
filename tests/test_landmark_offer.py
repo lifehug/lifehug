@@ -1,13 +1,15 @@
-"""Cut 6a — Add Landmark, the `offer` mode of the Landmarks Interaction.
+"""Add Landmark, the `offer` mode of the Landmarks Interaction.
 
 Controlling design: `lifehug-platform
 docs/decisions/2026-09-03-timeline-unification/decision-record.md` — R3, R3a,
-R3b, §4.2 (weight tiers), §5 (the interaction, the manifest, the six states,
-filing and the loop, transport, the five examples of §5.6). ADR 0033.
+R3b, §4.2 (weight tiers), §5 — and, for the reading, that program's
+`add-landmark-reading-plan.md` §2 (R6–R9) and §3.1/§3.2. ADR 0033 and its Cut
+6f amendment.
 
-No live model call: the two passes take an injected ``call``, and every test
-here scripts it — the same recorded discipline `tests/test_landmarks.py` uses
-for the recorder.
+Cut 6f (v291) replaced the three extraction passes with ONE reading, so every
+test here scripts ONE completion in the reading contract's own shape. No live
+model call anywhere — the same recorded discipline `tests/test_landmarks.py`
+uses for the recorder.
 
 Synthetic data only; NEVER references ~/Workspace/dave.
 """
@@ -72,31 +74,45 @@ def _span(start: str, end: str | None, **kwargs) -> dict:
     return span
 
 
-class ScriptedCall:
-    """One injected ``call`` that answers the listener and each recorder.
+def reading(units=(), events=(), stories=(), unplaced=()) -> dict:
+    """One reading completion, in §3.1's own shape."""
+    return {"units": list(units), "events": list(events),
+            "stories": list(stories), "unplaced": list(unplaced)}
 
-    Dispatch is on the composed prompt's own header — the recorder leaf names
-    its domain, the listener leaf does not — so the script is written the way
-    a host's REPLAY reads it, and a prompt nobody scripted answers empty
-    rather than silently borrowing another domain's completion.
+
+def read_unit(ref: str, domain: str, subject: str, quote: str, *,
+              record=None, names=None, dates=None, within=None) -> dict:
+    row = {"ref": ref, "domain": domain, "subject": subject, "quote": quote,
+           "record": dict(record or {}), "dates": dates, "within": within}
+    if names:
+        row["names"] = dict(names)
+    return row
+
+
+def read_dates(start=None, end=None, *, ongoing=False,
+               start_estimated=False, end_estimated=False) -> dict:
+    return {"start": start, "end": end, "ongoing": ongoing,
+            "start_estimated": start_estimated,
+            "end_estimated": end_estimated}
+
+
+class ScriptedCall:
+    """One injected ``call`` that answers the ONE reading (Cut 6f, R6/R9).
+
+    There is one prompt per submission now, so there is nothing to dispatch
+    on: whatever `propose` composes, this answers with the scripted reading.
     """
 
-    EMPTY = '{"landmarks": [], "claims": []}'
+    EMPTY = lo.EMPTY_COMPLETION
 
-    def __init__(self, *, listener: object = None, recorders: object = None):
-        self.listener = listener if listener is not None else self.EMPTY
-        self.recorders = dict(recorders or {})
+    def __init__(self, *, reading: object = None):
+        self.reading = reading if reading is not None else self.EMPTY
         self.prompts: list[str] = []
 
     def __call__(self, prompt: str, model: str) -> str:
         self.prompts.append(prompt)
-        for domain, payload in self.recorders.items():
-            if f"DOMAIN BEING ASKED ABOUT: {domain}\n" in prompt:
-                return payload if isinstance(payload, str) else json.dumps(payload)
-        if "DOMAIN BEING ASKED ABOUT:" in prompt:
-            return self.EMPTY
-        return (self.listener if isinstance(self.listener, str)
-                else json.dumps(self.listener))
+        return (self.reading if isinstance(self.reading, str)
+                else json.dumps(self.reading))
 
 
 class OfferVaultCase(unittest.TestCase):
@@ -160,14 +176,35 @@ class ModeTests(unittest.TestCase):
         self.assertIn("Where was that?", turn)
         self.assertIn("Do you remember the address on Mesa?", turn)
 
-    def test_an_inferred_date_is_shown_as_one(self):
+    def test_an_inferred_date_is_shown_with_the_clause_that_earned_it(self):
+        """§3.2: an inherited date renders its own provenance sentence
+        VERBATIM, and one with no clause falls back to the general one."""
+        clause = "from the dates of the Orchard House stay"
         turn = lo.build_offer_turn({"units": [
+            {"kind": "schooling", "subject": "Kestrel Elementary",
+             "dates": {"start": "1981", "end": "1982", "basis": "inferred",
+                       "clause": clause},
+             "quote": {"text": "School: Kestrel Elementary"},
+             "questions": []}],
+            "stories": [], "unrecognized": [], "questions": []})
+        self.assertIn(clause, turn)
+        bare = lo.build_offer_turn({"units": [
             {"kind": "residence", "subject": "Cedarport",
-             "dates": {"start": "1993", "end": None, "basis": "inferred"},
+             "dates": {"start": "1993", "end": None, "basis": "inferred",
+                       "clause": None},
              "quote": {"text": "Then Cedarport for a while."},
              "questions": []}], "stories": [], "unrecognized": [],
             "questions": []})
-        self.assertIn("you did not say a date", turn)
+        self.assertIn(lo.INFERRED_CLAUSE, bare)
+
+    def test_a_unit_with_no_date_read_says_so(self):
+        turn = lo.build_offer_turn({"units": [
+            {"kind": "residence", "subject": "Cedarport",
+             "dates": {"start": None, "end": None, "basis": "none"},
+             "quote": {"text": "Then Cedarport for a while."},
+             "questions": []}], "stories": [], "unrecognized": [],
+            "questions": []})
+        self.assertIn(lo.NO_DATE_READ, turn)
 
     def test_the_registry_gains_no_interaction_kind(self):
         import interaction_registry as reg  # noqa: PLC0415
@@ -219,38 +256,54 @@ class ModeTests(unittest.TestCase):
 
 
 MESA = "I lived in Mesa from 1990 to 1992."
-MESA_RECORD = {"domain": "residences", "label": "Mesa", "city": "Mesa",
-               "span": _span("1990", "1992")}
-MESA_CLAIM = {"claim_type": "range", "subject_mention": "Mesa",
-              "event_kind": "move", "temporal_value": "1990/1992",
-              "evidence": MESA}
+MESA_READING = reading(units=[read_unit(
+    "u1", "residences", "Mesa", MESA, record={"city": "Mesa", "label": "Mesa"},
+    names={"city": "Mesa"}, dates=read_dates("1990", "1992"))])
 
 BOATWORKS = "I worked at the Boatworks from about '91 to '92."
-BOATWORKS_RECORD = {"domain": "work", "label": "the Boatworks",
-                    "what": "boat building",
-                    "span": _span("1991", "1992", confidence="approximate")}
-BOATWORKS_CLAIM = {"claim_type": "range", "subject_mention": "the Boatworks",
-                   "event_kind": "job", "temporal_value": "1991/1992",
-                   "evidence": BOATWORKS}
+BOATWORKS_READING = reading(units=[read_unit(
+    "u1", "work", "the Boatworks", BOATWORKS,
+    record={"what": "boat building", "label": "the Boatworks"},
+    dates=read_dates("1991", "1992", start_estimated=True,
+                     end_estimated=True))])
 
 MOVED = "We moved around a lot after Dad changed jobs."
-MOVED_CLAIM = {"claim_type": "relative_order", "subject_mention": "we",
-               "event_kind": "move",
-               "temporal_value": {"relation": "after",
-                                  "anchors": ["Dad changed jobs"]},
-               "evidence": MOVED}
+MOVED_READING = reading(events=[
+    {"ref": "e1", "text": "we moved around a lot", "kind": "move",
+     "subject_mention": "self", "date": None, "within": None,
+     "quote": MOVED}])
 
 DOG = "My dog died that summer."
+DOG_READING = reading(stories=[{"quote": DOG, "within": None}])
+
+#: One stay with a school inside it — R7's own shape, in one sentence.
+ELM = ("I lived on Elm from 1990 to 1992, we called it the blue house, "
+       "I was at Lincoln Elementary then, and Dad started at the mill "
+       "that spring.")
+ELM_READING = reading(
+    units=[
+        read_unit("u1", "residences", "the blue house",
+                  "I lived on Elm from 1990 to 1992, we called it the blue house",
+                  record={"city": "Elm", "label": "the blue house"},
+                  names={"nickname": "the blue house", "city": "Elm"},
+                  dates=read_dates("1990", "1992")),
+        read_unit("u2", "schools", "Lincoln Elementary",
+                  "I was at Lincoln Elementary then",
+                  record={"name": "Lincoln Elementary",
+                          "label": "Lincoln Elementary"},
+                  within="u1"),
+    ],
+    events=[{"ref": "e1", "text": "Dad started at the mill", "kind": "job",
+             "subject_mention": "Dad", "date": None, "within": "u1",
+             "quote": "and Dad started at the mill that spring."}])
 
 
-class TheFiveExamplesTests(OfferVaultCase):
-    """Decision record §5.6, one test each."""
+class OneReadingTests(OfferVaultCase):
+    """R6/R9: one prompt, one completion, and everything after it
+    deterministic."""
 
     def test_a_stated_residence_is_one_certain_quoted_unit(self):
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         proposal = self.propose(MESA, call)
         self.assertEqual(proposal["state"], "proposed")
         self.assertEqual(len(proposal["units"]), 1)
@@ -258,41 +311,71 @@ class TheFiveExamplesTests(OfferVaultCase):
         self.assertEqual(unit["domain"], "residences")
         self.assertEqual(unit["kind"], "residence")
         self.assertEqual(unit["subject"], "Mesa")
-        self.assertEqual(unit["dates"],
-                         {"start": "1990", "end": "1992", "precision": "year",
-                          "basis": "stated", "confidence": "certain"})
+        self.assertEqual(unit["dates"], {
+            "start": "1990", "end": "1992", "precision": "year",
+            "basis": "stated", "confidence": "certain",
+            "estimated": {"start": False, "end": False},
+            "inherited_from": None, "clause": None})
         self.assertEqual(unit["quote"]["text"], MESA)
+        self.assertIsNone(unit["within"])
+        self.assertEqual(unit["names"], {"city": "Mesa"})
         self.assertTrue(unit["auto_file_eligible"])
         self.assertEqual(unit["questions"], [])
-        # The claim the listener heard is covered by the unit's own quote, so
-        # nothing is asked twice.
         self.assertEqual(proposal["questions"], [])
         self.assertEqual(lo.lint_offer_proposal(proposal), [])
 
-    def test_a_hedged_tenure_is_approximate_and_names_its_organization(self):
-        call = ScriptedCall(
-            listener={"landmarks": [BOATWORKS_RECORD], "claims": [BOATWORKS_CLAIM]},
-            recorders={"work": {"landmarks": [BOATWORKS_RECORD],
-                                "claims": [BOATWORKS_CLAIM]}})
+    def test_the_reading_is_exactly_one_model_call(self):
+        """R9: a long paste is ONE reading. No grammar first, no second pass,
+        no per-domain call."""
+        call = ScriptedCall(reading=ELM_READING)
+        self.propose(ELM, call)
+        self.assertEqual(len(call.prompts), 1)
+        self.assertIn("THE DOMAINS, AND THE ONLY KEYS EACH ONE CAN READ",
+                      call.prompts[0])
+        self.assertNotIn("DOMAIN BEING ASKED ABOUT:", call.prompts[0])
+
+    def test_the_prompt_is_the_reading_leaf_with_the_live_vocabulary(self):
+        import general_listener as gl  # noqa: PLC0415
+        import landmark_reading as lr  # noqa: PLC0415
+
+        call = ScriptedCall(reading=MESA_READING)
+        self.propose(MESA, call)
+        prompt = call.prompts[0]
+        self.assertIn(gl.render_domain_digest(), prompt)
+        self.assertIn(lr.render_name_keys(), prompt)
+        self.assertIn(MESA, prompt)
+
+    def test_an_estimated_bound_is_approximate_and_says_so(self):
+        """R8: brackets, 'about', '?' are the person's own convention and the
+        system's word for them is `approximate`."""
+        call = ScriptedCall(reading=BOATWORKS_READING)
         proposal = self.propose(BOATWORKS, call)
-        self.assertEqual(len(proposal["units"]), 1)
         unit = proposal["units"][0]
         self.assertEqual(unit["kind"], "tenure")
         self.assertEqual(unit["dates"]["basis"], "stated")
         self.assertEqual(unit["dates"]["confidence"], "approximate")
+        self.assertEqual(unit["dates"]["estimated"],
+                         {"start": True, "end": True})
+        self.assertIn(lo.ESTIMATED_PHRASE, lo.render_unit(unit))
         self.assertEqual([c["confidence"] for c in unit["entity_candidates"]],
                          ["new"])
         self.assertEqual(unit["entity_candidates"][0]["type"], "organization")
-        self.assertEqual(proposal["questions"], [])
         self.assertEqual(lo.lint_offer_proposal(proposal), [])
 
-    def test_a_claims_evidence_is_read_in_every_shape_the_contract_accepts(self):
-        self.assertEqual(lo.claim_evidence_text({"evidence": MESA}), MESA)
-        self.assertEqual(lo.claim_evidence_text({"evidence": [{"quote": MESA}]}),
-                         MESA)
-        self.assertEqual(lo.claim_evidence_text({"evidence": {"quote": MESA}}),
-                         MESA)
-        self.assertEqual(lo.claim_evidence_text({}), "")
+    def test_a_bracketed_bound_read_as_certain_is_a_finding(self):
+        proposal = {
+            "source_text": BOATWORKS,
+            "units": [{"unit_id": "lmu:x", "record": {},
+                       "quote": {"text": BOATWORKS, "offset": 0,
+                                 "length": len(BOATWORKS)},
+                       "dates": {"basis": "stated", "confidence": "certain",
+                                 "estimated": {"start": True, "end": False},
+                                 "clause": None}}],
+            "events": [], "stories": [], "unrecognized": [],
+        }
+        self.assertEqual([row["lint"] for row in
+                          lo.lint_offer_proposal(proposal)],
+                         [lo.HONEST_BASIS_LINT])
 
     def test_the_two_digit_year_the_person_wrote_is_still_their_own_date(self):
         self.assertTrue(lo.date_evidence(_date("1991"), {"text": BOATWORKS},
@@ -300,8 +383,20 @@ class TheFiveExamplesTests(OfferVaultCase):
         self.assertFalse(lo.date_evidence(_date("1994"), {"text": BOATWORKS},
                                           BOATWORKS))
 
+    def test_a_month_the_person_abbreviated_is_still_their_own_date(self):
+        """v291: `chronology.parse_loose_date` reads `Jun 1986`, so an
+        evidence guard that only looked for `june` dropped the very date they
+        typed."""
+        text = "Dates: [Jun 1986] - March 1991"
+        import chronology as chrono  # noqa: PLC0415
+
+        for value in ("Jun 1986", "March 1991"):
+            with self.subTest(value=value):
+                self.assertTrue(lo.date_evidence(
+                    chrono.normalized_date(value), {"text": text}, text))
+
     def test_vague_movement_fabricates_no_residence_and_asks_where(self):
-        call = ScriptedCall(listener={"landmarks": [], "claims": [MOVED_CLAIM]})
+        call = ScriptedCall(reading=MOVED_READING)
         proposal = self.propose(MOVED, call)
         self.assertEqual(proposal["units"], [])
         self.assertEqual(proposal["state"], "needs_clarification")
@@ -310,11 +405,14 @@ class TheFiveExamplesTests(OfferVaultCase):
         self.assertEqual(question["domain"], "residences")
         self.assertIn("where", question["text"].lower())
         self.assertNotIn("199", question["text"])
-        # The words themselves are retained, not thrown away.
-        self.assertEqual([span["text"] for span in proposal["stories"]], [MOVED])
+        # The words themselves are retained, not thrown away — the event's own
+        # quote covers them.
+        self.assertEqual([event["quote"]["text"]
+                          for event in proposal["events"]], [MOVED])
+        self.assertEqual(proposal["events"][0]["filing"], "moment")
 
     def test_a_story_is_routed_as_a_story_and_never_refused(self):
-        call = ScriptedCall(listener={"landmarks": [], "claims": []})
+        call = ScriptedCall(reading=DOG_READING)
         proposal = self.propose(DOG, call)
         self.assertEqual(proposal["units"], [])
         self.assertEqual([span["text"] for span in proposal["stories"]], [DOG])
@@ -326,55 +424,69 @@ class TheFiveExamplesTests(OfferVaultCase):
             "I've kept that as a story — it isn't one of the dated anchors."),
             [])
 
-    def test_a_thirty_block_document_proposes_thirty_units_and_drops_nothing(self):
-        blocks = []
-        for index in range(30):
-            year = 1960 + index
-            blocks.append(f"Dates: {year} - {year + 1}\n"
-                          f"City/State: Town{index:02d}, ST")
-        document = "\n\n".join(blocks)
-        call = ScriptedCall(listener={"landmarks": [], "claims": []})
-        proposal = self.propose(document, call)
-        self.assertEqual(len(proposal["units"]), 30)
-        self.assertEqual(proposal["unrecognized"], [])
+    def test_a_school_inside_a_stay_inherits_its_dates_and_says_where_from(self):
+        """R7 rule 4, and the clause is rendered verbatim."""
+        call = ScriptedCall(reading=ELM_READING)
+        proposal = self.propose(ELM, call)
+        by_subject = {unit["subject"]: unit for unit in proposal["units"]}
+        stay = by_subject["the blue house"]
+        school = by_subject["Lincoln Elementary"]
+        self.assertEqual(school["within"], stay["unit_id"])
+        self.assertEqual(school["dates"]["basis"], "inferred")
+        self.assertEqual(school["dates"]["confidence"], "inferred")
+        self.assertEqual(school["dates"]["start"], stay["dates"]["start"])
+        self.assertEqual(school["dates"]["end"], stay["dates"]["end"])
+        clause = "from the dates of the the blue house stay"
+        self.assertEqual(school["dates"]["clause"], clause)
+        self.assertEqual(school["dates"]["inherited_from"]["unit_id"],
+                         stay["unit_id"])
+        self.assertIn(clause, lo.render_unit(school))
+        self.assertIn({"basis": "inferred", "claim": clause},
+                      school["record"]["span"]["start"]["provenance"])
+        # An inherited date carries its own provenance, so it is not asked
+        # about a second time.
+        self.assertEqual(school["questions"], [])
+        self.assertEqual(lo.lint_offer_proposal(proposal), [])
+
+    def test_a_dated_event_files_as_a_claim_and_an_undated_one_as_a_moment(self):
+        call = ScriptedCall(reading=ELM_READING)
+        proposal = self.propose(ELM, call)
+        self.assertEqual(len(proposal["events"]), 1)
+        event = proposal["events"][0]
+        self.assertEqual(sorted(event), sorted(lo.EVENT_KEYS))
+        self.assertEqual(event["filing"], "moment")
+        self.assertIsNone(event["date"])
+        self.assertEqual(event["within"], proposal["units"][0]["unit_id"])
+        self.assertTrue(lo.valid_id(event["event_id"]))
+
+    def test_an_event_quote_counts_as_coverage(self):
+        call = ScriptedCall(reading=ELM_READING)
+        proposal = self.propose(ELM, call)
         self.assertEqual(proposal["stories"], [])
-        self.assertEqual({unit["extractor"] for unit in proposal["units"]},
-                         {"grammar"})
-        self.assertEqual({unit["dates"]["basis"] for unit in proposal["units"]},
-                         {"stated"})
-        self.assertEqual(lo.lint_offer_proposal(proposal), [])
-        self.assertEqual(len({unit["unit_id"] for unit in proposal["units"]}), 30)
-
-    def test_a_block_the_grammar_cannot_read_goes_to_the_listener(self):
-        """R3: a paste the grammar cannot read is never refused — it is
-        ordinary text, and the Haiku-class listener is what reads it."""
-        document = ("Dates: 1970 - 1972\nCity/State: Rivermouth, ST\n\n"
-                    "Dates: not sure really\nCity/State: Harbor End, ST")
-        call = ScriptedCall(listener={"landmarks": [], "claims": []})
-        proposal = self.propose(document, call)
-        self.assertEqual([unit["subject"] for unit in proposal["units"]],
-                         ["Rivermouth"])
-        kept = " ".join(span["text"] for span in
-                        proposal["stories"] + proposal["unrecognized"])
-        self.assertIn("Harbor End", kept)
-        self.assertIn("not sure really", kept)
+        self.assertEqual(proposal["unrecognized"], [])
         self.assertEqual(lo.lint_offer_proposal(proposal), [])
 
-    def test_a_line_the_grammar_does_not_know_is_never_half_parsed(self):
-        document = ("Dates: 1970 - 1972\nCity/State: Rivermouth, ST\n"
-                    "It rained the whole two years.")
-        units, _consumed = lo.grammar_units(document)
-        self.assertEqual(units, [])
+    def test_a_unit_with_no_dates_and_no_dated_parent_reads_no_date(self):
+        """R7 rule 5 / D5: `basis: none`, never `inferred`."""
+        text = "We were in Cedarport for a while."
+        call = ScriptedCall(reading=reading(units=[read_unit(
+            "u1", "residences", "Cedarport", text,
+            record={"city": "Cedarport", "label": "Cedarport"})]))
+        proposal = self.propose(text, call)
+        unit = proposal["units"][0]
+        self.assertEqual(unit["dates"]["basis"], "none")
+        self.assertIsNone(unit["dates"]["start"])
+        self.assertIsNone(unit["dates"]["clause"])
+        self.assertIn(lo.NO_DATE_READ, lo.render_unit(unit))
+        self.assertTrue(unit["questions"])
+        self.assertFalse(unit["auto_file_eligible"])
 
-    def test_the_extraction_roles_are_the_ones_the_manifest_declares(self):
-        import general_listener as gl  # noqa: PLC0415
-        import landmark_recorder as recorder  # noqa: PLC0415
+    def test_the_extraction_role_is_the_one_the_manifest_declares(self):
+        import landmark_reading as lr  # noqa: PLC0415
 
         manifest = (ROOT / "interactions" / "landmarks"
                     / "interaction.yaml").read_text(encoding="utf-8")
-        self.assertIn(f"role.listener: {gl.DEFAULT_LISTENER_ROLE}", manifest)
-        self.assertIn(f"role.recorder: {recorder.DEFAULT_RECORDER_ROLE}",
-                      manifest)
+        self.assertIn(f"role.reading: {lr.DEFAULT_READING_ROLE}", manifest)
         self.assertIn("role.worker: sonnet-class", manifest)
 
     def test_no_model_call_recalculates_a_date(self):
@@ -388,18 +500,22 @@ class TheFiveExamplesTests(OfferVaultCase):
                   if isinstance(node, ast.Call)
                   and isinstance(node.func, ast.Attribute)}
         self.assertNotIn("call_ai", called)
-        # The one model seam is the injected `call`, reached only through the
-        # two passes the interaction already declares.
-        self.assertEqual(
-            sorted(name for name in called
-                   if name in {"listen_to_answer", "record_answer"}),
-            ["listen_to_answer", "record_answer"])
+        # R6: the listener and the recorder are gone from this module
+        # entirely. (`plan_import` survives inside `grammar_units`, which
+        # nothing calls any more and Cut 6h deletes — the test below proves
+        # `propose` does not reach it.)
+        self.assertEqual(called & {"listen_to_answer", "record_answer"},
+                         set())
 
-    def test_the_deterministic_pass_spends_no_completion(self):
-        document = "Dates: 1970 - 1972\nCity/State: Rivermouth, ST"
-        units, _consumed = lo.grammar_units(document)
-        self.assertEqual(len(units), 1)
-        self.assertEqual(units[0]["subject"], "Rivermouth")
+    def test_the_offer_path_composes_no_listener_and_no_recorder(self):
+        """R6, read off the source: `propose` must not reach the collect
+        mode's own extraction passes."""
+        source = (SYSTEM / "landmark_offer.py").read_text(encoding="utf-8")
+        body = source[source.index("def propose("):
+                      source.index("def _extractors(")]
+        for forbidden in ("listen_to_answer", "record_answer", "grammar_units",
+                          "build_listener_prompt", "build_recorder_prompt"):
+            self.assertNotIn(forbidden, body)
 
 
 # --------------------------------------------------------------------------
@@ -408,51 +524,79 @@ class TheFiveExamplesTests(OfferVaultCase):
 
 
 class BasisTests(OfferVaultCase):
-    def test_a_quoted_date_files_as_stated_and_an_unquoted_one_as_inferred(self):
+    def test_a_bound_the_text_does_not_carry_is_dropped_not_rewritten(self):
+        """§3.1 rule 2, and D5: a year nobody typed is not turned into a
+        confident-looking inference — it is dropped, and the unit says no date
+        was read."""
         text = "I lived in Mesa from 1990 to 1992. Then Cedarport for a while."
-        cedar = {"domain": "residences", "label": "Cedarport",
-                 "city": "Cedarport", "span": _span("1993", "1996")}
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD, cedar],
-                      "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD, cedar],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=reading(units=[
+            read_unit("u1", "residences", "Mesa",
+                      "I lived in Mesa from 1990 to 1992.",
+                      record={"city": "Mesa", "label": "Mesa"},
+                      dates=read_dates("1990", "1992")),
+            read_unit("u2", "residences", "Cedarport",
+                      "Then Cedarport for a while.",
+                      record={"city": "Cedarport", "label": "Cedarport"},
+                      dates=read_dates("1993", "1996")),
+        ]))
         proposal = self.propose(text, call)
         by_subject = {unit["subject"]: unit for unit in proposal["units"]}
         self.assertEqual(by_subject["Mesa"]["dates"]["basis"], "stated")
-        self.assertEqual(by_subject["Cedarport"]["dates"]["basis"], "inferred")
-        filed = by_subject["Cedarport"]["record"]["span"]["start"]
-        self.assertEqual(filed["confidence"], "inferred")
-        self.assertNotEqual(filed["basis"], "stated")
-        self.assertIn({"basis": "inferred", "claim": lo.INFERRED_CLAUSE},
-                      filed["provenance"])
-        self.assertFalse(by_subject["Cedarport"]["auto_file_eligible"])
+        cedar = by_subject["Cedarport"]
+        self.assertEqual(cedar["dates"]["basis"], "none")
+        self.assertNotIn("span", cedar["record"])
+        self.assertFalse(cedar["auto_file_eligible"])
+        self.assertTrue(cedar["questions"])
+        self.assertEqual(lo.lint_offer_proposal(proposal), [])
 
-    def test_the_lint_refuses_a_stated_date_the_text_does_not_carry(self):
+    def test_the_lint_refuses_a_date_the_text_does_not_carry(self):
         proposal = {
             "source_text": "I lived in Mesa.",
             "units": [{"unit_id": "lmu:x", "dates": {"basis": "stated"},
                        "quote": {"text": "I lived in Mesa.", "offset": 0,
                                  "length": 16},
                        "record": {"date": _date("1990")}}],
-            "stories": [], "unrecognized": [],
+            "events": [], "stories": [], "unrecognized": [],
         }
         findings = lo.lint_offer_proposal(proposal)
         self.assertEqual([row["lint"] for row in findings],
                          [lo.NO_FABRICATED_DATE_LINT])
 
+    def test_the_lint_refuses_an_inference_that_names_no_source(self):
+        proposal = {
+            "source_text": "I lived in Mesa.",
+            "units": [{"unit_id": "lmu:x", "record": {},
+                       "quote": {"text": "I lived in Mesa.", "offset": 0,
+                                 "length": 16},
+                       "dates": {"basis": "inferred", "clause": None}}],
+            "events": [], "stories": [], "unrecognized": [],
+        }
+        self.assertEqual([row["lint"] for row in
+                          lo.lint_offer_proposal(proposal)],
+                         [lo.HONEST_BASIS_LINT])
+
+    def test_the_lint_refuses_a_quote_that_is_not_in_the_text(self):
+        proposal = {
+            "source_text": "I lived in Mesa.",
+            "units": [{"unit_id": "lmu:x", "record": {}, "dates": {},
+                       "quote": {"text": "I lived in Tempe.", "offset": 0,
+                                 "length": 17}}],
+            "events": [], "stories": [], "unrecognized": [],
+        }
+        self.assertIn(lo.QUOTES_LOCATE_LINT,
+                      [row["lint"] for row in lo.lint_offer_proposal(proposal)])
+
     def test_a_model_declaring_stated_over_a_year_nobody_typed_is_answered(self):
         """§4.2: the completion does not get to decide this."""
-        lying = {"domain": "residences", "label": "Mesa", "city": "Mesa",
-                 "span": _span("1990", "1992", basis="stated")}
-        call = ScriptedCall(
-            listener={"landmarks": [lying], "claims": []},
-            recorders={"residences": {"landmarks": [lying], "claims": []}})
-        proposal = self.propose("I lived in Mesa for a couple of years.", call)
+        text = "I lived in Mesa for a couple of years."
+        call = ScriptedCall(reading=reading(units=[read_unit(
+            "u1", "residences", "Mesa", text,
+            record={"city": "Mesa", "label": "Mesa"},
+            dates=read_dates("1990", "1992"))]))
+        proposal = self.propose(text, call)
         unit = proposal["units"][0]
-        self.assertEqual(unit["dates"]["basis"], "inferred")
-        self.assertEqual(unit["record"]["span"]["start"]["confidence"],
-                         "inferred")
+        self.assertEqual(unit["dates"]["basis"], "none")
+        self.assertNotIn("span", unit["record"])
         self.assertEqual(lo.lint_offer_proposal(proposal), [])
 
 
@@ -472,12 +616,11 @@ class KnownEntriesTests(OfferVaultCase):
 
     def test_a_second_stay_in_a_known_city_is_a_second_entry(self):
         self._file_phoenix()
-        again = {"domain": "residences", "label": "Phoenix", "city": "Phoenix",
-                 "span": _span("1995", "1999")}
         text = "I lived in Phoenix again from 1995 to 1999."
-        call = ScriptedCall(
-            listener={"landmarks": [again], "claims": []},
-            recorders={"residences": {"landmarks": [again], "claims": []}})
+        call = ScriptedCall(reading=reading(units=[read_unit(
+            "u1", "residences", "Phoenix", text,
+            record={"city": "Phoenix", "label": "Phoenix"},
+            dates=read_dates("1995", "1999"))]))
         proposal = self.propose(text, call)
         unit = proposal["units"][0]
         self.assertEqual(unit["duplicates"], [])
@@ -489,28 +632,23 @@ class KnownEntriesTests(OfferVaultCase):
 
     def test_the_same_stay_told_again_is_a_duplicate(self):
         self._file_phoenix()
-        same = {"domain": "residences", "label": "Phoenix", "city": "Phoenix",
-                "span": _span("1980", "1985")}
         text = "I lived in Phoenix from 1980 to 1985."
-        call = ScriptedCall(
-            listener={"landmarks": [same], "claims": []},
-            recorders={"residences": {"landmarks": [same], "claims": []}})
+        call = ScriptedCall(reading=reading(units=[read_unit(
+            "u1", "residences", "Phoenix", text,
+            record={"city": "Phoenix", "label": "Phoenix"},
+            dates=read_dates("1980", "1985"))]))
         proposal = self.propose(text, call)
         unit = proposal["units"][0]
         self.assertEqual(unit["duplicates"], ["residences/phoenix"])
         self.assertFalse(unit["auto_file_eligible"])
 
-    def test_the_recorder_is_shown_the_domains_filed_entries(self):
+    def test_the_reading_is_shown_what_is_already_filed(self):
         self._file_phoenix()
-        call = ScriptedCall(
-            listener={"landmarks": [{"domain": "residences", "label": "Mesa",
-                                     "city": "Mesa"}], "claims": []},
-            recorders={"residences": {"landmarks": [], "claims": []}})
+        call = ScriptedCall()
         self.propose("I lived in Mesa too.", call)
-        recorder_prompts = [p for p in call.prompts
-                            if "DOMAIN BEING ASKED ABOUT: residences" in p]
-        self.assertTrue(recorder_prompts)
-        self.assertIn("Phoenix", recorder_prompts[0])
+        self.assertEqual(len(call.prompts), 1)
+        self.assertIn("ALREADY FILED", call.prompts[0])
+        self.assertIn("Phoenix", call.prompts[0])
 
 
 # --------------------------------------------------------------------------
@@ -520,11 +658,7 @@ class KnownEntriesTests(OfferVaultCase):
 
 class ApplyTests(OfferVaultCase):
     def _mesa_proposal(self) -> dict:
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
-        return self.propose(MESA, call)
+        return self.propose(MESA, ScriptedCall(reading=MESA_READING))
 
     def test_nothing_is_filed_before_a_person_confirms(self):
         proposal = self._mesa_proposal()
@@ -608,10 +742,7 @@ class ApplyTests(OfferVaultCase):
 
 class RetractTests(OfferVaultCase):
     def test_undo_keeps_the_evidence_and_the_receipt(self):
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         proposal = self.propose(MESA, call)
         receipt = lo.apply(proposal["proposal_id"],
                            [unit["unit_id"] for unit in proposal["units"]],
@@ -634,10 +765,7 @@ class RetractTests(OfferVaultCase):
                                                 receipt["receipt_id"]))
 
     def test_undo_is_idempotent(self):
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         proposal = self.propose(MESA, call)
         receipt = lo.apply(proposal["proposal_id"],
                            [unit["unit_id"] for unit in proposal["units"]],
@@ -655,10 +783,7 @@ class RetractTests(OfferVaultCase):
 class ProposalFileTests(OfferVaultCase):
     def test_unrecognized_text_is_retained_in_the_proposal(self):
         text = "I lived in Mesa from 1990 to 1992.\n\n???"
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         proposal = self.propose(text, call)
         self.assertEqual([span["text"] for span in proposal["unrecognized"]],
                          ["???"])
@@ -669,10 +794,7 @@ class ProposalFileTests(OfferVaultCase):
     def test_every_span_of_the_submission_is_accounted_for(self):
         text = ("I lived in Mesa from 1990 to 1992. My dog died that summer. "
                 "!!")
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         proposal = self.propose(text, call)
         self.assertEqual(lo.lint_offer_proposal(proposal), [])
         accounted = (len(proposal["units"]) + len(proposal["stories"])
@@ -695,10 +817,7 @@ class ProposalFileTests(OfferVaultCase):
             raise RuntimeError("provider down")
 
         failed = self.propose(MESA, boom)
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         again = self.propose(MESA, call)
         self.assertEqual(failed["proposal_id"], again["proposal_id"])
         stored = json.loads(lo.proposal_path(
@@ -778,10 +897,7 @@ class OpportunityHookTests(OfferVaultCase):
         self.assertEqual(row["still_open"], [missing])
 
     def test_the_receipt_carries_the_retirement(self):
-        call = ScriptedCall(
-            listener={"landmarks": [MESA_RECORD], "claims": [MESA_CLAIM]},
-            recorders={"residences": {"landmarks": [MESA_RECORD],
-                                      "claims": [MESA_CLAIM]}})
+        call = ScriptedCall(reading=MESA_READING)
         proposal = self.propose(MESA, call)
         receipt = lo.apply(proposal["proposal_id"],
                            [unit["unit_id"] for unit in proposal["units"]],

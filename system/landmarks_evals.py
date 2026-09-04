@@ -131,12 +131,14 @@ def load_sample_predictions(*, framework_root: str | Path | None = None) -> list
 
 
 REQUIRED_OFFER_GOLDEN_IDS = frozenset({
-    # Decision record §5.6, in order.
-    "offer-residence-stated-certain",
-    "offer-tenure-approximate-organization",
-    "offer-vague-move-asks-where",
+    # Cut 6f (owner rulings R6-R9): the five readings the reading contract is
+    # pinned against. They replace the §5.6 grammar-era set, which pinned the
+    # three-pass shape R6 deleted.
+    "offer-residence-document",
+    "offer-free-prose-stay",
+    "offer-single-dated-event",
     "offer-story-not-a-landmark",
-    "offer-document-many-units",
+    "offer-mixed-paste",
 })
 
 _OFFER_FIXTURE_KEYS = {"fixture_id", "why", "source_text", "completions",
@@ -172,11 +174,14 @@ def validate_offer_fixtures(fixtures: list[dict]) -> list[str]:
         if not str(row.get("source_text") or "").strip():
             errors.append(f"{fixture_id}: source_text is required")
         completions = row.get("completions")
-        if not isinstance(completions, dict) or "listener" not in completions:
-            errors.append(f"{fixture_id}: completions need a listener")
+        if not isinstance(completions, dict) or "reading" not in completions:
+            errors.append(f"{fixture_id}: completions need a reading")
             continue
-        for domain in (completions.get("recorders") or {}):
-            if domain not in domains:
+        reading = completions.get("reading")
+        units = reading.get("units") if isinstance(reading, dict) else ()
+        for unit in (units or ()):
+            domain = unit.get("domain") if isinstance(unit, dict) else None
+            if domain is not None and domain not in domains:
                 errors.append(f"{fixture_id}: unknown domain {domain!r}")
         expected = row.get("expected")
         if not isinstance(expected, dict) or "state" not in expected:
@@ -189,35 +194,31 @@ def validate_offer_fixtures(fixtures: list[dict]) -> list[str]:
 
 
 class _RecordedCall:
-    """One recorded ``call`` over both extraction passes.
+    """One recorded ``call`` over the ONE reading pass (Cut 6f, R6/R9).
 
-    Dispatch is on the composed prompt's own header — the recorder leaf names
-    its domain and the listener leaf does not — so a golden is written the way
-    a host's REPLAY reads it, and a prompt nobody recorded answers empty
-    rather than borrowing another domain's completion.
+    There is one prompt per submission now, so there is nothing to dispatch
+    on: whatever `propose` composes, the golden's recorded reading answers.
+    A fixture with no reading answers an EMPTY reading rather than raising.
     """
 
-    EMPTY = '{"landmarks": [], "claims": []}'
+    EMPTY = '{"units": [], "events": [], "stories": [], "unplaced": []}'
 
     def __init__(self, completions: dict) -> None:
-        self._listener = completions.get("listener")
-        self._recorders = dict(completions.get("recorders") or {})
+        self._reading = completions.get("reading")
 
     @staticmethod
     def _as_text(value: object) -> str:
         return value if isinstance(value, str) else json.dumps(value)
 
-    def __call__(self, prompt: str, model: str) -> str:
-        for domain, payload in self._recorders.items():
-            if f"DOMAIN BEING ASKED ABOUT: {domain}\n" in prompt:
-                return self._as_text(payload)
-        if "DOMAIN BEING ASKED ABOUT:" in prompt:
+    def __call__(self, prompt: str, model: str) -> str:  # noqa: ARG002
+        if self._reading is None:
             return self.EMPTY
-        return self._as_text(self._listener)
+        return self._as_text(self._reading)
 
 
 def _offer_unit_matches(unit: dict, expected: dict) -> bool:
     dates = unit.get("dates") or {}
+    inherited = dates.get("inherited_from") or {}
     checks = [
         ("domain", unit.get("domain")),
         ("kind", unit.get("kind")),
@@ -227,6 +228,12 @@ def _offer_unit_matches(unit: dict, expected: dict) -> bool:
         ("start", dates.get("start")),
         ("end", dates.get("end")),
         ("auto_file_eligible", unit.get("auto_file_eligible")),
+        # Cut 6f: the reading's own relation and provenance are part of what a
+        # golden pins, not incidental output.
+        ("clause", dates.get("clause")),
+        ("inherited_from", inherited.get("subject")),
+        ("estimated", dates.get("estimated")),
+        ("names", unit.get("names")),
     ]
     for key, actual in checks:
         if key in expected and expected[key] != actual:
@@ -241,6 +248,17 @@ def _offer_unit_matches(unit: dict, expected: dict) -> bool:
         if expected["entity_confidence"] not in found:
             return False
     return True
+
+
+def _within_subject(unit: dict, by_id: dict) -> str | None:
+    """The SUBJECT of the unit this one belongs to, for a readable golden.
+
+    A golden pins ``"within": "The Blue House"``, never a content-addressed
+    `unit_id` that moves whenever a quote or a date moves — which would make
+    every fixture a hash nobody can read or check by eye.
+    """
+    parent = by_id.get(unit.get("within"))
+    return parent.get("subject") if isinstance(parent, dict) else None
 
 
 def score_offer_goldens(fixtures: list[dict]) -> dict:
@@ -281,11 +299,24 @@ def score_offer_goldens(fixtures: list[dict]) -> dict:
         units = [unit for unit in (proposal.get("units") or ())]
         if "unit_count" in expected:
             matched = matched and len(units) == expected["unit_count"]
+        by_id = {unit.get("unit_id"): unit for unit in units}
         if "units" in expected:
             matched = matched and len(units) == len(expected["units"])
             if matched:
-                matched = all(_offer_unit_matches(unit, want)
-                              for unit, want in zip(units, expected["units"]))
+                matched = all(
+                    _offer_unit_matches(unit, want)
+                    and ("within" not in want
+                         or _within_subject(unit, by_id) == want["within"])
+                    for unit, want in zip(units, expected["units"]))
+        if "events" in expected:
+            found = [{"text": row.get("text"), "kind": row.get("kind"),
+                      "filing": row.get("filing"),
+                      "within": (by_id.get(row.get("within")) or {}).get("subject")}
+                     for row in (proposal.get("events") or ())]
+            matched = matched and found == list(expected["events"])
+        if "findings" in expected:
+            matched = matched and list(proposal.get("findings") or ()) == \
+                list(expected["findings"])
         if "questions" in expected:
             asked = [row.get("domain") for row in (proposal.get("questions") or ())]
             matched = matched and asked == [row.get("domain") for row

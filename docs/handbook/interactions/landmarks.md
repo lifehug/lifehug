@@ -314,20 +314,40 @@ from the moment it is submitted — evidence is durable before confirmation
 recognized, and the open questions. It writes that file on failure too, so a
 provider outage never costs the person their words.
 
-**Three passes, none of them new.** A deterministic block grammar runs first
-over text it fully matches (zero model calls, so a thirty-block residence
-document costs nothing); then the general listener (§7, ADR 0029) with no
-domain; then the focused recorder (§6, ADR 0028) once per domain the listener
-named, with `{known_entries}` in view — which is what makes a second stay in a
-city the vault already knows a second entry rather than a merge.
+**ONE reading (v291, owner rulings R6-R9).** Until v290 this path read a
+submission three times — a deterministic block grammar first, then the general
+listener over the whole document blind to what the grammar had taken, then one
+focused recorder per domain, also blind. Pasting a thirty-stay residence
+history into it produced eight stays labelled by their city, every school and
+job dateless, invented labels, and "inferred" printed where nothing had been
+read. The cause was the ORDER, not the model. **The interaction reads; the
+system validates and files.** `propose` composes ONE prompt
+(`interactions/landmarks/prompt/reading.md`), makes ONE call and parses ONE
+completion (`landmark_reading.parse_reading`). The leaf carries — rendered from
+the live tables, never hand-copied — the nine domains and the exact keys each
+can read, the name fields each accepts (probed out of `validate_landmark`), the
+date forms, the estimation conventions, the relation rule, what is already
+filed and the roster. `collect` mode is untouched.
+
+**A span is what things belong to (R7).** A school or a job named inside a stay
+carries `within`, and a unit with no dates whose parent has dates inherits
+them: `basis: anchor` and `confidence: inferred` on the record's bounds, plus
+the verbatim clause "from the dates of the Orchard House stay". A unit with no dates
+and no dated parent is `basis: "none"` and renders **"no date read"** — never
+"inferred", because nothing was read. A domain that records one date rather
+than a stretch never inherits a stay's span.
+
+**Estimation is the person's convention; `approximate` is the system's word
+(R8).** Brackets, "about", "?" and "sometime" are read by the interaction and
+map to one bound's confidence, rendered "estimated, as you marked it".
 
 **Stated versus inferred is decided from the bytes**, not from the completion
 (decision record §4.2). `landmark_offer.date_evidence` re-reads every bound of
-every proposed date against the person's own text — the year in full
-(`1990`) or in the two-digit form people write (`'91`), and a finer grain with
-its month named. A bound the text carries files `basis: stated`; a bound it
-does not carries `confidence: inferred` and a verbatim inferred provenance
-clause, whatever the model declared.
+every proposed date against the person's own text — the year in full (`1990`)
+or in the two-digit form people write (`'91`), and a finer grain with its month
+named in full or abbreviated. A bound the text carries files `basis: stated`; a
+bound it does not is **dropped with a finding, never rewritten** into a
+confident-looking inference.
 
 **Filing is the road an answer already takes.** A confirmed unit files through
 `timeline.save_landmark`, so an offer and an answer are indistinguishable
@@ -340,9 +360,18 @@ stand on and republishes; the evidence, the receipts and the proposal all stay
 on disk.
 
 **Nothing is dropped and nothing is refused.** Every span of a submission is a
-unit's quote, a story, or an explicitly unrecognized span, and a lint asserts
-the three cover the text between them. Non-landmark text is routed as a story
-and the worker says so (R3a).
+unit's quote, an EVENT's quote, a story, or an explicitly unrecognized span,
+and a lint asserts they cover the text between them. Non-landmark text is
+routed as a story and the worker says so (R3a).
+
+**What the proposal carries** (§3.2 of the reading plan — a host transports
+these verbatim). A unit has `within` (the parent's `unit_id`, or `null`) and
+`names` (nickname · city · address · place_ref · link), and its `dates` block
+is `{start, end, precision, basis, confidence, estimated: {start, end},
+inherited_from, clause}` with `basis` one of `stated | inferred | none`. The
+proposal has `events[]` — `{event_id, text, kind, subject_mention, date,
+within, quote, filing}`, where `filing` is `claim` for a dated event and
+`moment` for an undated one — and `stories[]` carry `within`.
 
 The manifest gains three deterministic blocks (§5.2): the roster with its
 aliases, the published projection's episodes and eras with their spans, and
@@ -350,17 +379,18 @@ the age frames with the birth origin they are counted from —
 `landmarks_interaction.render_roster` / `render_known_spans` /
 `render_age_frames`. The model interprets; it does not fetch.
 
-**The host-run extraction protocol (v289, Cut 6c, ADR 0033 amendment).** A
-host that cannot let this process call a model — the platform's package
-sandbox has none, by design — drives the same three passes from another
-process instead: `--propose --prompts` prints the listener's exact prompt and
-calls nothing; `--prompts --listener-completion FILE` prints the per-domain
-recorder prompts that completion implies; `--completions FILE` runs `propose`
-from completions a host already made and writes the proposal exactly as a
-package-driven call would, byte-identical modulo `created_at`. Every shape
-that can write a document exits 0 whenever it wrote one, whatever its
-`state` — including `failed` — because R3 makes the submitted text durable on
-submit and a host must never read a nonzero exit as license to lose it.
+**The host-run reading protocol (v289 Cut 6c; ONE reading since v291 Cut 6f,
+ADR 0033 amendment).** A host that cannot let this process call a model — the
+platform's package sandbox has none, by design — drives the same reading from
+another process instead: `--propose --prompts` prints the ONE reading prompt
+and calls nothing; `--completions FILE`, where the file is
+`{"reading": <completion>}`, runs `propose` from the completion a host already
+made and writes the proposal exactly as a package-driven call would,
+byte-identical modulo `created_at`. Two doors, not Cut 6c's three: R6 deleted
+the passes and `--listener-completion` went with them. Every shape that can
+write a document exits 0 whenever it wrote one, whatever its `state` —
+including `failed` — because R3 makes the submitted text durable on submit and
+a host must never read a nonzero exit as license to lose it.
 
 ## 6. The behavior authority
 
@@ -520,11 +550,12 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Claims, both passes (v229) | `general_listener.CLAIM_PROMPT_KEYS`, `validate_claim_draft`, `parse_claims`, `bind_claims`, `render_event_kinds`, `claim_refused`; `landmark_recorder.parse_recorder_claims`, `RecorderOutcome.claims`. The contract is `system/temporal_claims.py` — one door, one vocabulary |
 | Their retryable lint (v229) | `general_listener.CLAIMS_MISSING_SUBJECTS_LINT`, `claims_missing_subjects`, `every_claim_reminder` — a BINDING of v214's `_name_groups`/`_record_terms`, never a second copy |
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
-| The `offer` mode (v287, ADR 0033) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `stories`, `unrecognized`, `questions`) · `apply(proposal_id, unit_ids, vault_root)` → the receipt, idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
-| Its internal extractors (v287) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import`/`record_unit`, reached ONLY through `landmark_offer` — retained under owner ruling R4 as extractors, with nothing user-facing naming the product they came from |
-| The host-run extraction protocol (v289, Cut 6c) | `host_listener_prompt(text, vault_root, model=, landmarks=)` → `{"listener": {"prompt", "model", "prompt_version"}}` · `host_recorder_prompts(text, listener_completion, vault_root, model=, landmarks=)` → `{"recorders": {domain: {...}}}`, empty where the listener named no domain · `propose_from_completions(text, vault_root, completions, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, dispatching on the composed prompt's `DOMAIN BEING ASKED ABOUT:` header exactly as `ScriptedCall`/`_RecordedCall` do · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}` |
-| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts [--listener-completion FILE]\|--completions FILE [--context FILE]` (v289), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_go_dig.py` |
+| The `offer` mode (v287, ADR 0033; one reading v291) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `within`, `names`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `events`, `stories`, `unrecognized`, `questions`) · `apply(proposal_id, unit_ids, vault_root)` → the receipt, idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_unit` / `render_event` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
+| Its ONE reading (v291, R6) | `system/landmark_reading.py`: `build_reading_prompt(text, landmarks=…, roster=…)` · `parse_reading(raw, text=…)` → `Reading(units, events, stories, unplaced, findings)` · `reading_extractor` (versioned by the leaf's own bytes) · `render_name_keys` / `render_date_shapes` / `render_span_nouns` / `render_estimation_marks` / `name_keys_for` / `date_shape_for` / `span_noun`. Leaf: `prompt/reading.md`; slot: `composition.reading`; role: `role.reading` (sonnet-class) |
+| Its retired extractors (v287, uncalled at v291) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import`, reached ONLY through `landmark_offer.grammar_units`, which R6 took off the offer path and Cut 6h deletes. `go_dig_writer.record_unit` remains the writer seam `apply` uses |
+| The host-run reading protocol (v289 Cut 6c; v291 Cut 6f) | `host_reading_prompt(text, vault_root, model=, landmarks=, roster=)` → `{"reading": {"prompt", "model", "prompt_version"}}` · `propose_from_completions(text, vault_root, {"reading": <completion>}, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, which needs no dispatch because there is one prompt per submission (R9) · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}`. `host_listener_prompt` and `host_recorder_prompts` were DELETED at v291 with the passes they named |
+| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts\|--completions FILE [--context FILE]` (v289; ONE reading prompt and a `{"reading": …}` completion since v291), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_landmark_reading.py` (v291), `tests/test_go_dig.py` |
 
 ## 8. Decisions
 

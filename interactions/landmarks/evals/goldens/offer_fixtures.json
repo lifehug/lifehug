@@ -1,286 +1,1047 @@
 [
   {
-    "fixture_id": "offer-residence-stated-certain",
-    "why": "decision record §5.6 example 1 — one residence unit, stated, certain, proposed, quoted.",
-    "source_text": "I lived in Mesa from 1990 to 1992.",
+    "fixture_id": "offer-residence-document",
+    "why": "Cut 6f (R6-R9): a thirty-block residence document in the shape people actually paste one — bracketed bounds, nicknames with a parenthetical, addresses, links, schools with grades, two employers on one line, the same employer across three blocks, dated and undated events, and a stay that is still going. ONE reading produces every unit; the schools and jobs inside a stay inherit its dates with a provenance clause. Synthetic throughout.",
+    "source_text": "Dates: July 11, 1960 - Jul 1961\nCity/State: Ashgrove, ST\nNickname: The Farmhouse\nAddress: 9 Sparrow Lane, Ashgrove, ST\n\nDates: [Feb 1961] - Aug 1962\nCity/State: Bellhollow, ST\n\nDates: Mar 1962 - Sep 1963\nCity/State: Cormorant, ST\nSchool: Kestrel Elementary, kindergarten through 2nd grade\n\nDates: Apr 1963 - Oct 1964\nCity/State: Dunmarsh, ST\nNickname: Grandma's place (rented)\nAddress: 412 Willow Court, Dunmarsh, ST\n\nDates: [May 1964] - [Nov 1965]\nCity/State: Elkhorn, ST\nEvents: Grandpa Ames died August 1988; the flood\n\nDates: Jun 1965 - Dec 1966\nCity/State: Fernwick, ST\nSchool: Marlow Middle School, 6th through 8th grade\n\nDates: Jul 1966 - Jan 1967\nCity/State: Gallowbrook, ST\nNickname: The Blue House\nAddress: 12 Elm Street, Gallowbrook, ST\nLink: https://example.invalid/map/12-elm\n\nDates: [Aug 1967] - Feb 1968\nCity/State: Havenridge, ST\n\nDates: Sep 1968 - Mar 1969\nCity/State: Ironvale, ST\nSchool: Northgate High School, 9th through 12th grade\n\nDates: Oct 1969 - Apr 1970\nCity/State: Juniper Flats, ST\nWork: Delaney Hardware\n\nDates: Nov 1970 - May 1971\nCity/State: Kestrelton, ST\nWork: Delaney Hardware\n\nDates: Dec 1971 - Jun 1972\nCity/State: Larkspur, ST\nNickname: The Yellow Duplex (upstairs only)\nAddress: 88 Harbour Row, Larkspur, ST\nWork: Delaney Hardware\n\nDates: [Jan 1972] - Jul 1973\nCity/State: Mossbank, ST\n\nDates: Feb 1973 - [Aug 1974]\nCity/State: Northgate, ST\nSchool: Vellacourt Community College, two years\n\nDates: Mar 1974 - Sep 1975\nCity/State: Oxbow, ST\nWork: Riverbend Feed; Pell & Sons\n\nDates: Apr 1975 - Oct 1976\nCity/State: Pinewater, ST\n\nDates: [May 1976] - Nov 1977\nCity/State: Quarryfield, ST\nEvents: our daughter Wren was born 2 April 1979; the year the barn came down\n\nDates: Jun 1977 - Dec 1978\nCity/State: Redbriar, ST\nNickname: The Cabin\nAddress: 6 Tanager Trail, Redbriar, ST\nLink: https://example.invalid/map/tanager\n\nDates: Jul 1978 - Jan 1979\nCity/State: Stonewall, ST\n\nDates: Aug 1979 - Feb 1980\nCity/State: Thistledown, ST\nSchool: Stonewall State, bachelor's\n\nDates: Sep 1980 - Mar 1981\nCity/State: Umberly, ST\nWork: Thorne Logistics\n\nDates: [Oct 1981] - Apr 1982\nCity/State: Vellacourt, ST\n\nDates: Nov 1982 - May 1983\nCity/State: Windrow, ST\nNickname: Aunt Odette's (we boarded there)\nAddress: 301 Marlin Way, Windrow, ST\n\nDates: Dec 1983 - Jun 1984\nCity/State: Yarrowfield, ST\n\nDates: [Jan 1984] - Jul 1985\nCity/State: Zephyr Bend, ST\n\nDates: Feb 1985 - Aug 1986\nCity/State: Alderbury, ST\nWork: Thorne Logistics\n\nDates: Mar 1986 - [Sep 1987]\nCity/State: Brackenmoor, ST\n\nDates: Apr 1987 - Oct 1988\nCity/State: Coldwater, ST\nNickname: The Brick House\nAddress: 77 Quarry Road, Coldwater, ST\n\nDates: [May 1988] - Nov 1989\nCity/State: Dovecote, ST\n\nDates: Jun 1989 - now\nCity/State: Emberly, ST",
     "completions": {
-      "listener": {
-        "landmarks": [
+      "reading": {
+        "units": [
           {
+            "ref": "u1",
             "domain": "residences",
-            "label": "Mesa",
-            "city": "Mesa",
-            "span": {
-              "start": {
-                "best": "1990",
-                "earliest": null,
-                "latest": null,
-                "granularity": "year",
-                "confidence": "certain",
-                "basis": "stated",
-                "anchors": [],
-                "provenance": []
-              },
-              "end": {
-                "best": "1992",
-                "earliest": null,
-                "latest": null,
-                "granularity": "year",
-                "confidence": "certain",
-                "basis": "stated",
-                "anchors": [],
-                "provenance": []
-              }
-            }
-          }
-        ],
-        "claims": [
-          {
-            "claim_type": "range",
-            "subject_mention": "Mesa",
-            "event_kind": "move",
-            "temporal_value": "1990/1992",
-            "evidence": "I lived in Mesa from 1990 to 1992."
-          }
-        ]
-      },
-      "recorders": {
-        "residences": {
-          "landmarks": [
-            {
-              "domain": "residences",
-              "label": "Mesa",
-              "city": "Mesa",
-              "span": {
-                "start": {
-                  "best": "1990",
-                  "earliest": null,
-                  "latest": null,
-                  "granularity": "year",
-                  "confidence": "certain",
-                  "basis": "stated",
-                  "anchors": [],
-                  "provenance": []
-                },
-                "end": {
-                  "best": "1992",
-                  "earliest": null,
-                  "latest": null,
-                  "granularity": "year",
-                  "confidence": "certain",
-                  "basis": "stated",
-                  "anchors": [],
-                  "provenance": []
-                }
-              }
-            }
-          ],
-          "claims": []
-        }
-      }
-    },
-    "expected": {
-      "state": "proposed",
-      "units": [
-        {
-          "domain": "residences",
-          "kind": "residence",
-          "subject": "Mesa",
-          "basis": "stated",
-          "confidence": "certain",
-          "start": "1990",
-          "end": "1992",
-          "quote": "I lived in Mesa from 1990 to 1992.",
-          "auto_file_eligible": true
-        }
-      ],
-      "questions": [],
-      "stories": [],
-      "unrecognized": []
-    },
-    "reply": "Reading this as a stay in Mesa, 1990 to 1992 — from “I lived in Mesa from 1990 to 1992.” Does this look right?"
-  },
-  {
-    "fixture_id": "offer-tenure-approximate-organization",
-    "why": "§5.6 example 2 — one tenure unit, approximate, organization matched against the roster or proposed as new.",
-    "source_text": "I worked at the Boatworks from about '91 to '92.",
-    "completions": {
-      "listener": {
-        "landmarks": [
-          {
-            "domain": "work",
-            "label": "the Boatworks",
-            "what": "boat building",
-            "span": {
-              "start": {
-                "best": "1991",
-                "earliest": null,
-                "latest": null,
-                "granularity": "year",
-                "confidence": "approximate",
-                "basis": "stated",
-                "anchors": [],
-                "provenance": []
-              },
-              "end": {
-                "best": "1992",
-                "earliest": null,
-                "latest": null,
-                "granularity": "year",
-                "confidence": "approximate",
-                "basis": "stated",
-                "anchors": [],
-                "provenance": []
-              }
-            }
-          }
-        ],
-        "claims": [
-          {
-            "claim_type": "range",
-            "subject_mention": "the Boatworks",
-            "event_kind": "job",
-            "temporal_value": "1991/1992",
-            "evidence": "I worked at the Boatworks from about '91 to '92."
-          }
-        ]
-      },
-      "recorders": {
-        "work": {
-          "landmarks": [
-            {
-              "domain": "work",
-              "label": "the Boatworks",
-              "what": "boat building",
-              "span": {
-                "start": {
-                  "best": "1991",
-                  "earliest": null,
-                  "latest": null,
-                  "granularity": "year",
-                  "confidence": "approximate",
-                  "basis": "stated",
-                  "anchors": [],
-                  "provenance": []
-                },
-                "end": {
-                  "best": "1992",
-                  "earliest": null,
-                  "latest": null,
-                  "granularity": "year",
-                  "confidence": "approximate",
-                  "basis": "stated",
-                  "anchors": [],
-                  "provenance": []
-                }
-              }
-            }
-          ],
-          "claims": []
-        }
-      }
-    },
-    "expected": {
-      "state": "proposed",
-      "units": [
-        {
-          "domain": "work",
-          "kind": "tenure",
-          "subject": "the Boatworks",
-          "basis": "stated",
-          "confidence": "approximate",
-          "start": "1991",
-          "end": "1992",
-          "quote": "I worked at the Boatworks from about '91 to '92.",
-          "entity_confidence": "new",
-          "auto_file_eligible": false
-        }
-      ],
-      "questions": [],
-      "stories": [],
-      "unrecognized": []
-    },
-    "reply": "I have the Boatworks from about '91 to '92 — roughly, the way you said it. The Boatworks is new here. Does this look right?"
-  },
-  {
-    "fixture_id": "offer-vague-move-asks-where",
-    "why": "§5.6 example 3 — retained as evidence; no residence and no year fabricated; one question, and it asks where.",
-    "source_text": "We moved around a lot after Dad changed jobs.",
-    "completions": {
-      "listener": {
-        "landmarks": [],
-        "claims": [
-          {
-            "claim_type": "relative_order",
-            "subject_mention": "we",
-            "event_kind": "move",
-            "temporal_value": {
-              "relation": "after",
-              "anchors": [
-                "Dad changed jobs"
-              ]
+            "subject": "The Farmhouse",
+            "names": {
+              "city": "Ashgrove",
+              "nickname": "The Farmhouse",
+              "address": "9 Sparrow Lane, Ashgrove, ST"
             },
-            "evidence": "We moved around a lot after Dad changed jobs."
+            "record": {
+              "city": "Ashgrove",
+              "label": "The Farmhouse"
+            },
+            "dates": {
+              "start": "July 11, 1960",
+              "end": "Jul 1961",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: July 11, 1960 - Jul 1961\nCity/State: Ashgrove, ST\nNickname: The Farmhouse\nAddress: 9 Sparrow Lane, Ashgrove, ST"
+          },
+          {
+            "ref": "u2",
+            "domain": "residences",
+            "subject": "Bellhollow",
+            "names": {
+              "city": "Bellhollow"
+            },
+            "record": {
+              "city": "Bellhollow",
+              "label": "Bellhollow"
+            },
+            "dates": {
+              "start": "Feb 1961",
+              "end": "Aug 1962",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [Feb 1961] - Aug 1962\nCity/State: Bellhollow, ST"
+          },
+          {
+            "ref": "u3",
+            "domain": "residences",
+            "subject": "Cormorant",
+            "names": {
+              "city": "Cormorant"
+            },
+            "record": {
+              "city": "Cormorant",
+              "label": "Cormorant"
+            },
+            "dates": {
+              "start": "Mar 1962",
+              "end": "Sep 1963",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Mar 1962 - Sep 1963\nCity/State: Cormorant, ST"
+          },
+          {
+            "ref": "u4",
+            "domain": "schools",
+            "subject": "Kestrel Elementary",
+            "record": {
+              "name": "Kestrel Elementary",
+              "label": "Kestrel Elementary",
+              "grades": "kindergarten through 2nd grade"
+            },
+            "dates": null,
+            "within": "u3",
+            "quote": "School: Kestrel Elementary, kindergarten through 2nd grade"
+          },
+          {
+            "ref": "u5",
+            "domain": "residences",
+            "subject": "Grandma's place",
+            "names": {
+              "city": "Dunmarsh",
+              "nickname": "Grandma's place (rented)",
+              "address": "412 Willow Court, Dunmarsh, ST"
+            },
+            "record": {
+              "city": "Dunmarsh",
+              "label": "Grandma's place"
+            },
+            "dates": {
+              "start": "Apr 1963",
+              "end": "Oct 1964",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Apr 1963 - Oct 1964\nCity/State: Dunmarsh, ST\nNickname: Grandma's place (rented)\nAddress: 412 Willow Court, Dunmarsh, ST"
+          },
+          {
+            "ref": "u6",
+            "domain": "residences",
+            "subject": "Elkhorn",
+            "names": {
+              "city": "Elkhorn"
+            },
+            "record": {
+              "city": "Elkhorn",
+              "label": "Elkhorn"
+            },
+            "dates": {
+              "start": "May 1964",
+              "end": "Nov 1965",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": true
+            },
+            "within": null,
+            "quote": "Dates: [May 1964] - [Nov 1965]\nCity/State: Elkhorn, ST"
+          },
+          {
+            "ref": "u7",
+            "domain": "residences",
+            "subject": "Fernwick",
+            "names": {
+              "city": "Fernwick"
+            },
+            "record": {
+              "city": "Fernwick",
+              "label": "Fernwick"
+            },
+            "dates": {
+              "start": "Jun 1965",
+              "end": "Dec 1966",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Jun 1965 - Dec 1966\nCity/State: Fernwick, ST"
+          },
+          {
+            "ref": "u8",
+            "domain": "schools",
+            "subject": "Marlow Middle School",
+            "record": {
+              "name": "Marlow Middle School",
+              "label": "Marlow Middle School",
+              "grades": "6th through 8th grade"
+            },
+            "dates": null,
+            "within": "u7",
+            "quote": "School: Marlow Middle School, 6th through 8th grade"
+          },
+          {
+            "ref": "u9",
+            "domain": "residences",
+            "subject": "The Blue House",
+            "names": {
+              "city": "Gallowbrook",
+              "nickname": "The Blue House",
+              "address": "12 Elm Street, Gallowbrook, ST",
+              "link": "https://example.invalid/map/12-elm"
+            },
+            "record": {
+              "city": "Gallowbrook",
+              "label": "The Blue House"
+            },
+            "dates": {
+              "start": "Jul 1966",
+              "end": "Jan 1967",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Jul 1966 - Jan 1967\nCity/State: Gallowbrook, ST\nNickname: The Blue House\nAddress: 12 Elm Street, Gallowbrook, ST\nLink: https://example.invalid/map/12-elm"
+          },
+          {
+            "ref": "u10",
+            "domain": "residences",
+            "subject": "Havenridge",
+            "names": {
+              "city": "Havenridge"
+            },
+            "record": {
+              "city": "Havenridge",
+              "label": "Havenridge"
+            },
+            "dates": {
+              "start": "Aug 1967",
+              "end": "Feb 1968",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [Aug 1967] - Feb 1968\nCity/State: Havenridge, ST"
+          },
+          {
+            "ref": "u11",
+            "domain": "residences",
+            "subject": "Ironvale",
+            "names": {
+              "city": "Ironvale"
+            },
+            "record": {
+              "city": "Ironvale",
+              "label": "Ironvale"
+            },
+            "dates": {
+              "start": "Sep 1968",
+              "end": "Mar 1969",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Sep 1968 - Mar 1969\nCity/State: Ironvale, ST"
+          },
+          {
+            "ref": "u12",
+            "domain": "schools",
+            "subject": "Northgate High School",
+            "record": {
+              "name": "Northgate High School",
+              "label": "Northgate High School",
+              "grades": "9th through 12th grade"
+            },
+            "dates": null,
+            "within": "u11",
+            "quote": "School: Northgate High School, 9th through 12th grade"
+          },
+          {
+            "ref": "u13",
+            "domain": "residences",
+            "subject": "Juniper Flats",
+            "names": {
+              "city": "Juniper Flats"
+            },
+            "record": {
+              "city": "Juniper Flats",
+              "label": "Juniper Flats"
+            },
+            "dates": {
+              "start": "Oct 1969",
+              "end": "Apr 1970",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Oct 1969 - Apr 1970\nCity/State: Juniper Flats, ST"
+          },
+          {
+            "ref": "u14",
+            "domain": "work",
+            "subject": "Delaney Hardware",
+            "record": {
+              "what": "Delaney Hardware",
+              "label": "Delaney Hardware"
+            },
+            "dates": null,
+            "within": "u13",
+            "quote": "Work: Delaney Hardware"
+          },
+          {
+            "ref": "u15",
+            "domain": "residences",
+            "subject": "Kestrelton",
+            "names": {
+              "city": "Kestrelton"
+            },
+            "record": {
+              "city": "Kestrelton",
+              "label": "Kestrelton"
+            },
+            "dates": {
+              "start": "Nov 1970",
+              "end": "May 1971",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Nov 1970 - May 1971\nCity/State: Kestrelton, ST"
+          },
+          {
+            "ref": "u16",
+            "domain": "work",
+            "subject": "Delaney Hardware",
+            "record": {
+              "what": "Delaney Hardware",
+              "label": "Delaney Hardware"
+            },
+            "dates": null,
+            "within": "u15",
+            "quote": "Work: Delaney Hardware"
+          },
+          {
+            "ref": "u17",
+            "domain": "residences",
+            "subject": "The Yellow Duplex",
+            "names": {
+              "city": "Larkspur",
+              "nickname": "The Yellow Duplex (upstairs only)",
+              "address": "88 Harbour Row, Larkspur, ST"
+            },
+            "record": {
+              "city": "Larkspur",
+              "label": "The Yellow Duplex"
+            },
+            "dates": {
+              "start": "Dec 1971",
+              "end": "Jun 1972",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Dec 1971 - Jun 1972\nCity/State: Larkspur, ST\nNickname: The Yellow Duplex (upstairs only)\nAddress: 88 Harbour Row, Larkspur, ST"
+          },
+          {
+            "ref": "u18",
+            "domain": "work",
+            "subject": "Delaney Hardware",
+            "record": {
+              "what": "Delaney Hardware",
+              "label": "Delaney Hardware"
+            },
+            "dates": null,
+            "within": "u17",
+            "quote": "Work: Delaney Hardware"
+          },
+          {
+            "ref": "u19",
+            "domain": "residences",
+            "subject": "Mossbank",
+            "names": {
+              "city": "Mossbank"
+            },
+            "record": {
+              "city": "Mossbank",
+              "label": "Mossbank"
+            },
+            "dates": {
+              "start": "Jan 1972",
+              "end": "Jul 1973",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [Jan 1972] - Jul 1973\nCity/State: Mossbank, ST"
+          },
+          {
+            "ref": "u20",
+            "domain": "residences",
+            "subject": "Northgate",
+            "names": {
+              "city": "Northgate"
+            },
+            "record": {
+              "city": "Northgate",
+              "label": "Northgate"
+            },
+            "dates": {
+              "start": "Feb 1973",
+              "end": "Aug 1974",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": true
+            },
+            "within": null,
+            "quote": "Dates: Feb 1973 - [Aug 1974]\nCity/State: Northgate, ST"
+          },
+          {
+            "ref": "u21",
+            "domain": "schools",
+            "subject": "Vellacourt Community College",
+            "record": {
+              "name": "Vellacourt Community College",
+              "label": "Vellacourt Community College",
+              "grades": "two years"
+            },
+            "dates": null,
+            "within": "u20",
+            "quote": "School: Vellacourt Community College, two years"
+          },
+          {
+            "ref": "u22",
+            "domain": "residences",
+            "subject": "Oxbow",
+            "names": {
+              "city": "Oxbow"
+            },
+            "record": {
+              "city": "Oxbow",
+              "label": "Oxbow"
+            },
+            "dates": {
+              "start": "Mar 1974",
+              "end": "Sep 1975",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Mar 1974 - Sep 1975\nCity/State: Oxbow, ST"
+          },
+          {
+            "ref": "u23",
+            "domain": "work",
+            "subject": "Riverbend Feed",
+            "record": {
+              "what": "Riverbend Feed",
+              "label": "Riverbend Feed"
+            },
+            "dates": null,
+            "within": "u22",
+            "quote": "Work: Riverbend Feed; Pell & Sons"
+          },
+          {
+            "ref": "u24",
+            "domain": "work",
+            "subject": "Pell & Sons",
+            "record": {
+              "what": "Pell & Sons",
+              "label": "Pell & Sons"
+            },
+            "dates": null,
+            "within": "u22",
+            "quote": "Pell & Sons"
+          },
+          {
+            "ref": "u25",
+            "domain": "residences",
+            "subject": "Pinewater",
+            "names": {
+              "city": "Pinewater"
+            },
+            "record": {
+              "city": "Pinewater",
+              "label": "Pinewater"
+            },
+            "dates": {
+              "start": "Apr 1975",
+              "end": "Oct 1976",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Apr 1975 - Oct 1976\nCity/State: Pinewater, ST"
+          },
+          {
+            "ref": "u26",
+            "domain": "residences",
+            "subject": "Quarryfield",
+            "names": {
+              "city": "Quarryfield"
+            },
+            "record": {
+              "city": "Quarryfield",
+              "label": "Quarryfield"
+            },
+            "dates": {
+              "start": "May 1976",
+              "end": "Nov 1977",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [May 1976] - Nov 1977\nCity/State: Quarryfield, ST"
+          },
+          {
+            "ref": "u27",
+            "domain": "residences",
+            "subject": "The Cabin",
+            "names": {
+              "city": "Redbriar",
+              "nickname": "The Cabin",
+              "address": "6 Tanager Trail, Redbriar, ST",
+              "link": "https://example.invalid/map/tanager"
+            },
+            "record": {
+              "city": "Redbriar",
+              "label": "The Cabin"
+            },
+            "dates": {
+              "start": "Jun 1977",
+              "end": "Dec 1978",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Jun 1977 - Dec 1978\nCity/State: Redbriar, ST\nNickname: The Cabin\nAddress: 6 Tanager Trail, Redbriar, ST\nLink: https://example.invalid/map/tanager"
+          },
+          {
+            "ref": "u28",
+            "domain": "residences",
+            "subject": "Stonewall",
+            "names": {
+              "city": "Stonewall"
+            },
+            "record": {
+              "city": "Stonewall",
+              "label": "Stonewall"
+            },
+            "dates": {
+              "start": "Jul 1978",
+              "end": "Jan 1979",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Jul 1978 - Jan 1979\nCity/State: Stonewall, ST"
+          },
+          {
+            "ref": "u29",
+            "domain": "residences",
+            "subject": "Thistledown",
+            "names": {
+              "city": "Thistledown"
+            },
+            "record": {
+              "city": "Thistledown",
+              "label": "Thistledown"
+            },
+            "dates": {
+              "start": "Aug 1979",
+              "end": "Feb 1980",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Aug 1979 - Feb 1980\nCity/State: Thistledown, ST"
+          },
+          {
+            "ref": "u30",
+            "domain": "schools",
+            "subject": "Stonewall State",
+            "record": {
+              "name": "Stonewall State",
+              "label": "Stonewall State",
+              "grades": "bachelor's"
+            },
+            "dates": null,
+            "within": "u29",
+            "quote": "School: Stonewall State, bachelor's"
+          },
+          {
+            "ref": "u31",
+            "domain": "residences",
+            "subject": "Umberly",
+            "names": {
+              "city": "Umberly"
+            },
+            "record": {
+              "city": "Umberly",
+              "label": "Umberly"
+            },
+            "dates": {
+              "start": "Sep 1980",
+              "end": "Mar 1981",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Sep 1980 - Mar 1981\nCity/State: Umberly, ST"
+          },
+          {
+            "ref": "u32",
+            "domain": "work",
+            "subject": "Thorne Logistics",
+            "record": {
+              "what": "Thorne Logistics",
+              "label": "Thorne Logistics"
+            },
+            "dates": null,
+            "within": "u31",
+            "quote": "Work: Thorne Logistics"
+          },
+          {
+            "ref": "u33",
+            "domain": "residences",
+            "subject": "Vellacourt",
+            "names": {
+              "city": "Vellacourt"
+            },
+            "record": {
+              "city": "Vellacourt",
+              "label": "Vellacourt"
+            },
+            "dates": {
+              "start": "Oct 1981",
+              "end": "Apr 1982",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [Oct 1981] - Apr 1982\nCity/State: Vellacourt, ST"
+          },
+          {
+            "ref": "u34",
+            "domain": "residences",
+            "subject": "Aunt Odette's",
+            "names": {
+              "city": "Windrow",
+              "nickname": "Aunt Odette's (we boarded there)",
+              "address": "301 Marlin Way, Windrow, ST"
+            },
+            "record": {
+              "city": "Windrow",
+              "label": "Aunt Odette's"
+            },
+            "dates": {
+              "start": "Nov 1982",
+              "end": "May 1983",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Nov 1982 - May 1983\nCity/State: Windrow, ST\nNickname: Aunt Odette's (we boarded there)\nAddress: 301 Marlin Way, Windrow, ST"
+          },
+          {
+            "ref": "u35",
+            "domain": "residences",
+            "subject": "Yarrowfield",
+            "names": {
+              "city": "Yarrowfield"
+            },
+            "record": {
+              "city": "Yarrowfield",
+              "label": "Yarrowfield"
+            },
+            "dates": {
+              "start": "Dec 1983",
+              "end": "Jun 1984",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Dec 1983 - Jun 1984\nCity/State: Yarrowfield, ST"
+          },
+          {
+            "ref": "u36",
+            "domain": "residences",
+            "subject": "Zephyr Bend",
+            "names": {
+              "city": "Zephyr Bend"
+            },
+            "record": {
+              "city": "Zephyr Bend",
+              "label": "Zephyr Bend"
+            },
+            "dates": {
+              "start": "Jan 1984",
+              "end": "Jul 1985",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [Jan 1984] - Jul 1985\nCity/State: Zephyr Bend, ST"
+          },
+          {
+            "ref": "u37",
+            "domain": "residences",
+            "subject": "Alderbury",
+            "names": {
+              "city": "Alderbury"
+            },
+            "record": {
+              "city": "Alderbury",
+              "label": "Alderbury"
+            },
+            "dates": {
+              "start": "Feb 1985",
+              "end": "Aug 1986",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Feb 1985 - Aug 1986\nCity/State: Alderbury, ST"
+          },
+          {
+            "ref": "u38",
+            "domain": "work",
+            "subject": "Thorne Logistics",
+            "record": {
+              "what": "Thorne Logistics",
+              "label": "Thorne Logistics"
+            },
+            "dates": null,
+            "within": "u37",
+            "quote": "Work: Thorne Logistics"
+          },
+          {
+            "ref": "u39",
+            "domain": "residences",
+            "subject": "Brackenmoor",
+            "names": {
+              "city": "Brackenmoor"
+            },
+            "record": {
+              "city": "Brackenmoor",
+              "label": "Brackenmoor"
+            },
+            "dates": {
+              "start": "Mar 1986",
+              "end": "Sep 1987",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": true
+            },
+            "within": null,
+            "quote": "Dates: Mar 1986 - [Sep 1987]\nCity/State: Brackenmoor, ST"
+          },
+          {
+            "ref": "u40",
+            "domain": "residences",
+            "subject": "The Brick House",
+            "names": {
+              "city": "Coldwater",
+              "nickname": "The Brick House",
+              "address": "77 Quarry Road, Coldwater, ST"
+            },
+            "record": {
+              "city": "Coldwater",
+              "label": "The Brick House"
+            },
+            "dates": {
+              "start": "Apr 1987",
+              "end": "Oct 1988",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Apr 1987 - Oct 1988\nCity/State: Coldwater, ST\nNickname: The Brick House\nAddress: 77 Quarry Road, Coldwater, ST"
+          },
+          {
+            "ref": "u41",
+            "domain": "residences",
+            "subject": "Dovecote",
+            "names": {
+              "city": "Dovecote"
+            },
+            "record": {
+              "city": "Dovecote",
+              "label": "Dovecote"
+            },
+            "dates": {
+              "start": "May 1988",
+              "end": "Nov 1989",
+              "ongoing": false,
+              "start_estimated": true,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: [May 1988] - Nov 1989\nCity/State: Dovecote, ST"
+          },
+          {
+            "ref": "u42",
+            "domain": "residences",
+            "subject": "Emberly",
+            "names": {
+              "city": "Emberly"
+            },
+            "record": {
+              "city": "Emberly",
+              "label": "Emberly"
+            },
+            "dates": {
+              "start": "Jun 1989",
+              "end": null,
+              "ongoing": true,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "Dates: Jun 1989 - now\nCity/State: Emberly, ST"
           }
-        ]
-      },
-      "recorders": {}
+        ],
+        "events": [
+          {
+            "ref": "e1",
+            "text": "Grandpa Ames died",
+            "kind": "death",
+            "subject_mention": "Grandpa Ames",
+            "date": "August 1988",
+            "within": "u6",
+            "quote": "Grandpa Ames died August 1988"
+          },
+          {
+            "ref": "e2",
+            "text": "our daughter Wren was born",
+            "kind": "child_born",
+            "subject_mention": "Wren",
+            "date": "2 April 1979",
+            "within": "u26",
+            "quote": "our daughter Wren was born 2 April 1979"
+          }
+        ],
+        "stories": [
+          {
+            "quote": "the flood",
+            "within": "u6"
+          },
+          {
+            "quote": "the year the barn came down",
+            "within": "u26"
+          }
+        ],
+        "unplaced": []
+      }
     },
     "expected": {
-      "state": "needs_clarification",
-      "units": [],
-      "questions": [
-        {
-          "domain": "residences"
-        }
-      ],
-      "stories": [
-        "We moved around a lot after Dad changed jobs."
-      ],
-      "unrecognized": []
+      "state": "proposed",
+      "unit_count": 42,
+      "questions": []
     },
-    "reply": "I have kept that. I can't place it yet — do you remember where you lived then?"
+    "reply": "That is thirty stays, 1960 to now, with the schools and jobs read inside the stay each one belongs to. Does this look right?"
+  },
+  {
+    "fixture_id": "offer-free-prose-stay",
+    "why": "One sentence of ordinary prose: a stay with a nickname, a school inside it that inherits its dates, and somebody else's job as an undated event. “That spring” is not turned into a date.",
+    "source_text": "I lived on Elm from 1990 to 1992, we called it the blue house, I was at Lincoln Elementary then, and Dad started at the mill that spring.",
+    "completions": {
+      "reading": {
+        "units": [
+          {
+            "ref": "u1",
+            "domain": "residences",
+            "subject": "the blue house",
+            "names": {
+              "nickname": "the blue house",
+              "city": "Elm"
+            },
+            "record": {
+              "city": "Elm",
+              "label": "the blue house"
+            },
+            "dates": {
+              "start": "1990",
+              "end": "1992",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": false
+            },
+            "within": null,
+            "quote": "I lived on Elm from 1990 to 1992, we called it the blue house"
+          },
+          {
+            "ref": "u2",
+            "domain": "schools",
+            "subject": "Lincoln Elementary",
+            "record": {
+              "name": "Lincoln Elementary",
+              "label": "Lincoln Elementary"
+            },
+            "dates": null,
+            "within": "u1",
+            "quote": "I was at Lincoln Elementary then"
+          }
+        ],
+        "events": [
+          {
+            "ref": "e1",
+            "text": "Dad started at the mill",
+            "kind": "job",
+            "subject_mention": "Dad",
+            "date": null,
+            "within": "u1",
+            "quote": "and Dad started at the mill that spring."
+          }
+        ],
+        "stories": [],
+        "unplaced": []
+      }
+    },
+    "expected": {
+      "state": "proposed"
+    },
+    "reply": "Reading this as a stay on Elm you called the blue house, 1990 to 1992, with Lincoln Elementary inside it, and your Dad starting at the mill with no date I could read. Does this look right?"
+  },
+  {
+    "fixture_id": "offer-single-dated-event",
+    "why": "One dated event and no landmark unit at all. It is carried as an event with a date, not fabricated into a residence because a place was mentioned.",
+    "source_text": "Wren was born 12 May 1991 while we lived at Hollow Creek.",
+    "completions": {
+      "reading": {
+        "units": [],
+        "events": [
+          {
+            "ref": "e1",
+            "text": "Wren was born",
+            "kind": "child_born",
+            "subject_mention": "Wren",
+            "date": "12 May 1991",
+            "within": null,
+            "quote": "Wren was born 12 May 1991 while we lived at Hollow Creek."
+          }
+        ],
+        "stories": [],
+        "unplaced": []
+      }
+    },
+    "expected": {
+      "state": "proposed",
+      "units": []
+    },
+    "reply": "I have Wren born on 12 May 1991. Nothing in this told me when you were at Hollow Creek. Does this look right?"
   },
   {
     "fixture_id": "offer-story-not-a-landmark",
-    "why": "§5.6 example 4 — not a landmark; accepted, routed as a story, and the worker says so. Never refused.",
-    "source_text": "My dog died that summer.",
+    "why": "R3a: not a landmark; accepted, routed as a story, and the worker says so. Never refused.",
+    "source_text": "The dog died that summer.",
     "completions": {
-      "listener": {
-        "landmarks": [],
-        "claims": []
-      },
-      "recorders": {}
+      "reading": {
+        "units": [],
+        "events": [],
+        "stories": [
+          {
+            "quote": "The dog died that summer.",
+            "within": null
+          }
+        ],
+        "unplaced": []
+      }
     },
     "expected": {
       "state": "proposed",
       "units": [],
-      "questions": [],
       "stories": [
-        "My dog died that summer."
-      ],
-      "unrecognized": []
+        "The dog died that summer."
+      ]
     },
     "reply": "That is not one of the dated anchors — I have kept it as a story."
   },
   {
-    "fixture_id": "offer-document-many-units",
-    "why": "§5.6 example 5 — a residence document pasted whole: the deterministic grammar runs first, and nothing it does not recognize is discarded.",
-    "source_text": "Dates: 1960 - 1961\nCity/State: Town00, ST\n\nDates: 1961 - 1962\nCity/State: Town01, ST\n\nDates: 1962 - 1963\nCity/State: Town02, ST\n\nDates: 1963 - 1964\nCity/State: Town03, ST\n\nDates: 1964 - 1965\nCity/State: Town04, ST\n\nDates: 1965 - 1966\nCity/State: Town05, ST\n\nDates: 1966 - 1967\nCity/State: Town06, ST\n\nDates: 1967 - 1968\nCity/State: Town07, ST\n\nDates: 1968 - 1969\nCity/State: Town08, ST\n\nDates: 1969 - 1970\nCity/State: Town09, ST\n\nDates: 1970 - 1971\nCity/State: Town10, ST\n\nDates: 1971 - 1972\nCity/State: Town11, ST\n\nDates: 1972 - 1973\nCity/State: Town12, ST\n\nDates: 1973 - 1974\nCity/State: Town13, ST\n\nDates: 1974 - 1975\nCity/State: Town14, ST\n\nDates: 1975 - 1976\nCity/State: Town15, ST\n\nDates: 1976 - 1977\nCity/State: Town16, ST\n\nDates: 1977 - 1978\nCity/State: Town17, ST\n\nDates: 1978 - 1979\nCity/State: Town18, ST\n\nDates: 1979 - 1980\nCity/State: Town19, ST\n\nDates: 1980 - 1981\nCity/State: Town20, ST\n\nDates: 1981 - 1982\nCity/State: Town21, ST\n\nDates: 1982 - 1983\nCity/State: Town22, ST\n\nDates: 1983 - 1984\nCity/State: Town23, ST\n\nDates: 1984 - 1985\nCity/State: Town24, ST\n\nDates: 1985 - 1986\nCity/State: Town25, ST\n\nDates: 1986 - 1987\nCity/State: Town26, ST\n\nDates: 1987 - 1988\nCity/State: Town27, ST\n\nDates: 1988 - 1989\nCity/State: Town28, ST\n\nDates: 1989 - 1990\nCity/State: Town29, ST",
+    "fixture_id": "offer-mixed-paste",
+    "why": "A document block and free prose in one submission: a dated stay with an estimated end and a job inside it, an undated stay that stays undated, a dated event about a sibling, and a vague statement about moving that earns the residences ladder's own opening question.",
+    "source_text": "Dates: 2001 - [Mar 2004]\nCity/State: Ashgrove, ST\nNickname: The Brick House (we rented the top floor)\nWork: Pell & Sons\n\nAfter that we were in Bellhollow for a while, I can't remember the years. My brother Owen was born June 1998. We moved around a lot after Dad changed jobs.",
     "completions": {
-      "listener": {
-        "landmarks": [],
-        "claims": []
-      },
-      "recorders": {}
+      "reading": {
+        "units": [
+          {
+            "ref": "u1",
+            "domain": "residences",
+            "subject": "The Brick House",
+            "names": {
+              "nickname": "The Brick House (we rented the top floor)",
+              "city": "Ashgrove"
+            },
+            "record": {
+              "city": "Ashgrove",
+              "label": "The Brick House"
+            },
+            "dates": {
+              "start": "2001",
+              "end": "Mar 2004",
+              "ongoing": false,
+              "start_estimated": false,
+              "end_estimated": true
+            },
+            "within": null,
+            "quote": "Dates: 2001 - [Mar 2004]\nCity/State: Ashgrove, ST\nNickname: The Brick House (we rented the top floor)"
+          },
+          {
+            "ref": "u2",
+            "domain": "work",
+            "subject": "Pell & Sons",
+            "record": {
+              "what": "Pell & Sons",
+              "label": "Pell & Sons"
+            },
+            "dates": null,
+            "within": "u1",
+            "quote": "Work: Pell & Sons"
+          },
+          {
+            "ref": "u3",
+            "domain": "residences",
+            "subject": "Bellhollow",
+            "names": {
+              "city": "Bellhollow"
+            },
+            "record": {
+              "city": "Bellhollow",
+              "label": "Bellhollow"
+            },
+            "dates": null,
+            "within": null,
+            "quote": "After that we were in Bellhollow for a while, I can't remember the years."
+          }
+        ],
+        "events": [
+          {
+            "ref": "e1",
+            "text": "my brother Owen was born",
+            "kind": "birth",
+            "subject_mention": "Owen",
+            "date": "June 1998",
+            "within": null,
+            "quote": "My brother Owen was born June 1998."
+          },
+          {
+            "ref": "e2",
+            "text": "we moved around a lot",
+            "kind": "move",
+            "subject_mention": "self",
+            "date": null,
+            "within": null,
+            "quote": "We moved around a lot after Dad changed jobs."
+          }
+        ],
+        "stories": [],
+        "unplaced": []
+      }
     },
     "expected": {
-      "state": "proposed",
-      "unit_count": 30,
-      "questions": [],
-      "stories": [],
-      "unrecognized": []
+      "state": "proposed"
     },
-    "reply": "That is thirty stays, 1960 through 1990. Does this look right?"
+    "reply": "I have the Brick House in Ashgrove from 2001 to an estimated March 2004, with Pell & Sons inside it, and Bellhollow with no dates I could read. Does this look right?"
   }
 ]

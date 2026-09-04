@@ -10,18 +10,19 @@ same three passes read it, propose landmark units with evidence, and file the
 confirmed ones through the SAME landmark writer a conversation answer uses.
 
 It is a MODE, not an interaction kind (R3b). Nothing here composes a second
-listener, a second recorder or a second writer:
+writer.
 
-  1. **A deterministic first pass**, for text a grammar fully matches. Zero
-     model calls (:func:`grammar_units`). It is an internal extractor and
-     nothing user-facing names it — R4 retired the product it came from, and
-     kept the parse.
-  2. **The general listener** (`landmark_recorder.listen_to_answer`, ADR
-     0029) with no domain: what does this text touch at all.
-  3. **The focused recorder** (`landmark_recorder.record_answer`, ADR 0028),
-     ONCE PER DOMAIN the listener named, with that domain's already-filed
-     entries in view — which is why a second stay in a city the vault
-     already knows becomes a second entry rather than a merge.
+**ONE READING (v291, owner rulings R6-R9).** Until v290 this path read a
+submission three times — a deterministic block grammar first, then the general
+listener over the whole document blind to what the grammar had taken, then one
+focused recorder per domain, also blind. The owner's first real use of it lost
+the date off every model-read unit, labelled eight stays by their city and
+showed "inferred" where nothing had been read at all. R6 reverses the order:
+**the interaction reads, and the system validates and files.** :func:`propose`
+composes ONE prompt (`landmark_reading.build_reading_prompt`), makes ONE call,
+and parses ONE completion (`landmark_reading.parse_reading`). No grammar runs
+first, no listener runs, no recorder runs. :func:`grammar_units` survives this
+release unused, and Cut 6h deletes it.
 
 **Nothing files before a person confirms.** :func:`propose` writes exactly one
 file, the proposal, and the submitted text is retained inside it from the
@@ -36,7 +37,16 @@ source text, and a bound the text does not carry files as an INFERENCE
 (`confidence: inferred`, a verbatim `inferred` provenance clause) no matter
 what the completion said. A model's reading of the person's words is stated; a
 model's guess beyond the words is not, and the difference is decided here,
-deterministically, from the bytes.
+deterministically, from the bytes. A bound the text does NOT carry is dropped
+with a finding rather than rewritten into a confident-looking inference.
+
+**A span is the unit of relation (R7).** A school, a job or an event named
+inside a stay carries ``within``, and a unit with no dates whose ``within``
+target HAS dates inherits them — ``basis: anchor``, ``confidence: inferred``,
+and the verbatim provenance clause *"from the dates of the Orchard House stay"*,
+rendered through the same `_restate` path every other inference goes through.
+A unit with no dates and no dated parent is ``basis: "none"`` and says "no date
+read"; it never says "inferred", because nothing was read.
 
 **Idempotency.** A unit's identity is content-addressed
 (:func:`derive_unit_id`) from its domain, kind, subject, dates and quote, so
@@ -77,9 +87,8 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
-import general_listener as gl  # noqa: E402
 import landmark_projection as lp  # noqa: E402
-import landmark_recorder as recorder  # noqa: E402
+import landmark_reading as lr  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_publication as pub  # noqa: E402
@@ -160,10 +169,11 @@ OFFER_CHANNEL = "landmark_offer"
 
 PROPOSAL_ID_PREFIX = "lmo"
 UNIT_ID_PREFIX = "lmu"
+EVENT_ID_PREFIX = "lme"
 RECEIPT_ID_PREFIX = "lmr"
 _DIGEST_LENGTH = 24
 
-_ID_RE = re.compile(r"^(lmo|lmu|lmr):[0-9a-f]{%d}$" % _DIGEST_LENGTH)
+_ID_RE = re.compile(r"^(lmo|lmu|lme|lmr):[0-9a-f]{%d}$" % _DIGEST_LENGTH)
 
 
 def _digest(payload: object) -> str:
@@ -266,9 +276,14 @@ _HEDGE_RE = re.compile(
 _YEAR_RE = re.compile(r"\b(1[6-9]\d{2}|20\d{2})\b")
 _SHORT_YEAR_RE = re.compile(r"['’](\d{2})\b")
 
-_MONTH_NAMES = (
-    "january", "february", "march", "april", "may", "june", "july",
-    "august", "september", "october", "november", "december",
+#: The month a bound names, in every spelling the person may have written it.
+#: v291: `chronology.MONTH_NAMES` is the ONE table (recurring-defect
+#: doctrine — this module used to keep a lower-cased copy), and the 3-letter
+#: abbreviation is here because `chronology.parse_loose_date` ACCEPTS it: a
+#: reader that parses `Jun 1986` and then an evidence guard that only looks
+#: for `june` would drop, as unevidenced, the exact date the person typed.
+_MONTH_SPELLINGS = tuple(
+    (name.lower(), name[:3].lower()) for name in chrono.MONTH_NAMES
 )
 
 #: How many characters of context a quote may carry around the words that
@@ -350,12 +365,22 @@ def locate(text: str, quote: object, *, hint: int = 0) -> dict | None:
 
     A quote that is not IN the text is not evidence of anything, so it is
     refused rather than stored with a made-up offset.
+
+    ``hint`` is where to look FIRST, and a caller walking a reading in order
+    threads it forward. A real document repeats itself — *"Work: Delaney
+    Hardware"* on three consecutive blocks is one employer across three
+    stays, not one line read three times — and without the hint all three
+    units would land on the first occurrence, leaving two blocks looking
+    uncovered. v291 makes the whitespace-tolerant fallback honour the hint
+    too: a multi-line block quote never matches `str.find` at all, so before
+    this it was the one path that could not be walked forward.
     """
     needle = " ".join(str(quote or "").split())
     if not needle:
         return None
     body = text or ""
-    index = body.find(needle, max(int(hint), 0))
+    start = max(int(hint), 0)
+    index = body.find(needle, start)
     if index < 0:
         index = body.find(needle)
     if index < 0:
@@ -363,7 +388,7 @@ def locate(text: str, quote: object, *, hint: int = 0) -> dict | None:
         # it; fall back to a whitespace-tolerant search before giving up.
         pattern = re.compile(r"\s+".join(re.escape(word)
                                          for word in needle.split()))
-        match = pattern.search(body)
+        match = pattern.search(body, start) or pattern.search(body)
         if match is None:
             return None
         return {"text": body[match.start():match.end()][:QUOTE_MAX_CHARS],
@@ -424,11 +449,12 @@ def date_evidence(record: object, quote: object, source_text: str) -> bool:
             if len(parts) < 2:
                 return False
             try:
-                month_name = _MONTH_NAMES[int(parts[1]) - 1]
+                spellings = _MONTH_SPELLINGS[int(parts[1]) - 1]
             except (ValueError, IndexError):
                 return False
             numeric = f"-{parts[1]}"
-            if month_name not in lowered and numeric not in lowered:
+            if numeric not in lowered and not any(
+                    spelling in lowered for spelling in spellings):
                 return False
     return True
 
@@ -468,8 +494,15 @@ def _closed(payload: dict) -> dict:
     return payload
 
 
-def _restate(record: object, *, stated: bool, hedged: bool) -> dict | None:
-    """One date bound, re-based on the evidence. Never on the completion."""
+def _restate(record: object, *, stated: bool, hedged: bool,
+             clause: str = INFERRED_CLAUSE) -> dict | None:
+    """One date bound, re-based on the evidence. Never on the completion.
+
+    ``clause`` is the sentence an INFERRED bound carries as its verbatim
+    provenance. It defaults to :data:`INFERRED_CLAUSE`; R7's inheritance passes
+    its own — *"from the dates of the Orchard House stay"* — through this one path
+    rather than writing a second provenance mechanism beside it.
+    """
     parsed = chrono.from_dict(record)
     if parsed is None:
         return None
@@ -485,10 +518,9 @@ def _restate(record: object, *, stated: bool, hedged: bool) -> dict | None:
     payload["basis"] = "anchor"
     payload["confidence"] = "inferred"
     provenance = [dict(item) for item in (payload.get("provenance") or ())]
-    clause = {"basis": chrono.INFERRED_PROVENANCE_BASIS,
-              "claim": INFERRED_CLAUSE}
-    if clause not in provenance:
-        provenance.append(clause)
+    entry = {"basis": chrono.INFERRED_PROVENANCE_BASIS, "claim": clause}
+    if entry not in provenance:
+        provenance.append(entry)
     payload["provenance"] = provenance
     return payload
 
@@ -513,29 +545,21 @@ def _set_bound(record: dict, path: str, value: object) -> None:
     record.setdefault("span", {})[path.split(".", 1)[1]] = value
 
 
-def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, dict]:
-    """``(record, dates)`` — the filed record, and the unit's own date block.
+def _date_summary(filed: dict) -> dict:
+    """The unit's own date block, read back off the record that just filed.
 
-    Every bound is re-based by :func:`date_evidence`; the unit's summary
-    ``basis`` is ``stated`` only when EVERY bound it carries is carried by the
-    person's words, and ``inferred`` otherwise. The per-bound truth is not
-    lost by that summary — it rides on the record, which is what files.
+    ONE reader for both roads into a unit's dates — the evidence guard
+    (:func:`rebase_record`) and R7's inheritance (:func:`inherit_dates`) — so
+    the two cannot describe the same record differently. It reports what the
+    RECORD says and decides nothing: `basis`, `inherited_from` and `clause`
+    are the caller's, because only the caller knows which road it took.
     """
-    filed = json.loads(json.dumps(record))
-    hedged = _hedged(quote)
-    bounds = _bounds_of(filed)
-    stated_all = bool(bounds)
     precision = None
     start = end = None
     confidence = "certain"
-    for path, value in bounds:
-        stated = date_evidence(value, quote, source_text)
-        stated_all = stated_all and stated
-        restated = _restate(value, stated=stated, hedged=hedged)
-        if restated is None:
-            continue
-        _set_bound(filed, path, restated)
-        parsed = chrono.from_dict(restated)
+    estimated = {"start": False, "end": False}
+    for path, value in _bounds_of(filed):
+        parsed = chrono.from_dict(value)
         if parsed is None:
             continue
         grain = parsed.granularity
@@ -550,17 +574,127 @@ def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, 
             confidence = parsed.confidence
         display = parsed.best or parsed.earliest or parsed.latest
         if path in ("date", "span.start"):
-            start = start or display
+            if start is None:
+                start = display
+            estimated["start"] = (estimated["start"]
+                                  or parsed.confidence == "approximate")
         if path == "span.end":
             end = display
-    dates = {
-        "start": start,
-        "end": end,
-        "precision": precision,
-        "basis": "stated" if stated_all else "inferred",
-        "confidence": confidence,
-    }
-    return filed, dates
+            estimated["end"] = parsed.confidence == "approximate"
+    return {"start": start, "end": end, "precision": precision,
+            "confidence": confidence, "estimated": estimated}
+
+
+#: The `dates` block's exact key set (§3.2 of the reading plan). The platform
+#: transports the proposal verbatim, so this IS the web side's contract; named
+#: here in one tuple rather than spelled out at three call sites.
+DATE_KEYS = ("start", "end", "precision", "basis", "confidence", "estimated",
+             "inherited_from", "clause")
+
+#: The three bases a UNIT's summary may carry. Deliberately not
+#: `chronology.BASES`: a bound's basis is `stated` or `anchor` and lives on
+#: the record, and this is the summary a person reads — "you said it", "it was
+#: read from something else", "nothing was read".
+UNIT_BASES = ("stated", "inferred", "none")
+
+
+def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, dict]:
+    """``(record, dates)`` — the filed record, and the unit's own date block.
+
+    Every bound is re-based by :func:`date_evidence`. A bound the person's own
+    words DO carry files ``basis: stated``; a bound they do not is DROPPED from
+    the record with nothing put in its place — never rewritten into a
+    confident-looking inference, which is the v290 defect this reverses (D5).
+    A record left with no bounds at all summarises ``basis: "none"``, which
+    renders "no date read" and earns the domain's own question.
+    """
+    filed = json.loads(json.dumps(record))
+    hedged = _hedged(quote)
+    bounds = _bounds_of(filed)
+    dropped: list[str] = []
+    for path, value in bounds:
+        if not date_evidence(value, quote, source_text):
+            _drop_bound(filed, path)
+            dropped.append(path)
+            continue
+        restated = _restate(value, stated=True, hedged=hedged)
+        if restated is None:
+            _drop_bound(filed, path)
+            dropped.append(path)
+            continue
+        _set_bound(filed, path, restated)
+    summary = _date_summary(filed)
+    summary["basis"] = "stated" if _bounds_of(filed) else "none"
+    if summary["basis"] == "none":
+        summary["confidence"] = None
+    summary["inherited_from"] = None
+    summary["clause"] = None
+    return filed, {key: summary[key] for key in DATE_KEYS}
+
+
+def _drop_bound(record: dict, path: str) -> None:
+    """Remove one bound the person's text does not carry, and its container
+    when that empties it."""
+    if path == "date":
+        record.pop("date", None)
+        return
+    span = record.get("span")
+    if isinstance(span, dict):
+        span.pop(path.split(".", 1)[1], None)
+        if not span:
+            record.pop("span", None)
+
+
+def inherit_dates(unit: dict, parent: dict, *,
+                  framework_root: str | Path | None = None) -> bool:
+    """R7 rule 4: a dateless unit takes its parent span's dates, and says so.
+
+    A school named inside a stay belongs to that stay and is dated by it. The
+    bounds are copied onto the child's record through :func:`_restate` — so
+    they carry ``basis: anchor``, ``confidence: inferred`` and the verbatim
+    provenance clause *"from the dates of the <subject> <stay|tenure|
+    schooling>"* — and the child's summary reads ``basis: "inferred"`` with
+    ``inherited_from`` naming the unit it came from.
+
+    Returns whether anything was inherited. It refuses in two cases, both
+    deliberately: a child whose domain records ONE DATE rather than a stretch
+    (a birth, a child, a loss) — a stay's span is not a person's birthday, and
+    putting one there is exactly the fabrication R6 exists to end — and a
+    parent that has no dates of its own to give.
+    """
+    try:
+        row = li.domain_row(unit["domain"], framework_root=framework_root)
+    except li.LandmarkInteractionError:
+        return False
+    if lr.date_shape_for(row) != "span":
+        return False
+    bounds = dict(_bounds_of(parent.get("record") or {}))
+    start = bounds.get("span.start") or bounds.get("date")
+    end = bounds.get("span.end")
+    if start is None and end is None:
+        return False
+    subject = parent.get("subject") or "that"
+    clause = (f"from the dates of the {subject} "
+              f"{lr.span_noun(parent.get('domain'))}")
+    span: dict = {}
+    for name, value in (("start", start), ("end", end)):
+        if value is None:
+            continue
+        restated = _restate(value, stated=False, hedged=False, clause=clause)
+        if restated is not None:
+            span[name] = restated
+    if not span:
+        return False
+    unit["record"]["span"] = span
+    summary = _date_summary(unit["record"])
+    summary["basis"] = "inferred"
+    summary["confidence"] = "inferred"
+    summary["inherited_from"] = {"unit_id": parent.get("unit_id"),
+                                 "subject": subject,
+                                 "kind": parent.get("kind")}
+    summary["clause"] = clause
+    unit["dates"] = {key: summary[key] for key in DATE_KEYS}
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -589,6 +723,25 @@ def derive_unit_id(*, domain: object, kind: object, subject: object,
         "quote": collapsed_text(quote_row.get("text")),
     }
     return f"{UNIT_ID_PREFIX}:{_digest(payload)}"
+
+
+def derive_event_id(*, kind: object, subject: object, date: object,
+                    quote: object) -> str:
+    """One EVENT's content-addressed identity (v291).
+
+    The same shape :func:`derive_unit_id` uses and for the same reason: two
+    readings of the same submission name the same events, so 6g's filing is
+    safe to retry. What happened, to whom, when, and the words it came from.
+    """
+    quote_row = quote if isinstance(quote, dict) else {}
+    date_row = date if isinstance(date, dict) else {}
+    payload = {
+        "kind": collapsed_text(kind),
+        "subject": collapsed_text(subject).casefold(),
+        "date": collapsed_text(date_row.get("best")),
+        "quote": collapsed_text(quote_row.get("text")),
+    }
+    return f"{EVENT_ID_PREFIX}:{_digest(payload)}"
 
 
 def derive_proposal_id(text: object, generation: object) -> str:
@@ -743,7 +896,8 @@ def _subject_of(record: dict, domain: str) -> str:
 
 
 def _unit(*, domain: str, record: dict, subject: str, quote: object,
-          source_text: str, extractor: str) -> dict:
+          source_text: str, extractor: str, within: object = None,
+          names: object = None) -> dict:
     filed, dates = rebase_record(record, quote, source_text)
     kind = UNIT_KIND_BY_DOMAIN.get(domain, domain)
     return {
@@ -755,6 +909,15 @@ def _unit(*, domain: str, record: dict, subject: str, quote: object,
         "entity_candidates": [],
         "dates": dates,
         "quote": quote,
+        # R7: the unit this one belongs to, as that unit's own `unit_id` —
+        # never the reading's short-lived ref, which means nothing once the
+        # proposal is written.
+        "within": collapsed_text(within) or None,
+        # The place's own NAMES (E-L2c): nickname, city, address, place_ref,
+        # link. They ride on the record too; carried here as well so a host
+        # can render "the blue house · Riverbend · 12 Elm Street" without
+        # knowing which of them are ladder rungs and which are additive.
+        "names": dict(names or {}),
         "duplicates": [],
         "conflicts": [],
         "questions": [],
@@ -764,12 +927,20 @@ def _unit(*, domain: str, record: dict, subject: str, quote: object,
     }
 
 
+def _remint(unit: dict) -> dict:
+    """The unit's id, recomputed after its dates moved (R7 inheritance)."""
+    unit["unit_id"] = derive_unit_id(
+        domain=unit["domain"], kind=unit["kind"], subject=unit["subject"],
+        dates=unit["dates"], quote=unit["quote"])
+    return unit
+
+
 #: The exact key set of a unit. Named so a reader — and 6b's typed surface —
 #: has one place to read the contract from.
 UNIT_KEYS = (
     "unit_id", "domain", "kind", "subject", "entity_candidates", "dates",
-    "quote", "duplicates", "conflicts", "questions", "auto_file_eligible",
-    "extractor", "record",
+    "quote", "within", "names", "duplicates", "conflicts", "questions",
+    "auto_file_eligible", "extractor", "record",
 )
 
 
@@ -909,16 +1080,24 @@ def unit_questions(unit: dict, landmarks: object) -> list[str]:
 
     * a unit whose domain names a subject and whose subject is missing;
     * a unit whose domain dates its entries and that carries no date at all —
-      asked with `landmarks_interaction.event_questions`, so a partnership
-      asks its three distinct events by name rather than one flattened
-      "when";
-    * a date this module INFERRED. A date the person did not say is the one
-      thing that must be checked before it is filed — and it is checked with
-      the domain's OWN question, never by naming the inferred value and
-      inviting agreement with it. Showing an inference on the confirmation
-      screen is honest (the leaf requires it, marked as an inference); asking
-      *"was it 1991?"* is the suggestive-interviewing hazard ADR 0025 named,
-      and it stays banned in this mode exactly as in the other one.
+      ``basis: "none"``, R7 rule 5 — asked with
+      `landmarks_interaction.event_questions`, so a partnership asks its three
+      distinct events by name rather than one flattened "when";
+    * a date this module INFERRED from something OTHER than a span it belongs
+      to. A date the person did not say is the one thing that must be checked
+      before it is filed — and it is checked with the domain's OWN question,
+      never by naming the inferred value and inviting agreement with it.
+      Showing an inference on the confirmation screen is honest (the leaf
+      requires it, marked as an inference); asking *"was it 1991?"* is the
+      suggestive-interviewing hazard ADR 0025 named, and it stays banned in
+      this mode exactly as in the other one.
+
+    A date INHERITED from the stay a unit sits inside (R7 rule 4) is
+    deliberately NOT asked about. It carries its own provenance clause on the
+    card — *"from the dates of the Orchard House stay"* — so the person can see
+    exactly where it came from and correct it there; asking the schooling
+    ladder's opening question once per school in a thirty-block document would
+    turn a reading into the interrogation this Interaction refuses to be.
     """
     try:
         row = li.domain_row(unit["domain"])
@@ -934,7 +1113,8 @@ def unit_questions(unit: dict, landmarks: object) -> list[str]:
     elif not _bounds_of(record) and li.date_semantics(row):
         asks.extend(question["text"] for question
                     in li.event_questions(row, subject))
-    if unit["dates"].get("basis") == "inferred":
+    if (unit["dates"].get("basis") == "inferred"
+            and not unit["dates"].get("inherited_from")):
         events = [question["text"] for question
                   in li.event_questions(row, subject)]
         if events:
@@ -944,6 +1124,23 @@ def unit_questions(unit: dict, landmarks: object) -> list[str]:
             if opening is not None:
                 asks.append(opening["text"])
     return list(dict.fromkeys(asks))
+
+
+def open_event_claims(events: object) -> list[dict]:
+    """The reading's UNDATED, UNPLACED events, in the shape
+    :func:`open_claim_questions` reads.
+
+    *"We moved around a lot after Dad changed jobs"* is a real thing somebody
+    said about moving. It fabricates no residence and no year, so the reading
+    carries it as an event with no date and no ``within`` — and that pair is
+    exactly what earns the domain's own opening question. An event that HAS a
+    date needs no question, and one held inside a stay is already placed.
+    """
+    return [{"event_kind": row.get("kind"),
+             "evidence": (row.get("quote") or {}).get("text")}
+            for row in (events or ())
+            if isinstance(row, dict) and not row.get("date")
+            and not row.get("within")]
 
 
 def open_claim_questions(claims: object, units: object, landmarks: object,
@@ -1050,33 +1247,6 @@ def _roster_snapshot() -> dict:
 # propose
 # --------------------------------------------------------------------------
 
-def _claim_quote(claims: object, subject: str, source_text: str) -> dict | None:
-    key = " ".join(str(subject or "").split()).casefold()
-    if not key:
-        return None
-    for claim in claims or ():
-        if not isinstance(claim, dict):
-            continue
-        mention = " ".join(str(claim.get("subject_mention") or "").split())
-        if mention.casefold() != key:
-            continue
-        located = locate(source_text, claim_evidence_text(claim))
-        if located is not None:
-            return located
-    return None
-
-
-def _span_quote(source_text: str, subject: str) -> dict | None:
-    key = " ".join(str(subject or "").split()).casefold()
-    if not key:
-        return None
-    for span in source_spans(source_text):
-        if key in span["text"].casefold():
-            return {"text": span["text"][:QUOTE_MAX_CHARS],
-                    "offset": span["offset"], "length": span["length"]}
-    return None
-
-
 def _auto_file_eligible(unit: dict) -> bool:
     """The existing extraction policy, applied to a unit.
 
@@ -1103,16 +1273,39 @@ def _auto_file_eligible(unit: dict) -> bool:
     )
 
 
-def _partition_text(source_text: str, units: list[dict]) -> tuple[list[dict], list[dict]]:
-    """``(stories, unrecognized)`` — every span no unit's quote covers.
+def _quote_spans(rows: object) -> list[tuple[int, int]]:
+    return [(row["quote"]["offset"], row["quote"]["length"])
+            for row in (rows or ())
+            if isinstance(row, dict) and isinstance(row.get("quote"), dict)]
+
+
+def _partition_text(source_text: str, units: list[dict],
+                    events: object = (),
+                    told: object = ()) -> tuple[list[dict], list[dict]]:
+    """``(stories, unrecognized)`` — every span no unit and no EVENT covers.
 
     R3a: non-landmark input is never refused. Prose the person offered is a
     STORY and says so; a fragment with nothing to route is ``unrecognized``
     and is still carried, because a proposal that quietly loses half a paste
     is the failure this whole mode replaces.
+
+    ``events`` count as coverage exactly as units do (v291): "Wren was born
+    12 May 1991" is read, filed and shown, and a coverage invariant that
+    called it uncovered would report the one thing the reading got right as
+    the thing it dropped.
+
+    ``told`` is the reading's OWN stories — the model's `{quote, within}`
+    rows. The span partition stays the authority on WHICH spans are stories
+    (it is the thing the coverage invariant is measured against), and the
+    reading supplies the one thing a partition cannot know: which stay a story
+    belongs to (R7).
     """
-    covered = [(unit["quote"]["offset"], unit["quote"]["length"])
-               for unit in units if isinstance(unit.get("quote"), dict)]
+    covered = _quote_spans(units) + _quote_spans(events)
+    within_by_span = [(row["quote"]["offset"], row["quote"]["length"],
+                       row.get("within"))
+                      for row in (told or ())
+                      if isinstance(row, dict)
+                      and isinstance(row.get("quote"), dict)]
     stories: list[dict] = []
     unknown: list[dict] = []
     for span in source_spans(source_text):
@@ -1121,27 +1314,115 @@ def _partition_text(source_text: str, units: list[dict]) -> tuple[list[dict], li
             continue
         words = [word for word in re.split(r"\s+", span["text"]) if word]
         if len(words) >= STORY_MIN_WORDS and re.search(r"[A-Za-z]", span["text"]):
-            stories.append({**span, "route": STORY_KIND})
+            within = next(
+                (value for offset, length, value in within_by_span
+                 if value and _overlaps(span["offset"], span["length"],
+                                        offset, length)), None)
+            stories.append({**span, "route": STORY_KIND, "within": within})
         else:
             unknown.append(dict(span))
     return stories, unknown
 
 
+#: The `events` list's exact key set (§3.2). `filing` says which road 6g takes
+#: with it — a DATED event becomes a `TemporalClaim`, an undated one a moment
+#: held inside the unit it belongs to.
+EVENT_KEYS = ("event_id", "text", "kind", "subject_mention", "date", "within",
+              "quote", "filing")
+
+
+def _event_row(read_event: object, by_ref: dict) -> dict:
+    """One reading event as the proposal carries it (§3.2 item 3)."""
+    date = read_event.date
+    parent = by_ref.get(read_event.within) if read_event.within else None
+    slim = None
+    if isinstance(date, dict):
+        slim = {"best": date.get("best"),
+                "granularity": date.get("granularity"),
+                "confidence": date.get("confidence")}
+    return {
+        "event_id": derive_event_id(kind=read_event.kind,
+                                    subject=read_event.subject_mention,
+                                    date=date, quote=read_event.quote),
+        "text": read_event.text,
+        "kind": read_event.kind,
+        "subject_mention": read_event.subject_mention,
+        "date": slim,
+        "within": (parent or {}).get("unit_id"),
+        "quote": read_event.quote,
+        "filing": "claim" if slim else "moment",
+    }
+
+
+def _units_from_reading(reading: object, source_text: str, *,
+                        framework_root: str | Path | None = None) -> tuple[list[dict], dict]:
+    """``(units, by_ref)`` — the reading's units, in text order, with R7's
+    inheritance already applied.
+
+    Parents are built before their children (the reading's ``within`` graph is
+    acyclic by the time :func:`landmark_reading.parse_reading` returns), so a
+    child that inherits its parent's dates can name the parent's own
+    ``unit_id`` and be re-minted over the dates it ended up with.
+    """
+    drafts = list(getattr(reading, "units", ()) or ())
+    by_ref: dict[str, dict] = {}
+    units: list[dict] = []
+    pending = list(drafts)
+    while pending:
+        progressed = False
+        remaining = []
+        for read_unit in pending:
+            parent_ref = read_unit.within
+            if parent_ref and parent_ref not in by_ref:
+                remaining.append(read_unit)
+                continue
+            parent = by_ref.get(parent_ref) if parent_ref else None
+            unit = _unit(domain=read_unit.domain, record=read_unit.record,
+                         subject=read_unit.subject, quote=read_unit.quote,
+                         source_text=source_text, extractor="reading",
+                         within=(parent or {}).get("unit_id"),
+                         names=read_unit.names)
+            if parent is not None and unit["dates"].get("basis") == "none":
+                if inherit_dates(unit, parent, framework_root=framework_root):
+                    _remint(unit)
+            by_ref[read_unit.ref] = unit
+            units.append(unit)
+            progressed = True
+        pending = remaining
+        if not progressed:
+            # Unreachable while `parse_reading` guarantees an acyclic graph;
+            # kept so a future caller that skips it degrades to "no parent"
+            # rather than looping forever.
+            for read_unit in pending:
+                unit = _unit(domain=read_unit.domain, record=read_unit.record,
+                             subject=read_unit.subject, quote=read_unit.quote,
+                             source_text=source_text, extractor="reading",
+                             names=read_unit.names)
+                by_ref[read_unit.ref] = unit
+                units.append(unit)
+            break
+    return units, by_ref
+
+
 def propose(text: str, vault_root: object = None, *, call,
-            model: object = None, listener_model: object = None,
-            recorder_model: object = None, now: object = None,
+            model: object = None, now: object = None,
             write: bool = True, landmarks: object = None,
-            roster: object = None, generation: object = None) -> dict:
+            roster: object = None, generation: object = None,
+            framework_root: str | Path | None = None) -> dict:
     """Read volunteered text; propose landmark units. Files NOTHING.
 
-    ``call(prompt, model) -> str`` is injected exactly as the recorder's is,
-    so this loop is testable, replayable and host-routable. ``model`` sets
-    both passes at once; ``listener_model``/``recorder_model`` override each.
+    **ONE reading (R6, R9).** ``call(prompt, model) -> str`` is injected
+    exactly as the recorder's is, so this loop is testable, replayable and
+    host-routable — and it is called ONCE, with the prompt
+    `landmark_reading.build_reading_prompt` composes. No deterministic grammar
+    runs first and no second pass re-reads the text: the interaction sees the
+    whole submission with the whole context and returns one reading, and
+    everything after that is deterministic.
 
     Writes exactly one file — ``state/landmarks/offers/<proposal_id>.json`` —
-    carrying the submitted text, the units, the stories, the spans nothing
-    recognized and the questions. That file IS R3's durable evidence: it
-    exists before anybody confirms anything, and a failure writes it too, so
+    carrying the submitted text, the units, the events, the stories, the spans
+    nothing recognized and the questions. That file IS R3's durable evidence:
+    it exists before anybody confirms anything, and a failure writes it too, so
     the input is never the thing that gets lost.
 
     ``landmarks``, ``roster`` and ``generation`` are the vault context. They
@@ -1164,58 +1445,27 @@ def propose(text: str, vault_root: object = None, *, call,
     roster = _roster_snapshot() if roster is None else roster
     stamp = normalized_timestamp(now, error=tc.TemporalContractError)
 
-    units, _consumed = grammar_units(body)
+    role = str(model or lr.DEFAULT_READING_ROLE)
     findings: list[str] = []
     failure: dict | None = None
-    claims: tuple[dict, ...] = ()
-
-    heard = None
+    reading = lr.Reading()
     try:
-        heard = recorder.listen_to_answer(
-            answer=body, call=call, landmarks=landmarks,
-            model=str(listener_model or model or gl.DEFAULT_LISTENER_ROLE))
+        prompt = lr.build_reading_prompt(body, landmarks=landmarks,
+                                         roster=roster,
+                                         framework_root=framework_root)
+        raw = call(prompt, role)
     except Exception as exc:  # noqa: BLE001 — a provider failure is data here
         failure = {"class": "service_unavailable", "detail": str(exc)}
-    if heard is not None:
-        findings.extend(heard.findings)
-        claims = heard.claims
-        if heard.status == recorder.STATUS_UNAVAILABLE:
-            failure = {"class": "service_unavailable",
-                       "detail": heard.reason or "the listener was unavailable"}
+    else:
+        reading = lr.parse_reading(raw, text=body,
+                                   framework_root=framework_root)
+        findings.extend(reading.findings)
+        if not len(reading) and reading.findings:
+            failure = {"class": "content_ambiguity",
+                       "detail": reading.findings[0]}
 
-    domains = sorted({collapsed_text(row.get("domain"))
-                      for row in (heard.records if heard else ())
-                      if isinstance(row, dict) and row.get("domain")})
-    for domain in domains:
-        try:
-            row = li.domain_row(domain)
-        except li.LandmarkInteractionError:
-            continue
-        try:
-            outcome = recorder.record_answer(
-                domain=domain, answer=body, call=call, landmarks=landmarks,
-                question_asked=str(row.get("ask") or ""),
-                model=str(recorder_model or model or recorder.DEFAULT_RECORDER_ROLE))
-        except Exception as exc:  # noqa: BLE001
-            failure = failure or {"class": "model_failure", "detail": str(exc)}
-            outcome = None
-        records = list(outcome.records) if outcome is not None else []
-        if not records:
-            records = [row_ for row_ in (heard.records if heard else ())
-                       if isinstance(row_, dict) and row_.get("domain") == domain]
-        if outcome is not None:
-            findings.extend(outcome.findings)
-        for record in records:
-            subject = _subject_of(record, domain)
-            quote = (_claim_quote(claims, subject, body)
-                     or _span_quote(body, subject)
-                     or _claim_quote(claims, record.get("label"), body))
-            unit = _unit(domain=domain, record=record, subject=subject,
-                         quote=quote, source_text=body, extractor="recorder")
-            if any(existing["unit_id"] == unit["unit_id"] for existing in units):
-                continue
-            units.append(unit)
-
+    units, by_ref = _units_from_reading(reading, body,
+                                        framework_root=framework_root)
     for unit in units:
         annotate_against_known(unit, landmarks)
         annotate_entities(unit, roster)
@@ -1226,8 +1476,15 @@ def propose(text: str, vault_root: object = None, *, call,
         row_["quote"]["offset"] if isinstance(row_.get("quote"), dict) else 1 << 30,
         row_["domain"], row_["unit_id"]))
 
-    questions = open_claim_questions(claims, units, landmarks, body)
-    stories, unrecognized = _partition_text(body, units)
+    events = [_event_row(read_event, by_ref) for read_event in reading.events]
+    events.sort(key=lambda row_: (row_["quote"]["offset"], row_["event_id"]))
+
+    told = [{"quote": story.quote,
+             "within": (by_ref.get(story.within) or {}).get("unit_id")}
+            for story in reading.stories]
+    questions = open_claim_questions(open_event_claims(events), units,
+                                     landmarks, body)
+    stories, unrecognized = _partition_text(body, units, events, told)
 
     if failure is not None:
         state = "failed"
@@ -1249,39 +1506,33 @@ def propose(text: str, vault_root: object = None, *, call,
         "source_text": body,
         "source_digest": f"sha256:{store.payload_sha256(store.normalize_payload(body))}",
         "units": units,
+        "events": events,
         "stories": stories,
         "unrecognized": unrecognized,
         "questions": questions,
         "findings": sorted(dict.fromkeys(findings)),
         "failure": failure,
-        "extractors": _extractors(listener_model or model,
-                                  recorder_model or model),
+        "extractors": _extractors(role, framework_root=framework_root),
     }
     if write:
         _save_proposal(root, proposal)
     return proposal
 
 
-def _extractors(listener_model: object, recorder_model: object) -> list[dict]:
+def _extractors(model: object,
+                framework_root: str | Path | None = None) -> list[dict]:
     """Which prompt bytes and which model read this text.
 
     §4.2 of the audited claim plan requires a receipt to name the extractor's
-    prompt, schema and model version; both passes carry their own
-    (`general_listener.claim_extractor`), and editing a leaf is a NEW
-    extractor rather than a cache rebuild.
+    prompt, schema and model version. There is ONE reading pass now
+    (`landmark_reading.reading_extractor`), so there is one row, and editing
+    the leaf is a NEW extractor rather than a cache rebuild.
     """
-    rows = []
     try:
-        rows.append(gl.listener_extractor(
-            model=str(listener_model or gl.DEFAULT_LISTENER_ROLE)))
+        return [lr.reading_extractor(str(model or lr.DEFAULT_READING_ROLE),
+                                     framework_root=framework_root)]
     except Exception:  # noqa: BLE001
-        pass
-    try:
-        rows.append(recorder.recorder_extractor(
-            model=str(recorder_model or recorder.DEFAULT_RECORDER_ROLE)))
-    except Exception:  # noqa: BLE001
-        pass
-    return rows
+        return []
 
 
 def _save_proposal(vault_root: Path, proposal: dict) -> Path:
@@ -1676,23 +1927,36 @@ def receipt_is_retracted(vault_root: str | Path, receipt_id: str) -> bool:
 OFFER_GATE_PREFIX = "landmark_offer_gates"
 
 OFFER_LINT_CLASSES = (
-    # A proposed date must be in the person's own text, or be marked as an
-    # inference. This is the class R3's whole "never invent a date" rests on.
+    # A proposed date must be in the person's own text. This is the class R3's
+    # whole "never invent a date" rests on, and v291 widens it from stated
+    # bounds to EVERY bound: an inherited date is still a year the document
+    # carries somewhere, so a year that is nowhere in it is fabricated
+    # whatever basis the unit claims.
     f"{OFFER_GATE_PREFIX}.no_fabricated_date",
-    # Every span of the submission is a unit, a story or an explicitly
-    # unrecognized span. Nothing is silently dropped.
+    # Every span of the submission is a unit, an event, a story or an
+    # explicitly unrecognized span. Nothing is silently dropped.
     f"{OFFER_GATE_PREFIX}.nothing_dropped",
     # R3a: non-landmark text is accepted and routed as a story, never refused.
     f"{OFFER_GATE_PREFIX}.never_refuses",
     # The stop rules, in offer clothing: no form voice, no homework, no
     # pressure, no "are you sure".
     f"{OFFER_GATE_PREFIX}.keeps_stop_rules",
+    # v291: every unit and every event carries a quotation LOCATED in the
+    # submitted text. A reading whose evidence cannot be pointed at is not
+    # evidence, and the confirmation screen has nothing honest to show.
+    f"{OFFER_GATE_PREFIX}.quotes_locate",
+    # v291: the basis says what it means. No `inferred` without the verbatim
+    # provenance clause that names where it came from (D5), and no `stated`
+    # bound shown certain when the reading marked it estimated (D3, R8).
+    f"{OFFER_GATE_PREFIX}.honest_basis",
 )
 
 NO_FABRICATED_DATE_LINT = OFFER_LINT_CLASSES[0]
 NOTHING_DROPPED_LINT = OFFER_LINT_CLASSES[1]
 NEVER_REFUSES_LINT = OFFER_LINT_CLASSES[2]
 KEEPS_STOP_RULES_LINT = OFFER_LINT_CLASSES[3]
+QUOTES_LOCATE_LINT = OFFER_LINT_CLASSES[4]
+HONEST_BASIS_LINT = OFFER_LINT_CLASSES[5]
 
 #: What a refusal sounds like. Any of these in the worker's reply is the
 #: R3a violation: the person handed over something real and was told no.
@@ -1717,25 +1981,56 @@ def lint_offer_proposal(proposal: object) -> list[dict]:
     ``[{"lint", "detail"}]``, one row per finding, sorted — the same shape
     `landmarks_interaction.lint_landmark_reply` returns, so a host runs both
     through one reporter.
+
+    Six checks, all off the bytes and none off a completion's own claim about
+    itself: no year a unit's dates carry that the submitted text does not
+    (whatever its basis) · every span of the text accounted for · every unit
+    and event quote LOCATED in the text · no `inferred` without a provenance
+    clause · no `stated` bound shown certain that the reading marked estimated.
     """
     findings: list[dict] = []
     row = proposal if isinstance(proposal, dict) else {}
     text = str(row.get("source_text") or "")
     units = [unit for unit in (row.get("units") or ()) if isinstance(unit, dict)]
+    events = [event for event in (row.get("events") or ())
+              if isinstance(event, dict)]
     for unit in units:
         dates = unit.get("dates") or {}
-        if dates.get("basis") != "stated":
-            continue
         for _path, bound in _bounds_of(unit.get("record") or {}):
             if not date_evidence(bound, unit.get("quote"), text):
                 findings.append({
                     "lint": NO_FABRICATED_DATE_LINT,
-                    "detail": (f"{unit.get('unit_id')} files a stated date the "
-                               f"text does not carry"),
+                    "detail": (f"{unit.get('unit_id')} carries a date the "
+                               f"text does not"),
                 })
                 break
-    covered = [(unit["quote"]["offset"], unit["quote"]["length"])
-               for unit in units if isinstance(unit.get("quote"), dict)]
+        if dates.get("basis") == "inferred" and not collapsed_text(
+                dates.get("clause")):
+            findings.append({
+                "lint": HONEST_BASIS_LINT,
+                "detail": f"{unit.get('unit_id')} is inferred and says nothing "
+                          f"about where the date came from",
+            })
+        estimated = dates.get("estimated") if isinstance(
+            dates.get("estimated"), dict) else {}
+        if dates.get("basis") == "stated" and (
+                estimated.get("start") or estimated.get("end")) and \
+                dates.get("confidence") == "certain":
+            findings.append({
+                "lint": HONEST_BASIS_LINT,
+                "detail": f"{unit.get('unit_id')} marks an estimated bound "
+                          f"certain",
+            })
+    for item, label in ([(unit, unit.get("unit_id")) for unit in units]
+                        + [(event, event.get("event_id")) for event in events]):
+        quote = item.get("quote")
+        if not isinstance(quote, dict) or not quote.get("text") or \
+                locate(text, quote.get("text")) is None:
+            findings.append({
+                "lint": QUOTES_LOCATE_LINT,
+                "detail": f"{label} has no quotation in the text",
+            })
+    covered = _quote_spans(units) + _quote_spans(events)
     covered += [(span["offset"], span["length"])
                 for group in ("stories", "unrecognized")
                 for span in (row.get(group) or ())
@@ -1778,7 +2073,17 @@ def lint_offer_reply(text: object, *, stage: str = "ask",
 # What the worker is shown
 # --------------------------------------------------------------------------
 
+#: What a unit with `basis: "none"` says out loud. NOT "inferred" and not "no
+#: dates yet": nothing was read, and the honest word for that is its own (D5).
+NO_DATE_READ = "no date read"
+
+#: What an estimated bound says. R8: brackets, "about", "?" are the person's
+#: own convention for an estimate, so the reading says it back as theirs.
+ESTIMATED_PHRASE = "estimated, as you marked it"
+
+
 def _date_phrase(dates: object) -> str:
+    """One unit's dates, in the words the person should recognise (§3.2)."""
     row = dates if isinstance(dates, dict) else {}
     start, end = row.get("start"), row.get("end")
     if start and end:
@@ -1788,11 +2093,14 @@ def _date_phrase(dates: object) -> str:
     elif end:
         body = f"until {end}"
     else:
-        return "no dates"
+        return NO_DATE_READ
     if row.get("basis") == "inferred":
-        return f"{body} (read from the text; you did not say a date)"
-    if row.get("confidence") == "approximate":
-        return f"{body}, roughly"
+        clause = collapsed_text(row.get("clause")) or INFERRED_CLAUSE
+        return f"{body} ({clause})"
+    estimated = row.get("estimated") if isinstance(row.get("estimated"), dict) else {}
+    if estimated.get("start") or estimated.get("end") or \
+            row.get("confidence") == "approximate":
+        return f"{body}, {ESTIMATED_PHRASE}"
     return body
 
 
@@ -1801,6 +2109,11 @@ def render_unit(unit: object) -> str:
     row = unit if isinstance(unit, dict) else {}
     subject = row.get("subject") or "(unnamed)"
     lines = [f"- {row.get('kind')}: {subject} — {_date_phrase(row.get('dates'))}"]
+    names = row.get("names") if isinstance(row.get("names"), dict) else {}
+    shown = [str(names[key]) for key in ("nickname", "city", "address", "link")
+             if names.get(key)]
+    if shown:
+        lines.append("  " + " · ".join(shown))
     quote = row.get("quote")
     if isinstance(quote, dict) and quote.get("text"):
         lines.append(f"  from your words: “{quote['text']}”")
@@ -1821,12 +2134,31 @@ def render_unit(unit: object) -> str:
 NO_UNITS = "(nothing in this reads as a landmark)"
 
 
+def render_event(event: object) -> str:
+    """ONE read event, in plain language, with the words it came from."""
+    row = event if isinstance(event, dict) else {}
+    date = row.get("date") if isinstance(row.get("date"), dict) else {}
+    when = collapsed_text(date.get("best"))
+    text = row.get("text") or row.get("kind") or "something happened"
+    line = f"- {text} — {when}" if when else f"- {text} — {NO_DATE_READ}"
+    quote = row.get("quote")
+    if isinstance(quote, dict) and quote.get("text"):
+        line += f"\n  from your words: “{quote['text']}”"
+    return line
+
+
 def render_proposal(proposal: object) -> str:
     """The whole reading, as the worker leaf's ``{proposed_units}`` block."""
     row = proposal if isinstance(proposal, dict) else {}
     blocks = [render_unit(unit) for unit in (row.get("units") or ())
               if isinstance(unit, dict)]
     lines = blocks or [NO_UNITS]
+    events = [event for event in (row.get("events") or ())
+              if isinstance(event, dict)]
+    if events:
+        lines.append("")
+        lines.append("Things that happened, read out of the same text:")
+        lines.extend(render_event(event) for event in events[:12])
     stories = [span for span in (row.get("stories") or ()) if isinstance(span, dict)]
     if stories:
         lines.append("")
@@ -1930,27 +2262,29 @@ def offer_context(vault_root: str | Path) -> dict:
 
 
 # --------------------------------------------------------------------------
-# The host-run extraction protocol (Cut 6c, ADR 0033 amendment)
+# The host-run reading protocol (Cut 6f, ADR 0033 amendment)
 # --------------------------------------------------------------------------
 #
 # A host that cannot let this package call a model (staging's package sandbox
-# has no AI provider, by design) can still produce the IDENTICAL proposal:
-# it asks the package for the prompts `propose` would have sent, makes the
-# calls itself through its own router, and hands the completions back. Three
-# doors, none of them a second extraction:
+# has no AI provider, by design) can still produce the IDENTICAL proposal: it
+# asks the package for the prompt `propose` would have sent, makes the call
+# itself through its own router, and hands the completion back. TWO doors, one
+# each way, because after R6 there is ONE reading:
 #
-#   1. :func:`host_listener_prompt` — the listener's prompt, exactly as
-#      `propose` composes it on its first attempt. Calls no model, writes
-#      nothing.
-#   2. :func:`host_recorder_prompts` — the per-domain recorder prompts the
-#      listener's OWN completion implies, once that completion is in hand.
-#      Calls no model, writes nothing. Empty where the listener named no
-#      domain.
-#   3. :func:`propose_from_completions` — `propose` itself, driven by the
-#      completions a host already made instead of a live `call`. Writes the
+#   1. :func:`host_reading_prompt` — the reading's prompt, exactly as
+#      `propose` composes it. Calls no model, writes nothing.
+#   2. :func:`propose_from_completions` — `propose` itself, driven by the
+#      completion a host already made instead of a live `call`. Writes the
 #      proposal exactly as `propose` always has.
 #
-# The three read the SAME leaves `propose` reads and substitute the SAME
+# Cut 6c's three doors were the three-pass shape's: a listener prompt, the
+# per-domain recorder prompts its own completion implied, then the run. R6
+# deleted the passes and this protocol shrank with them —
+# `host_recorder_prompts` and `--listener-completion` are gone rather than
+# kept as aliases, because a host threading a listener completion into a
+# reading would be threading it into nothing.
+#
+# Both doors read the SAME leaf `propose` reads and substitute the SAME
 # values, so a host that replays this protocol gets the byte-identical
 # proposal (modulo `created_at`) a package-driven call would have produced —
 # `tests/test_landmark_offer_host.py` pins it against the five
@@ -1958,9 +2292,9 @@ def offer_context(vault_root: str | Path) -> dict:
 
 #: The completion `ScriptedCall` and `landmarks_evals._RecordedCall` both
 #: answer with when nothing is scripted for a prompt. The host protocol's own
-#: default for the SAME reason: an un-scripted domain read as "nothing here"
-#: rather than borrowing another domain's completion.
-EMPTY_COMPLETION = '{"landmarks": [], "claims": []}'
+#: default for the SAME reason: an unanswered prompt reads as "nothing here"
+#: rather than as a crash.
+EMPTY_COMPLETION = lr.EMPTY_READING_COMPLETION
 
 
 def _completion_text(value: object) -> str:
@@ -1987,10 +2321,9 @@ def _usable_completion(value: object) -> str:
     package prose it can only degrade to an empty reading, is what lets that
     failure land on the proposal's own ``failure`` field instead of quietly
     reading as "the person said nothing datable". The same lenient parse
-    `general_listener.parse_listener_output` and
-    `landmark_recorder.parse_recorder_output` both apply (a fenced code
-    block strips) runs here first, so a completion either of them would
-    accept is never refused by this earlier gate.
+    `landmark_reading.parse_reading` applies (a fenced code block strips) runs
+    here first, so a completion it would accept is never refused by this
+    earlier gate.
     """
     text = _completion_text(value)
     body = text.strip()
@@ -2006,31 +2339,18 @@ def _usable_completion(value: object) -> str:
 
 
 def host_completions_call(completions: object):
-    """The ``call(prompt, model) -> str`` a host builds from prompts it has
+    """The ``call(prompt, model) -> str`` a host builds from the prompt it has
     already answered — what :func:`propose_from_completions` runs `propose`
     with.
 
-    Dispatch is on the composed prompt's own header — the recorder leaf
-    names its domain, the listener leaf does not — exactly as
-    `tests/test_landmark_offer.py`'s ``ScriptedCall`` and
-    `landmarks_evals.py`'s ``_RecordedCall`` both read it, so the SAME
-    completions file drives the CLI and an in-process replay to the
-    byte-identical proposal. A domain nobody scripted answers
-    :data:`EMPTY_COMPLETION` rather than silently borrowing another domain's
-    completion.
+    There is exactly one prompt per submission (R9), so there is no dispatch:
+    whatever `propose` asks, the host's ONE reading completion answers.
     """
     payload = completions if isinstance(completions, dict) else {}
-    listener_payload = payload.get("listener")
-    recorders = {str(key): value for key, value
-                in (payload.get("recorders") or {}).items()}
+    reading = payload.get("reading")
 
-    def _call(prompt: str, model: str) -> str:  # noqa: ARG001 — the shape `call` requires
-        for domain, value in recorders.items():
-            if f"DOMAIN BEING ASKED ABOUT: {domain}\n" in prompt:
-                return _usable_completion(value)
-        if "DOMAIN BEING ASKED ABOUT:" in prompt:
-            return EMPTY_COMPLETION
-        return _usable_completion(listener_payload)
+    def _call(prompt: str, model: str) -> str:  # noqa: ARG001 — `call`'s shape
+        return _usable_completion(reading)
 
     return _call
 
@@ -2040,106 +2360,62 @@ def _prompt_row(prompt: str, *, extractor: dict) -> dict:
             "prompt_version": extractor.get("prompt_version")}
 
 
-def host_listener_prompt(text: str, vault_root: object = None, *,
-                         model: object = None, landmarks: object = None,
-                         framework_root: str | Path | None = None) -> dict:
-    """Step 1 of the host-run protocol: the listener's prompt. Calls no
-    model; writes nothing.
+def host_reading_prompt(text: str, vault_root: object = None, *,
+                        model: object = None, landmarks: object = None,
+                        roster: object = None,
+                        framework_root: str | Path | None = None) -> dict:
+    """Step 1 of the host-run protocol: the reading's prompt. Calls no model;
+    writes nothing.
 
-    The exact prompt `propose` would send to `call` on its first attempt —
-    same leaf, same substitutions, same known-entries rendering
-    (`general_listener.build_listener_prompt`). ``landmarks`` is the vault
-    context a host may already hold (`propose`'s own ``landmarks=``); left
+    The exact prompt `propose` would send to `call` — same leaf, same
+    substitutions, same domain digest, same known-entries and roster rendering
+    (`landmark_reading.build_reading_prompt`). ``landmarks``/``roster`` are the
+    vault context a host may already hold (`propose`'s own keywords); left
     unset, this reads the bound vault's, the way ``--propose`` always has.
 
-    Returns ``{"listener": {"prompt", "model", "prompt_version"}}`` —
-    ``prompt_version`` is `general_listener.listener_extractor`'s, the same
+    Returns ``{"reading": {"prompt", "model", "prompt_version"}}`` —
+    ``prompt_version`` is `landmark_reading.reading_extractor`'s, the same
     block `propose`'s own ``extractors[]`` carries for this pass.
     """
     body = str(text or "")
-    if landmarks is None:
+    if landmarks is None or roster is None:
         _bound_vault(vault_root)
-        landmarks = _known_landmarks()
-    role = str(model or gl.DEFAULT_LISTENER_ROLE)
-    prompt = gl.build_listener_prompt(answer=body, landmarks=landmarks,
-                                      framework_root=framework_root)
-    extractor = gl.listener_extractor(model=role, framework_root=framework_root)
-    return {"listener": _prompt_row(prompt, extractor=extractor)}
-
-
-def host_recorder_prompts(text: str, listener_completion: object,
-                          vault_root: object = None, *,
-                          model: object = None, landmarks: object = None,
-                          framework_root: str | Path | None = None) -> dict:
-    """Step 2 of the host-run protocol: the per-domain recorder prompts the
-    listener's OWN completion implies. Calls no model; writes nothing.
-
-    ``listener_completion`` is the text (or parsed object) step 1's prompt
-    drew from a host's model — exactly what a host would hand `call` back.
-    The domains are read off it the SAME way `propose` derives them: every
-    ``domain`` the listener's parsed landmark records name
-    (`general_listener.parse_listener_output`). Returns ``{"recorders": {}}``
-    where the listener named none, and a host proceeds straight to step 3.
-
-    Each prompt is the exact one `propose` would send on its first attempt
-    for that domain (`landmark_recorder.build_recorder_prompt`), and each
-    row's ``prompt_version`` is `landmark_recorder.recorder_extractor`'s —
-    the same block `propose`'s ``extractors[]`` carries for this pass.
-    """
-    body = str(text or "")
-    if landmarks is None:
-        _bound_vault(vault_root)
-        landmarks = _known_landmarks()
-    raw = _completion_text(listener_completion)
-    heard = gl.parse_listener_output(raw, framework_root=framework_root)
-    domains = sorted({collapsed_text(row.get("domain"))
-                      for row in heard.landmarks
-                      if isinstance(row, dict) and row.get("domain")})
-    role = str(model or recorder.DEFAULT_RECORDER_ROLE)
-    extractor = recorder.recorder_extractor(model=role,
-                                            framework_root=framework_root)
-    rows: dict[str, dict] = {}
-    for domain in domains:
-        try:
-            row = li.domain_row(domain, framework_root=framework_root)
-        except li.LandmarkInteractionError:
-            continue
-        prompt = recorder.build_recorder_prompt(
-            domain=domain, question_asked=str(row.get("ask") or ""),
-            answer=body, landmarks=landmarks, framework_root=framework_root)
-        rows[domain] = _prompt_row(prompt, extractor=extractor)
-    return {"recorders": rows}
+        landmarks = _known_landmarks() if landmarks is None else landmarks
+        roster = _roster_snapshot() if roster is None else roster
+    role = str(model or lr.DEFAULT_READING_ROLE)
+    prompt = lr.build_reading_prompt(body, landmarks=landmarks, roster=roster,
+                                     framework_root=framework_root)
+    extractor = lr.reading_extractor(role, framework_root=framework_root)
+    return {"reading": _prompt_row(prompt, extractor=extractor)}
 
 
 def propose_from_completions(text: str, vault_root: object,
                              completions: object, *, model: object = None,
                              now: object = None, write: bool = True,
                              landmarks: object = None, roster: object = None,
-                             generation: object = None) -> dict:
-    """Step 3 of the host-run protocol: `propose`, driven by completions a
+                             generation: object = None,
+                             framework_root: str | Path | None = None) -> dict:
+    """Step 2 of the host-run protocol: `propose`, driven by the completion a
     host already made rather than by a live model call.
 
-    ``completions`` is exactly ``{"listener": <completion>, "recorders":
-    {"<domain>": <completion>}}`` — one completion per prompt
-    :func:`host_listener_prompt` / :func:`host_recorder_prompts` handed the
-    host, each either the raw completion TEXT or its parsed JSON object
-    (:func:`host_completions_call`'s own dispatch). Runs `propose` with a
-    ``call`` built from exactly those completions, so a host that cannot let
-    the package call a model still produces the SAME proposal a
-    package-driven call would have — deterministically, byte-identical
-    modulo ``created_at``.
+    ``completions`` is exactly ``{"reading": <completion>}`` — the one
+    completion :func:`host_reading_prompt` handed the host, either the raw
+    completion TEXT or its parsed JSON object
+    (:func:`host_completions_call`'s own reader). Runs `propose` with a
+    ``call`` built from exactly that, so a host that cannot let the package
+    call a model still produces the SAME proposal a package-driven call would
+    have — deterministically, byte-identical modulo ``created_at``.
 
     Writes the proposal exactly as `propose` always has, INCLUDING a
-    ``state: failed`` one: a host completion `propose`'s own passes could not
-    use (unusable JSON where the listener needed an answer) still leaves the
-    submitted text durable in a written document, which is R3's whole point
-    — a person's words must never be lost to a host's own extraction
-    trouble, on submit.
+    ``state: failed`` one: a host completion `propose` could not use (unusable
+    JSON where the reading needed an answer) still leaves the submitted text
+    durable in a written document, which is R3's whole point — a person's
+    words must never be lost to a host's own extraction trouble, on submit.
     """
     call = host_completions_call(completions)
     return propose(text, vault_root, call=call, model=model, now=now,
                    write=write, landmarks=landmarks, roster=roster,
-                   generation=generation)
+                   generation=generation, framework_root=framework_root)
 
 
 def load_host_context(path: str | Path) -> dict:
@@ -2175,23 +2451,23 @@ def main(argv: list[str] | None = None) -> int:
     """``landmark_offer.py --propose|--apply <id>|--retract <id>``.
 
     ``--propose`` reads the text on stdin and prints the proposal as JSON.
-    ``--dry-run`` prints the composed listener prompt and calls nothing, which
-    is how a host verifies its own REPLAY against these leaves without
-    spending a completion.
+    ``--dry-run`` prints the composed reading prompt and calls nothing, which
+    is how a host verifies its own REPLAY against this leaf without spending a
+    completion.
 
-    **The host-run extraction protocol (Cut 6c, ADR 0033 amendment)** adds
-    three more shapes to ``--propose``, for a host that cannot let this
-    process call a model itself (staging's package sandbox, by design, has
-    none):
+    **The host-run reading protocol (Cut 6f, ADR 0033 amendment)** adds two
+    more shapes to ``--propose``, for a host that cannot let this process call
+    a model itself (staging's package sandbox, by design, has none):
 
-    * ``--prompts`` prints the listener's prompt and calls nothing —
-      :func:`host_listener_prompt`.
-    * ``--prompts --listener-completion FILE`` prints the per-domain
-      recorder prompts that completion implies, and calls nothing —
-      :func:`host_recorder_prompts`.
-    * ``--completions FILE`` runs `propose` from the completions a host
-      already made and WRITES the proposal, exactly as a package-driven
-      ``--propose`` does — :func:`propose_from_completions`.
+    * ``--prompts`` prints the ONE reading prompt and calls nothing —
+      :func:`host_reading_prompt`.
+    * ``--completions FILE`` runs `propose` from the ``{"reading": …}``
+      completion a host already made and WRITES the proposal, exactly as a
+      package-driven ``--propose`` does — :func:`propose_from_completions`.
+
+    Cut 6c's ``--listener-completion`` is REMOVED with the pass it named
+    (R6): there is one reading, so there is nothing for a listener completion
+    to imply.
 
     ``--context FILE`` (any of the three) hands over ``{"landmarks",
     "roster", "generation"}`` a host already holds, so this module need not
@@ -2218,18 +2494,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--prompts", action="store_true",
-                        help="print the host-run extraction prompts; call "
-                             "no model, write nothing")
+                        help="print the host-run reading prompt; call no "
+                             "model, write nothing")
     parser.add_argument("--context", default=None,
                         help="a JSON file of {landmarks, roster, generation}")
-    parser.add_argument("--listener-completion", dest="listener_completion",
-                        default=None,
-                        help="with --prompts: the listener's own completion, "
-                             "to print the recorder prompts it implies")
     parser.add_argument("--completions", default=None,
-                        help="a JSON file of {listener, recorders} "
-                             "completions a host already made; runs and "
-                             "writes the proposal from them")
+                        help="a JSON file of {reading: <completion>} a host "
+                             "already made; runs and writes the proposal "
+                             "from it")
     args = parser.parse_args(argv)
 
     from lifehug_core import REPO_DIR  # noqa: PLC0415
@@ -2269,22 +2541,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.prompts:
             text = (Path(args.from_file).read_text(encoding="utf-8")
                     if args.from_file else sys.stdin.read())
-            if args.listener_completion:
-                listener_completion = Path(args.listener_completion).read_text(
-                    encoding="utf-8")
-                output = host_recorder_prompts(
-                    text, listener_completion, root, model=args.model,
-                    landmarks=landmarks_ctx)
-            else:
-                output = host_listener_prompt(
-                    text, root, model=args.model, landmarks=landmarks_ctx)
+            output = host_reading_prompt(text, root, model=args.model,
+                                         landmarks=landmarks_ctx,
+                                         roster=roster_ctx)
             print(json.dumps(output, indent=2, sort_keys=True))
             return 0
 
         text = (Path(args.from_file).read_text(encoding="utf-8")
                 if args.from_file else sys.stdin.read())
         if args.dry_run:
-            print(gl.build_listener_prompt(answer=text))
+            print(host_reading_prompt(text, root, model=args.model,
+                                      landmarks=landmarks_ctx,
+                                      roster=roster_ctx)["reading"]["prompt"])
             return 0
         from ai_provider import call_ai  # noqa: PLC0415
 
@@ -2322,14 +2590,18 @@ __all__ = [
     "annotate_entities",
     "claim_evidence_text",
     "apply",
+    "DATE_KEYS",
+    "EVENT_KEYS",
+    "UNIT_BASES",
     "date_evidence",
+    "derive_event_id",
     "derive_proposal_id",
     "derive_receipt_id",
     "derive_unit_id",
     "grammar_units",
     "host_completions_call",
-    "host_listener_prompt",
-    "host_recorder_prompts",
+    "host_reading_prompt",
+    "inherit_dates",
     "landmark_opportunity_id",
     "lint_offer_proposal",
     "lint_offer_reply",
@@ -2338,6 +2610,8 @@ __all__ = [
     "build_offer_turn",
     "load_offer_leaf",
     "offer_context",
+    "open_claim_questions",
+    "open_event_claims",
     "open_opportunity_ids",
     "opportunity_ids_for",
     "propose",
@@ -2345,6 +2619,7 @@ __all__ = [
     "read_offer_receipt",
     "read_proposal",
     "receipt_is_retracted",
+    "render_event",
     "render_open_questions",
     "render_proposal",
     "render_unit",
