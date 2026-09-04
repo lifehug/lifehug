@@ -430,6 +430,21 @@ write a document exits 0 whenever it wrote one, whatever its `state` —
 including `failed` — because R3 makes the submitted text durable on submit and
 a host must never read a nonzero exit as license to lose it.
 
+**The exact sequence a host runs (confirmed at v293, Cut 6h):**
+
+```bash
+python3 system/lifehug.py landmark-offer --propose --prompts \
+    --from-file submission.txt [--context context.json] > prompts.json
+#   host makes its own model call against prompts.json["reading"]["prompt"];
+#   writes the completion as {"reading": <completion>} to completions.json
+python3 system/lifehug.py landmark-offer --propose --completions completions.json \
+    --from-file submission.txt [--context context.json] > proposal.json
+```
+
+`tests/test_landmark_offer_host.py::test_the_cli_road_is_byte_identical_to_the_in_process_one`
+runs exactly this pair through `landmark_offer.main` on one `offer_fixtures.json`
+golden and pins it equal to the same fixture replayed in-process.
+
 ## 6. The behavior authority
 
 <!-- embed: interactions/landmarks/prompt/behavior.md -->
@@ -590,7 +605,7 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
 | The `offer` mode (v287, ADR 0033; one reading v291; filing v292) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `within`, `names`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `events`, `stories`, `groups`, `unrecognized`, `questions`) · `build_groups` / `group_members` / `group_slice` / `group_source_relative_path` / `derive_story_id` (v292, R7) · `apply(proposal_id, unit_ids, vault_root)` → the receipt (`filed`, `filed_names`, `filed_slices`, `counts`), idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override`, filing names through `go_dig_writer.record_unit` and events/moments through `general_listener.bind_claims` + `temporal_store.write_receipt` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` and `roster_relations.retract_alias`, scope `EVENTS_SCOPE` for what a stay held · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_group` / `render_unit` / `render_event` / `render_story` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`, `GROUP_KEYS`, `MEMBER_KINDS`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
 | Its ONE reading (v291, R6) | `system/landmark_reading.py`: `build_reading_prompt(text, landmarks=…, roster=…)` · `parse_reading(raw, text=…)` → `Reading(units, events, stories, unplaced, findings)` · `reading_extractor` (versioned by the leaf's own bytes) · `render_name_keys` / `render_date_shapes` / `render_span_nouns` / `render_estimation_marks` / `name_keys_for` / `date_shape_for` / `span_noun`. Leaf: `prompt/reading.md`; slot: `composition.reading`; role: `role.reading` (sonnet-class) |
-| Its retired extractors (v287, uncalled at v291) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import`, reached ONLY through `landmark_offer.grammar_units`, which R6 took off the offer path and Cut 6h deletes. `go_dig_writer.record_unit` remains the writer seam `apply` uses |
+| Its retired extractor, now deleted (v287 shipped it, uncalled at v291, gone at v293/Cut 6h) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import` were reachable ONLY through `landmark_offer.grammar_units`, which R6 (v291) took off the offer path and Cut 6h (v293) deleted along with `_date_dict` and `_grammar_block_quote` — neither `landmark_offer` nor `landmark_reading` names `go_dig_grammar` any more, by any route (`tests/test_landmark_offer.py::NoSecondCopyTests`). `go_dig_writer.record_unit` remains the writer seam `apply` uses; `go_dig_writer` itself and `go_dig_grammar.py` are Cut 7b's to delete |
 | The host-run reading protocol (v289 Cut 6c; v291 Cut 6f) | `host_reading_prompt(text, vault_root, model=, landmarks=, roster=)` → `{"reading": {"prompt", "model", "prompt_version"}}` · `propose_from_completions(text, vault_root, {"reading": <completion>}, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, which needs no dispatch because there is one prompt per submission (R9) · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}`. `host_listener_prompt` and `host_recorder_prompts` were DELETED at v291 with the passes they named |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts\|--completions FILE [--context FILE]` (v289; ONE reading prompt and a `{"reading": …}` completion since v291), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
 | Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_landmark_reading.py` (v291), `tests/test_go_dig.py`, `tests/test_roster_relations.py` and `tests/test_event_identity_i2b_containers.py` (v292) |

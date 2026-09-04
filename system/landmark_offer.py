@@ -21,8 +21,12 @@ showed "inferred" where nothing had been read at all. R6 reverses the order:
 **the interaction reads, and the system validates and files.** :func:`propose`
 composes ONE prompt (`landmark_reading.build_reading_prompt`), makes ONE call,
 and parses ONE completion (`landmark_reading.parse_reading`). No grammar runs
-first, no listener runs, no recorder runs. :func:`grammar_units` survives this
-release unused, and Cut 6h deletes it.
+first, no listener runs, no recorder runs. The deterministic block grammar
+that used to run first (`grammar_units`, `_date_dict`,
+`_grammar_block_quote`) survived one release unused (v291) and Cut 6h deletes
+it: this module no longer imports `go_dig_writer.plan_import` (the import
+`grammar_units` needed, and its only reason to import `go_dig_writer` at
+all), so it no longer reaches the block grammar module by any route.
 
 **Nothing files before a person confirms.** :func:`propose` writes exactly one
 file, the proposal, and the submitted text is retained inside it from the
@@ -822,92 +826,6 @@ def landmark_opportunity_id(*, domain: object, subject: object, kind: object,
 
     return lop.opportunity_id(domain=domain, kind=kind, subject=subject,
                               event=event)
-
-
-# --------------------------------------------------------------------------
-# The deterministic first pass (R4: the parse kept, the product gone)
-# --------------------------------------------------------------------------
-
-def _grammar_block_quote(text: str, block: dict, *, cursor: int) -> dict | None:
-    return locate(text, block.get("raw"), hint=cursor)
-
-
-def _date_dict(bound: object, *, ongoing: bool = False) -> dict | None:
-    """One grammar-parsed bound as a `chronology` record dict."""
-    if ongoing or not isinstance(bound, dict):
-        return None
-    edtf = bound.get("edtf")
-    if not edtf:
-        return None
-    parsed = chrono.parse_edtf(str(edtf), basis="stated")
-    if parsed is None:
-        return None
-    payload = parsed.to_dict()
-    grain = bound.get("grain")
-    if grain in chrono.GRANULARITIES:
-        payload["granularity"] = grain
-    payload["confidence"] = "certain"
-    return payload
-
-
-def grammar_units(text: str) -> tuple[list[dict], set[int]]:
-    """``(units, consumed_offsets)`` — the model-free extractor.
-
-    The deterministic block grammar runs FIRST over text it fully matches
-    (decision record §5.6, last example: *"anything it does not recognize goes
-    to the listener rather than being discarded"*). A block qualifies only
-    when it parsed cleanly AND every one of its lines was a field the grammar
-    knows — a block with a stray prose line is handed on whole, because half a
-    parse is a guess.
-
-    Zero model calls, by construction: nothing on this path consults a
-    completion, and a 30-block residence document therefore proposes 30 units
-    for the cost of a string split.
-    """
-    import go_dig_writer as _writer  # noqa: PLC0415 — internal extractor only
-
-    body = text or ""
-    plan = _writer.plan_import(body)
-    blocks = plan["blocks"]
-    clean = {block["ordinal"]: block for block in blocks
-             if not block["errors"] and not block["note_lines"]
-             and block["status"] == "ready"}
-    units: list[dict] = []
-    consumed: set[int] = set()
-    cursor = 0
-    for block in blocks:
-        if block["ordinal"] not in clean:
-            continue
-        quote = _grammar_block_quote(body, block, cursor=cursor)
-        if quote is None:
-            continue
-        cursor = quote["offset"] + quote["length"]
-        consumed.add(block["ordinal"])
-        place = block.get("place_name")
-        dates = block.get("dates") or {}
-        if not place:
-            consumed.discard(block["ordinal"])
-            continue
-        record: dict = {"domain": "residences", "label": place, "city": place}
-        if block.get("address"):
-            record["address"] = block["address"]
-        if block.get("nickname"):
-            record["nickname"] = block["nickname"]
-        start = _date_dict((dates or {}).get("start"))
-        end = _date_dict((dates or {}).get("end"),
-                         ongoing=bool((dates.get("end") or {}).get("ongoing")))
-        span = {key: value for key, value in (("start", start), ("end", end))
-                if value}
-        if span:
-            record["span"] = span
-        validated = li.validate_landmark(record)
-        if validated is None:
-            consumed.discard(block["ordinal"])
-            continue
-        units.append(_unit(domain="residences", record=validated,
-                           subject=place, quote=quote, source_text=body,
-                           extractor="grammar"))
-    return units, consumed
 
 
 # --------------------------------------------------------------------------
@@ -1749,6 +1667,10 @@ def unit_filing_digest(proposal_id: object, unit: dict) -> str:
     It rides into `timeline.save_landmark` through the ``digest_override``
     seam that already exists for exactly this problem.
     """
+    # The writer-seam import: `go_dig_writer` names the one identity formula
+    # `apply` files under. Cut 7b retires `go_dig_writer` (and this call)
+    # entirely, once the calculated projection carries its own filing
+    # identity.
     import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
 
     return _writer.go_dig_unit_digest(
@@ -2112,6 +2034,10 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
     moments and stories on them, with `counts`), the generations either side,
     the realized-gain diff Cut 4c publishes, and its sentence.
     """
+    # The ONE writer-seam import this function needs (`record_unit`, the
+    # actual write) — Cut 6h took `grammar_units` (and its OWN `go_dig_writer`
+    # import, used only to READ) off this module entirely. Cut 7b retires
+    # `go_dig_writer` itself; this is the seam that moves when it does.
     import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
 
     root = _bound_vault(vault_root)
@@ -3265,7 +3191,6 @@ __all__ = [
     "derive_story_id",
     "derive_receipt_id",
     "derive_unit_id",
-    "grammar_units",
     "host_completions_call",
     "host_reading_prompt",
     "inherit_dates",

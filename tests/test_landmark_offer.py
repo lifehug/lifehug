@@ -539,9 +539,10 @@ class OneReadingTests(OfferVaultCase):
                   and isinstance(node.func, ast.Attribute)}
         self.assertNotIn("call_ai", called)
         # R6: the listener and the recorder are gone from this module
-        # entirely. (`plan_import` survives inside `grammar_units`, which
-        # nothing calls any more and Cut 6h deletes — the test below proves
-        # `propose` does not reach it.)
+        # entirely. (`plan_import` used to survive, uncalled, inside
+        # `grammar_units` — Cut 6h deleted both; the test below proves
+        # `propose` never reached it, and `NoSecondCopyTests` below proves
+        # the module cannot reach `go_dig_grammar` at all any more.)
         self.assertEqual(called & {"listen_to_answer", "record_answer"},
                          set())
 
@@ -554,6 +555,70 @@ class OneReadingTests(OfferVaultCase):
         for forbidden in ("listen_to_answer", "record_answer", "grammar_units",
                           "build_listener_prompt", "build_recorder_prompt"):
             self.assertNotIn(forbidden, body)
+
+
+class NoSecondCopyTests(unittest.TestCase):
+    """Cut 6h: the block grammar leaves the Add Landmark path for good.
+
+    `grammar_units`, `_date_dict` and `_grammar_block_quote` — the
+    deterministic first pass ADR 0033 always allowed and R6 (v291) stopped
+    calling — are DELETED, not merely unreached. This class is the guard
+    against their return: an AST sweep (the discipline
+    `tests/test_go_dig.py`'s `NoModelCallTest` already uses) proves neither
+    `landmark_offer` nor `landmark_reading` — the two modules on the offer's
+    READ path — can import `go_dig_grammar` by any route, and a source-text
+    scope check proves `go_dig_writer`, the one still-legitimate WRITER seam
+    (`apply`'s `record_unit` call, and `unit_filing_digest`'s pre-existing
+    filing-identity helper, both of them writing/filing concerns Cut 6h does
+    not touch), is never named anywhere else in the module — in particular,
+    never again inside `propose` or anything it composes. Cut 7b deletes
+    `go_dig_writer` and `go_dig_grammar` entirely; this test is what makes a
+    reintroduction before then fail the build instead of waiting for 7b to
+    notice.
+    """
+
+    def _imported_module_names(self, path: Path) -> set:
+        import ast  # noqa: PLC0415
+
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names: set = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names.add(node.module.split(".")[0])
+        return names
+
+    def test_the_offer_path_never_imports_the_block_grammar(self):
+        """Neither module can reach `go_dig_grammar` by any import — live,
+        lazy, `import X` or `from X import Y` — anywhere in its source."""
+        for module in ("landmark_offer.py", "landmark_reading.py"):
+            with self.subTest(module=module):
+                self.assertNotIn(
+                    "go_dig_grammar",
+                    self._imported_module_names(SYSTEM / module))
+
+    def test_go_dig_writer_is_named_only_by_the_writer_seam(self):
+        """`go_dig_writer` is a WRITER concern now — `apply`'s own
+        `record_unit` call, and `unit_filing_digest`'s pre-existing (Cut 6a)
+        filing-identity helper `apply` calls for its receipt. Nothing else in
+        the module — least of all `propose` or the deleted `grammar_units` —
+        may name it."""
+        import ast  # noqa: PLC0415
+
+        source = (SYSTEM / "landmark_offer.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        legitimate = {"apply", "unit_filing_digest"}
+        naming_it: set = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                segment = ast.get_source_segment(source, node) or ""
+                if "go_dig_writer" in segment:
+                    naming_it.add(node.name)
+        self.assertEqual(naming_it, legitimate)
+        # The letter of the rule this test exists for: the writer's OWN
+        # write call is `apply`'s, and only `apply`'s.
+        self.assertIn("apply", naming_it)
 
 
 # --------------------------------------------------------------------------
