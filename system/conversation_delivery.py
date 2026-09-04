@@ -902,7 +902,21 @@ def _parse_landmark_date(raw: object) -> dict | None:
     ("you said you were about five") arrived at the writer as a bare interval,
     which is how the warrant went missing before anything even reached an argv.
     Both now survive, bounded the way `_parse_placed` bounds its anchors.
+
+    v290 (lifehug reader-date-contract): the leaves' own prompts (``date``
+    goes in ``date``) teach a plain string — ``"date": "1974"`` — and only
+    ever showed a dict shape for other fields. A bare string is wrapped as
+    ``{"best": <string>}``, the same shape a minimal model dict already
+    produces, bounded by the identical ``_PLACED_TEXT_MAX_CHARS`` every other
+    string in this dict is bounded by. The dict branch below is untouched:
+    every existing caller that already sends ``{"best": ..., "basis": ...}``
+    gets byte-identical output.
     """
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text or len(text) > _PLACED_TEXT_MAX_CHARS:
+            return None
+        return {"best": text}
     if not isinstance(raw, dict) or not raw or not set(raw) <= _LANDMARK_DATE_KEYS:
         return None
     parsed: dict = {}

@@ -209,9 +209,15 @@ other turn it is the empty string and the prompt is byte-identical to v205's.
 
 An answer comes back as one additive turn-output field, `landmark`, through
 two validation layers — `conversation_delivery._parse_landmark` (structural,
-closed key set) then `landmarks_interaction.validate_landmark` (semantic,
-closed domain set, and every date normalized through
-`chronology.parse_edtf` so its bounds are filled). It files through
+closed key set; v290: a bare string date or span bound — the shape both
+leaves' own worked example teaches — is wrapped as `{"best": <string>}`,
+the identical shape a minimal model dict already produced) then
+`landmarks_interaction.validate_landmark` (semantic, closed domain set,
+and every date normalized through `chronology.normalized_date`, which
+reads EDTF via `chronology.parse_edtf` and falls back, for a `best` EDTF
+cannot read, to `chronology.parse_loose_date` — a year, a year-month, a
+full date, or a month name with a year, and a bracketed whole date as the
+owner's own written estimate — so its bounds are filled). It files through
 `lifehug.py landmark-record`, which merges into the same entry by label,
 because the ladder revisits the same subject over many conversations. HOW two
 records combine is one function, `landmarks_interaction.merge_landmark_entry`:

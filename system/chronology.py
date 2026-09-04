@@ -263,13 +263,27 @@ def normalized_date(value: object) -> dict | None:
     `entity_roster` is exactly the duplicate definition the recurring-defect
     doctrine forbids. `landmarks_interaction._normalized_date` is now an alias
     of this function; there is no second body.
+
+    v290: EDTF is the only thing :func:`parse_edtf` reads, but the landmark
+    leaves' own prompts teach a person writes a date "plainly" — ``2 April
+    1979``, ``July 11, 1981``, ``Jun 1986`` — none of which is EDTF. Both
+    places :func:`parse_edtf` can fail below now fall back to
+    :func:`parse_loose_date` for a string ``best`` before giving up; a form
+    that fails BOTH stays exactly what it always was, an unparsed ``best``
+    with no bounds.
     """
     parsed = from_dict(value)
     if parsed is None:
+        if isinstance(value, str):
+            return parse_loose_date(value)
         return None
     if parsed.earliest or parsed.latest:
         return parsed.to_dict()
     rebuilt = parse_edtf(parsed.best, basis=parsed.basis)
+    if rebuilt is None and isinstance(parsed.best, str):
+        loose = parse_loose_date(parsed.best)
+        if loose is not None:
+            rebuilt = from_dict(loose)
     if rebuilt is None:
         return parsed.to_dict()
     supplied = value if isinstance(value, dict) else {}
@@ -494,6 +508,99 @@ _MONTH_NAMES = MONTH_NAMES
 #: which now reads this object. A year the timeline can hold and a year the
 #: recorder can hear must never be two different sentences.
 YEAR_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
+
+
+# --------------------------------------------------------------------------
+# Loose / natural date text
+# --------------------------------------------------------------------------
+
+#: Month name (and 3-letter abbreviation) -> 1-12, case-insensitive. Built
+#: from :data:`MONTH_NAMES` rather than re-typed — the same discipline
+#: `go_dig_grammar._MONTH_LOOKUP` and `general_listener._MONTH_WORDS` already
+#: follow for their own tables (recurring-defect doctrine). This module does
+#: NOT import `go_dig_grammar` (that module is being retired); the lookup
+#: shape is copied, not shared, because the two are allowed to diverge.
+_LOOSE_MONTH_LOOKUP: dict[str, int] = {}
+for _loose_index, _loose_name in enumerate(MONTH_NAMES, start=1):
+    _LOOSE_MONTH_LOOKUP[_loose_name.lower()] = _loose_index
+    _LOOSE_MONTH_LOOKUP[_loose_name[:3].lower()] = _loose_index
+del _loose_index, _loose_name
+
+#: The owner's own written convention for an estimate — a whole date
+#: bracketed, e.g. ``[Jun 1986]`` — also read by
+#: `go_dig_grammar.parse_date_bound`. Copied, not shared, for the same reason
+#: the month lookup above is copied.
+_LOOSE_BRACKET_RE = re.compile(r"^\[(.*)\]$")
+#: ``Month D, YYYY`` / ``Month D YYYY`` — the comma is optional either way.
+_LOOSE_MONTH_DAY_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$")
+#: ``D Month YYYY``.
+_LOOSE_DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})\s+([A-Za-z]+)\.?\s+(\d{4})$")
+#: ``Month YYYY``.
+_LOOSE_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{4})$")
+
+
+def parse_loose_date(text: object) -> dict | None:
+    """Natural date text into the identical normalized dict :func:`normalized_date` returns.
+
+    The landmark leaves' own prompts (``interactions/landmarks/prompt/``)
+    teach a date is written "plainly" as a year, a year-month, a full date,
+    or a month name with a year — ``1974``, ``1974-06``, ``1981-07-11``,
+    ``2 April 1979``, ``April 2, 1979``, ``July 11, 1981``, ``Jun 1986``,
+    ``June 1986`` — case-insensitive, full month names or their 3-letter
+    abbreviations. The EDTF forms are handed straight to :func:`parse_edtf`,
+    which already reads them (and every other human form it accepts, such as
+    ``spring 1998`` or ``1970s``, for free); the month-name forms are turned
+    into the equivalent EDTF expression first. A whole string wrapped in
+    square brackets — ``[Jun 1986]`` — parses to the same date with
+    ``confidence: "approximate"``, the owner's own estimation convention.
+
+    Never raises; text that is none of the above is ``None``, exactly like
+    :func:`parse_edtf`. This is the ONLY fuzzy-date parsing this module
+    performs — no other natural-language form is accepted.
+    """
+    if not isinstance(text, str):
+        return None
+    raw = " ".join(text.strip().split())
+    if not raw:
+        return None
+    approximate = False
+    match = _LOOSE_BRACKET_RE.match(raw)
+    if match:
+        raw = match.group(1).strip()
+        if not raw:
+            return None
+        approximate = True
+
+    record = parse_edtf(raw, basis="stated")
+    if record is None:
+        edtf: str | None = None
+        match = _LOOSE_MONTH_DAY_YEAR_RE.match(raw)
+        if match:
+            month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
+            day = int(match.group(2))
+            if month and 1 <= day <= 31:
+                edtf = f"{int(match.group(3)):04d}-{month:02d}-{day:02d}"
+        if edtf is None:
+            match = _LOOSE_DAY_MONTH_YEAR_RE.match(raw)
+            if match:
+                day = int(match.group(1))
+                month = _LOOSE_MONTH_LOOKUP.get(match.group(2).lower())
+                if month and 1 <= day <= 31:
+                    edtf = f"{int(match.group(3)):04d}-{month:02d}-{day:02d}"
+        if edtf is None:
+            match = _LOOSE_MONTH_YEAR_RE.match(raw)
+            if match:
+                month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
+                if month:
+                    edtf = f"{int(match.group(2)):04d}-{month:02d}"
+        if edtf is None:
+            return None
+        record = parse_edtf(edtf, basis="stated")
+        if record is None:
+            return None
+    if approximate:
+        record = replace(record, confidence="approximate", best=f"{record.best}~")
+    return record.to_dict()
 
 
 def display_date(record: object, *, with_basis: bool = True) -> str:

@@ -62,8 +62,14 @@ date they did not give you to make the list longer.
   is listed, put the name of the thing this record is ABOUT there as well:
   `label` is how this record finds its way back to the same entry next time.
 - A date goes in `date` and a stretch in `span`, and ONLY where those are
-  listed and ONLY when they gave you one. Never derive, never estimate, never
-  round a decade into a year.
+  listed and ONLY when they gave you one. Write down only what they gave
+  you, plainly: a year (`1974`), a year-month (`1974-06`), a full date
+  (`1981-07-11`), or a month name with a year (`July 1981`, `Jul 1981`).
+  When what they gave you was itself an estimate — "maybe '74", "sometime
+  around then" — bracket it exactly as they meant it: `[1974]`. `span` is
+  `{"start": ..., "end": ...}` with two such dates, for example `"span":
+  {"start": "1981-07", "end": "1982-07"}`. Never derive, never estimate on
+  your own, never round a decade into a year.
 - **A plain no is an answer, not an absence.** If they said there was never
   any of this — "I never served", "we didn't have children" — and this domain
   can be answered that way, record
