@@ -196,7 +196,7 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
-| The offer verb (v287, ADR 0033) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>`. Module: `system/landmark_offer.py`; leaf: `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
+| The offer verb (v287, ADR 0033; host-run protocol v289, Cut 6c) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>` · `--propose --prompts [--listener-completion FILE]` (prints the extraction prompts; calls no model) · `--propose --completions FILE` (runs and writes the proposal from completions already made) · `--context FILE` for `{landmarks, roster, generation}` on any of the above. Module: `system/landmark_offer.py`; leaf: `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
 | The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete] [--none]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
@@ -231,6 +231,18 @@ is absent from the person's own text unless it is marked as an inference**
 completion's own `basis`); **every span of a submission is a unit, a story or
 an explicitly unrecognized span**; and **non-landmark text is never refused** —
 it is accepted, routed as a story, and said so.
+
+**The host-run extraction protocol (v289, Cut 6c, ADR 0033 amendment).** A
+host that cannot let this process call a model — a package sandbox with no AI
+provider, by design — asks the package for the prompts, makes the calls
+itself, and hands the completions back: `--propose --prompts` prints the
+listener's prompt, `--prompts --listener-completion FILE` prints the
+per-domain recorder prompts that completion implies, and `--completions
+FILE` runs `propose` and writes the proposal from completions already made —
+byte-identical to a package-driven call, modulo `created_at`. Every shape
+that can write a document exits 0 whenever it wrote one, `state: failed`
+included, and 1 only when none was produced at all — R3 makes the submitted
+text durable on submit, and a nonzero exit must never say otherwise.
 
 Run the deterministic seat gate with:
 
