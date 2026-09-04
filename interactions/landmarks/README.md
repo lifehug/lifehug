@@ -197,53 +197,77 @@ nothing else is a contract (the shared shape: `interactions/README.md`
 | The filing beat's one sentence (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` for the `{filing_gain}` slot; the moment clause is `cross_dating.moment_clause`. **Platform wiring:** the engine fills the kwarg AFTER it files the turn's record, from the timeline payload it already holds, and passes `""` (or omits it) on every other turn — the substitution is additive and the prompt is byte-identical without it. |
 | The leaf the caller REPLAYs verbatim | `prompt/turn-instructions.md`, substituting `{landmark_stage}`, `{landmarks}`, `{next_question}`, `{filing_gain}` |
 | The read-only plan verb | `lifehug.py arc-plan-target --landmarks [--json]` |
-| The offer verb (v287, ADR 0033; host-run protocol v289, Cut 6c) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>` · `--propose --prompts [--listener-completion FILE]` (prints the extraction prompts; calls no model) · `--propose --completions FILE` (runs and writes the proposal from completions already made) · `--context FILE` for `{landmarks, roster, generation}` on any of the above. Module: `system/landmark_offer.py`; leaf: `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
+| The offer verb (v287, ADR 0033; host-run reading protocol v291, Cut 6f) | `lifehug.py landmark-offer --propose` (stdin text → the proposal, JSON; files no landmark) · `--apply <proposal_id> --units a,b,c\|--all` · `--retract <receipt_id>` · `--propose --prompts` (prints the ONE reading prompt; calls no model) · `--propose --completions FILE` (`{"reading": <completion>}`; runs and writes the proposal from it) · `--context FILE` for `{landmarks, roster, generation}` on any of the above. Modules: `system/landmark_offer.py`, `system/landmark_reading.py`; leaves: `prompt/reading.md` (`composition.reading`, `role.reading`) and `prompt/turn-instructions-offer.md` (`composition.offer_turn`); see "The `offer` mode" below |
 | The write verb | `lifehug.py landmark-record <domain> [--label …] [--date <edtf>] [--start <edtf>] [--end <edtf>] [--city …] [--address …] [--relation …] [--birth-order …] [--living\|--not-living] [--complete] [--none]` |
 
 The FILING of a landmark is entirely host-side: the package names it, the host
 writes it.
 
-## The `offer` mode (Add Landmark, v287)
+## The `offer` mode (Add Landmark, v287; ONE reading since v291)
 
 Owner rulings R3/R3a/R3b, 2026-09-03 (`lifehug-platform docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5;
-ADR 0033). Add Landmark is a second mode, `offer`, of THIS interaction beside
-`collect` — **not a new interaction kind**, and `interactions/registry.json` is
-untouched. The person volunteers ordinary text, from one dated event to a whole
-residence history; a deterministic block grammar runs first over text it fully
-matches; the listener classifies the rest into domains and units; each domain's
-recorder proposes entries with that domain's known entries in view, so a second
-stay in the same city is a second entry, not a merge; the worker shows the
-interpretation in plain language and asks *"does this look right?"*; confirmed
-entries file through `timeline.save_landmark` as **stated** facts, count toward
-sufficiency and retire the matching opportunity by closing its gap.
+ADR 0033) and **R6–R9, 2026-09-04** (that program's
+`add-landmark-reading-plan.md` §2; the ADR 0033 amendment). Add Landmark is a
+second mode, `offer`, of THIS interaction beside `collect` — **not a new
+interaction kind**, and `interactions/registry.json` is untouched. The person
+volunteers ordinary text, from one dated event to a whole residence history.
 
-`interaction.yaml` carries `modes: collect|offer` and
-`composition.offer_turn: prompt/turn-instructions-offer.md` — a third slot
-beside `composition.recorder` and `composition.listener`, for the same reason
-those two are their own: a leaf that never joins the conversation's load order
-is a different prompt, not an override of `composition.leaf`. The manifest
-gains the roster (people, places, organizations, aliases), the existing
-episodes and eras with their spans, and the age frames with their birth
-origin, all rendered deterministically by the caller.
+**One reading (R6).** Until v290 the offer path read a submission three times:
+a deterministic block grammar first, then the general listener over the whole
+document blind to what the grammar had taken, then one focused recorder per
+domain, also blind. The first real use of it lost the date off every model-read
+unit and labelled eight stays by their city. **The interaction reads; the
+system validates and files.** `propose` now composes ONE prompt
+(`landmark_reading.build_reading_prompt`), makes ONE call and parses ONE
+completion (`parse_reading`); everything after that is deterministic — the
+evidence guard, duplicates and conflicts, filing, receipts, undo. `collect`
+mode is untouched and still uses the listener and the recorder.
 
-Three promises the mode keeps, each with a lint behind it: **no proposed date
-is absent from the person's own text unless it is marked as an inference**
-(`landmark_offer.date_evidence`, read off the bytes and never off the
-completion's own `basis`); **every span of a submission is a unit, a story or
-an explicitly unrecognized span**; and **non-landmark text is never refused** —
-it is accepted, routed as a story, and said so.
+`interaction.yaml` carries `modes: collect|offer`,
+`composition.reading: prompt/reading.md` (with `role.reading` and
+`budget.reading`) and `composition.offer_turn:
+prompt/turn-instructions-offer.md` — slots of their own for the same reason
+`composition.recorder` and `composition.listener` are: a leaf that never joins
+the conversation's load order is a different prompt, not an override of
+`composition.leaf`. The reading leaf carries, **rendered from the live tables
+and never hand-copied**, the nine domains and the exact keys each can read
+(`general_listener.render_domain_digest`), the name fields each domain accepts
+(`landmark_reading.render_name_keys`, probed one at a time out of
+`validate_landmark` itself), which domains take a stretch and which take one
+date, the estimation conventions, the relation rule, what is already filed and
+the roster.
 
-**The host-run extraction protocol (v289, Cut 6c, ADR 0033 amendment).** A
-host that cannot let this process call a model — a package sandbox with no AI
-provider, by design — asks the package for the prompts, makes the calls
-itself, and hands the completions back: `--propose --prompts` prints the
-listener's prompt, `--prompts --listener-completion FILE` prints the
-per-domain recorder prompts that completion implies, and `--completions
-FILE` runs `propose` and writes the proposal from completions already made —
-byte-identical to a package-driven call, modulo `created_at`. Every shape
-that can write a document exits 0 whenever it wrote one, `state: failed`
-included, and 1 only when none was produced at all — R3 makes the submitted
-text durable on submit, and a nonzero exit must never say otherwise.
+**A span is the unit of relation (R7).** A school or a job named inside a stay
+carries `within`, and a unit with no dates whose `within` target has dates
+inherits them — `basis: anchor` and `confidence: inferred` on the record's
+bounds, and the verbatim clause *"from the dates of the Avenue F stay"* on the
+card. A unit with no dates and no dated parent is `basis: "none"` and says
+**"no date read"**; it never says "inferred". **Estimation is the
+interaction's convention and `approximate` is the system's word (R8):** a
+bracketed or hedged bound renders "estimated, as you marked it".
+
+Six promises the mode keeps, each with a lint behind it: **no date a unit
+carries is absent from the person's own text** (`landmark_offer.date_evidence`,
+read off the bytes and never off the completion's own `basis`; a bound the text
+does not carry is DROPPED with a finding, never rewritten); **every span of a
+submission is a unit, an event, a story or an explicitly unrecognized span**;
+**non-landmark text is never refused** — it is accepted, routed as a story, and
+said so; **the stop rules hold**; **every unit and event carries a quotation
+located in the text**; and **the basis says what it means** — no `inferred`
+without its provenance clause, and no `stated` bound shown certain that the
+reading marked estimated.
+
+**The host-run reading protocol (v291, Cut 6f, ADR 0033 amendment).** A host
+that cannot let this process call a model — a package sandbox with no AI
+provider, by design — asks the package for the prompt, makes the call itself,
+and hands the completion back: `--propose --prompts` prints the one reading
+prompt, and `--completions FILE` (`{"reading": <completion>}`) runs `propose`
+and writes the proposal from it — byte-identical to a package-driven call,
+modulo `created_at`. Cut 6c's `--listener-completion` is removed with the pass
+it named. Every shape that can write a document exits 0 whenever it wrote one,
+`state: failed` included, and 1 only when none was produced at all — R3 makes
+the submitted text durable on submit, and a nonzero exit must never say
+otherwise.
 
 Run the deterministic seat gate with:
 

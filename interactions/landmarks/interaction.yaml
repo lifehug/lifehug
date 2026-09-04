@@ -28,6 +28,15 @@ composition.listener: prompt/listener.md
 # different prompt. No new interaction kind, no second registry row: one
 # interaction, two modes.
 composition.offer_turn: prompt/turn-instructions-offer.md
+# v291 (owner rulings R6-R9): the READING. Add Landmark's offer path used to
+# compose the listener leaf and then one recorder leaf per domain, each blind
+# to the other's work; R6 replaces both with ONE pass that sees the whole text
+# and the whole vocabulary at once. Its own slot for the same reason every
+# other extraction leaf has one — it never joins the conversation's load
+# order. `collect` mode is untouched and still uses the listener and the
+# recorder. `landmark_reading.READING_PROMPT` carries the same file name and
+# tests/test_landmark_reading.py pins them equal.
+composition.reading: prompt/reading.md
 role.router: haiku-class
 role.worker: sonnet-class
 role.planner: sonnet-class
@@ -42,6 +51,13 @@ role.recorder: haiku-class
 # carries the same value and test_the_listener_role_matches_the_manifest pins
 # them equal.
 role.listener: haiku-class
+# The reading is one pass over a whole document carrying the whole domain
+# vocabulary, the date forms, the estimation conventions and the relation
+# rule at once — the judgment the three-pass shape was splitting badly (R6),
+# and a size of judgment the extraction classes above are not for. Sonnet.
+# `landmark_reading.DEFAULT_READING_ROLE` carries the same value and
+# test_the_reading_role_matches_the_manifest pins them equal.
+role.reading: sonnet-class
 # landmarks (v197, Design §E): the stop rules. A landmark pass is never an
 # interrogation — the person is doing us a favour. system/
 # landmarks_interaction.py carries the same two numbers as constants and
@@ -74,3 +90,9 @@ budget.recorder: 2100
 # still no identity, no behavior, no examples and no transcript, which is the
 # property the size pin holds.
 budget.listener: 2400
+# The reading leaf carries what the listener and the recorder leaves carried
+# between them — nine domain lines, the name keys, the date forms, the
+# estimation conventions — plus the two things neither had: the relation rule
+# and two whole worked readings. tests/test_landmark_reading.py measures the
+# ceiling rather than rounding it up.
+budget.reading: 2600

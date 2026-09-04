@@ -2215,13 +2215,13 @@ def cmd_landmark_offer(args: argparse.Namespace) -> int:
     applied one. The proposal is printed as JSON in every case, which is what
     a host surface consumes.
 
-    Cut 6c (ADR 0033 amendment) adds the HOST-RUN extraction protocol to
-    `--propose`, for a host that cannot let this process call a model itself:
-    `--prompts` (with `--listener-completion`) prints the prompts a host must
-    answer instead, and `--completions` runs and writes the proposal from
-    completions a host already made. `--context` hands over vault context
-    (`{landmarks, roster, generation}`) a host already holds, for any of the
-    three. See `system/landmark_offer.py::main`'s own docstring for the exact
+    Cut 6f (ADR 0033 amendment, owner rulings R6-R9) adds the HOST-RUN
+    READING protocol to `--propose`, for a host that cannot let this process
+    call a model itself: `--prompts` prints the ONE reading prompt a host must
+    answer, and `--completions` runs and writes the proposal from the
+    `{"reading": ...}` completion it made. `--context` hands over vault
+    context (`{landmarks, roster, generation}`) a host already holds, for
+    either. See `system/landmark_offer.py::main`'s own docstring for the exact
     shapes and the exit-code rule.
     """
     argv: list[str] = []
@@ -2243,8 +2243,6 @@ def cmd_landmark_offer(args: argparse.Namespace) -> int:
             argv.append("--prompts")
         if args.context:
             argv.extend(["--context", args.context])
-        if args.listener_completion:
-            argv.extend(["--listener-completion", args.listener_completion])
         if args.completions:
             argv.extend(["--completions", args.completions])
     if args.reason:
@@ -3857,25 +3855,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason", default=None,
                    help="Why (recorded on the receipt or the retraction)")
     p.add_argument("--model", default=None,
-                   help="Override the model role for both extraction passes")
+                   help="Override the model role for the reading pass")
     p.add_argument("--dry-run", action="store_true",
-                   help="With --propose: print the composed listener prompt "
+                   help="With --propose: print the composed reading prompt "
                         "and call nothing")
     p.add_argument("--prompts", action="store_true",
-                   help="With --propose: print the host-run extraction "
-                        "prompts (Cut 6c) instead of calling a model")
+                   help="With --propose: print the host-run reading prompt "
+                        "(Cut 6f) instead of calling a model")
     p.add_argument("--context", default=None,
                    help="A JSON file of {landmarks, roster, generation} "
                         "vault context a host already holds")
-    p.add_argument("--listener-completion", dest="listener_completion",
-                   default=None,
-                   help="With --propose --prompts: the listener's own "
-                        "completion, to print the recorder prompts it "
-                        "implies")
     p.add_argument("--completions", default=None,
-                   help="With --propose: a JSON file of {listener, "
-                        "recorders} completions a host already made; runs "
-                        "and writes the proposal from them")
+                   help="With --propose: a JSON file of {reading: "
+                        "<completion>} a host already made; runs and writes "
+                        "the proposal from it")
     p.set_defaults(func=cmd_landmark_offer)
 
     p = sub.add_parser("landmark-record",

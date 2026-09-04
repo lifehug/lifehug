@@ -1,9 +1,11 @@
-"""Cut 6c — the host-run extraction protocol for Add Landmark (`offer` mode).
+"""The host-run READING protocol for Add Landmark (`offer` mode).
 
 Controlling design: `lifehug-platform
 docs/decisions/2026-09-03-timeline-unification/decision-record.md` — R3 (the
-submitted text is durable on submit, whatever became of the reading). ADR
-0033's Cut 6c amendment.
+submitted text is durable on submit, whatever became of the reading) — and
+that program's `add-landmark-reading-plan.md` §2 (R6, R9). ADR 0033's Cut 6c
+amendment as rewritten by Cut 6f: three doors became TWO, because three
+extraction passes became ONE reading.
 
 WHY this exists as its own file rather than growing `test_landmark_offer.py`:
 that file pins `propose`/`apply`/`retract` themselves; this one pins that a
@@ -22,6 +24,7 @@ Synthetic data only; NEVER references ~/Workspace/dave.
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import sys
 import unittest
@@ -61,24 +64,20 @@ def synthetic_vault(root: Path):
 
 class ScriptedCall:
     """`tests/test_landmark_offer.py`'s own scripted ``call``, reproduced
-    here so this file needs nothing from that one (no test imports another)."""
+    here so this file needs nothing from that one (no test imports another).
+
+    One reading per submission (R9), so there is nothing to dispatch on."""
 
     EMPTY = lo.EMPTY_COMPLETION
 
-    def __init__(self, *, listener: object = None, recorders: object = None):
-        self.listener = listener if listener is not None else self.EMPTY
-        self.recorders = dict(recorders or {})
+    def __init__(self, *, reading: object = None):
+        self.reading = reading if reading is not None else self.EMPTY
         self.prompts: list[str] = []
 
     def __call__(self, prompt: str, model: str) -> str:
         self.prompts.append(prompt)
-        for domain, payload in self.recorders.items():
-            if f"DOMAIN BEING ASKED ABOUT: {domain}\n" in prompt:
-                return payload if isinstance(payload, str) else json.dumps(payload)
-        if "DOMAIN BEING ASKED ABOUT:" in prompt:
-            return self.EMPTY
-        return (self.listener if isinstance(self.listener, str)
-               else json.dumps(self.listener))
+        return (self.reading if isinstance(self.reading, str)
+                else json.dumps(self.reading))
 
 
 def load_goldens() -> list[dict]:
@@ -88,9 +87,7 @@ def load_goldens() -> list[dict]:
 def _in_process_replay(fixture: dict) -> tuple[ScriptedCall, dict]:
     """`propose(call=ScriptedCall(...))`, in-process — the baseline every
     host-run step is compared against."""
-    completions = fixture["completions"]
-    call = ScriptedCall(listener=completions.get("listener"),
-                        recorders=completions.get("recorders"))
+    call = ScriptedCall(reading=fixture["completions"].get("reading"))
     proposal = lo.propose(fixture["source_text"], None, call=call,
                           write=False, landmarks={}, roster={},
                           generation=0, now=NOW)
@@ -107,54 +104,29 @@ class GoldenReplayTests(unittest.TestCase):
         ids = {fixture["fixture_id"] for fixture in load_goldens()}
         self.assertEqual(ids, set(ev.REQUIRED_OFFER_GOLDEN_IDS))
 
-    def test_step1_listener_prompt_is_the_exact_prompt_call_received(self):
-        """Scope item 5: same leaf, same substitutions — asserted by
-        capturing the in-process `call`'s own first prompt."""
+    def test_step1_reading_prompt_is_the_exact_prompt_call_received(self):
+        """Same leaf, same substitutions — asserted by capturing the
+        in-process `call`'s own prompt, of which there is exactly one."""
         for fixture in load_goldens():
             with self.subTest(fixture=fixture["fixture_id"]):
                 call, proposal = _in_process_replay(fixture)
-                step1 = lo.host_listener_prompt(fixture["source_text"], None,
-                                                landmarks={})
-                self.assertEqual(step1["listener"]["prompt"], call.prompts[0])
-                self.assertEqual(step1["listener"]["model"],
-                                 lo.gl.DEFAULT_LISTENER_ROLE)
-                listener_extractor = next(
-                    row for row in proposal["extractors"]
-                    if row["name"] == "general_listener")
-                self.assertEqual(step1["listener"]["prompt_version"],
-                                 listener_extractor["prompt_version"])
+                self.assertEqual(len(call.prompts), 1)
+                step1 = lo.host_reading_prompt(fixture["source_text"], None,
+                                               landmarks={}, roster={})
+                self.assertEqual(step1["reading"]["prompt"], call.prompts[0])
+                self.assertEqual(step1["reading"]["model"],
+                                 lo.lr.DEFAULT_READING_ROLE)
+                extractor = next(row for row in proposal["extractors"]
+                                 if row["name"] == "landmark_reading")
+                self.assertEqual(step1["reading"]["prompt_version"],
+                                 extractor["prompt_version"])
 
-    def test_step2_recorder_prompts_are_the_exact_prompts_call_received(self):
-        for fixture in load_goldens():
-            with self.subTest(fixture=fixture["fixture_id"]):
-                completions = fixture["completions"]
-                call, proposal = _in_process_replay(fixture)
-                step2 = lo.host_recorder_prompts(
-                    fixture["source_text"], completions["listener"], None,
-                    landmarks={})
-                expected_domains = set(completions.get("recorders") or {})
-                self.assertEqual(set(step2["recorders"]), expected_domains)
-                captured = {p for p in call.prompts
-                           if "DOMAIN BEING ASKED ABOUT:" in p}
-                if not expected_domains:
-                    continue
-                recorder_extractor = next(
-                    row for row in proposal["extractors"]
-                    if row["name"] == "landmark_recorder")
-                for domain, row in step2["recorders"].items():
-                    self.assertIn(row["prompt"], captured)
-                    self.assertEqual(row["prompt_version"],
-                                     recorder_extractor["prompt_version"])
-
-    def test_step2_is_empty_when_the_listener_named_no_domain(self):
-        for fixture in load_goldens():
-            if fixture["completions"].get("recorders"):
-                continue
-            with self.subTest(fixture=fixture["fixture_id"]):
-                step2 = lo.host_recorder_prompts(
-                    fixture["source_text"], fixture["completions"]["listener"],
-                    None, landmarks={})
-                self.assertEqual(step2, {"recorders": {}})
+    def test_the_protocol_has_exactly_two_doors(self):
+        """R6 deleted the passes and the protocol shrank with them: there is
+        no listener prompt, no recorder prompts, and no way to ask for one."""
+        for gone in ("host_listener_prompt", "host_recorder_prompts"):
+            self.assertFalse(hasattr(lo, gone), gone)
+        self.assertIn("host_reading_prompt", lo.__all__)
 
     def test_step3_is_byte_identical_to_the_in_process_replay(self):
         """Scope item 4: modulo `created_at`, which is pinned equal here by
@@ -171,22 +143,18 @@ class GoldenReplayTests(unittest.TestCase):
                                  fixture["expected"]["state"])
 
     def test_the_completions_file_accepts_raw_text_or_parsed_objects(self):
-        """`offer_fixtures.json` carries parsed objects; a real host's file
-        would carry the raw completion strings a model returned. Both must
+        """`offer_fixtures.json` carries a parsed object; a real host's file
+        would carry the raw completion string a model returned. Both must
         drive `propose_from_completions` to the same proposal."""
         fixture = next(row for row in load_goldens()
-                       if row["fixture_id"] == "offer-residence-stated-certain")
+                       if row["fixture_id"] == "offer-free-prose-stay")
         as_objects = lo.propose_from_completions(
             fixture["source_text"], None, fixture["completions"], write=False,
             landmarks={}, roster={}, generation=0, now=NOW)
-        as_text = {
-            "listener": json.dumps(fixture["completions"]["listener"]),
-            "recorders": {domain: json.dumps(payload) for domain, payload
-                          in fixture["completions"]["recorders"].items()},
-        }
         via_text = lo.propose_from_completions(
-            fixture["source_text"], None, as_text, write=False, landmarks={},
-            roster={}, generation=0, now=NOW)
+            fixture["source_text"], None,
+            {"reading": json.dumps(fixture["completions"]["reading"])},
+            write=False, landmarks={}, roster={}, generation=0, now=NOW)
         self.assertEqual(as_objects, via_text)
 
 
@@ -202,10 +170,9 @@ class FailedProposalStillWritesTests(unittest.TestCase):
         self.root = self._ctx.__enter__()
         self.addCleanup(self._ctx.__exit__, None, None, None)
 
-    def test_an_unusable_listener_completion_still_writes_a_failed_proposal(self):
+    def test_an_unusable_reading_completion_still_writes_a_failed_proposal(self):
         text = "I lived in Mesa from 1990 to 1992."
-        completions = {"listener": "not JSON at all, just prose.",
-                      "recorders": {}}
+        completions = {"reading": "not JSON at all, just prose."}
         proposal = lo.propose_from_completions(text, self.root, completions,
                                                now=NOW)
         self.assertEqual(proposal["state"], "failed")
@@ -222,8 +189,7 @@ class FailedProposalStillWritesTests(unittest.TestCase):
     def test_the_cli_exits_0_on_a_written_failed_proposal(self):
         completions_path = self.root / "completions.json"
         completions_path.write_text(
-            json.dumps({"listener": "not JSON at all.", "recorders": {}}),
-            encoding="utf-8")
+            json.dumps({"reading": "not JSON at all."}), encoding="utf-8")
         text_path = self.root / "text.txt"
         text_path.write_text("I lived in Mesa from 1990 to 1992.",
                              encoding="utf-8")
@@ -241,7 +207,7 @@ class FailedProposalStillWritesTests(unittest.TestCase):
 
     def test_the_written_proposal_is_byte_stable_across_two_runs(self):
         text = "I lived in Mesa from 1990 to 1992."
-        completions = {"listener": "not JSON at all.", "recorders": {}}
+        completions = {"reading": "not JSON at all."}
         first = lo.propose_from_completions(text, self.root, completions,
                                             now=NOW)
         path = lo.proposal_path(self.root, first["proposal_id"])
@@ -265,11 +231,49 @@ class WrittenProposalTests(unittest.TestCase):
         self.root = self._ctx.__enter__()
         self.addCleanup(self._ctx.__exit__, None, None, None)
 
+    def test_the_cli_road_is_byte_identical_to_the_in_process_one(self):
+        """The determinism pin, run through `main` rather than around it:
+        `--prompts` prints ONE prompt, `--completions` prints the proposal a
+        package-driven `propose(call=ScriptedCall(...))` would have built."""
+        fixture = next(row for row in load_goldens()
+                       if row["fixture_id"] == "offer-residence-document")
+        text_path = self.root / "text.txt"
+        text_path.write_text(fixture["source_text"], encoding="utf-8")
+        completions_path = self.root / "completions.json"
+        completions_path.write_text(json.dumps(fixture["completions"]),
+                                    encoding="utf-8")
+        orig_repo_dir = lifehug_core.REPO_DIR
+        lifehug_core.REPO_DIR = self.root
+        try:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = lo.main(["--propose", "--prompts",
+                                "--from-file", str(text_path)])
+            self.assertEqual(code, 0)
+            prompts = json.loads(buffer.getvalue())
+            self.assertEqual(list(prompts), ["reading"])
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = lo.main(["--propose", "--completions",
+                                str(completions_path),
+                                "--from-file", str(text_path)])
+            self.assertEqual(code, 0)
+            via_cli = json.loads(buffer.getvalue())
+        finally:
+            lifehug_core.REPO_DIR = orig_repo_dir
+
+        call = ScriptedCall(reading=fixture["completions"]["reading"])
+        in_process = lo.propose(fixture["source_text"], self.root, call=call,
+                                write=False, now=via_cli["created_at"])
+        self.assertEqual(len(call.prompts), 1)
+        self.assertEqual(call.prompts[0], prompts["reading"]["prompt"])
+        self.assertEqual(via_cli, in_process)
+
     def test_completions_driven_propose_writes_the_same_file_a_live_call_would(self):
         fixture = next(row for row in load_goldens()
-                       if row["fixture_id"] == "offer-residence-stated-certain")
-        call = ScriptedCall(listener=fixture["completions"]["listener"],
-                            recorders=fixture["completions"]["recorders"])
+                       if row["fixture_id"] == "offer-free-prose-stay")
+        call = ScriptedCall(reading=fixture["completions"]["reading"])
         live = lo.propose(fixture["source_text"], self.root, call=call, now=NOW)
         live_path = lo.proposal_path(self.root, live["proposal_id"])
         live_bytes = live_path.read_text(encoding="utf-8")
@@ -309,13 +313,14 @@ class ContextTests(unittest.TestCase):
             lo.load_host_context(path)
         self.assertEqual(caught.exception.code, "unsupported_input")
 
-    def test_prompts_are_pure_over_a_supplied_landmarks_context_no_vault(self):
-        """Supplying `landmarks` skips reading a vault at all — the whole
-        point of `--context`."""
-        step1 = lo.host_listener_prompt(
+    def test_prompts_are_pure_over_a_supplied_context_with_no_vault(self):
+        """Supplying `landmarks` and `roster` skips reading a vault at all —
+        the whole point of `--context`."""
+        step1 = lo.host_reading_prompt(
             "I lived in Mesa from 1990 to 1992.", "/nonexistent/not-a-vault",
-            landmarks={"residences": [{"label": "Tempe", "city": "Tempe"}]})
-        self.assertIn("Tempe", step1["listener"]["prompt"])
+            landmarks={"residences": [{"label": "Tempe", "city": "Tempe"}]},
+            roster={})
+        self.assertIn("Tempe", step1["reading"]["prompt"])
 
 
 # --------------------------------------------------------------------------
@@ -332,8 +337,10 @@ class WiringTests(unittest.TestCase):
                     for action in parser._subparsers._group_actions  # noqa: SLF001
                     if "landmark-offer" in getattr(action, "choices", ()))
         dests = {action.dest for action in offer._actions}  # noqa: SLF001
-        for flag in ("prompts", "context", "listener_completion", "completions"):
+        for flag in ("prompts", "context", "completions"):
             self.assertIn(flag, dests)
+        # Cut 6f: the pass it named is gone, so the flag is gone with it.
+        self.assertNotIn("listener_completion", dests)
 
     def test_the_new_test_module_ships(self):
         manifest = json.loads((SYSTEM / "version.json").read_text(

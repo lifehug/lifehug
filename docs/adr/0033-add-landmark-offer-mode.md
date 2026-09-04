@@ -281,3 +281,135 @@ extractor, the stated/inferred rule, filing, undo and the failure classes are
 exactly ADR 0033's. This amendment adds a way to DRIVE the same `propose`
 from outside this process; it is not a fourth pass and it composes no prompt
 of its own.
+
+---
+
+## Amendment, 2026-09-04 (v291) — one reading replaces the three passes
+
+Owner rulings **R6–R9**, recorded in `lifehug-platform
+docs/decisions/2026-09-03-timeline-unification/add-landmark-reading-plan.md`
+§2. This amendment supersedes the decision record's §5.6 "extraction" order and
+everything above that describes three passes.
+
+### What the first real use showed
+
+On 2026-09-04 the owner pasted a thirty-stay residence history into Add
+Landmark on staging and did not accept the proposal. Five defects, each
+verified against the shipped code:
+
+| # | Defect | Where | What the owner saw |
+|---|---|---|---|
+| D1 | The prompts teach `"date": "1974"`; the shared reader accepted only `{"best": …}`. | `conversation_delivery._parse_landmark_date` | Every model-read unit "no dates yet" — fixed on its own in v290. |
+| D2 | The block grammar read first; the model then re-read the whole document blind to what the grammar had taken. | `grammar_units` → `propose` | "Mesa" ×8 labelled by city; "Avenue F" as a second dateless residence; every school and job dateless; invented labels. |
+| D3 | The grammar read `[Jun 1986]` as approximate; the offer path overwrote it to certain. | `_date_dict` | 17 of 30 estimated starts shown "as you said it". |
+| D4 | A block with any parenthetical was refused by the grammar and split line-by-line into stories. | `grammar_units` | Four stays "kept as a story". |
+| D5 | A unit with no date at all was summarised `basis: inferred`. | `rebase_record` | "inferred" shown where nothing was read. |
+
+The root cause is architectural, not the model's: this ADR put a deterministic
+reader in FRONT of the interaction and hid its work from it.
+
+### The rulings
+
+- **R6 — the interaction reads; the system validates and files.** Add Landmark
+  is one model pass with full context, reading any free text into a structured
+  *reading*. No deterministic reader touches the person's text before the
+  model. The deterministic layer validates the model's output (evidence,
+  duplicates, conflicts), files what the person confirms, and nothing else.
+  *"Users don't need to know how a parser works; the model must know how to use
+  the system."*
+- **R7 — a span is the unit of relation.** Anything named inside a stay, a
+  tenure or a schooling belongs to it and inherits its dates as a stated
+  inference. Dated events inside it file as claims tied to it; undated events
+  file as moments contained by it.
+- **R8 — estimation is the interaction's convention, `approximate` is the
+  system's word.** Brackets, "about", "?", "sometime" are read by the
+  interaction and mapped to one bound's confidence. The system never sees the
+  convention.
+- **R9 — one reading per submission.** A long paste is one model reading. The
+  page says it is reading; it does not split, sample or time out early.
+
+### What replaced what
+
+| Was | Is |
+|---|---|
+| `grammar_units` (block grammar, first) | nothing — it survives uncalled at v291 and Cut 6h deletes it |
+| `landmark_recorder.listen_to_answer` on the offer path | `landmark_reading.build_reading_prompt` + `parse_reading` |
+| `landmark_recorder.record_answer`, once per domain | — |
+| `prompt/listener.md` + `prompt/recorder.md` on the offer path | `prompt/reading.md`, slot `composition.reading`, role `role.reading` (sonnet-class) |
+| `host_listener_prompt` / `host_recorder_prompts` | `host_reading_prompt` |
+| `--prompts [--listener-completion FILE]` | `--prompts` (one prompt) |
+| `--completions {listener, recorders}` | `--completions {reading}` |
+| three `extractors[]` rows | one, `landmark_reading` |
+
+**`collect` mode is untouched.** The daily listener and the focused recorder
+are exactly what ADR 0028 and ADR 0029 describe; only the offer path changed.
+
+### The reading contract
+
+`parse_reading` is **lenient in shape and strict in substance**. Lenient: a
+missing list is an empty one, an unknown key is dropped with a finding, and a
+completion that is not JSON at all is an EMPTY reading with a finding — never
+an exception, because a person's words must not be lost to a model's bad JSON.
+Strict, in this order:
+
+1. Every `quote` must LOCATE in the submitted text (`landmark_offer.locate`);
+   an item whose quote does not is dropped with a finding.
+2. A `dates` bound is `stated` only if `date_evidence` finds its year — and its
+   month at that grain — in the person's own bytes. A bound the text does not
+   carry is **DROPPED with a finding, never rewritten** (this is D5's fix, and
+   the reversal of the old "demote it to inferred" behaviour).
+3. `*_estimated: true` ⇒ `confidence: approximate` on that bound (R8).
+4. A unit with no dates whose `within` target HAS dates inherits them:
+   `basis: anchor` and `confidence: inferred` on the record's bounds, the
+   verbatim provenance clause *"from the dates of the &lt;subject&gt; stay |
+   tenure | schooling"*, and `dates.basis: "inferred"` with `inherited_from` on
+   the unit. A child domain that records ONE DATE rather than a stretch
+   (a birth, a child, a loss) never inherits: a stay's span is not a person's
+   birthday.
+5. A unit with no dates and no dated parent is `dates.basis: "none"`, renders
+   "no date read", and earns the domain's own opening question. It never says
+   "inferred".
+6. `names` (nickname · city · address · place_ref · link) map onto the record's
+   E-L2c fields, per domain, and the accepted set is PROBED out of
+   `validate_landmark` rather than declared.
+7. Dated events carry `filing: "claim"`; undated ones carry `filing: "moment"`.
+   Cut 6g files them; v291 reads and carries them.
+8. `within` cycles and dangling refs are findings, never crashes. A cycle is
+   cut where it is found and nowhere else.
+9. Every span of the text is accounted for by a unit quote, an EVENT quote, a
+   story or an unrecognized span.
+
+### The proposal's keys (§3.2 — the platform transports these verbatim)
+
+A unit gains `within` (the parent's `unit_id`, or `null`) and `names`. Its
+`dates` block is `{start, end, precision, basis, confidence, estimated:
+{start, end}, inherited_from, clause}` where `basis` is one of
+`stated | inferred | none`. The proposal gains `events[]` —
+`{event_id, text, kind, subject_mention, date, within, quote, filing}` — and
+`stories[]` gain `within`. The `unrecognized` key keeps its name. Nothing
+existing is renamed.
+
+### Lints
+
+`OFFER_LINT_CLASSES` grows from four to six. `no_fabricated_date` widens from
+stated bounds to EVERY bound (an inherited year is still a year the document
+carries somewhere). Two are new: `quotes_locate` — every unit and every event
+carries a quotation located in the text; and `honest_basis` — no `inferred`
+without a provenance clause (D5), and no `stated` bound shown certain that the
+reading marked estimated (D3, R8).
+
+### Two shared-root fixes this found
+
+`date_evidence` matched a month only by its full name, so a date written the
+way v290's own reader parses it (`Jun 1986`) was dropped as unevidenced; it now
+reads the 3-letter abbreviation too, from `chronology.MONTH_NAMES` rather than
+a fourth private copy. And `locate` now honours its `hint` on the
+whitespace-tolerant path, so a document that repeats itself — the same employer
+on three consecutive blocks — locates three quotes instead of three copies of
+the first.
+
+### Status
+
+Accepted for the offer path at v291. Cut 6g adds filing for relations, names
+and events; Cut 6h deletes `grammar_units`, `_date_dict` and the
+`go_dig_writer.plan_import` import.

@@ -19,8 +19,9 @@ landmark_gates.never_proposes_a_date.compliance: 1.0
 # message, because that is the only honest evidence the lint can read
 # (`landmarks_interaction.answer_shape`; ambiguity fails toward skip).
 landmark_gates.answer_must_record.compliance: 1.0
-# Cut 6a (ADR 0033, decision record §5): the `offer` mode's four gates,
-# scored by `landmarks_evals.score_offer_goldens` over the five §5.6 goldens.
+# Cut 6a (ADR 0033, decision record §5), widened to six by Cut 6f (R6-R9):
+# the `offer` mode's gates, scored by `landmarks_evals.score_offer_goldens`
+# over the five reading goldens.
 # The first is the one R3's "never invent a date" rests on: a proposed date
 # must be in the person's own text or be marked as an inference, and the check
 # is `landmark_offer.date_evidence` over the bytes — never the completion's
@@ -35,3 +36,11 @@ landmark_offer_gates.never_refuses.compliance: 1.0
 # The landmarks stop rules, in offer clothing: no form voice, no homework, no
 # pressure, and never naming a date and inviting agreement with it.
 landmark_offer_gates.keeps_stop_rules.compliance: 1.0
+# v291 (R6): every unit and every event carries a quotation LOCATED in the
+# submitted text. A reading whose evidence cannot be pointed at is not
+# evidence, and the confirmation screen has nothing honest to show.
+landmark_offer_gates.quotes_locate.compliance: 1.0
+# v291 (D3, D5, R8): the basis says what it means. No `inferred` without the
+# verbatim provenance clause naming where the date came from, and no `stated`
+# bound shown certain that the reading marked estimated.
+landmark_offer_gates.honest_basis.compliance: 1.0
