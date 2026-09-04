@@ -219,6 +219,40 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
     return {"applied": True, "snapshot": {**snap, "entities": updated_entities}, "changed": True}
 
 
+def retract_alias(entity_type: str, ref: object, alias: object,
+                  snapshot: object) -> dict:
+    """Take ``alias`` back off the entity at ``ref``. The undo of
+    :func:`alias_decision`, and its exact mirror.
+
+    Add Landmark's `retract` (v292) undoes the NAMES an apply filed, and a
+    nickname filed as a roster alias is one of them. Pure and idempotent: an
+    alias that is not there returns ``changed: False`` and the snapshot
+    unchanged, so a second retraction of the same receipt removes nothing a
+    second time. Matching is `identity_resolution.normalized_mention_key`'s,
+    the same key :func:`alias_decision` refuses a duplicate by — one
+    definition of "the same alias", not two.
+
+    Returns ``{"applied": bool, "snapshot": ..., "changed": bool}`` or
+    ``{"applied": False, "reason": "entity_not_found" | "alias_empty"}``.
+    """
+    alias_text = str(alias or "").strip()
+    if not alias_text:
+        return {"applied": False, "reason": "alias_empty"}
+    snap = snapshot if isinstance(snapshot, dict) else {"entities": []}
+    target = find_by_ref(entity_type, snap, ref)
+    if target is None:
+        return {"applied": False, "reason": "entity_not_found"}
+    wanted = ir.normalized_mention_key(alias_text)
+    kept = [str(value) for value in target.get("aliases") or ()
+            if ir.normalized_mention_key(str(value)) != wanted]
+    if len(kept) == len(list(target.get("aliases") or ())):
+        return {"applied": True, "snapshot": snap, "changed": False}
+    updated = [{**entity, "aliases": kept} if entity is target else entity
+               for entity in roster_entities(snap)]
+    return {"applied": True, "snapshot": {**snap, "entities": updated},
+            "changed": True}
+
+
 def located_in(child_ref: object, parent_ref: object, snapshot: object) -> dict:
     """Set ``located_in`` on the child PLACE entity (design §3.3, §4.1's
     "city rule" — the hierarchy `located_in` records, home -> city).

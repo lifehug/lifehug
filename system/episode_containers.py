@@ -394,7 +394,8 @@ def _stated(record: object) -> bool:
     return getattr(record, "basis", None) == "stated"
 
 
-def span_from_claims(claims: Sequence[object]) -> tuple:
+def span_from_claims(claims: Sequence[object], *,
+                     require_stated: bool = True) -> tuple:
     """``(span, open_ended)`` — the stretch this telling's own words open.
 
     ``(None, False)`` when the telling opens none. The three cases, in order:
@@ -405,6 +406,17 @@ def span_from_claims(claims: Sequence[object]) -> tuple:
     * failing that, a stated value that is itself a proper range (a job filed
       as ``2012``–``2015``);
     * otherwise nothing. A point is a moment, not a container.
+
+    ``require_stated`` is the ONE knob, added at v292 for R7's inherited spans.
+    A container must be opened *in the person's own words* — that is what
+    :func:`containers` means by a container and it is unchanged. But a
+    schooling that INHERITED its stay's two ends ("from the dates of the
+    Orchard House stay") has two ends all the same, and publishing only its
+    start would say the schooling was a point in 1990, which is a claim nobody
+    made. `temporal_timeline._apply_participation_span` therefore asks for the
+    stretch whatever its basis, and the returned record carries the WEAKER of
+    the two ends' basis and confidence rather than being stamped ``stated`` —
+    an inherited stretch says out loud that it was inherited.
     """
     opens: list = []
     closes: list = []
@@ -412,7 +424,7 @@ def span_from_claims(claims: Sequence[object]) -> tuple:
     for claim in claims or ():
         row = claim if isinstance(claim, dict) else {}
         record = chrono.from_dict(row.get("temporal_value"))
-        if record is None or not _stated(record):
+        if record is None or (require_stated and not _stated(record)):
             continue
         kind = collapsed_text(row.get("event_kind"))
         if kind in SPAN_OPENING_KINDS:
@@ -438,7 +450,10 @@ def span_from_claims(claims: Sequence[object]) -> tuple:
                 latest=latest,
                 granularity="range",
                 confidence=start.confidence,
-                basis="stated",
+                # `stated` only where BOTH ends are the person's own words;
+                # a stretch with an inherited end is an inherited stretch.
+                basis=("stated" if _stated(start) and (
+                    end is None or _stated(end)) else start.basis),
                 provenance=tuple(start.provenance) + tuple(
                     end.provenance if end is not None else ()
                 ),
