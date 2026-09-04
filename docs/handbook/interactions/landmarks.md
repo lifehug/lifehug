@@ -291,7 +291,7 @@ checks the row off). `lifehug.py
 arc-plan-target --landmarks` walks the open ones as an episode, keystone
 first, then by ladder cost, with sensitive domains last.
 
-## 5a. Add Landmark — the `offer` mode (v287, ADR 0033)
+## 5a. Add Landmark — the `offer` mode (v287, ADR 0033; one reading v291; R7 filing v292)
 
 Owner rulings R3, R3a and R3b, 2026-09-03 (`lifehug-platform
 docs/decisions/2026-09-03-timeline-unification/decision-record.md` §5).
@@ -337,6 +337,40 @@ and no dated parent is `basis: "none"` and renders **"no date read"** — never
 "inferred", because nothing was read. A domain that records one date rather
 than a stretch never inherits a stay's span.
 
+**One card per stay, and confirming it files what is on it (v292, R7).** The
+proposal carries `groups[]` — one entry per top-level unit, in text order, whose
+`members` are the units, events and stories whose `within` resolves to it
+**transitively** (a school inside a stay brings its own events), plus a trailing
+`{unit_id: null}` entry for what belongs to nothing. A thirty-block document
+reads as thirty cards, not ninety rows. `apply` then files the whole card:
+
+- **the names.** `city` mints or finds the roster place, `nickname` becomes an
+  ALIAS on it (the trailing parenthetical moved to the entry's note), `address`
+  and `link` are the entry's own fields. This is why it matters: a later story
+  is joined to a stay by provable source overlap with the roster PLACE
+  (`timeline._place_for_event`), never by keyword, so without the alias "the
+  Orchard House" in next year's story finds nothing.
+- **the inherited span**, with every bound's `basis: anchor`,
+  `confidence: inferred` and the provenance clause preserved through the writer.
+- **one promoted slice per group** — the head unit's own words, extended to
+  cover its members' — so a moment cites the stay and not the whole paste. The
+  slice carries `question_context` = the stay's own telling ref, which is
+  `episode_binder`'s deterministic containment rung: `bind-episodes` turns that
+  stamp into a `part_of`, and the fold then gives the undated moment the stay's
+  bounds. Filing the binding is the binder's act, never `apply`'s.
+- **the events and the stories.** A dated event files as a `date` claim at its
+  date; an undated one as an `occurrence` — the claim type that asserts a thing
+  happened and asserts nothing about when. An event's date is evidenced against
+  the person's own bytes exactly as a unit's bound is: a year the text does not
+  carry is dropped and the event files as a moment.
+
+The receipt lists all of it (`filed`, `filed_names`, `filed_slices`, `counts`)
+and `retract` takes every piece back — including the alias, but only one this
+apply actually changed. Nothing immutable is deleted. **Episode-in-episode
+containment is not a thing the calculated graph holds**: its relation block is
+telling→episode, so a school inside a stay is a date inheritance and not a
+rendered edge, and this mode does not fake one (ADR 0033 amendment 2).
+
 **Estimation is the person's convention; `approximate` is the system's word
 (R8).** Brackets, "about", "?" and "sometime" are read by the interaction and
 map to one bound's confidence, rendered "estimated, as you marked it".
@@ -371,7 +405,11 @@ is `{start, end, precision, basis, confidence, estimated: {start, end},
 inherited_from, clause}` with `basis` one of `stated | inferred | none`. The
 proposal has `events[]` — `{event_id, text, kind, subject_mention, date,
 within, quote, filing}`, where `filing` is `claim` for a dated event and
-`moment` for an undated one — and `stories[]` carry `within`.
+`moment` for an undated one — and `stories[]` carry `within` and `story_id`.
+v292 adds `groups[]`: `[{unit_id, members: [{kind, id}]}]`, one entry per unit
+with `within: null` in text order, with a trailing `{unit_id: null}` entry for
+what belongs to nothing. A renderer walks `groups` and falls back to the flat
+`units` list when a document written at an older pin carries none (R5).
 
 The manifest gains three deterministic blocks (§5.2): the roster with its
 aliases, the published projection's episodes and eras with their spans, and
@@ -550,12 +588,12 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Claims, both passes (v229) | `general_listener.CLAIM_PROMPT_KEYS`, `validate_claim_draft`, `parse_claims`, `bind_claims`, `render_event_kinds`, `claim_refused`; `landmark_recorder.parse_recorder_claims`, `RecorderOutcome.claims`. The contract is `system/temporal_claims.py` — one door, one vocabulary |
 | Their retryable lint (v229) | `general_listener.CLAIMS_MISSING_SUBJECTS_LINT`, `claims_missing_subjects`, `every_claim_reminder` — a BINDING of v214's `_name_groups`/`_record_terms`, never a second copy |
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
-| The `offer` mode (v287, ADR 0033; one reading v291) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `within`, `names`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `events`, `stories`, `unrecognized`, `questions`) · `apply(proposal_id, unit_ids, vault_root)` → the receipt, idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_unit` / `render_event` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
+| The `offer` mode (v287, ADR 0033; one reading v291; filing v292) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `within`, `names`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `events`, `stories`, `groups`, `unrecognized`, `questions`) · `build_groups` / `group_members` / `group_slice` / `group_source_relative_path` / `derive_story_id` (v292, R7) · `apply(proposal_id, unit_ids, vault_root)` → the receipt (`filed`, `filed_names`, `filed_slices`, `counts`), idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override`, filing names through `go_dig_writer.record_unit` and events/moments through `general_listener.bind_claims` + `temporal_store.write_receipt` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` and `roster_relations.retract_alias`, scope `EVENTS_SCOPE` for what a stay held · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_group` / `render_unit` / `render_event` / `render_story` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`, `GROUP_KEYS`, `MEMBER_KINDS`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
 | Its ONE reading (v291, R6) | `system/landmark_reading.py`: `build_reading_prompt(text, landmarks=…, roster=…)` · `parse_reading(raw, text=…)` → `Reading(units, events, stories, unplaced, findings)` · `reading_extractor` (versioned by the leaf's own bytes) · `render_name_keys` / `render_date_shapes` / `render_span_nouns` / `render_estimation_marks` / `name_keys_for` / `date_shape_for` / `span_noun`. Leaf: `prompt/reading.md`; slot: `composition.reading`; role: `role.reading` (sonnet-class) |
 | Its retired extractors (v287, uncalled at v291) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import`, reached ONLY through `landmark_offer.grammar_units`, which R6 took off the offer path and Cut 6h deletes. `go_dig_writer.record_unit` remains the writer seam `apply` uses |
 | The host-run reading protocol (v289 Cut 6c; v291 Cut 6f) | `host_reading_prompt(text, vault_root, model=, landmarks=, roster=)` → `{"reading": {"prompt", "model", "prompt_version"}}` · `propose_from_completions(text, vault_root, {"reading": <completion>}, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, which needs no dispatch because there is one prompt per submission (R9) · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}`. `host_listener_prompt` and `host_recorder_prompts` were DELETED at v291 with the passes they named |
 | The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts\|--completions FILE [--context FILE]` (v289; ONE reading prompt and a `{"reading": …}` completion since v291), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_landmark_reading.py` (v291), `tests/test_go_dig.py` |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_landmark_reading.py` (v291), `tests/test_go_dig.py`, `tests/test_roster_relations.py` and `tests/test_event_identity_i2b_containers.py` (v292) |
 
 ## 8. Decisions
 
