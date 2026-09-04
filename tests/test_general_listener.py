@@ -375,8 +375,16 @@ class ListenerPromptTests(unittest.TestCase):
         `{identity_relations}` vocabulary line and the (empty-store)
         `{identity_candidates}` block — 1890 characters, re-measured here for
         the same reason every prior move was.
+
+        v290 (the reader-date-contract fix) moved it again, from 11800: the
+        leaf had only ever SHOWN a date once (`"date": "1974"`) and never
+        said what other forms were accepted or how an estimate is written,
+        which is exactly the gap the reader's own defect traced back to.
+        Naming the accepted forms, the bracket-estimate convention, and one
+        `span` example costs 12004 characters measured here. Re-measured,
+        not rounded up.
         """
-        self.assertLess(len(self._prompt()), 11800)
+        self.assertLess(len(self._prompt()), 12100)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()

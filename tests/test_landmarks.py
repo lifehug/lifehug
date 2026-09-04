@@ -2763,12 +2763,19 @@ class LandmarkRecorderTests(unittest.TestCase):
         # `event_mention` and the paragraph telling the ear it is writing down
         # a NAME rather than making a link. Re-measured, not rounded up — a
         # pin padded "for headroom" measures nothing.
-        self.assertLess(len(prompt), 8700)
+        #
+        # v290 (the reader-date-contract fix) moved it again, 8555 → 8700,
+        # by naming the date contract the leaf had only ever demonstrated
+        # once: the accepted forms (year, year-month, full date, month name
+        # with a year), the bracket-estimate convention, and one `span`
+        # example. Measured range across all nine domains with an empty
+        # already-filed block: 8974–9086. Re-measured, not rounded up.
+        self.assertLess(len(prompt), 9200)
         for row in li.load_questions():
             with self.subTest(domain=row["domain"]):
                 self.assertLess(len(self._prompt(domain=row["domain"],
                                                  question_asked=row["ask"])),
-                                8700)
+                                9200)
 
     def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
         military = self._prompt()
