@@ -287,6 +287,38 @@ it named. Every shape that can write a document exits 0 whenever it wrote one,
 the submitted text durable on submit, and a nonzero exit must never say
 otherwise.
 
+**Confirmed at v293 (Cut 6h): the shape is one prompt, one completion, and it
+does not move again until 7b.** The exact sequence a host runs, start to
+finish:
+
+```bash
+# 1. Ask the package for the ONE reading prompt. Calls no model, writes
+#    nothing. `--context FILE` is optional — a host already holding the
+#    vault's landmarks/roster/generation can hand them over instead of
+#    letting this process read the vault a second time.
+python3 system/lifehug.py landmark-offer --propose --prompts \
+    --from-file submission.txt [--context context.json] > prompts.json
+
+# 2. The host makes its OWN model call against prompts.json["reading"]["prompt"]
+#    (model: prompts.json["reading"]["model"]) through its own router, with
+#    its own budgets. Write the raw completion text (or the parsed JSON
+#    object — either is accepted) as {"reading": <completion>} to a file.
+echo '{"reading": <the completion the host got back>}' > completions.json
+
+# 3. Hand the completion back. This call is what actually WRITES the
+#    proposal — byte-identical (modulo `created_at`) to what a package-driven
+#    `--propose` alone would have written from the same completion.
+python3 system/lifehug.py landmark-offer --propose --completions completions.json \
+    --from-file submission.txt [--context context.json] > proposal.json
+```
+
+Step 1's output and step 3's input share exactly one key, `reading` — there is
+no dispatch, because R9 makes this one reading per submission. `tests/test_landmark_offer_host.py`'s
+`test_the_cli_road_is_byte_identical_to_the_in_process_one` runs precisely
+this two-step sequence, through `landmark_offer.main`, on one of the five
+`offer_fixtures.json` goldens, and pins the result equal to the same fixture
+replayed in-process.
+
 Run the deterministic seat gate with:
 
 ```bash

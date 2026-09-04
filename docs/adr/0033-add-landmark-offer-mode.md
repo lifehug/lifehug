@@ -9,8 +9,9 @@ docs/decisions/2026-09-03-timeline-unification/decision-record.md` — owner
 rulings R3, R3a, R3b of 2026-09-03, §4.2 (weight tiers), §5 (how Add Landmark
 works), Cut 6a of §7
 Supersedes in part: ADR 0025 is retired (R4a); the deterministic block grammar
-it shipped survives as an internal extractor and nothing user-facing names the
-product it came from (R4)
+it shipped survived one release as an unreached internal extractor (v291,
+R6) and Cut 6h (v293) deleted it — see the amendments below; nothing
+user-facing ever named the product it came from (R4)
 
 ## Context
 
@@ -72,27 +73,39 @@ They are rendered by the caller from `landmarks_interaction.render_roster`,
 `render_known_entries`, for the same reason that one is pure. **The model
 interprets; it does not fetch.**
 
-### 2. Three passes, in order, none of them new
+### 2. Three passes, in order, none of them new — SUPERSEDED, v291
 
-1. A **deterministic first pass** over text a block grammar fully matches
+> This section described the ORIGINAL shape: a deterministic grammar first,
+> then the general listener with no domain, then the focused recorder once
+> per domain the listener named. **The "Amendment, 2026-09-04 (v291)"
+> section below replaces it — R6 reverses the order entirely, to ONE model
+> reading with no deterministic pass in front of it — and Cut 6h (v293)
+> finished the reversal by deleting the grammar pass's own code
+> (`grammar_units`, `_date_dict`, `_grammar_block_quote`) rather than merely
+> leaving it uncalled.** Kept below for the record of what this ADR
+> originally decided; see the v291 and v292 amendments for what actually
+> ships.
+
+1. ~~A **deterministic first pass** over text a block grammar fully matches
    (`landmark_offer.grammar_units`). Zero model calls; a thirty-block
    residence document proposes thirty units for the cost of a string split.
    A block with one line the grammar does not know is NOT half-parsed — it
-   goes on to the listener whole, because half a parse is a guess.
-2. The **general listener** (ADR 0029) with no domain: what does this text
-   touch at all.
-3. The **focused recorder** (ADR 0028) once per domain the listener named,
+   goes on to the listener whole, because half a parse is a guess.~~
+2. ~~The **general listener** (ADR 0029) with no domain: what does this text
+   touch at all.~~
+3. ~~The **focused recorder** (ADR 0028) once per domain the listener named,
    with that domain's already-filed entries in view — which is why a second
    stay in a city the vault already knows becomes a second entry rather than
-   a merge.
+   a merge.~~
 
-Model tiers are the ones already declared: `role.listener` and
+~~Model tiers are the ones already declared: `role.listener` and
 `role.recorder` are Haiku-class, `role.worker` is Sonnet-class. There is no
 separate format-repair prompt and deliberately no place for one — a paste the
 grammar cannot read is not malformed input to be fixed before reading, it is
-ordinary text, and the Haiku-class listener is what reads it. **No model call
+ordinary text, and the Haiku-class listener is what reads it.~~ **No model call
 recalculates a date:** every interval that files is `chronology`'s, derived
-from what the person wrote.
+from what the person wrote. (This sentence alone survives v291 unchanged —
+see `landmark_offer.date_evidence` below.)
 
 ### 3. Stated versus inferred is decided from the bytes
 
@@ -169,10 +182,13 @@ watch it become dated anchors, with the sentence each one came from beside it,
 and undo any of it. The landmark question that unit answers stops being asked.
 Nothing files behind their back.
 
-**What it costs.** One listener completion plus one recorder completion per
+**What it costs.** ~~One listener completion plus one recorder completion per
 domain the listener named, at Haiku-class, per submission — the same shape and
 the same tier as a landmark answer's cost, paid once per paste rather than
-once per turn. Text a grammar fully matches costs nothing at all.
+once per turn. Text a grammar fully matches costs nothing at all.~~
+SUPERSEDED, v291: ONE reading completion per submission, Sonnet-class
+(`role.reading`) — see the v291 amendment below. There is no grammar pass any
+more to cost nothing.
 
 **What is deliberately not decided.** Auto-filing. The policy exists
 (`auto_file_eligible` on every unit, computed from the evidence and never from
@@ -205,8 +221,9 @@ second lineage for one unit of meaning. `timeline-eras.md` §16 already ruled
 against it and R3b confirms it.
 
 **Keeping the grammar as the user-facing format.** It is the thing that
-failed. It survives as an extractor for text it matches, and R4 forbids
-anything user-facing naming the product it came from.
+failed. R4 forbade anything user-facing naming the product it came from; R6
+(v291) took it off the offer path entirely, and Cut 6h (v293) deleted the
+extractor itself rather than leaving it as dead code.
 
 **Trusting the completion's `basis`.** The model that guessed the year is the
 last thing that should grade the guess. §4.2's dividing line is a question
@@ -332,7 +349,7 @@ reader in FRONT of the interaction and hid its work from it.
 
 | Was | Is |
 |---|---|
-| `grammar_units` (block grammar, first) | nothing — it survives uncalled at v291 and Cut 6h deletes it |
+| `grammar_units` (block grammar, first) | nothing — it survived uncalled at v291; Cut 6h (v293) deleted it |
 | `landmark_recorder.listen_to_answer` on the offer path | `landmark_reading.build_reading_prompt` + `parse_reading` |
 | `landmark_recorder.record_answer`, once per domain | — |
 | `prompt/listener.md` + `prompt/recorder.md` on the offer path | `prompt/reading.md`, slot `composition.reading`, role `role.reading` (sonnet-class) |
@@ -410,9 +427,9 @@ the first.
 
 ### Status
 
-Accepted for the offer path at v291. Cut 6g adds filing for relations, names
-and events; Cut 6h deletes `grammar_units`, `_date_dict` and the
-`go_dig_writer.plan_import` import.
+Accepted for the offer path at v291. Cut 6g added filing for relations, names
+and events; Cut 6h (v293) deleted `grammar_units`, `_date_dict` and the
+`go_dig_writer.plan_import` import — see "Amendment 3" below.
 
 ## Amendment 2, 2026-09-04 (v292) — R7's filing: relations, names and what a stay holds
 
@@ -529,5 +546,39 @@ immutable is deleted.
 
 ### Status
 
-Accepted at v292. Cut 6h deletes `grammar_units`, `_date_dict` and the
+Accepted at v292. Cut 6h (v293) deleted `grammar_units`, `_date_dict` and the
 `go_dig_writer.plan_import` import; 6j renders `groups` on the page.
+
+## Amendment 3, 2026-09-04 (v293) — the grammar leaves the path
+
+Controlling record: `lifehug-platform
+docs/decisions/2026-09-03-timeline-unification/add-landmark-reading-plan.md`
+§2 (R6–R9) and §4 "6h". v291 stopped the offer path from CALLING the block
+grammar; this cut stops it from being ABLE to. `grammar_units`, `_date_dict`
+and `_grammar_block_quote` are deleted from `landmark_offer.py`, along with
+the `go_dig_writer.plan_import` import that was `grammar_units`'s only
+reason to exist. Nothing else in the module changed: `propose` already read
+one way, and `apply` still files through `go_dig_writer.record_unit`, the
+one remaining — and now the ONLY — `go_dig_writer` name this module carries,
+confined to `apply` and to `unit_filing_digest`, the pre-existing (Cut 6a)
+filing-identity helper `apply`'s own receipt calls.
+
+`tests/test_landmark_offer.py::NoSecondCopyTests` is the guard: an AST
+import-sweep (the discipline `tests/test_go_dig.py::NoModelCallTest` already
+uses) proves neither `landmark_offer` nor `landmark_reading` can import
+`go_dig_grammar` by any route, and a source-scope check proves `go_dig_writer`
+is never named outside `apply` and `unit_filing_digest` — in particular,
+never again inside `propose` or anything it composes. `go_dig_grammar.py` and
+`go_dig_writer.py` themselves are untouched; nothing on the offer's READ path
+reaches them any more, and Cut 7b is where they are deleted for good.
+
+The host-run protocol (Amendment, Cut 6c, as replaced by the v291 amendment)
+is unchanged and reconfirmed as the one-reading shape: `--propose --prompts`
+→ `{"reading": {"prompt", "model", "prompt_version"}}`; `--propose
+--completions FILE` with `FILE = {"reading": <completion>}` → the written
+proposal. `docs/handbook/interactions/landmarks.md` and
+`interactions/landmarks/README.md` carry the exact CLI sequence a host runs.
+
+### Status
+
+Accepted and shipped at v293.
