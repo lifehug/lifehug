@@ -43,7 +43,7 @@ with a finding rather than rewritten into a confident-looking inference.
 **A span is the unit of relation (R7).** A school, a job or an event named
 inside a stay carries ``within``, and a unit with no dates whose ``within``
 target HAS dates inherits them — ``basis: anchor``, ``confidence: inferred``,
-and the verbatim provenance clause *"from the dates of the Avenue F stay"*,
+and the verbatim provenance clause *"from the dates of the Orchard House stay"*,
 rendered through the same `_restate` path every other inference goes through.
 A unit with no dates and no dated parent is ``basis: "none"`` and says "no date
 read"; it never says "inferred", because nothing was read.
@@ -500,7 +500,7 @@ def _restate(record: object, *, stated: bool, hedged: bool,
 
     ``clause`` is the sentence an INFERRED bound carries as its verbatim
     provenance. It defaults to :data:`INFERRED_CLAUSE`; R7's inheritance passes
-    its own — *"from the dates of the Avenue F stay"* — through this one path
+    its own — *"from the dates of the Orchard House stay"* — through this one path
     rather than writing a second provenance mechanism beside it.
     """
     parsed = chrono.from_dict(record)
@@ -1094,7 +1094,7 @@ def unit_questions(unit: dict, landmarks: object) -> list[str]:
 
     A date INHERITED from the stay a unit sits inside (R7 rule 4) is
     deliberately NOT asked about. It carries its own provenance clause on the
-    card — *"from the dates of the Avenue F stay"* — so the person can see
+    card — *"from the dates of the Orchard House stay"* — so the person can see
     exactly where it came from and correct it there; asking the schooling
     ladder's opening question once per school in a thirty-block document would
     turn a reading into the interrogation this Interaction refuses to be.
@@ -1289,8 +1289,8 @@ def _partition_text(source_text: str, units: list[dict],
     and is still carried, because a proposal that quietly loses half a paste
     is the failure this whole mode replaces.
 
-    ``events`` count as coverage exactly as units do (v291): "AJ was born
-    March 20, 1990" is read, filed and shown, and a coverage invariant that
+    ``events`` count as coverage exactly as units do (v291): "Wren was born
+    12 May 1991" is read, filed and shown, and a coverage invariant that
     called it uncovered would report the one thing the reading got right as
     the thing it dropped.
 

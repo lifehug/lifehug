@@ -166,7 +166,7 @@ def render_estimation_marks() -> str:
 
 
 #: Which noun a domain's span is called when a child inherits its dates
-#: (R7's provenance clause: *"from the dates of the Avenue F stay"*).
+#: (R7's provenance clause: *"from the dates of the Orchard House stay"*).
 #: `landmark_offer` renders the clause; the leaf shows the same three words so
 #: the model reads and the system writes one vocabulary.
 SPAN_NOUN_BY_DOMAIN = {

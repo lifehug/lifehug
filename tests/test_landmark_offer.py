@@ -179,12 +179,13 @@ class ModeTests(unittest.TestCase):
     def test_an_inferred_date_is_shown_with_the_clause_that_earned_it(self):
         """§3.2: an inherited date renders its own provenance sentence
         VERBATIM, and one with no clause falls back to the general one."""
-        clause = "from the dates of the Avenue F stay"
+        clause = "from the dates of the Orchard House stay"
         turn = lo.build_offer_turn({"units": [
-            {"kind": "schooling", "subject": "Longfellow",
+            {"kind": "schooling", "subject": "Kestrel Elementary",
              "dates": {"start": "1981", "end": "1982", "basis": "inferred",
                        "clause": clause},
-             "quote": {"text": "School: Longfellow"}, "questions": []}],
+             "quote": {"text": "School: Kestrel Elementary"},
+             "questions": []}],
             "stories": [], "unrecognized": [], "questions": []})
         self.assertIn(clause, turn)
         bare = lo.build_offer_turn({"units": [

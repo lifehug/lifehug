@@ -907,19 +907,19 @@
   {
     "fixture_id": "offer-single-dated-event",
     "why": "One dated event and no landmark unit at all. It is carried as an event with a date, not fabricated into a residence because a place was mentioned.",
-    "source_text": "AJ was born March 20, 1990 while we lived on Thunderhead.",
+    "source_text": "Wren was born 12 May 1991 while we lived at Hollow Creek.",
     "completions": {
       "reading": {
         "units": [],
         "events": [
           {
             "ref": "e1",
-            "text": "AJ was born",
+            "text": "Wren was born",
             "kind": "child_born",
-            "subject_mention": "AJ",
-            "date": "March 20, 1990",
+            "subject_mention": "Wren",
+            "date": "12 May 1991",
             "within": null,
-            "quote": "AJ was born March 20, 1990 while we lived on Thunderhead."
+            "quote": "Wren was born 12 May 1991 while we lived at Hollow Creek."
           }
         ],
         "stories": [],
@@ -930,7 +930,7 @@
       "state": "proposed",
       "units": []
     },
-    "reply": "I have AJ born on 20 March 1990. Nothing in this told me when you were on Thunderhead. Does this look right?"
+    "reply": "I have Wren born on 12 May 1991. Nothing in this told me when you were at Hollow Creek. Does this look right?"
   },
   {
     "fixture_id": "offer-story-not-a-landmark",

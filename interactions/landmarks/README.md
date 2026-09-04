@@ -240,7 +240,7 @@ the roster.
 **A span is the unit of relation (R7).** A school or a job named inside a stay
 carries `within`, and a unit with no dates whose `within` target has dates
 inherits them — `basis: anchor` and `confidence: inferred` on the record's
-bounds, and the verbatim clause *"from the dates of the Avenue F stay"* on the
+bounds, and the verbatim clause *"from the dates of the Orchard House stay"* on the
 card. A unit with no dates and no dated parent is `basis: "none"` and says
 **"no date read"**; it never says "inferred". **Estimation is the
 interaction's convention and `approximate` is the system's word (R8):** a

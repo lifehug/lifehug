@@ -19,7 +19,7 @@ the question comes back anyway.
 NAMES A UNIT MAY ALSO CARRY, per domain:
 {name_keys}
 
-`nickname` is what they call the place ("the blue house", "Avenue F").
+`nickname` is what they call the place ("the blue house", "the Orchard House").
 `city` and `address` are where it is. `place_ref` is an existing place they
 named. `link` must start with `https:`. These are how a story told next year
 about "the blue house" finds its way back to this stay — a name you leave out
@@ -52,14 +52,14 @@ means nothing outside this one reading. Use it to say what belongs to what.
 One unit per stay, tenure, schooling, birth, partnership, child, loss or
 service. Each one is:
 
-  {"ref": "u1", "domain": "residences", "subject": "Avenue F",
-   "names": {"nickname": "Avenue F", "city": "Yucaipa",
-             "address": "35292 Avenue F, Yucaipa, CA"},
-   "record": {"city": "Yucaipa", "label": "Avenue F"},
-   "dates": {"start": "1981-07-11", "end": "1982-07", "ongoing": false,
+  {"ref": "u1", "domain": "residences", "subject": "the Orchard House",
+   "names": {"nickname": "the Orchard House", "city": "Riverbend",
+             "address": "14 Orchard Lane, Riverbend, ST"},
+   "record": {"city": "Riverbend", "label": "the Orchard House"},
+   "dates": {"start": "1986-06", "end": "1988-03", "ongoing": false,
              "start_estimated": false, "end_estimated": false},
    "within": null,
-   "quote": "Dates: July 11, 1981 - July 1982 City/State: Yucaipa, California"}
+   "quote": "Dates: June 1986 - March 1988 City/State: Riverbend, ST"}
 
 - `subject` is what this unit is CALLED, in their words — the nickname if they
   gave one, otherwise the city, the school, the employer. Never a name you made
@@ -113,9 +113,9 @@ The word for one span is: {span_nouns}.
 
 ## `events` — things that happened
 
-  {"ref": "e1", "text": "AJ born", "kind": "child_born",
-   "subject_mention": "AJ", "date": "1990-03-20", "within": "u7",
-   "quote": "AJ born March 20, 1990"}
+  {"ref": "e1", "text": "Wren born", "kind": "child_born",
+   "subject_mention": "Wren", "date": "1991-05-12", "within": "u7",
+   "quote": "Wren born 12 May 1991"}
 
 - `date` is the date they gave, in the same forms as above, or `null`.
 - `kind` is one lowercase word for what happened — `birth`, `child_born`,

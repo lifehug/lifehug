@@ -300,7 +300,7 @@ verified against the shipped code:
 | # | Defect | Where | What the owner saw |
 |---|---|---|---|
 | D1 | The prompts teach `"date": "1974"`; the shared reader accepted only `{"best": …}`. | `conversation_delivery._parse_landmark_date` | Every model-read unit "no dates yet" — fixed on its own in v290. |
-| D2 | The block grammar read first; the model then re-read the whole document blind to what the grammar had taken. | `grammar_units` → `propose` | "Mesa" ×8 labelled by city; "Avenue F" as a second dateless residence; every school and job dateless; invented labels. |
+| D2 | The block grammar read first; the model then re-read the whole document blind to what the grammar had taken. | `grammar_units` → `propose` | Eight stays labelled by their city rather than the nickname beside it; a street name read as a second, dateless residence; every school and job dateless; labels invented by joining two unrelated names. |
 | D3 | The grammar read `[Jun 1986]` as approximate; the offer path overwrote it to certain. | `_date_dict` | 17 of 30 estimated starts shown "as you said it". |
 | D4 | A block with any parenthetical was refused by the grammar and split line-by-line into stories. | `grammar_units` | Four stays "kept as a story". |
 | D5 | A unit with no date at all was summarised `basis: inferred`. | `rebase_record` | "inferred" shown where nothing was read. |

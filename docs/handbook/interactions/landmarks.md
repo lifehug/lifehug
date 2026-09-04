@@ -332,7 +332,7 @@ filed and the roster. `collect` mode is untouched.
 **A span is what things belong to (R7).** A school or a job named inside a stay
 carries `within`, and a unit with no dates whose parent has dates inherits
 them: `basis: anchor` and `confidence: inferred` on the record's bounds, plus
-the verbatim clause "from the dates of the Avenue F stay". A unit with no dates
+the verbatim clause "from the dates of the Orchard House stay". A unit with no dates
 and no dated parent is `basis: "none"` and renders **"no date read"** — never
 "inferred", because nothing was read. A domain that records one date rather
 than a stretch never inherits a stay's span.

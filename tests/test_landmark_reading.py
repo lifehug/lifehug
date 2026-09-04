@@ -359,15 +359,15 @@ class DateTests(unittest.TestCase):
         self.assertNotIn("end", record["span"])
 
     def test_a_domain_that_records_one_date_takes_the_start(self):
-        text = "AJ was born March 20, 1990."
+        text = "Wren was born 12 May 1991."
         payload = {"units": [
-            {"ref": "u1", "domain": "children", "subject": "AJ",
-             "record": {"who": "AJ", "label": "AJ"},
-             "dates": {"start": "March 20, 1990", "end": "1991"},
+            {"ref": "u1", "domain": "children", "subject": "Wren",
+             "record": {"who": "Wren", "label": "Wren"},
+             "dates": {"start": "12 May 1991", "end": "1992"},
              "within": None, "quote": text}]}
         out = lr.parse_reading(json.dumps(payload), text=text)
         record = out.units[0].record
-        self.assertEqual(record["date"]["best"], "1990-03-20")
+        self.assertEqual(record["date"]["best"], "1991-05-12")
         self.assertNotIn("span", record)
         self.assertIn("dropped end date: children records one date, not a "
                       "stretch", out.findings)
@@ -377,13 +377,13 @@ class DateTests(unittest.TestCase):
         self.assertNotIn("span", record)
 
     def test_an_event_date_is_normalized_and_an_unreadable_one_is_a_finding(self):
-        text = "AJ was born March 20, 1990."
+        text = "Wren was born 12 May 1991."
         payload = {"events": [
-            {"ref": "e1", "text": "AJ was born", "kind": "child_born",
-             "subject_mention": "AJ", "date": "March 20, 1990",
+            {"ref": "e1", "text": "Wren was born", "kind": "child_born",
+             "subject_mention": "Wren", "date": "12 May 1991",
              "within": None, "quote": text}]}
         out = lr.parse_reading(json.dumps(payload), text=text)
-        self.assertEqual(out.events[0].date["best"], "1990-03-20")
+        self.assertEqual(out.events[0].date["best"], "1991-05-12")
         payload["events"][0]["date"] = "one summer"
         out = lr.parse_reading(json.dumps(payload), text=text)
         self.assertIsNone(out.events[0].date)
