@@ -48,6 +48,20 @@ rendered through the same `_restate` path every other inference goes through.
 A unit with no dates and no dated parent is ``basis: "none"`` and says "no date
 read"; it never says "inferred", because nothing was read.
 
+**And a span is what gets FILED (v292).** The proposal is GROUPED — one entry
+per top-level unit, its members the units, events and stories whose ``within``
+resolves to it transitively (:func:`build_groups`) — and :func:`apply` files a
+group, not a list of units. The names go through the E-L2c road (nickname ⇒ a
+roster alias on the place the city minted; without it "the Orchard House" in a
+story told next year joins to nothing, because the place join is provable
+source overlap and never a keyword). The group's own words are promoted as
+their own slice, stamped with the stay's telling ref, and the dated events on
+it file as claims, the undated ones as ``occurrence`` moments and the stories
+as themselves against THAT source rather than against the whole paste.
+Episode-in-episode containment is not a relation the calculated graph holds, so
+a school inside a stay is a date inheritance and nothing here pretends
+otherwise (ADR 0033 amendment 2).
+
 **Idempotency.** A unit's identity is content-addressed
 (:func:`derive_unit_id`) from its domain, kind, subject, dates and quote, so
 the same text proposed twice yields the same unit ids. Filing goes through
@@ -2086,8 +2100,17 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
     calculation"). The submitted text is promoted once as an ordinary vault
     source so no filed claim's only citation is a proposal file.
 
-    Returns the receipt: what was filed, the generations either side, the
-    realized-gain diff Cut 4c publishes, and its sentence.
+    **A confirmed unit files what is ON ITS CARD (v292, R7).** The unit's
+    `names` ride on the record through the E-L2c road, so the nickname lands as
+    a roster ALIAS on the place its city minted and the address lands as the
+    place's own field. The GROUP that unit heads is filed with it: one promoted
+    slice of the person's own words, the dated events on it as claims, the
+    undated ones as moments, the stories as themselves. A group whose head
+    nobody confirmed files nothing — an event rides its stay.
+
+    Returns the receipt: what was filed (units, names, slices and the events,
+    moments and stories on them, with `counts`), the generations either side,
+    the realized-gain diff Cut 4c publishes, and its sentence.
     """
     import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
 
