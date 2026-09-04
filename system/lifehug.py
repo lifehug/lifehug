@@ -2214,6 +2214,15 @@ def cmd_landmark_offer(args: argparse.Namespace) -> int:
     `--apply` files the units the person confirmed; `--retract` undoes an
     applied one. The proposal is printed as JSON in every case, which is what
     a host surface consumes.
+
+    Cut 6c (ADR 0033 amendment) adds the HOST-RUN extraction protocol to
+    `--propose`, for a host that cannot let this process call a model itself:
+    `--prompts` (with `--listener-completion`) prints the prompts a host must
+    answer instead, and `--completions` runs and writes the proposal from
+    completions a host already made. `--context` hands over vault context
+    (`{landmarks, roster, generation}`) a host already holds, for any of the
+    three. See `system/landmark_offer.py::main`'s own docstring for the exact
+    shapes and the exit-code rule.
     """
     argv: list[str] = []
     if args.retract:
@@ -2230,6 +2239,14 @@ def cmd_landmark_offer(args: argparse.Namespace) -> int:
             argv.extend(["--from-file", args.from_file])
         if args.dry_run:
             argv.append("--dry-run")
+        if args.prompts:
+            argv.append("--prompts")
+        if args.context:
+            argv.extend(["--context", args.context])
+        if args.listener_completion:
+            argv.extend(["--listener-completion", args.listener_completion])
+        if args.completions:
+            argv.extend(["--completions", args.completions])
     if args.reason:
         argv.extend(["--reason", args.reason])
     if getattr(args, "model", None):
@@ -3844,6 +3861,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true",
                    help="With --propose: print the composed listener prompt "
                         "and call nothing")
+    p.add_argument("--prompts", action="store_true",
+                   help="With --propose: print the host-run extraction "
+                        "prompts (Cut 6c) instead of calling a model")
+    p.add_argument("--context", default=None,
+                   help="A JSON file of {landmarks, roster, generation} "
+                        "vault context a host already holds")
+    p.add_argument("--listener-completion", dest="listener_completion",
+                   default=None,
+                   help="With --propose --prompts: the listener's own "
+                        "completion, to print the recorder prompts it "
+                        "implies")
+    p.add_argument("--completions", default=None,
+                   help="With --propose: a JSON file of {listener, "
+                        "recorders} completions a host already made; runs "
+                        "and writes the proposal from them")
     p.set_defaults(func=cmd_landmark_offer)
 
     p = sub.add_parser("landmark-record",

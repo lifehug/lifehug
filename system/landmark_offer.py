@@ -1930,6 +1930,236 @@ def offer_context(vault_root: str | Path) -> dict:
 
 
 # --------------------------------------------------------------------------
+# The host-run extraction protocol (Cut 6c, ADR 0033 amendment)
+# --------------------------------------------------------------------------
+#
+# A host that cannot let this package call a model (staging's package sandbox
+# has no AI provider, by design) can still produce the IDENTICAL proposal:
+# it asks the package for the prompts `propose` would have sent, makes the
+# calls itself through its own router, and hands the completions back. Three
+# doors, none of them a second extraction:
+#
+#   1. :func:`host_listener_prompt` — the listener's prompt, exactly as
+#      `propose` composes it on its first attempt. Calls no model, writes
+#      nothing.
+#   2. :func:`host_recorder_prompts` — the per-domain recorder prompts the
+#      listener's OWN completion implies, once that completion is in hand.
+#      Calls no model, writes nothing. Empty where the listener named no
+#      domain.
+#   3. :func:`propose_from_completions` — `propose` itself, driven by the
+#      completions a host already made instead of a live `call`. Writes the
+#      proposal exactly as `propose` always has.
+#
+# The three read the SAME leaves `propose` reads and substitute the SAME
+# values, so a host that replays this protocol gets the byte-identical
+# proposal (modulo `created_at`) a package-driven call would have produced —
+# `tests/test_landmark_offer_host.py` pins it against the five
+# `offer_fixtures.json` goldens both ways.
+
+#: The completion `ScriptedCall` and `landmarks_evals._RecordedCall` both
+#: answer with when nothing is scripted for a prompt. The host protocol's own
+#: default for the SAME reason: an un-scripted domain read as "nothing here"
+#: rather than borrowing another domain's completion.
+EMPTY_COMPLETION = '{"landmarks": [], "claims": []}'
+
+
+def _completion_text(value: object) -> str:
+    """One completion, as the TEXT a ``call`` must return.
+
+    Mirrors `tests/test_landmark_offer.py`'s ``ScriptedCall`` and
+    `landmarks_evals.py`'s ``_RecordedCall`` exactly: a completion may
+    already be the raw string a model would have returned, or — as every row
+    of `offer_fixtures.json` carries it, for readability — the parsed JSON
+    object. Either way this is the one place that decides which, so a
+    completions file can be written in whichever shape is convenient.
+    """
+    if value is None:
+        return EMPTY_COMPLETION
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def _usable_completion(value: object) -> str:
+    """A completion's text, refused where it is not JSON at all.
+
+    A host that could not get a parseable response out of its own model call
+    is exactly the failure `propose` already has a class for
+    (:data:`FAILURE_CLASSES`) — raising here, rather than handing the
+    package prose it can only degrade to an empty reading, is what lets that
+    failure land on the proposal's own ``failure`` field instead of quietly
+    reading as "the person said nothing datable". The same lenient parse
+    `general_listener.parse_listener_output` and
+    `landmark_recorder.parse_recorder_output` both apply (a fenced code
+    block strips) runs here first, so a completion either of them would
+    accept is never refused by this earlier gate.
+    """
+    text = _completion_text(value)
+    body = text.strip()
+    if body.startswith("```"):
+        body = body.split("\n", 1)[-1].rsplit("```", 1)[0]
+    try:
+        json.loads(body)
+    except (ValueError, TypeError) as exc:
+        raise LandmarkOfferError(
+            "content_ambiguity",
+            f"host completion is not usable JSON: {exc}") from exc
+    return text
+
+
+def host_completions_call(completions: object):
+    """The ``call(prompt, model) -> str`` a host builds from prompts it has
+    already answered — what :func:`propose_from_completions` runs `propose`
+    with.
+
+    Dispatch is on the composed prompt's own header — the recorder leaf
+    names its domain, the listener leaf does not — exactly as
+    `tests/test_landmark_offer.py`'s ``ScriptedCall`` and
+    `landmarks_evals.py`'s ``_RecordedCall`` both read it, so the SAME
+    completions file drives the CLI and an in-process replay to the
+    byte-identical proposal. A domain nobody scripted answers
+    :data:`EMPTY_COMPLETION` rather than silently borrowing another domain's
+    completion.
+    """
+    payload = completions if isinstance(completions, dict) else {}
+    listener_payload = payload.get("listener")
+    recorders = {str(key): value for key, value
+                in (payload.get("recorders") or {}).items()}
+
+    def _call(prompt: str, model: str) -> str:  # noqa: ARG001 — the shape `call` requires
+        for domain, value in recorders.items():
+            if f"DOMAIN BEING ASKED ABOUT: {domain}\n" in prompt:
+                return _usable_completion(value)
+        if "DOMAIN BEING ASKED ABOUT:" in prompt:
+            return EMPTY_COMPLETION
+        return _usable_completion(listener_payload)
+
+    return _call
+
+
+def _prompt_row(prompt: str, *, extractor: dict) -> dict:
+    return {"prompt": prompt, "model": extractor.get("model") or "",
+            "prompt_version": extractor.get("prompt_version")}
+
+
+def host_listener_prompt(text: str, vault_root: object = None, *,
+                         model: object = None, landmarks: object = None,
+                         framework_root: str | Path | None = None) -> dict:
+    """Step 1 of the host-run protocol: the listener's prompt. Calls no
+    model; writes nothing.
+
+    The exact prompt `propose` would send to `call` on its first attempt —
+    same leaf, same substitutions, same known-entries rendering
+    (`general_listener.build_listener_prompt`). ``landmarks`` is the vault
+    context a host may already hold (`propose`'s own ``landmarks=``); left
+    unset, this reads the bound vault's, the way ``--propose`` always has.
+
+    Returns ``{"listener": {"prompt", "model", "prompt_version"}}`` —
+    ``prompt_version`` is `general_listener.listener_extractor`'s, the same
+    block `propose`'s own ``extractors[]`` carries for this pass.
+    """
+    body = str(text or "")
+    if landmarks is None:
+        _bound_vault(vault_root)
+        landmarks = _known_landmarks()
+    role = str(model or gl.DEFAULT_LISTENER_ROLE)
+    prompt = gl.build_listener_prompt(answer=body, landmarks=landmarks,
+                                      framework_root=framework_root)
+    extractor = gl.listener_extractor(model=role, framework_root=framework_root)
+    return {"listener": _prompt_row(prompt, extractor=extractor)}
+
+
+def host_recorder_prompts(text: str, listener_completion: object,
+                          vault_root: object = None, *,
+                          model: object = None, landmarks: object = None,
+                          framework_root: str | Path | None = None) -> dict:
+    """Step 2 of the host-run protocol: the per-domain recorder prompts the
+    listener's OWN completion implies. Calls no model; writes nothing.
+
+    ``listener_completion`` is the text (or parsed object) step 1's prompt
+    drew from a host's model — exactly what a host would hand `call` back.
+    The domains are read off it the SAME way `propose` derives them: every
+    ``domain`` the listener's parsed landmark records name
+    (`general_listener.parse_listener_output`). Returns ``{"recorders": {}}``
+    where the listener named none, and a host proceeds straight to step 3.
+
+    Each prompt is the exact one `propose` would send on its first attempt
+    for that domain (`landmark_recorder.build_recorder_prompt`), and each
+    row's ``prompt_version`` is `landmark_recorder.recorder_extractor`'s —
+    the same block `propose`'s ``extractors[]`` carries for this pass.
+    """
+    body = str(text or "")
+    if landmarks is None:
+        _bound_vault(vault_root)
+        landmarks = _known_landmarks()
+    raw = _completion_text(listener_completion)
+    heard = gl.parse_listener_output(raw, framework_root=framework_root)
+    domains = sorted({collapsed_text(row.get("domain"))
+                      for row in heard.landmarks
+                      if isinstance(row, dict) and row.get("domain")})
+    role = str(model or recorder.DEFAULT_RECORDER_ROLE)
+    extractor = recorder.recorder_extractor(model=role,
+                                            framework_root=framework_root)
+    rows: dict[str, dict] = {}
+    for domain in domains:
+        try:
+            row = li.domain_row(domain, framework_root=framework_root)
+        except li.LandmarkInteractionError:
+            continue
+        prompt = recorder.build_recorder_prompt(
+            domain=domain, question_asked=str(row.get("ask") or ""),
+            answer=body, landmarks=landmarks, framework_root=framework_root)
+        rows[domain] = _prompt_row(prompt, extractor=extractor)
+    return {"recorders": rows}
+
+
+def propose_from_completions(text: str, vault_root: object,
+                             completions: object, *, model: object = None,
+                             now: object = None, write: bool = True,
+                             landmarks: object = None, roster: object = None,
+                             generation: object = None) -> dict:
+    """Step 3 of the host-run protocol: `propose`, driven by completions a
+    host already made rather than by a live model call.
+
+    ``completions`` is exactly ``{"listener": <completion>, "recorders":
+    {"<domain>": <completion>}}`` — one completion per prompt
+    :func:`host_listener_prompt` / :func:`host_recorder_prompts` handed the
+    host, each either the raw completion TEXT or its parsed JSON object
+    (:func:`host_completions_call`'s own dispatch). Runs `propose` with a
+    ``call`` built from exactly those completions, so a host that cannot let
+    the package call a model still produces the SAME proposal a
+    package-driven call would have — deterministically, byte-identical
+    modulo ``created_at``.
+
+    Writes the proposal exactly as `propose` always has, INCLUDING a
+    ``state: failed`` one: a host completion `propose`'s own passes could not
+    use (unusable JSON where the listener needed an answer) still leaves the
+    submitted text durable in a written document, which is R3's whole point
+    — a person's words must never be lost to a host's own extraction
+    trouble, on submit.
+    """
+    call = host_completions_call(completions)
+    return propose(text, vault_root, call=call, model=model, now=now,
+                   write=write, landmarks=landmarks, roster=roster,
+                   generation=generation)
+
+
+def load_host_context(path: str | Path) -> dict:
+    """The ``--context`` file: ``{"landmarks", "roster", "generation"}``, the
+    same three keywords `propose` itself accepts — so a host that already
+    holds the vault context can hand it over instead of this module reading
+    the vault a second time.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise LandmarkOfferError("unsupported_input",
+                                 f"unreadable context file: {exc}") from exc
+    if not isinstance(data, dict):
+        raise LandmarkOfferError("unsupported_input",
+                                 f"context must be a JSON object: {path}")
+    return data
+
+
+# --------------------------------------------------------------------------
 # CLI — the stdin-text path `lifehug.py landmark-offer` dispatches to
 # --------------------------------------------------------------------------
 
@@ -1948,6 +2178,32 @@ def main(argv: list[str] | None = None) -> int:
     ``--dry-run`` prints the composed listener prompt and calls nothing, which
     is how a host verifies its own REPLAY against these leaves without
     spending a completion.
+
+    **The host-run extraction protocol (Cut 6c, ADR 0033 amendment)** adds
+    three more shapes to ``--propose``, for a host that cannot let this
+    process call a model itself (staging's package sandbox, by design, has
+    none):
+
+    * ``--prompts`` prints the listener's prompt and calls nothing —
+      :func:`host_listener_prompt`.
+    * ``--prompts --listener-completion FILE`` prints the per-domain
+      recorder prompts that completion implies, and calls nothing —
+      :func:`host_recorder_prompts`.
+    * ``--completions FILE`` runs `propose` from the completions a host
+      already made and WRITES the proposal, exactly as a package-driven
+      ``--propose`` does — :func:`propose_from_completions`.
+
+    ``--context FILE`` (any of the three) hands over ``{"landmarks",
+    "roster", "generation"}`` a host already holds, so this module need not
+    read the vault a second time for context it was already given.
+
+    **Exit code, every shape that can write a proposal:** 0 whenever a
+    proposal document was written, whatever its ``state`` — including
+    ``failed`` — because R3 makes the submitted text durable the moment it is
+    submitted, and a host that retries on a nonzero exit must never re-lose
+    it. 1 only when no document could be produced at all (unreadable input,
+    an unbound vault, a write failure) — those raise :class:`LandmarkOfferError`
+    and are caught below.
     """
     import argparse  # noqa: PLC0415
 
@@ -1961,6 +2217,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reason", default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--prompts", action="store_true",
+                        help="print the host-run extraction prompts; call "
+                             "no model, write nothing")
+    parser.add_argument("--context", default=None,
+                        help="a JSON file of {landmarks, roster, generation}")
+    parser.add_argument("--listener-completion", dest="listener_completion",
+                        default=None,
+                        help="with --prompts: the listener's own completion, "
+                             "to print the recorder prompts it implies")
+    parser.add_argument("--completions", default=None,
+                        help="a JSON file of {listener, recorders} "
+                             "completions a host already made; runs and "
+                             "writes the proposal from them")
     args = parser.parse_args(argv)
 
     from lifehug_core import REPO_DIR  # noqa: PLC0415
@@ -1979,6 +2248,39 @@ def main(argv: list[str] | None = None) -> int:
                                    reason=args.reason), indent=2,
                              sort_keys=True))
             return 0
+
+        context = load_host_context(args.context) if args.context else {}
+        landmarks_ctx = context.get("landmarks")
+        roster_ctx = context.get("roster")
+        generation_ctx = context.get("generation")
+
+        if args.completions:
+            text = (Path(args.from_file).read_text(encoding="utf-8")
+                    if args.from_file else sys.stdin.read())
+            completions = json.loads(Path(args.completions).read_text(
+                encoding="utf-8"))
+            proposal = propose_from_completions(
+                text, root, completions, model=args.model,
+                landmarks=landmarks_ctx, roster=roster_ctx,
+                generation=generation_ctx)
+            print(json.dumps(proposal, indent=2, sort_keys=True))
+            return 0
+
+        if args.prompts:
+            text = (Path(args.from_file).read_text(encoding="utf-8")
+                    if args.from_file else sys.stdin.read())
+            if args.listener_completion:
+                listener_completion = Path(args.listener_completion).read_text(
+                    encoding="utf-8")
+                output = host_recorder_prompts(
+                    text, listener_completion, root, model=args.model,
+                    landmarks=landmarks_ctx)
+            else:
+                output = host_listener_prompt(
+                    text, root, model=args.model, landmarks=landmarks_ctx)
+            print(json.dumps(output, indent=2, sort_keys=True))
+            return 0
+
         text = (Path(args.from_file).read_text(encoding="utf-8")
                 if args.from_file else sys.stdin.read())
         if args.dry_run:
@@ -1988,11 +2290,14 @@ def main(argv: list[str] | None = None) -> int:
 
         proposal = propose(text, root, call=call_ai, model=args.model)
         print(json.dumps(proposal, indent=2, sort_keys=True))
-        return 0 if proposal.get("state") != "failed" else 1
+        # R3: a WRITTEN proposal is durable regardless of its state, so a
+        # `failed` reading is not a nonzero exit — see this function's own
+        # docstring.
+        return 0
     except LandmarkOfferError as exc:
         print(json.dumps({"error": str(exc), "class": exc.code}, indent=2))
         return 1
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         print(json.dumps({"error": str(exc), "class": "unsupported_input"},
                          indent=2))
         return 1
@@ -2000,6 +2305,7 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "COLLECT_MODE",
+    "EMPTY_COMPLETION",
     "FAILURE_CLASSES",
     "LandmarkOfferError",
     "MODES",
@@ -2021,9 +2327,13 @@ __all__ = [
     "derive_receipt_id",
     "derive_unit_id",
     "grammar_units",
+    "host_completions_call",
+    "host_listener_prompt",
+    "host_recorder_prompts",
     "landmark_opportunity_id",
     "lint_offer_proposal",
     "lint_offer_reply",
+    "load_host_context",
     "OFFER_TURN_PROMPT",
     "build_offer_turn",
     "load_offer_leaf",
@@ -2031,6 +2341,7 @@ __all__ = [
     "open_opportunity_ids",
     "opportunity_ids_for",
     "propose",
+    "propose_from_completions",
     "read_offer_receipt",
     "read_proposal",
     "receipt_is_retracted",

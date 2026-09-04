@@ -214,3 +214,70 @@ about bytes and is answered as one.
 
 **Filing on submit.** Rejected by R3's proposal step: landmark-grade input
 gets a confirmation screen. Evidence is durable at submit; landmarks are not.
+
+## Amendment (2026-09-03, Cut 6c): the host-run extraction protocol
+
+On staging, `landmark-offer --propose` ran inside the platform's package
+sandbox — which, by design, carries no AI provider: a frozen env allowlist,
+no keys. The listener call failed `{"class": "service_unavailable", ...}`,
+the CLI exited 1, the platform retried three times and parked the job, and
+the owner saw a 503. The pattern the platform already keeps for the
+landmark RECORDER on a conversation answer — the package composes prompts in
+a sandboxed snippet, the host makes every model call through its own router
+with budgets, and the parsed result is handed back for the package to file
+(`services/api/app/delivery/landmark_recorder.py`,
+`conversation_prompt.py::build_recorder_prompt`/`build_listener_prompt`) —
+had not been extended to Add Landmark. `propose`'s `call(prompt, model) ->
+str` injection (ADR 0033, above) already made this possible in principle;
+what was missing was the CLI/host protocol that lets a host in ANOTHER
+PROCESS drive it.
+
+**Three steps, none of them a second extraction — the same leaves, the same
+substitutions, the same passes `propose` always runs, just not in this
+process:**
+
+1. `landmark-offer --propose --prompts` (stdin text; optional `--context
+   FILE` of `{landmarks, roster, generation}`, so a host already holding
+   vault context need not have this process read the vault a second time) →
+   `{"listener": {"prompt", "model", "prompt_version"}}` on stdout. Calls no
+   model; writes nothing.
+2. `landmark-offer --propose --prompts --listener-completion FILE` → the
+   per-domain recorder prompts the listener's completion implies:
+   `{"recorders": {"<domain>": {"prompt", "model", "prompt_version"}, ...}}`.
+   Empty where the listener named no domain, and a host proceeds straight to
+   step 3. Calls no model; writes nothing.
+3. `landmark-offer --propose --completions FILE` (stdin text; `FILE =
+   {"listener": <completion>, "recorders": {"<domain>": <completion>}}` —
+   exactly the shape `tests/test_landmark_offer.py`'s `ScriptedCall` and
+   `landmarks_evals.py`'s `_RecordedCall` already read, a completion either
+   the raw text or its parsed object) → runs `propose(..., call=...)` and
+   WRITES the proposal file, precisely as a package-driven `--propose`
+   always has.
+
+**The exit-code rule, everywhere `--propose` can write a document: exit 0
+whenever a proposal document was written, whatever its `state` — a `failed`
+one included — and exit 1 only when no document could be produced at all**
+(unreadable input, an unbound vault, a write failure — the cases that already
+raise `LandmarkOfferError`). R3 makes the submitted text durable the moment
+it is submitted; a nonzero exit on a `state: failed` proposal that IS on disk
+would tell a retrying host to treat durable evidence as lost, which is
+exactly the defect this amendment closes. This also corrects the
+package-side `--propose` (a live model call in-process): it now exits 0 on a
+written `failed` proposal too, for the identical reason — the CLI-only path
+and the host-run path make the same promise.
+
+**Determinism.** `propose_from_completions` — the function `--completions`
+runs — builds its `call` from the completions file with the same
+domain-header dispatch `ScriptedCall`/`_RecordedCall` use, so the proposal it
+writes is byte-identical (modulo `created_at`) to
+`propose(call=ScriptedCall(...))`'s in-process one over the same
+completions. `tests/test_landmark_offer_host.py` pins this against all five
+`offer_fixtures.json` goldens, both ways, and pins each `--prompts` string
+against the prompt an in-process `call` actually received, and each row's
+`prompt_version` against the written proposal's own `extractors[]`.
+
+**What is deliberately unchanged.** The three passes, the grammar-first
+extractor, the stated/inferred rule, filing, undo and the failure classes are
+exactly ADR 0033's. This amendment adds a way to DRIVE the same `propose`
+from outside this process; it is not a fourth pass and it composes no prompt
+of its own.

@@ -344,6 +344,18 @@ the age frames with the birth origin they are counted from —
 `landmarks_interaction.render_roster` / `render_known_spans` /
 `render_age_frames`. The model interprets; it does not fetch.
 
+**The host-run extraction protocol (v289, Cut 6c, ADR 0033 amendment).** A
+host that cannot let this process call a model — the platform's package
+sandbox has none, by design — drives the same three passes from another
+process instead: `--propose --prompts` prints the listener's exact prompt and
+calls nothing; `--prompts --listener-completion FILE` prints the per-domain
+recorder prompts that completion implies; `--completions FILE` runs `propose`
+from completions a host already made and writes the proposal exactly as a
+package-driven call would, byte-identical modulo `created_at`. Every shape
+that can write a document exits 0 whenever it wrote one, whatever its
+`state` — including `failed` — because R3 makes the submitted text durable on
+submit and a host must never read a nonzero exit as license to lose it.
+
 ## 6. The behavior authority
 
 <!-- embed: interactions/landmarks/prompt/behavior.md -->
@@ -504,8 +516,9 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
 | The `offer` mode (v287, ADR 0033) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `stories`, `unrecognized`, `questions`) · `apply(proposal_id, unit_ids, vault_root)` → the receipt, idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
 | Its internal extractors (v287) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import`/`record_unit`, reached ONLY through `landmark_offer` — retained under owner ruling R4 as extractors, with nothing user-facing naming the product they came from |
-| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_go_dig.py` |
+| The host-run extraction protocol (v289, Cut 6c) | `host_listener_prompt(text, vault_root, model=, landmarks=)` → `{"listener": {"prompt", "model", "prompt_version"}}` · `host_recorder_prompts(text, listener_completion, vault_root, model=, landmarks=)` → `{"recorders": {domain: {...}}}`, empty where the listener named no domain · `propose_from_completions(text, vault_root, completions, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, dispatching on the composed prompt's `DOMAIN BEING ASKED ABOUT:` header exactly as `ScriptedCall`/`_RecordedCall` do · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}` |
+| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts [--listener-completion FILE]\|--completions FILE [--context FILE]` (v289), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
+| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_go_dig.py` |
 
 ## 8. Decisions
 
