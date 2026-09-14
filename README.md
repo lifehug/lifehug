@@ -849,7 +849,7 @@ lifehug/
 ├── state/            # roadmap, weekly queue, candidates, classifications, quality profile, source manifest
 ├── system/           # all the scripts (the system is script-first)
 ├── templates/        # output format templates
-├── skills/           # Claude Code skills (/focus, /compile, /artifact)
+├── skills/           # Claude Code skills (/focus, /compile, /artifact, /ingest-story)
 ├── config.yaml       # your preferences (name, timezone, channel)
 └── CLAUDE.md         # operating instructions for the AI
 ```
