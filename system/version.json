@@ -1,7 +1,7 @@
 {
-  "version": 293,
-  "released": "2026-09-04",
-  "changelog": "v293: the block grammar leaves the Add Landmark path for good. Owner rulings R6-R9 (v291) already stopped Add Landmark's `offer` mode from CALLING the deterministic block grammar that used to run before the model read your words; this cut stops it from being able to at all. **What you will notice.** Nothing — Add Landmark already reads every submission the one way it has since v291, one model pass over the whole text with the whole context, and this cut removes code that was never reached on that path any more. `grammar_units`, `_date_dict` and `_grammar_block_quote` are deleted from `landmark_offer.py`, and with them its only import of `go_dig_writer.plan_import` — the last live route from the offer's READ side back to the retired block grammar. `apply`'s `go_dig_writer.record_unit` writer seam is untouched: a confirmed unit still files through the same one landmark writer a conversation answer uses. **The host-run reading protocol is confirmed unchanged and now documented with the exact CLI sequence a host runs** (`docs/handbook/interactions/landmarks.md`, `interactions/landmarks/README.md`): `landmark-offer --propose --prompts` prints the one reading prompt and calls nothing; `landmark-offer --propose --completions FILE` with `FILE = {\"reading\": <completion>}` runs the reading from a completion the host already made and writes the proposal, byte-identical (modulo `created_at`) to a package-driven call. **New guard test:** `tests/test_landmark_offer.py::NoSecondCopyTests` proves by AST sweep that neither `landmark_offer` nor `landmark_reading` can import `go_dig_grammar` any more, and that `go_dig_writer` is named nowhere in `landmark_offer.py` outside `apply` and its own pre-existing filing-identity helper `unit_filing_digest` — never again inside `propose` or anything it composes. ADR 0033 gains Amendment 3 marking the superseded three-pass prose struck through, with the history kept in the v291/v292 amendment sections. `go_dig_grammar.py` and `go_dig_writer.py` themselves are untouched and unimported by anything outside `apply`'s writer seam; Cut 7b is where those modules are deleted entirely.",
+  "version": 294,
+  "released": "2026-09-14",
+  "changelog": "v294: official Claude Code skill for unprompted story ingest. **What you will notice.** Agents and desktop operators can invoke `/ingest-story` the same way they already use `/focus`, `/compile`, and `/artifact`. The skill documents classify-first routing (process-answer vs ingest-story vs --kind opinion vs --witness), the core `lifehug.py ingest-story` CLI, sensitivity, after-ingest compile, and additive corrections \u2014 and it hard-rules never rewriting sources, never hand-editing wiki/people, and never forcing unprompted material into answers/{qid}.md. Ships as `skills/ingest-story/SKILL.md` on the framework manifest so upgrades deliver it to existing installs. No change to ingest runtime behavior.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -254,6 +254,7 @@
     "skills/artifact/SKILL.md",
     "skills/compile/SKILL.md",
     "skills/focus/SKILL.md",
+    "skills/ingest-story/SKILL.md",
     "skills/maintenance/SKILL.md",
     "sources/.gitkeep",
     "sources/artifacts/.gitkeep",
