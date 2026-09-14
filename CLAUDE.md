@@ -181,19 +181,26 @@ Use the rotation logic through the script wrapper:
 python3 system/lifehug.py next
 ```
 
-`ask.py` first consumes a planned weekly queue (`state/question_queue.json`) if one exists and hasn't expired; otherwise it falls back to coverage-driven rotation. The weekly queue is built by the **roadmap-driven planner** (see below). You normally don't pick by hand — the queue does it.
+In normal delivery, `ask.py` consumes a planned weekly queue (`state/question_queue.json`) if one exists and hasn't expired; otherwise it falls back to delivery-aware rotation. The weekly queue is built by the **roadmap-driven planner** (see below). A healthy queue keeps its order even when an entry was delivered before. The existing silence-triggered re-engagement mode below still takes precedence over that queue. You normally don't pick by hand — the script does it.
 
 Fallback rotation order:
-1. **Coverage priority**: lowest answer-ratio category first (RED → YELLOW → GREEN)
-2. **Group alternation**: alternate between groups based on the last question
-3. **Focus interleaving**: every N questions (`focus_frequency`, default 4)
-4. **Within category**: first unanswered question
+1. **Delivery history**: among unanswered questions, give the last delivered question one turn off when an alternative exists, then keep the least-delivered cohort
+2. **Coverage priority**: lowest answer-ratio category in that cohort first (RED → YELLOW → GREEN)
+3. **Group alternation**: alternate between available groups based on the last question
+4. **Focus interleaving**: every N questions (`focus_frequency`, default 4), when that cohort includes a Focus
+5. **Within category**: first eligible unanswered question
+
+Missing or malformed delivery counts default to zero for selection. Delivery
+never answers, edits, or permanently excludes a bank row; one remaining
+unanswered question stays eligible regardless of its count.
 
 **Adaptive cadence (v68).** The system runs 1–3 questions/day, conversation-style:
 after an answer is processed, `process-answer` may offer one optional same-day
 follow-up question (config `max_questions_per_day`, default 3; never after 20:00).
 After `reengage_after_days` (default 4) silent days, the daily pick switches to a
 short, warm re-engagement question instead of re-offering the heavy queue head.
+Within its existing light/non-focus pool, it avoids the last question when
+an alternative exists, then prefers fewer deliveries before shorter wording.
 Deliveries-per-question and latency-to-answer are recorded in `rotation.json` as
 engagement signal. Disable with `adaptive_cadence: false` in config.yaml.
 

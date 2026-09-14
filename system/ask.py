@@ -77,11 +77,38 @@ def days_since_last_answer(rotation) -> float | None:
     return (datetime.now(timezone.utc) - value).total_seconds() / 86400
 
 
-def pick_reengagement_question(questions, categories):
+def _delivery_count(rotation, question_id):
+    counts = rotation.get("delivery_counts")
+    if not isinstance(counts, dict):
+        return 0
+    raw = counts.get(question_id, 0)
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _least_delivered_questions(questions, rotation):
+    """Prefer less-offered questions, never treating delivery as an answer.
+
+    Give the last question one turn off when an alternative exists, then
+    compare counts. Keep bank order for ties; a sole question stays eligible.
+    """
+    if not questions:
+        return []
+    alternatives = [q for q in questions if q["id"] != rotation.get("last_question_id")]
+    scored = [(_delivery_count(rotation, q["id"]), q) for q in alternatives or questions]
+    minimum = min(count for count, _question in scored)
+    return [q for count, q in scored if count == minimum]
+
+
+def pick_reengagement_question(questions, categories, rotation=None):
     """A warm, low-stakes question for a quiet stretch. The industry's #1
     failure is silent abandonment — re-offering the same heavy queue head
-    entrenches it. Heuristic: the shortest pending non-focus question (short
-    questions read light), avoiding heavy emotional openers."""
+    entrenches it. Among light, non-focus questions, avoid immediate repeats
+    and prefer least-delivered before using length as a tie-breaker."""
     heavy = ("regret", "grief", "death", "fear", "afraid", "shame", "lost", "worst")
     pending = [q for q in questions if not q["answered"]]
     if not pending:
@@ -93,16 +120,17 @@ def pick_reengagement_question(questions, categories):
             if categories.get(q["category"], {}).get("group") != "focus" and light_enough(q)]
     if not pool:
         pool = [q for q in pending if light_enough(q)] or pending
+    pool = _least_delivered_questions(pool, rotation or {})
     return min(pool, key=lambda q: len(str(q["text"]).split()))
 
 
 def pick_next_question(questions, categories, rotation):
-    """Pick the next unanswered question using coverage + rotation logic."""
+    """Honor a planned queue, otherwise rotate among less-delivered questions."""
     config = load_config()
     reengage_days = float(config.get("reengage_after_days", DEFAULT_REENGAGE_AFTER_DAYS) or DEFAULT_REENGAGE_AFTER_DAYS)
     silent = days_since_last_answer(rotation)
     if silent is not None and reengage_days > 0 and silent >= reengage_days:
-        warm = pick_reengagement_question(questions, categories)
+        warm = pick_reengagement_question(questions, categories, rotation)
         if warm:
             return warm
 
@@ -110,7 +138,7 @@ def pick_next_question(questions, categories, rotation):
     if planned:
         return planned
 
-    pending = [q for q in questions if not q["answered"]]
+    pending = _least_delivered_questions([q for q in questions if not q["answered"]], rotation)
     if not pending:
         return None
 

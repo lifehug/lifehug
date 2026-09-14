@@ -209,6 +209,14 @@ opening if one is live (`arc-card --daily-text`, a pure file read — no
 AI on this path) → send + pin on Telegram → confirm delivered. Handles
 pass-completion prompts too.
 
+Normal delivery honors the healthy weekly queue. If it expires or runs out,
+fallback prefers another unanswered question over the last delivery, then
+uses the least-delivered cohort for category rotation. Quiet-day re-engagement
+uses the same history preference within its existing light/non-focus pool,
+before choosing the shortest wording. Only confirmed delivery advances this
+history; it never answers or edits a question. A sole unanswered question
+remains available, and an all-answered bank still completes the pass.
+
 ### Weekly — keyless-capable, capped API use
 
 `system/weekly_maintenance.sh`, in this literal order:
