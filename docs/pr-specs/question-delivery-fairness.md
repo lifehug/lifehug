@@ -89,6 +89,9 @@ Focused local commands (set `PYTHON` to a working Python 3.11+ executable and
 ```sh
 "$PYTHON" -m unittest discover -s tests -p 'test_question_delivery_fairness.py'
 "$PYTHON" -m unittest discover -s tests -p 'test_v68_loop.py'
+"$PYTHON" -m unittest discover -s tests -p 'test_ingest_and_planner.py'
+"$PYTHON" -m unittest discover -s tests -p 'test_lifehug_wrapper.py'
+"$PYTHON" -m unittest discover -s tests -p 'test_pass_transition.py'
 "$PYTHON" -m unittest discover -s tests -p 'test_handbook_parity.py'
 "$PYTHON" scripts/ci/check_framework_files.py
 "$PYTHON" scripts/ci/check_version_bump.py --base origin/main --head HEAD
@@ -101,8 +104,8 @@ draft/ready state, CI monitoring, merge, and the subsequent platform pin.
 
 ## Definition Of Done
 
-- [ ] Focused regression and compatibility tests pass with no real sends.
-- [ ] Version, release date, changelog, and affected docs are updated.
+- [x] Focused regression and compatibility tests pass with no real sends.
+- [x] Version, release date, changelog, and affected docs are updated.
 - [ ] Covering issue carries synthetic reproduction and verification.
 - [ ] Parent receives branch/SHA, exact commands/results, and limitations.
 - [ ] Parent verifies the full CI matrix on the implementation SHA.
@@ -110,5 +113,33 @@ draft/ready state, CI monitoring, merge, and the subsequent platform pin.
 No viewer surface changes; a visual walkthrough is not applicable. This is
 a narrow repair of existing adaptive selection using existing telemetry, not
 a new durable-data architecture or a new question-validity policy.
+
+## Local Verification And Pin Boundary
+
+On Python 3.12.14 with an empty temporary HOME, stripped environment,
+`TMPDIR=/private/tmp`, and bytecode disabled: fairness 20, v68 27,
+ingest/planner 22, wrapper 17, pass transition 1, handbook parity 9 tests
+passed (96 total). The manifest check passed for all 540 entries; there are
+no manifest additions. New-test Ruff checks pass. The optional Ruff scan of
+`ask.py` reports the same seven pre-existing DTZ005/DTZ011 findings as the
+base revision; changing time semantics is out of scope.
+
+Red-before-green evidence: repeated confirmed CLI selection kept the stub
+dominant before the fix; an additional counts-1-versus-100 unit test failed
+in both selectors before the recency refinement. The final regression suite
+also verifies healthy queue authority, missing-count confirmation from 1 to
+3 for a sole valid question, unchanged bank bytes, and pass completion.
+
+For the subsequent platform pin, the changed overlay closure is exactly
+`system/ask.py`, `system/research.md`, and `system/version.json`. There are no
+new imports, exported output fields, CLI flags, durable fields, or migrations.
+The additional `pick_reengagement_question(..., rotation=None)` input is
+optional. The full git export also carries the operating docs, handbook,
+maintenance skill, this contract, and the synthetic regression file. A host
+must take the shared selector through its normal pin, not copy the policy.
+
+CI source: PR #332, `.github/workflows/ci.yml`, on the final implementation
+SHA. The parent checks the full Python 3.11/3.14 matrix and manages PR state;
+these local results do not claim a CI verdict or a deployment.
 
 Authorship: Generated with Codex.

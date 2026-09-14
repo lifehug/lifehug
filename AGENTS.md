@@ -459,7 +459,7 @@ python3 system/lifehug.py planner-objective-add "Prepare Mom letter" --category 
 python3 system/lifehug.py planner-queue --limit 14 --arc-max 2 --expires-days 7
 ```
 
-`planner-report` is read-only. `ask.py` uses `state/question_queue.json` only while it is valid and unexpired, then falls back to normal rotation logic.
+`planner-report` is read-only. In normal delivery, `ask.py` uses `state/question_queue.json` only while it is valid and unexpired, then falls back to delivery-aware rotation: prefer an alternative to the last question, then the least-delivered unanswered cohort before category rotation. Silence-triggered re-engagement applies the same history preference within its existing light/non-focus pool. Delivery never marks an answer or permanently excludes a row; a sole unanswered question remains eligible. Do not mark answered or rewrite a bank row merely because it was delivered repeatedly.
 
 ## Studio: Piece Creation
 

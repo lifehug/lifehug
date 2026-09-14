@@ -77,6 +77,12 @@ Focuses drive the weekly question allocation. **David James Taylor** is the prim
 
 No ratings, no friction. The answer itself is the feedback.
 
+If the weekly queue expires or runs out, the daily picker prefers another
+unanswered question over the last delivery, then the least-delivered questions
+before category rotation. After quiet days, re-engagement applies that same
+history preference within its light/non-focus pool. Sending a question never
+checks it off; a sole unanswered question remains available.
+
 ## Studio: Projects & Pieces
 
 The Studio is the product payoff — the reason the daily answers and wiki matter outside the system. Two kinds of work happen there:

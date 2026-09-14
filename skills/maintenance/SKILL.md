@@ -16,6 +16,14 @@ Do not add an ambient bypass flag or a second lock. Dry-runs stay direct and
 non-mutating. If a run fails, report its job id and fixed failure code; never
 print the retained payload or blindly replay a non-idempotent job.
 
+An expired or exhausted queue does not stop daily selection. Fallback uses
+confirmed delivery history: another unanswered question gets preference over
+the last delivery, then the least-delivered cohort feeds category rotation.
+Quiet-day re-engagement applies this within its existing light/non-focus pool.
+This limits repeats; it does not repair a failed weekly job or malformed bank
+content. Recover the job through its supported workflow, never check off or
+rewrite a bank row merely because it was delivered repeatedly.
+
 ## Find the workspace
 
 Use the current repo if it has `system/lifehug.py`. Otherwise check

@@ -263,7 +263,7 @@ The key mental model: a **Focus** is the unit of intent. Everything — a person
 
 ## How the planner decides what to ask
 
-You almost never pick a question by hand. Once a week the **planner** (`question_planner.py`) writes a delivery queue of about 8 questions, matching the horizon before the queue expires, and `ask.py` serves one per day from it. If the queue expires or runs out, `ask.py` falls back to simple coverage-based rotation, so a missed week degrades gracefully.
+You almost never pick a question by hand. Once a week the **planner** (`question_planner.py`) writes a delivery queue of about 8 questions, matching the horizon before the queue expires, and `ask.py` serves one per day from it. If the queue expires or runs out, fallback gives the last question one turn off when another unanswered question exists, then prefers the least-delivered questions before applying category rotation. A missed week therefore keeps offering alternatives instead of getting stuck on one unanswered row. After a quiet stretch, re-engagement uses that same delivery-history preference within its light/non-focus pool before comparing question length. Normal delivery still honors a healthy queue's order. Delivery never counts as an answer, and a sole remaining unanswered question stays available.
 
 The planner's job is **balance**: pour attention into under-developed Focuses, ease off ones that are nearly done, and never let a single Focus eat your whole week.
 
