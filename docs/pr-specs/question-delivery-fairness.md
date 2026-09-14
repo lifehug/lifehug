@@ -28,20 +28,22 @@ subsequent framework pin remain the parent investigation's responsibility.
   hard placeholder predicate to reuse. Do not add a minimum-word,
   question-mark, or one-off `update` blacklist as a substitute.
 - Proposed release: version 294, reallocated at merge if another PR lands.
+- Covering issue: https://github.com/lifehug/lifehug/issues/331.
 
 ## Scope And Policy
 
 1. Normal delivery still honors the first valid unanswered entry in a healthy
    planned queue. Queue ordering is authoritative, even for a prior delivery.
 2. Re-engagement still starts after the configured silent interval, with the
-   existing light/non-focus preference. Within that eligible pool, prefer
-   least-delivered questions before shortest wording. Use `last_question_id`
-   to break equally-delivered ties away from an immediate repeat; retain
-   deterministic existing ordering for remaining ties.
-3. Without a usable queue, use the least-delivered unanswered cohort before
-   applying the existing category coverage/group/focus rotation. Avoid the
-   last question when that cohort contains alternatives. Thus a low-coverage
-   category containing a repeatedly delivered row cannot monopolize fallback.
+   existing light/non-focus preference. Within that eligible pool, avoid
+   `last_question_id` when an alternative exists, then prefer least-delivered
+   questions before shortest wording. Retain deterministic existing ordering
+   for remaining ties.
+3. Without a usable queue, avoid the last unanswered question when an
+   unanswered alternative exists, then use the least-delivered cohort before
+   applying the existing category coverage/group/focus rotation. Thus a
+   low-coverage category containing a repeatedly delivered row cannot
+   monopolize fallback.
 4. Missing or malformed count metadata has a nonnegative zero default. Counts
    do not make a question ineligible forever. One remaining unanswered
    question remains selectable, regardless of its delivery count.
@@ -52,6 +54,12 @@ subsequent framework pin remain the parent investigation's responsibility.
 No bank-content mutation, model calls, provider changes, maintenance changes,
 viewer work, private-vault fixtures, or platform edits are in this branch.
 Correcting malformed source entries is a separate explicit data decision.
+
+Contract refinement after the first implementation: an executable counterexample
+with counts 1 and 100 proved that a last-question tie-break alone still permits
+long consecutive repeat streaks. The recency preference therefore comes before
+counts, within the existing eligible pool. It lasts only one confirmed delivery,
+introduces no clock or cooldown state, and never exhausts a sole question.
 
 ## Implementation Notes
 
@@ -69,7 +77,8 @@ Use only invented questions and isolated temporary state. Add
 `tests/test_question_delivery_fairness.py` and keep the existing v68 controls.
 Cases: repeated re-engagement, expired queue fallback with existing counts,
 healthy queue authority, silent override of a healthy queue, cross-category
-fallback fairness, deterministic equal-count ties, missing/malformed counts,
+fallback fairness, uneven-history repeat avoidance, deterministic equal-count
+ties, missing/malformed counts,
 a sole remaining valid question, answered exclusion, empty/all-answered bank,
 and actual repeated `--dry-run` / `--confirm-sent` subprocesses proving bank
 bytes are unchanged and only confirmation advances counts.
@@ -82,7 +91,7 @@ Focused local commands (set `PYTHON` to a working Python 3.11+ executable and
 "$PYTHON" -m unittest discover -s tests -p 'test_v68_loop.py'
 "$PYTHON" -m unittest discover -s tests -p 'test_handbook_parity.py'
 "$PYTHON" scripts/ci/check_framework_files.py
-"$PYTHON" scripts/ci/check_version_bump.py --base origin/main
+"$PYTHON" scripts/ci/check_version_bump.py --base origin/main --head HEAD
 git diff --check
 ```
 
