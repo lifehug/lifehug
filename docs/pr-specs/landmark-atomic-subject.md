@@ -32,22 +32,24 @@ temporal claim validator applies its people-enumeration heuristic.
 
 This is an **explicit narrow qualification** of the unconditional enumeration
 refusal, not a global relaxation: a deterministic landmark import can preserve
-its declared `landmark_domain` as optional claim metadata. Validation derives
-the domain's identity kind from the existing framework question set. Only a
+its declared `landmark_identity_kind` as optional claim metadata. The converter
+derives the identity kind from the existing framework question set; the pure
+temporal validator checks the finite type and producer provenance without I/O. Only a
 declared place or organization is an atomic named non-person for this purpose.
 Person, relationship_edge, episode, unknown, and unannotated claims keep the
 existing enumeration refusal, including the four-children case.
 
-**Accepted cardinality limitation:** a place/organization type
+**Engineering limitation:** a place/organization type
 does not itself prove that a record names only one entity. For example, a
 malformed residence record naming `Harbor City and Pine City` would also pass
 this qualified temporal guard. The upstream reading still asks for one unit
 per residence/school/job, but that is not an independent deterministic proof
 that a model never collapsed two into one. Do not describe the type annotation
 as that proof or claim that every multi-place/multi-company enumeration remains
-refused. The owner explicitly approved this narrow qualification after this
-tradeoff was explained. This does not authorize an unrelated relaxation for
-people or a claim that a multi-entity reading is valid.
+refused. The owner authorized the narrow typed place/company qualification;
+this specific edge case is an engineering consequence, not a separately
+ratified ruling. It does not authorize an unrelated relaxation for people or
+a claim that a multi-entity reading is valid.
 
 The metadata is accepted only on landmark import claims with the landmark
 source identity (`source_ref.source_id` beginning `landmark:entry-`) and one of
@@ -56,9 +58,14 @@ versions. It is not model-authorable listener output, a roster resolution, or
 permission for a free-text claim to declare itself exempt. A forged ref or
 resolution annotation alone never bypasses the guard. The converter derives
 metadata from the domain argument, never from a field in the proposed record.
-The exact optional field is `landmark_domain: str`, populated only for domain
+The exact optional field is `landmark_identity_kind: str`, populated only for domain
 rows whose `identity_kind` is `place` or `organization`. Invalid annotated
-provenance/domain is a typed refusal, not a silent fallback or sanitization.
+provenance/kind is a typed refusal, not a silent fallback or sanitization.
+The converter emits the annotation only when the mention would otherwise trip
+the enumeration guard. Ordinary pre-existing claims remain byte-identical:
+adding an annotation to them would violate receipt assertion equality during
+idempotent re-filing. Previously refused punctuated claims have no valid receipt
+to migrate. The receipt store's immutable-conflict guard stays unchanged.
 All existing entry/propose/apply signatures remain unchanged; sibling reading
 fixes need not generate or pass this field. The landmark converter owns it.
 
@@ -74,7 +81,7 @@ platform pin must consume the exported framework change; behavior is OSS-owned.
 
 ## Implementation Notes
 
-Carry `landmark_domain` from `entry_claims` to both identity and date claims;
+Carry `landmark_identity_kind` from `entry_claims` to both identity and date claims;
 validate and retain it in the temporal substrate, including `TemporalClaim` and
 `claim_from_dict`. Use the existing question-domain authority, not a duplicate
 domain allowlist. Keep extractor identity definitions shared with the converter
@@ -92,7 +99,9 @@ Add focused synthetic regressions in `tests/test_landmark_atomic_subject.py`:
   metadata retain refusal;
 - claim IDs and old unannotated claims are unchanged;
 - real package offer apply succeeds for a grouped mixed reading including
-  punctuated atomic subjects, and a repeat apply is idempotent;
+  punctuated atomic subjects, and a repeat apply is idempotent: immutable bytes
+  and roster contents stay identical; the existing place roster's `resolved_at`
+  refresh is allowed, not described as a byte-level no-op for mutable caches;
 - the domain decision is derived from the question set and date claims receive
   the same annotation as identity claims.
 
