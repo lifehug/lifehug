@@ -32,8 +32,10 @@ city and of the separate stays at that house.
 - temporal_claims.py and landmark_projection.py belong to the other builder
   and MUST NOT be edited on this branch. Report any required interface change
   to the parent. Existing PRs #330, #252 and #142 are outside this work.
-- PR337 adds optional TemporalClaim.landmark_domain, derived only by
-  landmark_projection.entry_claims. This branch keeps that call unchanged.
+- PR337 adds optional TemporalClaim.landmark_identity_kind (place/organization),
+  derived only by landmark_projection.entry_claims from domain authority when
+  the splitter trips. Temporal validation stays pure and checks provenance.
+  This branch keeps that call unchanged.
 
 ## Scope
 
@@ -56,6 +58,10 @@ interval count as recognized. Old readings without evidence remain accepted;
 their existing conservative coverage is not silently reinterpreted. Persist
 validated evidence on the proposal and use exact interval subtraction for
 residuals. Evidence for a dropped/unsafe value must not hide its source text.
+The evidence quote equals the accepted field value, not a surrounding
+assertion. Only an adjacent line-start literal field label (such as
+`Nickname:`) is separately accounted as structure. Trailing prose, rejected
+parenthetical components and differently worded labels remain visible.
 
 Add an explicit reading revision to newly derived proposal identities, keeping
 the public derive_proposal_id(text, generation) call shape. A new reading at
@@ -68,6 +74,17 @@ every unrelated framework release. Test this against a saved legacy proposal
 at generation 32, with no forced timeline generation change. Hosted current-ID
 derivation already delegates to the pinned function and must remain so.
 
+Hosted #846 must gate its pre-model existing-proposal shortcut with package
+`is_current_proposal(proposal, text, generation=None)`, and namespace BOTH
+immutable mutation and model keys with `reading_request_key(text)` before
+composing its existing attempt policy. A new proposal ID alone is insufficient
+when an old immutable host mutation can adopt the previous commit. Package
+`proposal_reading_rank(proposal)` orders exact-text matches by generation then
+revision; absent revision means 1, current is PROPOSAL_READING_REVISION (2),
+invalid explicit metadata ranks (-1, -1). Do not reconstruct the hash or let
+file iteration order choose an older reading at the same generation. Old
+proposal IDs and applied receipts remain valid explicit apply/replay targets.
+
 ### House identity and compatibility
 
 Reuse the existing place roster, alias authority, located_in relation, and
@@ -76,6 +93,10 @@ of its nickname and stay dates, and is located in its containing city. Retain
 the supplied nickname as its human name/alias. Preserve existing individual
 place references and make collisions explicit rather than selecting a first
 match. A city-only residence continues to name the city.
+An existing reference to the containing CITY must not suppress supplied house
+address evidence. Persist alias failures/ambiguities and their candidates in
+the apply receipt; retaining a legacy city association is not a successful
+unambiguous house alias decision.
 
 Derive this from the validated record at apply time, including old proposals.
 Do not rewrite already-filed landmarks or delete/reassign existing city

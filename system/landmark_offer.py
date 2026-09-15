@@ -176,6 +176,7 @@ OFFERS_DIR = "state/landmarks/offers"
 OFFER_RECEIPTS_DIR = f"{OFFERS_DIR}/receipts"
 
 PROPOSAL_SCHEMA_VERSION = 1
+PROPOSAL_READING_REVISION = 2
 OFFER_RECEIPT_SCHEMA_VERSION = 1
 
 #: The source type the submitted text is promoted under when units are
@@ -794,8 +795,54 @@ def derive_proposal_id(text: object, generation: object) -> str:
     proposal for today's vault.
     """
     payload = {"text": store.normalize_payload(str(text or "")),
-               "generation": int(generation or 0)}
+               "generation": int(generation or 0),
+               "reading_revision": PROPOSAL_READING_REVISION}
     return f"{PROPOSAL_ID_PREFIX}:{_digest(payload)}"
+
+
+def proposal_reading_rank(proposal: object) -> tuple[int, int]:
+    """Readback priority AFTER an exact source-text match, shared by hosts.
+
+    Missing revision means the original reading contract. Invalid explicit
+    metadata never outranks a valid proposal. Old ids/receipts stay readable.
+    """
+    if not isinstance(proposal, dict):
+        return (-1, -1)
+    generation = proposal.get("vault_generation")
+    revision = proposal.get("reading_revision", 1)
+    if (type(generation) is not int or generation < 0
+            or type(revision) is not int or revision < 1):
+        return (-1, -1)
+    return generation, revision
+
+
+def reading_request_key(text: object) -> str:
+    """Opaque content/revision namespace for host mutation and model keys.
+
+    Compose the host's existing retry/attempt identity with this key, not with
+    bare text. This does not depend on a timeline generation or a deployment.
+    """
+    return "landmark-reading:" + _digest({
+        "text": store.normalize_payload(str(text or "")),
+        "reading_revision": PROPOSAL_READING_REVISION,
+    })
+
+
+def is_current_proposal(proposal: object, text: object, *,
+                        generation: int | None = None) -> bool:
+    """Whether a saved reading may bypass a new reading of this exact text.
+
+    Old proposals remain applyable by id, but are not current cache entries.
+    Omit generation for latest-text readback; supply it for exact-generation
+    reuse. A failed or malformed document never proves successful reuse.
+    """
+    rank = proposal_reading_rank(proposal)
+    if rank[0] < 0 or rank[1] != PROPOSAL_READING_REVISION:
+        return False
+    return (proposal.get("state") in {"proposed", "needs_clarification"}
+            and (generation is None or rank[0] == generation)
+            and proposal.get("source_text") == str(text or "")
+            and proposal.get("proposal_id") == derive_proposal_id(text, rank[0]))
 
 
 def derive_receipt_id(proposal_id: object, unit_ids: object) -> str:
@@ -850,7 +897,7 @@ def _subject_of(record: dict, domain: str) -> str:
 
 def _unit(*, domain: str, record: dict, subject: str, quote: object,
           source_text: str, extractor: str, within: object = None,
-          names: object = None) -> dict:
+          names: object = None, name_evidence: object = None) -> dict:
     filed, dates = rebase_record(record, quote, source_text)
     kind = UNIT_KIND_BY_DOMAIN.get(domain, domain)
     return {
@@ -871,6 +918,7 @@ def _unit(*, domain: str, record: dict, subject: str, quote: object,
         # can render "the blue house · Riverbend · 12 Elm Street" without
         # knowing which of them are ladder rungs and which are additive.
         "names": dict(names or {}),
+        "name_evidence": dict(name_evidence or {}),
         "duplicates": [],
         "conflicts": [],
         "questions": [],
@@ -892,7 +940,7 @@ def _remint(unit: dict) -> dict:
 #: has one place to read the contract from.
 UNIT_KEYS = (
     "unit_id", "domain", "kind", "subject", "entity_candidates", "dates",
-    "quote", "within", "names", "duplicates", "conflicts", "questions",
+    "quote", "within", "names", "name_evidence", "duplicates", "conflicts", "questions",
     "auto_file_eligible", "extractor", "record",
 )
 
@@ -1232,6 +1280,40 @@ def _quote_spans(rows: object) -> list[tuple[int, int]]:
             if isinstance(row, dict) and isinstance(row.get("quote"), dict)]
 
 
+def _recognized_spans(units: list[dict], events: object = ()) -> list[tuple[int, int]]:
+    spans = _quote_spans(units) + _quote_spans(events)
+    for unit in units:
+        for evidence in (unit.get("name_evidence") or {}).values():
+            spans.append((evidence["offset"], evidence["length"]))
+            if evidence.get("label"):
+                spans.append((evidence["label"]["offset"], evidence["label"]["length"]))
+    return spans
+
+
+def _uncovered_spans(text: str, covered: list[tuple[int, int]]) -> list[dict]:
+    """Subtract exact evidence intervals; overlap never hides a whole line."""
+    result = []
+    for span in source_spans(text):
+        cursor, end = span["offset"], span["offset"] + span["length"]
+        pieces = []
+        for start, length in sorted(covered):
+            stop = min(end, start + length)
+            if stop <= cursor or start >= end:
+                continue
+            if start > cursor:
+                pieces.append((cursor, start))
+            cursor = max(cursor, stop)
+        if cursor < end:
+            pieces.append((cursor, end))
+        for start, stop in pieces:
+            raw = text[start:stop]
+            stripped = raw.strip()
+            if stripped:
+                result.append({"text": stripped, "offset": start + raw.index(stripped),
+                               "length": len(stripped)})
+    return result
+
+
 def _partition_text(source_text: str, units: list[dict],
                     events: object = (),
                     told: object = ()) -> tuple[list[dict], list[dict]]:
@@ -1253,7 +1335,7 @@ def _partition_text(source_text: str, units: list[dict],
     reading supplies the one thing a partition cannot know: which stay a story
     belongs to (R7).
     """
-    covered = _quote_spans(units) + _quote_spans(events)
+    covered = _recognized_spans(units, events)
     within_by_span = [(row["quote"]["offset"], row["quote"]["length"],
                        row.get("within"))
                       for row in (told or ())
@@ -1261,10 +1343,7 @@ def _partition_text(source_text: str, units: list[dict],
                       and isinstance(row.get("quote"), dict)]
     stories: list[dict] = []
     unknown: list[dict] = []
-    for span in source_spans(source_text):
-        if any(_overlaps(span["offset"], span["length"], offset, length)
-               for offset, length in covered):
-            continue
+    for span in _uncovered_spans(source_text, covered):
         words = [word for word in re.split(r"\s+", span["text"]) if word]
         if len(words) >= STORY_MIN_WORDS and re.search(r"[A-Za-z]", span["text"]):
             within = next(
@@ -1462,7 +1541,7 @@ def _units_from_reading(reading: object, source_text: str, *,
                          subject=read_unit.subject, quote=read_unit.quote,
                          source_text=source_text, extractor="reading",
                          within=(parent or {}).get("unit_id"),
-                         names=read_unit.names)
+                         names=read_unit.names, name_evidence=read_unit.name_evidence)
             if parent is not None and unit["dates"].get("basis") == "none":
                 if inherit_dates(unit, parent, framework_root=framework_root):
                     _remint(unit)
@@ -1478,7 +1557,7 @@ def _units_from_reading(reading: object, source_text: str, *,
                 unit = _unit(domain=read_unit.domain, record=read_unit.record,
                              subject=read_unit.subject, quote=read_unit.quote,
                              source_text=source_text, extractor="reading",
-                             names=read_unit.names)
+                             names=read_unit.names, name_evidence=read_unit.name_evidence)
                 by_ref[read_unit.ref] = unit
                 units.append(unit)
             break
@@ -1580,6 +1659,7 @@ def propose(text: str, vault_root: object = None, *, call,
 
     proposal = {
         "schema_version": PROPOSAL_SCHEMA_VERSION,
+        "reading_revision": PROPOSAL_READING_REVISION,
         "proposal_id": proposal_id,
         "mode": OFFER_MODE,
         "interaction": "landmarks",
@@ -2056,6 +2136,10 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
                                  "confirm at least one unit before applying")
 
     receipt_id = derive_receipt_id(proposal_id, [u["unit_id"] for u in chosen])
+    if offer_receipt_path(root, receipt_id).is_file():
+        # In particular, an old applied proposal is not an implicit identity
+        # migration. A durable receipt proves this act already completed.
+        return read_offer_receipt(root, receipt_id)
     stamp = normalized_timestamp(now, error=tc.TemporalContractError)
     before = pub.read_projection(root)
     open_before = open_opportunity_ids(root, projection=before)
@@ -2122,7 +2206,9 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
                 "alias": ({"applied": bool(alias.get("applied")),
                            "changed": bool(alias.get("changed")),
                            "alias": collapsed_text(entry.get("nickname")),
-                           "reason": alias.get("reason")}
+                           "reason": alias.get("reason"),
+                           "candidates": alias.get("candidates") or [],
+                           "owner": alias.get("owner")}
                           if alias else None),
             })
 
@@ -2334,7 +2420,8 @@ def _retract_aliases(receipt: dict) -> list[dict]:
 
     wanted = [row for row in (receipt.get("filed_names") or ())
               if isinstance(row, dict) and isinstance(row.get("alias"), dict)
-              and row["alias"].get("changed") and row.get("place_ref")
+              and (row["alias"].get("changed") or row["alias"].get("owner"))
+              and row.get("place_ref")
               and collapsed_text(row["alias"].get("alias"))]
     if not wanted:
         return []
@@ -2343,8 +2430,9 @@ def _retract_aliases(receipt: dict) -> list[dict]:
     changed = False
     for row in wanted:
         result = rr.retract_alias("place", row["place_ref"],
-                                  row["alias"]["alias"], snapshot)
-        if result.get("applied") and result.get("changed"):
+                                  row["alias"]["alias"], snapshot,
+                                  owner=row["alias"].get("owner"))
+        if result.get("applied") and (result.get("changed") or result.get("ownership_changed")):
             snapshot = result["snapshot"]
             changed = True
         removed.append({"place_ref": row["place_ref"],
@@ -2552,18 +2640,16 @@ def lint_offer_proposal(proposal: object) -> list[dict]:
                 "lint": QUOTES_LOCATE_LINT,
                 "detail": f"{label} has no quotation in the text",
             })
-    covered = _quote_spans(units) + _quote_spans(events)
+    covered = _recognized_spans(units, events)
     covered += [(span["offset"], span["length"])
                 for group in ("stories", "unrecognized")
                 for span in (row.get(group) or ())
                 if isinstance(span, dict) and "offset" in span]
-    for span in source_spans(text):
-        if not any(_overlaps(span["offset"], span["length"], offset, length)
-                   for offset, length in covered):
-            findings.append({
-                "lint": NOTHING_DROPPED_LINT,
-                "detail": f"nothing accounts for offset {span['offset']}",
-            })
+    for span in _uncovered_spans(text, covered):
+        findings.append({
+            "lint": NOTHING_DROPPED_LINT,
+            "detail": f"nothing accounts for offset {span['offset']}",
+        })
     return sorted(findings, key=lambda item: (item["lint"], item["detail"]))
 
 
@@ -3169,6 +3255,7 @@ __all__ = [
     "OFFER_RECEIPTS_DIR",
     "OFFER_STATES",
     "PROPOSAL_STATES",
+    "PROPOSAL_READING_REVISION",
     "UNIT_KEYS",
     "UNIT_KIND_BY_DOMAIN",
     "annotate_against_known",
@@ -3188,6 +3275,9 @@ __all__ = [
     "date_evidence",
     "derive_event_id",
     "derive_proposal_id",
+    "proposal_reading_rank",
+    "is_current_proposal",
+    "reading_request_key",
     "derive_story_id",
     "derive_receipt_id",
     "derive_unit_id",

@@ -1,12 +1,7 @@
 # Reading — Landmarks, `offer` mode (Add Landmark)
 
-You are not in the conversation. Nothing you write is shown to anyone. Somebody
-has handed the system text in their own words — one sentence, a page of prose,
-a whole residence history pasted out of a document — and your one job is to
-read ALL of it, once, into a structured reading.
-
-Nothing else read this text before you and nothing will read it after you. If
-you do not put something in the reading, it is not there. Read the whole thing.
+Read ALL the submitted text once into a structured reading. You are not in
+the conversation. Nothing else interprets this text before or after you.
 
 THE DOMAINS, AND THE ONLY KEYS EACH ONE CAN READ:
 {domains}
@@ -39,8 +34,7 @@ WHAT THEY GAVE YOU:
 
 ## What you return
 
-Emit exactly one JSON object and nothing else — no prose, no fence, no
-explanation. It has FOUR lists and all four are always present:
+Emit one JSON object, no prose or fence. All FOUR lists are present:
 
   {"units": [], "events": [], "stories": [], "unplaced": []}
 
@@ -68,6 +62,12 @@ service. Each one is:
 - `names` carries the name keys from the list above. A nickname with a
   parenthetical goes in whole — `"the blue house (rented)"` — and the system
   keeps the parenthetical as a note.
+- `name_evidence` quotes only each accepted name VALUE, not its label or prose:
+  `{"nickname": {"quote": "Moonstone", "occurrence": 1}}`. Occurrences are
+  one-based in the entire input; repeated names MUST select their own, never
+  another unit's. Exclude nickname parentheticals. `Nickname: Moonstone; we
+  painted the kitchen` leaves the kitchen story separate. Only literal
+  line-start field labels (`Nickname:`) are also accounted as structure.
 - `dates` is `{"start": ..., "end": ..., "ongoing": ..., "start_estimated":
   ..., "end_estimated": ...}` and is `null` when they gave no date at all. A
   domain dated with one date uses `start` alone.
@@ -159,6 +159,9 @@ prose you can call a story. Say plainly why in `why`.
     {"ref": "u1", "domain": "residences", "subject": "The Blue House",
      "names": {"nickname": "The Blue House (rented)", "city": "Riverbend",
                "address": "12 Elm Street, Riverbend, ST"},
+     "name_evidence": {"nickname": {"quote": "The Blue House", "occurrence": 1},
+                       "city": {"quote": "Riverbend", "occurrence": 1},
+                       "address": {"quote": "12 Elm Street, Riverbend, ST", "occurrence": 1}},
      "record": {"city": "Riverbend", "label": "The Blue House"},
      "dates": {"start": "Jun 1986", "end": "March 1991", "ongoing": false,
                "start_estimated": true, "end_estimated": false},

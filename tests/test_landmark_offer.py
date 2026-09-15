@@ -501,7 +501,9 @@ class OneReadingTests(OfferVaultCase):
         call = ScriptedCall(reading=ELM_READING)
         proposal = self.propose(ELM, call)
         self.assertEqual(proposal["stories"], [])
-        self.assertEqual(proposal["unrecognized"], [])
+        # Exact subtraction keeps separators between independently quoted
+        # assertions; overlap no longer swallows the rest of a sentence.
+        self.assertEqual([row["text"] for row in proposal["unrecognized"]], [",", ","])
         self.assertEqual(lo.lint_offer_proposal(proposal), [])
 
     def test_a_unit_with_no_dates_and_no_dated_parent_reads_no_date(self):
@@ -985,7 +987,9 @@ class FilingTests(OfferVaultCase):
         # as the entry's note rather than vanishing (E-L2c).
         self.assertIn("we rented the top floor", entry["note"])
         place = entity_roster.load_roster("place")["entities"][0]
-        self.assertEqual(place["name"], "Riverbend")
+        self.assertEqual(place["place_kind"], "residence")
+        self.assertEqual(place["located_in"], "place/riverbend")
+        self.assertNotEqual(entry["place_ref"], "place/riverbend")
         self.assertIn("the Orchard House", place["aliases"])
         self.assertEqual(receipt["filed_names"][0]["place_ref"],
                          entry["place_ref"])
