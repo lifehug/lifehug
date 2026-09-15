@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "system"))
 import classifier_context as cc  # noqa: E402
 import classifier_claims  # noqa: E402
 import classify_story  # noqa: E402
+import entity_roster  # noqa: E402
 import episode_fold  # noqa: E402
 import event_identity  # noqa: E402
 import landmark_projection  # noqa: E402
@@ -202,6 +203,115 @@ class StableFreshnessTests(ContextCase):
         self.assertEqual(report["selected_count"], 1)
         self.assertEqual(report["remaining_count"], 1)
         self.assertFalse(report["complete"])
+
+    def test_target_selection_loads_canonical_catalog_once_for_many_sources(self):
+        sources = []
+        for index in range(100):
+            source = self.source.parent / f"story-{index:03d}.md"
+            source.write_text(f"Synthetic story {index} in Cedarport.", encoding="utf-8")
+            sources.append(source)
+
+        with mock.patch.object(
+            temporal_publication,
+            "read_projection",
+            wraps=temporal_publication.read_projection,
+        ) as read_projection, mock.patch.object(
+            temporal_store,
+            "read_active_index",
+            wraps=temporal_store.read_active_index,
+        ) as read_active_index, mock.patch.object(
+            entity_roster,
+            "load_roster",
+            wraps=entity_roster.load_roster,
+        ) as load_roster, mock.patch.object(
+            event_identity,
+            "load_event_identities",
+            wraps=event_identity.load_event_identities,
+        ) as load_event_identities, mock.patch.object(
+            event_identity,
+            "load_episode_operations",
+            wraps=event_identity.load_episode_operations,
+        ) as load_episode_operations, mock.patch.object(
+            event_identity,
+            "read_telling_manifest",
+            wraps=event_identity.read_telling_manifest,
+        ) as read_telling_manifest:
+            report = cc.select_refresh_targets(
+                self.root, sources, limit=50, classifications={}
+            )
+
+        self.assertEqual(report["selected_count"], 50)
+        self.assertEqual(report["pending_count"], 100)
+        self.assertEqual(report["remaining_count"], 50)
+        self.assertFalse(report["complete"])
+        self.assertEqual(read_projection.call_count, 1)
+        self.assertEqual(read_active_index.call_count, 1)
+        self.assertEqual(load_roster.call_count, 3)
+        self.assertEqual(load_event_identities.call_count, 1)
+        self.assertEqual(load_episode_operations.call_count, 1)
+        self.assertEqual(read_telling_manifest.call_count, 1)
+
+    def test_standalone_snapshots_keep_independent_fresh_catalog_reads(self):
+        with mock.patch.object(
+            temporal_publication,
+            "read_projection",
+            wraps=temporal_publication.read_projection,
+        ) as read_projection, mock.patch.object(
+            temporal_store,
+            "read_active_index",
+            wraps=temporal_store.read_active_index,
+        ) as read_active_index:
+            self.snapshot()
+            self.snapshot()
+
+        self.assertEqual(read_projection.call_count, 2)
+        self.assertEqual(read_active_index.call_count, 2)
+
+    def test_empty_target_inventory_does_not_load_the_catalog(self):
+        with mock.patch.object(cc, "_load_context_catalog") as load_catalog:
+            report = cc.select_refresh_targets(self.root, [], classifications={})
+
+        load_catalog.assert_not_called()
+        self.assertEqual(report["pending_count"], 0)
+        self.assertTrue(report["complete"])
+
+    def test_shared_catalog_applies_own_output_exclusion_per_source(self):
+        second = self.source.parent / "other.md"
+        second.write_text("Another synthetic story.", encoding="utf-8")
+        (self.root / cc.ACTIVE_INDEX_PATH).write_text(json.dumps({"claims": [
+            {
+                "claim_id": "claim:self",
+                "status": "active",
+                "source_ref": {
+                    "source_id": "classification:story#event",
+                    "source_path": "sources/manual/story.md",
+                },
+            },
+            {
+                "claim_id": "claim:grounded",
+                "status": "active",
+                "source_ref": {
+                    "source_id": "listener:landmark",
+                    "source_path": "sources/manual/landmark.md",
+                },
+            },
+        ]}), encoding="utf-8")
+        self.write_projection([
+            node(claim_id="claim:self") | {
+                "input_claim_refs": ["claim:self", "claim:grounded"],
+            }
+        ])
+
+        catalog = cc._load_context_catalog(self.root)
+        own = cc._build_context_snapshot_from_catalog(
+            self.root, self.source, catalog
+        )
+        other = cc._build_context_snapshot_from_catalog(self.root, second, catalog)
+
+        self.assertEqual(own["candidates"], [])
+        self.assertEqual(
+            [row["candidate_id"] for row in other["candidates"]], ["node:stay"]
+        )
 
     def test_large_catalog_keeps_relevant_repeated_stays_and_real_aliases(self):
         roster_dir = self.root / "state" / "entity_rosters"

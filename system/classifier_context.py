@@ -86,15 +86,13 @@ def _relative_source(vault_root: Path, source_path: Path) -> str:
         return str(source_path)
 
 
-def _claim_context(vault_root: Path, source_path: Path) -> tuple[set[str], set[str], dict[str, bool]]:
-    """Own classifier ids, grounded entity refs, and classifier provenance."""
+def _load_claim_catalog(vault_root: Path) -> tuple[dict[str, list[dict]], dict[str, bool]]:
+    """Load active claims once and index the source-independent provenance."""
     try:
         payload = temporal_store.read_active_index(vault_root) or {}
     except (OSError, ValueError):
         payload = {}
-    relative = _relative_source(vault_root, source_path)
-    own: set[str] = set()
-    refs: set[str] = set()
+    claims_by_source: dict[str, list[dict]] = {}
     classifier_claim: dict[str, bool] = {}
     for claim in temporal_store.active_claims(payload if isinstance(payload, dict) else {}):
         if not isinstance(claim, dict):
@@ -108,10 +106,31 @@ def _claim_context(vault_root: Path, source_path: Path) -> tuple[set[str], set[s
         is_classifier = source_id.startswith("classification:")
         if claim_id:
             classifier_claim[claim_id] = is_classifier
-        if source_id.startswith("classification:") and source_path_value == relative:
-            if claim_id:
-                own.add(claim_id)
-        if source_path_value != relative or is_classifier:
+        if source_path_value:
+            claims_by_source.setdefault(source_path_value, []).append(claim)
+    return claims_by_source, classifier_claim
+
+
+def _claim_context_from_catalog(
+    relative_source: str,
+    claims_by_source: dict[str, list[dict]],
+    classifier_claim: dict[str, bool],
+) -> tuple[set[str], set[str]]:
+    """Filter preloaded claims to one source without rereading the index."""
+    own: set[str] = set()
+    refs: set[str] = set()
+    for claim in claims_by_source.get(relative_source, ()):
+        source_ref = claim.get("source_ref")
+        if not isinstance(source_ref, dict):
+            continue
+        claim_id = str(claim.get("claim_id") or "")
+        source_id = str(source_ref.get("source_id") or "")
+        is_classifier = source_id.startswith("classification:")
+        if claim_id:
+            is_classifier = classifier_claim.get(claim_id, is_classifier)
+        if is_classifier and claim_id:
+            own.add(claim_id)
+        if is_classifier:
             continue
         for key in ("subject_ref", "place_ref"):
             value = str(claim.get(key) or "")
@@ -122,6 +141,15 @@ def _claim_context(vault_root: Path, source_path: Path) -> tuple[set[str], set[s
                 text = str(value or "")
                 if "/" in text and not text.startswith("unresolved:"):
                     refs.add(text)
+    return own, refs
+
+
+def _claim_context(vault_root: Path, source_path: Path) -> tuple[set[str], set[str], dict[str, bool]]:
+    """Own classifier ids, grounded entity refs, and classifier provenance."""
+    claims_by_source, classifier_claim = _load_claim_catalog(vault_root)
+    own, refs = _claim_context_from_catalog(
+        _relative_source(vault_root, source_path), claims_by_source, classifier_claim
+    )
     return own, refs, classifier_claim
 
 
@@ -223,10 +251,15 @@ def _candidate(
     }
 
 
-def _human_identity_records(vault_root: Path) -> list[dict]:
+def _normalized_human_identity_records(
+    identities: object,
+    operations: object,
+) -> list[dict]:
     """Validated human identity decisions, with operational metadata removed."""
     rows: list[dict] = []
-    for value in event_identity.load_event_identities(vault_root):
+    for value in identities if isinstance(identities, list) else ():
+        if not isinstance(value, dict):
+            continue
         if value.get("origin") not in event_identity.HUMAN_ORIGINS:
             continue
         rows.append({
@@ -236,7 +269,9 @@ def _human_identity_records(vault_root: Path) -> list[dict]:
                 "origin", "supersedes", "telling_aliases",
             )
         })
-    for value in event_identity.load_episode_operations(vault_root):
+    for value in operations if isinstance(operations, list) else ():
+        if not isinstance(value, dict):
+            continue
         if value.get("authority") != "human":
             continue
         rows.append({
@@ -249,8 +284,15 @@ def _human_identity_records(vault_root: Path) -> list[dict]:
     return sorted(rows, key=_canonical)
 
 
+def _human_identity_records(vault_root: Path) -> list[dict]:
+    return _normalized_human_identity_records(
+        event_identity.load_event_identities(vault_root),
+        event_identity.load_episode_operations(vault_root),
+    )
+
+
 def _applicable_human_identity_records(
-    vault_root: Path,
+    human_identity_records: list[dict],
     *,
     candidates: list[dict],
     prior_identities: list[dict],
@@ -272,7 +314,7 @@ def _applicable_human_identity_records(
         if value
     }
     applicable: list[dict] = []
-    for row in _human_identity_records(vault_root):
+    for row in human_identity_records:
         row_tellings = {
             str(value)
             for value in (row.get("telling_ref"), *(row.get("telling_aliases") or ()))
@@ -293,19 +335,13 @@ def _applicable_human_identity_records(
     return applicable
 
 
-def _roster_context(
-    vault_root: Path,
-    story_text: str,
-) -> tuple[
+def _load_roster_catalog(vault_root: Path) -> tuple[
     dict[str, tuple[str, ...]],
-    set[str],
     dict[str, identity_resolution.RosterIndex],
 ]:
-    """Canonical roster aliases and exact-phrase refs used only for retrieval."""
+    """Load and normalize each canonical roster once."""
     aliases: dict[str, tuple[str, ...]] = {}
-    mentioned: set[str] = set()
     rosters: dict[str, identity_resolution.RosterIndex] = {}
-    lowered = story_text.casefold()
     for kind in ("person", "place", "period"):
         roster = entity_roster.load_roster(kind, vault_root=vault_root)
         rosters[kind] = identity_resolution.roster_index(roster, entity_type=kind)
@@ -324,13 +360,43 @@ def _roster_context(
                 ) if text
             ))
             aliases[ref] = terms
-            for term in terms:
-                # Exact roster phrase retrieval is not a binding: the model must
-                # still return an allowlisted candidate/ref pair and evidence.
-                pattern = rf"(?<!\w){re.escape(term.casefold())}(?!\w)"
-                if re.search(pattern, lowered):
-                    mentioned.add(ref)
-    return aliases, mentioned, rosters
+    return aliases, rosters
+
+
+def _mentioned_roster_refs(
+    roster_aliases: dict[str, tuple[str, ...]],
+    story_text: str,
+    *,
+    matchers: tuple[tuple[str, re.Pattern], ...] | None = None,
+) -> set[str]:
+    """Find exact roster phrases for retrieval, without treating them as bindings."""
+    mentioned: set[str] = set()
+    lowered = story_text.casefold()
+    if matchers is not None:
+        for ref, pattern in matchers:
+            if pattern.search(lowered):
+                mentioned.add(ref)
+        return mentioned
+    for ref, terms in roster_aliases.items():
+        for term in terms:
+            pattern = rf"(?<!\w){re.escape(term.casefold())}(?!\w)"
+            if re.search(pattern, lowered):
+                mentioned.add(ref)
+                break
+    return mentioned
+
+
+def _roster_context(
+    vault_root: Path,
+    story_text: str,
+) -> tuple[
+    dict[str, tuple[str, ...]],
+    set[str],
+    dict[str, identity_resolution.RosterIndex],
+]:
+    """Canonical roster aliases and exact-phrase refs used only for retrieval."""
+    aliases, rosters = _load_roster_catalog(vault_root)
+    return aliases, _mentioned_roster_refs(aliases, story_text), rosters
 
 
 def _locate_unique_exact_quote(story_text: str, quote: str) -> tuple[int, int]:
@@ -363,15 +429,11 @@ def _freshness_candidate(row: dict) -> dict:
     }
 
 
-def _prior_identities(vault_root: Path, source_path: Path) -> list[dict]:
-    try:
-        manifest = event_identity.read_telling_manifest(vault_root) or {}
-    except (OSError, ValueError):
-        manifest = {}
-    relative = _relative_source(vault_root, source_path)
+def _prior_identities_from_manifest(manifest: object, relative_source: str) -> list[dict]:
     rows: list[dict] = []
     for row in manifest.get("tellings") or () if isinstance(manifest, dict) else ():
-        if not isinstance(row, dict) or str(row.get("source_path") or "") != relative:
+        if (not isinstance(row, dict)
+                or str(row.get("source_path") or "") != relative_source):
             continue
         rows.append({
             "telling_ref": row.get("telling_ref"),
@@ -385,60 +447,116 @@ def _prior_identities(vault_root: Path, source_path: Path) -> list[dict]:
     return sorted(rows, key=_canonical)
 
 
-def build_context_snapshot(
-    vault_root: str | Path,
-    source_path: str | Path,
+def _prior_identities(vault_root: Path, source_path: Path) -> list[dict]:
+    try:
+        manifest = event_identity.read_telling_manifest(vault_root) or {}
+    except (OSError, ValueError):
+        manifest = {}
+    return _prior_identities_from_manifest(
+        manifest, _relative_source(vault_root, source_path)
+    )
+
+
+def _load_context_catalog(vault_root: Path) -> dict:
+    """Load source-independent classifier context for one invocation."""
+    import temporal_publication  # noqa: PLC0415 - avoids the timeline import cycle
+
+    try:
+        projection = temporal_publication.read_projection(vault_root) or {}
+    except (OSError, ValueError):
+        projection = {}
+    roster_aliases, rosters = _load_roster_catalog(vault_root)
+    roster_matchers = tuple(
+        (ref, re.compile(rf"(?<!\w){re.escape(term.casefold())}(?!\w)"))
+        for ref, terms in roster_aliases.items()
+        for term in terms
+    )
+    claims_by_source, classifier_claims = _load_claim_catalog(vault_root)
+    identities = event_identity.load_event_identities(vault_root)
+    operations = event_identity.load_episode_operations(vault_root)
+    try:
+        manifest = event_identity.read_telling_manifest(vault_root) or {}
+    except (OSError, ValueError):
+        manifest = {}
+
+    candidates: list[tuple[dict, frozenset[str]]] = []
+    for node in projection.get("nodes") or () if isinstance(projection, dict) else ():
+        if not isinstance(node, dict):
+            continue
+        claim_ids = frozenset(
+            str(value) for value in node.get("input_claim_refs") or () if value
+        )
+        # Pure classifier readings are not landmark context. Excluding them in
+        # the shared catalog prevents two source rereads from refreshing each
+        # other forever; mixed independently grounded episodes remain eligible.
+        if claim_ids and all(
+            classifier_claims.get(claim_id, False) for claim_id in claim_ids
+        ):
+            continue
+        row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
+        if row is not None:
+            candidates.append((row, claim_ids))
+    candidates.sort(key=lambda item: (
+        0 if item[0].get("node_kind") == "episode" else 1,
+        str(item[0].get("kind") or ""),
+        str(item[0].get("candidate_id") or ""),
+    ))
+    return {
+        "roster_aliases": roster_aliases,
+        "roster_matchers": roster_matchers,
+        "claims_by_source": claims_by_source,
+        "classifier_claims": classifier_claims,
+        "identities_by_id": {
+            str(row.get("identity_id") or ""): row
+            for row in identities
+            if isinstance(row, dict)
+        },
+        "human_identity_records": _normalized_human_identity_records(
+            identities, operations
+        ),
+        "manifest": manifest,
+        "candidates": candidates,
+    }
+
+
+def _build_context_snapshot_from_catalog(
+    vault_root: Path,
+    source_path: Path,
+    catalog: dict,
     *,
     source_bytes: bytes | None = None,
     max_candidates: int = MAX_CONTEXT_CANDIDATES,
 ) -> dict:
-    """Build the bounded prompt context and stable freshness snapshot."""
-    import temporal_publication  # noqa: PLC0415 - avoids the timeline import cycle
-
+    """Apply source-specific retrieval and exclusions to one loaded catalog."""
     root = Path(vault_root)
     source = Path(source_path)
-    try:
-        projection = temporal_publication.read_projection(root) or {}
-    except (OSError, ValueError):
-        projection = {}
     raw = source.read_bytes() if source_bytes is None else source_bytes
     story_text = raw.decode("utf-8", errors="replace")
-    roster_aliases, roster_refs, rosters = _roster_context(root, story_text)
-    own_claims, grounded_refs, classifier_claims = _claim_context(root, source)
-    grounded_refs |= roster_refs
-    prior_identities = _prior_identities(root, source)
-    identities = {
-        str(row.get("identity_id") or ""): row
-        for row in event_identity.load_event_identities(root)
-        if isinstance(row, dict)
-    }
+    relative = _relative_source(root, source)
+    own_claims, grounded_refs = _claim_context_from_catalog(
+        relative,
+        catalog["claims_by_source"],
+        catalog["classifier_claims"],
+    )
+    grounded_refs |= _mentioned_roster_refs(
+        catalog["roster_aliases"],
+        story_text,
+        matchers=catalog["roster_matchers"],
+    )
+    prior_identities = _prior_identities_from_manifest(catalog["manifest"], relative)
+    identities = catalog["identities_by_id"]
     bound_episode_ids = {
         str(identities[identity_id].get("episode_id") or "")
         for telling in prior_identities
         for identity_id in telling.get("bound_identity_ids") or ()
         if identity_id in identities and identities[identity_id].get("episode_id")
     }
-    candidates: list[dict] = []
-    for node in projection.get("nodes") or () if isinstance(projection, dict) else ():
-        if not isinstance(node, dict):
-            continue
-        claim_ids = {str(value) for value in node.get("input_claim_refs") or () if value}
-        if own_claims.intersection(claim_ids):
-            continue
-        # Pure classifier readings are not landmark context. They are exactly
-        # the output-derived noise that could make two sources refresh each
-        # other forever; independently grounded nodes and mixed-support episodes
-        # remain eligible.
-        if claim_ids and all(classifier_claims.get(claim_id, False) for claim_id in claim_ids):
-            continue
-        row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
-        if row is not None:
-            candidates.append(row)
-    candidates.sort(key=lambda row: (
-        0 if row.get("node_kind") == "episode" else 1,
-        str(row.get("kind") or ""),
-        str(row.get("candidate_id") or ""),
-    ))
+    # Rows are copied because completeness is source-specific prompt metadata.
+    candidates = [
+        dict(row)
+        for row, claim_ids in catalog["candidates"]
+        if not own_claims.intersection(claim_ids)
+    ]
     cap = max(0, min(int(max_candidates), MAX_CONTEXT_CANDIDATES))
     relevant = [
         row for row in candidates
@@ -473,7 +591,9 @@ def build_context_snapshot(
         selected = candidates[:cap]
         truncated = len(candidates) > len(selected)
     human_decisions_all = _applicable_human_identity_records(
-        root, candidates=selected, prior_identities=prior_identities
+        catalog["human_identity_records"],
+        candidates=selected,
+        prior_identities=prior_identities,
     )
     human_decisions = human_decisions_all[:MAX_CONTEXT_DECISIONS]
     decision_truncated = len(human_decisions_all) > len(human_decisions)
@@ -508,6 +628,24 @@ def build_context_snapshot(
         "prior_event_identities": prior_identities,
     }
     return snapshot
+
+
+def build_context_snapshot(
+    vault_root: str | Path,
+    source_path: str | Path,
+    *,
+    source_bytes: bytes | None = None,
+    max_candidates: int = MAX_CONTEXT_CANDIDATES,
+) -> dict:
+    """Build the bounded prompt context from independently fresh durable reads."""
+    root = Path(vault_root)
+    return _build_context_snapshot_from_catalog(
+        root,
+        Path(source_path),
+        _load_context_catalog(root),
+        source_bytes=source_bytes,
+        max_candidates=max_candidates,
+    )
 
 
 def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
@@ -610,21 +748,35 @@ def select_refresh_targets(
 ) -> dict:
     """Canonical bounded refresh selection for maintenance and host schedulers."""
     root = Path(vault_root)
-    records = _classification_records(root) if classifications is None else classifications
-    pending: list[dict] = []
+    cap = max(0, min(int(limit), MAX_REFRESH_TARGETS))
+    sources: list[Path] = []
     for value in source_paths if isinstance(source_paths, (list, tuple, set)) else ():
         source = Path(value)
         if not source.is_absolute():
             source = root / source
         if not source.exists() or not source.is_file():
             continue
+        sources.append(source)
+    if not sources:
+        return {
+            "targets": [],
+            "selected_count": 0,
+            "pending_count": 0,
+            "remaining_count": 0,
+            "complete": True,
+            "limit": cap,
+        }
+
+    records = _classification_records(root) if classifications is None else classifications
+    catalog = _load_context_catalog(root)
+    pending: list[dict] = []
+    for source in sources:
         relative = _relative_source(root, source)
-        snapshot = build_context_snapshot(root, source)
+        snapshot = _build_context_snapshot_from_catalog(root, source, catalog)
         reason = refresh_reason(snapshot, records.get(relative))
         if reason:
             pending.append({"source_path": relative, "reason": reason, "snapshot": snapshot_metadata(snapshot)})
     pending.sort(key=lambda row: (row["reason"] != "stale", row["source_path"]))
-    cap = max(0, min(int(limit), MAX_REFRESH_TARGETS))
     targets = pending[:cap]
     return {
         "targets": targets,
