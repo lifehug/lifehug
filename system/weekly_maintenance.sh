@@ -157,6 +157,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$SCRIPT_DIR/lifehug.py" compile --dry-run --no-ai
   run_step python3 "$SCRIPT_DIR/lifehug.py" source-lint --no-write-findings
   run_step python3 "$SCRIPT_DIR/lifehug.py" classify-story --classify-all --unclassified --limit "$CLASSIFY_LIMIT" --dry-run
+  run_step python3 "$SCRIPT_DIR/lifehug.py" migrate-classifier-moments --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" quality-stats
   run_step python3 "$SCRIPT_DIR/lifehug.py" judgment-update --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" timeline-retire --dry-run
@@ -231,6 +232,13 @@ ${out}"
   fi
   LAST_STEP_OUT="$out"
 }
+
+# Classifier output becomes evidence through the same deterministic migration
+# used by hosted classify successors. A failed or keyless-pending refresh leaves
+# the prior classification and claims standing; this step simply has no new
+# receipt to file for it.
+run_learning_step "migrate_classifier_moments" \
+  python3 "$SCRIPT_DIR/lifehug.py" migrate-classifier-moments
 
 run_learning_step "quality_update" python3 "$SCRIPT_DIR/lifehug.py" quality-update
 

@@ -96,8 +96,8 @@
     "nodes_after_binding": 6,
     "entailed_not_same_pairs": 5,
     "unplaced_before_binding": 7,
-    "unplaced_after_binding": 3,
+    "unplaced_after_binding": 2,
     "date_questions_before_binding": 7,
-    "date_questions_after_binding": 3
+    "date_questions_after_binding": 2
   }
 }

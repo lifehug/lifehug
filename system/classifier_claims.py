@@ -25,19 +25,18 @@ the classifier's output and files evidence; everything downstream is
 unchanged machinery doing what it already did.
 
 WHAT IT READS. The RAW classification (`classify_story.current_classification_files`
-— the one iterator, so a stale classification is withheld here exactly as it
-is withheld from every other reader). Raw, because `timeline.load_events()`
-DROPS the document's `places` and `people` and this migration needs them:
-places are the evidence a later co-location rule will place an undated moment
-with (Timeline Fix 05 §8.3), and the people are how an event that happened to
-somebody else stays off the owner's axis.
+— the one iterator, so a correction-stale classification is withheld here
+exactly as it is withheld from every other reader). Raw, because
+`timeline.load_events()` drops event-local people, places, direct dates and
+validated contextual relations. Document-level place lists are retrieval
+hints only; they are never copied onto every event.
 
-WHAT IT WRITES. One `ExtractionReceipt` per classifier EVENT, holding one
-`TemporalClaim`, plus — when a source has been re-classified — one supersession
-correction retiring the claims of the reading that no longer stands. Nothing
-else. It never edits `state/classifications/`, never re-classifies anything,
-never calls a model, and never redraws `state/landmarks.json` (a filing step
-never redraws — CLAUDE.md's rule, learned on lifehug-platform#680).
+WHAT IT WRITES. One `ExtractionReceipt` per classifier EVENT, holding the
+event's independently supported claims: a direct date or age and a validated
+`within`/`before`/`after` relation may coexist. When a source is re-classified,
+one supersession correction retires only the older classifier-family reading.
+Nothing else. It never edits `state/classifications/`, never re-classifies
+anything, never calls a model, and never redraws `state/landmarks.json`.
 
 WHY ONE RECEIPT PER EVENT AND NOT PER DOCUMENT. The contract asked for one
 receipt per classification document. `temporal_claims.CLAIM_IDENTITY_KEYS` is
@@ -146,7 +145,7 @@ from temporal_claims import (  # noqa: E402
 #: prompt, no temperature. `temporal_claims.extractor_version_string` is the
 #: one spelling, so "which extractor produced this" stays comparable.
 EXTRACTOR_NAME = "classifier-claims"
-RULE_VERSION = "1"
+RULE_VERSION = "2"
 CLASSIFIER_EXTRACTOR = tc.extractor_version_string(
     EXTRACTOR_NAME, rule_version=RULE_VERSION
 )
@@ -180,6 +179,7 @@ RELATION_BY_DATE_RELATION = {
     "before": "before",
     "after": "after",
     "during": "within",
+    "within": "within",
 }
 
 #: What `chronology.record_from_claim` already does with an anchor whose
@@ -341,19 +341,12 @@ def moment_title(event: object) -> str:
 
 
 def event_place_mentions(event: object, document_places: object = ()) -> tuple[str, ...]:
-    """The places this moment names — its own first, the document's after.
-
-    The document's places are included because the current classify prompt
-    records places at document level only, and a story about one afternoon in
-    Mesa names Mesa exactly once. They are EVIDENCE for a later co-location
-    rule and never a date; carrying them here is what makes that rule a pure
-    fold over claims instead of a second reader of the classifier.
-    """
+    """Places explicitly attached to this event, never document-wide places."""
+    del document_places
     names: list[str] = []
     row = event if isinstance(event, dict) else {}
     for key in EVENT_PLACE_KEYS:
         names.extend(_place_names(row.get(key)))
-    names.extend(_place_names(document_places))
     return tc.normalized_place_mentions(names)
 
 
@@ -477,6 +470,35 @@ def temporal_reading(event: object) -> dict:
     }
 
 
+def contextual_reading(event: object) -> dict | None:
+    """A validated contextual relationship to a supplied canonical candidate."""
+    row = event if isinstance(event, dict) else {}
+    relation = row.get("timeline_relation")
+    if not isinstance(relation, dict):
+        return None
+    relation_name = collapsed_text(relation.get("relation"))
+    candidate_id = collapsed_text(relation.get("candidate_id"))
+    evidence = relation.get("evidence")
+    refs = relation.get("entity_refs")
+    if relation_name not in ("within", "before", "after") or not candidate_id:
+        return None
+    if not isinstance(evidence, dict) or not collapsed_text(evidence.get("quote")):
+        return None
+    if not isinstance(refs, list) or not refs:
+        return None
+    return {
+        "claim_type": "relative_order",
+        "temporal_value": {"relation": relation_name, "anchors": [candidate_id]},
+        "basis": "explicit",
+        "confidence": ORDER_CLAIM_CONFIDENCE,
+        "evidence": [{
+            "quote": bounded_quote(evidence.get("quote")),
+            "start": evidence.get("start"),
+            "end": evidence.get("end"),
+        }],
+    }
+
+
 def event_evidence(event: object) -> list[dict]:
     """The bounded quotation behind the claim, and the hint that dates nothing.
 
@@ -499,7 +521,7 @@ def event_evidence(event: object) -> list[dict]:
     return [{"quote": bounded_quote(quote), "locator": "events/description"}]
 
 
-def event_claim(
+def event_claims(
     *,
     stem: object,
     event: object,
@@ -507,8 +529,8 @@ def event_claim(
     source_path: object,
     document_places: object = (),
     now: object = None,
-) -> dict:
-    """One classifier event -> one validated `TemporalClaim`.
+) -> list[dict]:
+    """One classifier event -> its direct and contextual validated claims.
 
     The ``event_ref`` is minted here and it is load-bearing: without it every
     ``moment`` of the owner's would group into ONE node
@@ -521,31 +543,49 @@ def event_claim(
     import temporal_projection as tp  # noqa: PLC0415 — pure, but keeps the load light
 
     row = event if isinstance(event, dict) else {}
-    reading = temporal_reading(row)
+    readings = [temporal_reading(row)]
+    contextual = contextual_reading(row)
+    if contextual is not None and readings[0]["claim_type"] == tc.OCCURRENCE_CLAIM_TYPE:
+        readings = [contextual]
+    elif contextual is not None and not any(
+        reading["claim_type"] == contextual["claim_type"]
+        and reading["temporal_value"] == contextual["temporal_value"]
+        for reading in readings
+    ):
+        readings.append(contextual)
     source_ref = event_source_ref(
         stem=stem, event=row, revision=revision, source_path=source_path
     )
-    payload = {
-        "source_ref": source_ref,
-        "source_kind": SOURCE_KIND,
-        "claim_type": reading["claim_type"],
-        "subject_mention": event_subject_mention(row),
-        "event_kind": MOMENT_EVENT_KIND,
-        "event_ref": tp.derive_node_id(
-            node_kind="event",
-            event_kind=MOMENT_EVENT_KIND,
-            subject_refs=[event_subject_mention(row)],
-            discriminator=event_key(row),
-        ),
-        "event_mention": moment_title(row),
-        "temporal_value": reading["temporal_value"],
-        "evidence": event_evidence(row),
-        "basis": reading["basis"],
-        "confidence": reading["confidence"],
-        "extractor_version": CLASSIFIER_EXTRACTOR,
-        "place_mentions": event_place_mentions(row, document_places),
-    }
-    return tc.validate_temporal_claim(payload, now=now)
+    event_ref = tp.derive_node_id(
+        node_kind="event",
+        event_kind=MOMENT_EVENT_KIND,
+        subject_refs=[event_subject_mention(row)],
+        discriminator=event_key(row),
+    )
+    claims = []
+    for reading in readings:
+        payload = {
+            "source_ref": source_ref,
+            "source_kind": SOURCE_KIND,
+            "claim_type": reading["claim_type"],
+            "subject_mention": event_subject_mention(row),
+            "event_kind": MOMENT_EVENT_KIND,
+            "event_ref": event_ref,
+            "event_mention": moment_title(row),
+            "temporal_value": reading["temporal_value"],
+            "evidence": reading.get("evidence") or event_evidence(row),
+            "basis": reading["basis"],
+            "confidence": reading["confidence"],
+            "extractor_version": CLASSIFIER_EXTRACTOR,
+            "place_mentions": event_place_mentions(row, document_places),
+        }
+        claims.append(tc.validate_temporal_claim(payload, now=now))
+    return claims
+
+
+def event_claim(**kwargs) -> dict:
+    """Compatibility helper returning the event's primary direct reading."""
+    return event_claims(**kwargs)[0]
 
 
 def classification_events(data: object) -> list[dict]:
@@ -622,7 +662,8 @@ def _superseded_by_reclassification(
             ref = claim.get("source_ref")
             if not isinstance(ref, dict):
                 continue
-            if collapsed_text(ref.get("revision")) == revision:
+            if collapsed_text(ref.get("revision")) == revision and \
+                    collapsed_text(claim.get("extractor_version")) == CLASSIFIER_EXTRACTOR:
                 continue
             ids.add(collapsed_text(claim.get("claim_id")))
             revisions.add(collapsed_text(ref.get("revision")))
@@ -743,38 +784,42 @@ def migrate_classifier_moments(
             (data or {}).get("events") or ()
         ) - len(events)
         report["events"] += len(events)
-        places = (data or {}).get("places") or ()
         deduped_here = 0
 
         for event in events:
-            claim = event_claim(
+            claims = event_claims(
                 stem=stem, event=event, revision=revision,
-                source_path=source_path, document_places=places, now=now,
+                source_path=source_path, now=now,
             )
-            if _already_recorded(claim, recorder_dates.get(source_path) or ()):
-                report["deduped_against_recorder"] += 1
-                deduped_here += 1
+            kept_claims = []
+            for claim in claims:
+                if _already_recorded(claim, recorder_dates.get(source_path) or ()):
+                    report["deduped_against_recorder"] += 1
+                    deduped_here += 1
+                    continue
+                kept_claims.append(claim)
+                report["claims"] += 1
+                kind = claim["claim_type"]
+                report["claims_by_type"][kind] = report["claims_by_type"].get(kind, 0) + 1
+                if kind == tc.OCCURRENCE_CLAIM_TYPE:
+                    report["undated"] += 1
+                else:
+                    report["dated"] += 1
+                if claim.get("place_mentions"):
+                    report["with_place"] += 1
+                if normalized_mention_key(claim["subject_mention"]) == \
+                        normalized_mention_key(OWNER_SUBJECT_REF):
+                    report["subjects"]["self"] += 1
+                else:
+                    report["subjects"]["named_other"] += 1
+                node_ref = collapsed_text(claim.get("event_ref"))
+                if node_ref and node_ref not in known_nodes:
+                    new_nodes.add(node_ref)
+            if not kept_claims:
                 continue
-            report["claims"] += 1
-            kind = claim["claim_type"]
-            report["claims_by_type"][kind] = report["claims_by_type"].get(kind, 0) + 1
-            if kind == tc.OCCURRENCE_CLAIM_TYPE:
-                report["undated"] += 1
-            else:
-                report["dated"] += 1
-            if claim.get("place_mentions"):
-                report["with_place"] += 1
-            if normalized_mention_key(claim["subject_mention"]) == \
-                    normalized_mention_key(OWNER_SUBJECT_REF):
-                report["subjects"]["self"] += 1
-            else:
-                report["subjects"]["named_other"] += 1
-            node_ref = collapsed_text(claim.get("event_ref"))
-            if node_ref and node_ref not in known_nodes:
-                new_nodes.add(node_ref)
             receipts.append(
                 {
-                    "source_ref": claim["source_ref"],
+                    "source_ref": kept_claims[0]["source_ref"],
                     "extractor_version": CLASSIFIER_EXTRACTOR,
                     "extractor": ei.declare_tellings(
                         {
@@ -783,11 +828,12 @@ def migrate_classifier_moments(
                             "deterministic": True,
                         },
                         telling_keys={
-                            claim["claim_id"]: ei.classifier_telling_ref(stem, event),
+                            claim["claim_id"]: ei.classifier_telling_ref(stem, event)
+                            for claim in kept_claims
                         },
                         document_revision=story_revision,
                     ),
-                    "claims": [claim],
+                    "claims": kept_claims,
                     "recorder": "classifier_claims",
                 }
             )
@@ -844,6 +890,7 @@ def migrate_classifier_moments(
         )
 
     store.rebuild_active_index(root)
+    ei.rebuild_telling_manifest(root)
     if publish:
         import timeline  # noqa: PLC0415 — the package's ONE publish caller
 
@@ -916,12 +963,14 @@ __all__ = [
     "classification_source_prefix",
     "describe_migration",
     "event_claim",
+    "event_claims",
     "event_evidence",
     "event_key",
     "event_place_mentions",
     "event_source_id",
     "event_source_ref",
     "event_subject_mention",
+    "contextual_reading",
     "is_classifier_source_id",
     "migrate_classifier_moments",
     "moment_title",

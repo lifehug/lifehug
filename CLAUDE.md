@@ -715,6 +715,17 @@ build time, never at read time; everything unlabeled defaults to `private`.**
   entries (v110).
   Keyless classification: `classify_story.py --from-response <json> --source
   <file> [--no-candidates]` (archive backfills suppress candidates).
+  Classification may also place an event against a bounded set of canonical,
+  dated landmark/participation episodes with `within`, `before`, or `after`.
+  The response must echo the prompt's source/context snapshot and cite one
+  exact, uniquely occurring source quote; candidate IDs and entity refs must
+  come from the supplied context. The validator derives quote offsets locally.
+  Direct stated dates remain separate claims and survive beside the relation.
+  Run `classify-story --refresh-targets --limit N` for the canonical bounded
+  source/context freshness report used by maintenance and hosted scheduling.
+  Published calculated nodes carry `usable_placement: bool`, derived by the
+  same predicate as work items and counts; clients consume it directly rather
+  than interpreting `temporal_state`, width, or possible-value presence.
 
 ## Focus Management
 
@@ -1032,13 +1043,15 @@ a cache must be derivable from filed sources.
   display-only overlay that records the correction it filed. Unpinning keeps
   the assertion — if the *fact* was wrong, retract the correction from its
   source-actions page.
-- **Corrections invalidate classification**: filing any correction marks the
+- **Content corrections invalidate classification**: filing a content correction marks the
   target's classification stale (`stale: true` in
   `state/classifications/<slug>.json`), and the weekly `--unclassified`
   batch (keyed AND keyless emit paths) treats stale as work — events,
   people, and themes re-derive with the correction injected as
-  authoritative. The old classification keeps feeding the timeline/wiki
-  until the fresh one replaces it, so nothing regresses mid-week.
+  authoritative. An explicitly stale classification is withheld from derived
+  readers immediately. Context-only freshness is different: the accepted
+  classification and its claims remain current while a bounded refresh is
+  pending, and a failed or raced response cannot replace them.
 - When the re-derived classification places a pinned moment in its period by
   itself (`placement_redundant`), the pin **retires automatically** (v105):
   the weekly maintenance runs `python3 system/lifehug.py timeline-retire`,

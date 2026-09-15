@@ -257,13 +257,11 @@ class AStoryLandsInsideTheStay(ParticipationEpisodeCase):
         self.assertEqual(self.span_text(node.get("possible_temporal_value")),
                          "March 2002–September 2006")
 
-    def test_the_window_does_not_silence_the_precision_question(self):
-        """§7.1 / H6: render-placeable is not date-resolved. The anchored
-        probe is an improvement on the question, never its removal."""
+    def test_the_supported_window_retires_the_generic_precision_question(self):
         node = self.node_labelled("The tree fell on the Cedarport house")
         kinds = {row["kind"] for row in self.timeline.work_items
                  if row.get("event_ref") == node["node_id"]}
-        self.assertIn("precision_gap", kinds)
+        self.assertNotIn("precision_gap", kinds)
 
 
 class TwoStaysAtOnePlace(ParticipationEpisodeCase):

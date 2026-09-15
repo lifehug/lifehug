@@ -1,7 +1,7 @@
 {
-  "version": 300,
+  "version": 301,
   "released": "2026-09-15",
-  "changelog": "v300: A healthy weekly question queue now remains authoritative after a quiet stretch: daily delivery asks its first eligible planned question before considering warm re-engagement. When the queue is missing, expired, exhausted, sent, answered or otherwise unusable, the existing quiet re-engagement and ordinary rotation fallbacks retain their delivery-history fairness. Brief prompts and a sole unanswered question remain eligible, and selection still writes nothing.",
+  "changelog": "v301: Story classification can now ground an event within, before or after a bounded set of canonical dated landmarks and participation episodes, while direct dates remain independent claims. Stable source/context snapshots reject raced responses without replacing accepted evidence; one bounded selector serves maintenance and hosted scheduling. A shared usable-placement predicate aligns timeline counts, work items and old-question retirement, and age decades retain their intended range semantics.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -278,6 +278,7 @@
     "system/candidate_research.py",
     "system/chronology.py",
     "system/classifier_claims.py",
+    "system/classifier_context.py",
     "system/classify_story.py",
     "system/compile_and_commit.sh",
     "system/compose.py",
@@ -419,6 +420,7 @@
     "tests/test_candidate_research.py",
     "tests/test_chain_coverage.py",
     "tests/test_classifier_claims.py",
+    "tests/test_classifier_context.py",
     "tests/test_classify_story_current.py",
     "tests/test_connectors.py",
     "tests/test_conversation_delivery.py",

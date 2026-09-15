@@ -11,6 +11,7 @@ from lifehug_core import (
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
     ROTATION_FILE,
+    TEMPORAL_WORK_ITEMS_FILE,
     compute_coverage,
     load_config,
     mark_answered_in_bank,
@@ -18,6 +19,7 @@ from lifehug_core import (
     parse_questions,
     question_by_id,
     read_json,
+    read_text,
     rebuild_coverage,
     write_json,
 )
@@ -27,6 +29,55 @@ from lifehug_core import (
 # question when the planned queue cannot supply one.
 DEFAULT_MAX_QUESTIONS_PER_DAY = 3
 DEFAULT_REENGAGE_AFTER_DAYS = 4
+
+
+def eligible_questions(questions, *, question_bank_text=None, work_items_payload=None):
+    """Retire timeline questions absent from a valid current work-item view.
+
+    Missing or malformed projection data is fail-open: it must never hide an
+    ordinary question by guessing. The filtered list feeds queue,
+    re-engagement, and bank fallback alike.
+    """
+    payload = work_items_payload
+    if payload is None:
+        payload = read_json(TEMPORAL_WORK_ITEMS_FILE, default=None)
+    if not isinstance(payload, dict):
+        return list(questions)
+    generation = payload.get("projection_generation")
+    work_items = payload.get("work_items")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        return list(questions)
+    if not isinstance(work_items, list):
+        return list(questions)
+    try:
+        import question_planner as planner
+        import temporal_projection as temporal_projection
+        for row in work_items:
+            temporal_projection.validate_temporal_work_item(row)
+        bank_text = read_text(QUESTIONS_FILE) if question_bank_text is None else question_bank_text
+        marked = planner.bank_work_item_rows(
+            bank_text,
+            aliases=payload.get("work_item_aliases"),
+        )
+    except (OSError, TypeError, ValueError):
+        return list(questions)
+    timeline_by_bank = {
+        str(row.get("bank_id") or ""): str(row.get("work_item_id") or "")
+        for row in marked
+        if isinstance(row, dict) and row.get("bank_id")
+    }
+    active = {
+        planner.resolve_work_item_id(
+            row.get("work_item_id"), aliases=payload.get("work_item_aliases")
+        )
+        for row in work_items
+        if isinstance(row, dict) and row.get("state", "open") in ("open", "offered")
+    }
+    return [
+        question for question in questions
+        if str(question.get("id") or "") not in timeline_by_bank
+        or timeline_by_bank[str(question.get("id") or "")] in active
+    ]
 
 
 def pick_planned_question(questions):
@@ -126,6 +177,7 @@ def pick_reengagement_question(questions, categories, rotation=None):
 
 def pick_next_question(questions, categories, rotation):
     """Honor a planned queue, otherwise rotate among less-delivered questions."""
+    questions = eligible_questions(questions)
     planned = pick_planned_question(questions)
     if planned:
         return planned

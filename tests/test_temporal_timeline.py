@@ -564,8 +564,8 @@ class IdentityAndEpisodes(unittest.TestCase):
 
 
 class WorkItems(unittest.TestCase):
-    def test_a_precise_gap_is_asked_at_the_precision_the_event_deserves(self):
-        """§2.2 — a year is enough for a move; a wedding is worth the day."""
+    def test_supported_coarse_dates_do_not_create_generic_precision_questions(self):
+        """A supported year is placed; generic precision is not a backlog."""
         move = claim(
             claim_type="date",
             subject_mention="Mesa",
@@ -583,7 +583,7 @@ class WorkItems(unittest.TestCase):
         result = derive(move, wedding)
         asked = {row["event_ref"]: row for row in items_of(result, "precision_gap")}
         self.assertNotIn(node_for(result, "move")["node_id"], asked)
-        self.assertIn(node_for(result, "married")["node_id"], asked)
+        self.assertNotIn(node_for(result, "married")["node_id"], asked)
 
     def test_a_generic_loss_question_never_reaches_the_daily_queue(self):
         """§2.4 — loss discovery is offer-only."""
@@ -602,8 +602,7 @@ class WorkItems(unittest.TestCase):
             self.assertNotIn("daily_question", row["allowed_surfaces"])
             self.assertNotIn("whisper", row["allowed_surfaces"])
 
-    def test_a_named_loss_participates_in_ordinary_questions(self):
-        """§2.4 — once the person is named, the ordinary surfaces apply."""
+    def test_a_named_dated_loss_needs_no_generic_date_question(self):
         roster = {"type": "person", "entities": [{"name": "Aunt Della", "slug": "aunt-della"}]}
         death = claim(
             claim_type="date",
@@ -614,17 +613,14 @@ class WorkItems(unittest.TestCase):
         )
         result = derive(death, roster_snapshot=roster)
         gaps = items_of(result, "precision_gap")
-        self.assertEqual(len(gaps), 1)
-        self.assertIn("daily_question", gaps[0]["allowed_surfaces"])
-        self.assertGreaterEqual(gaps[0]["sensitivity"], 0.8)
+        self.assertEqual(gaps, [])
 
     def test_one_work_item_id_is_the_same_question_across_rebuilds(self):
         """§5.4 — answer once, update everywhere, needs one stable identity."""
         wedding = claim(
-            claim_type="date",
+            claim_type="occurrence",
             subject_mention="Katie",
             event_kind="married",
-            temporal_value="1998",
             seed="katie",
         )
         first = derive(wedding)

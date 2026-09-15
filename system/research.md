@@ -177,6 +177,19 @@ fix that; and a completeness meter is an *improper* scoring rule — maximized b
 writing anything down — whereas a score built on interval WIDTH is not. Nothing
 in it is implemented.
 
+**Contextual timeline placement shipped in v301.** Story classification now
+receives a bounded, source-relevant set of independently grounded dated
+landmarks and participation episodes, including competing repeated stays and
+human identity decisions. It may assert only `within`, `before`, or `after`
+against supplied IDs with exact source evidence; direct dates remain separate
+claims. A stable source/context snapshot prevents stale model responses from
+being silently rebased, while failed refreshes preserve the last accepted
+reading. Placement itself has one definition: a supported best value at any
+grain, or an evidence-backed possible window, is usable; a bare lifetime
+fallback is not. Thus generic precision work does not survive merely because a
+valid placement is broad, and the same predicate drives counts, work items,
+and old-question retirement.
+
 ---
 
 ## 5. Relationships & Connection

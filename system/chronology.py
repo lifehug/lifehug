@@ -902,6 +902,17 @@ _NUMBER_WORDS = NUMBER_WORDS
 _HEDGES = ("about", "around", "roughly", "approximately", "maybe", "or so",
            "something like", "somewhere around", "ish", "give or take")
 _AGE_TOKEN_RE = re.compile(r"\d{1,3}|[a-z]+", re.IGNORECASE)
+_AGE_DECADE_RE = re.compile(r"\b(?:in\s+(?:my\s+)?)?(?P<decade>\d{2})s\b", re.IGNORECASE)
+_AGE_DECADE_WORDS = {
+    "twenties": 20,
+    "thirties": 30,
+    "forties": 40,
+    "fifties": 50,
+    "sixties": 60,
+    "seventies": 70,
+    "eighties": 80,
+    "nineties": 90,
+}
 
 
 def parse_age(age_text: object) -> tuple[int, int, bool] | None:
@@ -917,6 +928,14 @@ def parse_age(age_text: object) -> tuple[int, int, bool] | None:
     if not lowered:
         return None
     hedged = any(h in lowered for h in _HEDGES)
+    decade_match = _AGE_DECADE_RE.search(lowered)
+    if decade_match:
+        decade = int(decade_match.group("decade"))
+        if 10 <= decade <= 90 and decade % 10 == 0:
+            return decade, decade + 9, hedged
+    for word, decade in _AGE_DECADE_WORDS.items():
+        if re.search(rf"\b{word}\b", lowered):
+            return decade, decade + 9, hedged
     ages: list[int] = []
     for token in _AGE_TOKEN_RE.findall(lowered):
         if token.isdigit():

@@ -574,22 +574,24 @@ class TheFoldPublishesTheOpportunity(MesaVault):
         self.assertEqual(li.status_for_domain(state["residences"], row), "complete")
         self.assertIsNone(li.next_rung(state["residences"], row))
 
-    def test_the_graph_still_owes_one_question_and_names_the_house(self) -> None:
-        found = list(self.result.landmark_opportunities)
-        self.assertEqual(len(found), 1)
-        row = found[0]
-        self.assertEqual(row["domain"], "residences")
-        self.assertEqual(row["kind"], "span_open_end")
-        self.assertEqual(row["question"], "When did you move out of the Mesa house?")
-        self.assertEqual(row["leverage"], self.MOMENTS + 1)
-        self.assertEqual(len(row["resolves"]), self.MOMENTS)
+    def test_accepted_windows_do_not_create_a_privileged_date_question(self) -> None:
+        self.assertEqual(list(self.result.landmark_opportunities), [])
 
     def test_the_leverage_is_the_same_number_the_needs_placing_row_carries(self) -> None:
         """§4.6's one base quantity, proved on one generation rather than
         asserted: the opportunity and the Timeline row share an anchor."""
-        row = self.result.landmark_opportunities[0]
-        self.assertEqual(sorted(self.result.dependency_index[row["subject"]]),
-                         row["resolves"])
+        candidates = lo.candidates(
+            self.result.to_dict(),
+            lp.project_landmark_entries(
+                ts.fold_active_index(self.vault),
+                sources=lp.load_landmark_sources(self.vault),
+            ),
+            self.roster,
+        )
+        [row] = [candidate for candidate in candidates
+                 if candidate["domain"] == "residences"]
+        self.assertEqual(row["leverage"], 1)
+        self.assertEqual(row["resolves"], [])
 
     def test_every_id_it_names_is_a_node_the_projection_holds(self) -> None:
         known = {node["node_id"] for node in self.result.nodes}
@@ -601,7 +603,8 @@ class TheFoldPublishesTheOpportunity(MesaVault):
     def test_the_other_eight_domains_collapse(self) -> None:
         verdicts = self.result.landmark_sufficiency
         open_domains = [d for d, row in verdicts.items() if not row["sufficient"]]
-        self.assertEqual(open_domains, ["residences"])
+        self.assertEqual(open_domains, [])
+        self.assertEqual(verdicts["residences"]["reason"], lo.REASON_LIST_FINISHED)
         self.assertEqual(verdicts["losses"]["reason"], lo.REASON_OFFER_ONLY)
         self.assertEqual(verdicts["birth"]["reason"], lo.REASON_NOTHING_REMAINING)
 
@@ -611,7 +614,7 @@ class TheOpportunitySurvivesARebuild(MesaVault):
         first = [row["id"] for row in self.result.landmark_opportunities]
         second = [row["id"] for row in self.fold(generation=2).landmark_opportunities]
         self.assertEqual(first, second)
-        self.assertTrue(first)
+        self.assertEqual(first, [])
 
     def test_both_keys_ride_the_rebuild_signature(self) -> None:
         signature = tt.structural_signature(self.result)
@@ -632,7 +635,7 @@ class TheOpportunitySurvivesARebuild(MesaVault):
 
     def test_answering_it_retires_it_and_mints_nothing_in_its_place(self) -> None:
         """The question does not come back under a new id; it stops existing."""
-        was = self.result.landmark_opportunities[0]["id"]
+        self.assertEqual(self.result.landmark_opportunities, ())
         lp.file_landmark_record(
             self.vault, "residences",
             {"domain": "residences", "label": "the Mesa house",
@@ -644,7 +647,6 @@ class TheOpportunitySurvivesARebuild(MesaVault):
         eb.bind_episodes(self.vault, apply=True, now=NOW,
                          containment_authority="applied")
         after = self.fold(generation=2)
-        self.assertNotIn(was, [row["id"] for row in after.landmark_opportunities])
         self.assertEqual(
             [row for row in after.landmark_opportunities
              if row["domain"] == "residences" and row["kind"].startswith("span")],
@@ -658,10 +660,8 @@ class ThePageIsServedTheOpportunity(MesaVault):
         view = pub.calculated_view(self.vault)
         self.assertIn("landmark_opportunities", pub.view_block_keys())
         self.assertIn("landmark_sufficiency", pub.view_block_keys())
-        self.assertEqual(len(view["landmark_opportunities"]), 1)
-        self.assertEqual(view["landmark_opportunities"][0]["question"],
-                         "When did you move out of the Mesa house?")
-        self.assertFalse(view["landmark_sufficiency"]["residences"]["sufficient"])
+        self.assertEqual(view["landmark_opportunities"], ())
+        self.assertTrue(view["landmark_sufficiency"]["residences"]["sufficient"])
 
     def test_every_published_key_is_still_served_or_excused(self) -> None:
         """The O-E1b guard's own rule, on the two new keys."""

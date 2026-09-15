@@ -634,12 +634,9 @@ class ContainmentTests(unittest.TestCase):
         self.assertIsNone(member.get("possible_temporal_value"))
         self.assertEqual(chrono.from_dict(member["best_temporal_value"]).best, "2023-09")
 
-    def test_it_never_suppresses_the_members_own_precision_question(self):
-        """§5.3: the probe just gets better, it does not go away. `placed` is
-        untouched by a containment, so the WHEN item is minted exactly as it
-        was before the containment existed."""
+    def test_the_supported_window_suppresses_generic_precision(self):
         asked = {item.get("node_ref") for item in date_questions(self.result)}
-        self.assertIn(self.member["node_id"], asked)
+        self.assertNotIn(self.member["node_id"], asked)
         self.assertIn("{episode}", efc.CONTAINMENT_PROBE_TEXT)
 
     def test_two_containing_episodes_are_legal_and_are_no_pick_at_all(self):
@@ -950,8 +947,8 @@ class Cert11Tests(unittest.TestCase):
 
 class VersionTests(unittest.TestCase):
 
-    def test_the_calculation_rule_version_is_five(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:5")
+    def test_the_calculation_rule_version_is_six(self):
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:6")
 
     def test_the_projection_schema_version_did_not_move(self):
         """Every §3.5 field is ADDITIVE, so a v2 reader reads a v2 payload."""

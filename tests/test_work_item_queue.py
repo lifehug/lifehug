@@ -696,19 +696,16 @@ class WaveDSeamTests(unittest.TestCase):
         self.assertTrue(qp.is_loss_discovery(opener))
         self.assertEqual(qp.queue_candidates([opener], question_bank_text=EMPTY_BANK), [])
 
-    def test_a_named_loss_is_an_ordinary_candidate_again(self):
+    def test_a_supported_named_loss_does_not_get_a_generic_precision_question(self):
         roster = {"type": "person", "entities": [{"name": "Aunt Della", "slug": "aunt-della"}]}
         death = claim(claim_type="date", subject_mention="Aunt Della", event_kind="death",
                       temporal_value="2011", seed="della")
         result = derive(death, roster_snapshot=roster)
         items = qp.work_items_from_projection(result.to_dict())
-        gap = next(row for row in items if row["kind"] == "precision_gap")
-        self.assertIn("daily_question", gap["allowed_surfaces"])
-        self.assertFalse(qp.is_loss_discovery(gap))
-        self.assertFalse(ident.is_unresolved_ref(gap["subject_ref"]))
-        # It is a candidate on its merits — and sensitivity is doing real work,
-        # which is the point of it being a component rather than a veto.
-        self.assertGreaterEqual(gap["sensitivity"], 0.8)
+        self.assertEqual(
+            [row for row in items if row["kind"] == "precision_gap"],
+            [],
+        )
 
     def test_no_contradiction_reaches_the_daily_queue_yet(self):
         """The named honest gap: for a contradiction the derivation states

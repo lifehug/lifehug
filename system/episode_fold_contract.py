@@ -390,7 +390,7 @@ FOLD_FINDINGS = (
 #: (`docs/contracts/event-identity-i0-telling.md`) owns the schema; naming the
 #: read surface here means a C1 schema change that breaks the fold breaks one
 #: named function instead of a dozen call sites.
-MANIFEST_READ_FIELDS = ("tellings", "telling_ref", "claim_ids", "status")
+MANIFEST_READ_FIELDS = ("tellings", "telling_ref", "claim_ids", "status", "aliases")
 
 
 def manifest_claim_index(manifest: object) -> dict:
@@ -451,7 +451,7 @@ def telling_ref_for_claim(claim: object, manifest: object) -> str:
 # --------------------------------------------------------------------------
 
 
-def active_binding_index(bindings: object) -> dict:
+def active_binding_index(bindings: object, manifest: object = None) -> dict:
     """``{telling_ref: (binding, …)}`` — the active bindings per telling.
 
     Supersession is followed first: a record named by another record's
@@ -464,7 +464,9 @@ def active_binding_index(bindings: object) -> dict:
     :data:`REFUSAL_IDENTITY_CONFLICT`.
 
     Ordering is deterministic — by ``identity_id`` — so the tuple a permuted
-    input produces is the same tuple.
+    input produces is the same tuple. With a telling manifest, an
+    evidence-backed re-key redirects the old durable binding to the active
+    telling through its alias; the record itself remains byte-identical.
     """
     rows = [row for row in (bindings or ()) if isinstance(row, dict)]
     superseded = {
@@ -483,6 +485,29 @@ def active_binding_index(bindings: object) -> dict:
         if not telling_ref:
             continue
         by_telling.setdefault(telling_ref, []).append(row)
+
+    manifest_rows = (
+        manifest.get("tellings") if isinstance(manifest, dict) else manifest
+    ) if manifest is not None else ()
+    possible_alias_targets: dict[str, set[str]] = {}
+    for value in manifest_rows or ():
+        manifest_row = value if isinstance(value, dict) else {}
+        if collapsed_text(manifest_row.get("status") or "active") != "active":
+            continue
+        target = collapsed_text(manifest_row.get("telling_ref"))
+        if not target:
+            continue
+        for value in manifest_row.get("aliases") or ():
+            alias = collapsed_text(value)
+            if alias and alias in by_telling:
+                possible_alias_targets.setdefault(alias, set()).add(target)
+    alias_targets = {
+        alias: next(iter(targets))
+        for alias, targets in possible_alias_targets.items()
+        if len(targets) == 1
+    }
+    for alias, target in sorted(alias_targets.items()):
+        by_telling.setdefault(target, []).extend(by_telling.pop(alias, []))
 
     index: dict[str, tuple] = {}
     for telling_ref, found in sorted(by_telling.items()):
@@ -820,7 +845,7 @@ def fold_grouping(claims: object, manifest: object, bindings: object) -> dict:
     and no binding land under ``""`` — v264's own minting, deliberately not
     duplicated here.
     """
-    active = bindings if isinstance(bindings, dict) else active_binding_index(bindings)
+    active = bindings if isinstance(bindings, dict) else active_binding_index(bindings, manifest)
     index = manifest_claim_index(manifest)
     grouped: dict[str, list[str]] = {}
     for claim in claims or ():
@@ -979,7 +1004,8 @@ def possible_outer_range(member_value: object, episode_span: object, *,
     * **never stored** — nothing here writes; the caller recomputes it from
       the receipts on every rebuild and it disappears the moment the member
       gains a value of its own;
-    * **never suppresses the question** — see :func:`containment_probe`.
+    * **satisfies generic placement** — the evidence-backed outer range is a
+      usable placement, while conflict and missing-anchor questions remain.
 
     The episode's own provenance is DROPPED: its sources dated the episode,
     not this member, and carrying them across would attribute to the person a
@@ -1012,12 +1038,11 @@ def possible_outer_range(member_value: object, episode_span: object, *,
 
 
 def containment_probe(episode_label: object) -> str:
-    """The precision question a contained member still gets (§5.3).
+    """Optional refinement language for a contained member (§5.3).
 
-    Its existence is the promise: a containment is a BOUND, not an answer, and
-    a rule that quietly retired the ▸ would have made the Timeline less
-    answerable by knowing more — v264 learned that from co-location and this
-    inherits it rather than rediscovering it.
+    A containment is a bound rather than an exact date. It nevertheless meets
+    the usable-placement contract and is not automatically queued as a generic
+    precision question.
     """
     return CONTAINMENT_PROBE_TEXT.format(episode=collapsed_text(episode_label))
 

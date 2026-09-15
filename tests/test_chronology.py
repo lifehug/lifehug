@@ -177,6 +177,12 @@ class AgeArithmeticTests(unittest.TestCase):
         self.assertIsNone(ch.parse_age("no idea"))
         self.assertIsNone(ch.parse_age(None))
 
+    def test_explicit_age_decades_are_ranges_not_exact_ages(self):
+        self.assertEqual(ch.parse_age("in my 20s"), (20, 29, False))
+        self.assertEqual(ch.parse_age("my twenties"), (20, 29, False))
+        self.assertEqual(ch.parse_age("roughly in my 30s"), (30, 39, True))
+        self.assertEqual(ch.parse_age("20"), (20, 20, False))
+
     def test_no_birthday_or_no_age_is_none(self):
         self.assertIsNone(ch.from_age(None, "about 5"))
         self.assertIsNone(ch.from_age("1979", "no idea"))

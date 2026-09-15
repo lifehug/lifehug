@@ -178,7 +178,7 @@ class ClassifyStoryTests(unittest.TestCase):
         self.assertEqual(path_names[0], "sources-manual-memory.json")
         self.assertIn("memory.json", path_names)
 
-    def test_legacy_classification_file_counts_as_classified(self):
+    def test_legacy_classification_file_is_a_bounded_refresh_target(self):
         mod = load("classify_story")
         with tempfile.TemporaryDirectory() as td:
             original_dir = mod.CLASSIFICATIONS_DIR
@@ -186,7 +186,7 @@ class ClassifyStoryTests(unittest.TestCase):
                 mod.CLASSIFICATIONS_DIR = Path(td)
                 source = ROOT / "sources" / "manual" / "memory.md"
                 mod.legacy_classification_path(source).write_text("{}", encoding="utf-8")
-                self.assertTrue(mod.is_classified(source))
+                self.assertFalse(mod.is_classified(source))
             finally:
                 mod.CLASSIFICATIONS_DIR = original_dir
 

@@ -279,9 +279,13 @@ class ClassifyKeylessTests(unittest.TestCase):
             live.ANSWERS_DIR = answers
             live.QUESTION_CANDIDATES_FILE = root / "state" / "question_candidates.json"
             try:
+                payload = json.loads(response.read_text())
+                payload["_classification_snapshot"] = live.classifier_ctx.snapshot_metadata(
+                    live.classifier_ctx.build_context_snapshot(root, src)
+                )
                 rc = live.classify_file(src, model="external-agent",
                                         skip_candidates=True,
-                                        precomputed_result=json.loads(response.read_text()))
+                                        precomputed_result=payload)
             finally:
                 (live.REPO_DIR, live.CLASSIFICATIONS_DIR, live.ANSWERS_DIR,
                  live.QUESTION_CANDIDATES_FILE) = orig

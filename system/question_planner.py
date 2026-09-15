@@ -1672,24 +1672,16 @@ def score_work_item(item: object, *, weights: object = None, policy: object = No
     }
 
 
-def bank_work_items(question_bank_text: object, *, aliases: object = None) -> dict:
-    """`{work_item_id: row}` for every timeline-origin question in the bank.
+def bank_work_item_rows(question_bank_text: object, *, aliases: object = None) -> list[dict]:
+    """Every timeline-origin bank row, including duplicate work-item markers.
 
-    Reads the bank's own provenance comment. A row minted before wave F carries
-    no `work_item:` field — its identity is DERIVED from the anchor it does
-    carry, by the same function everything else uses, so the pre-wave-F bank
-    dedupes and closes exactly like a post-wave-F one and no migration exists.
-
-    **O-E6: a row whose marker holds a LEGACY id is keyed under the canonical
-    one.** The bank is the answer-once ledger, so a marker written last month
-    under `temporal_anchor` has to tick the item the fold mints today or the
-    person is asked their own birthday twice. `aliases` is the published map
-    (`published_work_item_aliases`); pure by default, so a caller with no vault
-    behaves exactly as it did before the map existed.
+    Selection needs every historical bank id, while state folding intentionally
+    collapses repeated markers to one canonical work item. Parsing lives here so
+    both uses share the same marker grammar.
     """
     table = aliases if isinstance(aliases, dict) else {}
     text = str(question_bank_text or "")
-    rows: dict[str, dict] = {}
+    rows: list[dict] = []
     lines = text.splitlines()
     for position, line in enumerate(lines):
         bank_row = _WORK_ITEM_BANK_ROW_RE.match(line)
@@ -1707,7 +1699,7 @@ def bank_work_items(question_bank_text: object, *, aliases: object = None) -> di
         )
         if not work_item_id:
             continue
-        rows.setdefault(work_item_id, {
+        rows.append({
             "work_item_id": work_item_id,
             "bank_id": bank_row.group("qid"),
             "question_id": tag.group("keystone_id"),
@@ -1717,6 +1709,27 @@ def bank_work_items(question_bank_text: object, *, aliases: object = None) -> di
             "answered": bank_row.group(1) == "x",
             "provenance": lane.group("provenance") if lane else "",
         })
+    return rows
+
+
+def bank_work_items(question_bank_text: object, *, aliases: object = None) -> dict:
+    """`{work_item_id: row}` for every timeline-origin question in the bank.
+
+    Reads the bank's own provenance comment. A row minted before wave F carries
+    no `work_item:` field — its identity is DERIVED from the anchor it does
+    carry, by the same function everything else uses, so the pre-wave-F bank
+    dedupes and closes exactly like a post-wave-F one and no migration exists.
+
+    **O-E6: a row whose marker holds a LEGACY id is keyed under the canonical
+    one.** The bank is the answer-once ledger, so a marker written last month
+    under `temporal_anchor` has to tick the item the fold mints today or the
+    person is asked their own birthday twice. `aliases` is the published map
+    (`published_work_item_aliases`); pure by default, so a caller with no vault
+    behaves exactly as it did before the map existed.
+    """
+    rows: dict[str, dict] = {}
+    for row in bank_work_item_rows(question_bank_text, aliases=aliases):
+        rows.setdefault(row["work_item_id"], row)
     return rows
 
 

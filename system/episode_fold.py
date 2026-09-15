@@ -354,7 +354,7 @@ class EpisodeIdentity:
             _enriched(row, self.episodes) for row in records["bindings"]
         )
         self.claims = [row for row in (claims or ()) if isinstance(row, dict)]
-        self.active = efc.active_binding_index(self.bindings)
+        self.active = efc.active_binding_index(self.bindings, self.manifest)
         self.node_of_episode = {
             episode_id: view.node_id for episode_id, view in self.episodes.items()
         }

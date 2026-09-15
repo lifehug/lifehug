@@ -72,6 +72,15 @@ classifications — classify first so this week's queue sees this week's answers
    Use only facts present in the source — never invent people, dates, or
    events. (If `manifest.json` says 0 items, nothing is pending — skip ahead.)
 
+   The prompt supplies a bounded canonical timeline context. Copy only its
+   candidate IDs and entity refs, use only `within`, `before`, or `after`, and
+   cite one exact quote that occurs once in the Story Text. Do not calculate
+   character offsets; ingestion derives them. Echo `_classification_snapshot`
+   unchanged. If source or context moved while the response was produced,
+   ingestion refuses it and preserves the prior accepted classification and
+   claims. `classify-story --refresh-targets --limit 50` is the canonical
+   bounded freshness/target report; `complete: false` means work remains.
+
    "Unclassified" includes **stale** classifications (v103): filing a
    correction marks its target's classification `stale: true`, so corrected
    sources re-enter this batch automatically. Their prompts carry a LATER
@@ -97,6 +106,11 @@ classifications — classify first so this week's queue sees this week's answers
    was read out of. So a vault where somebody has been dating moments has
    no stale classifications to re-derive from that alone, and the
    Timeline shows those dates with no model call.
+
+   Weekly maintenance runs `migrate-classifier-moments` immediately after the
+   classify step. This deterministic filing may be run again safely; it files
+   direct dates and validated contextual relations as separate claims and
+   supersedes only the prior classifier-family reading.
 
 2. **Synthesize the Mirror** (v100) — the weekly introspection edition built
    from classifier contradictions/insights/positions:

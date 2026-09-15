@@ -184,6 +184,44 @@ class EmptyAndBirthlessTests(unittest.TestCase):
         projection = {"nodes": [_node("n:married", "event", "married",
                                       ["person/x"], MARRIED)]}
         self.assertIsNone(tpl.placement_for_projection(projection))
+
+
+class UsablePlacementTests(unittest.TestCase):
+    def test_every_supported_best_granularity_is_usable(self) -> None:
+        for value in (
+            date("1998", "year"),
+            date_range("1990", "1999"),
+            chrono.parse_edtf("199X").to_dict(),
+        ):
+            with self.subTest(value=value):
+                self.assertTrue(tpl.has_usable_placement({"best_temporal_value": value}))
+
+    def test_evidence_backed_window_is_usable_but_bare_fallback_is_not(self) -> None:
+        window = chrono.DateRecord(
+            best="1990/1999", earliest="1990", latest="1999",
+            granularity="range", confidence="inferred", basis="order",
+            provenance=({"source": "episode:test", "claim": "inside the stay"},),
+        ).to_dict()
+        self.assertTrue(tpl.has_usable_placement({"possible_temporal_value": window}))
+        bare = dict(window)
+        bare["provenance"] = []
+        self.assertFalse(tpl.has_usable_placement({"possible_temporal_value": bare}))
+        self.assertFalse(tpl.has_usable_placement({
+            "possible_temporal_value": bare,
+            "input_constraint_refs": ["constraint:unrelated"],
+        }))
+
+    def test_unplaced_count_is_distinct_and_honors_the_declared_cohort(self) -> None:
+        nodes = [
+            {"node_id": "n:placed", "best_temporal_value": date("1998")},
+            {"node_id": "n:missing", "best_temporal_value": None},
+            {"node_id": "n:missing", "best_temporal_value": None},
+            {"node_id": "n:outside", "best_temporal_value": None},
+        ]
+        self.assertEqual(
+            tpl.unplaced_node_ids(nodes, cohort_ids=("n:placed", "n:missing", "n:absent")),
+            ["n:absent", "n:missing"],
+        )
         legacy_data = {"event_lineup": {"college": [{"date": MARRIED}]}}
         self.assertIsNone(tl.placement_score(legacy_data))
 

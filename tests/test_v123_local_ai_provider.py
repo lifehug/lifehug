@@ -630,6 +630,7 @@ class FailureRedactionTests(unittest.TestCase):
     def test_classifier_valid_json_bad_priority_never_reaches_report_or_store(self):
         secret = "PRIVATE_CLASSIFIER_PRIORITY_MARKER"
         response = json.dumps({
+            "_classification_snapshot": {},
             "candidate_questions": [{
                 "text": "Synthetic question?",
                 "story_function": "scene",
@@ -645,6 +646,13 @@ class FailureRedactionTests(unittest.TestCase):
                 "---\ntype: manual_story\n---\nSynthetic story.\n",
                 encoding="utf-8",
             )
+            parsed = json.loads(response)
+            parsed["_classification_snapshot"] = classify_story.classifier_ctx.snapshot_metadata(
+                classify_story.classifier_ctx.build_context_snapshot(
+                    classify_story.REPO_DIR, source
+                )
+            )
+            response = json.dumps(parsed)
             with mock.patch.object(aip, "call_ai", return_value=response), \
                     mock.patch.object(
                         classify_story, "CLASSIFICATIONS_DIR", classifications

@@ -53,6 +53,7 @@ import landmark_projection as lp  # noqa: E402
 import question_planner as qp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
+import temporal_publication as pub  # noqa: E402
 import temporal_store as ts  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 import timeline as tl  # noqa: E402
@@ -176,7 +177,7 @@ class TheRuleIsWrittenDown(unittest.TestCase):
     """The rule text lives as a constant, and the retirement says so too."""
 
     def test_the_rule_version_tracks_the_current_rules(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:5")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:6")
         self.assertEqual(tt.CALCULATION_RULE_VERSION,
                          CERT_10["calculation_rule_version"])
 
@@ -252,12 +253,18 @@ class OneDatedEpisode(CertCase):
                 chrono._ordinal(span.latest, end=True),  # noqa: SLF001
             )
 
-    def test_a_window_does_not_silence_the_question(self):
-        """§7.1 / H6: render-placeable is not date-resolved. A window is a
-        bound, not an answer, and every member still owes its own date."""
+    def test_an_accepted_window_silences_only_the_generic_date_question(self):
+        """The evidence-backed outer window is usable placement in v301."""
         nodes = {row["node_id"] for row in self.moment_nodes()}
         asked = {row.get("node_ref") for row in self.result.work_items}
-        self.assertTrue(nodes <= asked, f"unasked: {sorted(nodes - asked)}")
+        self.assertFalse(nodes & asked, f"still asked: {sorted(nodes & asked)}")
+
+    def test_publication_and_view_expose_the_canonical_usable_flag(self):
+        pub.publish(self.root, now=NOW)
+        view = pub.calculated_view(self.root)
+        moments = [row for row in view["nodes"] if row.get("event_kind") == "moment"]
+        self.assertTrue(moments)
+        self.assertTrue(all(row["usable_placement"] is True for row in moments))
 
     def test_the_rung_that_filed_it_is_named(self):
         by_rule = self.binder["plan"].counts["containment_by_rule"]
@@ -288,6 +295,13 @@ class TwoEpisodesAtTheSamePlace(CertCase):
         self.assertEqual(len(self.windowed()), self.expected["contained_nodes"])
         self.assertEqual(
             self.binder["plan"].counts["containment_by_rule"]["entity_span"], 0)
+
+    def test_ambiguous_stays_publish_as_not_usable(self):
+        pub.publish(self.root, now=NOW)
+        view = pub.calculated_view(self.root)
+        moments = [row for row in view["nodes"] if row.get("event_kind") == "moment"]
+        self.assertTrue(moments)
+        self.assertTrue(all(row["usable_placement"] is False for row in moments))
 
     def test_the_rung_says_why_it_refused(self):
         refused = self.binder["plan"].containment_ambiguities
