@@ -1,7 +1,7 @@
 {
-  "version": 295,
+  "version": 296,
   "released": "2026-09-15",
-  "changelog": "v295: freeze the unified quality ladder's synthetic fixture clocks so candidate tests do not expire after September 14 (issue #333). Explicit future-clock and 45-day boundary regressions preserve production expiry, scoring, and promotion behavior unchanged.",
+  "changelog": "v296: confirmed place and organization landmarks now file names containing commas, '&', or 'and' without misreading them as lists of people (issue #328). The deterministic converter carries optional landmark_identity_kind through claims and receipts; ordinary, person, relationship, episode, and unknown-domain mentions retain strict enumeration checks. Labels, claim IDs, immutable receipts, and idempotent reapply behavior are preserved. Type alone does not prove that a reading kept multiple places or companies in separate units.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

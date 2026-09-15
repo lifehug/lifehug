@@ -582,3 +582,35 @@ proposal. `docs/handbook/interactions/landmarks.md` and
 ### Status
 
 Accepted and shipped at v293.
+
+## Amendment 4, 2026-09-15 (v296): Punctuated Atomic Landmark Names
+
+Issue #328: `Pell & Sons` and a residence labelled `Harbor City, ST` reach
+the real landmark writer but fail as `aggregate_subject_mention`. The converter
+knows the domain's `identity_kind`; the temporal claim previously lost it.
+
+The converter now preserves optional `landmark_identity_kind` on identity and
+date claims only for place/organization domains and only when the raw mention
+would otherwise trip the enumeration heuristic. It derives this from the
+framework question set, never a proposed record's extra fields. The pure
+temporal validator accepts this annotation only with `source_kind: import`,
+a `landmark:entry-` source identity, and the shared existing deterministic
+`legacy-entry-import/rule:1` or `landmark-record/rule:1` extractor identity.
+The listener's closed draft shape cannot supply it. These are internal producer
+provenance checks, not cryptographic proof of an entity's real-world identity.
+A free `subject_ref` or resolution annotation is not an exemption.
+
+The owner authorized the narrow typed place/company qualification. Its
+engineering limitation is explicit: this type alone cannot distinguish one
+punctuated name from several places/companies collapsed into one malformed
+record. The reading still owes one unit per subject; this is not permission to
+aggregate units. Person, relationship, episode, unknown-domain and ordinary
+untyped mentions keep the exact previous enumeration refusal. No regex, word
+limit, human label, raw mention, date, or claim identity input changes.
+
+This is additive schema-1 metadata, retained through claim and receipt readback.
+No existing source/receipt is rewritten. Ordinary claims omit it so retrying
+against an older immutable receipt is byte-compatible. Receipt conflict checks
+remain strict. No new roster entry is minted merely to evade the guard.
+The package owns this behavior; hosts consume it by pin, not by punctuation
+sanitization or admission shortcuts.
