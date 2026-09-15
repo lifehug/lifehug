@@ -15,7 +15,9 @@ import shutil
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ROOT / "system"
@@ -148,7 +150,19 @@ class AutoPromoteLadderTests(unittest.TestCase):
     re-expressed over the unified score (contract §Scope item 2), stamping
     (§Scope item 3), and idempotence/resurfacing (§Implementation notes)."""
 
+    NOW = datetime(2026, 8, 14, tzinfo=timezone.utc)
+
     def setUp(self):
+        # Age reads datetime.now(), independently of the now_utc stamps.
+        # Keep August 1 candidates inside their real 45-day lifetime.
+        clock = mock.patch.object(qc, "datetime", wraps=datetime)
+        self.addCleanup(clock.stop)
+        clock.start().now.return_value = self.NOW
+        stamps = mock.patch.object(
+            qc, "now_utc", return_value=self.NOW.isoformat().replace("+00:00", "Z"))
+        self.addCleanup(stamps.stop)
+        stamps.start()
+
         self.tmp = Path(tempfile.mkdtemp(prefix="lifehug-uqs-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.bank_path = self.tmp / "question-bank.md"
@@ -298,7 +312,8 @@ class AutoPromoteLadderTests(unittest.TestCase):
         ticks = itertools.count(1)
         original_now_utc = qc.now_utc
         self.addCleanup(setattr, qc, "now_utc", original_now_utc)
-        qc.now_utc = lambda: f"2026-08-14T00:00:{next(ticks):03d}Z"
+        qc.now_utc = lambda: (self.NOW + timedelta(seconds=next(ticks))).isoformat().replace(
+            "+00:00", "Z")
 
         self._write_store([{
             "id": "cand-mid", "status": "candidate", "priority": 0.95,
@@ -381,6 +396,39 @@ class AutoPromoteLadderTests(unittest.TestCase):
         output = buf.getvalue()
         self.assertIn("score 0.90", output)
         self.assertIn("no craft flags", output)
+
+
+class AutoPromoteFixtureClockTests(unittest.TestCase):
+    def test_ladder_is_independent_of_the_wall_clock_after_fixture_expiry(self):
+        for instant in ("2026-09-15T00:00:01+00:00", "2030-01-01T00:00:00+00:00"):
+            with self.subTest(now=instant), mock.patch.object(
+                    qc, "datetime", wraps=datetime) as clock:
+                clock.now.return_value = datetime.fromisoformat(instant)
+                suite = unittest.defaultTestLoader.loadTestsFromTestCase(AutoPromoteLadderTests)
+                result = unittest.TestResult()
+                suite.run(result)
+                self.assertGreater(result.testsRun, 0)
+                self.assertEqual(result.failures, [])
+                self.assertEqual(result.errors, [])
+                self.assertEqual(qc.datetime.now(timezone.utc), datetime.fromisoformat(instant))
+
+    def test_real_expiry_still_applies_after_45_days(self):
+        for instant, expired in (
+            ("2026-09-14T23:59:59+00:00", False),
+            ("2026-09-15T00:00:00+00:00", False),
+            ("2026-09-15T00:00:01+00:00", True),
+            ("2030-01-01T00:00:00+00:00", True),
+        ):
+            with self.subTest(now=instant), mock.patch.object(
+                    qc, "datetime", wraps=datetime) as clock:
+                clock.now.return_value = datetime.fromisoformat(instant)
+                candidate = {
+                    "id": "synthetic-expiry", "status": "candidate",
+                    "created_at": "2026-08-01T00:00:00Z",
+                }
+                result = qc.expire_stale_candidates({"candidates": [candidate]})
+                self.assertEqual(bool(result), expired)
+                self.assertEqual(candidate["status"], "expired" if expired else "candidate")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
-  "version": 294,
-  "released": "2026-09-14",
-  "changelog": "v294: daily fallback and quiet-day re-engagement use confirmed delivery history (issue #331). When a weekly queue expires or runs out, another unanswered question gets preference over the last delivery, then the least-delivered cohort feeds the existing category rotation. Re-engagement applies the same preference within its light/non-focus pool before comparing length, so the shortest unanswered row no longer wins every day when alternatives exist. Normal delivery still honors a healthy queue's order. Sending is never answering: bank text and answered flags stay unchanged, no question is permanently excluded by delivery count, and a sole unanswered question remains available. Missing or malformed counts default to zero for selection. No new durable fields, migration, placeholder grammar, or model calls. Shared API compatibility: pick_reengagement_question accepts optional rotation history while existing two-argument callers still work; dry-run output and confirm-sent bookkeeping are unchanged. Existing malformed bank content needs a separate supported correction, and failed weekly maintenance still needs recovery.",
+  "version": 295,
+  "released": "2026-09-15",
+  "changelog": "v295: freeze the unified quality ladder's synthetic fixture clocks so candidate tests do not expire after September 14 (issue #333). Explicit future-clock and 45-day boundary regressions preserve production expiry, scoring, and promotion behavior unchanged.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
