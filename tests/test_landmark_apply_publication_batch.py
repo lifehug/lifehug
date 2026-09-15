@@ -92,7 +92,7 @@ class PublicationBatchTests(OfferVaultCase):
         self.assertEqual(receipt["counts"]["claims"], 30)
         self.assertEqual(receipt["generation_after"], receipt["generation_before"] + 1)
         published = pub.read_projection(self.root)
-        published_claims = {c for n in published["nodes"] for c in n["claim_refs"]}
+        published_claims = {c for n in published["nodes"] for c in n["input_claim_refs"]}
         event_claims = {e["claim_id"] for s in receipt["filed_slices"] for e in s["events"]}
         self.assertTrue(event_claims <= published_claims)
         self.assertEqual(sum(n["event_kind"] == "moment" for n in published["nodes"]), 1000)
