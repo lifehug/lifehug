@@ -1,7 +1,7 @@
 {
-  "version": 299,
+  "version": 300,
   "released": "2026-09-15",
-  "changelog": "v299: Add Landmark filing spends less time rediscovering the receipt archive between confirmed units. Its bounded receipt scope reuses unchanged directory names, refreshes changed branches and checks every existing receipt's current metadata through no-follow directory handles. New, changed, removed, corrupt and repaired receipts remain observable; root or ancestor swaps fail closed. Handles close after each refresh and cached state closes on every scope exit. Full receipt/correction folds, sequential landmark redraws, active-index writes, one final calculated publication, immutable receipts and replay are unchanged. No model, migration, reading revision, protocol or host budget change. Hosts must consume the complete package pin, including vault_paths.py; a synthetic improvement alone does not certify live filing latency.",
+  "changelog": "v300: A healthy weekly question queue now remains authoritative after a quiet stretch: daily delivery asks its first eligible planned question before considering warm re-engagement. When the queue is missing, expired, exhausted, sent, answered or otherwise unusable, the existing quiet re-engagement and ordinary rotation fallbacks retain their delivery-history fairness. Brief prompts and a sole unanswered question remain eligible, and selection still writes nothing.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -21,6 +21,7 @@
     "docs/adr/0031-event-identity.md",
     "docs/adr/0032-landmark-sufficiency.md",
     "docs/adr/0033-add-landmark-offer-mode.md",
+    "docs/adr/0034-planned-questions-before-reengagement.md",
     "docs/contracts/event-identity-i0-fold.md",
     "docs/contracts/event-identity-i0-records.md",
     "docs/handbook/eras.md",
