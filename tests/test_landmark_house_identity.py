@@ -263,6 +263,12 @@ class ReadingRevisionTests(OfferVaultCase):
         self.assertTrue(lo.proposal_matches_current_reading(failed, text))
         self.assertFalse(lo.is_current_proposal(failed, text))
         self.assertFalse(lo.proposal_matches_current_reading({**failed, "reading_revision": 1}, text))
+        for invalid_state in (None, [], {}, "unknown"):
+            with self.subTest(state=invalid_state):
+                higher = {**proposal, "state": invalid_state, "vault_generation": 33,
+                          "proposal_id": lo.derive_proposal_id(text, 33)}
+                self.assertFalse(lo.proposal_matches_current_reading(higher, text))
+                self.assertFalse(lo.is_current_proposal(higher, text))
         self.assertFalse(lo.is_current_proposal(proposal, text + " changed"))
         self.assertFalse(lo.is_current_proposal(proposal, text, generation=33))
         for field, value in (("reading_revision", 1), ("reading_revision", "2"),

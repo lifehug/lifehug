@@ -662,7 +662,8 @@ Hosts must use `reading_request_key(text)` as their opaque revision-aware
 mutation AND model-key input, composing their existing attempt policy with it.
 `proposal_matches_current_reading(proposal, text, generation=None)` validates
 exact source, current revision and package-derived ID independently of state;
-it permits displaying a current failed reading. `is_current_proposal` adds
+it permits displaying a current failed reading but rejects unknown/non-string
+states using the package's `PROPOSAL_STATES`. `is_current_proposal` adds
 successful-state eligibility for bypassing the model and adopting a commit.
 `proposal_reading_rank` orders compatible exact-text matches by generation then
 revision; invalid explicit metadata ranks below valid. A new proposal ID alone

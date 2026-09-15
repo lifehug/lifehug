@@ -831,16 +831,19 @@ def reading_request_key(text: object) -> str:
 
 def proposal_matches_current_reading(proposal: object, text: object, *,
                                      generation: int | None = None) -> bool:
-    """Exact current reading identity, independent of success/failure state.
+    """Display-compatible current identity, including a known failed state.
 
     Old proposals remain applyable by id, but are not current cache entries.
     Omit generation for latest-text readback; supply it for exact-generation
-    identity. Hosts may show a current failed reading without adopting it.
+    identity. Hosts may show a current failed reading without adopting it;
+    unknown or malformed states cannot displace a valid readable document.
     """
     rank = proposal_reading_rank(proposal)
     if rank[0] < 0 or rank[1] != PROPOSAL_READING_REVISION:
         return False
-    return ((generation is None or rank[0] == generation)
+    return (isinstance(proposal.get("state"), str)
+            and proposal.get("state") in PROPOSAL_STATES
+            and (generation is None or rank[0] == generation)
             and proposal.get("source_text") == str(text or "")
             and proposal.get("proposal_id") == derive_proposal_id(text, rank[0]))
 
@@ -849,8 +852,7 @@ def is_current_proposal(proposal: object, text: object, *,
                         generation: int | None = None) -> bool:
     """Whether a saved successful reading may bypass the model call."""
     return (proposal_matches_current_reading(proposal, text, generation=generation)
-            and isinstance(proposal.get("state"), str)
-            and proposal.get("state") in {"proposed", "needs_clarification"})
+            and proposal.get("state") != "failed")
 
 
 def derive_receipt_id(proposal_id: object, unit_ids: object) -> str:
