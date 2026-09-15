@@ -27,6 +27,19 @@ evidence. Prefer existing store/publication boundaries, not another writer
 or a parallel projection implementation. New policy or durable-data format
 changes are outside this repair.
 
+The read-only follow-up profile narrows the implementation: a warm fold of
+1,107 synthetic receipts / 1,260 claims takes 0.398 seconds unprofiled; one
+profiled fold makes 28,808 stat calls and 4,430 directory scans. Receipt
+loading occupies 91% of that profiled fold. Index serialization is only
+0.038 seconds. Therefore extend the existing bounded receipt cache with a
+contained directory inventory: discover once, refresh changed directory
+listings before each fold, and check existing receipt signatures each fold.
+Validate shared ancestors once per refresh using no-follow protections
+instead of repeatedly checking the whole path for every cached receipt.
+Keep the full authoritative fold, sequential landmark redraws, active-index
+writes and calculated publication unchanged. Do not add an incremental or
+landmark-only fold, or defer active-index writes, in this repair.
+
 ## Invariants
 
 - The existing landmark writer remains authoritative. Every intermediate
