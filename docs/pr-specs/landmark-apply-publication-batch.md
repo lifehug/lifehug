@@ -12,6 +12,35 @@ v297 evidence: 76 units / 30 events produced 77 calculated publications,
 fixture. A populated fixture with 1,000 existing moments is under measurement.
 The hosted counterpart is lifehug/lifehug-platform#847.
 
+### Measured Amendment: Bounded Receipt Reuse
+
+The populated v297 run completed in 186.812 seconds: 77 calculated
+publications consumed 114.044 seconds, 77 eager landmark redraws 70.346
+seconds, and 154 full receipt loads 128.634 seconds (nested timings).
+160,218 receipt reads consumed 104.156 seconds. A representative real-call
+profile confirms guarded receipt reopening/validation as the remaining hot
+path. Publication-only savings leave inadequate margin for the existing
+90-second hosted package budget. The owner explicitly approved bounded
+immutable receipt-input reuse on this evidence.
+
+Within the apply scope only, `temporal_store` may reuse already validated
+receipt objects when the same contained, nonsymlink file retains its complete
+file-identity/change signature (device, inode, mode, size, nanosecond mtime and
+ctime). Every load still lists current receipt paths; new, changed, deleted,
+unreadable or symlinked paths must be handled from current disk state. File
+identity is checked before and after a cache fill. No invalid receipt is cached.
+Caller mutation must not mutate cached values. Corrections are always loaded
+fresh; each active-index fold and every landmark redraw still runs normally.
+No persistent/global-result cache, cached fold, side writer, receipt rewrite,
+or relaxation of the existing immutable conflict check is permitted. Cache
+scope is context-local and vault-bound and is cleared on every exit.
+
+Additional tests cover new receipts, re-extraction winners, corrections,
+changed/deleted/repaired files, symlinks, caller mutation, cross-vault refusal,
+scope cleanup and byte-identical historical receipts. Final evidence must
+measure the populated path with meaningful margin, not merely under 90s on a
+fast development machine; the host runs its real overlay independently.
+
 ## Binding Facts
 
 - Base: v297, `411a43c9caa02b12c2020e8aeccdfd46b11bad35`; release: v298.
