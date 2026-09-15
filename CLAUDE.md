@@ -1512,6 +1512,16 @@ issues #51–#54.
 
 ## Decided 2026-09-03 — TIMELINE UNIFICATION (platform program)
 
+**Large Add Landmark filing, v298:** one successful confirmed apply publishes
+the calculated timeline once, after its unit writes and group claims. Landmark
+draws remain sequential and immediately readable. The bounded, vault-specific
+receipt read scope reuses only validated unchanged files; new receipts and
+corrections remain visible. Scope state closes on every exit, including copied
+execution contexts used later. A failed apply keeps durable evidence for retry,
+not a success receipt; its calculated projection can remain at the preceding
+generation until retry/repair. Existing applied receipts replay without writes.
+No model, reading revision, CLI protocol or host timeout budget changes.
+
 **Current Add Landmark amendment, v297 (#335/#336):** `name_evidence` carries
 unit-owned exact accepted value occurrences, never paragraph coverage. Reading
 revision 2 allows a new same-text/same-generation proposal; hosts consume the

@@ -69,11 +69,14 @@ the fold) and §4.1 (authority), plus owner amendment 2 / option B.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import copy
 import hashlib
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -701,9 +704,69 @@ def receipt_relative_paths(vault_root: str | Path) -> list[str]:
     return sorted(found)
 
 
+@dataclass
+class _ReceiptReadBatch:
+    root: Path
+    receipts: dict[str, tuple[tuple, ExtractionReceipt]] = field(default_factory=dict)
+    closed: bool = False
+
+
+_RECEIPT_READ_BATCH: contextvars.ContextVar[_ReceiptReadBatch | None] = (
+    contextvars.ContextVar("temporal_receipt_read_batch", default=None)
+)
+
+
+@contextlib.contextmanager
+def receipt_read_batch(vault_root: str | Path):
+    """Reuse validated immutable inputs only within one vault's bounded act.
+
+    Folds still list receipt paths and load corrections anew. File changes
+    invalidate reuse; no derived index, missing file or parse failure is cached.
+    """
+    root = _vault_root(vault_root).resolve()
+    parent = _RECEIPT_READ_BATCH.get()
+    if parent is not None and parent.closed:
+        parent = None
+    if parent is not None and parent.root != root:
+        raise TemporalStoreError("unsafe_store_path", "receipt batch cannot cross vaults")
+    batch = parent or _ReceiptReadBatch(root)
+    token = _RECEIPT_READ_BATCH.set(batch)
+    try:
+        yield
+    finally:
+        _RECEIPT_READ_BATCH.reset(token)
+        if parent is None:
+            batch.closed = True
+            batch.receipts.clear()
+
+
+def _receipt_file_signature(path: Path) -> tuple | None:
+    try:
+        info = path.stat(follow_symlinks=False)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
 def read_receipt(vault_root: str | Path, relative: str) -> ExtractionReceipt | None:
     """Tolerant read (compat rule 2): unknown keys ignored, unknown schema
     versions read for the fields this version knows, unreadable files ``None``."""
+    batch = _RECEIPT_READ_BATCH.get()
+    if batch is not None and batch.closed:
+        batch = None
+    signature = None
+    if batch is not None:
+        if _vault_root(vault_root).resolve() != batch.root:
+            raise TemporalStoreError("unsafe_store_path", "receipt batch cannot cross vaults")
+        # Repeat containment/symlink checks even on a cache hit. The old reader
+        # remains the only way a new or changed receipt enters this scope.
+        path = store_path(vault_root, relative)
+        signature = _receipt_file_signature(path)
+        cached = batch.receipts.get(relative)
+        if signature is not None and cached is not None and signature == cached[0]:
+            return copy.deepcopy(cached[1])
+        batch.receipts.pop(relative, None)
     content = _read_text(vault_root, relative)
     if content is None:
         return None
@@ -711,7 +774,11 @@ def read_receipt(vault_root: str | Path, relative: str) -> ExtractionReceipt | N
         payload = json.loads(content)
     except json.JSONDecodeError:
         return None
-    return receipt_from_dict(payload)
+    receipt = receipt_from_dict(payload)
+    if (batch is not None and signature is not None and receipt is not None
+            and _receipt_file_signature(path) == signature):
+        batch.receipts[relative] = (signature, copy.deepcopy(receipt))
+    return receipt
 
 
 def load_receipts(

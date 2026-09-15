@@ -37,8 +37,10 @@ Zero AI calls; read-only over live state.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import re
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1028,6 +1030,57 @@ def _projection_vault_root():
     return parent
 
 
+@dataclass
+class _LandmarkPublicationBatch:
+    root: Path
+    dirty: bool = False
+    failed: bool = False
+    closed: bool = False
+
+
+_LANDMARK_PUBLICATION_BATCH: contextvars.ContextVar[_LandmarkPublicationBatch | None] = (
+    contextvars.ContextVar("landmark_publication_batch", default=None)
+)
+
+
+def _publication_batch_for(root: Path) -> _LandmarkPublicationBatch | None:
+    batch = _LANDMARK_PUBLICATION_BATCH.get()
+    if batch is not None and batch.closed:
+        return None
+    if batch is not None and root.expanduser().resolve() != batch.root:
+        raise ValueError("landmark publication batch cannot cross vaults")
+    return batch
+
+
+@contextlib.contextmanager
+def landmark_publication_batch(vault_root: str | Path):
+    """Keep landmark draws eager; publish calculated truth once on success.
+
+    The outermost same-vault scope owns the flush. Failure leaves evidence
+    durable for retry, never a success receipt or a deferred context behind.
+    """
+    root = Path(vault_root).expanduser().resolve()
+    if root != _projection_vault_root().expanduser().resolve():
+        raise ValueError("landmark publication batch must match the bound vault")
+    parent = _publication_batch_for(root)
+    batch = parent or _LandmarkPublicationBatch(root)
+    token = _LANDMARK_PUBLICATION_BATCH.set(batch)
+    try:
+        yield
+        _publication_batch_for(_projection_vault_root())
+        if batch.failed:
+            raise RuntimeError("landmark publication batch did not complete")
+    except BaseException:
+        batch.failed = True
+        raise
+    finally:
+        _LANDMARK_PUBLICATION_BATCH.reset(token)
+        if parent is None:
+            batch.closed = True
+    if parent is None and batch.dirty:
+        publish_calculated_timeline(root)
+
+
 def redraw_landmarks() -> dict:
     """Redraw the landmark store from the claim substrate. THE ONE WRITER.
 
@@ -1044,9 +1097,13 @@ def redraw_landmarks() -> dict:
     CONTENT and never learns where it lands.
     """
     root = _projection_vault_root()
+    batch = _publication_batch_for(root)
     drawing = landmark_projection.redraw(root)
     write_json(LANDMARKS_STORE, drawing)
-    publish_calculated_timeline(root)
+    if batch is None:
+        publish_calculated_timeline(root)
+    else:
+        batch.dirty = True
     return drawing
 
 
@@ -1154,6 +1211,7 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
         row = None
 
     root = _projection_vault_root()
+    _publication_batch_for(root)
     # A vault that has not been converted yet is converted before its first
     # post-upgrade write, so a record can never land in a half-flipped vault.
     landmark_projection.flip_if_needed(root, load_landmarks())

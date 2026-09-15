@@ -1,7 +1,7 @@
 {
-  "version": 297,
+  "version": 298,
   "released": "2026-09-15",
-  "changelog": "v297: Add Landmark accounts for accepted nickname, address and link occurrences through additive name_evidence, without hiding unrelated prose (#335). A house now has its own place identity below its city, so later stories can name one of two same-city homes; repeat stays share the house but remain separate episodes (#336). Alias collisions remain explicit, retraction respects surviving alias owners, and canonical roster refresh preserves these decisions. Old unapplied proposals file with the corrected house identity; existing applied receipts are not migrated. Reading revision 2 permits a fresh same-text/same-generation proposal. Hosts must use reading_request_key for mutation/model identity, proposal_matches_current_reading for display compatibility, is_current_proposal for successful reuse, and proposal_reading_rank for readback ordering. No model, date-invention, geocoding or live-data migration change.",
+  "changelog": "v298: Filing a large Add Landmark review now publishes the calculated timeline once after all confirmed units and group events are filed. Every landmark still redraws in sequence, preserving merge, supersession, house aliases and telling identities. A vault-bound, short-lived receipt read scope reuses validated unchanged inputs while retaining fresh path listings, file-change checks and correction folds; it ends on success or failure. Failed filing leaves no success receipt and can retry from its durable evidence. Existing receipts and replay, proposal/reading identities, CLI arguments and host budgets are unchanged. Hosts consume the package pin; no new interaction fields, migration or model call are required.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -454,6 +454,7 @@
     "tests/test_interaction_evals.py",
     "tests/test_interaction_registry.py",
     "tests/test_landmark_date_contract.py",
+    "tests/test_landmark_apply_publication_batch.py",
     "tests/test_landmark_offer.py",
     "tests/test_landmark_offer_host.py",
     "tests/test_landmark_opportunities.py",

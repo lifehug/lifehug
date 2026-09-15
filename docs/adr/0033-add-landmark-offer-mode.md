@@ -704,3 +704,46 @@ colliding refresh output. Raw model output cannot supply identity metadata or
 the in-process preservation marker. This is reachable through the monthly
 roster refresh, not an out-of-loop repair job. Existing ordinary roster behavior
 is unchanged outside these explicit place decisions.
+
+## Amendment 6, 2026-09-15 (v298): One Publication Per Confirmed Apply
+
+A synthetic populated vault with 1,000 classifier moments showed the 76-unit /
+30-event apply taking 186.812 seconds on v297: 77 calculated publications and
+154 active-index rebuilds. The same input on a small fixture took 14.126 seconds.
+The input size alone was not an adequate performance test. The controlling
+contract is `docs/pr-specs/landmark-apply-publication-batch.md`; platform #847
+consumes the package change without increasing time budgets.
+
+The package batches only calculated publication, not landmark truth. Every
+`save_landmark` still folds and writes the landmark drawing before returning,
+so the next unit sees earlier merges, supersession and repeated stays. Groups
+still file their source slices and event claims in the same order. The outer
+successful dirty batch then calls the canonical calculated publisher once,
+before computing gain, retiring opportunities and writing the apply receipt.
+An empty batch does nothing; an unchanged final projection retains its generation.
+Standalone calls keep immediate publication. Proposal, claim, source, telling
+and receipt identities, CLI arguments and reading revision are unchanged.
+
+Repeated guarded receipt loads were the remaining dominant cost, so the same
+apply scope permits `temporal_store.receipt_read_batch` to reuse validated
+immutable inputs. Every load still lists current paths; every reuse checks
+containment, symlinks and file identity/change metadata (device, inode, mode,
+size, nanosecond mtime and ctime). A cache fill checks identity on both sides
+of the canonical read. New or changed receipts read normally; unreadable or
+missing files are never cached. Corrections and active-index folds remain
+fresh. Cached objects are copied before returning to callers. Immutable write
+conflict checks are untouched. This is not a persistent cache or a second fold.
+
+Both scopes are context-local, vault-bound and closed on exit; an escaped
+copied context cannot later reuse the cache or silently defer a publication.
+Nested same-vault publication scopes flush only at the outer boundary.
+Cross-vault bindings fail before writing another vault. A failed nested scope
+cannot be swallowed into a successful outer flush.
+
+Failure is not rollback: evidence and landmark drawings already filed remain
+durable, and the preceding calculated projection may remain until retry/repair.
+Neither a failed unit/group nor a failed final publication writes a successful
+apply receipt. Retry reuses immutable source/claim identities and publishes
+the complete result. Previously successful receipts still short-circuit before
+the scopes, including receipts subsequently undone; no historical receipt,
+projection-gain receipt, source or proposal is rewritten by this upgrade.
