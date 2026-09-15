@@ -95,6 +95,7 @@ vault (:func:`propose`, :func:`apply`, :func:`retract`).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sys
@@ -2185,6 +2186,19 @@ def _refuse_refiling_earlier_reading(root: Path, proposal: dict, chosen: list[di
                         f"use the original receipt {receipt.get('receipt_id')} for replay or undo")
 
 
+@contextlib.contextmanager
+def _apply_publication(vault_root: Path):
+    import timeline  # noqa: PLC0415
+
+    try:
+        with store.receipt_read_batch(vault_root), timeline.landmark_publication_batch(vault_root):
+            yield
+    except LandmarkOfferError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — publication failure is a failed apply
+        raise LandmarkOfferError("write_failure", f"landmark apply did not publish: {exc}") from exc
+
+
 def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
           now: object = None, reason: object = None) -> dict:
     """File the units a person confirmed. Idempotent by ``(proposal, unit)``.
@@ -2214,6 +2228,8 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
     # import, used only to READ) off this module entirely. Cut 7b retires
     # `go_dig_writer` itself; this is the seam that moves when it does.
     import go_dig_writer as _writer  # noqa: PLC0415 — internal writer seam
+
+    import timeline as _timeline  # noqa: PLC0415 — the one publication boundary
 
     root = _bound_vault(vault_root)
     proposal = read_proposal(root, proposal_id)
@@ -2251,88 +2267,76 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
     filed: list[dict] = []
     names: list[dict] = []
     telling_refs: dict[str, str] = {}
-    for unit in sorted(chosen, key=lambda row_: row_["unit_id"]):
-        payload = {
-            "landmark": dict(unit["record"]),
-            "import_operation_id": proposal_id,
-            "block_content_digest": unit["unit_id"],
-            "session_ref": f"landmark-offer:{proposal_id}",
-        }
-        place_name = _place_name_for(unit)
-        if place_name:
-            payload["landmark"]["place_name"] = place_name
-        try:
-            summary = _writer.record_unit(payload, now=now)
-        except RosterIdentityUncertain as exc:
-            raise LandmarkOfferError("content_ambiguity", str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 — every write failure is typed
-            raise LandmarkOfferError("write_failure",
-                                     f"{unit['unit_id']} did not file: {exc}") from exc
-        entry = summary.get("entry") or {}
-        try:
-            row = li.domain_row(unit["domain"])
-        except li.LandmarkInteractionError:
-            row = None
-        telling = collapsed_text(summary.get("telling_ref"))
-        if telling:
-            telling_refs[unit["unit_id"]] = telling
-        filed.append({
-            "unit_id": unit["unit_id"],
-            "domain": unit["domain"],
-            "kind": unit["kind"],
-            "subject": unit["subject"],
-            "entry_key": li.landmark_entry_key(entry or unit["record"], row),
-            "basis": (unit.get("dates") or {}).get("basis"),
-            "filing_digest": unit_filing_digest(proposal_id, unit),
-            "source_id": _source_id_for(root, proposal_id, unit),
-            "place_ref": summary.get("place_ref"),
-            "telling_ref": telling or None,
-        })
-        # The NAMES the record carried (§3 "why names matter"): the E-L2c
-        # fields rode on the record through the one writer, and `record_unit`
-        # filed the nickname as a roster alias on the resolved individual place.
-        # What is reported here is what the ENTRY ended up with, never what
-        # the reading asked for — a name the validator dropped was not filed.
-        filed_names = {key: entry[key] for key in lr.NAME_FIELDS
-                       if isinstance(entry, dict) and entry.get(key)}
-        alias = summary.get("alias") if isinstance(summary.get("alias"), dict) else None
-        if filed_names or alias:
-            names.append({
-                "unit_id": unit["unit_id"],
-                "place_ref": summary.get("place_ref"),
-                "names": filed_names,
-                "alias": ({"applied": bool(alias.get("applied")),
-                           "changed": bool(alias.get("changed")),
-                           "alias": collapsed_text(entry.get("nickname")),
-                           "reason": alias.get("reason"),
-                           "candidates": alias.get("candidates") or [],
-                           "owner": alias.get("owner")}
-                          if alias else None),
-            })
-
-    # R7: what each confirmed stay HOLDS — the events read inside it, the
-    # moments it dates, the stories told about it — filed against that stay's
-    # own words rather than against the whole submission. A group whose head
-    # unit the person did not confirm files nothing: an event rides its stay,
-    # and an unconfirmed stay carries nothing.
-    extractor, version = _filing_extractor(proposal)
-    confirmed = {unit["unit_id"] for unit in chosen}
     slices: list[dict] = []
-    for group in (proposal.get("groups") or ()):
-        if not isinstance(group, dict) or group.get("unit_id") not in confirmed:
-            continue
-        row = _file_group(root, proposal, group,
-                          telling_ref=telling_refs.get(group["unit_id"]),
-                          extractor=extractor, version=version, now=now)
-        if row is not None:
-            slices.append(row)
-    if slices:
-        # The one writer: the claims just filed become the current substrate
-        # and the calculated projection is republished from it, exactly as
-        # `save_landmark` does for a landmark record.
-        import timeline as _timeline  # noqa: PLC0415 — the one republisher
+    with _apply_publication(root):
+        for unit in sorted(chosen, key=lambda row_: row_["unit_id"]):
+            payload = {
+                "landmark": dict(unit["record"]),
+                "import_operation_id": proposal_id,
+                "block_content_digest": unit["unit_id"],
+                "session_ref": f"landmark-offer:{proposal_id}",
+            }
+            place_name = _place_name_for(unit)
+            if place_name:
+                payload["landmark"]["place_name"] = place_name
+            try:
+                summary = _writer.record_unit(payload, now=now)
+            except RosterIdentityUncertain as exc:
+                raise LandmarkOfferError("content_ambiguity", str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001 — every write failure is typed
+                raise LandmarkOfferError("write_failure",
+                                         f"{unit['unit_id']} did not file: {exc}") from exc
+            entry = summary.get("entry") or {}
+            try:
+                row = li.domain_row(unit["domain"])
+            except li.LandmarkInteractionError:
+                row = None
+            telling = collapsed_text(summary.get("telling_ref"))
+            if telling:
+                telling_refs[unit["unit_id"]] = telling
+            filed.append({
+                "unit_id": unit["unit_id"],
+                "domain": unit["domain"],
+                "kind": unit["kind"],
+                "subject": unit["subject"],
+                "entry_key": li.landmark_entry_key(entry or unit["record"], row),
+                "basis": (unit.get("dates") or {}).get("basis"),
+                "filing_digest": unit_filing_digest(proposal_id, unit),
+                "source_id": _source_id_for(root, proposal_id, unit),
+                "place_ref": summary.get("place_ref"),
+                "telling_ref": telling or None,
+            })
+            # Report retained names, never values the validator dropped.
+            filed_names = {key: entry[key] for key in lr.NAME_FIELDS
+                           if isinstance(entry, dict) and entry.get(key)}
+            alias = summary.get("alias") if isinstance(summary.get("alias"), dict) else None
+            if filed_names or alias:
+                names.append({
+                    "unit_id": unit["unit_id"],
+                    "place_ref": summary.get("place_ref"),
+                    "names": filed_names,
+                    "alias": ({"applied": bool(alias.get("applied")),
+                               "changed": bool(alias.get("changed")),
+                               "alias": collapsed_text(entry.get("nickname")),
+                               "reason": alias.get("reason"),
+                               "candidates": alias.get("candidates") or [],
+                               "owner": alias.get("owner")}
+                              if alias else None),
+                })
 
-        _timeline.redraw_landmarks()
+        # R7: events ride their confirmed stay and cite that group's own words.
+        extractor, version = _filing_extractor(proposal)
+        confirmed = {unit["unit_id"] for unit in chosen}
+        for group in (proposal.get("groups") or ()):
+            if not isinstance(group, dict) or group.get("unit_id") not in confirmed:
+                continue
+            row = _file_group(root, proposal, group,
+                              telling_ref=telling_refs.get(group["unit_id"]),
+                              extractor=extractor, version=version, now=now)
+            if row is not None:
+                slices.append(row)
+        if slices:
+            _timeline.redraw_landmarks()
 
     after = pub.read_projection(root)
     gain = trcpt.diff_projections(before, after) if after is not None else {}

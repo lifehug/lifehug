@@ -20,8 +20,8 @@ seconds, and 154 full receipt loads 128.634 seconds (nested timings).
 160,218 receipt reads consumed 104.156 seconds. A representative real-call
 profile confirms guarded receipt reopening/validation as the remaining hot
 path. Publication-only savings leave inadequate margin for the existing
-90-second hosted package budget. The owner explicitly approved bounded
-immutable receipt-input reuse on this evidence.
+90-second hosted package budget. This measured amendment authorizes bounded
+immutable receipt-input reuse within the approved end-to-end fix.
 
 Within the apply scope only, `temporal_store` may reuse already validated
 receipt objects when the same contained, nonsymlink file retains its complete
