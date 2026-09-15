@@ -1,7 +1,7 @@
 {
-  "version": 296,
+  "version": 297,
   "released": "2026-09-15",
-  "changelog": "v296: confirmed place and organization landmarks now file names containing commas, '&', or 'and' without misreading them as lists of people (issue #328). The deterministic converter carries optional landmark_identity_kind through claims and receipts; ordinary, person, relationship, episode, and unknown-domain mentions retain strict enumeration checks. Labels, claim IDs, immutable receipts, and idempotent reapply behavior are preserved. Type alone does not prove that a reading kept multiple places or companies in separate units.",
+  "changelog": "v297: Add Landmark accounts for accepted nickname, address and link occurrences through additive name_evidence, without hiding unrelated prose (#335). A house now has its own place identity below its city, so later stories can name one of two same-city homes; repeat stays share the house but remain separate episodes (#336). Alias collisions remain explicit, retraction respects surviving alias owners, and canonical roster refresh preserves these decisions. Old unapplied proposals file with the corrected house identity; existing applied receipts are not migrated. Reading revision 2 permits a fresh same-text/same-generation proposal. Hosts must use reading_request_key for mutation/model identity, proposal_matches_current_reading for display compatibility, is_current_proposal for successful reuse, and proposal_reading_rank for readback ordering. No model, date-invention, geocoding or live-data migration change.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

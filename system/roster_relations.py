@@ -41,6 +41,8 @@ already are, and names the gap rather than silently building around it.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -60,10 +62,15 @@ ORGANIZATION_KINDS = ("school", "employer", "other")
 #: honestly could not tell which of these you meant", regardless of what
 #: kind of entity is ambiguous.
 IDENTITY_UNCERTAIN_KIND = "identity_uncertain"
+PLACE_IDENTITY_FIELDS = ("place_kind", "residence_identity", "located_in", "alias_ownership")
 
 
 class RosterRelationError(ValueError):
     """A roster relation could not be resolved, minted or filed."""
+
+
+class RosterIdentityUncertain(RosterRelationError):
+    """Existing house identity is ambiguous; minting is not a resolution."""
 
 
 def roster_entities(snapshot: object) -> list[dict]:
@@ -164,7 +171,87 @@ def resolve_or_create(entity_type: str, name: object, snapshot: object, *,
     return entity_ref(entity_type, new_entity), updated, True
 
 
-def alias_decision(entity_type: str, ref: object, alias: object, snapshot: object) -> dict:
+def resolve_residence_place(record: dict, snapshot: object) -> tuple[str | None, dict]:
+    """Resolve a house independently of its stays; a city is only its parent.
+
+    Exact supplied address/city are identity evidence, never dates or a maps
+    lookup. An established individual ref wins, but a containing city ref does
+    not. Legacy city aliases are left untouched for the alias authority to
+    report as ambiguity. No fuzzy address equivalence or automatic migration.
+    """
+    snap = snapshot if isinstance(snapshot, dict) else {"type": "place", "entities": []}
+    city = str(record.get("city") or "").strip()
+    address = str(record.get("address") or "").strip()
+    nickname = str(record.get("nickname") or "").strip()
+    explicit = find_by_ref("place", snap, record.get("place_ref"))
+    city_matches = {entity_ref("place", e) for e in find_by_alias(snap, city)}
+    is_city = (explicit is not None and explicit.get("place_kind") != "residence" and (
+        entity_ref("place", explicit) in city_matches
+        or explicit.get("place_kind") in {"city", "region", "country"}))
+    individual_names = {ir.normalized_mention_key(v) for v in (address, nickname) if v}
+    explicit_names = ({ir.normalized_mention_key(explicit.get("name"))}
+                      | {ir.normalized_mention_key(a) for a in explicit.get("aliases") or ()}
+                      if explicit else set())
+    if explicit is not None and not is_city and (
+            explicit.get("place_kind") == "residence"
+            or individual_names & explicit_names):
+        return entity_ref("place", explicit), snap
+    if not address and not nickname:
+        if city:
+            ref, snap, _ = resolve_or_create("place", city, snap)
+            return ref, snap
+        return (entity_ref("place", explicit) if explicit else None), snap
+
+    def norm(value: str) -> str:
+        return " ".join(value.casefold().split())
+    identity = {"city": norm(city), "address": norm(address)} if address else {
+        "city": norm(city), "nickname": norm(nickname)}
+    matches = [e for e in roster_entities(snap) if e.get("residence_identity") == identity]
+    if len(matches) == 1:
+        return entity_ref("place", matches[0]), snap
+    if len(matches) > 1:
+        raise RosterIdentityUncertain("multiple places have the supplied residence identity")
+    if not address:
+        named = [e for e in find_by_alias(snap, nickname)
+                 if e.get("place_kind") == "residence"
+                 and (not city or (e.get("residence_identity") or {}).get("city") == norm(city))]
+        if len(named) == 1:
+            return entity_ref("place", named[0]), snap
+        if len(named) > 1:
+            raise RosterIdentityUncertain("the nickname identifies multiple houses; supply an individual place ref or address")
+
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
+    slug = f"residence-{digest}"
+    if any(_slug_of(e) == slug for e in roster_entities(snap)):
+        raise RosterIdentityUncertain("residence identity is ambiguous")
+    # A nickname-only place still needs an independent name so retracting its
+    # alias does not leave that same alias active as the entity's primary name.
+    label = ", ".join(v for v in (address, city) if v) if address else f"Residence {digest}"
+    house = {"name": label, "slug": slug, "aliases": [], "place_kind": "residence",
+             "residence_identity": identity}
+    snap = {**snap, "entities": [*roster_entities(snap), house]}
+    ref = entity_ref("place", house)
+    if city:
+        parent, snap, _ = resolve_or_create("place", city, snap)
+        snap = located_in(ref, parent, snap)
+    return ref, snap
+
+
+def settled_place_refs(snapshot: object) -> set[str]:
+    """Explicit place decisions and their containing places survive refresh.
+
+    The roster is already the alias/hierarchy authority; a model's refreshed
+    mention list may not delete its decisions or coalesce their identities.
+    """
+    refs = {entity_ref("place", e) for e in roster_entities(snapshot)
+            if any(e.get(field) is not None for field in PLACE_IDENTITY_FIELDS)}
+    for ref in tuple(refs):
+        refs.update(located_in_chain(ref, snapshot))
+    return refs
+
+
+def alias_decision(entity_type: str, ref: object, alias: object, snapshot: object, *,
+                   owner: str | None = None) -> dict:
     """Add ``alias`` to the entity at ``ref``, or refuse with a collision.
 
     Design §4.3, reusing the eras program's shared-alias rule verbatim: two
@@ -173,6 +260,12 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
     shape `event_binding.ambiguous_work_item` already mints for two eras
     sharing a label. Adding an alias that is already present is an idempotent
     success with ``changed: False``.
+
+    With a telling-ref ``owner``, record the owned claim even when it collides:
+    the existing multi-match resolver must see both candidates. Such a result
+    remains ``applied: False`` and names the ambiguity; ``changed`` describes
+    recorded state, not a successful unique identity decision. Ownership is
+    retained separately from whether this call first inserted the alias.
 
     Returns one of:
       ``{"applied": True, "snapshot": ..., "changed": bool}``
@@ -194,6 +287,7 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
         entity_ref_value = entity_ref(entity_type, entity)
         if entity_ref_value != target_ref:
             colliders[entity_ref_value] = entity
+    refusal = {}
     if colliders:
         candidates = [{"ref": target_ref, "name": target.get("name")}]
         candidates.extend(
@@ -201,26 +295,41 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
             for r, e in sorted(colliders.items())
         )
         names = " or ".join(str(c["name"]) for c in candidates)
-        return {
+        refusal = {
             "applied": False,
             "reason": IDENTITY_UNCERTAIN_KIND,
             "candidates": candidates,
             "headline": f"“{alias_text}” could be {names}",
         }
+        if not owner:
+            return refusal
     existing_aliases = [str(a) for a in target.get("aliases") or ()]
-    if any(ir.normalized_mention_key(a) == ir.normalized_mention_key(alias_text)
-          for a in existing_aliases):
-        return {"applied": True, "snapshot": snap, "changed": False}
+    key = ir.normalized_mention_key(alias_text)
+    exists = any(ir.normalized_mention_key(a) == key for a in existing_aliases)
+    ownership = dict(target.get("alias_ownership") or {})
+    old_ownership = dict(ownership)
+    if owner:
+        standing = ownership.get(key) or {"owners": [], "created": not exists}
+        ownership[key] = {**standing, "owners": sorted(set(standing["owners"]) | {owner})}
+    if exists and ownership == old_ownership:
+        return {"applied": True, "snapshot": snap, "changed": False, **refusal,
+                **({"owner": owner} if owner else {})}
     updated_entities = []
     for entity in entities:
         if entity is target:
-            entity = {**entity, "aliases": [*existing_aliases, alias_text]}
+            entity = {**entity, "aliases": existing_aliases if exists else [*existing_aliases, alias_text]}
+            if owner:
+                entity["alias_ownership"] = ownership
         updated_entities.append(entity)
-    return {"applied": True, "snapshot": {**snap, "entities": updated_entities}, "changed": True}
+    # Owned conflicting claims stay discoverable by the existing multi-match
+    # resolver. This records ambiguity, NOT a successful unique alias mapping.
+    return {"applied": True, "snapshot": {**snap, "entities": updated_entities},
+            "changed": not exists, **refusal,
+            **({"owner": owner, "ownership_changed": ownership != old_ownership} if owner else {})}
 
 
 def retract_alias(entity_type: str, ref: object, alias: object,
-                  snapshot: object) -> dict:
+                  snapshot: object, *, owner: str | None = None) -> dict:
     """Take ``alias`` back off the entity at ``ref``. The undo of
     :func:`alias_decision`, and its exact mirror.
 
@@ -243,14 +352,29 @@ def retract_alias(entity_type: str, ref: object, alias: object,
     if target is None:
         return {"applied": False, "reason": "entity_not_found"}
     wanted = ir.normalized_mention_key(alias_text)
+    ownership = dict(target.get("alias_ownership") or {})
+    if owner:
+        standing = ownership.get(wanted) or {}
+        if owner not in standing.get("owners", ()):
+            return {"applied": True, "snapshot": snap, "changed": False}
+        remaining = [value for value in standing["owners"] if value != owner]
+        if remaining:
+            ownership[wanted] = {**standing, "owners": remaining}
+        else:
+            del ownership[wanted]
+        remove = not remaining and standing.get("created")
+    else:
+        remove = not (ownership.get(wanted) or {}).get("owners")
     kept = [str(value) for value in target.get("aliases") or ()
-            if ir.normalized_mention_key(str(value)) != wanted]
-    if len(kept) == len(list(target.get("aliases") or ())):
+            if not remove or ir.normalized_mention_key(str(value)) != wanted]
+    changed = len(kept) != len(list(target.get("aliases") or ()))
+    if not changed and not owner:
         return {"applied": True, "snapshot": snap, "changed": False}
-    updated = [{**entity, "aliases": kept} if entity is target else entity
+    updated = [{**entity, "aliases": kept,
+                **({"alias_ownership": ownership} if owner else {})} if entity is target else entity
                for entity in roster_entities(snap)]
     return {"applied": True, "snapshot": {**snap, "entities": updated},
-            "changed": True}
+            "changed": changed, **({"ownership_changed": True} if owner else {})}
 
 
 def located_in(child_ref: object, parent_ref: object, snapshot: object) -> dict:

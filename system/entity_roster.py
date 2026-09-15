@@ -36,6 +36,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology
+import roster_relations
 from ai_provider import failure_metadata
 from lifehug_core import (
     ANSWERS_DIR,
@@ -345,7 +346,8 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
 #: entity-candidate refresh, whose whole input is mention statistics. Omitting
 #: them would mean a roster refresh silently drops the most common datable
 #: facts in a life story.
-_SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died")
+_SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_relations.PLACE_IDENTITY_FIELDS)
+_SETTLED_PLACE = object()
 
 #: The two date-shaped settled fields, as a subset of the tuple above. Named
 #: once so the store's precedence rule (`entity_verdict._preferred_date`) and
@@ -396,13 +398,28 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     the roster is the settled-identity store for entities; a verdict on it
     is never contingent on this refresh's raw output.
     """
+    # Model output cannot mint identity metadata or the in-process provenance
+    # marker. Only this function's previous authoritative snapshot can do so.
+    raw_entities = [{k: v for k, v in e.items()
+                     if k not in (*roster_relations.PLACE_IDENTITY_FIELDS, "_settled_place")}
+                    for e in raw_entities]
     previous = (previous_roster or {}).get("entities") or []
     if not previous:
         return list(raw_entities), 0
+    place_refs = roster_relations.settled_place_refs(previous_roster)
+
+    def protected_place(entry: dict) -> bool:
+        return roster_relations.entity_ref("place", entry) in place_refs
+
+    def preserved(entry: dict) -> dict:
+        # This transient marker preserves even a containing city's authored
+        # slug through normalize; it is never written into roster state.
+        return {**entry, **({"_settled_place": _SETTLED_PLACE} if protected_place(entry) else {})}
+
     if not raw_entities:
         # Nothing to fold onto, but a settled owner_verdict must still
         # survive an empty refresh (e.g. an empty/failed candidate pass).
-        survivors = [dict(p) for p in previous if _has_settled_identity(p)]
+        survivors = [preserved(p) for p in previous if _has_settled_identity(p) or protected_place(p)]
         return survivors, len(survivors)
 
     key_to_prev: dict[str, dict] = {}
@@ -410,12 +427,22 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         for key in _entity_keys(prev):
             key_to_prev.setdefault(key, prev)
 
-    def _match(entry: dict) -> dict | None:
+    def _match(entry: dict) -> tuple[dict | None, bool]:
+        candidates = [p for p in previous if _entity_keys(entry) & _entity_keys(p)]
+        if any(protected_place(p) for p in candidates):
+            exact = [p for p in candidates
+                     if _entity_keys({k: entry[k] for k in ("name", "slug") if k in entry})
+                     & _entity_keys({k: p[k] for k in ("name", "slug") if k in p})]
+            if len(exact) == 1:
+                return exact[0], False
+            if len(candidates) == 1:
+                return candidates[0], False
+            return None, True
         for key in _entity_keys(entry):
             prev = key_to_prev.get(key)
             if prev:
-                return prev
-        return None
+                return prev, False
+        return None, False
 
     out: list[dict] = []
     slots: dict[str, dict] = {}  # previous slug -> folded entry
@@ -425,7 +452,12 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         if not name:
             out.append(dict(e))
             continue
-        prev = _match(e)
+        prev, ambiguous = _match(e)
+        if ambiguous:
+            # A shared alias is not permission to select the first house (or
+            # merge a house into its city). All prior identities survive below.
+            forced += 1
+            continue
         if prev is None:
             out.append(dict(e))
             continue
@@ -438,6 +470,13 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         canonical = name if promoted else (prev_name or name)
         prev_slug = prev.get("slug") or slugify(prev_name or canonical)
         slot = slots.get(prev_slug)
+        if protected_place(prev):
+            if slot is None:
+                slot = preserved(prev)
+                slots[prev_slug] = slot
+                out.append(slot)
+            forced += 1
+            continue
         if slot is None:
             slot = dict(e)
             slot["name"] = canonical
@@ -485,12 +524,12 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     # A previous entry carrying an owner_verdict must survive even when no
     # raw entry in THIS refresh matched it at all.
     for prev in previous:
-        if not _has_settled_identity(prev):
+        if not (_has_settled_identity(prev) or protected_place(prev)):
             continue
         prev_slug = prev.get("slug") or slugify(prev.get("name") or "")
         if prev_slug in slots:
             continue  # already folded above
-        out.append(dict(prev))
+        out.append(preserved(prev))
         forced += 1
     return out, forced
 
@@ -536,7 +575,7 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         "Rules:",
         f"- Merge aliases/variants of the same {entity_type} into ONE entry (e.g. "
         "'20s'/'My 20s'/'Twenties' → one; 'Mit' → 'MIT'). Put variants in `aliases`.",
-        f"- Pick the most natural `name` (for objects, a title like 'The Cleats').",
+        "- Pick the most natural `name` (for objects, a title like 'The Cleats').",
         "- If it clearly refers to an existing Focus above, set `maps_to_focus` to that slug.",
         "- Set `qualifies` false for anything that doesn't meet the bar above (fragments, "
         "pronouns, wrong type, mundane objects). When unsure, set qualifies false.",
@@ -675,6 +714,11 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
             "score": round(score, 2), "unique_answers": answers,
             "page_eligible": page_eligible,
         }
+        if entity_type == "place" and e.get("_settled_place") is _SETTLED_PLACE:
+            entry["slug"] = e["slug"]
+            for field in roster_relations.PLACE_IDENTITY_FIELDS:
+                if field in e:
+                    entry[field] = e[field]
         # entity-identity-context (v190, Design §E): identity facts the owner
         # supplied through `entity-verdict` survive normalization. Validated
         # here only for SHAPE — the closed relationship vocabulary belongs to

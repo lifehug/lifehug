@@ -134,11 +134,11 @@ def resolve_organization_ref(name: str, *, organization_kind: str | None = None)
     return ref
 
 
-def apply_place_alias(ref: str, alias: str) -> dict:
+def apply_place_alias(ref: str, alias: str, *, owner: str | None = None) -> dict:
     """File a nickname as a roster alias on the place at ``ref`` (§4.3)."""
     snapshot = _roster_snapshot("place")
-    result = rr.alias_decision("place", ref, alias, snapshot)
-    if result.get("applied") and result.get("changed"):
+    result = rr.alias_decision("place", ref, alias, snapshot, owner=owner)
+    if result.get("changed") or result.get("ownership_changed"):
         _persist_roster("place", result["snapshot"])
     return result
 
@@ -250,7 +250,7 @@ def record_unit(payload: object, *, now: object = None) -> dict:
 
     value = dict(landmark)
     place_name = value.pop("place_name", None)
-    if isinstance(place_name, str) and place_name.strip():
+    if domain != "residences" and isinstance(place_name, str) and place_name.strip():
         value["place_ref"] = resolve_place_ref(place_name)
 
     if not collapsed_text(value.get("label")):
@@ -275,6 +275,13 @@ def record_unit(payload: object, *, now: object = None) -> dict:
     validated = li.validate_landmark(value)
     if validated is None:
         raise GoDigError("nothing to record")
+    if domain == "residences":
+        snapshot = _roster_snapshot("place")
+        place_ref, updated = rr.resolve_residence_place(validated, snapshot)
+        if place_ref:
+            validated["place_ref"] = place_ref
+        if updated != snapshot:
+            _persist_roster("place", updated)
 
     import_operation_id = collapsed_text(payload.get("import_operation_id"))
     block_digest = (collapsed_text(payload.get("block_content_digest"))
@@ -295,8 +302,6 @@ def record_unit(payload: object, *, now: object = None) -> dict:
     alias_result = None
     nickname = validated.get("nickname")
     place_ref = validated.get("place_ref")
-    if isinstance(nickname, str) and nickname.strip() and place_ref:
-        alias_result = apply_place_alias(place_ref, nickname)
 
     root = timeline._projection_vault_root()  # noqa: SLF001 — one definition; see module docstring.
     row = None
@@ -305,6 +310,8 @@ def record_unit(payload: object, *, now: object = None) -> dict:
     except li.LandmarkInteractionError:
         row = None
     telling_ref = telling_ref_for_entry(root, domain, validated, row=row)
+    if isinstance(nickname, str) and nickname.strip() and place_ref:
+        alias_result = apply_place_alias(place_ref, nickname, owner=telling_ref)
 
     note_source = None
     note_text = payload.get("note")
@@ -703,7 +710,11 @@ def apply_import(text: str, *, import_operation_id: str, now: object = None) -> 
             place_ref = result.get("place_ref")
             if place_ref and block["region_name"]:
                 region_ref = resolve_place_ref(block["region_name"])
-                apply_located_in(place_ref, region_ref)
+                place = rr.find_by_ref("place", _roster_snapshot("place"), place_ref) or {}
+                # A house already names its city; the import's region belongs
+                # above that city, not in place of the house -> city edge.
+                parent = place.get("located_in") if place.get("place_kind") == "residence" else None
+                apply_located_in(parent or place_ref, region_ref)
         elif block["events_text"]:
             # No structural fields at all — the note still files, just with
             # no known container to stamp (§10.3: never dropped).

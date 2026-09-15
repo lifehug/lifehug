@@ -51,6 +51,7 @@ Pure. No vault, no clock, no model call.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -317,6 +318,7 @@ class ReadUnit:
     record: dict
     quote: dict
     names: dict = field(default_factory=dict)
+    name_evidence: dict = field(default_factory=dict)
     dates: dict | None = None
     within: str | None = None
 
@@ -384,7 +386,7 @@ READING_KEYS = ("units", "events", "stories", "unplaced")
 
 #: The keys ONE unit may carry.
 UNIT_ITEM_KEYS = ("ref", "domain", "subject", "names", "record", "dates",
-                  "within", "quote")
+                  "within", "quote", "name_evidence")
 
 #: The keys ONE event may carry.
 EVENT_ITEM_KEYS = ("ref", "text", "kind", "subject_mention", "date", "within",
@@ -466,6 +468,60 @@ def _date_block(value: object, findings: list[str]) -> dict | None:
     if not any(block.get(bound) for bound in ("start", "end")):
         return None
     return block
+
+
+def _name_evidence(value: object, *, names: dict, record: dict, text: str,
+                   findings: list[str], ref: str) -> dict:
+    """Validate the reading's field-owned occurrences, never discover names.
+
+    Evidence quotes ONLY the accepted value, not an assertion or block. A
+    repeated value needs an explicit occurrence; no cursor guesses its owner.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        findings.append(f"dropped name evidence on {ref}: not an object")
+        return {}
+    result = {}
+    for key, evidence in value.items():
+        quote = evidence.get("quote") if isinstance(evidence, dict) else None
+        accepted = record.get(key)
+        valid = (key in NAME_FIELDS and key in names and isinstance(accepted, str)
+                 and isinstance(quote, str) and bool(quote.strip())
+                 and not any(c in quote for c in "\r\n")
+                 and quote == accepted and set(evidence) <= {"quote", "occurrence"})
+        matches = list(re.finditer(re.escape(quote), text)) if valid else []
+        occurrence = evidence.get("occurrence") if isinstance(evidence, dict) else None
+        if occurrence is None and len(matches) == 1:
+            occurrence = 1
+        if (not valid or type(occurrence) is not int
+                or not 1 <= occurrence <= len(matches)):
+            findings.append(f"dropped name evidence on {ref}.{key}: unproven occurrence")
+            continue
+        match = matches[occurrence - 1]
+        result[key] = {"text": quote, "offset": match.start(),
+                       "length": len(quote), "occurrence": occurrence}
+        structural_start = match.start()
+        if key == "link":
+            # The Markdown label may repeat the exact URL, but may not add
+            # meaning. Both occurrences are one owned presentation; arbitrary
+            # labels, titles, surrounding text and another link stay uncovered.
+            presentation = f"[{quote}]({quote})"
+            starts = (match.start() - 1, match.start() - len(quote) - 3)
+            for start in starts:
+                if start >= 0 and text[start:start + len(presentation)] == presentation:
+                    result[key]["presentation"] = {"text": presentation, "offset": start,
+                                                    "length": len(presentation)}
+                    structural_start = start
+                    break
+        # Only the literal field label at a line start is structural. Never
+        # infer prose, synonyms, trailing punctuation or a paragraph boundary.
+        prefix = re.search(r"(?:^|\n)([ \t]*(?:[-*+][ \t]+)?" + re.escape(key) + r":[ \t]*)$",
+                           text[:structural_start], flags=re.IGNORECASE)
+        if prefix:
+            result[key]["label"] = {"text": prefix[1], "offset": prefix.start(1),
+                                    "length": len(prefix[1])}
+    return result
 
 
 def _record_for(domain: str, *, record: object, names: dict, dates: dict | None,
@@ -656,8 +712,22 @@ def parse_reading(raw: object, *, text: str = "",
         drafts.append({
             "ref": ref, "domain": domain, "subject": subject,
             "record": record, "quote": quote, "names": dict(names),
+            "name_evidence": _name_evidence(
+                row.get("name_evidence"), names=names, record=record, text=body,
+                findings=findings, ref=ref),
             "dates": dates, "within": collapsed_text(row.get("within")) or None,
         })
+    owned = [(draft["ref"], key, evidence.get("presentation", evidence))
+             for draft in drafts for key, evidence in draft["name_evidence"].items()]
+    contested = {(ref, key) for ref, key, span in owned
+                 if any(other != ref and span["offset"] < other_span["offset"] + other_span["length"]
+                        and other_span["offset"] < span["offset"] + span["length"]
+                        for other, _, other_span in owned)}
+    for draft in drafts:
+        for key, evidence in list(draft["name_evidence"].items()):
+            if (draft["ref"], key) in contested:
+                del draft["name_evidence"][key]
+                findings.append(f"dropped name evidence on {draft['ref']}.{key}: multiple owners")
     _resolve_refs(drafts, findings)
     units = tuple(ReadUnit(**row) for row in drafts)
 

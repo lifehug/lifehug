@@ -134,7 +134,7 @@ Identity is content-addressed and it is deliberately not an ordinal:
 | Identity | What it is | Why |
 |---|---|---|
 | `unit_id` | digest of domain, kind, subject, dates, quote | two readings of one text propose the same units; a unit whose date or evidence changed is a different unit |
-| `proposal_id` | digest of the submitted text and the vault generation it was read against | the same paragraph offered after the timeline moved is a NEW reading, because the known entries the recorder saw are different |
+| `proposal_id` | digest of submitted text, vault generation and, since v297, reading revision | a changed timeline or reading contract permits a new reading; old IDs and applied receipts remain valid |
 | filing digest | `(proposal_id, unit_id)` through `save_landmark`'s existing `digest_override` seam | a retry files nothing twice, and the identity does not move under a retry as earlier units land |
 | `receipt_id` | digest of the proposal and exactly which units | applying the same units twice reads the standing receipt back rather than claiming a second gain |
 
@@ -614,3 +614,93 @@ against an older immutable receipt is byte-compatible. Receipt conflict checks
 remain strict. No new roster entry is minted merely to evade the guard.
 The package owns this behavior; hosts consume it by pin, not by punctuation
 sanitization or admission shortcuts.
+
+## Amendment 5, 2026-09-15 (v297): Attribute Evidence and House Identity
+
+Issues #335/#336 are different failures after a correct model reading: the
+source partition counted only the short unit quote, and the writer aliased a
+house nickname onto the containing city. One model pass remains authoritative.
+
+### Coverage and Reading Compatibility
+
+Optional `name_evidence` on each reading unit maps name fields to exact value
+quotes and explicit one-based occurrences in the whole source. A repeated
+value without an occurrence is not evidence. The quote must equal the value
+the semantic recorder accepted, so a dropped link or nickname parenthetical
+cannot conceal its source. Validated offsets persist on the proposal. Two
+units claiming overlapping evidence both lose that evidence, not their facts.
+Coverage subtracts exact intervals; touching a sentence never covers all of it.
+
+Formatting is separate and bounded: literal line-start field labels (optionally
+bulleted), empty Markdown bullets, and `[URL](URL)` whose label exactly equals
+the accepted URL. A meaningful different link label, arbitrary trailing prose,
+or a whole attribute assertion is not covered as a value. No keyword blacklist,
+second interpretation grammar, Maps resolution or model change is introduced.
+
+`PROPOSAL_READING_REVISION = 2` participates in `derive_proposal_id` and is
+persisted as `reading_revision`. Missing metadata means legacy revision 1.
+This allows a new proposal at unchanged text and generation 32 without replacing
+the first successful legacy file. Old IDs remain explicitly readable/applyable.
+Existing applied receipts short-circuit before writes, including after undo;
+upgrading the package is not permission to migrate an already completed act.
+Explicitly applying an unchanged unit from a newer reading of that same text
+returns `content_ambiguity` before any writes, naming the earlier receipt.
+This intentionally refuses rather than minting duplicate import sources or
+migrating the old city association. Matching uses the same unit ID or exact
+validated record, not speculative equivalence. New, previously unapplied units
+remain fileable. Corrections with changed facts are a distinct confirmed act;
+this does not attempt general cross-document duplicate resolution.
+After a matching full undo, a fresh current reading may be explicitly applied
+as a new act. The guard requires the matching retraction receipt plus durable
+source claims fully marked retracted under its correction coverage; a marker
+alone, missing evidence or partial scopes remain conservatively refused.
+The original applied receipt and undo remain immutable and cannot be revived
+by replaying the old proposal. Malformed non-string proposal states are never
+eligible for reuse and cannot abort a batch of otherwise valid proposals.
+
+Hosts must use `reading_request_key(text)` as their opaque revision-aware
+mutation AND model-key input, composing their existing attempt policy with it.
+`proposal_matches_current_reading(proposal, text, generation=None)` validates
+exact source, current revision and package-derived ID independently of state;
+it permits displaying a current failed reading but rejects unknown/non-string
+states using the package's `PROPOSAL_STATES`. `is_current_proposal` adds
+successful-state eligibility for bypassing the model and adopting a commit.
+`proposal_reading_rank` orders compatible exact-text matches by generation then
+revision; invalid explicit metadata ranks below valid. A new proposal ID alone
+cannot prevent an old host immutable mutation or pre-model lookup from reusing
+the old reading. Platform #846 owns that integration, not a second hash policy.
+
+### The House and Its Stays
+
+The existing roster/recorder path now creates an individual house from exact
+supplied address and city, independent of nickname and dates. It records
+`place_kind: residence`, `residence_identity`, and `located_in` its city.
+An established individual ref wins; a ref naming that CITY does not suppress
+address evidence. A nickname-only house can be established without a date;
+its name is not silently treated as an alias of the city. No address-equivalence
+guess or automatic rewrite of historical city aliases occurs.
+If a nickname-only stay identifies several existing houses, or stored exact
+residence identity matches multiple refs, resolution refuses before minting.
+It never creates a third house to bypass ambiguity. Add Landmark reports this
+as `content_ambiguity`; an explicit individual ref can disambiguate.
+
+Two homes in one city have different refs. Repeated stays at one house share
+the place but remain separate episodes. The existing identity resolver and
+episode binder can place a later undated story at one uniquely named house;
+multiple stays there remain `place_ambiguous` without a stated date. Refusing
+that stay choice does not lose the known house identity.
+
+Owned alias decisions carry telling-ref ownership in the same roster, not a
+parallel identity store. A collision is persisted as discoverable candidates
+and an explicit `applied: false`, `identity_uncertain` receipt, never a first
+match. Existing city aliases stay untouched. Undo removes one owner's claim,
+retains aliases needed by other stays, and removes a newly created alias after
+its last owner; preexisting curated aliases remain. Old unapplied proposals
+derive this behavior from their validated record without new name evidence.
+
+The canonical `entity_roster.apply_previous_decisions`/`normalize` path retains
+settled house refs, parent hierarchy and owned aliases through empty or
+colliding refresh output. Raw model output cannot supply identity metadata or
+the in-process preservation marker. This is reachable through the monthly
+roster refresh, not an out-of-loop repair job. Existing ordinary roster behavior
+is unchanged outside these explicit place decisions.

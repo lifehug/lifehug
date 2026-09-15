@@ -10,6 +10,11 @@ The wiki is the core memory layer — an AI-maintained knowledge graph connectin
 
 ## Nomenclature
 
+A house is an individual place below its city; a residence is one stay there.
+Add Landmark preserves house nicknames for future stories without inventing a
+date or choosing between ambiguous stays. These identities and aliases survive
+roster refresh; existing city-alias conflicts need an explicit decision.
+
 The wiki is a **graph of Dave's life**. The standard terms:
 
 - **Node** — a graph vertex: a durable subject in Dave's life that can be compiled into a wiki page. People, places, periods, objects, themes, projects, and Dave himself are nodes.

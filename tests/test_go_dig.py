@@ -574,11 +574,15 @@ class ApplyImportTests(GoDigVaultCase):
         gd.apply_import(text, import_operation_id="op-34", now=NOW)
         residences = self.entries("residences")
         self.assertEqual(len(residences), 3)
-        springfield = [e for e in residences if e.get("place_ref") == "place/springfield"]
+        springfield = [e for e in residences if e.get("address") == "100 Example Street, Springfield, OR"]
         self.assertEqual(len(springfield), 2)
+        self.assertEqual(springfield[0]["place_ref"], springfield[1]["place_ref"])
+        self.assertNotEqual(springfield[0]["place_ref"], "place/springfield")
         roster = self.roster("place")
-        names = sorted(e["name"] for e in roster["entities"] if e["name"] != "Oregon")
-        self.assertEqual(names, ["Elsewhere", "Springfield"])
+        houses = [e for e in roster["entities"] if e.get("place_kind") == "residence"]
+        self.assertEqual(len(houses), 2)
+        self.assertEqual({e["located_in"] for e in houses},
+                         {"place/springfield", "place/elsewhere"})
 
 
 # --------------------------------------------------------------------------

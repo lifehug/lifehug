@@ -113,6 +113,7 @@ import temporal_publication as pub  # noqa: E402
 import temporal_receipts as trcpt  # noqa: E402
 import temporal_store as store  # noqa: E402
 from lifehug_core import INTERACTIONS_DIR  # noqa: E402
+from roster_relations import RosterIdentityUncertain  # noqa: E402
 from vault_paths import atomic_write_vault_text  # noqa: E402
 from temporal_claims import collapsed_text, normalized_timestamp  # noqa: E402
 
@@ -176,6 +177,7 @@ OFFERS_DIR = "state/landmarks/offers"
 OFFER_RECEIPTS_DIR = f"{OFFERS_DIR}/receipts"
 
 PROPOSAL_SCHEMA_VERSION = 1
+PROPOSAL_READING_REVISION = 2
 OFFER_RECEIPT_SCHEMA_VERSION = 1
 
 #: The source type the submitted text is promoted under when units are
@@ -794,8 +796,63 @@ def derive_proposal_id(text: object, generation: object) -> str:
     proposal for today's vault.
     """
     payload = {"text": store.normalize_payload(str(text or "")),
-               "generation": int(generation or 0)}
+               "generation": int(generation or 0),
+               "reading_revision": PROPOSAL_READING_REVISION}
     return f"{PROPOSAL_ID_PREFIX}:{_digest(payload)}"
+
+
+def proposal_reading_rank(proposal: object) -> tuple[int, int]:
+    """Readback priority AFTER an exact source-text match, shared by hosts.
+
+    Missing revision means the original reading contract. Invalid explicit
+    metadata never outranks a valid proposal. Old ids/receipts stay readable.
+    """
+    if not isinstance(proposal, dict):
+        return (-1, -1)
+    generation = proposal.get("vault_generation")
+    revision = proposal.get("reading_revision", 1)
+    if (type(generation) is not int or generation < 0
+            or type(revision) is not int or revision < 1):
+        return (-1, -1)
+    return generation, revision
+
+
+def reading_request_key(text: object) -> str:
+    """Opaque content/revision namespace for host mutation and model keys.
+
+    Compose the host's existing retry/attempt identity with this key, not with
+    bare text. This does not depend on a timeline generation or a deployment.
+    """
+    return "landmark-reading:" + _digest({
+        "text": store.normalize_payload(str(text or "")),
+        "reading_revision": PROPOSAL_READING_REVISION,
+    })
+
+
+def proposal_matches_current_reading(proposal: object, text: object, *,
+                                     generation: int | None = None) -> bool:
+    """Display-compatible current identity, including a known failed state.
+
+    Old proposals remain applyable by id, but are not current cache entries.
+    Omit generation for latest-text readback; supply it for exact-generation
+    identity. Hosts may show a current failed reading without adopting it;
+    unknown or malformed states cannot displace a valid readable document.
+    """
+    rank = proposal_reading_rank(proposal)
+    if rank[0] < 0 or rank[1] != PROPOSAL_READING_REVISION:
+        return False
+    return (isinstance(proposal.get("state"), str)
+            and proposal.get("state") in PROPOSAL_STATES
+            and (generation is None or rank[0] == generation)
+            and proposal.get("source_text") == str(text or "")
+            and proposal.get("proposal_id") == derive_proposal_id(text, rank[0]))
+
+
+def is_current_proposal(proposal: object, text: object, *,
+                        generation: int | None = None) -> bool:
+    """Whether a saved successful reading may bypass the model call."""
+    return (proposal_matches_current_reading(proposal, text, generation=generation)
+            and proposal.get("state") != "failed")
 
 
 def derive_receipt_id(proposal_id: object, unit_ids: object) -> str:
@@ -850,7 +907,7 @@ def _subject_of(record: dict, domain: str) -> str:
 
 def _unit(*, domain: str, record: dict, subject: str, quote: object,
           source_text: str, extractor: str, within: object = None,
-          names: object = None) -> dict:
+          names: object = None, name_evidence: object = None) -> dict:
     filed, dates = rebase_record(record, quote, source_text)
     kind = UNIT_KIND_BY_DOMAIN.get(domain, domain)
     return {
@@ -871,6 +928,7 @@ def _unit(*, domain: str, record: dict, subject: str, quote: object,
         # can render "the blue house · Riverbend · 12 Elm Street" without
         # knowing which of them are ladder rungs and which are additive.
         "names": dict(names or {}),
+        "name_evidence": dict(name_evidence or {}),
         "duplicates": [],
         "conflicts": [],
         "questions": [],
@@ -892,7 +950,7 @@ def _remint(unit: dict) -> dict:
 #: has one place to read the contract from.
 UNIT_KEYS = (
     "unit_id", "domain", "kind", "subject", "entity_candidates", "dates",
-    "quote", "within", "names", "duplicates", "conflicts", "questions",
+    "quote", "within", "names", "name_evidence", "duplicates", "conflicts", "questions",
     "auto_file_eligible", "extractor", "record",
 )
 
@@ -1232,6 +1290,45 @@ def _quote_spans(rows: object) -> list[tuple[int, int]]:
             if isinstance(row, dict) and isinstance(row.get("quote"), dict)]
 
 
+def _recognized_spans(units: list[dict], events: object = ()) -> list[tuple[int, int]]:
+    spans = _quote_spans(units) + _quote_spans(events)
+    for unit in units:
+        for evidence in (unit.get("name_evidence") or {}).values():
+            spans.append((evidence["offset"], evidence["length"]))
+            if evidence.get("label"):
+                spans.append((evidence["label"]["offset"], evidence["label"]["length"]))
+            if evidence.get("presentation"):
+                spans.append((evidence["presentation"]["offset"], evidence["presentation"]["length"]))
+    return spans
+
+
+def _uncovered_spans(text: str, covered: list[tuple[int, int]]) -> list[dict]:
+    """Subtract exact evidence intervals; overlap never hides a whole line."""
+    result = []
+    # An empty Markdown bullet contains no assertion. This does not discard
+    # punctuation elsewhere, nonempty list items or any person's prose.
+    covered = [*covered, *((m.start(), len(m[0])) for m in re.finditer(r"(?m)^[ \t]*[-*+][ \t]*$", text))]
+    for span in source_spans(text):
+        cursor, end = span["offset"], span["offset"] + span["length"]
+        pieces = []
+        for start, length in sorted(covered):
+            stop = min(end, start + length)
+            if stop <= cursor or start >= end:
+                continue
+            if start > cursor:
+                pieces.append((cursor, start))
+            cursor = max(cursor, stop)
+        if cursor < end:
+            pieces.append((cursor, end))
+        for start, stop in pieces:
+            raw = text[start:stop]
+            stripped = raw.strip()
+            if stripped:
+                result.append({"text": stripped, "offset": start + raw.index(stripped),
+                               "length": len(stripped)})
+    return result
+
+
 def _partition_text(source_text: str, units: list[dict],
                     events: object = (),
                     told: object = ()) -> tuple[list[dict], list[dict]]:
@@ -1253,7 +1350,7 @@ def _partition_text(source_text: str, units: list[dict],
     reading supplies the one thing a partition cannot know: which stay a story
     belongs to (R7).
     """
-    covered = _quote_spans(units) + _quote_spans(events)
+    covered = _recognized_spans(units, events)
     within_by_span = [(row["quote"]["offset"], row["quote"]["length"],
                        row.get("within"))
                       for row in (told or ())
@@ -1261,10 +1358,7 @@ def _partition_text(source_text: str, units: list[dict],
                       and isinstance(row.get("quote"), dict)]
     stories: list[dict] = []
     unknown: list[dict] = []
-    for span in source_spans(source_text):
-        if any(_overlaps(span["offset"], span["length"], offset, length)
-               for offset, length in covered):
-            continue
+    for span in _uncovered_spans(source_text, covered):
         words = [word for word in re.split(r"\s+", span["text"]) if word]
         if len(words) >= STORY_MIN_WORDS and re.search(r"[A-Za-z]", span["text"]):
             within = next(
@@ -1462,7 +1556,7 @@ def _units_from_reading(reading: object, source_text: str, *,
                          subject=read_unit.subject, quote=read_unit.quote,
                          source_text=source_text, extractor="reading",
                          within=(parent or {}).get("unit_id"),
-                         names=read_unit.names)
+                         names=read_unit.names, name_evidence=read_unit.name_evidence)
             if parent is not None and unit["dates"].get("basis") == "none":
                 if inherit_dates(unit, parent, framework_root=framework_root):
                     _remint(unit)
@@ -1478,7 +1572,7 @@ def _units_from_reading(reading: object, source_text: str, *,
                 unit = _unit(domain=read_unit.domain, record=read_unit.record,
                              subject=read_unit.subject, quote=read_unit.quote,
                              source_text=source_text, extractor="reading",
-                             names=read_unit.names)
+                             names=read_unit.names, name_evidence=read_unit.name_evidence)
                 by_ref[read_unit.ref] = unit
                 units.append(unit)
             break
@@ -1580,6 +1674,7 @@ def propose(text: str, vault_root: object = None, *, call,
 
     proposal = {
         "schema_version": PROPOSAL_SCHEMA_VERSION,
+        "reading_revision": PROPOSAL_READING_REVISION,
         "proposal_id": proposal_id,
         "mode": OFFER_MODE,
         "interaction": "landmarks",
@@ -2011,6 +2106,85 @@ def _file_group(vault_root: Path, proposal: dict, group: dict, *,
     }
 
 
+def _receipt_fully_withdrawn(root: Path, receipt: dict) -> bool:
+    """Prove a complete undo, not merely a marker file or a partial correction.
+
+    A fresh confirmed reading may file after a full undo. Missing/malformed
+    provenance or a partly withdrawn receipt remains conservative: the old act
+    cannot be silently reused, and its outstanding claims must be resolved.
+    """
+    try:
+        path = store.store_path(root, retraction_path(root, receipt.get("receipt_id")).relative_to(root).as_posix())
+        withdrawn = json.loads(path.read_text(encoding="utf-8"))
+    except (LandmarkOfferError, OSError, ValueError):
+        return False
+    if (not isinstance(withdrawn, dict)
+            or withdrawn.get("receipt_id") != receipt.get("receipt_id")
+            or withdrawn.get("proposal_id") != receipt.get("proposal_id")
+            or not isinstance(withdrawn.get("retracted_at"), str)
+            or not isinstance(withdrawn.get("corrections"), list)):
+        return False
+    corrected = {claim_id for row in withdrawn["corrections"] if isinstance(row, dict)
+                 for claim_id in (row.get("claim_ids") if isinstance(row.get("claim_ids"), list) else [])
+                 if isinstance(claim_id, str)}
+    unit_sources = {row["source_id"] for row in receipt.get("filed") or ()
+                    if isinstance(row, dict) and isinstance(row.get("source_id"), str)}
+    sources = unit_sources | {row["source_id"] for row in receipt.get("filed_slices") or ()
+                              if isinstance(row, dict) and isinstance(row.get("source_id"), str)}
+    if not unit_sources or not corrected:
+        return False
+    # Fold durable evidence afresh: a stale cached active index must not
+    # authorize refiling a still-active unit after a partial/failed undo.
+    claims = [row for row in store.fold_active_index(root).get("claims", ())
+              if (row.get("source_ref") or {}).get("source_id") in sources]
+    found_sources = {(row.get("source_ref") or {}).get("source_id") for row in claims}
+    return (unit_sources <= found_sources
+            and all(row.get("status") == "retracted" and row.get("claim_id") in corrected
+                    for row in claims))
+
+
+def _refuse_refiling_earlier_reading(root: Path, proposal: dict, chosen: list[dict]) -> None:
+    """A reading upgrade is not permission to redo a completed unchanged act.
+
+    Match only this exact submission and unchanged units, not guessed house or
+    date equivalence. Refuse before any writes; the original receipt remains
+    the replay/undo authority rather than being adopted under a new act id.
+    """
+    directory = store.store_path(root, OFFER_RECEIPTS_DIR)
+    for path in sorted(directory.glob("*.json")):
+        if path.name.endswith(".retracted.json"):
+            continue
+        path = store.store_path(root, f"{OFFER_RECEIPTS_DIR}/{path.name}")
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(receipt, dict) or receipt.get("proposal_id") == proposal["proposal_id"]:
+            continue
+        try:
+            previous = read_proposal(root, receipt.get("proposal_id"))
+        except (LandmarkOfferError, TypeError):
+            continue
+        previous_rank = proposal_reading_rank(previous)
+        if (previous.get("source_text") != proposal.get("source_text")
+                or previous_rank[0] < 0 or previous_rank[1] >= proposal_reading_rank(proposal)[1]):
+            continue
+        if _receipt_fully_withdrawn(root, receipt):
+            continue
+        filed_ids = set(receipt.get("unit_ids") or ())
+        for prior in previous.get("units") or ():
+            if not isinstance(prior, dict) or prior.get("unit_id") not in filed_ids:
+                continue
+            for unit in chosen:
+                if (unit["unit_id"] == prior.get("unit_id")
+                        or (unit.get("domain") == prior.get("domain")
+                            and unit.get("record") == prior.get("record"))):
+                    raise LandmarkOfferError(
+                        "content_ambiguity",
+                        f"{unit['unit_id']} was already filed by an earlier reading; "
+                        f"use the original receipt {receipt.get('receipt_id')} for replay or undo")
+
+
 def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
           now: object = None, reason: object = None) -> dict:
     """File the units a person confirmed. Idempotent by ``(proposal, unit)``.
@@ -2024,8 +2198,9 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
 
     **A confirmed unit files what is ON ITS CARD (v292, R7).** The unit's
     `names` ride on the record through the E-L2c road, so the nickname lands as
-    a roster ALIAS on the place its city minted and the address lands as the
-    place's own field. The GROUP that unit heads is filed with it: one promoted
+    a roster ALIAS on the individual house identified by its address, below
+    its containing city. Repeated stays share the house, not the episode;
+    collisions remain explicit. The GROUP that unit heads is filed with it: one promoted
     slice of the person's own words, the dated events on it as claims, the
     undated ones as moments, the stories as themselves. A group whose head
     nobody confirmed files nothing — an event rides its stay.
@@ -2056,6 +2231,11 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
                                  "confirm at least one unit before applying")
 
     receipt_id = derive_receipt_id(proposal_id, [u["unit_id"] for u in chosen])
+    if offer_receipt_path(root, receipt_id).is_file():
+        # In particular, an old applied proposal is not an implicit identity
+        # migration. A durable receipt proves this act already completed.
+        return read_offer_receipt(root, receipt_id)
+    _refuse_refiling_earlier_reading(root, proposal, chosen)
     stamp = normalized_timestamp(now, error=tc.TemporalContractError)
     before = pub.read_projection(root)
     open_before = open_opportunity_ids(root, projection=before)
@@ -2083,6 +2263,8 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
             payload["landmark"]["place_name"] = place_name
         try:
             summary = _writer.record_unit(payload, now=now)
+        except RosterIdentityUncertain as exc:
+            raise LandmarkOfferError("content_ambiguity", str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 — every write failure is typed
             raise LandmarkOfferError("write_failure",
                                      f"{unit['unit_id']} did not file: {exc}") from exc
@@ -2108,7 +2290,7 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
         })
         # The NAMES the record carried (§3 "why names matter"): the E-L2c
         # fields rode on the record through the one writer, and `record_unit`
-        # filed the nickname as a roster ALIAS on the place the city minted.
+        # filed the nickname as a roster alias on the resolved individual place.
         # What is reported here is what the ENTRY ended up with, never what
         # the reading asked for — a name the validator dropped was not filed.
         filed_names = {key: entry[key] for key in lr.NAME_FIELDS
@@ -2122,7 +2304,9 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
                 "alias": ({"applied": bool(alias.get("applied")),
                            "changed": bool(alias.get("changed")),
                            "alias": collapsed_text(entry.get("nickname")),
-                           "reason": alias.get("reason")}
+                           "reason": alias.get("reason"),
+                           "candidates": alias.get("candidates") or [],
+                           "owner": alias.get("owner")}
                           if alias else None),
             })
 
@@ -2324,17 +2508,17 @@ EVENTS_SCOPE = "events"
 def _retract_aliases(receipt: dict) -> list[dict]:
     """Take back the roster aliases this receipt's apply added. Idempotent.
 
-    Only an alias the apply itself CHANGED is removed: a nickname the place
-    already answered to was not this act's to file and is not this act's to
-    take away. `roster_relations.retract_alias` is the one definition of
-    removing one; this only decides which.
+    New receipts withdraw their telling-ref ownership; another surviving stay
+    keeps its alias. Legacy receipts withdraw only aliases they changed.
+    `roster_relations.retract_alias` owns removal and preexisting-name safety.
     """
     import entity_roster  # noqa: PLC0415 — process-bound roster, as everywhere
     import roster_relations as rr  # noqa: PLC0415
 
     wanted = [row for row in (receipt.get("filed_names") or ())
               if isinstance(row, dict) and isinstance(row.get("alias"), dict)
-              and row["alias"].get("changed") and row.get("place_ref")
+              and (row["alias"].get("changed") or row["alias"].get("owner"))
+              and row.get("place_ref")
               and collapsed_text(row["alias"].get("alias"))]
     if not wanted:
         return []
@@ -2343,8 +2527,9 @@ def _retract_aliases(receipt: dict) -> list[dict]:
     changed = False
     for row in wanted:
         result = rr.retract_alias("place", row["place_ref"],
-                                  row["alias"]["alias"], snapshot)
-        if result.get("applied") and result.get("changed"):
+                                  row["alias"]["alias"], snapshot,
+                                  owner=row["alias"].get("owner"))
+        if result.get("applied") and (result.get("changed") or result.get("ownership_changed")):
             snapshot = result["snapshot"]
             changed = True
         removed.append({"place_ref": row["place_ref"],
@@ -2552,18 +2737,16 @@ def lint_offer_proposal(proposal: object) -> list[dict]:
                 "lint": QUOTES_LOCATE_LINT,
                 "detail": f"{label} has no quotation in the text",
             })
-    covered = _quote_spans(units) + _quote_spans(events)
+    covered = _recognized_spans(units, events)
     covered += [(span["offset"], span["length"])
                 for group in ("stories", "unrecognized")
                 for span in (row.get(group) or ())
                 if isinstance(span, dict) and "offset" in span]
-    for span in source_spans(text):
-        if not any(_overlaps(span["offset"], span["length"], offset, length)
-                   for offset, length in covered):
-            findings.append({
-                "lint": NOTHING_DROPPED_LINT,
-                "detail": f"nothing accounts for offset {span['offset']}",
-            })
+    for span in _uncovered_spans(text, covered):
+        findings.append({
+            "lint": NOTHING_DROPPED_LINT,
+            "detail": f"nothing accounts for offset {span['offset']}",
+        })
     return sorted(findings, key=lambda item: (item["lint"], item["detail"]))
 
 
@@ -3169,6 +3352,7 @@ __all__ = [
     "OFFER_RECEIPTS_DIR",
     "OFFER_STATES",
     "PROPOSAL_STATES",
+    "PROPOSAL_READING_REVISION",
     "UNIT_KEYS",
     "UNIT_KIND_BY_DOMAIN",
     "annotate_against_known",
@@ -3188,6 +3372,10 @@ __all__ = [
     "date_evidence",
     "derive_event_id",
     "derive_proposal_id",
+    "proposal_reading_rank",
+    "is_current_proposal",
+    "proposal_matches_current_reading",
+    "reading_request_key",
     "derive_story_id",
     "derive_receipt_id",
     "derive_unit_id",
