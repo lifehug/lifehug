@@ -115,6 +115,10 @@ Applying unchanged previously filed units from a newer reading of the same
 text refuses as `content_ambiguity` before writes, naming the original receipt.
 It neither duplicates imports nor implicitly migrates the legacy city mapping.
 Unapplied units still file; this is not general cross-document deduplication.
+A fully withdrawn earlier act permits a fresh confirmed current apply; matching
+undo provenance and fully retracted source claims must prove the whole scope.
+Malformed/partial undo evidence stays refused, and old receipt replay cannot
+revive the withdrawn act. Non-string saved proposal states are not adoptable.
 Canonical roster refresh retains these place rows, their parents, stable slugs,
 hierarchy and alias ownership even for empty or colliding model output. Raw
 model fields cannot inject the private preservation marker or identity metadata.

@@ -650,6 +650,13 @@ migrating the old city association. Matching uses the same unit ID or exact
 validated record, not speculative equivalence. New, previously unapplied units
 remain fileable. Corrections with changed facts are a distinct confirmed act;
 this does not attempt general cross-document duplicate resolution.
+After a matching full undo, a fresh current reading may be explicitly applied
+as a new act. The guard requires the matching retraction receipt plus durable
+source claims fully marked retracted under its correction coverage; a marker
+alone, missing evidence or partial scopes remain conservatively refused.
+The original applied receipt and undo remain immutable and cannot be revived
+by replaying the old proposal. Malformed non-string proposal states are never
+eligible for reuse and cannot abort a batch of otherwise valid proposals.
 
 Hosts must use `reading_request_key(text)` as their opaque revision-aware
 mutation AND model-key input, composing their existing attempt policy with it.

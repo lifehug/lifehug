@@ -849,6 +849,7 @@ def is_current_proposal(proposal: object, text: object, *,
                         generation: int | None = None) -> bool:
     """Whether a saved successful reading may bypass the model call."""
     return (proposal_matches_current_reading(proposal, text, generation=generation)
+            and isinstance(proposal.get("state"), str)
             and proposal.get("state") in {"proposed", "needs_clarification"})
 
 
@@ -2103,6 +2104,43 @@ def _file_group(vault_root: Path, proposal: dict, group: dict, *,
     }
 
 
+def _receipt_fully_withdrawn(root: Path, receipt: dict) -> bool:
+    """Prove a complete undo, not merely a marker file or a partial correction.
+
+    A fresh confirmed reading may file after a full undo. Missing/malformed
+    provenance or a partly withdrawn receipt remains conservative: the old act
+    cannot be silently reused, and its outstanding claims must be resolved.
+    """
+    try:
+        path = store.store_path(root, retraction_path(root, receipt.get("receipt_id")).relative_to(root).as_posix())
+        withdrawn = json.loads(path.read_text(encoding="utf-8"))
+    except (LandmarkOfferError, OSError, ValueError):
+        return False
+    if (not isinstance(withdrawn, dict)
+            or withdrawn.get("receipt_id") != receipt.get("receipt_id")
+            or withdrawn.get("proposal_id") != receipt.get("proposal_id")
+            or not isinstance(withdrawn.get("retracted_at"), str)
+            or not isinstance(withdrawn.get("corrections"), list)):
+        return False
+    corrected = {claim_id for row in withdrawn["corrections"] if isinstance(row, dict)
+                 for claim_id in (row.get("claim_ids") if isinstance(row.get("claim_ids"), list) else [])
+                 if isinstance(claim_id, str)}
+    unit_sources = {row["source_id"] for row in receipt.get("filed") or ()
+                    if isinstance(row, dict) and isinstance(row.get("source_id"), str)}
+    sources = unit_sources | {row["source_id"] for row in receipt.get("filed_slices") or ()
+                              if isinstance(row, dict) and isinstance(row.get("source_id"), str)}
+    if not unit_sources or not corrected:
+        return False
+    # Fold durable evidence afresh: a stale cached active index must not
+    # authorize refiling a still-active unit after a partial/failed undo.
+    claims = [row for row in store.fold_active_index(root).get("claims", ())
+              if (row.get("source_ref") or {}).get("source_id") in sources]
+    found_sources = {(row.get("source_ref") or {}).get("source_id") for row in claims}
+    return (unit_sources <= found_sources
+            and all(row.get("status") == "retracted" and row.get("claim_id") in corrected
+                    for row in claims))
+
+
 def _refuse_refiling_earlier_reading(root: Path, proposal: dict, chosen: list[dict]) -> None:
     """A reading upgrade is not permission to redo a completed unchanged act.
 
@@ -2128,6 +2166,8 @@ def _refuse_refiling_earlier_reading(root: Path, proposal: dict, chosen: list[di
         previous_rank = proposal_reading_rank(previous)
         if (previous.get("source_text") != proposal.get("source_text")
                 or previous_rank[0] < 0 or previous_rank[1] >= proposal_reading_rank(proposal)[1]):
+            continue
+        if _receipt_fully_withdrawn(root, receipt):
             continue
         filed_ids = set(receipt.get("unit_ids") or ())
         for prior in previous.get("units") or ():

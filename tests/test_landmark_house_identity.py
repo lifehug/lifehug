@@ -152,7 +152,7 @@ class AttributeCoverageTests(unittest.TestCase):
 
 
 class ReadingRevisionTests(OfferVaultCase):
-    def test_applying_upgraded_reading_does_not_refile_an_unchanged_legacy_act(self):
+    def legacy_filed(self):
         text, completion = house()
         legacy = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
                             generation=32, now=NOW, write=False)
@@ -171,6 +171,10 @@ class ReadingRevisionTests(OfferVaultCase):
         # house. Everything else uses the real recorder and durable stores.
         with mock.patch.object(rr, "resolve_residence_place", side_effect=legacy_city_resolution):
             receipt = lo.apply(legacy["proposal_id"], [legacy["units"][0]["unit_id"]], self.root, now=NOW)
+        return text, completion, legacy, receipt
+
+    def test_applying_upgraded_reading_does_not_refile_an_unchanged_legacy_act(self):
+        text, completion, legacy, receipt = self.legacy_filed()
         self.assertEqual(receipt["filed"][0]["place_ref"], "place/riverbend")
         original_receipt = lo.offer_receipt_path(self.root, receipt["receipt_id"]).read_bytes()
         current = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
@@ -182,6 +186,43 @@ class ReadingRevisionTests(OfferVaultCase):
         self.assertEqual(after, before)
         self.assertEqual(lo.offer_receipt_path(self.root, receipt["receipt_id"]).read_bytes(), original_receipt)
         self.assertEqual(self.entries("residences")[0]["place_ref"], "place/riverbend")
+
+    def test_full_undo_allows_fresh_confirmed_reading_without_reviving_old_receipt(self):
+        text, completion, legacy, receipt = self.legacy_filed()
+        old_receipt = lo.offer_receipt_path(self.root, receipt["receipt_id"]).read_bytes()
+        old_proposal = lo.proposal_path(self.root, legacy["proposal_id"]).read_bytes()
+        lo.retract(receipt["receipt_id"], self.root, now=NOW)
+        old_retraction = lo.retraction_path(self.root, receipt["receipt_id"]).read_bytes()
+        self.assertTrue(lo._receipt_fully_withdrawn(self.root, receipt))
+        self.assertEqual(self.entries("residences"), [])
+        current = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
+                             generation=32, now=NOW)
+        fresh = lo.apply(current["proposal_id"], [u["unit_id"] for u in current["units"]], self.root, now=NOW)
+        self.assertNotEqual(fresh["receipt_id"], receipt["receipt_id"])
+        self.assertNotEqual(fresh["filed"][0]["place_ref"], "place/riverbend")
+        self.assertEqual(len(self.entries("residences")), 1)
+        before_replay = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        self.assertEqual(lo.apply(legacy["proposal_id"], receipt["unit_ids"], self.root), receipt)
+        self.assertEqual({p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}, before_replay)
+        self.assertEqual(lo.offer_receipt_path(self.root, receipt["receipt_id"]).read_bytes(), old_receipt)
+        self.assertEqual(lo.proposal_path(self.root, legacy["proposal_id"]).read_bytes(), old_proposal)
+        self.assertEqual(lo.retraction_path(self.root, receipt["receipt_id"]).read_bytes(), old_retraction)
+
+    def test_partial_or_malformed_undo_does_not_authorize_legacy_refiling(self):
+        text, completion, _legacy, receipt = self.legacy_filed()
+        source = receipt["filed"][0]["source_id"]
+        claims = lo._claim_ids_for_sources(self.root, [source])
+        self.assertGreater(len(claims), 1)
+        correction = ts.retract_claims(self.root, claims[:1], reason="synthetic partial undo", occurred_at=NOW)
+        partial = {"receipt_id": receipt["receipt_id"], "proposal_id": receipt["proposal_id"],
+                   "retracted_at": NOW, "corrections": [{"correction_id": correction.correction_id,
+                                                          "claim_ids": claims[:1]}]}
+        current = lo.propose(text, self.root, call=ScriptedCall(reading=completion), generation=32, now=NOW)
+        for marker in (partial, {**partial, "receipt_id": "wrong"}, {**partial, "corrections": {}}):
+            lo._write_json(self.root, lo.retraction_path(self.root, receipt["receipt_id"]), marker)
+            self.assertFalse(lo._receipt_fully_withdrawn(self.root, receipt))
+            with self.assertRaisesRegex(lo.LandmarkOfferError, "already filed by an earlier reading"):
+                lo.apply(current["proposal_id"], [u["unit_id"] for u in current["units"]], self.root, now=NOW)
 
     def test_same_generation_upgrade_keeps_old_document_and_receipt(self):
         text, completion = house()
@@ -226,6 +267,7 @@ class ReadingRevisionTests(OfferVaultCase):
         self.assertFalse(lo.is_current_proposal(proposal, text, generation=33))
         for field, value in (("reading_revision", 1), ("reading_revision", "2"),
                              ("vault_generation", True), ("state", "failed"),
+                             ("state", []), ("state", {}),
                              ("proposal_id", "landmark-proposal:invalid")):
             self.assertFalse(lo.is_current_proposal({**proposal, field: value}, text))
         self.assertEqual(lo.proposal_reading_rank({"vault_generation": 32, "reading_revision": "2"}), (-1, -1))
