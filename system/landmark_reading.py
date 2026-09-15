@@ -501,10 +501,23 @@ def _name_evidence(value: object, *, names: dict, record: dict, text: str,
         match = matches[occurrence - 1]
         result[key] = {"text": quote, "offset": match.start(),
                        "length": len(quote), "occurrence": occurrence}
+        structural_start = match.start()
+        if key == "link":
+            # The Markdown label may repeat the exact URL, but may not add
+            # meaning. Both occurrences are one owned presentation; arbitrary
+            # labels, titles, surrounding text and another link stay uncovered.
+            presentation = f"[{quote}]({quote})"
+            starts = (match.start() - 1, match.start() - len(quote) - 3)
+            for start in starts:
+                if start >= 0 and text[start:start + len(presentation)] == presentation:
+                    result[key]["presentation"] = {"text": presentation, "offset": start,
+                                                    "length": len(presentation)}
+                    structural_start = start
+                    break
         # Only the literal field label at a line start is structural. Never
         # infer prose, synonyms, trailing punctuation or a paragraph boundary.
-        prefix = re.search(r"(?:^|\n)([ \t]*" + re.escape(key) + r":[ \t]*)$",
-                           text[:match.start()], flags=re.IGNORECASE)
+        prefix = re.search(r"(?:^|\n)([ \t]*(?:[-*+][ \t]+)?" + re.escape(key) + r":[ \t]*)$",
+                           text[:structural_start], flags=re.IGNORECASE)
         if prefix:
             result[key]["label"] = {"text": prefix[1], "offset": prefix.start(1),
                                     "length": len(prefix[1])}
@@ -704,13 +717,15 @@ def parse_reading(raw: object, *, text: str = "",
                 findings=findings, ref=ref),
             "dates": dates, "within": collapsed_text(row.get("within")) or None,
         })
-    owners: dict[tuple[int, int], set[str]] = {}
-    for draft in drafts:
-        for evidence in draft["name_evidence"].values():
-            owners.setdefault((evidence["offset"], evidence["length"]), set()).add(draft["ref"])
+    owned = [(draft["ref"], key, evidence.get("presentation", evidence))
+             for draft in drafts for key, evidence in draft["name_evidence"].items()]
+    contested = {(ref, key) for ref, key, span in owned
+                 if any(other != ref and span["offset"] < other_span["offset"] + other_span["length"]
+                        and other_span["offset"] < span["offset"] + span["length"]
+                        for other, _, other_span in owned)}
     for draft in drafts:
         for key, evidence in list(draft["name_evidence"].items()):
-            if len(owners[(evidence["offset"], evidence["length"])]) > 1:
+            if (draft["ref"], key) in contested:
                 del draft["name_evidence"][key]
                 findings.append(f"dropped name evidence on {draft['ref']}.{key}: multiple owners")
     _resolve_refs(drafts, findings)

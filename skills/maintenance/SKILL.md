@@ -126,6 +126,11 @@ classifications — classify first so this week's queue sees this week's answers
 
 ### Monthly
 
+Settled house identities, alias ownership and their containing-place hierarchy
+survive the canonical roster refresh, even when model output is empty or
+colliding. Do not rewrite city aliases or merge houses by nickname to repair
+ambiguity; use the existing identity decision path (v297, ADR 0033 amendment 5).
+
 1. **Classify pending sources** (same loop as weekly step 1).
 2. **Refresh entity rosters** — for each type, emit → resolve → ingest:
    ```bash

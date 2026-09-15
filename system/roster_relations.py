@@ -41,9 +41,9 @@ already are, and names the gap rather than silently building around it.
 
 from __future__ import annotations
 
-import sys
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 _SYSTEM_DIR = Path(__file__).resolve().parent
@@ -198,7 +198,8 @@ def resolve_residence_place(record: dict, snapshot: object) -> tuple[str | None,
             return ref, snap
         return (entity_ref("place", explicit) if explicit else None), snap
 
-    norm = lambda value: " ".join(value.casefold().split())
+    def norm(value: str) -> str:
+        return " ".join(value.casefold().split())
     identity = {"city": norm(city), "address": norm(address)} if address else {
         "city": norm(city), "nickname": norm(nickname)}
     matches = [e for e in roster_entities(snap) if e.get("residence_identity") == identity]

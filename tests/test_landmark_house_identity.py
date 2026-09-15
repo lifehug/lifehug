@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import unittest
+from unittest import mock
 
 import entity_roster
 import episode_binder as eb
@@ -123,8 +124,65 @@ class AttributeCoverageTests(unittest.TestCase):
         self.assertEqual(proposal["units"][0]["name_evidence"], {})
         self.assertIn("Nickname: Moonstone", self.leftovers(proposal))
 
+    def test_markdown_labels_duplicate_url_and_empty_bullet_are_only_structure(self):
+        text, completion = house()
+        url = "https://example.invalid/map"
+        text = text.replace("Nickname:", "- Nickname:")
+        text = text.replace("Link: https://example.invalid/home", f"- Link: [{url}]({url})\n-")
+        completion["units"][0]["names"]["link"] = url
+        for occurrence in (1, 2):
+            with self.subTest(occurrence=occurrence):
+                completion["units"][0]["name_evidence"]["link"] = {"quote": url, "occurrence": occurrence}
+                proposal = self.propose(text, completion)
+                self.assertEqual(self.leftovers(proposal), "")
+                self.assertEqual(lo.lint_offer_proposal(proposal), [])
+        completion["units"][0]["name_evidence"]["link"].pop("occurrence")
+        self.assertIn(url, self.leftovers(self.propose(text, completion)))
+
+    def test_markdown_extra_label_meaning_and_tail_are_never_suppressed(self):
+        text, completion = house()
+        url = "https://example.invalid/home"
+        for label in (url, "where we spent happy summers"):
+            with self.subTest(label=label):
+                body = text.replace(f"Link: {url}", f"- Link: [{label}]({url}); an unrelated memory")
+                proposal = self.propose(body, completion)
+                self.assertIn("an unrelated memory", self.leftovers(proposal))
+                if label != url:
+                    self.assertIn(label, self.leftovers(proposal))
+
 
 class ReadingRevisionTests(OfferVaultCase):
+    def test_applying_upgraded_reading_does_not_refile_an_unchanged_legacy_act(self):
+        text, completion = house()
+        legacy = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
+                            generation=32, now=NOW, write=False)
+        legacy.pop("reading_revision")
+        legacy["proposal_id"] = f"{lo.PROPOSAL_ID_PREFIX}:" + lo._digest({
+            "text": ts.normalize_payload(text), "generation": 32})
+        for unit in legacy["units"]:
+            unit.pop("name_evidence")
+        lo._save_proposal(self.root, legacy)
+
+        def legacy_city_resolution(record, snapshot):
+            ref, snapshot, _ = rr.resolve_or_create("place", record["city"], snapshot)
+            return ref, snapshot
+
+        # Record the actual legacy city association, not an already-corrected
+        # house. Everything else uses the real recorder and durable stores.
+        with mock.patch.object(rr, "resolve_residence_place", side_effect=legacy_city_resolution):
+            receipt = lo.apply(legacy["proposal_id"], [legacy["units"][0]["unit_id"]], self.root, now=NOW)
+        self.assertEqual(receipt["filed"][0]["place_ref"], "place/riverbend")
+        original_receipt = lo.offer_receipt_path(self.root, receipt["receipt_id"]).read_bytes()
+        current = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
+                             generation=32, now=NOW)
+        before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        with self.assertRaisesRegex(lo.LandmarkOfferError, "already filed by an earlier reading"):
+            lo.apply(current["proposal_id"], [current["units"][0]["unit_id"]], self.root, now=NOW)
+        after = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        self.assertEqual(after, before)
+        self.assertEqual(lo.offer_receipt_path(self.root, receipt["receipt_id"]).read_bytes(), original_receipt)
+        self.assertEqual(self.entries("residences")[0]["place_ref"], "place/riverbend")
+
     def test_same_generation_upgrade_keeps_old_document_and_receipt(self):
         text, completion = house()
         legacy = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
@@ -160,6 +218,10 @@ class ReadingRevisionTests(OfferVaultCase):
         proposal = lo.propose(text, self.root, call=ScriptedCall(reading=completion),
                              generation=32, now=NOW)
         self.assertTrue(lo.is_current_proposal(proposal, text))
+        failed = {**proposal, "state": "failed"}
+        self.assertTrue(lo.proposal_matches_current_reading(failed, text))
+        self.assertFalse(lo.is_current_proposal(failed, text))
+        self.assertFalse(lo.proposal_matches_current_reading({**failed, "reading_revision": 1}, text))
         self.assertFalse(lo.is_current_proposal(proposal, text + " changed"))
         self.assertFalse(lo.is_current_proposal(proposal, text, generation=33))
         for field, value in (("reading_revision", 1), ("reading_revision", "2"),
@@ -314,6 +376,25 @@ class HouseIdentityTests(OfferVaultCase):
         lo.retract(second["receipt_id"], self.root, now=NOW)
         self.assertEqual(self.resolve("Suncrest").resolved_ref, repeated["filed"][0]["place_ref"])
         self.assertNotEqual(first["filed"][0]["place_ref"], "place/riverbend")
+
+    def test_raw_refresh_cannot_inject_house_metadata_or_private_marker(self):
+        self.file_house()
+        for previous in (None, entity_roster.load_roster("place")):
+            for slug in (None, "injected-ref"):
+                raw = {"name": "Unrelated Park", "_settled_place": True,
+                       "place_kind": "residence", "residence_identity": {"address": "forged"},
+                       "located_in": "place/riverbend", "alias_ownership": {"x": {"owners": ["forged"]}}}
+                if slug:
+                    raw["slug"] = slug
+                # Also safe when called directly, without the fold boundary.
+                direct = entity_roster.normalize("place", [raw], [], {}, 0, 0)[0]
+                self.assertFalse(set(rr.PLACE_IDENTITY_FIELDS) & set(direct))
+                folded, _ = entity_roster.apply_previous_decisions([raw], previous)
+                normalized = entity_roster.normalize("place", folded, [], {}, 0, 0)
+                fresh = next(e for e in normalized if e["name"] == "Unrelated Park")
+                self.assertEqual(fresh["slug"], "unrelated-park")
+                self.assertFalse(set(rr.PLACE_IDENTITY_FIELDS) & set(fresh))
+                self.assertNotIn("_settled_place", fresh)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,8 @@ city and of the separate stays at that house.
 ## Scope
 
 In: landmark_offer.py, landmark_reading.py, the reading prompt and additive
-schema, the existing go_dig_writer/roster_relations identity path as necessary,
+schema, the existing go_dig_writer/roster_relations identity path and canonical
+entity_roster refresh preservation as necessary,
 focused tests, version/changelog and behavioral documentation/ADR.
 
 Out: platform changes/pins, maintenance, delivery, atomic-punctuation work,
@@ -60,7 +61,10 @@ validated evidence on the proposal and use exact interval subtraction for
 residuals. Evidence for a dropped/unsafe value must not hide its source text.
 The evidence quote equals the accepted field value, not a surrounding
 assertion. Only an adjacent line-start literal field label (such as
-`Nickname:`) is separately accounted as structure. Trailing prose, rejected
+`Nickname:`, optionally bulleted) is separately accounted as structure. An
+empty Markdown bullet has no assertion; `[URL](URL)` is one presentation only
+when its label is exactly the accepted URL. Repeated URL evidence still needs
+an explicit occurrence. Different link-label meaning stays uncovered. Trailing prose, rejected
 parenthetical components and differently worded labels remain visible.
 
 Add an explicit reading revision to newly derived proposal identities, keeping
@@ -84,6 +88,9 @@ revision; absent revision means 1, current is PROPOSAL_READING_REVISION (2),
 invalid explicit metadata ranks (-1, -1). Do not reconstruct the hash or let
 file iteration order choose an older reading at the same generation. Old
 proposal IDs and applied receipts remain valid explicit apply/replay targets.
+`proposal_matches_current_reading` performs the same identity checks without
+the success-state requirement, so a current failed proposal can still be shown
+with its typed error without being adopted as a successful durable mutation.
 
 ### House identity and compatibility
 
@@ -104,6 +111,13 @@ aliases. Conflicting historical associations must remain conservative and
 auditable, never silently merge two homes or manufacture a date. Undo removes
 only aliases owned by that apply and must not damage another surviving stay
 at the same house. Re-applying an existing receipt remains idempotent.
+Applying unchanged previously filed units from a newer reading of the same
+text refuses as `content_ambiguity` before writes, naming the original receipt.
+It neither duplicates imports nor implicitly migrates the legacy city mapping.
+Unapplied units still file; this is not general cross-document deduplication.
+Canonical roster refresh retains these place rows, their parents, stable slugs,
+hierarchy and alias ownership even for empty or colliding model output. Raw
+model fields cannot inject the private preservation marker or identity metadata.
 
 ## Test plan
 
@@ -140,9 +154,9 @@ No serve_wiki.py visual change is planned; no browser walkthrough is required.
 
 ## Definition of done
 
-- [ ] Focused coverage, identity, compatibility and semantic tests pass.
-- [ ] Version/released/changelog and required docs/ADR updated together.
-- [ ] Manifest, diff and policy gates pass; protected files untouched.
+- [x] Focused coverage, identity, compatibility and semantic tests pass.
+- [x] Version/released/changelog and required docs/ADR updated together.
+- [x] Manifest, diff and policy gates pass; protected files untouched.
 - [ ] Branch pushed and self-contained evidence posted on the draft PR.
 - [ ] Parent receives exact head, commands/counts and any limits; no agent
   labels, ready/merge/deploy operations, or CI polling.

@@ -1,5 +1,14 @@
 # Landmarks Interaction
 
+**Add Landmark, v297:** the single reading can attach exact per-field
+`name_evidence` with an explicit source occurrence. Accepted nickname/link
+values no longer appear as unexplained text merely because the unit quoted
+only its dates; unrelated prose stays visible. Filing identifies an individual
+house below its city, preserving separate stays and honest alias collisions.
+Hosts must carry reading revision 2 through proposal readback and mutation/model
+keys using the package helpers in ADR 0033 amendment 5. Old proposal apply is
+supported; existing applied receipts are not rewritten.
+
 `landmarks` is an independently registered, auditable Interaction for the
 **universal dating question set**. It exact-composes Conversation by
 reference and owns only the one goal Conversation cannot carry: **collect the

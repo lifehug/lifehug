@@ -8,6 +8,11 @@ You usually do one thing: **answer the question.** When an occasion arrives, you
 
 ## Two users, one Loop
 
+Add Landmark can retain a house nickname for future stories independently of
+its city and of separate stays at that address. Name evidence is occurrence-
+specific; unrelated prose and ambiguous aliases remain visible. See
+[ADR 0033](docs/adr/0033-add-landmark-offer-mode.md) for filing and compatibility.
+
 **If you do the minimum, it still works.** Answer one quick question a day —
 that is the whole obligation — and over time you get a full life story:
 answers become durable sources, sources compile into a private wiki, the wiki

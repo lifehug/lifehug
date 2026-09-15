@@ -828,21 +828,27 @@ def reading_request_key(text: object) -> str:
     })
 
 
-def is_current_proposal(proposal: object, text: object, *,
-                        generation: int | None = None) -> bool:
-    """Whether a saved reading may bypass a new reading of this exact text.
+def proposal_matches_current_reading(proposal: object, text: object, *,
+                                     generation: int | None = None) -> bool:
+    """Exact current reading identity, independent of success/failure state.
 
     Old proposals remain applyable by id, but are not current cache entries.
     Omit generation for latest-text readback; supply it for exact-generation
-    reuse. A failed or malformed document never proves successful reuse.
+    identity. Hosts may show a current failed reading without adopting it.
     """
     rank = proposal_reading_rank(proposal)
     if rank[0] < 0 or rank[1] != PROPOSAL_READING_REVISION:
         return False
-    return (proposal.get("state") in {"proposed", "needs_clarification"}
-            and (generation is None or rank[0] == generation)
+    return ((generation is None or rank[0] == generation)
             and proposal.get("source_text") == str(text or "")
             and proposal.get("proposal_id") == derive_proposal_id(text, rank[0]))
+
+
+def is_current_proposal(proposal: object, text: object, *,
+                        generation: int | None = None) -> bool:
+    """Whether a saved successful reading may bypass the model call."""
+    return (proposal_matches_current_reading(proposal, text, generation=generation)
+            and proposal.get("state") in {"proposed", "needs_clarification"})
 
 
 def derive_receipt_id(proposal_id: object, unit_ids: object) -> str:
@@ -1287,12 +1293,17 @@ def _recognized_spans(units: list[dict], events: object = ()) -> list[tuple[int,
             spans.append((evidence["offset"], evidence["length"]))
             if evidence.get("label"):
                 spans.append((evidence["label"]["offset"], evidence["label"]["length"]))
+            if evidence.get("presentation"):
+                spans.append((evidence["presentation"]["offset"], evidence["presentation"]["length"]))
     return spans
 
 
 def _uncovered_spans(text: str, covered: list[tuple[int, int]]) -> list[dict]:
     """Subtract exact evidence intervals; overlap never hides a whole line."""
     result = []
+    # An empty Markdown bullet contains no assertion. This does not discard
+    # punctuation elsewhere, nonempty list items or any person's prose.
+    covered = [*covered, *((m.start(), len(m[0])) for m in re.finditer(r"(?m)^[ \t]*[-*+][ \t]*$", text))]
     for span in source_spans(text):
         cursor, end = span["offset"], span["offset"] + span["length"]
         pieces = []
@@ -2091,6 +2102,46 @@ def _file_group(vault_root: Path, proposal: dict, group: dict, *,
     }
 
 
+def _refuse_refiling_earlier_reading(root: Path, proposal: dict, chosen: list[dict]) -> None:
+    """A reading upgrade is not permission to redo a completed unchanged act.
+
+    Match only this exact submission and unchanged units, not guessed house or
+    date equivalence. Refuse before any writes; the original receipt remains
+    the replay/undo authority rather than being adopted under a new act id.
+    """
+    directory = store.store_path(root, OFFER_RECEIPTS_DIR)
+    for path in sorted(directory.glob("*.json")):
+        if path.name.endswith(".retracted.json"):
+            continue
+        path = store.store_path(root, f"{OFFER_RECEIPTS_DIR}/{path.name}")
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(receipt, dict) or receipt.get("proposal_id") == proposal["proposal_id"]:
+            continue
+        try:
+            previous = read_proposal(root, receipt.get("proposal_id"))
+        except (LandmarkOfferError, TypeError):
+            continue
+        previous_rank = proposal_reading_rank(previous)
+        if (previous.get("source_text") != proposal.get("source_text")
+                or previous_rank[0] < 0 or previous_rank[1] >= proposal_reading_rank(proposal)[1]):
+            continue
+        filed_ids = set(receipt.get("unit_ids") or ())
+        for prior in previous.get("units") or ():
+            if not isinstance(prior, dict) or prior.get("unit_id") not in filed_ids:
+                continue
+            for unit in chosen:
+                if (unit["unit_id"] == prior.get("unit_id")
+                        or (unit.get("domain") == prior.get("domain")
+                            and unit.get("record") == prior.get("record"))):
+                    raise LandmarkOfferError(
+                        "content_ambiguity",
+                        f"{unit['unit_id']} was already filed by an earlier reading; "
+                        f"use the original receipt {receipt.get('receipt_id')} for replay or undo")
+
+
 def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
           now: object = None, reason: object = None) -> dict:
     """File the units a person confirmed. Idempotent by ``(proposal, unit)``.
@@ -2104,8 +2155,9 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
 
     **A confirmed unit files what is ON ITS CARD (v292, R7).** The unit's
     `names` ride on the record through the E-L2c road, so the nickname lands as
-    a roster ALIAS on the place its city minted and the address lands as the
-    place's own field. The GROUP that unit heads is filed with it: one promoted
+    a roster ALIAS on the individual house identified by its address, below
+    its containing city. Repeated stays share the house, not the episode;
+    collisions remain explicit. The GROUP that unit heads is filed with it: one promoted
     slice of the person's own words, the dated events on it as claims, the
     undated ones as moments, the stories as themselves. A group whose head
     nobody confirmed files nothing — an event rides its stay.
@@ -2140,6 +2192,7 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
         # In particular, an old applied proposal is not an implicit identity
         # migration. A durable receipt proves this act already completed.
         return read_offer_receipt(root, receipt_id)
+    _refuse_refiling_earlier_reading(root, proposal, chosen)
     stamp = normalized_timestamp(now, error=tc.TemporalContractError)
     before = pub.read_projection(root)
     open_before = open_opportunity_ids(root, projection=before)
@@ -2192,7 +2245,7 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
         })
         # The NAMES the record carried (§3 "why names matter"): the E-L2c
         # fields rode on the record through the one writer, and `record_unit`
-        # filed the nickname as a roster ALIAS on the place the city minted.
+        # filed the nickname as a roster alias on the resolved individual place.
         # What is reported here is what the ENTRY ended up with, never what
         # the reading asked for — a name the validator dropped was not filed.
         filed_names = {key: entry[key] for key in lr.NAME_FIELDS
@@ -2410,10 +2463,9 @@ EVENTS_SCOPE = "events"
 def _retract_aliases(receipt: dict) -> list[dict]:
     """Take back the roster aliases this receipt's apply added. Idempotent.
 
-    Only an alias the apply itself CHANGED is removed: a nickname the place
-    already answered to was not this act's to file and is not this act's to
-    take away. `roster_relations.retract_alias` is the one definition of
-    removing one; this only decides which.
+    New receipts withdraw their telling-ref ownership; another surviving stay
+    keeps its alias. Legacy receipts withdraw only aliases they changed.
+    `roster_relations.retract_alias` owns removal and preexisting-name safety.
     """
     import entity_roster  # noqa: PLC0415 — process-bound roster, as everywhere
     import roster_relations as rr  # noqa: PLC0415
@@ -3277,6 +3329,7 @@ __all__ = [
     "derive_proposal_id",
     "proposal_reading_rank",
     "is_current_proposal",
+    "proposal_matches_current_reading",
     "reading_request_key",
     "derive_story_id",
     "derive_receipt_id",

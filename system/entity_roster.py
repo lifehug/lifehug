@@ -347,6 +347,7 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
 #: them would mean a roster refresh silently drops the most common datable
 #: facts in a life story.
 _SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_relations.PLACE_IDENTITY_FIELDS)
+_SETTLED_PLACE = object()
 
 #: The two date-shaped settled fields, as a subset of the tuple above. Named
 #: once so the store's precedence rule (`entity_verdict._preferred_date`) and
@@ -397,6 +398,11 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     the roster is the settled-identity store for entities; a verdict on it
     is never contingent on this refresh's raw output.
     """
+    # Model output cannot mint identity metadata or the in-process provenance
+    # marker. Only this function's previous authoritative snapshot can do so.
+    raw_entities = [{k: v for k, v in e.items()
+                     if k not in (*roster_relations.PLACE_IDENTITY_FIELDS, "_settled_place")}
+                    for e in raw_entities]
     previous = (previous_roster or {}).get("entities") or []
     if not previous:
         return list(raw_entities), 0
@@ -408,7 +414,7 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     def preserved(entry: dict) -> dict:
         # This transient marker preserves even a containing city's authored
         # slug through normalize; it is never written into roster state.
-        return {**entry, **({"_settled_place": True} if protected_place(entry) else {})}
+        return {**entry, **({"_settled_place": _SETTLED_PLACE} if protected_place(entry) else {})}
 
     if not raw_entities:
         # Nothing to fold onto, but a settled owner_verdict must still
@@ -569,7 +575,7 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         "Rules:",
         f"- Merge aliases/variants of the same {entity_type} into ONE entry (e.g. "
         "'20s'/'My 20s'/'Twenties' → one; 'Mit' → 'MIT'). Put variants in `aliases`.",
-        f"- Pick the most natural `name` (for objects, a title like 'The Cleats').",
+        "- Pick the most natural `name` (for objects, a title like 'The Cleats').",
         "- If it clearly refers to an existing Focus above, set `maps_to_focus` to that slug.",
         "- Set `qualifies` false for anything that doesn't meet the bar above (fragments, "
         "pronouns, wrong type, mundane objects). When unsure, set qualifies false.",
@@ -708,7 +714,7 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
             "score": round(score, 2), "unique_answers": answers,
             "page_eligible": page_eligible,
         }
-        if entity_type == "place" and e.get("_settled_place"):
+        if entity_type == "place" and e.get("_settled_place") is _SETTLED_PLACE:
             entry["slug"] = e["slug"]
             for field in roster_relations.PLACE_IDENTITY_FIELDS:
                 if field in e:
