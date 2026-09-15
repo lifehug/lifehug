@@ -671,6 +671,10 @@ An established individual ref wins; a ref naming that CITY does not suppress
 address evidence. A nickname-only house can be established without a date;
 its name is not silently treated as an alias of the city. No address-equivalence
 guess or automatic rewrite of historical city aliases occurs.
+If a nickname-only stay identifies several existing houses, or stored exact
+residence identity matches multiple refs, resolution refuses before minting.
+It never creates a third house to bypass ambiguity. Add Landmark reports this
+as `content_ambiguity`; an explicit individual ref can disambiguate.
 
 Two homes in one city have different refs. Repeated stays at one house share
 the place but remain separate episodes. The existing identity resolver and

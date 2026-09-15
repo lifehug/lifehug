@@ -113,6 +113,7 @@ import temporal_publication as pub  # noqa: E402
 import temporal_receipts as trcpt  # noqa: E402
 import temporal_store as store  # noqa: E402
 from lifehug_core import INTERACTIONS_DIR  # noqa: E402
+from roster_relations import RosterIdentityUncertain  # noqa: E402
 from vault_paths import atomic_write_vault_text  # noqa: E402
 from temporal_claims import collapsed_text, normalized_timestamp  # noqa: E402
 
@@ -2220,6 +2221,8 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
             payload["landmark"]["place_name"] = place_name
         try:
             summary = _writer.record_unit(payload, now=now)
+        except RosterIdentityUncertain as exc:
+            raise LandmarkOfferError("content_ambiguity", str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 — every write failure is typed
             raise LandmarkOfferError("write_failure",
                                      f"{unit['unit_id']} did not file: {exc}") from exc

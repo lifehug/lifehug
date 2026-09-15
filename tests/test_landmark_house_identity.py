@@ -300,6 +300,12 @@ class HouseIdentityTests(OfferVaultCase):
         first = self.file_house(place_ref="place/riverbend")
         ref = first["filed"][0]["place_ref"]
         self.assertNotEqual(ref, "place/riverbend")
+        snapshot = entity_roster.load_roster("place")
+        entity_roster.write_roster("place", [
+            {**e, "aliases": [*e["aliases"], "Riverbend"]}
+            if rr.entity_ref("place", e) == ref else e for e in snapshot["entities"]])
+        # Explicit individual-kind provenance wins even if an alias happens
+        # to collide with the containing city's name.
         second = self.file_house("Renamed House", "An explicitly corrected address", "2000", "2002", place_ref=ref)
         self.assertEqual(second["filed"][0]["place_ref"], ref)
 
@@ -322,6 +328,27 @@ class HouseIdentityTests(OfferVaultCase):
         self.assertEqual(lo.read_offer_receipt(self.root, second["receipt_id"]), second)
         lo.retract(second["receipt_id"], self.root, now=NOW)
         self.assertEqual(self.resolve("Moonstone").resolved_ref, first["filed"][0]["place_ref"])
+
+    def test_nickname_only_stay_cannot_mint_a_third_house_to_escape_ambiguity(self):
+        self.file_house()
+        self.file_house("Moonstone", "28 Ash Lane", "2000", "2002")
+        before = entity_roster.load_roster("place")
+        with self.assertRaisesRegex(lo.LandmarkOfferError, "nickname identifies multiple houses") as caught:
+            self.file_house("Moonstone", "", "2010", "2012")
+        self.assertEqual(caught.exception.code, "content_ambiguity")
+        self.assertEqual(entity_roster.load_roster("place"), before)
+        self.assertEqual(len([e for e in before["entities"] if e.get("place_kind") == "residence"]), 2)
+        self.assertEqual(len(self.entries("residences")), 2)
+
+    def test_duplicate_stored_residence_identity_refuses_before_mint(self):
+        identity = {"address": "14 willow lane", "city": "riverbend"}
+        snapshot = {"type": "place", "entities": [
+            {"name": name, "slug": name, "aliases": [], "place_kind": "residence",
+             "residence_identity": identity} for name in ("old-house-a", "old-house-b")]}
+        before = copy.deepcopy(snapshot)
+        with self.assertRaisesRegex(rr.RosterIdentityUncertain, "multiple places"):
+            rr.resolve_residence_place({"address": "14 Willow Lane", "city": "Riverbend"}, snapshot)
+        self.assertEqual(snapshot, before)
 
     def test_legacy_city_alias_is_not_reassigned_or_reported_as_success(self):
         city = {"name": "Riverbend", "slug": "riverbend", "aliases": ["Moonstone"]}

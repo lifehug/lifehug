@@ -69,6 +69,10 @@ class RosterRelationError(ValueError):
     """A roster relation could not be resolved, minted or filed."""
 
 
+class RosterIdentityUncertain(RosterRelationError):
+    """Existing house identity is ambiguous; minting is not a resolution."""
+
+
 def roster_entities(snapshot: object) -> list[dict]:
     """Every entity row in a roster snapshot, tolerant of both stored shapes
     (`entity_roster.load_roster`'s ``{"entities": [...]}`` or a bare list)."""
@@ -181,7 +185,7 @@ def resolve_residence_place(record: dict, snapshot: object) -> tuple[str | None,
     nickname = str(record.get("nickname") or "").strip()
     explicit = find_by_ref("place", snap, record.get("place_ref"))
     city_matches = {entity_ref("place", e) for e in find_by_alias(snap, city)}
-    is_city = (explicit is not None and (
+    is_city = (explicit is not None and explicit.get("place_kind") != "residence" and (
         entity_ref("place", explicit) in city_matches
         or explicit.get("place_kind") in {"city", "region", "country"}))
     individual_names = {ir.normalized_mention_key(v) for v in (address, nickname) if v}
@@ -205,17 +209,21 @@ def resolve_residence_place(record: dict, snapshot: object) -> tuple[str | None,
     matches = [e for e in roster_entities(snap) if e.get("residence_identity") == identity]
     if len(matches) == 1:
         return entity_ref("place", matches[0]), snap
+    if len(matches) > 1:
+        raise RosterIdentityUncertain("multiple places have the supplied residence identity")
     if not address:
         named = [e for e in find_by_alias(snap, nickname)
                  if e.get("place_kind") == "residence"
                  and (not city or (e.get("residence_identity") or {}).get("city") == norm(city))]
         if len(named) == 1:
             return entity_ref("place", named[0]), snap
+        if len(named) > 1:
+            raise RosterIdentityUncertain("the nickname identifies multiple houses; supply an individual place ref or address")
 
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
     slug = f"residence-{digest}"
     if any(_slug_of(e) == slug for e in roster_entities(snap)):
-        raise RosterRelationError("residence identity is ambiguous")
+        raise RosterIdentityUncertain("residence identity is ambiguous")
     # A nickname-only place still needs an independent name so retracting its
     # alias does not leave that same alias active as the entity's primary name.
     label = ", ".join(v for v in (address, city) if v) if address else f"Residence {digest}"
@@ -252,6 +260,12 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
     shape `event_binding.ambiguous_work_item` already mints for two eras
     sharing a label. Adding an alias that is already present is an idempotent
     success with ``changed: False``.
+
+    With a telling-ref ``owner``, record the owned claim even when it collides:
+    the existing multi-match resolver must see both candidates. Such a result
+    remains ``applied: False`` and names the ambiguity; ``changed`` describes
+    recorded state, not a successful unique identity decision. Ownership is
+    retained separately from whether this call first inserted the alias.
 
     Returns one of:
       ``{"applied": True, "snapshot": ..., "changed": bool}``
