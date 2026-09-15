@@ -747,3 +747,33 @@ apply receipt. Retry reuses immutable source/claim identities and publishes
 the complete result. Previously successful receipts still short-circuit before
 the scopes, including receipts subsequently undone; no historical receipt,
 projection-gain receipt, source or proposal is rewritten by this upgrade.
+
+## Amendment 7, 2026-09-15 (v299): Validated Receipt Directory Inventory
+
+The follow-up contract is `docs/pr-specs/landmark-receipt-fold-scale.md`.
+v298 still performs 78 full index folds for a 76-unit grouped filing. A
+warm synthetic fold of 1,107 receipts made 28,808 stat calls and 4,430
+directory scans; its unprofiled 0.398 seconds outweighed index serialization
+at 0.038 seconds. The actual hosted filing still timed out despite the
+previous synthetic gate. This amendment addresses traversal, not an assumed
+need to defer writes or calculate a landmark-only index.
+
+Within the existing `receipt_read_batch`, `vault_paths.VaultDirectoryInventory`
+retains only directory signatures and names. A refresh opens the bound root
+and receipt subtree without following symlinks, rejects root identity drift,
+and visits every child with fresh metadata. Unchanged directories reuse their
+names; membership changes force enumeration. Existing-file signatures are
+checked independently of parent timestamps, so edits, corruption and repair
+remain observable. Changed/new inputs still use the canonical receipt reader.
+Directory identity and membership are checked around each visit, with root
+and subtree bindings checked again before the result is returned. Symlinks,
+special files and concurrent tree changes fail closed rather than licensing
+stale cached results. All descriptors close on success or exception.
+
+Parsed receipt copies remain isolated from callers. Directory and receipt
+caches close with their vault-bound scope, including nested exceptions and
+escaped contexts. Corrections are still loaded afresh; the full authoritative
+fold and every active-index write are unchanged. Standalone receipt readers,
+immutable write validation, sequential landmark merge/supersession, final
+publication ordering and applied-receipt replay retain their existing paths.
+No durable format, identity formula, model request or host budget changes.

@@ -104,3 +104,63 @@ Done when: exact-head CI is green, the host budget gate passes, the actual
 filing is verified durably, and both repositories complete normal merges
 with staging back on full-CI-green main. If live evidence exposes another
 cause, continue diagnosis instead of declaring success.
+
+## Implementation Evidence (2026-09-15)
+
+Run from the candidate checkout, optionally passing an older OSS checkout to
+`--framework` for a reference comparison:
+
+```bash
+python3 -B tests/benchmark_landmark_receipt_fold.py --moments 1000
+python3 -B tests/benchmark_landmark_receipt_fold.py --moments 1000 --framework /path/to/v298
+```
+
+The script uses the platform temporary directory and resolves it before
+creating a disposable synthetic vault. On macOS the repo test convention is
+`TMPDIR=/private/tmp`. On Linux the benchmark pins its own process to one CPU
+from its allowed affinity set; no system-wide setting is changed. On macOS
+affinity is unavailable and the output says so. No private fixture or live
+model call is used.
+
+Serialized same-machine Python 3.12 / macOS runs compared v298
+`1aca370f8ce304a4d4b18867e7c81bcb55706c3b` with this implementation. Both
+started with 1,000 moments, 37 landmark sources, 1,087 receipts, 1,160 claims
+and 50 corrections; the calculated projection was 2,382,270 bytes. The
+filing contained 76 residence units with invented house addresses, nicknames
+and map links, plus 10 grouped events. Both produced 76 filed names and the
+same complete active-index fold oracle, then replayed without changing any
+vault bytes.
+
+| Measurement | v298 | v299 candidate |
+| --- | ---: | ---: |
+| Apply wall seconds | 51.430 | 27.677 |
+| Apply process CPU seconds | 49.974 | 27.127 |
+| Directory enumerations | 336,558 | 2,789 |
+| `os.stat` calls | 2,443,917 | 608,639 |
+| `os.fstat` calls | 16,368 | 521,914 |
+| `os.open` calls | 79,765 | 253,833 |
+| Ordinary receipt reader calls | 87,884 | 1,173 |
+| Receipt loading seconds (inclusive) | 34.797 | 11.206 |
+| Full fold seconds (inclusive) | 39.548 | 16.172 |
+| Active-index write seconds | 4.051 | 3.926 |
+| Full folds / index writes | 78 / 78 | 78 / 78 |
+| Landmark redraws / calculated publications | 77 / 1 | 77 / 1 |
+
+The descriptor checks intentionally increase `fstat` and `open` counts while
+removing repeated directory enumeration and full-path validation. Inclusive
+phase durations overlap and must not be summed. A subsequent small smoke
+used the portable temp-directory command and additionally asserted every
+one of the 76 alias operations was applied. That assertion was added after
+the large comparison had started; it was not part of those recorded runs.
+
+Local affected-suite verification passed on Python 3.12: 36 focused inventory
+and publication/cache tests; 275 temporal tests; 664 landmark tests (four
+existing skips); and 89 vault-only, roster and extraction/recorder tests.
+The landmark suite also reran the original populated-archive regression.
+The 36 focused tests overlap the landmark suite. Manifest validation found
+all 543 distributed files, and `git diff --check` was clean.
+
+These are single-threaded local measurements, not a Cloud Run performance
+verdict. The exact immutable candidate still requires full OSS CI, the
+hosted one-attempt 90-second gate, and parent-owned durable live UI filing
+verification. No execution budget was increased.

@@ -276,15 +276,18 @@ class ReceiptReadBatchTests(OfferVaultCase):
         seed_moments(self.root, 2)
         self.paths = ts.receipt_relative_paths(self.root)
 
-    def test_unchanged_receipts_parse_once_but_every_fold_still_lists_paths(self):
+    def test_unchanged_receipts_parse_once_and_every_fold_refreshes_inventory(self):
         with mock.patch.object(ts, "receipt_from_dict", wraps=ts.receipt_from_dict) as parse, \
                 mock.patch.object(ts, "receipt_relative_paths", wraps=ts.receipt_relative_paths) as listing:
             with ts.receipt_read_batch(self.root):
-                first = ts.fold_active_index(self.root)
-                second = ts.fold_active_index(self.root)
+                inventory = ts._RECEIPT_READ_BATCH.get().inventory
+                with mock.patch.object(inventory, "visit_files", wraps=inventory.visit_files) as refresh:
+                    first = ts.fold_active_index(self.root)
+                    second = ts.fold_active_index(self.root)
+                self.assertEqual(refresh.call_count, 2)
                 self.assertEqual(first, second)
                 self.assertEqual(parse.call_count, len(self.paths))
-                self.assertEqual(listing.call_count, 2)
+                self.assertEqual(listing.call_count, 0)
             self.assertEqual(ts.fold_active_index(self.root), first)
             self.assertEqual(parse.call_count, 2 * len(self.paths))
 

@@ -931,6 +931,111 @@ def walk_vault_tree(
     return tuple(rows)
 
 
+def stat_signature(info: os.stat_result) -> tuple:
+    """Identity and change metadata; timestamps alone cannot identify a file."""
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
+class VaultDirectoryInventory:
+    """Bounded directory-name reuse, never a cached claim about file contents.
+
+    Every visit pins and checks directories without following symlinks and
+    stats every child. Only an unchanged directory's names are reusable.
+    No descriptors survive a visit; callers own the inventory's lifetime.
+    """
+
+    def __init__(self, vault_root: Path, relative: str):
+        self.root = Path(os.path.abspath(Path(vault_root).expanduser()))
+        self.relative = _relative_to_vault(self.root / relative, self.root)
+        fd = _open_absolute_dir_no_follow(self.root)
+        try:
+            info = os.fstat(fd)
+            self.identity = (info.st_dev, info.st_ino)
+        finally:
+            os.close(fd)
+        self.directories: dict[str, tuple[tuple, tuple[str, ...]]] = {}
+
+    def clear(self) -> None:
+        self.directories.clear()
+
+    def _check_root(self, fd: int) -> None:
+        info = os.fstat(fd)
+        if (info.st_dev, info.st_ino) != self.identity:
+            raise ValueError("inventory vault root identity changed")
+
+    def check_root(self) -> None:
+        fd = _open_absolute_dir_no_follow(self.root)
+        try:
+            self._check_root(fd)
+        finally:
+            os.close(fd)
+
+    def visit_files(self, visit: Callable[[str, tuple], None]) -> None:
+        """Visit JSON files with fresh metadata, or fail closed on a tree swap.
+
+        Membership edits invalidate directory names; edits to an existing
+        file are detected separately even when its parent has not changed.
+        The visitor must not write this subtree while it is being inspected.
+        """
+        seen: set[str] = set()
+
+        def walk(fd: int, prefix: str) -> None:
+            before = stat_signature(os.fstat(fd))
+            cached = self.directories.get(prefix)
+            if cached is not None and cached[0] == before:
+                names = cached[1]
+            else:
+                with os.scandir(fd) as entries:
+                    names = tuple(sorted(entry.name for entry in entries))
+            seen.add(prefix)
+            for name in names:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                relative = f"{prefix}/{name}"
+                if stat.S_ISDIR(info.st_mode):
+                    child = os.open(name, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=fd)
+                    try:
+                        if stat_signature(os.fstat(child)) != stat_signature(info):
+                            raise ValueError("inventory directory changed before inspection")
+                        walk(child, relative)
+                        current = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                        if stat_signature(current) != stat_signature(info):
+                            raise ValueError("inventory directory binding changed")
+                    finally:
+                        os.close(child)
+                elif stat.S_ISREG(info.st_mode):
+                    if name.endswith(".json"):
+                        visit(relative, stat_signature(info))
+                else:
+                    raise ValueError("inventory contains a symlink or special file")
+            if stat_signature(os.fstat(fd)) != before:
+                raise ValueError("inventory membership changed during inspection")
+            self.directories[prefix] = (before, names)
+
+        root_fd = _open_absolute_dir_no_follow(self.root)
+        try:
+            self._check_root(root_fd)
+            try:
+                base_fd = _open_relative_dir_no_follow(root_fd, self.relative, create=False)
+            except FileNotFoundError:
+                self.clear()
+                self.check_root()
+                _verify_directory_binding(self.root, Path(), root_fd)
+                return
+            try:
+                walk(base_fd, self.relative.as_posix())
+                _verify_directory_binding(self.root, self.relative, base_fd)
+                self.check_root()
+            finally:
+                os.close(base_fd)
+            self.directories = {key: value for key, value in self.directories.items() if key in seen}
+        except (OSError, ValueError):
+            self.clear()
+            raise
+        finally:
+            os.close(root_fd)
+
+
 def exported_contract() -> dict[str, object]:
     """Stable one-way export for hosted parity; contains no machine-local roots."""
     return json.loads(json.dumps(VAULT_CONTRACT, sort_keys=True))
