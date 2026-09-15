@@ -1522,6 +1522,16 @@ not a success receipt; its calculated projection can remain at the preceding
 generation until retry/repair. Existing applied receipts replay without writes.
 No model, reading revision, CLI protocol or host timeout budget changes.
 
+**Receipt traversal, v299:** that same bounded scope now reuses unchanged
+directory names while refreshing directory membership and every receipt's
+metadata on each fold. No-follow directory handles validate shared ancestors
+once per refresh and reject root/ancestor swaps, including during a read.
+Changed or repaired files use the ordinary reader; cached values remain
+caller-isolated. Full claim/correction folds and active-index writes are not
+deferred or filtered. No handles outlive a refresh, and no inventory survives
+its scope. Synthetic performance evidence does not replace the hosted budget
+gate and live filing verification.
+
 **Current Add Landmark amendment, v297 (#335/#336):** `name_evidence` carries
 unit-owned exact accepted value occurrences, never paragraph coverage. Reading
 revision 2 allows a new same-text/same-generation proposal; hosts consume the

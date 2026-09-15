@@ -74,6 +74,7 @@ import contextvars
 import copy
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -107,9 +108,11 @@ from temporal_claims import (  # noqa: E402
     validate_source_ref,
 )
 from vault_paths import (  # noqa: E402
+    VaultDirectoryInventory,
     atomic_create_vault_bytes,
     atomic_write_vault_text,
     read_vault_text,
+    stat_signature,
     validate_contained_path,
 )
 
@@ -691,7 +694,7 @@ def _assertion_view(receipt: dict) -> dict:
 
 
 def receipt_relative_paths(vault_root: str | Path) -> list[str]:
-    """Every checked-in receipt path, sorted — the fold's only input listing."""
+    """Every checked-in receipt path, sorted, for unscoped receipt loading."""
     root = _vault_root(vault_root)
     base = store_path(root, RECEIPTS_DIR)
     if not base.is_dir():
@@ -707,6 +710,7 @@ def receipt_relative_paths(vault_root: str | Path) -> list[str]:
 @dataclass
 class _ReceiptReadBatch:
     root: Path
+    inventory: VaultDirectoryInventory
     receipts: dict[str, tuple[tuple, ExtractionReceipt]] = field(default_factory=dict)
     closed: bool = False
 
@@ -720,16 +724,20 @@ _RECEIPT_READ_BATCH: contextvars.ContextVar[_ReceiptReadBatch | None] = (
 def receipt_read_batch(vault_root: str | Path):
     """Reuse validated immutable inputs only within one vault's bounded act.
 
-    Folds still list receipt paths and load corrections anew. File changes
-    invalidate reuse; no derived index, missing file or parse failure is cached.
+    Folds refresh directory membership and file signatures and load corrections
+    anew. Only unchanged directory names and validated receipts are reused;
+    no derived index, missing file or parse failure is cached.
     """
-    root = _vault_root(vault_root).resolve()
+    root = Path(os.path.abspath(_vault_root(vault_root)))
     parent = _RECEIPT_READ_BATCH.get()
     if parent is not None and parent.closed:
         parent = None
     if parent is not None and parent.root != root:
         raise TemporalStoreError("unsafe_store_path", "receipt batch cannot cross vaults")
-    batch = parent or _ReceiptReadBatch(root)
+    try:
+        batch = parent or _ReceiptReadBatch(root, VaultDirectoryInventory(root, RECEIPTS_DIR))
+    except (OSError, ValueError) as exc:
+        raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
     token = _RECEIPT_READ_BATCH.set(batch)
     try:
         yield
@@ -738,6 +746,7 @@ def receipt_read_batch(vault_root: str | Path):
         if parent is None:
             batch.closed = True
             batch.receipts.clear()
+            batch.inventory.clear()
 
 
 def _receipt_file_signature(path: Path) -> tuple | None:
@@ -745,8 +754,7 @@ def _receipt_file_signature(path: Path) -> tuple | None:
         info = path.stat(follow_symlinks=False)
     except OSError:
         return None
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
-            info.st_mtime_ns, info.st_ctime_ns)
+    return stat_signature(info)
 
 
 def read_receipt(vault_root: str | Path, relative: str) -> ExtractionReceipt | None:
@@ -757,8 +765,12 @@ def read_receipt(vault_root: str | Path, relative: str) -> ExtractionReceipt | N
         batch = None
     signature = None
     if batch is not None:
-        if _vault_root(vault_root).resolve() != batch.root:
+        if Path(os.path.abspath(_vault_root(vault_root))) != batch.root:
             raise TemporalStoreError("unsafe_store_path", "receipt batch cannot cross vaults")
+        try:
+            batch.inventory.check_root()
+        except (OSError, ValueError) as exc:
+            raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
         # Repeat containment/symlink checks even on a cache hit. The old reader
         # remains the only way a new or changed receipt enters this scope.
         path = store_path(vault_root, relative)
@@ -787,8 +799,39 @@ def load_receipts(
     """``(receipts, unreadable_relative_paths)`` — both sorted, neither hidden."""
     receipts: list[ExtractionReceipt] = []
     unreadable: list[str] = []
-    for relative in receipt_relative_paths(vault_root):
-        receipt = read_receipt(vault_root, relative)
+    batch = _RECEIPT_READ_BATCH.get()
+    if batch is not None and batch.closed:
+        batch = None
+    if batch is None:
+        rows = [(relative, read_receipt(vault_root, relative))
+                for relative in receipt_relative_paths(vault_root)]
+    else:
+        if Path(os.path.abspath(_vault_root(vault_root))) != batch.root:
+            raise TemporalStoreError("unsafe_store_path", "receipt batch cannot cross vaults")
+        rows = []
+        observed: set[str] = set()
+
+        def read_validated(relative: str, signature: tuple) -> None:
+            observed.add(relative)
+            cached = batch.receipts.get(relative)
+            if cached is not None and cached[0] == signature:
+                receipt = copy.deepcopy(cached[1])
+            else:
+                # The ordinary reader remains the only parser and revalidates
+                # changed/new files. Metadata never licenses a new input.
+                batch.receipts.pop(relative, None)
+                receipt = read_receipt(vault_root, relative)
+            rows.append((relative, receipt))
+
+        try:
+            batch.inventory.visit_files(read_validated)
+        except (OSError, ValueError) as exc:
+            batch.inventory.clear()
+            batch.receipts.clear()
+            raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
+        batch.receipts = {key: value for key, value in batch.receipts.items() if key in observed}
+        rows.sort(key=lambda row: row[0])
+    for relative, receipt in rows:
         if receipt is None:
             unreadable.append(relative)
         else:
