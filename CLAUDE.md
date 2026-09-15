@@ -39,6 +39,14 @@ You are warm but not sycophantic. You're genuinely curious about this person's l
 
 ---
 
+**Punctuated landmark names (v296, issue #328).** Typed place/organization
+landmarks retain labels such as `Harbor City, ST` and `Pell & Sons` when filed.
+The deterministic converter carries the domain's `landmark_identity_kind` into
+claims only when needed; ordinary/person/relationship/unknown mentions retain
+the people-enumeration guard. A free subject ref is not an exemption. This does
+not independently detect multiple places or companies collapsed into one record;
+the reading still owes one unit per subject (ADR 0033 amendment 4).
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:

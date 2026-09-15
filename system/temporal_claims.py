@@ -378,6 +378,7 @@ ERROR_CODES = (
     "subject_mention_required",
     "subject_mention_too_long",
     "aggregate_subject_mention",
+    "invalid_landmark_identity_kind",
     "identity_claim_carries_no_temporal_value",
     "identity_claim_carries_no_event",
     "occurrence_claim_carries_no_temporal_value",
@@ -501,10 +502,10 @@ def split_subject_enumeration(text: object) -> tuple[str, ...]:
     otherwise the "and" was grammar — *"the summer after we moved and settled
     in"* is one mention — and the original comes back whole.
 
-    Known and accepted: a single subject whose own name contains "and" splits.
-    The subject slot names one subject; a wedding, a shop or a band with a
-    conjunction in its name belongs in the event or the resolved ref, and the
-    plan's cardinality defect is worth that trade.
+    A single subject whose own name contains "and" still splits. The validator
+    retains this tradeoff for untyped mentions and people; only deterministic
+    landmark imports annotated with a place/organization identity kind qualify for
+    the narrow exception in ADR 0033. A free subject_ref is not such evidence.
     """
     cleaned = _text(text)
     if not cleaned:
@@ -747,6 +748,13 @@ def extractor_version_string(
         if cleaned:
             parts.append(f"{key}:{cleaned}")
     return "/".join(parts)
+
+
+# Shared with the landmark converter: these are producer identities, not a
+# free-text claim's permission to invent its subject type.
+LANDMARK_LEGACY_EXTRACTOR = extractor_version_string("legacy-entry-import", rule_version="1")
+LANDMARK_RECORD_EXTRACTOR = extractor_version_string("landmark-record", rule_version="1")
+ATOMIC_LANDMARK_IDENTITY_KINDS = ("place", "organization")
 
 
 # --------------------------------------------------------------------------
@@ -1152,6 +1160,11 @@ class TemporalClaim:
     supersedes_claim_ids: tuple[str, ...] = ()
     subject_resolution: dict | None = None
     schema_version: int = SCHEMA_VERSION
+    #: The domain's declared type, not proof that arbitrary text is singular.
+    #: Deterministic import annotation, never part of claim identity. Only
+    #: present when a typed place/organization name needs the punctuation
+    #: qualification; ordinary historic claims remain byte-identical.
+    landmark_identity_kind: str | None = None
 
     def to_dict(self) -> dict:
         payload: dict = {
@@ -1176,6 +1189,7 @@ class TemporalClaim:
             ("event_mention", self.event_mention),
             ("event_kind", self.event_kind),
             ("subject_resolution", self.subject_resolution),
+            ("landmark_identity_kind", self.landmark_identity_kind),
         ):
             if value is not None:
                 payload[key] = value
@@ -1238,6 +1252,26 @@ def derive_claim_id(
     )
 
 
+def _validated_landmark_identity_kind(value: dict, source_ref: dict) -> str | None:
+    kind = value.get("landmark_identity_kind")
+    if kind is None:
+        return None
+    if (
+        not isinstance(kind, str)
+        or kind not in ATOMIC_LANDMARK_IDENTITY_KINDS
+        or _text(value.get("source_kind")) != "import"
+        or not source_ref["source_id"].startswith("landmark:entry-")
+        or _text(value.get("extractor_version")) not in (
+            LANDMARK_LEGACY_EXTRACTOR, LANDMARK_RECORD_EXTRACTOR
+        )
+    ):
+        raise TemporalClaimError(
+            "invalid_landmark_identity_kind",
+            "a place/organization landmark identity needs deterministic import provenance",
+        )
+    return kind
+
+
 def validate_temporal_claim(value: object, *, now: object = None) -> dict:
     """Normalize a claim or raise :class:`TemporalClaimError`.
 
@@ -1246,7 +1280,8 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
 
     * the raw ``subject_mention`` is required and survives resolution;
     * an enumerated mention is refused by name, with the parts in the error, so
-      *"Ada, Bo, Cy, and Della"* becomes four claims and never one;
+      *"Ada, Bo, Cy, and Della"* becomes four claims and never one. A typed
+      place/organization landmark import retains its punctuated name (ADR 0033);
     * ``identity`` claims carry no date and no event; an ``occurrence`` claim
       carries an event and no date; every dated claim carries an
       ``event_kind``, because a date is the date of an event and never of a
@@ -1281,8 +1316,9 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
             "subject_mention_too_long",
             f"subject_mention is {len(subject_mention)} chars; a subject is not a sentence",
         )
+    landmark_identity_kind = _validated_landmark_identity_kind(value, source_ref)
     parts = split_subject_enumeration(subject_mention)
-    if len(parts) > 1:
+    if len(parts) > 1 and landmark_identity_kind is None:
         raise TemporalClaimError(
             "aggregate_subject_mention",
             f"{subject_mention!r} names {len(parts)} subjects; emit one claim each",
@@ -1400,6 +1436,8 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
         "supersedes_claim_ids": list(supersedes),
     }
     subject_ref = _opt_text(value.get("subject_ref"))
+    if landmark_identity_kind is not None:
+        normalized["landmark_identity_kind"] = landmark_identity_kind
     if subject_ref:
         normalized["subject_ref"] = subject_ref
     if event_ref:
@@ -1524,6 +1562,7 @@ def claim_from_dict(value: object) -> TemporalClaim | None:
         supersedes_claim_ids=tuple(normalized["supersedes_claim_ids"]),
         subject_resolution=normalized.get("subject_resolution"),
         schema_version=int(normalized.get("schema_version") or SCHEMA_VERSION),
+        landmark_identity_kind=normalized.get("landmark_identity_kind"),
     )
 
 
@@ -1886,6 +1925,7 @@ def receipt_from_dict(value: object) -> ExtractionReceipt | None:
 
 
 __all__ = [
+    "ATOMIC_LANDMARK_IDENTITY_KINDS",
     "ACTIVE_INDEX_FILE",
     "CLAIM_BASES",
     "CLAIM_BASIS_BY_DATE_BASIS",
@@ -1902,6 +1942,8 @@ __all__ = [
     "EVENT_KIND_RE",
     "IDEMPOTENCY_KEYS",
     "LANDMARK_DATE_SEMANTICS",
+    "LANDMARK_LEGACY_EXTRACTOR",
+    "LANDMARK_RECORD_EXTRACTOR",
     "MAX_EVENT_MENTION_CHARS",
     "MAX_EVIDENCE_QUOTE_CHARS",
     "MAX_PLACE_MENTIONS",

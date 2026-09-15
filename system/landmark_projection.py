@@ -94,14 +94,17 @@ import event_identity as ei  # noqa: E402
 import landmarks_interaction  # noqa: E402
 import temporal_store as store  # noqa: E402
 from temporal_claims import (  # noqa: E402
+    ATOMIC_LANDMARK_IDENTITY_KINDS,
     CLAIM_BASIS_BY_DATE_BASIS,
+    LANDMARK_LEGACY_EXTRACTOR,
+    LANDMARK_RECORD_EXTRACTOR,
     SCHEMA_VERSION,
     SourceRef,
     TemporalContractError,
     bounded_quote,
     collapsed_text,
-    extractor_version_string,
     normalized_timestamp,
+    split_subject_enumeration,
     validate_extraction_receipt,
     validate_temporal_claim,
 )
@@ -130,12 +133,12 @@ LANDMARKS_SCHEMA_VERSION = 1
 #: calls nothing. Bump the rule version to re-import under a new reading; the
 #: old receipts stay on disk beside the new ones, which is the substrate's
 #: whole promise.
-LEGACY_EXTRACTOR = extractor_version_string("legacy-entry-import", rule_version="1")
+LEGACY_EXTRACTOR = LANDMARK_LEGACY_EXTRACTOR
 
 #: The live write path's extractor version. The SAME deterministic rule, named
 #: differently so the fold and a debugging human can tell an imported record
 #: from one filed after the flip. Both run :func:`entry_claims`.
-LIVE_EXTRACTOR = extractor_version_string("landmark-record", rule_version="1")
+LIVE_EXTRACTOR = LANDMARK_RECORD_EXTRACTOR
 
 #: A span's two bounds, as event kinds. Both are in
 #: ``temporal_claims.LANDMARK_DATE_SEMANTICS``; a span is stored as two dated
@@ -437,6 +440,7 @@ def _date_claim(
     source_ref: object,
     extractor_version: str,
     now: object,
+    subject_annotation: dict,
 ) -> dict | None:
     """One dated claim read out of one stored `chronology` record, or ``None``.
 
@@ -455,6 +459,7 @@ def _date_claim(
             "source_kind": "import",
             "claim_type": "date",
             "subject_mention": mention,
+            **subject_annotation,
             "event_kind": event_kind,
             "temporal_value": parsed.to_dict(),
             "evidence": [_evidence_for(entry, domain, field_label)],
@@ -530,6 +535,15 @@ def entry_claims(
     row = domain_row_or_none(name)
     mention = entry_subject_mention(entry, row, name)
     kind = date_event_kind(row)
+    # Keep ordinary old receipts identical on re-file. Only names refused by
+    # the untyped heuristic need the question set's non-person qualification.
+    subject_annotation = {}
+    if (
+        isinstance(row, dict)
+        and row.get("identity_kind") in ATOMIC_LANDMARK_IDENTITY_KINDS
+        and len(split_subject_enumeration(mention)) > 1
+    ):
+        subject_annotation["landmark_identity_kind"] = row["identity_kind"]
 
     claims: list[dict] = [
         validate_temporal_claim(
@@ -538,6 +552,7 @@ def entry_claims(
                 "source_kind": "import",
                 "claim_type": "identity",
                 "subject_mention": mention,
+                **subject_annotation,
                 "evidence": [_evidence_for(entry, name, "domain")],
                 # An entry's existence is as explicit as the act of filing it.
                 "basis": "explicit",
@@ -578,6 +593,7 @@ def entry_claims(
             source_ref=source_ref,
             extractor_version=extractor_version,
             now=now,
+            subject_annotation=subject_annotation,
         )
         if claim is not None:
             claims.append(claim)
