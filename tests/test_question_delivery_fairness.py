@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from datetime import datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 from unittest import mock
@@ -122,16 +123,54 @@ class DeliveryFairnessTests(unittest.TestCase):
             "A8",
         )
 
-    def test_silence_still_overrides_a_healthy_queue_using_delivery_history(self):
-        questions = [question("A7a", "update"), question("A8")]
+    def test_fresh_planned_question_wins_after_thirteen_silent_days(self):
+        questions = [
+            question("A7a", "What difficult choice changed the direction of your life?"),
+            question("A8", "update"),
+        ]
         self.queue.return_value = {
             "queue": [{"question_id": "A7a", "status": "queued"}],
             "expires_at": "2099-01-01T00:00:00Z",
         }
         rotation = {
-            "last_answered_at": "2000-01-01T00:00:00Z", "delivery_counts": {"A7a": 8},
+            "last_answered_at": (datetime.now() - timedelta(days=13)).isoformat(),
+            "delivery_counts": {"A7a": 8},
         }
-        self.assertEqual(ask.pick_next_question(questions, self.categories, rotation)["id"], "A8")
+        self.assertEqual(ask.pick_next_question(questions, self.categories, rotation)["id"], "A7a")
+
+    def test_unusable_queues_retain_quiet_reengagement_fallback(self):
+        future = "2099-01-01T00:00:00Z"
+        cases = [
+            ("missing queue", {}, set()),
+            ("exhausted queue", {"queue": [], "expires_at": future}, set()),
+            ("sent item", {
+                "queue": [{"question_id": "A1", "status": "sent"}],
+                "expires_at": future,
+            }, set()),
+            ("answered item", {
+                "queue": [{"question_id": "A1", "status": "queued"}],
+                "expires_at": future,
+            }, {"A1"}),
+            ("missing bank item", {
+                "queue": [{"question_id": "Z9", "status": "queued"}],
+                "expires_at": future,
+            }, set()),
+            ("expired queue", {
+                "queue": [{"question_id": "A1", "status": "queued"}],
+                "expires_at": "2000-01-01T00:00:00Z",
+            }, set()),
+        ]
+        rotation = {"last_answered_at": (datetime.now() - timedelta(days=13)).isoformat()}
+        for label, queue_data, answered_ids in cases:
+            with self.subTest(queue=label):
+                self.queue.return_value = queue_data
+                questions = [
+                    question("A1", "What was your deepest fear?", answered="A1" in answered_ids),
+                    question("B1", "update"),
+                ]
+                self.assertEqual(
+                    ask.pick_next_question(questions, self.categories, rotation)["id"], "B1"
+                )
 
     def test_one_remaining_short_or_declarative_question_is_never_exhausted_by_delivery(self):
         for text in ("Who helped?", "Tell me more."):
@@ -165,10 +204,17 @@ class DeliveryFairnessTests(unittest.TestCase):
     def test_selection_never_mutates_inputs(self):
         questions = [question("A1"), question("A2")]
         rotation = {"delivery_counts": {"A1": 2}, "last_question_id": "A1"}
-        before = copy.deepcopy((questions, rotation))
-        for picker in (ask.pick_next_question, ask.pick_reengagement_question):
-            picker(questions, self.categories, rotation)
-        self.assertEqual((questions, rotation), before)
+        queue_data = {
+            "queue": [{"question_id": "A1", "status": "queued"}],
+            "expires_at": "2099-01-01T00:00:00Z",
+        }
+        self.queue.return_value = queue_data
+        before = copy.deepcopy((questions, rotation, queue_data))
+        with mock.patch.object(ask, "write_json") as write_json:
+            for picker in (ask.pick_next_question, ask.pick_reengagement_question):
+                picker(questions, self.categories, rotation)
+        write_json.assert_not_called()
+        self.assertEqual((questions, rotation, queue_data), before)
 
 
 class ConfirmedDeliverySequenceTests(unittest.TestCase):

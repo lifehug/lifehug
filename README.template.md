@@ -82,11 +82,13 @@ Focuses drive the weekly question allocation. **David James Taylor** is the prim
 
 No ratings, no friction. The answer itself is the feedback.
 
-If the weekly queue expires or runs out, the daily picker prefers another
-unanswered question over the last delivery, then the least-delivered questions
-before category rotation. After quiet days, re-engagement applies that same
-history preference within its light/non-focus pool. Sending a question never
-checks it off; a sole unanswered question remains available.
+The daily picker serves the first usable question in the weekly queue even
+after quiet days. If that queue is missing, expired, exhausted, or otherwise
+cannot supply an unanswered queued item, quiet re-engagement gets the next
+choice after the configured silence threshold; ordinary rotation follows when
+the threshold is not met. Both fallback paths prefer another unanswered
+question over the last delivery and then the least-delivered cohort. Sending a
+question never checks it off; a sole unanswered question remains available.
 
 ## Studio: Projects & Pieces
 

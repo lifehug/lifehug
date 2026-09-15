@@ -23,8 +23,8 @@ from lifehug_core import (
 )
 
 # Adaptive cadence defaults (config-overridable): at most this many questions
-# in one day, and after this many silent days switch to a warmer re-engagement
-# question instead of re-offering the queue head.
+# in one day, and after this many silent days use a warmer re-engagement
+# question when the planned queue cannot supply one.
 DEFAULT_MAX_QUESTIONS_PER_DAY = 3
 DEFAULT_REENGAGE_AFTER_DAYS = 4
 
@@ -126,6 +126,10 @@ def pick_reengagement_question(questions, categories, rotation=None):
 
 def pick_next_question(questions, categories, rotation):
     """Honor a planned queue, otherwise rotate among less-delivered questions."""
+    planned = pick_planned_question(questions)
+    if planned:
+        return planned
+
     config = load_config()
     reengage_days = float(config.get("reengage_after_days", DEFAULT_REENGAGE_AFTER_DAYS) or DEFAULT_REENGAGE_AFTER_DAYS)
     silent = days_since_last_answer(rotation)
@@ -133,10 +137,6 @@ def pick_next_question(questions, categories, rotation):
         warm = pick_reengagement_question(questions, categories, rotation)
         if warm:
             return warm
-
-    planned = pick_planned_question(questions)
-    if planned:
-        return planned
 
     pending = _least_delivered_questions([q for q in questions if not q["answered"]], rotation)
     if not pending:
