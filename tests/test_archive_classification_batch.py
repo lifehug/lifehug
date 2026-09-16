@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -38,7 +39,12 @@ def snapshot(source: Path, context: str = "context-1") -> dict:
     }
 
 
-def full_response(snap: dict, *, events: list[dict] | None = None) -> dict:
+def full_response(
+    snap: dict,
+    *,
+    events: list[dict] | None = None,
+    candidate_questions: list[dict] | None = None,
+) -> dict:
     return {
         "_classification_mode": "full",
         "_classification_snapshot": cc.snapshot_metadata(snap),
@@ -56,7 +62,7 @@ def full_response(snap: dict, *, events: list[dict] | None = None) -> dict:
         "scene_slots": {},
         "situation_vs_story": "balanced",
         "events": [] if events is None else events,
-        "candidate_questions": [],
+        "candidate_questions": [] if candidate_questions is None else candidate_questions,
     }
 
 
@@ -252,8 +258,10 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertEqual(cs._exclude_items(str(transport)), [item])
         parsed = cs.build_parser().parse_args([
             "--batch-plan", "--exclude-items-json", str(transport),
+            "--require-candidates",
         ])
         self.assertEqual(parsed.exclude_items_json, str(transport))
+        self.assertTrue(parsed.require_candidates)
         transport.write_text(json.dumps({"items": [item]}), encoding="utf-8")
         with self.assertRaises(cs.ClassificationPreparationError) as unversioned:
             cs._exclude_items(str(transport))
@@ -286,7 +294,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
     def test_timeline_refresh_preserves_every_non_timeline_field_and_candidate_id(self) -> None:
         old = snapshot(self.a, "old")
         current = snapshot(self.a, "new")
-        prior = self.existing(self.a, old)
+        prior = self.existing(self.a, old, classification_skip_candidates=True)
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(current),
@@ -305,6 +313,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             if key not in {"events", "classification_snapshot", "classified_at", "model_used"}:
                 self.assertEqual(filed[key], value, key)
         self.assertEqual(filed["events"], response["events"])
+        self.assertTrue(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
 
     def test_full_skip_candidates_preserves_prior_candidate_ids(self) -> None:
         old = snapshot(self.a, "old")
@@ -320,6 +329,152 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
                 "response_text": json.dumps(response),
             }]))
         filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertEqual(filed["candidate_question_ids"], ["cand-preserved-1"])
+        self.assertTrue(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+        self.assertEqual(json.loads(self.candidates.read_text())["candidates"], [])
+
+    def test_explicit_candidate_requirement_converges_once_without_default_refresh(self) -> None:
+        current = snapshot(self.a)
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            archive = cs.file_batch_response(self.envelope("archive-first", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "full",
+                "response_text": json.dumps(full_response(current)),
+            }], skip=True))
+        self.assertEqual(archive["items"][0]["status"], "accepted")
+        archived = json.loads(cs.classification_path(self.a).read_text())
+        self.assertTrue(archived[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+        self.assertIsNone(cc.refresh_reason(current, archived))
+        with mock.patch.object(cc, "_load_context_catalog", return_value={}), \
+                mock.patch.object(
+                    cc, "_build_context_snapshot_from_catalog", return_value=current
+                ):
+            weekly = cc.select_refresh_targets(
+                self.root,
+                [self.a],
+                classifications={"sources/manual/alpha.md": archived},
+            )
+        self.assertEqual(weekly["pending_count"], 0)
+
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            default_plan = cs.build_batch_plan(sources=[self.a], skip_candidates=False)
+        self.assertEqual(default_plan["pending_count"], 0)
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            required_plan = cs.build_batch_plan(
+                sources=[self.a],
+                skip_candidates=False,
+                require_candidates=True,
+            )
+        self.assertEqual(required_plan["pending_count"], 1)
+        self.assertEqual(required_plan["items"][0]["reason"], "candidate_generation_needed")
+        self.assertEqual(required_plan["items"][0]["mode"], "full")
+        self.assertIn('"candidate_questions"', required_plan["items"][0]["prompt"])
+
+        response = full_response(current, candidate_questions=[{
+            "text": "What made this synthetic moment stay with you?",
+            "story_function": "meaning",
+            "priority": 0.8,
+            "reason": "Synthetic candidate-generation proof.",
+        }])
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            ordinary = cs.file_batch_response(self.envelope("ordinary-after-archive", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "full",
+                "response_text": json.dumps(response),
+            }], skip=False))
+        self.assertEqual(ordinary["items"][0]["status"], "accepted")
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertFalse(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+        self.assertEqual(len(filed["candidate_question_ids"]), 1)
+        self.assertEqual(len(json.loads(self.candidates.read_text())["candidates"]), 1)
+
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            converged = cs.build_batch_plan(
+                sources=[self.a],
+                skip_candidates=False,
+                require_candidates=True,
+            )
+        self.assertEqual(converged["pending_count"], 0)
+
+    def test_inflight_normal_full_response_survives_archive_first_race(self) -> None:
+        current = snapshot(self.a)
+        normal_payload = self.envelope("normal-inflight", [{
+            "source_path": "sources/manual/alpha.md",
+            "mode": "full",
+            "response_text": json.dumps(full_response(current, candidate_questions=[{
+                "text": "Which synthetic detail would you tell first?",
+                "story_function": "scene",
+                "priority": 0.7,
+                "reason": "Synthetic in-flight response.",
+            }])),
+        }], skip=False)
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            cs.file_batch_response(self.envelope("archive-wins-race", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "full",
+                "response_text": json.dumps(full_response(current)),
+            }], skip=True))
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            normal = cs.file_batch_response(normal_payload)
+        self.assertEqual(normal["items"][0]["status"], "accepted")
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertFalse(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+        self.assertEqual(len(filed["candidate_question_ids"]), 1)
+
+    def test_candidate_requirement_is_one_source_explicit_and_legacy_safe(self) -> None:
+        current = snapshot(self.a)
+        self.existing(self.a, current)
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            legacy = cs.build_batch_plan(
+                sources=[self.a], require_candidates=True, skip_candidates=False
+            )
+        self.assertEqual(legacy["pending_count"], 0)
+        invalid_calls = (
+            {"sources": None, "require_candidates": True},
+            {"sources": [self.a, self.b], "require_candidates": True},
+            {
+                "sources": [self.a],
+                "require_candidates": True,
+                "skip_candidates": True,
+            },
+        )
+        for kwargs in invalid_calls:
+            with self.subTest(kwargs=kwargs), self.assertRaises(
+                    cs.ClassificationPreparationError) as invalid:
+                cs.build_batch_plan(**kwargs)
+            self.assertEqual(invalid.exception.code, "candidate_request_scope_invalid")
+
+    def test_default_timeline_refresh_preserves_archive_candidate_policy(self) -> None:
+        old = snapshot(self.a, "old")
+        current = snapshot(self.a, "new")
+        self.existing(self.a, old, classification_skip_candidates=True)
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            plan = cs.build_batch_plan(sources=[self.a], skip_candidates=False)
+        self.assertEqual(plan["items"][0]["mode"], "timeline")
+        response = {
+            "_classification_mode": "timeline",
+            "_classification_snapshot": cc.snapshot_metadata(current),
+            "events": [{"title": "Context refreshed"}],
+        }
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            receipt = cs.file_batch_response(self.envelope("timeline-after-archive", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "timeline",
+                "response_text": json.dumps(response),
+            }], skip=False))
+        self.assertEqual(receipt["items"][0]["status"], "accepted")
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertTrue(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
         self.assertEqual(filed["candidate_question_ids"], ["cand-preserved-1"])
         self.assertEqual(json.loads(self.candidates.read_text())["candidates"], [])
 
@@ -366,6 +521,224 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         changed = self.envelope("replay-one", [{**item, "response_text": item["response_text"] + " "}])
         with self.assertRaisesRegex(cs.ClassificationPreparationError, "different input"):
             cs.file_batch_response(changed)
+
+    def test_public_receipt_validator_binds_closed_ordered_envelope(self) -> None:
+        snapshots = {self.a: snapshot(self.a), self.b: snapshot(self.b)}
+        payload = self.envelope("validate-one", [
+            {
+                "source_path": "sources/manual/bravo.md",
+                "mode": "full",
+                "response_text": json.dumps(full_response(snapshots[self.b])),
+            },
+            {
+                "source_path": "sources/manual/alpha.md",
+                "mode": "full",
+                "response_text": json.dumps(full_response(snapshots[self.a])),
+            },
+        ])
+        load, build = self.catalogs(snapshots)
+        with load, build:
+            receipt = cs.file_batch_response(payload)
+        with mock.patch.object(
+                cs, "_safe_source_path", side_effect=AssertionError("not pure")):
+            self.assertIs(cs.validate_batch_receipt(payload, receipt), receipt)
+        self.assertEqual(
+            [row["source_path"] for row in receipt["items"]],
+            ["sources/manual/bravo.md", "sources/manual/alpha.md"],
+        )
+
+        cases = {}
+        changed = copy.deepcopy(receipt)
+        changed.pop("counts")
+        cases["missing top field"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["unexpected"] = True
+        cases["extra top field"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["schema_version"] = 2
+        cases["schema"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["schema_version"] = True
+        cases["boolean schema"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["batch_id"] = "different"
+        cases["batch id"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["skip_candidates"] = False
+        cases["skip policy"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["input_digest"] = "sha256:" + "0" * 64
+        cases["top digest"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["receipt_path"] = "state/classification_batches/other.json"
+        cases["receipt path"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"].reverse()
+        cases["item order"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["source_path"] = "sources/manual/alpha.md"
+        cases["duplicate source"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["source_path"] = "sources/manual/other.md"
+        cases["source"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["mode"] = "timeline"
+        cases["mode"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["input_digest"] = "sha256:" + "0" * 64
+        cases["item digest"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0].pop("refusal_code")
+        cases["missing item field"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["extra"] = True
+        cases["extra item field"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["status"] = "unknown"
+        cases["status"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["status"] = []
+        cases["unhashable status"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["refusal_code"] = "not-allowed"
+        cases["successful refusal code"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["items"][0]["status"] = "refused"
+        changed["items"][0]["refusal_code"] = None
+        cases["missing refusal code"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["counts"]["accepted"] -= 1
+        cases["counts"] = changed
+        changed = copy.deepcopy(receipt)
+        changed["counts"]["refused"] = False
+        cases["boolean count"] = changed
+        for label, changed in cases.items():
+            with self.subTest(label=label), self.assertRaises(
+                    cs.ClassificationPreparationError) as invalid:
+                cs.validate_batch_receipt(payload, changed)
+            self.assertEqual(invalid.exception.code, "receipt_invalid")
+
+        malformed_envelopes = (
+            {key: value for key, value in payload.items() if key != "items"},
+            {**payload, "unexpected": True},
+        )
+        for changed in malformed_envelopes:
+            with self.assertRaises(cs.ClassificationPreparationError) as invalid:
+                cs.validate_batch_receipt(changed, receipt)
+            self.assertEqual(invalid.exception.code, "batch_schema_invalid")
+
+    def test_receipt_validator_rejects_changed_envelope_identity(self) -> None:
+        current = snapshot(self.a)
+        item = {
+            "source_path": "sources/manual/alpha.md",
+            "mode": "full",
+            "response_text": json.dumps(full_response(current)),
+        }
+        payload = self.envelope("envelope-binding", [item])
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            receipt = cs.file_batch_response(payload)
+        changed_envelopes = {
+            "source": self.envelope("envelope-binding", [{
+                **item, "source_path": "sources/manual/bravo.md",
+            }]),
+            "mode": self.envelope("envelope-binding", [{**item, "mode": "timeline"}]),
+            "skip": self.envelope("envelope-binding", [item], skip=False),
+            "response": self.envelope("envelope-binding", [{
+                **item, "response_text": item["response_text"] + " ",
+            }]),
+            "extra": self.envelope("envelope-binding", [{**item, "extra": True}]),
+        }
+        for label, changed in changed_envelopes.items():
+            with self.subTest(label=label), self.assertRaises(
+                    cs.ClassificationPreparationError) as invalid:
+                cs.validate_batch_receipt(changed, receipt)
+            self.assertEqual(invalid.exception.code, "receipt_invalid")
+
+    def test_malformed_item_receipt_binds_its_exact_attempt(self) -> None:
+        payload = self.envelope("malformed-binding", [{
+            "source_path": "sources/manual/alpha.md",
+            "mode": "full",
+            "response_text": "{}",
+            "unexpected": "first",
+        }])
+        load, build = self.catalogs({self.a: snapshot(self.a)})
+        with load, build:
+            receipt = cs.file_batch_response(payload)
+        self.assertEqual(receipt["items"][0]["status"], "refused")
+        self.assertEqual(receipt["items"][0]["refusal_code"], "item_schema_invalid")
+        self.assertEqual(cs.validate_batch_receipt(payload, receipt), receipt)
+        changed = copy.deepcopy(payload)
+        changed["items"][0]["unexpected"] = "second"
+        with self.assertRaises(cs.ClassificationPreparationError) as invalid:
+            cs.validate_batch_receipt(changed, receipt)
+        self.assertEqual(invalid.exception.code, "receipt_invalid")
+
+    def test_receipt_validator_checks_consistency_not_historical_authenticity(self) -> None:
+        current = snapshot(self.a)
+        payload = self.envelope("outcome-boundary", [{
+            "source_path": "sources/manual/alpha.md",
+            "mode": "full",
+            "response_text": json.dumps(full_response(current)),
+        }])
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            receipt = cs.file_batch_response(payload)
+        rewritten = copy.deepcopy(receipt)
+        rewritten["items"][0]["status"] = "refused"
+        rewritten["items"][0]["refusal_code"] = "self_consistent_rewrite"
+        rewritten["counts"] = {"accepted": 0, "refused": 1, "already_current": 0}
+        self.assertEqual(cs.validate_batch_receipt(payload, rewritten), rewritten)
+
+    def test_exact_replay_revalidates_the_durable_receipt(self) -> None:
+        current = snapshot(self.a)
+        payload = self.envelope("revalidate-replay", [{
+            "source_path": "sources/manual/alpha.md",
+            "mode": "full",
+            "response_text": json.dumps(full_response(current)),
+        }])
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            receipt = cs.file_batch_response(payload)
+        receipt["items"][0]["input_digest"] = "sha256:" + "0" * 64
+        cs._write_batch_receipt(receipt["receipt_path"], receipt)
+        with self.assertRaises(cs.ClassificationPreparationError) as invalid:
+            cs.file_batch_response(payload)
+        self.assertEqual(invalid.exception.code, "receipt_invalid")
+
+    def test_noncanonical_batch_source_is_refused_before_any_write(self) -> None:
+        current = snapshot(self.a)
+        payload = self.envelope("noncanonical-source", [{
+            "source_path": "./sources/manual/alpha.md",
+            "mode": "full",
+            "response_text": json.dumps(full_response(current)),
+        }])
+        load, build = self.catalogs({self.a: current})
+        with load, build, mock.patch.object(cs, "apply_prepared_classification") as apply:
+            receipt = cs.file_batch_response(payload)
+        apply.assert_not_called()
+        self.assertEqual(receipt["items"][0]["status"], "refused")
+        self.assertEqual(receipt["items"][0]["refusal_code"], "source_path_invalid")
+        self.assertEqual(cs.validate_batch_receipt(payload, receipt), receipt)
+        self.assertFalse(cs.classification_path(self.a).exists())
+
+    def test_duplicate_invalid_source_labels_fail_before_valid_sibling_writes(self) -> None:
+        current = snapshot(self.b)
+        payload = self.envelope("duplicate-invalid-label", [
+            {"source_path": "not/a/source.md", "mode": "full", "response_text": "{}"},
+            {"source_path": "not/a/source.md", "mode": "full", "response_text": "{}"},
+            {
+                "source_path": "sources/manual/bravo.md",
+                "mode": "full",
+                "response_text": json.dumps(full_response(current)),
+            },
+        ])
+        with mock.patch.object(cs, "apply_prepared_classification") as apply:
+            with self.assertRaises(cs.ClassificationPreparationError) as duplicate:
+                cs.file_batch_response(payload)
+        self.assertEqual(duplicate.exception.code, "duplicate_source")
+        apply.assert_not_called()
+        self.assertFalse(cs.classification_path(self.b).exists())
 
     def test_already_current_skips_even_an_unusable_response(self) -> None:
         current = snapshot(self.a)

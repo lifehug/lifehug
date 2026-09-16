@@ -2334,6 +2334,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
             flags.extend(["--sources-json", args.sources_json])
         if getattr(args, "exclude_items_json", None):
             flags.extend(["--exclude-items-json", args.exclude_items_json])
+        if getattr(args, "require_candidates", False):
+            flags.append("--require-candidates")
     elif getattr(args, "from_batch_response", None):
         flags.extend(["--from-batch-response", args.from_batch_response])
     elif getattr(args, "refresh_targets", False):
@@ -3134,6 +3136,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="With --batch-plan: explicit bounded JSON source list")
     p.add_argument("--exclude-items-json", metavar="PATH",
                    help="With --batch-plan: exact source/snapshot identities already attempted")
+    p.add_argument("--require-candidates", action="store_true",
+                   help="With one explicit batch source: regenerate skipped candidates")
     p.add_argument("--unclassified", action="store_true")
     p.add_argument("--stale-first", action="store_true",
                    help="With --classify-all: stale classifications first (oldest first), "

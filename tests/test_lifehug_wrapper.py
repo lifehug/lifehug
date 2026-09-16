@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,6 +94,20 @@ class LifehugWrapperTests(unittest.TestCase):
             with self.subTest(command=command):
                 args = parser.parse_args(command)
                 self.assertTrue(callable(args.func))
+
+    def test_classify_story_wrapper_forwards_require_candidates(self):
+        mod = load_wrapper()
+        args = mod.build_parser().parse_args([
+            "classify-story",
+            "--batch-plan",
+            "--sources-json",
+            "/tmp/one-source.json",
+            "--require-candidates",
+        ])
+        with mock.patch.object(mod, "run_python", return_value=0) as run:
+            self.assertEqual(args.func(args), 0)
+        self.assertEqual(run.call_args.args[0], "classify_story.py")
+        self.assertIn("--require-candidates", run.call_args.args[1])
 
     def test_candidate_status_choices_match_candidate_manager(self):
         wrapper = load_wrapper()
