@@ -92,6 +92,7 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_EXCLUDE_ITEMS_BYTES = 2 * 1024 * 1024
 BATCH_RECEIPTS_DIR = CLASSIFICATION_BATCHES_DIR.relative_to(REPO_DIR)
 CLASSIFICATION_MODES = ("full", "timeline")
+CLASSIFICATION_SKIP_CANDIDATES_FIELD = "classification_skip_candidates"
 BATCH_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -592,14 +593,24 @@ def _existing_classification(source_path: Path) -> tuple[Path | None, dict | Non
     return None, None
 
 
-def classification_mode(snapshot: dict, existing: object) -> str | None:
+def classification_mode(
+    snapshot: dict,
+    existing: object,
+    *,
+    require_candidates: bool = False,
+) -> str | None:
     """Return the model work needed for this exact source/context state.
 
     Timeline-only refresh is deliberately narrow: only a context digest
     change on an otherwise compatible, non-stale classification qualifies.
     Source, prompt, extractor, legacy, and explicit-stale changes require a
     full reread. ``None`` means the existing result is already current.
+    ``require_candidates`` additionally makes an explicitly skip-true full
+    reading eligible for one full candidate-bearing pass.
     """
+    if (require_candidates and isinstance(existing, dict)
+            and existing.get(CLASSIFICATION_SKIP_CANDIDATES_FIELD) is True):
+        return "full"
     reason = classifier_ctx.refresh_reason(snapshot, existing)
     if reason is None:
         return None
@@ -1282,7 +1293,11 @@ def prepare_classification(
     classifier_ctx.validate_response(result, snapshot, story_text)
     _path, existing = _existing_classification(source_path)
     base_digest = _digest(existing) if isinstance(existing, dict) else ""
-    expected_mode = classification_mode(snapshot, existing)
+    expected_mode = classification_mode(
+        snapshot,
+        existing,
+        require_candidates=(mode == "full" and not skip_candidates),
+    )
     if expected_mode is None:
         return {
             "status": "already_current",
@@ -1334,6 +1349,7 @@ def prepare_classification(
             candidate_ids,
             snapshot,
         )
+        classification[CLASSIFICATION_SKIP_CANDIDATES_FIELD] = bool(skip_candidates)
         if new_candidates:
             updated_store["candidates"].extend(new_candidates)
     return {
@@ -1649,12 +1665,19 @@ def build_batch_plan(
     limit: int = DEFAULT_BATCH_LIMIT,
     sources: list[Path] | None = None,
     skip_candidates: bool = False,
+    require_candidates: bool = False,
     exclude_items: list[dict] | None = None,
 ) -> dict:
     """Build one bounded private transport document from one shared catalog."""
     if isinstance(limit, bool) or not 0 <= int(limit) <= MAX_BATCH_ITEMS:
         raise ClassificationPreparationError(
             "batch limit must be between 0 and 500", code="limit_invalid"
+        )
+    if require_candidates and (
+            sources is None or len(sources) != 1 or skip_candidates):
+        raise ClassificationPreparationError(
+            "candidate generation requires one explicit source and skip_candidates=false",
+            code="candidate_request_scope_invalid",
         )
     inventory_scope = "all" if sources is None else "explicit"
     excluded_identities = _normalize_exclude_items(exclude_items)
@@ -1667,9 +1690,20 @@ def build_batch_plan(
         )
         _path, existing = _existing_classification(source)
         reason = classifier_ctx.refresh_reason(snapshot, existing)
-        if reason is None:
+        candidate_generation_needed = (
+            require_candidates
+            and isinstance(existing, dict)
+            and existing.get(CLASSIFICATION_SKIP_CANDIDATES_FIELD) is True
+        )
+        if reason is None and not candidate_generation_needed:
             continue
-        mode = classification_mode(snapshot, existing)
+        if reason is None:
+            reason = "candidate_generation_needed"
+        mode = classification_mode(
+            snapshot,
+            existing,
+            require_candidates=require_candidates,
+        )
         pending.append({
             "source": source,
             "source_path": _relative_path(source),
@@ -1766,29 +1800,39 @@ def _batch_error_code(exc: Exception) -> str:
 def _batch_item_identity(item: object, index: int) -> dict:
     row = item if isinstance(item, dict) else {}
     response = row.get("response_text")
-    if isinstance(response, str):
-        response_digest = _digest(response.encode("utf-8"))
-    else:
-        response_digest = _digest(response)
-    return {
+    try:
+        if isinstance(response, str):
+            response_digest = _digest(response.encode("utf-8"))
+        else:
+            response_digest = _digest(response)
+    except (TypeError, ValueError) as exc:
+        raise ClassificationPreparationError(
+            "batch items must be JSON values", code="batch_schema_invalid"
+        ) from exc
+    identity = {
         "index": index,
         "source_path": row.get("source_path") if isinstance(row.get("source_path"), str) else "",
         "mode": row.get("mode") if isinstance(row.get("mode"), str) else "",
         "response_digest": response_digest,
     }
+    if (not isinstance(item, dict)
+            or set(item) != {"source_path", "mode", "response_text"}
+            or not isinstance(item.get("source_path"), str)
+            or not isinstance(item.get("mode"), str)
+            or not isinstance(item.get("response_text"), str)):
+        try:
+            identity["malformed_digest"] = _digest(item)
+        except (TypeError, ValueError) as exc:
+            raise ClassificationPreparationError(
+                "batch items must be JSON values", code="batch_schema_invalid"
+            ) from exc
+    return identity
 
 
-def _receipt_counts(items: list[dict]) -> dict:
-    return {
-        status: sum(row["status"] == status for row in items)
-        for status in ("accepted", "refused", "already_current")
-    }
-
-
-def file_batch_response(payload: object, *, model: str = "external-agent") -> dict:
-    """Validate one envelope, apply valid siblings, then publish its receipt."""
+def _batch_envelope_identity(payload: object) -> dict:
     if (not isinstance(payload, dict)
             or set(payload) != {"schema_version", "batch_id", "skip_candidates", "items"}
+            or type(payload.get("schema_version")) is not int
             or payload.get("schema_version") != BATCH_SCHEMA_VERSION):
         raise ClassificationPreparationError(
             "batch response schema_version must be 1", code="batch_schema_invalid"
@@ -1799,7 +1843,6 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
             "batch response skip_candidates must be boolean",
             code="batch_schema_invalid",
         )
-    skip_candidates = payload["skip_candidates"]
     raw_items = payload.get("items")
     if not isinstance(raw_items, list):
         raise ClassificationPreparationError(
@@ -1810,21 +1853,154 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
             "batch response exceeds 500 items", code="too_many_items"
         )
     identities = [_batch_item_identity(item, index) for index, item in enumerate(raw_items)]
-    input_digest = _digest({
-        "schema_version": BATCH_SCHEMA_VERSION,
+    receipt_sources = [
+        identity["source_path"] or f"<item:{index}>"
+        for index, identity in enumerate(identities)
+    ]
+    if len(set(receipt_sources)) != len(receipt_sources):
+        raise ClassificationPreparationError(
+            "batch contains duplicate source labels", code="duplicate_source"
+        )
+    skip_candidates = payload["skip_candidates"]
+    item_digests = [
+        _digest({
+            "batch_id": batch_id,
+            "skip_candidates": skip_candidates,
+            **identity,
+        })
+        for identity in identities
+    ]
+    return {
         "batch_id": batch_id,
         "skip_candidates": skip_candidates,
-        "items": identities,
-    })
-    receipt_relative = batch_receipt_relative_path(batch_id)
+        "raw_items": raw_items,
+        "identities": identities,
+        "item_digests": item_digests,
+        "input_digest": _digest({
+            "schema_version": BATCH_SCHEMA_VERSION,
+            "batch_id": batch_id,
+            "skip_candidates": skip_candidates,
+            "items": identities,
+        }),
+        "receipt_path": batch_receipt_relative_path(batch_id),
+    }
+
+
+def _receipt_counts(items: list[dict]) -> dict:
+    return {
+        status: sum(row["status"] == status for row in items)
+        for status in ("accepted", "refused", "already_current")
+    }
+
+
+def validate_batch_receipt(envelope: object, receipt: object) -> dict:
+    """Purely validate a receipt's exact input binding and internal consistency."""
+    binding = _batch_envelope_identity(envelope)
+    receipt_keys = {
+        "schema_version", "batch_id", "skip_candidates", "input_digest",
+        "receipt_path", "items", "counts",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != receipt_keys:
+        raise ClassificationPreparationError(
+            "batch receipt has invalid fields", code="receipt_invalid"
+        )
+    if (type(receipt.get("schema_version")) is not int
+            or not isinstance(receipt.get("batch_id"), str)
+            or type(receipt.get("skip_candidates")) is not bool
+            or not isinstance(receipt.get("input_digest"), str)
+            or not isinstance(receipt.get("receipt_path"), str)):
+        raise ClassificationPreparationError(
+            "batch receipt field types are invalid", code="receipt_invalid"
+        )
+    expected_top = {
+        "schema_version": BATCH_RECEIPT_SCHEMA_VERSION,
+        "batch_id": binding["batch_id"],
+        "skip_candidates": binding["skip_candidates"],
+        "input_digest": binding["input_digest"],
+        "receipt_path": binding["receipt_path"],
+    }
+    if any(receipt.get(key) != value for key, value in expected_top.items()):
+        raise ClassificationPreparationError(
+            "batch receipt does not match its envelope", code="receipt_invalid"
+        )
+    raw_items = receipt.get("items")
+    if not isinstance(raw_items, list) or len(raw_items) != len(binding["identities"]):
+        raise ClassificationPreparationError(
+            "batch receipt item count is invalid", code="receipt_invalid"
+        )
+    statuses = {"accepted", "refused", "already_current"}
+    seen_sources: set[str] = set()
+    for index, (item, identity, item_digest) in enumerate(zip(
+            raw_items, binding["identities"], binding["item_digests"], strict=True)):
+        if (not isinstance(item, dict)
+                or set(item) != {
+                    "source_path", "mode", "input_digest", "status", "refusal_code",
+                }):
+            raise ClassificationPreparationError(
+                "batch receipt item has invalid fields", code="receipt_invalid"
+            )
+        expected_source = identity["source_path"] or f"<item:{index}>"
+        expected_mode = identity["mode"] if identity["mode"] in CLASSIFICATION_MODES else "full"
+        if (item.get("source_path") != expected_source
+                or item.get("mode") != expected_mode
+                or item.get("input_digest") != item_digest):
+            raise ClassificationPreparationError(
+                "batch receipt item does not match its envelope", code="receipt_invalid"
+            )
+        if expected_source in seen_sources:
+            raise ClassificationPreparationError(
+                "batch receipt has duplicate sources", code="receipt_invalid"
+            )
+        seen_sources.add(expected_source)
+        status = item.get("status")
+        refusal_code = item.get("refusal_code")
+        if not isinstance(status, str) or status not in statuses:
+            raise ClassificationPreparationError(
+                "batch receipt status is invalid", code="receipt_invalid"
+            )
+        if status == "refused":
+            if not isinstance(refusal_code, str) or not refusal_code:
+                raise ClassificationPreparationError(
+                    "refused batch receipt item needs a refusal code",
+                    code="receipt_invalid",
+                )
+        elif refusal_code is not None:
+            raise ClassificationPreparationError(
+                "successful batch receipt item cannot have a refusal code",
+                code="receipt_invalid",
+            )
+    counts = receipt.get("counts")
+    expected_counts = _receipt_counts(raw_items)
+    if (not isinstance(counts, dict)
+            or set(counts) != set(expected_counts)
+            or any(type(value) is not int for value in counts.values())
+            or counts != expected_counts):
+        raise ClassificationPreparationError(
+            "batch receipt counts are invalid", code="receipt_invalid"
+        )
+    return receipt
+
+
+def file_batch_response(payload: object, *, model: str = "external-agent") -> dict:
+    """Validate one envelope, apply valid siblings, then publish its receipt."""
+    binding = _batch_envelope_identity(payload)
+    batch_id = binding["batch_id"]
+    skip_candidates = binding["skip_candidates"]
+    raw_items = binding["raw_items"]
+    identities = binding["identities"]
+    item_digests = binding["item_digests"]
+    input_digest = binding["input_digest"]
+    receipt_relative = binding["receipt_path"]
     existing_receipt = _read_batch_receipt(receipt_relative)
     if isinstance(existing_receipt, dict):
+        if not isinstance(existing_receipt.get("input_digest"), str):
+            return validate_batch_receipt(payload, existing_receipt)
         if existing_receipt.get("input_digest") != input_digest:
             raise ClassificationPreparationError(
                 "batch_id is already bound to different input",
                 code="batch_id_conflict",
             )
-        return existing_receipt
+        return validate_batch_receipt(payload, existing_receipt)
 
     structural: list[dict] = []
     canonical_seen: set[str] = set()
@@ -1846,11 +2022,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
     for index, item in enumerate(raw_items):
         identity = identities[index]
         source_label = identity["source_path"] or f"<item:{index}>"
-        item_digest = _digest({
-            "batch_id": batch_id,
-            "skip_candidates": skip_candidates,
-            **identity,
-        })
+        item_digest = item_digests[index]
         try:
             if not isinstance(item, dict) or set(item) != {"source_path", "mode", "response_text"}:
                 raise ClassificationPreparationError(
@@ -1868,12 +2040,11 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 )
             source = _safe_source_path(item["source_path"])
             relative = _relative_path(source)
-            item_digest = _digest({
-                "batch_id": batch_id,
-                "skip_candidates": skip_candidates,
-                **identity,
-                "source_path": relative,
-            })
+            if item["source_path"] != relative:
+                raise ClassificationPreparationError(
+                    "batch source paths must be canonical vault-relative paths",
+                    code="source_path_invalid",
+                )
             if relative in canonical_seen:
                 duplicate_source = True
                 raise ClassificationPreparationError(
@@ -1881,6 +2052,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 )
             canonical_seen.add(relative)
             valid_rows.append({
+                "index": index,
                 "source": source,
                 "source_path": relative,
                 "mode": item["mode"],
@@ -1891,6 +2063,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
             raise
         except Exception as exc:  # noqa: BLE001 - every item gets a typed outcome
             structural.append({
+                "index": index,
                 "source_path": source_label,
                 "mode": identity["mode"] if identity["mode"] in CLASSIFICATION_MODES else "full",
                 "input_digest": item_digest,
@@ -1912,7 +2085,11 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 REPO_DIR, row["source"], catalog
             )
             _path, existing = _existing_classification(row["source"])
-            needed = classification_mode(snapshot, existing)
+            needed = classification_mode(
+                snapshot,
+                existing,
+                require_candidates=(row["mode"] == "full" and not skip_candidates),
+            )
             if needed is None:
                 first_pass.append({**row, "status": "already_current", "snapshot": snapshot})
                 continue
@@ -1948,6 +2125,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
     for row in first_pass:
         if row["status"] == "refused":
             outcomes.append({
+                "index": row["index"],
                 "source_path": row["source_path"],
                 "mode": row["mode"],
                 "input_digest": row["input_digest"],
@@ -1965,7 +2143,11 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                     code="source_context_race",
                 )
             _path, existing = _existing_classification(row["source"])
-            needed = classification_mode(snapshot, existing)
+            needed = classification_mode(
+                snapshot,
+                existing,
+                require_candidates=(row["mode"] == "full" and not skip_candidates),
+            )
             if row["status"] == "already_current":
                 if needed is not None:
                     raise ClassificationPreparationError(
@@ -1973,6 +2155,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                         code="source_context_race",
                     )
                 outcomes.append({
+                    "index": row["index"],
                     "source_path": row["source_path"],
                     "mode": row["mode"],
                     "input_digest": row["input_digest"],
@@ -1995,6 +2178,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
             virtual_store = prepared["candidate_store"]
             prepared_items.append((row, prepared))
             outcomes.append({
+                "index": row["index"],
                 "source_path": row["source_path"],
                 "mode": row["mode"],
                 "input_digest": row["input_digest"],
@@ -2005,6 +2189,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
             raise
         except Exception as exc:  # noqa: BLE001
             outcomes.append({
+                "index": row["index"],
                 "source_path": row["source_path"],
                 "mode": row["mode"],
                 "input_digest": row["input_digest"],
@@ -2064,22 +2249,29 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
             target["status"] = "refused"
             target["refusal_code"] = _batch_error_code(exc)
 
-    outcomes.sort(key=lambda row: row["source_path"])
-    for _row, prepared in survivors:
-        apply_prepared_classification(prepared, write_candidates=False)
-    if any(prepared["new_candidates"] for _row, prepared in survivors):
-        save_candidate_store(virtual_store)
+    outcomes.sort(key=lambda row: row["index"])
+    receipt_items = [
+        {key: row[key] for key in (
+            "source_path", "mode", "input_digest", "status", "refusal_code",
+        )}
+        for row in outcomes
+    ]
     receipt = {
         "schema_version": BATCH_RECEIPT_SCHEMA_VERSION,
         "batch_id": batch_id,
         "skip_candidates": skip_candidates,
         "input_digest": input_digest,
         "receipt_path": receipt_relative,
-        "items": outcomes,
-        "counts": _receipt_counts(outcomes),
+        "items": receipt_items,
+        "counts": _receipt_counts(receipt_items),
     }
-    _write_batch_receipt(receipt_relative, receipt)
-    return receipt
+    validated = validate_batch_receipt(payload, receipt)
+    for _row, prepared in survivors:
+        apply_prepared_classification(prepared, write_candidates=False)
+    if any(prepared["new_candidates"] for _row, prepared in survivors):
+        save_candidate_store(virtual_store)
+    _write_batch_receipt(receipt_relative, validated)
+    return validated
 
 
 # ── modes ─────────────────────────────────────────────────────────────────────
@@ -2187,6 +2379,7 @@ def cmd_batch_plan(args: argparse.Namespace) -> int:
             limit=DEFAULT_BATCH_LIMIT if args.limit is None else args.limit,
             sources=sources,
             skip_candidates=args.skip_candidates,
+            require_candidates=getattr(args, "require_candidates", False),
             exclude_items=exclude_items,
         )
     except Exception as exc:  # noqa: BLE001
@@ -2452,6 +2645,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicitly omit and suppress candidate questions (archive backfills only).",
     )
     parser.add_argument(
+        "--require-candidates",
+        action="store_true",
+        help="With a one-source --batch-plan: select an archive reading that skipped candidates.",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Extra diagnostic output.",
@@ -2464,6 +2662,9 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.require_candidates and not args.batch_plan:
+        print("Error: --require-candidates requires --batch-plan", file=sys.stderr)
+        return 1
     if args.classify:
         return cmd_classify(args)
     if args.prompt_file:

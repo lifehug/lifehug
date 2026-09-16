@@ -63,6 +63,15 @@ Extend `classify-story`, with the same flags exposed by `system/lifehug.py`:
    `state/classification_batches/<batch_id>.json`, schema version 1:
    `{schema_version, batch_id, skip_candidates, input_digest, receipt_path,
    items: [{source_path, mode, input_digest, status, refusal_code}], counts}`.
+   Items retain envelope order. The public pure
+   `validate_batch_receipt(envelope, receipt)` function is shared by canonical
+   exact replay and host adoption. It rejects missing or extra fields and binds
+   schema, batch ID, `skip_candidates`, top digest, ordered source/mode/item
+   digests, counts, statuses and refusal-code consistency to that exact envelope.
+   This is content and input-integrity validation, not a signature or proof of
+   the original historical outcome: a self-consistent rewrite of statuses,
+   refusal codes and counts remains indistinguishable without a separate trusted
+   commit/transaction boundary.
 4. A repeat of a previously accepted identical batch is a semantic no-op.
    Changed bodies under an existing batch identity must fail closed, not adopt
    the wrong report. Batch receipt binds all input identities/digests. Replay
@@ -114,6 +123,19 @@ boolean is bound into receipt identity. It defaults false, so ordinary new-story
 work retains normal candidate generation. When true, the prompt omits candidate
 instructions, judgment context, and question categories; filing preserves every
 prior candidate ID and creates none. Never generate candidates and discard them.
+
+A successful full reading records the exact policy in top-level boolean
+`classification_skip_candidates`; timeline mode preserves that metadata and
+legacy records without it retain prior behavior. The additive planner flag
+`--require-candidates` is valid only with `--batch-plan`, one explicit source
+from `--sources-json`, and `skip_candidates=false`. It selects an otherwise
+current record only when that marker is explicitly true, reports reason
+`candidate_generation_needed`, and emits mode `full`. Default, weekly, and
+whole-inventory plans do not consult the marker. Filing an already emitted full
+skip-false response also recognizes a current skip-true base so an archive pass
+that wins the race cannot discard the ordinary candidate-bearing response.
+Timeline responses never take this override: a default context-only timeline
+plan remains timeline and preserves the marker and all prior candidates.
 
 Ordinary single-source prompt/from-response and local maintenance must use the
 same mode selection and validation definitions, so future contextual additions
