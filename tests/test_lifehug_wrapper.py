@@ -147,6 +147,20 @@ class LifehugWrapperTests(unittest.TestCase):
         self.assertIn("CLASSIFY_OUT=", script)
         self.assertLess(classify_index, promote_index)
 
+    def test_weekly_migrates_classification_before_quality_in_both_modes(self):
+        script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
+        dry_classify = script.index("classify-story --classify-all --unclassified --limit")
+        dry_migrate = script.index("migrate-classifier-moments --dry-run")
+        dry_quality = script.index("quality-stats")
+        self.assertLess(dry_classify, dry_migrate)
+        self.assertLess(dry_migrate, dry_quality)
+
+        real_classify = script.index("CLASSIFY_OUT=")
+        real_migrate = script.index('run_learning_step "migrate_classifier_moments"')
+        real_quality = script.index('run_learning_step "quality_update"')
+        self.assertLess(real_classify, real_migrate)
+        self.assertLess(real_migrate, real_quality)
+
     def test_weekly_dry_run_previews_candidate_auto_promotion(self):
         script = (SYSTEM / "weekly_maintenance.sh").read_text(encoding="utf-8")
         dry_run_index = script.index("candidates-auto-promote --dry-run")

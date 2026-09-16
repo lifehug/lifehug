@@ -1029,6 +1029,19 @@ def _apply_rekeys(
             if not candidates:
                 row["rekey_case"] = "no_successor"
                 continue
+            evidence_matches: list[tuple[dict, dict]] = []
+            for other in candidates:
+                if (not row["document_revision"]
+                        or row["document_revision"] != other["document_revision"]):
+                    continue
+                evidence = rekey_evidence(row, other)
+                if evidence["sufficient"]:
+                    evidence_matches.append((other, evidence))
+            if len(evidence_matches) == 1:
+                candidate, evidence = evidence_matches[0]
+                row["rekey_evidence"] = evidence
+                proposals.append((row, candidate, evidence))
+                continue
             if len(candidates) > 1:
                 row["rekey_case"] = "fragmented"
                 row["superseded_by"] = sorted(
@@ -1151,9 +1164,21 @@ def _cohort_refs(row: dict, generations: Mapping[tuple[str, str], set[str]]) -> 
 
 
 def _attach_bindings(by_ref: Mapping[str, dict], records: Sequence[object]) -> None:
+    possible_successors: dict[str, set[str]] = {}
+    for row in by_ref.values():
+        if row.get("status") != "active":
+            continue
+        for alias in row.get("aliases") or ():
+            possible_successors.setdefault(alias, set()).add(row["telling_ref"])
+    successors = {
+        alias: next(iter(targets))
+        for alias, targets in possible_successors.items()
+        if len(targets) == 1
+    }
     for record in records or ():
         row = record if isinstance(record, dict) else {}
-        live = by_ref.get(collapsed_text(row.get("telling_ref")))
+        telling_ref = collapsed_text(row.get("telling_ref"))
+        live = by_ref.get(successors.get(telling_ref, telling_ref))
         identity_id = collapsed_text(row.get("identity_id"))
         if live is None or not identity_id:
             continue

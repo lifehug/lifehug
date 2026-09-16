@@ -224,17 +224,18 @@ class RowTwelveTheFourStates(DragOutCase):
         self.assertEqual([(row[2], row[3]) for row in rows], [("part_of", "stated")])
         self.assertIsNotNone(self.published_window())
 
-    def test_the_precision_question_survives_every_state(self):
-        """§7.1 / H6: the window is an improvement on the question, never its
-        removal, and taking the window away does not remove it either."""
+    def test_retracting_the_window_restores_the_generic_question(self):
+        """An accepted window retires the nag; removing evidence restores it."""
         telling, episode = self.pair()
-        for _step in range(2):
-            payload = pub.read_projection(self.root) or {}
-            kinds = {item["kind"] for item in payload.get("work_items") or ()}
-            self.assertIn("precision_gap", kinds)
-            iq.remove_from_container(
-                self.root, telling_ref=telling, episode_id=episode, now=NOW)
-            self.publish()
+        payload = pub.read_projection(self.root) or {}
+        kinds = {item["kind"] for item in payload.get("work_items") or ()}
+        self.assertNotIn("precision_gap", kinds)
+        iq.remove_from_container(
+            self.root, telling_ref=telling, episode_id=episode, now=NOW)
+        self.publish()
+        payload = pub.read_projection(self.root) or {}
+        kinds = {item["kind"] for item in payload.get("work_items") or ()}
+        self.assertIn("precision_gap", kinds)
 
 
 class TheRemovalItself(DragOutCase):

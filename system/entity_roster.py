@@ -53,6 +53,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+from vault_paths import vault_data_path
 from recommend_focuses import STOPWORDS, OLD_FOCUS_TERM, load_recommendation_state
 
 ENTITY_TYPES = ("person", "place", "period", "object", "theme")
@@ -812,9 +813,12 @@ def write_roster(entity_type: str, entities: list[dict], *, source: str | None =
     write_json(roster_file(entity_type), payload)
 
 
-def load_roster(entity_type: str = "person") -> dict:
+def load_roster(entity_type: str = "person", *, vault_root: object = None) -> dict:
     """Load a canonical entity roster."""
-    data = read_json(roster_file(entity_type), default=None)
+    path = roster_file(entity_type)
+    if vault_root is not None:
+        path = vault_data_path("entity_rosters", vault_root=vault_root) / f"{entity_type}.json"
+    data = read_json(path, default=None)
     if data and "entities" in data:
         return data
     return {"version": 1, "type": entity_type, "entities": []}

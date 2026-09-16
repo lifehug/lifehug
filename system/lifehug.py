@@ -1437,7 +1437,9 @@ def cmd_migrate_classifier_moments(args: argparse.Namespace) -> int:
     import classifier_claims  # noqa: PLC0415
 
     report = classifier_claims.migrate_classifier_moments(
-        REPO_DIR, dry_run=bool(getattr(args, "dry_run", False))
+        REPO_DIR,
+        sources=getattr(args, "source", None),
+        dry_run=bool(getattr(args, "dry_run", False)),
     )
     if getattr(args, "json", False):
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -2326,7 +2328,9 @@ def cmd_monthly_research(args: argparse.Namespace) -> int:
 
 def cmd_classify_story(args: argparse.Namespace) -> int:
     flags: list[str] = []
-    if args.prompt:
+    if getattr(args, "refresh_targets", False):
+        flags.append("--refresh-targets")
+    elif args.prompt:
         flags.append("--prompt")
         flags.append(args.prompt)
     elif args.from_response:
@@ -3110,6 +3114,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Ingest an agent-written classification JSON (keyless agent path)")
     p.add_argument("--source", metavar="PATH", help="With --from-response: the source file it classifies")
     p.add_argument("--classify-all", action="store_true")
+    p.add_argument("--refresh-targets", action="store_true",
+                   help="Print canonical bounded contextual refresh targets as JSON")
     p.add_argument("--unclassified", action="store_true")
     p.add_argument("--stale-first", action="store_true",
                    help="With --classify-all: stale classifications first (oldest first), "
@@ -3558,6 +3564,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true",
                    help="Print the counts and write nothing")
     p.add_argument("--json", action="store_true", help="Print the report as JSON")
+    p.add_argument("--source", action="append", default=[], metavar="PATH",
+                   help="Restrict migration to this source_path (repeatable)")
     p.set_defaults(func=cmd_migrate_classifier_moments)
 
     p = sub.add_parser("mirror-compile",

@@ -433,13 +433,16 @@ class IdempotencyAcrossFrameworkVersionsTests(unittest.TestCase):
         self.assertNotIn("telling_keys", stored["extractor"])
         self.assertNotIn("document_revision", stored["extractor"])
 
-    def test_re_migrating_a_v263_written_vault_is_a_byte_identical_no_op(self):
-        before = _files(self.root)
+    def test_re_migrating_a_v263_written_vault_is_stable_after_manifest_rebuild(self):
         report = _run(self.root, publish=False)
+        before = _files(self.root)
+        second = _run(self.root, publish=False)
         self.assertEqual(_files(self.root), before)
         self.assertEqual(report["receipts"], 2)
         self.assertEqual(report["receipts_written"], 0)
         self.assertEqual(report["receipts_kept"], 2)
+        self.assertEqual(second["receipts_kept"], 2)
+        self.assertIn("state/temporal_claims/telling_manifest.json", before)
         self.assertIn(
             "kept 2 already filed", "\n".join(cc.describe_migration(report))
         )
@@ -821,9 +824,9 @@ class ReclassificationTests(unittest.TestCase):
 
 
 class PlaceMentionTests(unittest.TestCase):
-    """§8.1's `place_mentions`, and §8.0's finding that `load_events` drops them."""
+    """Only event-local place evidence reaches a temporal claim."""
 
-    def test_the_documents_places_reach_the_claim(self):
+    def test_document_places_are_retrieval_only(self):
         root = _vault(self)
         relative = _story(root, "san-diego")
         _classification(root, "san-diego", classification(
@@ -834,15 +837,39 @@ class PlaceMentionTests(unittest.TestCase):
         ))
         _run(root, publish=False)
         row = ts.active_claims(ts.fold_active_index(root))[0]
-        self.assertEqual(row["place_mentions"], ["San Diego"])
+        self.assertNotIn("place_mentions", row)
 
-    def test_an_events_own_place_comes_first(self):
+    def test_an_events_own_place_is_kept_without_document_places(self):
         self.assertEqual(
             cc.event_place_mentions(
                 event("x", "y", places=["Mesa"]), [{"name": "Arizona"}]
             ),
-            ("Mesa", "Arizona"),
+            ("Mesa",),
         )
+
+    def test_direct_date_and_context_relation_share_one_event_receipt(self):
+        row = event(
+            "The Cedarport letter",
+            "I found it while we lived in Cedarport.",
+            places=["Cedarport"],
+            date={"stated": "1999", "age": None, "anchor_ref": None, "relation": None},
+        )
+        row["timeline_relation"] = {
+            "relation": "within",
+            "candidate_id": "node:cedarport-stay",
+            "entity_refs": ["place/cedarport"],
+            "evidence": {"quote": "while we lived in Cedarport", "start": 11, "end": 38},
+        }
+        claims = cc.event_claims(
+            stem="letter", event=row,
+            revision="sha256:" + "a" * 64,
+            source_path="sources/manual/letter.md", now=NOW,
+        )
+        self.assertEqual([claim["claim_type"] for claim in claims], ["date", "relative_order"])
+        self.assertEqual(claims[1]["temporal_value"], {
+            "relation": "within", "anchors": ["node:cedarport-stay"]
+        })
+        self.assertEqual(claims[0]["event_ref"], claims[1]["event_ref"])
 
     def test_places_are_never_part_of_a_claims_identity(self):
         self.assertNotIn("place_mentions", tc.CLAIM_IDENTITY_KEYS)

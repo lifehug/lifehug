@@ -24,6 +24,7 @@ from tempdirs import root_parent_tmp
 spec = importlib.util.spec_from_file_location("ask_fairness", SYSTEM / "ask.py")
 ask = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ask)
+import temporal_projection as temporal_projection  # noqa: E402
 
 
 def question(qid, text="Tell me about that place.", *, answered=False):
@@ -215,6 +216,112 @@ class DeliveryFairnessTests(unittest.TestCase):
                 picker(questions, self.categories, rotation)
         write_json.assert_not_called()
         self.assertEqual((questions, rotation, queue_data), before)
+
+    def test_retired_timeline_question_cannot_reenter_through_any_picker(self):
+        bank = (
+            "## A: Origins\n"
+            "- [ ] A1: When did that happen?\n"
+            "  <!-- timeline_probe: tl:event; anchor: event; leverage: 1; "
+            "work_item: work:retired -->\n"
+            "- [ ] A2: Who helped?\n"
+        )
+        payload = {"projection_generation": 8, "work_items": [], "work_item_aliases": {}}
+        kept = ask.eligible_questions(
+            [question("A1"), question("A2")],
+            question_bank_text=bank,
+            work_items_payload=payload,
+        )
+        self.assertEqual([row["id"] for row in kept], ["A2"])
+
+    def test_missing_projection_is_fail_open(self):
+        questions = [question("A1"), question("A2")]
+        for payload in (None, {}, {"projection_generation": 8}, {"work_items": []}):
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    ask.eligible_questions(
+                        questions, question_bank_text="", work_items_payload=payload
+                    ),
+                    questions,
+                )
+
+    def test_malformed_work_item_row_is_fail_open(self):
+        questions = [question("A1"), question("A2")]
+        payload = {"projection_generation": 8, "work_items": [{"state": "open"}]}
+        self.assertEqual(
+            ask.eligible_questions(
+                questions, question_bank_text="", work_items_payload=payload
+            ),
+            questions,
+        )
+
+    def test_duplicate_work_item_markers_retire_every_old_bank_id(self):
+        bank = (
+            "## A: Origins\n"
+            "- [ ] A1: When did that happen?\n"
+            "  <!-- timeline_probe: tl:event; anchor: event; leverage: 1; "
+            "work_item: work:retired -->\n"
+            "- [ ] A2: When was the same thing?\n"
+            "  <!-- timeline_probe: tl:event; anchor: event; leverage: 1; "
+            "work_item: work:retired -->\n"
+            "- [ ] A3: Who helped?\n"
+        )
+        kept = ask.eligible_questions(
+            [question("A1"), question("A2"), question("A3")],
+            question_bank_text=bank,
+            work_items_payload={
+                "projection_generation": 8,
+                "work_items": [],
+                "work_item_aliases": {},
+            },
+        )
+        self.assertEqual([row["id"] for row in kept], ["A3"])
+
+    def test_retraction_restores_the_same_unanswered_timeline_question(self):
+        item = temporal_projection.validate_temporal_work_item({
+            "kind": "precision_gap",
+            "subject_ref": "self",
+            "event_ref": "node:memory",
+            "requested_field": "date",
+            "prompt_intent": "When did the memory happen?",
+            "allowed_surfaces": ["timeline", "daily_question"],
+            "person_value": 0.5,
+            "system_value": 0.5,
+            "created_at": "2026-09-15T00:00:00Z",
+        })
+        bank = (
+            "## A: Origins\n"
+            "- [ ] A1: When did the memory happen?\n"
+            f"  <!-- timeline_probe: tl:memory; anchor: memory; leverage: 1; "
+            f"work_item: {item['work_item_id']} -->\n"
+            "- [ ] A2: Who helped?\n"
+        )
+        active = {
+            "projection_generation": 8,
+            "work_items": [item],
+            "work_item_aliases": {},
+        }
+        retired = {**active, "projection_generation": 9, "work_items": []}
+        restored = {**active, "projection_generation": 10}
+        questions = [question("A1"), question("A2")]
+        self.assertEqual(
+            [row["id"] for row in ask.eligible_questions(
+                questions, question_bank_text=bank, work_items_payload=active
+            )],
+            ["A1", "A2"],
+        )
+        self.assertEqual(
+            [row["id"] for row in ask.eligible_questions(
+                questions, question_bank_text=bank, work_items_payload=retired
+            )],
+            ["A2"],
+        )
+        self.assertEqual(
+            [row["id"] for row in ask.eligible_questions(
+                questions, question_bank_text=bank, work_items_payload=restored
+            )],
+            ["A1", "A2"],
+        )
+        self.assertFalse(questions[0]["answered"])
 
 
 class ConfirmedDeliverySequenceTests(unittest.TestCase):

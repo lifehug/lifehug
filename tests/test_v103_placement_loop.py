@@ -154,8 +154,16 @@ class StaleClassificationTests(unittest.TestCase):
         self.target.write_text("# story\n", encoding="utf-8")
         self.clf = cs.classification_path(self.target)
 
+    def _fresh(self, **extra):
+        snapshot = cs.classifier_ctx.build_context_snapshot(cs.REPO_DIR, self.target)
+        return {
+            "events": [],
+            "classification_snapshot": cs.classifier_ctx.snapshot_metadata(snapshot),
+            **extra,
+        }
+
     def test_mark_stale_flips_is_classified(self):
-        write_json(self.clf, {"events": []})
+        write_json(self.clf, self._fresh())
         self.assertTrue(cs.is_classified(self.target))
         self.assertTrue(cs.mark_stale(self.target, "correction filed: sources/corrections/c1.md"))
         data = json.loads(self.clf.read_text(encoding="utf-8"))
@@ -169,9 +177,9 @@ class StaleClassificationTests(unittest.TestCase):
         self.assertFalse(cs.is_classified(self.target))
 
     def test_fresh_rewrite_clears_stale(self):
-        write_json(self.clf, {"events": []})
+        write_json(self.clf, self._fresh())
         cs.mark_stale(self.target, "x")
-        write_json(self.clf, {"events": [], "model": "m"})  # re-classification
+        write_json(self.clf, self._fresh(model="m"))  # re-classification
         self.assertTrue(cs.is_classified(self.target))
 
 
@@ -191,7 +199,11 @@ class CorrectionMarksStaleTests(unittest.TestCase):
         cs.CLASSIFICATIONS_DIR.mkdir()
         self.addCleanup(lambda: setattr(cs, "CLASSIFICATIONS_DIR", self._orig))
         self.clf = cs.classification_path(self.target)
-        write_json(self.clf, {"events": [{"description": "the move", "when_hint": ""}]})
+        snapshot = cs.classifier_ctx.build_context_snapshot(cs.REPO_DIR, self.target)
+        write_json(self.clf, {
+            "events": [{"description": "the move", "when_hint": ""}],
+            "classification_snapshot": cs.classifier_ctx.snapshot_metadata(snapshot),
+        })
 
     def _create(self, source_type):
         with mock.patch.object(si, "SOURCES_DIR", self.tmp), \

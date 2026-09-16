@@ -538,11 +538,11 @@ class OneDefinitionManyHosts(unittest.TestCase):
         """I0 held this at `timeline-rules:4` so an I1 branch could not borrow
         the slot early. I1 has now taken it, and this test moved with the
         promise rather than being deleted: `timeline-rules:5` is where
-        grouping reads the identity layer, and every fingerprint moved with
-        it. The next phase that changes the fold's arithmetic takes `:6`."""
+        grouping reads the identity layer. The usable-placement policy changes
+        work-item derivation and therefore takes `:6`."""
         import temporal_timeline as tt  # noqa: PLC0415
 
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:5")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:6")
 
 
 if __name__ == "__main__":

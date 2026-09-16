@@ -320,6 +320,16 @@ def projection_payload(result: tt.CalculatedTimeline, *, published_at: str,
     payload = _envelope(result, published_at=published_at, input_digest=input_digest,
                         timings=timings)
     payload.update(body)
+    # PR342: one explicit host-facing answer, derived from the same predicate
+    # that owns work items and counts. Clients must not reconstruct this from
+    # value shape, width, temporal_state, or the presence of a possible value.
+    payload["nodes"] = [
+        {
+            **dict(node),
+            "usable_placement": tpl.has_usable_placement(node),
+        }
+        for node in result.nodes
+    ]
     payload["memberships"] = [dict(row) for row in result.memberships]
     # SCHEMA V3, BEHIND THE FLAG (design §9.6, eras §7.8 step 2). The fold
     # always derives these; only the WRITER is gated, so rollback is the flag

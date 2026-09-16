@@ -134,6 +134,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import chronology as chrono  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
 import timeline as tl  # noqa: E402
@@ -147,7 +148,67 @@ OWNER_SUBJECT_REF = twi.OWNER_SUBJECT_REF
 #: one analog of legacy's `anchors.birth`.
 OWNER_BIRTH_EVENT_KIND = twi.BIRTH_ORIGIN_EVENT_KIND
 
-__all__ = ["placement_for_projection", "OWNER_SUBJECT_REF", "OWNER_BIRTH_EVENT_KIND"]
+__all__ = [
+    "placement_for_projection",
+    "usable_temporal_value",
+    "has_usable_placement",
+    "unplaced_node_ids",
+    "OWNER_SUBJECT_REF",
+    "OWNER_BIRTH_EVENT_KIND",
+]
+
+
+def usable_temporal_value(node: object) -> chrono.DateRecord | None:
+    """Return the canonical usable placement for one calculated node.
+
+    A best value is usable at every supported granularity. A possible value is
+    usable only when it is an evidence-backed containment/window; a naked range
+    used as a display or lifetime fallback is deliberately not enough. Width is
+    never part of this decision.
+    """
+    if not isinstance(node, dict):
+        return None
+    best = chrono.from_dict(node.get("best_temporal_value"))
+    if best is not None and (
+        best.best is not None or best.earliest is not None or best.latest is not None
+    ):
+        return best
+    possible = chrono.from_dict(node.get("possible_temporal_value"))
+    if possible is None or (
+        possible.best is None and possible.earliest is None and possible.latest is None
+    ):
+        return None
+    evidence_backed = bool(
+        possible.anchors
+        or possible.provenance
+    )
+    return possible if evidence_backed else None
+
+
+def has_usable_placement(node: object) -> bool:
+    """Whether a node is canonically placed for diagnostics and questioning."""
+    return usable_temporal_value(node) is not None
+
+
+def unplaced_node_ids(nodes: object, *, cohort_ids: object = None) -> list[str]:
+    """Distinct unplaced ids in an explicit cohort (or all supplied nodes)."""
+    cohort = None if cohort_ids is None else {
+        str(value) for value in cohort_ids if str(value)
+    }
+    placed: set[str] = set()
+    seen: set[str] = set()
+    for node in nodes if isinstance(nodes, (list, tuple)) else ():
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("node_id") or "")
+        if not node_id or (cohort is not None and node_id not in cohort):
+            continue
+        seen.add(node_id)
+        if has_usable_placement(node):
+            placed.add(node_id)
+    if cohort is not None:
+        seen |= cohort
+    return sorted(seen - placed)
 
 
 def _life_span(projection: dict) -> tuple[int, int] | None:

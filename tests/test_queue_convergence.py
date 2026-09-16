@@ -529,49 +529,39 @@ class TheMesaHouseReachesTheQueue(MesaVault):
         self.publish()
         self.view = pub.calculated_view(self.vault)
 
-    def test_the_served_view_offers_exactly_one_candidate(self):
+    def test_the_served_view_offers_no_obsolete_date_candidate(self):
         rows = tcand.candidates_from_view(self.view, question_bank_text=EMPTY_BANK,
                                           dismissed=())
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["question"], "When did you move out of the Mesa house?")
-        self.assertEqual(rows[0]["leverage"], BAR)
-        self.assertTrue(rows[0]["id"].startswith(lo.OPPORTUNITY_ID_PREFIX + ":"))
+        self.assertEqual(rows, [])
 
     def test_the_keystone_about_the_same_stay_is_not_a_second_question(self):
         """One gap, three names (`work:`, `tl:`, `lo:`) — one question."""
-        self.assertEqual(len(self.view["keystones"]), 1)
+        self.assertEqual(self.view["keystones"], ())
         rows = tcand.candidates_from_view(self.view, question_bank_text=EMPTY_BANK,
                                           dismissed=())
-        self.assertEqual([r["source"] for r in rows], [tcand.SOURCE_OPPORTUNITY])
+        self.assertEqual(rows, [])
 
-    def test_it_mints_one_bank_row_in_the_timeline_group(self):
+    def test_it_mints_no_bank_row_for_accepted_windows(self):
         items = tcand.from_view(self.view, question_bank_text=EMPTY_BANK)
         minted = qp.mint_queue_questions(work_items=items, question_bank_text=EMPTY_BANK)
-        self.assertEqual(len(minted), 1)
-        self.assertEqual(minted[0]["text"], "When did you move out of the Mesa house?")
-        self.assertEqual(minted[0]["group"], ti.TIMELINE_GROUP)
-        self.assertEqual(minted[0]["provenance"], tcand.PROVENANCE)
-        self.assertEqual(qp.timeline_probe_weight(minted[0]["leverage"]), 1.0)
+        self.assertEqual(minted, [])
 
-    def test_filing_the_answer_retires_the_row(self):
+    def test_there_is_no_row_for_filing_to_retire(self):
         items = tcand.from_view(self.view, question_bank_text=EMPTY_BANK)
-        [minted] = qp.mint_queue_questions(work_items=items, question_bank_text=EMPTY_BANK)
-        bank = ti.insert_keystone_question(EMPTY_BANK, minted)
         answer = {"domain": "residences", "label": "the Mesa house",
                   "city": "the Mesa house",
                   "span": {"start": year("1990"), "end": year("1992")}}
         retired = tcand.retire_for_landmark("residences", answer, view=self.view,
-                                            question_bank_text=bank)
-        self.assertEqual(retired, [minted["id"]])
+                                            question_bank_text=EMPTY_BANK)
+        self.assertEqual(items, [])
+        self.assertEqual(retired, [])
 
     def test_a_rebuild_after_the_answer_mints_nothing_for_it(self):
         import episode_binder as eb  # noqa: PLC0415
         import temporal_store as ts  # noqa: PLC0415
 
         items = tcand.from_view(self.view, question_bank_text=EMPTY_BANK)
-        [minted] = qp.mint_queue_questions(work_items=items, question_bank_text=EMPTY_BANK)
-        answered = ti.insert_keystone_question(EMPTY_BANK, minted).replace(
-            "- [ ] T1:", "- [x] T1:")
+        self.assertEqual(items, [])
         lp.file_landmark_record(
             self.vault, "residences",
             {"domain": "residences", "label": "the Mesa house",
@@ -587,16 +577,13 @@ class TheMesaHouseReachesTheQueue(MesaVault):
         self.assertEqual(
             [r for r in rebuilt["landmark_opportunities"]
              if r["domain"] == "residences" and r["kind"].startswith("span")], [])
-        self.assertEqual(tcand.from_view(rebuilt, question_bank_text=answered), [])
+        self.assertEqual(tcand.from_view(rebuilt, question_bank_text=EMPTY_BANK), [])
 
-    def test_a_different_answer_does_not_retire_it(self):
-        items = tcand.from_view(self.view, question_bank_text=EMPTY_BANK)
-        [minted] = qp.mint_queue_questions(work_items=items, question_bank_text=EMPTY_BANK)
-        bank = ti.insert_keystone_question(EMPTY_BANK, minted)
+    def test_a_different_answer_retires_nothing(self):
         other = {"domain": "residences", "label": "the Phoenix house",
                  "city": "the Phoenix house"}
         self.assertEqual(tcand.retire_for_landmark("residences", other, view=self.view,
-                                                   question_bank_text=bank), [])
+                                                   question_bank_text=EMPTY_BANK), [])
 
 
 # --------------------------------------------------------------------------

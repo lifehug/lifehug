@@ -39,6 +39,7 @@ if str(SYSTEM_DIR) not in sys.path:
 LEGACY_FOCUS_KEY = "spot" "light_opportunities"
 
 from ai_provider import AIResponseError, failure_metadata, normalize_question_records
+import classifier_context as classifier_ctx
 
 from lifehug_core import (
     ANSWERS_DIR,
@@ -220,9 +221,15 @@ def is_classified(source_path: Path) -> bool:
     it — the classify prompt already injects corrections as authoritative, so
     the re-derivation asserts the corrected facts. This is deliberately NOT
     the reader gate: see `is_current` below."""
+    if not source_path.exists():
+        return False
     for path in classification_paths(source_path):
         if path.exists():
-            return not _is_stale(path)
+            data = read_json(path, default=None) or {}
+            if _is_stale_data(data):
+                return False
+            snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+            return classifier_ctx.refresh_reason(snapshot, data) is None
     return False
 
 
@@ -581,8 +588,19 @@ def corrections_for(source_path: Path) -> list[str]:
     ]
 
 
-def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
+def build_prompt(
+    source_path: Path,
+    fm: dict,
+    story_text: str,
+    *,
+    context_snapshot: dict | None = None,
+) -> str:
     """Construct the full AI classification prompt for a source file."""
+    if context_snapshot is None:
+        source_bytes = source_path.read_bytes() if source_path.exists() else story_text.encode("utf-8")
+        context_snapshot = classifier_ctx.build_context_snapshot(
+            REPO_DIR, source_path, source_bytes=source_bytes
+        )
     mission = load_mission()
     judgment_rubric = load_judgment_rubric()
     judgment_section = f"## Question-Judgment Rubric\n{judgment_rubric}"
@@ -592,6 +610,17 @@ def build_prompt(source_path: Path, fm: dict, story_text: str) -> str:
     categories_block = load_question_categories()
     story_functions_block = "\n".join(f"  - {sf}" for sf in STORY_FUNCTIONS)
     themes_block = ", ".join(THEME_TAXONOMY)
+    timeline_context = json.dumps({
+        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
+        "context_complete": context_snapshot.get("context_complete", False),
+        "context_truncated": context_snapshot.get("context_truncated", False),
+        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
+        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
+        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
+        "candidates": context_snapshot.get("candidates", []),
+        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
+        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
+    }, indent=2, sort_keys=True)
 
     relative_path = _relative_path(source_path)
 
@@ -614,6 +643,13 @@ Captured at: {fm.get('captured_at', 'unknown')}
 {story_text}
 {_corrections_block(source_path)}
 
+## Canonical Timeline Context
+Only the exact `candidate_id` and `entity_refs` values below may be used for a
+timeline relation. Candidate names and aliases are retrieval context, never
+permission to bind by a label or substring. A truncated context is visibly
+unfinished; do not infer candidates that are not supplied.
+{timeline_context}
+
 ---
 
 ## Your Task
@@ -624,6 +660,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 ### Required output schema:
 
 {{
+  "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
   "people": [
     {{ "name": "string", "relationship": "string", "role": "string", "mention_count": 1 }}
   ],
@@ -661,7 +698,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   }},
   "situation_vs_story": "situation_rich_story_empty|story_rich_situation_thin|balanced|neither",
   "events": [
-    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the author's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|during|null" }} }}
+    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the author's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null }}
   ],
   "candidate_questions": [
     {{
@@ -698,6 +735,15 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   leave `date` itself null when they said none of it. The system does the
   arithmetic from there — an age against a birthday, a relation against a dated
   landmark — so a guessed year is worse than no year at all.
+- `events[].timeline_relation`: optional contextual placement. Use only
+  `within`, `before`, or `after`; never invent `at_start`. Copy an exact supplied
+  `candidate_id`, include event-local allowlisted `entity_refs`, and cite one exact
+  Story Text quote that occurs only once; the system derives its offsets. Document-level `places`
+  are retrieval hints only, never evidence for every event. If any field is not
+  supported, leave the whole relation null. A contextual relation does not
+  replace a direct stated date or age; return both when the source supports both.
+- Echo `_classification_snapshot` byte-for-byte as shown. It binds this response
+  to the source and context seen in this prompt; never substitute newer values.
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
   telling: "Grandpa's two-page letter", not "the time Grandpa wrote to me about the
   farm". No verbs of narration, no dates in the title.
@@ -911,10 +957,11 @@ def build_classification(
     model: str,
     classified_at: str,
     candidate_ids: list[str],
+    classification_snapshot: dict | None = None,
 ) -> dict:
     relative_path = _relative_path(source_path)
     return {
-        "version": 1,
+        "version": 2,
         "source_path": relative_path,
         "source_title": fm.get("title", ""),
         "source_type": fm.get("type", "unknown"),
@@ -922,6 +969,9 @@ def build_classification(
         "model_used": model,
         "reviewable": True,
         "candidate_question_ids": candidate_ids,
+        "classification_snapshot": classifier_ctx.snapshot_metadata(
+            classification_snapshot or ai_result.get("_classification_snapshot")
+        ),
         # ── extracted fields (as-returned by AI, mark reviewable) ──
         "people": ai_result.get("people", []),
         "places": ai_result.get("places", []),
@@ -1029,10 +1079,13 @@ def classify_file(
             print("[dry-run] would append candidate questions returned by the model")
         return 0
 
+    prompt_snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
     if precomputed_result is not None:
         ai_result = precomputed_result
     else:
-        prompt = build_prompt(source_path, fm, story_text)
+        prompt = build_prompt(
+            source_path, fm, story_text, context_snapshot=prompt_snapshot
+        )
         if verbose:
             print(f"[verbose] calling model={model} for {source_path}")
         try:
@@ -1048,6 +1101,10 @@ def classify_file(
     classified_at = now_utc()
 
     try:
+        # Rebuild after the model returns. A response to an older source or
+        # context is rejected before either classification or candidates write.
+        current_snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+        classifier_ctx.validate_response(ai_result, current_snapshot, story_text)
         # Validate every model-derived coercion before any persistence.
         store = load_candidate_store()
         ai_questions = [] if skip_candidates else normalize_question_records(
@@ -1059,7 +1116,8 @@ def classify_file(
         )
         candidate_ids = [c["id"] for c in new_candidates]
         classification = build_classification(
-            source_path, fm, ai_result, model, classified_at, candidate_ids
+            source_path, fm, ai_result, model, classified_at, candidate_ids,
+            current_snapshot,
         )
     except Exception as exc:  # noqa: BLE001 — model schema failures stay private
         print(
@@ -1125,7 +1183,8 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         print(f"Warning: no story text found: {_relative_path(source_path)}", file=sys.stderr)
         return 1
 
-    prompt = build_prompt(source_path, fm, story_text)
+    snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+    prompt = build_prompt(source_path, fm, story_text, context_snapshot=snapshot)
     print(prompt)
     return 0
 
@@ -1171,11 +1230,16 @@ def emit_prompts(sources: list[Path], out_dir: Path) -> int:
             continue
         stem = classify_stem(source_path)
         prompt_file = out_dir / f"{stem}.prompt.md"
-        write_text(prompt_file, build_prompt(source_path, fm, story_text))
+        snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+        write_text(
+            prompt_file,
+            build_prompt(source_path, fm, story_text, context_snapshot=snapshot),
+        )
         items.append({
             "source": _relative_path(source_path),
             "prompt": prompt_file.name,
             "response": f"{stem}.response.json",
+            "classification_snapshot": classifier_ctx.snapshot_metadata(snapshot),
         })
     manifest_path = out_dir / "manifest.json"
     write_json(manifest_path, {
@@ -1250,6 +1314,18 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh_targets(args: argparse.Namespace) -> int:
+    """Print the canonical bounded classifier-refresh selection as JSON."""
+    sources = all_source_files()
+    report = classifier_ctx.select_refresh_targets(
+        REPO_DIR,
+        sources,
+        limit=args.limit if args.limit is not None else classifier_ctx.MAX_REFRESH_TARGETS,
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1280,6 +1356,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--from-response",
         metavar="RESPONSE_JSON",
         help="Keyless: ingest an externally-produced classification JSON (requires --source).",
+    )
+    mode.add_argument(
+        "--refresh-targets",
+        action="store_true",
+        help="Print canonical bounded refresh targets and unfinished count as JSON.",
     )
 
     parser.add_argument(
@@ -1350,6 +1431,8 @@ def main() -> int:
         return cmd_from_response(args)
     if args.classify_all:
         return cmd_classify_all(args)
+    if args.refresh_targets:
+        return cmd_refresh_targets(args)
 
     parser.print_help()
     return 1

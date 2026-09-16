@@ -406,13 +406,21 @@ You can still review with `candidates-review`, inspect `needs_review` items, upd
 - contradictions and self-understanding insights
 - possible outputs such as letters, chapters, essays, posts, or speeches
 - Focus opportunities and candidate follow-up questions
+- direct event dates plus source-grounded `within`/`before`/`after` relations
+  to a bounded set of canonical dated landmarks and participation episodes
 
-Weekly maintenance classifies a capped number of unclassified sources (`LIFEHUG_WEEKLY_CLASSIFY_LIMIT`, default `5`) before candidate auto-promotion runs. The source file stays immutable; the derived record is written under `state/classifications/` using a repo-relative key, and any follow-up questions are added to the reviewable candidate store. That keeps the system improving without letting a large archive import dominate the week. You can also run it manually:
+Weekly maintenance classifies a capped number of new or source/context-stale sources (`LIFEHUG_WEEKLY_CLASSIFY_LIMIT`, default `5`), migrates accepted events into temporal claims, and then runs candidate auto-promotion. A response echoes the source revision and stable context digest it saw; changed source/context rejects the response before any write, so the previous accepted classification and claims remain intact. Context is limited to independently grounded dated landmarks/episodes, includes competing stays and human identity decisions, and accepts only supplied IDs plus an exact unique source quote. The source file stays immutable; the derived record is written under `state/classifications/` using a repo-relative key, and any follow-up questions are added to the reviewable candidate store. That keeps the system improving without letting a large archive import dominate the week. You can also inspect the same bounded target selection used by hosted scheduling:
 
 ```bash
 python3 system/lifehug.py classify-story --classify answers/A14.md
 python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
+python3 system/lifehug.py classify-story --refresh-targets --limit 50
 ```
+
+Calculated timeline nodes publish `usable_placement: true|false` as the stable
+client answer. It is derived by the same predicate that controls unplaced
+counts and question retirement, so a viewer does not need to interpret date
+width, `temporal_state`, or the presence of a possible value.
 
 ### Where the AI comes from (keyless by default)
 

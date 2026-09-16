@@ -158,7 +158,7 @@ from temporal_claims import (  # noqa: E402
 #: ``input_fingerprint`` moves with this bump whether or not that node is
 #: bound — which is the honest signal, since a stale projection calculated by
 #: :4 rules is stale everywhere, not only where a binding landed.
-CALCULATION_RULE_VERSION = "timeline-rules:5"
+CALCULATION_RULE_VERSION = "timeline-rules:6"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -3636,20 +3636,15 @@ def _precision_target(event_kind: object) -> str:
     return PRECISION_TARGETS.get(collapsed_text(event_kind), DEFAULT_PRECISION_TARGET)
 
 
-def _wants_precision(best: object, event_kind: object) -> bool:
-    """Is this node coarser than its event is worth asking about (§2.2)?
+def _wants_precision(best: object, event_kind: object, possible: object = None) -> bool:
+    """Does this node lack the canonical usable placement contract?"""
+    import temporal_placement as placement  # noqa: PLC0415 - avoids timeline cycle
 
-    A node already at or finer than its target mints nothing: Timeline is an
-    invitation, not a backlog, and re-asking for a day when the year is what the
-    event deserves is exactly the false precision §2.2 forbids.
-    """
-    if best is None:
-        return True
-    record = chrono.from_dict(best)
-    if record is None:
-        return True
-    target = _precision_target(event_kind)
-    return _GRANULARITY_RANK.get(record.granularity, 99) > _GRANULARITY_RANK.get(target, 0)
+    del event_kind
+    return not placement.has_usable_placement({
+        "best_temporal_value": best,
+        "possible_temporal_value": possible,
+    })
 
 
 def _dated_claim_refs(group: dict) -> list[str]:
@@ -4042,8 +4037,8 @@ def derive_calculated_timeline(
     # beside E3's `within`, which is what keeps every clause of the rule
     # structural rather than asserted. It is never `best_temporal_value`, so
     # it cannot override, cannot anchor and cannot be mistaken for a date the
-    # person gave; `placed` is untouched, so the member's own precision
-    # question is minted exactly as it was before the containment existed.
+    # person gave. The shared usable-placement predicate decides whether that
+    # supported outer window retires the member's old date question.
     if identity.applies:
         for node_id in sorted(groups):
             if possibilities.get(node_id) is not None or placed.get(node_id) is not None:
@@ -4155,6 +4150,7 @@ def derive_calculated_timeline(
         groups=groups,
         calculated=calculated,
         placed=placed,
+        possibilities=possibilities,
         edges=edges,
         diagnostics=diagnostics,
         records=records,
@@ -4180,7 +4176,9 @@ def derive_calculated_timeline(
     # keystone is the same greedy plan over the residual, at the same cap,
     # under the same `tl:<anchor-slug>` identity.
     mark = clock()
-    unplaced_ids = sorted(node_id for node_id in groups if placed.get(node_id) is None)
+    import temporal_placement as placement  # noqa: PLC0415 - fold is now initialized
+
+    unplaced_ids = placement.unplaced_node_ids(nodes, cohort_ids=groups)
     dependencies = tg.dependency_index(
         nodes=nodes,
         ordering=[(edge.subject, edge.anchors) for edge in edges],
@@ -4469,7 +4467,7 @@ def _dated_node_for(groups: dict, placed: dict, ref: str, event_kind: str) -> st
 
 
 def _derive_work_items(
-    *, groups, calculated, placed, edges, diagnostics, records, by_mention, displays,
+    *, groups, calculated, placed, possibilities, edges, diagnostics, records, by_mention, displays,
     whats=None, owner_flags=None, place_flags=None, roster_snapshot=(),
     ambiguity=None, residence_overlaps=None, containment_conflicts=None, owner, now
 ):
@@ -4512,7 +4510,15 @@ def _derive_work_items(
             **extra,
         )
 
-    unplaced = {node_id for node_id in groups if placed.get(node_id) is None}
+    import temporal_placement as placement  # noqa: PLC0415 - avoids timeline cycle
+
+    unplaced = {
+        node_id for node_id in groups
+        if not placement.has_usable_placement({
+            "best_temporal_value": placed.get(node_id),
+            "possible_temporal_value": possibilities.get(node_id),
+        })
+    }
 
     node_reach: dict[str, int] = {}
     for edge in edges:
@@ -4713,13 +4719,9 @@ def _derive_work_items(
     # -- precision gaps ---------------------------------------------------
     for node_id in sorted(groups):
         group = groups[node_id]
-        # §7.1 / H6: render-placeable is not date-resolved. A member drawn
-        # inside a container has a WINDOW, never a value of its own, so
-        # `placed` holds nothing for it and the precision question survives —
-        # structurally, rather than by an exclusion list a later pass could
-        # forget to update.
         best = placed.get(node_id)
-        if not _wants_precision(best, group["event_kind"]):
+        possible = possibilities.get(node_id)
+        if not _wants_precision(best, group["event_kind"], possible):
             continue
         # D5: an age frame's boundary is arithmetic off the birth origin, never
         # a question (ADR 0030). "When did Childhood end?" is not askable.

@@ -281,7 +281,11 @@ class OrderTargetsTests(unittest.TestCase):
         return path
 
     def _classify(self, path: Path, *, stale_at: str | None = None) -> None:
-        data = {"source_path": path.name}
+        snapshot = cs.classifier_ctx.build_context_snapshot(self.tmp, path)
+        data = {
+            "source_path": path.relative_to(self.tmp).as_posix(),
+            "classification_snapshot": cs.classifier_ctx.snapshot_metadata(snapshot),
+        }
         if stale_at is not None:
             data.update({"stale": True, "stale_at": stale_at})
         cs.classification_path(path).write_text(json.dumps(data), encoding="utf-8")
@@ -348,7 +352,7 @@ class OrderTargetsTests(unittest.TestCase):
         self.assertTrue(data["updated_at"])
         self.assertEqual(cs.read_classify_cursor(), cs.source_key(path))
 
-    def test_is_classified_meaning_unchanged(self):
+    def test_is_classified_includes_contextual_freshness(self):
         stale = self._source("s")
         current = self._source("c")
         self._classify(stale, stale_at="2026-08-02T00:00:00Z")
