@@ -190,6 +190,17 @@ fallback is not. Thus generic precision work does not survive merely because a
 valid placement is broad, and the same predicate drives counts, work items,
 and old-question retirement.
 
+**Classifier eligibility clarification (v302).** Optional timeline relations
+require complete supplied context, an unambiguous candidate, nonempty
+event-local allowlisted references (at least one unique across candidates),
+and one unchanged, uniquely occurring Story Text quote. If any prerequisite
+is unsupported, leave the whole relation null while retaining the event and
+independent direct date/age. Validation still rejects invalid responses before
+filing; it never repairs or silently drops a relation. Operational failures
+now carry a closed `context_*` status code, never source or exception text.
+This clarifies v301's existing rules: prompt/extractor freshness versions stay
+unchanged, so valid accepted readings and in-flight responses remain current.
+
 ---
 
 ## 5. Relationships & Connection

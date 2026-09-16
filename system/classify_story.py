@@ -647,7 +647,8 @@ Captured at: {fm.get('captured_at', 'unknown')}
 Only the exact `candidate_id` and `entity_refs` values below may be used for a
 timeline relation. Candidate names and aliases are retrieval context, never
 permission to bind by a label or substring. A truncated context is visibly
-unfinished; do not infer candidates that are not supplied.
+unfinished; do not assert a timeline relation from it. Do not infer candidates
+that are not supplied. Follow every eligibility prerequisite in the Guidelines.
 {timeline_context}
 
 ---
@@ -736,12 +737,25 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   arithmetic from there — an age against a birthday, a relation against a dated
   landmark — so a guessed year is worse than no year at all.
 - `events[].timeline_relation`: optional contextual placement. Use only
-  `within`, `before`, or `after`; never invent `at_start`. Copy an exact supplied
-  `candidate_id`, include event-local allowlisted `entity_refs`, and cite one exact
-  Story Text quote that occurs only once; the system derives its offsets. Document-level `places`
-  are retrieval hints only, never evidence for every event. If any field is not
-  supported, leave the whole relation null. A contextual relation does not
-  replace a direct stated date or age; return both when the source supports both.
+  `within`, `before`, or `after`; never invent `at_start`. Assert a relation ONLY
+  when ALL of these already-enforced prerequisites hold:
+  1. Copy an exact supplied `candidate_id`. `context_truncated` must be false
+     and that candidate's `candidate_set_complete` must be true.
+  2. That candidate must have no `unresolved_entity_mentions` and no
+     `entity_ref_ambiguities`. A matching name or date does not resolve identity.
+  3. `entity_refs` must be a nonempty list of exact refs supplied on THAT
+     candidate, supported by this event. At least one selected ref must occur
+     on exactly one candidate across the ENTIRE supplied candidate list;
+     refs shared by competing stays alone do not disambiguate them.
+  4. `evidence.quote` must be one exact, unchanged substring of Story Text
+     occurring exactly once. Do not paraphrase, normalize whitespace, combine
+     excerpts, or quote context/metadata instead. The system derives offsets.
+  If ANY prerequisite is unsupported or uncertain, including empty, null, or
+  missing entity refs, return the WHOLE `timeline_relation` as null. Keep the
+  event and its independently stated date or age; do not omit the event or
+  invent references to make a relation pass. Document-level `places` are
+  retrieval hints only, never evidence for every event. A supported contextual
+  relation does not replace a direct stated date or age; return both when valid.
 - Echo `_classification_snapshot` byte-for-byte as shown. It binds this response
   to the source and context seen in this prompt; never substitute newer values.
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
