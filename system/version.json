@@ -1,7 +1,7 @@
 {
-  "version": 304,
+  "version": 305,
   "released": "2026-09-16",
-  "changelog": "v304: Validate every archive-classification batch receipt through one public pure helper before write, exact replay, or host adoption. Closed receipt shapes now bind the exact ordered envelope identity and enforce count, status, and refusal consistency instead of trusting only the top digest. Full readings also record whether archive mode skipped candidate generation, allowing a one-source --require-candidates plan to repair that omission once without making unchanged archive rows weekly refresh work or discarding an ordinary response already in flight.",
+  "changelog": "v305: Timeline publication no longer fails when a classifier corrects an event's subject while keeping its wording. The telling manifest checks non-superseded identity claims while preserving all old receipts, claim history and human bindings. Disputed or simultaneous current identities still fail closed; a fully retired telling with conflicting historical identities stays visible with a diagnostic and is never automatically re-keyed.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

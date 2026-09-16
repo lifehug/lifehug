@@ -98,7 +98,7 @@ replaced it.
 
 ### One telling, one event identity
 
-`assert_one_event_identity` refuses a telling whose active claims carry **two
+`assert_one_event_identity` refuses supplied claims carrying **two
 distinct non-era `event_ref` values** (`telling_spans_two_events`) — design
 §13.1's *"never a partial bind"*. Era composition is claim-precise per §5.1:
 
@@ -107,6 +107,19 @@ distinct non-era `event_ref` values** (`telling_spans_two_events`) — design
 * a telling whose claims are **about an era itself** (the tell is an
   `era:<hex>` subject, which only `era_identity`'s own identity claim mints) is
   `episode_eligible: false`, reason `telling_is_about_an_era`.
+
+**v305 superseded-history clarification.** The manifest supplies all
+non-superseded claims to that unchanged validator: disputed, retracted, missing
+or unknown statuses are not silently treated as supersession. Operative refs,
+signature, locator and era eligibility use the same standing claims. All claim
+IDs and provenance remain in the row, and immutable receipts and human binding
+records are unchanged. A fully superseded row with a single historical identity
+retains its prior evidence-based re-key behavior. A fully superseded row with
+multiple historical identities stays retired and non-bindable, with reason and
+diagnostic `telling_retired_identity_ambiguous`; no automatic re-key may choose
+one historical interpretation. Explicit durable human aliases still stand.
+The frozen row keys, manifest schema, identity rule version and identity digests
+do not change: this corrects how a derived view reads existing supersession.
 
 ### Named gap, carried forward to I1
 

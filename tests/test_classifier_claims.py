@@ -818,6 +818,72 @@ class ReclassificationTests(unittest.TestCase):
         self.assertEqual(len(ts.active_claims(index)), 1)
 
 
+class SubjectReinterpretationMigrationTests(unittest.TestCase):
+    def test_subject_change_preserves_history_binding_and_publication(self):
+        root = _vault(self)
+        source = _story(root, "cedarport", "Morgan visited Cedarport in 2002.")
+        original = event("Cedarport visit", "Visited Cedarport.", date={"stated": "2001"})
+        _classification(root, "cedarport", classification(source, original))
+        _run(root)
+        ref = ei.classifier_telling_ref("cedarport", original)
+        binding, _ = ei.file_event_identity(
+            root, telling_ref=ref, episode_id="episode:" + "a" * 24,
+            relation="same", origin="confirmed", created_at=NOW,
+        )
+        binding_files = {path: path.read_bytes() for path in (root / ei.HUMAN_BINDINGS_DIR).glob("*.json")}
+        revised_date = {**original, "date": {"stated": "2002"}}
+        _classification(root, "cedarport", classification(source, revised_date))
+        _run(root)
+        old_receipts = {path: (root / path).read_bytes() for path in ts.receipt_relative_paths(root)}
+
+        revised_subject = {**revised_date, "subject": "Morgan"}
+        _classification(root, "cedarport", classification(source, revised_subject))
+        report = _run(root)
+        self.assertEqual(report["superseded_claims"], 1)
+        index = ts.fold_active_index(root)
+        self.assertEqual(len(index["claims"]), 3)
+        self.assertEqual(sorted(row["status"] for row in index["claims"]),
+                         ["active", "superseded", "superseded"])
+        current = ts.active_claims(index)
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0]["subject_mention"], "Morgan")
+        manifest = ei.read_telling_manifest(root)
+        self.assertEqual(len(manifest["tellings"]), 1)
+        row = manifest["tellings"][0]
+        self.assertEqual(row["telling_ref"], ref)
+        self.assertEqual(row["event_refs"], [current[0]["event_ref"]])
+        self.assertEqual(row["claim_ids"], sorted(claim["claim_id"] for claim in index["claims"]))
+        self.assertEqual(row["active_claim_ids"], [current[0]["claim_id"]])
+        self.assertEqual(row["bound_identity_ids"], [binding["identity_id"]])
+        self.assertEqual(row["aliases"], [])
+        self.assertTrue(pub.read_projection(root)["nodes"])
+        for path, content in old_receipts.items():
+            self.assertEqual((root / path).read_bytes(), content)
+        for path, content in binding_files.items():
+            self.assertEqual(path.read_bytes(), content)
+
+        before = _files(root)
+        _run(root)
+        self.assertEqual(_files(root), before)
+        manifest_path = root / ei.TELLING_MANIFEST_FILE
+        manifest_bytes = manifest_path.read_bytes()
+        manifest_path.unlink()
+        ei.rebuild_telling_manifest(root)
+        self.assertEqual(manifest_path.read_bytes(), manifest_bytes)
+
+        # Removing the event retires all three readings, without deleting or
+        # guessing an identity from its now-ambiguous historical aggregate.
+        _classification(root, "cedarport", classification(source))
+        _run(root)
+        retired = ei.read_telling_manifest(root)["tellings"][0]
+        self.assertEqual(retired["status"], "retired")
+        self.assertEqual(retired["active_claim_ids"], [])
+        self.assertEqual(retired["claim_ids"], row["claim_ids"])
+        self.assertEqual(retired["bound_identity_ids"], row["bound_identity_ids"])
+        self.assertFalse(retired["episode_eligible"])
+        self.assertEqual(retired["ineligible_reason"], "telling_retired_identity_ambiguous")
+
+
 # --------------------------------------------------------------------------
 # Places, carried as evidence for the co-location rule
 # --------------------------------------------------------------------------

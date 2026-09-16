@@ -71,14 +71,14 @@ python3 -B -m unittest discover -s tests -p 'test_event_identity*.py'
 python3 -B -m unittest discover -s tests -p 'test_classifier*.py'
 python3 -B -m unittest discover -s tests -p 'test_*.py'
 python3 -B scripts/ci/check_framework_files.py
-python3 -B scripts/ci/check_version_bump.py
+python3 -B scripts/ci/check_version_bump.py --base origin/main --head HEAD
 ```
 
 ## Definition Of Done
 
-- [ ] Narrow implementation and synthetic regressions complete.
+- [x] Narrow implementation and synthetic regressions complete.
 - [ ] Focused and full local suites plus version/manifest gates pass.
-- [ ] Version, changelog and identity documentation updated together.
+- [x] Version, changelog and identity documentation updated together.
 - [ ] Immutable candidate pushed with exact command/result evidence.
 
 Parent owns CI dispatch, readiness, merge, platform pin and live verification.

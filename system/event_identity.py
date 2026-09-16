@@ -600,11 +600,15 @@ CORRECTION_DIAGNOSTIC = "telling_source_corrected"
 #: construction: it takes the correction reading and re-keys nothing.
 UNDECLARED_DOCUMENT_REVISION = "telling_document_revision_undeclared"
 
+#: A fully superseded row has no current identity to select from its history.
+INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS = "telling_retired_identity_ambiguous"
+
 MANIFEST_DIAGNOSTICS = (
     REKEY_DIAGNOSTIC,
     FRAGMENT_DIAGNOSTIC,
     CORRECTION_DIAGNOSTIC,
     UNDECLARED_DOCUMENT_REVISION,
+    INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS,
 )
 
 
@@ -882,7 +886,15 @@ def build_telling_manifest(
         for ref, claims in sorted(grouped.items())
     ]
     by_ref = {row["telling_ref"]: row for row in rows}
-    diagnostics: list[dict] = []
+    diagnostics: list[dict] = [
+        {
+            "finding": INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS,
+            "telling_ref": row["telling_ref"],
+            "event_refs": list(row["event_refs"]),
+        }
+        for row in rows
+        if row["ineligible_reason"] == INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS
+    ]
     _apply_durable_aliases(by_ref, records)
     _apply_rekeys(rows, _generations(rows), diagnostics)
     _attach_bindings(by_ref, records)
@@ -909,7 +921,14 @@ def build_telling_manifest(
 
 
 def _telling_row(ref: str, claims: Sequence[dict], by_receipt: Mapping[str, object]) -> dict:
-    found = assert_one_event_identity(ref, claims)
+    # A corrected interpretation is history, not a simultaneous event. Only
+    # explicit supersession removes a claim from this guard, never dispute.
+    standing = [row for row in claims if collapsed_text(row.get("status")) != "superseded"]
+    semantic_claims = standing or claims
+    found = event_identities_in(semantic_claims)
+    retired_ambiguous = not standing and len(found["event_refs"]) > 1
+    if not retired_ambiguous:
+        found = assert_one_event_identity(ref, semantic_claims)
     source_id, local_key = split_telling_ref(ref)
     kind = telling_source_kind(ref)
     active = sorted(
@@ -944,7 +963,7 @@ def _telling_row(ref: str, claims: Sequence[dict], by_receipt: Mapping[str, obje
     if kind == "landmark" and local_key is None:
         # `landmark:<entry id>` — the entry id IS the durable recorder event id.
         recorder_ids.add(ref.split(":", 1)[1])
-    about_era = telling_is_about_an_era(claims)
+    about_era = telling_is_about_an_era(semantic_claims)
     return {
         "telling_ref": ref,
         "source_kind": kind,
@@ -959,12 +978,15 @@ def _telling_row(ref: str, claims: Sequence[dict], by_receipt: Mapping[str, obje
         "claim_ids": sorted(collapsed_text(row.get("claim_id")) for row in claims),
         "active_claim_ids": active,
         "status": "active" if active else "retired",
-        "episode_eligible": not about_era,
-        "ineligible_reason": INELIGIBLE_TELLING_IS_AN_ERA if about_era else None,
+        "episode_eligible": not (about_era or retired_ambiguous),
+        "ineligible_reason": (
+            INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS if retired_ambiguous
+            else INELIGIBLE_TELLING_IS_AN_ERA if about_era else None
+        ),
         "event_refs": found["event_refs"],
         "era_refs": found["era_refs"],
-        "signature": telling_signature(claims),
-        "locator": telling_locator(claims),
+        "signature": telling_signature(semantic_claims),
+        "locator": telling_locator(semantic_claims),
         "aliases": [],
         "superseded_by": [],
         "rekey_case": None,
@@ -1022,6 +1044,10 @@ def _apply_rekeys(
         if not retired:
             continue
         for row in retired:
+            if row["ineligible_reason"] == INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS:
+                # Retain the history and binding, but never guess which of its
+                # superseded identities a new telling would continue.
+                continue
             cohort = _cohort_refs(row, generations)
             candidates = [
                 other for other in live if other["telling_ref"] not in cohort
@@ -2194,6 +2220,7 @@ __all__ = [
     "IDENTITY_SOURCES_DIR",
     "IDENTITY_STATE_DIR",
     "INELIGIBLE_TELLING_IS_AN_ERA",
+    "INELIGIBLE_RETIRED_IDENTITY_AMBIGUOUS",
     "LANDMARK_TELLING_PREFIX",
     "MACHINE_ORIGINS",
     "MANIFEST_DIAGNOSTICS",

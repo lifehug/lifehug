@@ -831,6 +831,122 @@ class OneEventIdentityTests(unittest.TestCase):
         self.assertEqual(len(found["era_refs"]), 2)
 
 
+class SupersededHistoryTests(unittest.TestCase):
+    def test_disputed_identity_still_refuses_through_canonical_store(self):
+        root = _vault(self, "ei-disputed-history-")
+        fixture_two_events(root)
+        claims = ts.active_claims(ts.fold_active_index(root))
+        ts.file_temporal_correction(
+            root, kind="dispute", claim_ids=[claims[0]["claim_id"]],
+            reason="The interpretation remains disputed, not superseded.", occurred_at=NOW,
+        )
+        with self.assertRaises(ei.EventIdentityError) as caught:
+            ei.build_telling_manifest(root)
+        self.assertEqual(caught.exception.code, "telling_spans_two_events")
+
+    def test_only_superseded_claims_leave_the_operative_identity(self):
+        ref = "classification:cedarport#1111aaaa1111"
+        old = {"claim_id": "old", "event_ref": "node:" + "1" * 24}
+        current = {
+            "claim_id": "current", "event_ref": "node:" + "2" * 24,
+            "status": "active", "event_mention": "Cedarport visit",
+            "subject_mention": "Morgan", "evidence": [{"start": 20, "end": 30}],
+        }
+        for status in ("active", "disputed", "retracted", "unknown", None):
+            with self.subTest(status=status):
+                historical = dict(old)
+                if status is not None:
+                    historical["status"] = status
+                with self.assertRaises(ei.EventIdentityError) as caught:
+                    ei._telling_row(ref, [historical, current], {})
+                self.assertEqual(caught.exception.code, "telling_spans_two_events")
+        historical = {**old, "status": "superseded", "subject_mention": "Taylor"}
+        row = ei._telling_row(ref, [historical, current], {})
+        self.assertEqual(row["claim_ids"], ["current", "old"])
+        self.assertEqual(row["active_claim_ids"], ["current"])
+        self.assertEqual(row["event_refs"], [current["event_ref"]])
+        self.assertEqual(row["signature"], ei.telling_signature([current]))
+        self.assertEqual(row["locator"], ei.telling_locator([current]))
+        # The public validator is still strict even for superseded inputs.
+        with self.assertRaises(ei.EventIdentityError):
+            ei.assert_one_event_identity(ref, [historical, current])
+
+    def test_superseded_era_identity_does_not_make_current_event_ineligible(self):
+        ref = "classification:cedarport#1111aaaa1111"
+        row = ei._telling_row(ref, [
+            {"claim_id": "old", "status": "superseded",
+             "event_ref": "era:" + "1" * 24, "subject_mention": "era:" + "1" * 24},
+            {"claim_id": "current", "status": "active",
+             "event_ref": "node:" + "2" * 24, "subject_mention": "self"},
+        ], {})
+        self.assertTrue(row["episode_eligible"])
+        self.assertEqual(row["era_refs"], [])
+        self.assertEqual(row["claim_ids"], ["current", "old"])
+
+    def test_retired_ambiguous_history_preserves_binding_without_auto_rekey(self):
+        root = _vault(self, "ei-retired-history-")
+        ref = "classification:cedarport#1111aaaa1111"
+        successor = "classification:cedarport#2222bbbb2222"
+        old_ids = []
+        for number, subject in enumerate(("Morgan", "Taylor"), 1):
+            revision = _rev(f"reading-{number}")
+            old_ids += _file(
+                root, source_id=ref, revision=revision, extractor="classify:1",
+                document_revision=_rev("same-source"),
+                claims=[_claim(
+                    source_id=ref, revision=revision, extractor="classify:1",
+                    subject=subject, event_mention="Cedarport visit", span=(20, 30),
+                    event_ref="node:" + str(number) * 24,
+                )],
+            )
+        _retire(root, old_ids, "Both earlier interpretations were superseded.")
+        revision = _rev("reading-3")
+        _file(
+            root, source_id=successor, revision=revision, extractor="classify:1",
+            document_revision=_rev("same-source"),
+            claims=[_claim(
+                source_id=successor, revision=revision, extractor="classify:1",
+                subject="Morgan", event_mention="A visit to Cedarport", span=(20, 30),
+                event_ref="node:" + "3" * 24,
+            )],
+        )
+        binding, _ = ei.file_event_identity(
+            root, telling_ref=ref, episode_id="episode:" + "4" * 24,
+            relation="same", origin="confirmed", created_at=NOW,
+        )
+        before = {path: (root / path).read_bytes() for path in ts.receipt_relative_paths(root)}
+        manifest = ei.build_telling_manifest(root)
+        rows = _rows(manifest)
+        old, new = rows[ref], rows[successor]
+        self.assertEqual(old["status"], "retired")
+        self.assertEqual(old["claim_ids"], sorted(old_ids))
+        self.assertEqual(old["active_claim_ids"], [])
+        self.assertEqual(len(old["event_refs"]), 2)
+        self.assertFalse(old["episode_eligible"])
+        self.assertEqual(old["ineligible_reason"], "telling_retired_identity_ambiguous")
+        self.assertIn("telling_retired_identity_ambiguous", _findings(manifest))
+        self.assertIn("telling_retired_identity_ambiguous", ei.MANIFEST_DIAGNOSTICS)
+        self.assertEqual(old["bound_identity_ids"], [binding["identity_id"]])
+        self.assertEqual(new["bound_identity_ids"], [])
+        self.assertEqual(old["superseded_by"], [])
+        self.assertEqual(new["aliases"], [])
+        self.assertTrue(ei.rekey_evidence(old, new)["sufficient"], "exercise the re-key guard")
+        self.assertEqual(ei.build_telling_manifest(root), manifest)
+        self.assertEqual(before, {path: (root / path).read_bytes() for path in before})
+
+        # A separately filed human alias remains authoritative; this guard
+        # only prevents inventing a transfer from mixed retired evidence.
+        confirmed, _ = ei.file_event_identity(
+            root, telling_ref=successor, episode_id="episode:" + "4" * 24,
+            relation="same", origin="confirmed", telling_aliases=[ref], created_at=NOW,
+        )
+        aliased = _rows(ei.build_telling_manifest(root))
+        self.assertEqual(aliased[ref]["rekey_case"], "durable_alias")
+        self.assertEqual(aliased[successor]["aliases"], [ref])
+        self.assertEqual(aliased[successor]["bound_identity_ids"],
+                         sorted([binding["identity_id"], confirmed["identity_id"]]))
+
+
 # --------------------------------------------------------------------------
 # The projection's own promises
 # --------------------------------------------------------------------------

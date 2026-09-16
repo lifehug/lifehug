@@ -47,6 +47,12 @@ the people-enumeration guard. A free subject ref is not an exemption. This does
 not independently detect multiple places or companies collapsed into one record;
 the reading still owes one unit per subject (ADR 0033 amendment 4).
 
+**Classifier history and publication (v305).** A superseded subject reading
+does not conflict with a telling's current event identity. Migration retains
+all old receipts and human bindings; disputed or simultaneous current identities
+still fail closed. Fully retired mixed-identity history remains visible with
+`telling_retired_identity_ambiguous` and cannot be automatically re-keyed.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:
