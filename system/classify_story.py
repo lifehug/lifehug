@@ -2021,7 +2021,9 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
     for row, prepared in prepared_items:
         try:
             if cc_revision := prepared["snapshot"].get("source_revision"):
-                if classifier_ctx.source_revision(row["source"]) != cc_revision:
+                if classifier_ctx.effective_source_revision(
+                    REPO_DIR, row["source"]
+                ) != cc_revision:
                     raise ClassificationPreparationError(
                         "source changed after preparation", code="source_context_race"
                     )
@@ -2039,9 +2041,9 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 skip_candidates=skip_candidates, require_mode=True,
                 strict_schema=True,
             )
-            if classifier_ctx.source_revision(row["source"]) != prepared["snapshot"].get(
-                "source_revision"
-            ):
+            if classifier_ctx.effective_source_revision(
+                REPO_DIR, row["source"]
+            ) != prepared["snapshot"].get("source_revision"):
                 raise ClassificationPreparationError(
                     "source changed after final preparation",
                     code="source_context_race",
@@ -2342,6 +2344,7 @@ def cmd_refresh_targets(args: argparse.Namespace) -> int:
     report["eligible_count"] = len(sources)
     report["ineligible_count"] = len(ineligible)
     report["ineligible_items"] = ineligible
+    report["complete"] = bool(report["complete"] and not ineligible)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 

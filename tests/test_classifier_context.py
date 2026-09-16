@@ -100,8 +100,140 @@ class ContextCase(unittest.TestCase):
             }],
         }
 
+    def write_correction(
+        self,
+        name: str,
+        body: str,
+        *,
+        target: Path | None = None,
+        supersedes: str = "",
+    ) -> str:
+        target = target or self.source
+        corrections = self.root / "sources" / "corrections"
+        corrections.mkdir(parents=True, exist_ok=True)
+        path = corrections / f"{name}.md"
+        source_id = f"correction:{name}"
+        target_relative = target.relative_to(self.root).as_posix()
+        supersedes_lines = (
+            f'supersedes: "{supersedes}"\n'
+            f'supersedes_path: "sources/corrections/{supersedes.removeprefix("correction:")}.md"\n'
+            if supersedes
+            else ""
+        )
+        path.write_text(
+            "---\n"
+            'type: "source_correction"\n'
+            f'source_id: "{source_id}"\n'
+            f'source_path: "sources/corrections/{name}.md"\n'
+            f'corrects_path: "{target_relative}"\n'
+            f"{supersedes_lines}"
+            'correction_kind: "factual"\n'
+            "---\n\n"
+            f"# Synthetic correction\n\n{body}\n",
+            encoding="utf-8",
+        )
+        return source_id
+
 
 class StableFreshnessTests(ContextCase):
+    def test_effective_source_revision_binds_active_correction_leaves(self):
+        other = self.source.parent / "other.md"
+        other.write_text("An unrelated synthetic story.", encoding="utf-8")
+        raw_revision = cc.source_revision(self.source)
+        before = self.snapshot()
+        other_before = cc.build_context_snapshot(self.root, other)
+        self.assertEqual(before["source_revision"], raw_revision)
+
+        first = self.write_correction("first", "The city was Harborview, not Cedarport.")
+        after_add = self.snapshot()
+        self.assertNotEqual(after_add["source_revision"], raw_revision)
+        self.assertEqual(
+            cc.refresh_reason(after_add, {"classification_snapshot": cc.snapshot_metadata(before)}),
+            "source_changed",
+        )
+
+        second = self.write_correction(
+            "second",
+            "The city was Thunderhead, not Harborview.",
+            supersedes=first,
+        )
+        after_supersede = self.snapshot()
+        self.assertNotEqual(
+            after_supersede["source_revision"], after_add["source_revision"]
+        )
+
+        self.write_correction(
+            "retract-second",
+            "The previous correction is retracted; the original wording stands.",
+            supersedes=second,
+        )
+        after_retraction = self.snapshot()
+        self.assertNotEqual(
+            after_retraction["source_revision"], after_supersede["source_revision"]
+        )
+        self.assertEqual(
+            cc.build_context_snapshot(self.root, other)["source_revision"],
+            other_before["source_revision"],
+        )
+
+    def test_source_relevant_roster_alias_changes_freshness_with_same_candidate(self):
+        roster_dir = self.root / "state" / "entity_rosters"
+        roster_dir.mkdir(parents=True)
+        roster_path = roster_dir / "place.json"
+        roster = {
+            "version": 1,
+            "type": "place",
+            "entities": [
+                {"name": "Cedarport", "slug": "cedarport", "aliases": []},
+                {"name": "Elsewhere", "slug": "elsewhere", "aliases": []},
+            ],
+        }
+        roster_path.write_text(json.dumps(roster), encoding="utf-8")
+        self.source.write_text("Thunderhead was home.", encoding="utf-8")
+        self.write_projection([node()])
+        before = self.snapshot()
+        self.assertEqual(
+            [row["candidate_id"] for row in before["candidates"]], ["node:stay"]
+        )
+
+        roster["entities"][0]["aliases"] = ["Thunderhead"]
+        roster_path.write_text(json.dumps(roster), encoding="utf-8")
+        matched = self.snapshot()
+        self.assertEqual(
+            [row["candidate_id"] for row in matched["candidates"]], ["node:stay"]
+        )
+        self.assertNotEqual(matched["context_digest"], before["context_digest"])
+
+        roster["entities"][1]["aliases"] = ["Thunderhead"]
+        roster_path.write_text(json.dumps(roster), encoding="utf-8")
+        ambiguous = self.snapshot()
+        self.assertEqual(
+            [row["candidate_id"] for row in ambiguous["candidates"]], ["node:stay"]
+        )
+        self.assertNotEqual(ambiguous["context_digest"], matched["context_digest"])
+
+        roster["entities"][1]["aliases"] = ["Elsewhere Station"]
+        roster_path.write_text(json.dumps(roster), encoding="utf-8")
+        unrelated_before = self.snapshot()
+        roster["entities"][1]["aliases"] = ["Another Unmentioned Alias"]
+        roster_path.write_text(json.dumps(roster), encoding="utf-8")
+        unrelated_after = self.snapshot()
+        self.assertEqual(
+            unrelated_after["context_digest"], unrelated_before["context_digest"]
+        )
+
+    def test_machine_telling_alias_churn_does_not_change_freshness(self):
+        first = node() | {"legacy_refs": ["machine:first"]}
+        self.write_projection([first])
+        before = self.snapshot()
+        second = node() | {"legacy_refs": ["machine:second"]}
+        self.write_projection([second], generation=2)
+        after = self.snapshot()
+        self.assertNotEqual(
+            before["candidates"][0]["aliases"], after["candidates"][0]["aliases"]
+        )
+        self.assertEqual(after["context_digest"], before["context_digest"])
+
     def test_generation_and_timestamp_do_not_change_digest(self):
         first = self.snapshot()["context_digest"]
         self.write_projection([node()], generation=9)

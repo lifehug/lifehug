@@ -85,6 +85,14 @@ requires both `pending_count == 0` and `ineligible_count == 0`.
 Before changing these interface names, notify the parent; platform builds against
 them. No hosted behavior belongs in this repository.
 
+The snapshot's existing `source_revision` key binds the effective authoritative
+classifier input. With no active correction it remains the historical hash of
+raw source bytes. When corrections exist it hashes that raw revision together
+with the ordered active correction bodies selected by the canonical
+`source_integrity` supersession graph. Adding or superseding a correction is
+therefore a full source change, including when it happens during a model call;
+unrelated corrections do not invalidate the source.
+
 ## Timeline-Only Refresh
 
 Use `mode: timeline` only when an existing non-stale classification is proven
@@ -123,6 +131,11 @@ Do not fabricate a model's echo or claim the old model saw new context.
 - Preserve existing exact evidence quotes, unique occurrence, canonical ID,
   source revision, incomplete-context, ambiguous identity, and human-override
   checks. No guessed calendar years; supported ranges count as placement.
+- Context freshness binds canonical roster identity/name/alias terms supplied
+  with selected candidates plus the exact roster refs and terms matched in the
+  source. Relevant alias additions, removals, and ambiguities refresh the
+  reading even when candidate IDs do not change. Unrelated roster aliases and
+  projection-provided machine telling aliases do not invalidate it.
 - Each item's candidate normalization and all possible validation happen before
   writes. Unexpected I/O failure fails the batch; the host disposable transaction
   discards uncommitted changes. Local batch application must not leave a receipt

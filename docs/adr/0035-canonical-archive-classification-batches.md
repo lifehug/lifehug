@@ -27,6 +27,15 @@ pre-exclusion truth; only an unchanged identity is omitted from selection, so a
 source or context change immediately makes it eligible again. Path-only skipping
 is invalid, and excluded refusals remain pending unresolved work.
 
+The existing `source_revision` snapshot key represents the effective
+authoritative classifier input. It remains the raw-byte hash when no active
+correction exists; otherwise it binds that hash plus the ordered active
+correction bodies chosen by `source_integrity`'s supersession graph. The
+context digest separately binds canonical roster terms supplied with candidates
+and exact roster refs/terms matched in the source. Machine telling aliases stay
+excluded. Thus correction and source-relevant alias changes cannot reuse an old
+model response even when selected candidate IDs happen to remain unchanged.
+
 `classify-story --from-batch-response` validates up to 500 raw response strings
 against one fresh shared catalog, reloads it once as a race gate, and only then
 writes valid siblings. Timeline mode

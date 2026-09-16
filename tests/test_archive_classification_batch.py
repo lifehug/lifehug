@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,6 +139,21 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             "skip_candidates": skip,
             "items": items,
         }
+
+    def write_correction(self, name: str, body: str) -> None:
+        corrections = self.sources / "corrections"
+        corrections.mkdir(parents=True, exist_ok=True)
+        (corrections / f"{name}.md").write_text(
+            "---\n"
+            'type: "source_correction"\n'
+            f'source_id: "correction:{name}"\n'
+            f'source_path: "sources/corrections/{name}.md"\n'
+            'corrects_path: "sources/manual/alpha.md"\n'
+            'correction_kind: "factual"\n'
+            "---\n\n"
+            f"# Synthetic correction\n\n{body}\n",
+            encoding="utf-8",
+        )
 
     def test_plan_loads_one_catalog_and_uses_full_and_timeline_modes(self) -> None:
         current_a = snapshot(self.a)
@@ -305,6 +322,35 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         filed = json.loads(cs.classification_path(self.a).read_text())
         self.assertEqual(filed["candidate_question_ids"], ["cand-preserved-1"])
         self.assertEqual(json.loads(self.candidates.read_text())["candidates"], [])
+
+    def test_correction_selects_full_mode_and_saved_old_response_is_refused(self) -> None:
+        before = cc.build_context_snapshot(self.root, self.a)
+        prior = self.existing(self.a, {**before, "source_revision": "sha256:" + "0" * 64})
+        response = full_response(before)
+        original_prepare = cs.prepare_classification
+        calls = 0
+
+        def prepare(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            prepared = original_prepare(*args, **kwargs)
+            if calls == 2:
+                self.write_correction("arrived-during-model", "Alpha happened later.")
+            return prepared
+
+        with mock.patch.object(cs, "prepare_classification", side_effect=prepare):
+            report = cs.file_batch_response(self.envelope("correction-race", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "full",
+                "response_text": json.dumps(response),
+            }]))
+        self.assertEqual(report["items"][0]["status"], "refused")
+        self.assertEqual(report["items"][0]["refusal_code"], "source_context_race")
+        self.assertEqual(json.loads(cs.classification_path(self.a).read_text()), prior)
+
+        plan = cs.build_batch_plan(sources=[self.a], limit=1)
+        self.assertEqual(plan["items"][0]["reason"], "source_changed")
+        self.assertEqual(plan["items"][0]["mode"], "full")
 
     def test_exact_replay_is_noop_and_changed_body_conflicts(self) -> None:
         current = snapshot(self.a)
@@ -478,6 +524,25 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             }]))
         self.assertEqual(report["counts"]["accepted"], 1)
         self.assertEqual(json.loads(cs.classification_path(self.a).read_text())["events"], [])
+
+    def test_refresh_report_is_incomplete_when_inventory_has_ineligible_rows(self) -> None:
+        empty = self.sources / "manual" / "empty.md"
+        empty.write_text("---\ntitle: Empty\n---\n", encoding="utf-8")
+        base = {
+            "targets": [],
+            "selected_count": 0,
+            "pending_count": 0,
+            "remaining_count": 0,
+            "complete": True,
+            "limit": 50,
+        }
+        output = io.StringIO()
+        with mock.patch.object(cc, "select_refresh_targets", return_value=base), \
+                redirect_stdout(output):
+            self.assertEqual(cs.cmd_refresh_targets(SimpleNamespace(limit=50)), 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["ineligible_count"], 1)
+        self.assertFalse(report["complete"])
 
 
 if __name__ == "__main__":
