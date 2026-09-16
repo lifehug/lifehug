@@ -201,6 +201,21 @@ now carry a closed `context_*` status code, never source or exception text.
 This clarifies v301's existing rules: prompt/extractor freshness versions stay
 unchanged, so valid accepted readings and in-flight responses remain current.
 
+**Canonical archive batching shipped in v303 (ADR 0035).** One planner loads
+the canonical catalog once for up to 500 selected sources, and one filer
+validates all responses against a shared fresh catalog, reloads it once as a
+race gate, and then applies valid siblings.
+Context-only refresh asks only for event evidence and preserves themes, insights,
+sensitivity, scene analysis, candidate IDs, and every other non-timeline field.
+Exact-current work is a no-model no-op. Archive-only `--skip-candidates` removes
+question instructions and judgment context from full prompts; it never changes
+ordinary new-story behavior or erases prior candidates. Deterministic projection
+recalculation remains safe. Finite retries exclude only exact source-path plus
+four-key snapshot identities; refusals stay pending and any source/context
+change makes them selectable again. Reusing an old model reading after an anchor
+change is deferred until a separately versioned dependency contract can exclude
+alias, competitor, identity-decision, removal, and retraction changes.
+
 ---
 
 ## 5. Relationships & Connection

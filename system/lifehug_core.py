@@ -190,6 +190,10 @@ SOURCE_MANIFEST_FILE = _data("source_manifest")
 SOURCE_LINT_FINDINGS_FILE = _data("source_lint_findings")
 LEARNING_FAILURES_FILE = _data("learning_failures")
 CLASSIFICATIONS_DIR = _data("classifications")
+# v303: content-free, deterministic outcomes for one canonical archive batch.
+# The receipt is durable owner data because a host adopts it after commit to
+# recover exact per-source outcomes without buying model work again.
+CLASSIFICATION_BATCHES_DIR = _data("classification_batches")
 # v237: where the classification batch got to. Derived operational memory —
 # rebuildable, deletable, never authority — so a missing or malformed cursor
 # means "start at the head", never an error (system/classify_story.py owns

@@ -37,31 +37,51 @@ Extend `classify-story`, with the same flags exposed by `system/lifehug.py`:
 1. `--batch-plan` prints ONE JSON object, no prose, holding the bounded set of
    sources needing work, their canonical snapshot, `mode`, and emitted prompt.
    Default limit 50, explicit maximum 500; optional `--sources-json PATH` selects
-   an explicit bounded source list. The document is private transport data, not
+   an explicit bounded source list. Optional `--exclude-items-json PATH` accepts
+   the closed document `{schema_version: 1, items: [{source_path, snapshot}]}`,
+   where every snapshot has exactly the existing four identity keys. It skips
+   selection only when both canonical path and snapshot still match; path-only
+   exclusions are invalid and changed source/context becomes eligible again.
+   The document is private transport data, not
    a logging artifact. Target selection remains canonical, includes all source
    kinds accepted by current classification, excludes corrections themselves,
    rejects paths escaping the vault/symlinks, and shares one loaded catalog.
 2. `--from-batch-response PATH` consumes `{schema_version: 1, batch_id: SLUG,
+   skip_candidates: BOOLEAN,
    items: [{source_path: STRING, mode: 'full'|'timeline', response_text: STRING}]}`.
    Maximum 500 items with explicit size/path validation and no duplicate source
    targets. The framework alone parses and validates model bytes. Validate all
-   items against ONE fresh catalog before applying valid items; refusal of one
+   items against one shared fresh catalog, then reload that catalog once as a
+   race gate before applying valid items; refusal of one
    item is reported separately and must not erase valid siblings or old data.
 3. Return a content-free structured batch report with source paths, accepted /
    refused / already-current statuses, typed refusal codes, and counts. No
    prompts, quotes, model bodies, or dates in the report. Preserve a durable,
    deterministic receipt at an appropriate existing report location or explicitly
    contracted state location so an adopted host commit can recover its exact
-   per-source outcomes. Decide and document the exact path before host wiring.
+   per-source outcomes. Receipts live at
+   `state/classification_batches/<batch_id>.json`, schema version 1:
+   `{schema_version, batch_id, skip_candidates, input_digest, receipt_path,
+   items: [{source_path, mode, input_digest, status, refusal_code}], counts}`.
 4. A repeat of a previously accepted identical batch is a semantic no-op.
    Changed bodies under an existing batch identity must fail closed, not adopt
    the wrong report. Batch receipt binds all input identities/digests. Replay
    after source/context changes must not overwrite newer interpretations.
 
-Plan shape: `{schema_version: 1, selected_count, pending_count, remaining_count,
+Plan shape: `{schema_version: 1, skip_candidates, inventory_scope,
+eligible_count, ineligible_count, ineligible_items, excluded_count,
+selected_count, pending_count, remaining_count,
 items: [{source_path, reason, mode, snapshot, prompt}]}`. `snapshot` retains the
-existing four keys. Pending covers the whole eligible inventory, not only the
-selected slice. `remaining_count` is not a claim of full archive completion.
+existing four keys. `pending_count` covers the whole eligible inventory before
+exclusions. `excluded_count` counts exact matching pending identities, and
+`remaining_count = pending_count - excluded_count - selected_count` reports
+unseen selectable work. Excluded refusals remain pending: selected zero with
+pending greater than zero is an unresolved run, never completion.
+`inventory_scope` says `all` or `explicit`; an explicit source
+file scopes every count to that bounded list. Ineligible rows carry only source
+path and typed refusal code, and are never silently omitted. Archive completion
+requires both `pending_count == 0` and `ineligible_count == 0`.
+`remaining_count` is not a claim of full archive completion.
 Before changing these interface names, notify the parent; platform builds against
 them. No hosted behavior belongs in this repository.
 
@@ -80,10 +100,12 @@ mechanisms. Filing refuses a changed base classification/source rather than
 merging into an unrelated newer reading. It must not make a content-stale
 classification readable again merely by refreshing its dates.
 
-Full batch mode may suppress new question candidates through an explicit option,
-but do not erase prior candidates or silently change normal new-story behavior.
-Thread the actual prompt omission as well as storage suppression; spending the
-model tokens and throwing the questions away is not the optimization.
+Full batch mode suppresses new question candidates only through the explicit
+`--skip-candidates` option on both planner and filer. The required envelope
+boolean is bound into receipt identity. It defaults false, so ordinary new-story
+work retains normal candidate generation. When true, the prompt omits candidate
+instructions, judgment context, and question categories; filing preserves every
+prior candidate ID and creates none. Never generate candidates and discard them.
 
 Ordinary single-source prompt/from-response and local maintenance must use the
 same mode selection and validation definitions, so future contextual additions
@@ -91,9 +113,10 @@ benefit without a special operator pass. Changing known anchor bounds with
 unchanged valid relationships should use deterministic recalculation wherever
 provable. Do not remove fields from fingerprints blindly: new competing stays,
 new aliases, unresolved references, date-dependent bindings, and retractions
-must still be reconsidered. If safe no-model reuse needs a separately versioned
-dependency contract, document that explicitly; do not fabricate a model's echo
-or claim the old model saw new context.
+must still be reconsidered. Safe no-model anchor reuse requires a separately
+versioned dependency contract and is not part of v303. Exact-current sources are
+no-ops and accepted claims still recalculate through the canonical projection.
+Do not fabricate a model's echo or claim the old model saw new context.
 
 ## Validation and Atomicity
 
@@ -122,7 +145,13 @@ manual decisions and event identities; repeated current pass creates no changes.
 Provide a runnable 500-source synthetic batch walkthrough that measures planning,
 validation, application and projection separately and counts model work needed
 on first build, no-change rerun, added story, and changed relevant landmark.
-Do not label recorded model speed a live provider performance result.
+Its deterministic context-provider stub may isolate batching overhead, but must
+say so. In the same executable, use real synthetic roster, landmark, temporal
+claim/publication, context-catalog, snapshot and identity records to prove that
+adding, changing and removing a competing anchor refreshes only the related
+source while preserving an unrelated current classification, owner identity
+decisions and all non-temporal fields. Recorded model responses are acceptable;
+do not label either fixture a live provider performance result.
 
 Update behavior docs, ADR for durable interfaces, CLI help, version/release and
 framework manifest in the same PR. Version target v303 unless main advances.

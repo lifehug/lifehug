@@ -690,6 +690,34 @@ def build_context_snapshot(
     )
 
 
+def load_context_catalog(vault_root: str | Path) -> dict:
+    """Load the immutable-for-one-operation context catalog once.
+
+    Batch planners and batch filers use this public boundary so hundreds of
+    source-specific snapshots do not reread the projection, claims, rosters,
+    identity decisions, and telling manifest hundreds of times.
+    """
+    return _load_context_catalog(Path(vault_root))
+
+
+def build_context_snapshot_from_catalog(
+    vault_root: str | Path,
+    source_path: str | Path,
+    catalog: dict,
+    *,
+    source_bytes: bytes | None = None,
+    max_candidates: int = MAX_CONTEXT_CANDIDATES,
+) -> dict:
+    """Build one source snapshot from a caller-owned shared catalog."""
+    return _build_context_snapshot_from_catalog(
+        Path(vault_root),
+        Path(source_path),
+        catalog,
+        source_bytes=source_bytes,
+        max_candidates=max_candidates,
+    )
+
+
 def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
     """Validate one model response against exactly the context it observed."""
     if not isinstance(result, dict):
@@ -874,6 +902,8 @@ __all__ = [
     "RELATIONS",
     "SNAPSHOT_KEYS",
     "build_context_snapshot",
+    "build_context_snapshot_from_catalog",
+    "load_context_catalog",
     "refresh_reason",
     "select_refresh_targets",
     "snapshot_metadata",

@@ -26,8 +26,12 @@ python3 system/classify_story.py --classify sources/manual/arizona.md --model cl
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
+import os
 import re
+import stat
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -43,6 +47,7 @@ import classifier_context as classifier_ctx
 
 from lifehug_core import (
     ANSWERS_DIR,
+    CLASSIFICATION_BATCHES_DIR,
     CLASSIFICATIONS_DIR,
     CLASSIFY_CURSOR_FILE,
     DEFAULT_CORRECTION_ROLE,
@@ -67,6 +72,7 @@ from lifehug_core import (
     write_text,
 )
 from question_judgment import build_decision_context, load_judgment_rubric, owner_judgment_signals_block
+from vault_paths import atomic_write_vault_text, read_vault_text
 
 # ── constants ─────────────────────────────────────────────────────────────────
 # Non-dated alias — tracks the current Sonnet tier instead of pinning a
@@ -76,6 +82,18 @@ from question_judgment import build_decision_context, load_judgment_rubric, owne
 # misdiagnosed — if it recurs on an instance, set `classify_model:
 # claude-sonnet-4-6` in config.yaml and capture the actual error.
 DEFAULT_MODEL = "claude-sonnet-5"
+
+BATCH_SCHEMA_VERSION = 1
+BATCH_RECEIPT_SCHEMA_VERSION = 1
+DEFAULT_BATCH_LIMIT = 50
+MAX_BATCH_ITEMS = 500
+MAX_BATCH_BYTES = 32 * 1024 * 1024
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_EXCLUDE_ITEMS_BYTES = 2 * 1024 * 1024
+BATCH_RECEIPTS_DIR = CLASSIFICATION_BATCHES_DIR.relative_to(REPO_DIR)
+CLASSIFICATION_MODES = ("full", "timeline")
+BATCH_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 # Taxonomy themes for the AI prompt
 THEME_TAXONOMY = [
@@ -555,6 +573,39 @@ def _relative_path(source_path) -> str:
         return str(source_path)
 
 
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _digest(value: object) -> str:
+    raw = value if isinstance(value, bytes) else _canonical_json(value).encode("utf-8")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _existing_classification(source_path: Path) -> tuple[Path | None, dict | None]:
+    for path in classification_paths(source_path):
+        if not path.exists():
+            continue
+        value = read_json(path, default=None)
+        if isinstance(value, dict):
+            return path, value
+    return None, None
+
+
+def classification_mode(snapshot: dict, existing: object) -> str | None:
+    """Return the model work needed for this exact source/context state.
+
+    Timeline-only refresh is deliberately narrow: only a context digest
+    change on an otherwise compatible, non-stale classification qualifies.
+    Source, prompt, extractor, legacy, and explicit-stale changes require a
+    full reread. ``None`` means the existing result is already current.
+    """
+    reason = classifier_ctx.refresh_reason(snapshot, existing)
+    if reason is None:
+        return None
+    return "timeline" if reason == "context_changed" else "full"
+
+
 def _corrections_block(source_path: Path) -> str:
     corrections = corrections_for(source_path)
     if not corrections:
@@ -588,27 +639,88 @@ def corrections_for(source_path: Path) -> list[str]:
     ]
 
 
+def _build_timeline_prompt(
+    source_path: Path,
+    fm: dict,
+    story_text: str,
+    context_snapshot: dict,
+) -> str:
+    """Ask only for the temporal fields that can legitimately be refreshed."""
+    timeline_context = json.dumps({
+        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
+        "context_complete": context_snapshot.get("context_complete", False),
+        "context_truncated": context_snapshot.get("context_truncated", False),
+        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
+        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
+        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
+        "candidates": context_snapshot.get("candidates", []),
+        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
+        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
+    }, indent=2, sort_keys=True)
+    return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
+
+## Source File
+Path: {_relative_path(source_path)}
+Title: {fm.get('title', '(untitled)')}
+Type: {fm.get('type', 'unknown')}
+
+## Story Text
+{story_text}
+{_corrections_block(source_path)}
+
+## Canonical Timeline Context
+{timeline_context}
+
+Return ONLY one raw JSON object with exactly these fields:
+{{
+  "_classification_mode": "timeline",
+  "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
+  "events": [
+    {{ "title": "noun phrase of at most 7 words", "description": "one datable moment", "subject": "who or what experienced it", "places": ["source-grounded place names for this event only"], "when_hint": "the source's own words or null", "anchor": "nearest stated landmark or null", "date": {{ "stated": "explicit date/year or null", "age": "explicit age or null", "anchor_ref": "stated landmark or null", "relation": "before|after|within|null" }}, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null }}
+  ]
+}}
+
+Extract every datable moment, including zero events when this is an opinion with
+no narrated moment. Never infer a calendar year. Preserve direct dates and ages
+alongside supported contextual relations. A timeline relation is optional and
+must be null unless its candidate set is complete, identity is unambiguous, at
+least one selected entity ref uniquely disambiguates the candidate, and its
+evidence quote occurs exactly once in Story Text. Do not return people, places,
+themes, insights, sensitivity, scene analysis, outputs, focuses, projects,
+contradictions, or candidate questions. The framework preserves those existing
+fields and human decisions. Echo the mode and four-key snapshot exactly.
+"""
+
+
 def build_prompt(
     source_path: Path,
     fm: dict,
     story_text: str,
     *,
     context_snapshot: dict | None = None,
+    mode: str = "full",
+    include_candidates: bool = True,
 ) -> str:
-    """Construct the full AI classification prompt for a source file."""
+    """Construct the mode-bound AI classification prompt for one source."""
+    if mode not in CLASSIFICATION_MODES:
+        raise ValueError(f"unsupported classification mode: {mode}")
     if context_snapshot is None:
         source_bytes = source_path.read_bytes() if source_path.exists() else story_text.encode("utf-8")
         context_snapshot = classifier_ctx.build_context_snapshot(
             REPO_DIR, source_path, source_bytes=source_bytes
         )
+    if mode == "timeline":
+        return _build_timeline_prompt(source_path, fm, story_text, context_snapshot)
     mission = load_mission()
-    judgment_rubric = load_judgment_rubric()
-    judgment_section = f"## Question-Judgment Rubric\n{judgment_rubric}"
-    signals_block = owner_judgment_signals_block(build_decision_context(limit=15))
-    if signals_block:
-        judgment_section += f"\n\n{signals_block}"
-    categories_block = load_question_categories()
-    story_functions_block = "\n".join(f"  - {sf}" for sf in STORY_FUNCTIONS)
+    judgment_section = ""
+    categories_block = ""
+    if include_candidates:
+        judgment_rubric = load_judgment_rubric()
+        judgment_section = f"## Question-Judgment Rubric\n{judgment_rubric}"
+        signals_block = owner_judgment_signals_block(build_decision_context(limit=15))
+        if signals_block:
+            judgment_section += f"\n\n{signals_block}"
+        categories_block = load_question_categories()
     themes_block = ", ".join(THEME_TAXONOMY)
     timeline_context = json.dumps({
         "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
@@ -623,6 +735,36 @@ def build_prompt(
     }, indent=2, sort_keys=True)
 
     relative_path = _relative_path(source_path)
+    question_schema = ""
+    question_guidelines = ""
+    question_categories_section = ""
+    if include_candidates:
+        question_schema = f''',
+  "candidate_questions": [
+    {{
+      "text": "string — the actual question",
+      "story_function": "one of: {', '.join(STORY_FUNCTIONS)}",
+      "priority": 0.75,
+      "reason": "why this question matters for the memoir",
+      "defer": false,
+      "target_category": "one of these category IDs or null — {', '.join(sorted(parse_categories(QUESTIONS_FILE.read_text(encoding='utf-8') if QUESTIONS_FILE.exists() else '').keys()))}"
+    }}
+  ]'''
+        question_guidelines = f'''
+- `candidate_questions`: generate 3–8 high-quality follow-up questions. **Craft rules (violations get parked, so follow them):**
+  - **Two-sentence rule**: one sentence of context quoting or referencing the author's own words, then ONE open question. One question mark per candidate.
+  - **Target the empty scene_slots.** "What does it say about you?" is the highest-value follow-up when that slot is empty.
+  - **Action↔identity ladder**: after an action answer ask what it says about them; after an identity claim ask for one specific moment that proves it.
+  - **Situation-rich/story-empty sources get the meaning-making question**; story-rich/situation-thin sources get the scene question ("pick one of those mornings — what did it smell like?").
+  - **"What"/"When"/"Tell me about", never "Why", for the author's own feelings** (why-questions about one's own emotions produce confabulation). "Why" is fine for events and other people.
+  - **Never restate the author's account with changed details** — quote exactly or ask fresh (memory reconsolidation contamination).
+  - **New angles only** — if the source retells a story the archive already holds, ask for what's NEVER been told ("a detail from that day you've never mentioned to anyone"), never a re-rehearsal.
+  - **High-negative-affect material**: offer ONE distanced question (fly-on-the-wall retelling, or "when you're 80, what will this chapter mean?") rather than digging straight in. If the story describes an upheaval within the last ~2 months, set `"defer": true` on deep-processing questions (they will wait ~60 days — expressive-writing evidence says too-soon is harmful).
+  - **Draw from the high-yield families** where they fit: typical-day reconstruction; era anchors (what things cost, the car, the music, the house room by room); photo/song cues ("what song puts you back there?"); perspective-taking ("tell it as your dad would tell it"); off-script probes ("which milestone did NOT go the way the script says?"); forgiveness/blessing ("what do you wish for them that you've never said out loud?").
+  - Assign story_function from the list: {', '.join(STORY_FUNCTIONS)}
+  - Set priority between 0.4 (nice-to-have) and 0.95 (critical gap)'''
+        question_categories_section = f'''### Question bank categories for target_category:
+{categories_block}'''
 
     prompt = f"""You are a memoir analyst and oral history specialist helping to classify a personal story for the Lifehug memoir project.
 
@@ -661,6 +803,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 ### Required output schema:
 
 {{
+  "_classification_mode": "full",
   "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
   "people": [
     {{ "name": "string", "relationship": "string", "role": "string", "mention_count": 1 }}
@@ -700,17 +843,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   "situation_vs_story": "situation_rich_story_empty|story_rich_situation_thin|balanced|neither",
   "events": [
     {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the author's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null }}
-  ],
-  "candidate_questions": [
-    {{
-      "text": "string — the actual question",
-      "story_function": "one of: {', '.join(STORY_FUNCTIONS)}",
-      "priority": 0.75,
-      "reason": "why this question matters for the memoir",
-      "defer": false,
-      "target_category": "one of these category IDs or null — {', '.join(sorted(parse_categories(QUESTIONS_FILE.read_text(encoding='utf-8') if QUESTIONS_FILE.exists() else '').keys()))}"
-    }}
-  ]
+  ]{question_schema}
 }}
 
 ### Guidelines
@@ -761,24 +894,12 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
   telling: "Grandpa's two-page letter", not "the time Grandpa wrote to me about the
   farm". No verbs of narration, no dates in the title.
-- `candidate_questions`: generate 3–8 high-quality follow-up questions. **Craft rules (violations get parked, so follow them):**
-  - **Two-sentence rule**: one sentence of context quoting or referencing the author's own words, then ONE open question. One question mark per candidate.
-  - **Target the empty scene_slots.** "What does it say about you?" is the highest-value follow-up when that slot is empty.
-  - **Action↔identity ladder**: after an action answer ask what it says about them; after an identity claim ask for one specific moment that proves it.
-  - **Situation-rich/story-empty sources get the meaning-making question**; story-rich/situation-thin sources get the scene question ("pick one of those mornings — what did it smell like?").
-  - **"What"/"When"/"Tell me about", never "Why", for the author's own feelings** (why-questions about one's own emotions produce confabulation). "Why" is fine for events and other people.
-  - **Never restate the author's account with changed details** — quote exactly or ask fresh (memory reconsolidation contamination).
-  - **New angles only** — if the source retells a story the archive already holds, ask for what's NEVER been told ("a detail from that day you've never mentioned to anyone"), never a re-rehearsal.
-  - **High-negative-affect material**: offer ONE distanced question (fly-on-the-wall retelling, or "when you're 80, what will this chapter mean?") rather than digging straight in. If the story describes an upheaval within the last ~2 months, set `"defer": true` on deep-processing questions (they will wait ~60 days — expressive-writing evidence says too-soon is harmful).
-  - **Draw from the high-yield families** where they fit: typical-day reconstruction; era anchors (what things cost, the car, the music, the house room by room); photo/song cues ("what song puts you back there?"); perspective-taking ("tell it as your dad would tell it"); off-script probes ("which milestone did NOT go the way the script says?"); forgiveness/blessing ("what do you wish for them that you've never said out loud?").
-  - Assign story_function from the list: {', '.join(STORY_FUNCTIONS)}
-  - Set priority between 0.4 (nice-to-have) and 0.95 (critical gap)
+{question_guidelines}
 - `focus_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section
 - `contradictions`: tensions or paradoxes in values, beliefs, or events — leave them unresolved, do not explain them away
 - `possible_outputs`: concrete deliverables this story could contribute to
 
-### Question bank categories for target_category:
-{categories_block}
+{question_categories_section}
 
 Respond with ONLY valid JSON. No prose, no markdown fences.
 """
@@ -798,7 +919,9 @@ Respond with ONLY valid JSON. No prose, no markdown fences.
   between it and the author's other known positions — never manufacture one.
 - `events`: usually empty for an opinion; include only moments the author
   actually narrates.
-- `candidate_questions`: use the SOCRATIC families instead of scene probes —
+"""
+        if include_candidates:
+            prompt += """- `candidate_questions`: use the SOCRATIC families instead of scene probes —
   origin (who taught this / what moment forged it → story_function "value"),
   lived counterexample (→ "contradiction"), how the position has changed
   (→ "growth_edge"), who would disagree and what they see (→
@@ -1058,6 +1181,183 @@ def print_summary(classification: dict, new_candidates: list[dict]) -> None:
 
 # ── core classify action ──────────────────────────────────────────────────────
 
+FULL_LIST_FIELDS = (
+    "people", "places", "time_periods", "themes", "projects",
+    "contradictions", "possible_outputs", "focus_opportunities",
+    "self_understanding_insights", "events",
+)
+
+
+class ClassificationPreparationError(ValueError):
+    """A content-free, stable refusal raised before classification writes."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        self.code = code
+        super().__init__(message)
+
+
+def _validate_mode_result(
+    result: dict,
+    *,
+    mode: str,
+    require_mode: bool,
+    strict_schema: bool,
+    include_candidates: bool,
+) -> None:
+    echoed = result.get("_classification_mode")
+    if require_mode or echoed is not None:
+        if echoed != mode:
+            raise ClassificationPreparationError(
+                "classification mode is missing or does not match the requested mode",
+                code="mode_mismatch",
+            )
+    if mode == "timeline":
+        if strict_schema and set(result) != {
+            "_classification_mode", "_classification_snapshot", "events"
+        }:
+            raise ClassificationPreparationError(
+                "timeline response contained fields outside the timeline contract",
+                code="timeline_schema_invalid",
+            )
+        if not isinstance(result.get("events"), list):
+            raise ClassificationPreparationError(
+                "timeline events must be a list", code="context_events_not_list"
+            )
+        return
+    if not strict_schema:
+        return
+    for field in FULL_LIST_FIELDS:
+        if not isinstance(result.get(field), list):
+            raise ClassificationPreparationError(
+                f"full response field {field} must be a list",
+                code="full_schema_invalid",
+            )
+    if include_candidates and not isinstance(result.get("candidate_questions"), list):
+        raise ClassificationPreparationError(
+            "full response candidate_questions must be a list",
+            code="full_schema_invalid",
+        )
+    if not isinstance(result.get("scene_slots"), dict):
+        raise ClassificationPreparationError(
+            "full response scene_slots must be an object",
+            code="full_schema_invalid",
+        )
+    for field in ("suggested_sensitivity", "sensitivity_reason", "situation_vs_story"):
+        if not isinstance(result.get(field), str):
+            raise ClassificationPreparationError(
+                f"full response field {field} must be a string",
+                code="full_schema_invalid",
+            )
+
+
+def prepare_classification(
+    source_path: Path,
+    model: str,
+    result: dict,
+    *,
+    mode: str,
+    snapshot: dict,
+    candidate_store: dict,
+    skip_candidates: bool = False,
+    require_mode: bool = False,
+    strict_schema: bool = False,
+) -> dict:
+    """Validate and normalize one result without writing any vault state."""
+    if mode not in CLASSIFICATION_MODES:
+        raise ClassificationPreparationError("unsupported mode", code="mode_invalid")
+    fm, story_text = load_source_text(source_path)
+    if not story_text.strip():
+        raise ClassificationPreparationError("source has no story text", code="source_empty")
+    if not isinstance(result, dict):
+        # Preserve the classifier context validator's established typed code
+        # and failure metadata for ordinary single-source callers.
+        classifier_ctx.validate_response(result, snapshot, story_text)
+    _validate_mode_result(
+        result,
+        mode=mode,
+        require_mode=require_mode,
+        strict_schema=strict_schema,
+        include_candidates=not skip_candidates,
+    )
+    classifier_ctx.validate_response(result, snapshot, story_text)
+    _path, existing = _existing_classification(source_path)
+    base_digest = _digest(existing) if isinstance(existing, dict) else ""
+    expected_mode = classification_mode(snapshot, existing)
+    if expected_mode is None:
+        return {
+            "status": "already_current",
+            "source_path": source_path,
+            "mode": mode,
+            "snapshot": classifier_ctx.snapshot_metadata(snapshot),
+            "base_digest": base_digest,
+        }
+    if expected_mode != mode:
+        raise ClassificationPreparationError(
+            "response mode is no longer valid for the current base classification",
+            code="mode_stale",
+        )
+
+    classified_at = now_utc()
+    if mode == "timeline":
+        if not isinstance(existing, dict):
+            raise ClassificationPreparationError(
+                "timeline refresh has no compatible base classification",
+                code="timeline_base_missing",
+            )
+        classification = copy.deepcopy(existing)
+        classification["events"] = result["events"]
+        classification["classification_snapshot"] = classifier_ctx.snapshot_metadata(snapshot)
+        classification["classified_at"] = classified_at
+        classification["model_used"] = model
+        new_candidates: list[dict] = []
+        updated_store = candidate_store
+    else:
+        updated_store = copy.deepcopy(candidate_store)
+        ai_questions = [] if skip_candidates else normalize_question_records(
+            result.get("candidate_questions", []),
+            operation="classify-schema",
+        )
+        new_candidates = build_candidates(
+            ai_questions, source_path, updated_store, classified_at
+        )
+        prior_ids = existing.get("candidate_question_ids", []) if isinstance(existing, dict) else []
+        candidate_ids = list(dict.fromkeys([
+            *[str(value) for value in prior_ids if value],
+            *[candidate["id"] for candidate in new_candidates],
+        ]))
+        classification = build_classification(
+            source_path,
+            fm,
+            result,
+            model,
+            classified_at,
+            candidate_ids,
+            snapshot,
+        )
+        if new_candidates:
+            updated_store["candidates"].extend(new_candidates)
+    return {
+        "status": "accepted",
+        "source_path": source_path,
+        "mode": mode,
+        "snapshot": classifier_ctx.snapshot_metadata(snapshot),
+        "base_digest": base_digest,
+        "classification": classification,
+        "new_candidates": new_candidates,
+        "candidate_store": updated_store,
+    }
+
+
+def apply_prepared_classification(prepared: dict, *, write_candidates: bool = True) -> None:
+    """Persist one already-validated item; batch callers may share one store write."""
+    if prepared.get("status") != "accepted":
+        return
+    source_path = prepared["source_path"]
+    CLASSIFICATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    write_json(classification_path(source_path), prepared["classification"])
+    if write_candidates and prepared["new_candidates"]:
+        save_candidate_store(prepared["candidate_store"])
+
 def classify_file(
     source_path: Path,
     model: str,
@@ -1066,6 +1366,7 @@ def classify_file(
     verbose: bool = False,
     skip_candidates: bool = False,
     precomputed_result: dict | None = None,
+    require_mode: bool = False,
 ) -> int:
     """Classify a single source file. Returns 0 on success, 1 on error.
 
@@ -1094,11 +1395,21 @@ def classify_file(
         return 0
 
     prompt_snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+    _existing_path, existing = _existing_classification(source_path)
+    mode = classification_mode(prompt_snapshot, existing)
+    if mode is None:
+        print(f"Already current: {_relative_path(source_path)}")
+        return 0
     if precomputed_result is not None:
         ai_result = precomputed_result
     else:
         prompt = build_prompt(
-            source_path, fm, story_text, context_snapshot=prompt_snapshot
+            source_path,
+            fm,
+            story_text,
+            context_snapshot=prompt_snapshot,
+            mode=mode,
+            include_candidates=not skip_candidates,
         )
         if verbose:
             print(f"[verbose] calling model={model} for {source_path}")
@@ -1112,26 +1423,20 @@ def classify_file(
             )
             return 1
 
-    classified_at = now_utc()
-
     try:
         # Rebuild after the model returns. A response to an older source or
         # context is rejected before either classification or candidates write.
         current_snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
-        classifier_ctx.validate_response(ai_result, current_snapshot, story_text)
-        # Validate every model-derived coercion before any persistence.
         store = load_candidate_store()
-        ai_questions = [] if skip_candidates else normalize_question_records(
-            ai_result.get("candidate_questions", []),
-            operation="classify-schema",
-        )
-        new_candidates = build_candidates(
-            ai_questions, source_path, store, classified_at
-        )
-        candidate_ids = [c["id"] for c in new_candidates]
-        classification = build_classification(
-            source_path, fm, ai_result, model, classified_at, candidate_ids,
-            current_snapshot,
+        prepared = prepare_classification(
+            source_path,
+            model,
+            ai_result,
+            mode=mode,
+            snapshot=current_snapshot,
+            candidate_store=store,
+            skip_candidates=skip_candidates,
+            require_mode=require_mode,
         )
     except Exception as exc:  # noqa: BLE001 — model schema failures stay private
         print(
@@ -1141,19 +1446,638 @@ def classify_file(
         )
         return 1
 
-    clf_path = classification_path(source_path)
-
-    # Write classification
-    CLASSIFICATIONS_DIR.mkdir(parents=True, exist_ok=True)
-    write_json(clf_path, classification)
-
-    # Append new candidates to store
-    if new_candidates:
-        store["candidates"].extend(new_candidates)
-        save_candidate_store(store)
-
-    print_summary(classification, new_candidates)
+    apply_prepared_classification(prepared)
+    if prepared["status"] == "already_current":
+        print(f"Already current: {_relative_path(source_path)}")
+        return 0
+    print_summary(prepared["classification"], prepared["new_candidates"])
     return 0
+
+
+# ── canonical archive batch ──────────────────────────────────────────────────
+
+def _read_transport_json(path_value: str, *, max_bytes: int) -> object:
+    path = Path(path_value)
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise ClassificationPreparationError(
+            "transport input must be a regular non-symlink file",
+            code="input_path_unsafe",
+        )
+    if info.st_size > max_bytes:
+        raise ClassificationPreparationError(
+            "transport input exceeds its byte limit", code="input_too_large"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _safe_source_path(value: object) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ClassificationPreparationError("source path is invalid", code="source_path_invalid")
+    supplied = Path(value)
+    candidate = supplied if supplied.is_absolute() else REPO_DIR / supplied
+    try:
+        lexical = candidate.absolute().relative_to(REPO_DIR.resolve())
+    except ValueError as exc:
+        raise ClassificationPreparationError(
+            "source path escapes the vault", code="source_path_escape"
+        ) from exc
+    if ".." in supplied.parts:
+        raise ClassificationPreparationError(
+            "source path traversal is not allowed", code="source_path_escape"
+        )
+    current = REPO_DIR.resolve()
+    try:
+        for part in lexical.parts:
+            current = current / part
+            info = current.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                raise ClassificationPreparationError(
+                    "source path may not traverse a symlink", code="source_path_symlink"
+                )
+    except FileNotFoundError as exc:
+        raise ClassificationPreparationError(
+            "source file does not exist", code="source_missing"
+        ) from exc
+    resolved = candidate.resolve(strict=True)
+    try:
+        relative = resolved.relative_to(REPO_DIR.resolve())
+    except ValueError as exc:
+        raise ClassificationPreparationError(
+            "source path escapes the vault", code="source_path_escape"
+        ) from exc
+    allowed_roots = {SOURCES_DIR.resolve(), ANSWERS_DIR.resolve()}
+    if not any(resolved.is_relative_to(root) for root in allowed_roots):
+        raise ClassificationPreparationError(
+            "source is outside the classifiable inventory", code="source_not_classifiable"
+        )
+    if not resolved.is_file() or resolved.suffix != ".md" or resolved.name.startswith("."):
+        raise ClassificationPreparationError(
+            "source is not a classifiable markdown file", code="source_not_classifiable"
+        )
+    if is_correction_document(resolved):
+        raise ClassificationPreparationError(
+            "correction documents are not classification targets",
+            code="source_is_correction",
+        )
+    return REPO_DIR / relative
+
+
+def _explicit_sources(path_value: str) -> list[Path]:
+    payload = _read_transport_json(path_value, max_bytes=2 * 1024 * 1024)
+    values = payload.get("sources") if isinstance(payload, dict) else payload
+    if not isinstance(values, list):
+        raise ClassificationPreparationError(
+            "sources JSON must be a list or an object with a sources list",
+            code="sources_schema_invalid",
+        )
+    if len(values) > MAX_BATCH_ITEMS:
+        raise ClassificationPreparationError(
+            "explicit source inventory exceeds 500 items", code="too_many_sources"
+        )
+    result: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        source = _safe_source_path(value)
+        relative = _relative_path(source)
+        if relative in seen:
+            raise ClassificationPreparationError(
+                "explicit source inventory contains duplicates", code="duplicate_source"
+            )
+        seen.add(relative)
+        result.append(source)
+    return result
+
+
+def classification_inventory(
+    sources: list[Path] | None = None,
+) -> tuple[list[Path], list[dict]]:
+    """One eligibility definition for refresh and archive completion reports."""
+    inventory = all_source_files() if sources is None else list(sources)
+    eligible: list[Path] = []
+    ineligible: list[dict] = []
+    seen: set[str] = set()
+    for value in inventory:
+        label = _relative_path(value)
+        try:
+            source = _safe_source_path(label)
+            relative = _relative_path(source)
+            if relative in seen:
+                raise ClassificationPreparationError(
+                    "source inventory contains duplicates", code="duplicate_source"
+                )
+            seen.add(relative)
+            _fm, story_text = load_source_text(source)
+            if not story_text.strip():
+                raise ClassificationPreparationError(
+                    "source has no story text", code="source_empty"
+                )
+            eligible.append(source)
+        except Exception as exc:  # noqa: BLE001 - content-free inventory outcome
+            ineligible.append({
+                "source_path": label,
+                "refusal_code": _batch_error_code(exc),
+            })
+    ineligible.sort(key=lambda row: row["source_path"])
+    return eligible, ineligible
+
+
+def _normalize_exclude_items(value: object) -> set[tuple[str, tuple[str, ...]]]:
+    """Validate exact attempted source/snapshot identities for planner paging."""
+    if value is None:
+        return set()
+    if not isinstance(value, list):
+        raise ClassificationPreparationError(
+            "exclude items must be a list", code="exclude_schema_invalid"
+        )
+    identities: set[tuple[str, tuple[str, ...]]] = set()
+    snapshot_keys = tuple(classifier_ctx.SNAPSHOT_KEYS)
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {"source_path", "snapshot"}:
+            raise ClassificationPreparationError(
+                "exclude item must bind source_path and snapshot",
+                code="exclude_schema_invalid",
+            )
+        source_path = _relative_path(_safe_source_path(row["source_path"]))
+        snapshot = row["snapshot"]
+        if not isinstance(snapshot, dict) or set(snapshot) != set(snapshot_keys):
+            raise ClassificationPreparationError(
+                "exclude snapshot must contain exactly four identity fields",
+                code="exclude_schema_invalid",
+            )
+        metadata = classifier_ctx.snapshot_metadata(snapshot)
+        if (not DIGEST_PATTERN.fullmatch(metadata["source_revision"])
+                or not DIGEST_PATTERN.fullmatch(metadata["context_digest"])
+                or not all(0 < len(metadata[key]) <= 200 for key in (
+                    "prompt_version", "extractor_version"
+                ))):
+            raise ClassificationPreparationError(
+                "exclude snapshot identity is malformed", code="exclude_schema_invalid"
+            )
+        identity = (source_path, tuple(metadata[key] for key in snapshot_keys))
+        if identity in identities:
+            raise ClassificationPreparationError(
+                "exclude items contain a duplicate identity", code="duplicate_exclude_item"
+            )
+        identities.add(identity)
+    return identities
+
+
+def _exclude_items(path_value: str) -> list[dict]:
+    payload = _read_transport_json(path_value, max_bytes=MAX_EXCLUDE_ITEMS_BYTES)
+    if (not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "items"}
+            or payload.get("schema_version") != BATCH_SCHEMA_VERSION):
+        raise ClassificationPreparationError(
+            "exclude document must be a schema-v1 items object",
+            code="exclude_schema_invalid",
+        )
+    _normalize_exclude_items(payload["items"])
+    return payload["items"]
+
+
+def _pending_identity(row: dict) -> tuple[str, tuple[str, ...]]:
+    metadata = row["snapshot"]
+    return (
+        row["source_path"],
+        tuple(metadata[key] for key in classifier_ctx.SNAPSHOT_KEYS),
+    )
+
+
+def build_batch_plan(
+    *,
+    limit: int = DEFAULT_BATCH_LIMIT,
+    sources: list[Path] | None = None,
+    skip_candidates: bool = False,
+    exclude_items: list[dict] | None = None,
+) -> dict:
+    """Build one bounded private transport document from one shared catalog."""
+    if isinstance(limit, bool) or not 0 <= int(limit) <= MAX_BATCH_ITEMS:
+        raise ClassificationPreparationError(
+            "batch limit must be between 0 and 500", code="limit_invalid"
+        )
+    inventory_scope = "all" if sources is None else "explicit"
+    excluded_identities = _normalize_exclude_items(exclude_items)
+    safe_inventory, ineligible = classification_inventory(sources)
+    catalog = classifier_ctx.load_context_catalog(REPO_DIR)
+    pending: list[dict] = []
+    for source in safe_inventory:
+        snapshot = classifier_ctx.build_context_snapshot_from_catalog(
+            REPO_DIR, source, catalog
+        )
+        _path, existing = _existing_classification(source)
+        reason = classifier_ctx.refresh_reason(snapshot, existing)
+        if reason is None:
+            continue
+        mode = classification_mode(snapshot, existing)
+        pending.append({
+            "source": source,
+            "source_path": _relative_path(source),
+            "reason": reason,
+            "mode": mode,
+            "snapshot": classifier_ctx.snapshot_metadata(snapshot),
+            "context_snapshot": snapshot,
+        })
+    pending.sort(key=lambda row: (row["reason"] != "stale", row["source_path"]))
+    excluded_count = sum(
+        _pending_identity(row) in excluded_identities for row in pending
+    )
+    selectable = [
+        row for row in pending if _pending_identity(row) not in excluded_identities
+    ]
+    selected = []
+    for row in selectable[: int(limit)]:
+        fm, story_text = load_source_text(row["source"])
+        selected.append({
+            "source_path": row["source_path"],
+            "reason": row["reason"],
+            "mode": row["mode"],
+            "snapshot": row["snapshot"],
+            "prompt": build_prompt(
+                row["source"],
+                fm,
+                story_text,
+                context_snapshot=row["context_snapshot"],
+                mode=row["mode"] or "full",
+                include_candidates=not skip_candidates,
+            ),
+        })
+    return {
+        "schema_version": BATCH_SCHEMA_VERSION,
+        "skip_candidates": bool(skip_candidates),
+        "inventory_scope": inventory_scope,
+        "eligible_count": len(safe_inventory),
+        "ineligible_count": len(ineligible),
+        "ineligible_items": ineligible,
+        "excluded_count": excluded_count,
+        "selected_count": len(selected),
+        "pending_count": len(pending),
+        "remaining_count": max(0, len(selectable) - len(selected)),
+        "items": selected,
+    }
+
+
+def _batch_id(value: object) -> str:
+    if (not isinstance(value, str) or len(value) > 80
+            or BATCH_ID_PATTERN.fullmatch(value) is None):
+        raise ClassificationPreparationError(
+            "batch_id must be a lowercase hyphenated slug", code="batch_id_invalid"
+        )
+    return value
+
+
+def batch_receipt_relative_path(batch_id: str) -> str:
+    return (BATCH_RECEIPTS_DIR / f"{_batch_id(batch_id)}.json").as_posix()
+
+
+def _read_batch_receipt(relative: str) -> dict | None:
+    try:
+        value = json.loads(read_vault_text(relative, vault_root=REPO_DIR))
+    except FileNotFoundError:
+        return None
+    if not isinstance(value, dict):
+        raise ClassificationPreparationError(
+            "existing batch receipt is invalid", code="receipt_invalid"
+        )
+    return value
+
+
+def _write_batch_receipt(relative: str, receipt: dict) -> None:
+    atomic_write_vault_text(
+        relative,
+        json.dumps(receipt, indent=2) + "\n",
+        vault_root=REPO_DIR,
+    )
+
+
+def _batch_error_code(exc: Exception) -> str:
+    if isinstance(exc, (ClassificationPreparationError, classifier_ctx.ClassifierContextError)):
+        code = exc.code
+        return code.value if hasattr(code, "value") else str(code)
+    if isinstance(exc, AIResponseError):
+        return str(exc.status or "response_invalid")
+    if isinstance(exc, json.JSONDecodeError):
+        return "input_json_invalid"
+    if isinstance(exc, (OSError, UnicodeError)):
+        return "input_read_failed"
+    return "response_invalid"
+
+
+def _batch_item_identity(item: object, index: int) -> dict:
+    row = item if isinstance(item, dict) else {}
+    response = row.get("response_text")
+    if isinstance(response, str):
+        response_digest = _digest(response.encode("utf-8"))
+    else:
+        response_digest = _digest(response)
+    return {
+        "index": index,
+        "source_path": row.get("source_path") if isinstance(row.get("source_path"), str) else "",
+        "mode": row.get("mode") if isinstance(row.get("mode"), str) else "",
+        "response_digest": response_digest,
+    }
+
+
+def _receipt_counts(items: list[dict]) -> dict:
+    return {
+        status: sum(row["status"] == status for row in items)
+        for status in ("accepted", "refused", "already_current")
+    }
+
+
+def file_batch_response(payload: object, *, model: str = "external-agent") -> dict:
+    """Validate one envelope, apply valid siblings, then publish its receipt."""
+    if (not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "batch_id", "skip_candidates", "items"}
+            or payload.get("schema_version") != BATCH_SCHEMA_VERSION):
+        raise ClassificationPreparationError(
+            "batch response schema_version must be 1", code="batch_schema_invalid"
+        )
+    batch_id = _batch_id(payload.get("batch_id"))
+    if not isinstance(payload.get("skip_candidates"), bool):
+        raise ClassificationPreparationError(
+            "batch response skip_candidates must be boolean",
+            code="batch_schema_invalid",
+        )
+    skip_candidates = payload["skip_candidates"]
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise ClassificationPreparationError(
+            "batch response items must be a list", code="batch_schema_invalid"
+        )
+    if len(raw_items) > MAX_BATCH_ITEMS:
+        raise ClassificationPreparationError(
+            "batch response exceeds 500 items", code="too_many_items"
+        )
+    identities = [_batch_item_identity(item, index) for index, item in enumerate(raw_items)]
+    input_digest = _digest({
+        "schema_version": BATCH_SCHEMA_VERSION,
+        "batch_id": batch_id,
+        "skip_candidates": skip_candidates,
+        "items": identities,
+    })
+    receipt_relative = batch_receipt_relative_path(batch_id)
+    existing_receipt = _read_batch_receipt(receipt_relative)
+    if isinstance(existing_receipt, dict):
+        if existing_receipt.get("input_digest") != input_digest:
+            raise ClassificationPreparationError(
+                "batch_id is already bound to different input",
+                code="batch_id_conflict",
+            )
+        return existing_receipt
+
+    structural: list[dict] = []
+    canonical_seen: set[str] = set()
+    valid_rows: list[dict] = []
+    duplicate_source = False
+    preflight_sources: set[str] = set()
+    for item in raw_items:
+        if not isinstance(item, dict) or not isinstance(item.get("source_path"), str):
+            continue
+        try:
+            canonical = _relative_path(_safe_source_path(item["source_path"]))
+        except ClassificationPreparationError:
+            continue
+        if canonical in preflight_sources:
+            raise ClassificationPreparationError(
+                "batch contains duplicate source targets", code="duplicate_source"
+            )
+        preflight_sources.add(canonical)
+    for index, item in enumerate(raw_items):
+        identity = identities[index]
+        source_label = identity["source_path"] or f"<item:{index}>"
+        item_digest = _digest({
+            "batch_id": batch_id,
+            "skip_candidates": skip_candidates,
+            **identity,
+        })
+        try:
+            if not isinstance(item, dict) or set(item) != {"source_path", "mode", "response_text"}:
+                raise ClassificationPreparationError(
+                    "batch item has invalid fields", code="item_schema_invalid"
+                )
+            if item["mode"] not in CLASSIFICATION_MODES:
+                raise ClassificationPreparationError("batch item mode is invalid", code="mode_invalid")
+            if not isinstance(item["response_text"], str):
+                raise ClassificationPreparationError(
+                    "batch response_text must be a string", code="response_not_string"
+                )
+            if len(item["response_text"].encode("utf-8")) > MAX_RESPONSE_BYTES:
+                raise ClassificationPreparationError(
+                    "batch response_text exceeds its byte limit", code="response_too_large"
+                )
+            source = _safe_source_path(item["source_path"])
+            relative = _relative_path(source)
+            item_digest = _digest({
+                "batch_id": batch_id,
+                "skip_candidates": skip_candidates,
+                **identity,
+                "source_path": relative,
+            })
+            if relative in canonical_seen:
+                duplicate_source = True
+                raise ClassificationPreparationError(
+                    "batch contains duplicate source targets", code="duplicate_source"
+                )
+            canonical_seen.add(relative)
+            valid_rows.append({
+                "source": source,
+                "source_path": relative,
+                "mode": item["mode"],
+                "response_text": item["response_text"],
+                "input_digest": item_digest,
+            })
+        except OSError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - every item gets a typed outcome
+            structural.append({
+                "source_path": source_label,
+                "mode": identity["mode"] if identity["mode"] in CLASSIFICATION_MODES else "full",
+                "input_digest": item_digest,
+                "status": "refused",
+                "refusal_code": _batch_error_code(exc),
+            })
+
+    if duplicate_source:
+        raise ClassificationPreparationError(
+            "batch contains duplicate source targets", code="duplicate_source"
+        )
+
+    catalog = classifier_ctx.load_context_catalog(REPO_DIR)
+    base_store = load_candidate_store()
+    first_pass: list[dict] = []
+    for row in valid_rows:
+        try:
+            snapshot = classifier_ctx.build_context_snapshot_from_catalog(
+                REPO_DIR, row["source"], catalog
+            )
+            _path, existing = _existing_classification(row["source"])
+            needed = classification_mode(snapshot, existing)
+            if needed is None:
+                first_pass.append({**row, "status": "already_current", "snapshot": snapshot})
+                continue
+            if needed != row["mode"]:
+                raise ClassificationPreparationError(
+                    "batch mode is stale for the current source", code="mode_stale"
+                )
+            result = extract_json(row["response_text"])
+            prepared = prepare_classification(
+                row["source"],
+                model,
+                result,
+                mode=row["mode"],
+                snapshot=snapshot,
+                candidate_store=base_store,
+                skip_candidates=skip_candidates,
+                require_mode=True,
+                strict_schema=True,
+            )
+            first_pass.append({**row, "status": prepared["status"], "snapshot": snapshot})
+        except OSError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            first_pass.append({**row, "status": "refused", "refusal_code": _batch_error_code(exc)})
+
+    # Re-read the whole catalog once after validation. Final preparation below
+    # uses this single shared view and refuses any source/context race before
+    # the first classification write.
+    final_catalog = classifier_ctx.load_context_catalog(REPO_DIR)
+    virtual_store = base_store
+    prepared_items: list[tuple[dict, dict]] = []
+    outcomes = list(structural)
+    for row in first_pass:
+        if row["status"] == "refused":
+            outcomes.append({
+                "source_path": row["source_path"],
+                "mode": row["mode"],
+                "input_digest": row["input_digest"],
+                "status": row["status"],
+                "refusal_code": row.get("refusal_code"),
+            })
+            continue
+        try:
+            snapshot = classifier_ctx.build_context_snapshot_from_catalog(
+                REPO_DIR, row["source"], final_catalog
+            )
+            if classifier_ctx.snapshot_metadata(snapshot) != classifier_ctx.snapshot_metadata(row["snapshot"]):
+                raise ClassificationPreparationError(
+                    "source or context changed during batch validation",
+                    code="source_context_race",
+                )
+            _path, existing = _existing_classification(row["source"])
+            needed = classification_mode(snapshot, existing)
+            if row["status"] == "already_current":
+                if needed is not None:
+                    raise ClassificationPreparationError(
+                        "current classification changed during validation",
+                        code="source_context_race",
+                    )
+                outcomes.append({
+                    "source_path": row["source_path"],
+                    "mode": row["mode"],
+                    "input_digest": row["input_digest"],
+                    "status": "already_current",
+                    "refusal_code": None,
+                })
+                continue
+            result = extract_json(row["response_text"])
+            prepared = prepare_classification(
+                row["source"],
+                model,
+                result,
+                mode=row["mode"],
+                snapshot=snapshot,
+                candidate_store=virtual_store,
+                skip_candidates=skip_candidates,
+                require_mode=True,
+                strict_schema=True,
+            )
+            virtual_store = prepared["candidate_store"]
+            prepared_items.append((row, prepared))
+            outcomes.append({
+                "source_path": row["source_path"],
+                "mode": row["mode"],
+                "input_digest": row["input_digest"],
+                "status": "accepted",
+                "refusal_code": None,
+            })
+        except OSError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            outcomes.append({
+                "source_path": row["source_path"],
+                "mode": row["mode"],
+                "input_digest": row["input_digest"],
+                "status": "refused",
+                "refusal_code": _batch_error_code(exc),
+            })
+
+    # The final named-source/base check happens after every item is prepared and
+    # before the first write. It catches source edits and another classifier
+    # filing into the same target during validation without a third catalog read.
+    survivors: list[tuple[dict, dict]] = []
+    outcome_by_source = {row["source_path"]: row for row in outcomes}
+    virtual_store = base_store
+    for row, prepared in prepared_items:
+        try:
+            if cc_revision := prepared["snapshot"].get("source_revision"):
+                if classifier_ctx.source_revision(row["source"]) != cc_revision:
+                    raise ClassificationPreparationError(
+                        "source changed after preparation", code="source_context_race"
+                    )
+            _path, existing = _existing_classification(row["source"])
+            current_base = _digest(existing) if isinstance(existing, dict) else ""
+            if current_base != prepared["base_digest"]:
+                raise ClassificationPreparationError(
+                    "base classification changed after preparation",
+                    code="source_context_race",
+                )
+            result = extract_json(row["response_text"])
+            prepared = prepare_classification(
+                row["source"], model, result, mode=row["mode"],
+                snapshot=row["snapshot"], candidate_store=virtual_store,
+                skip_candidates=skip_candidates, require_mode=True,
+                strict_schema=True,
+            )
+            if classifier_ctx.source_revision(row["source"]) != prepared["snapshot"].get(
+                "source_revision"
+            ):
+                raise ClassificationPreparationError(
+                    "source changed after final preparation",
+                    code="source_context_race",
+                )
+            _path, existing = _existing_classification(row["source"])
+            current_base = _digest(existing) if isinstance(existing, dict) else ""
+            if current_base != prepared["base_digest"]:
+                raise ClassificationPreparationError(
+                    "base classification changed after final preparation",
+                    code="source_context_race",
+                )
+            virtual_store = prepared["candidate_store"]
+            survivors.append((row, prepared))
+        except OSError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            target = outcome_by_source[row["source_path"]]
+            target["status"] = "refused"
+            target["refusal_code"] = _batch_error_code(exc)
+
+    outcomes.sort(key=lambda row: row["source_path"])
+    for _row, prepared in survivors:
+        apply_prepared_classification(prepared, write_candidates=False)
+    if any(prepared["new_candidates"] for _row, prepared in survivors):
+        save_candidate_store(virtual_store)
+    receipt = {
+        "schema_version": BATCH_RECEIPT_SCHEMA_VERSION,
+        "batch_id": batch_id,
+        "skip_candidates": skip_candidates,
+        "input_digest": input_digest,
+        "receipt_path": receipt_relative,
+        "items": outcomes,
+        "counts": _receipt_counts(outcomes),
+    }
+    _write_batch_receipt(receipt_relative, receipt)
+    return receipt
 
 
 # ── modes ─────────────────────────────────────────────────────────────────────
@@ -1177,7 +2101,7 @@ def cmd_classify(args: argparse.Namespace) -> int:
         model,
         dry_run=args.dry_run,
         verbose=getattr(args, "verbose", False),
-        skip_candidates=getattr(args, "no_candidates", False),
+        skip_candidates=getattr(args, "skip_candidates", False),
     )
 
 
@@ -1198,7 +2122,19 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         return 1
 
     snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
-    prompt = build_prompt(source_path, fm, story_text, context_snapshot=snapshot)
+    _path, existing = _existing_classification(source_path)
+    mode = classification_mode(snapshot, existing)
+    if mode is None:
+        print(f"Already current: {_relative_path(source_path)}", file=sys.stderr)
+        return 0
+    prompt = build_prompt(
+        source_path,
+        fm,
+        story_text,
+        context_snapshot=snapshot,
+        mode=mode,
+        include_candidates=not args.skip_candidates,
+    )
     print(prompt)
     return 0
 
@@ -1221,22 +2157,70 @@ def cmd_from_response(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    skip_candidates = (
+        getattr(args, "skip_candidates", None) is True
+        or getattr(args, "no_candidates", None) is True
+    )
     return classify_file(
         source_path,
         model=args.model or "external-agent",
         dry_run=args.dry_run,
         verbose=getattr(args, "verbose", False),
-        skip_candidates=args.no_candidates,
+        skip_candidates=skip_candidates,
         precomputed_result=result,
+        require_mode=False,
     )
 
 
-def emit_prompts(sources: list[Path], out_dir: Path) -> int:
+def cmd_batch_plan(args: argparse.Namespace) -> int:
+    """Print exactly one private JSON transport object and no prose."""
+    try:
+        sources_json = getattr(args, "sources_json", None)
+        exclude_items_json = getattr(args, "exclude_items_json", None)
+        sources = _explicit_sources(sources_json) if sources_json else None
+        exclude_items = (
+            _exclude_items(exclude_items_json) if exclude_items_json else None
+        )
+        plan = build_batch_plan(
+            limit=DEFAULT_BATCH_LIMIT if args.limit is None else args.limit,
+            sources=sources,
+            skip_candidates=args.skip_candidates,
+            exclude_items=exclude_items,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error: batch plan refused ({_batch_error_code(exc)})", file=sys.stderr)
+        return 1
+    print(json.dumps(plan, sort_keys=True))
+    return 0
+
+
+def cmd_from_batch_response(args: argparse.Namespace) -> int:
+    """File valid siblings from one bounded response envelope."""
+    try:
+        payload = _read_transport_json(args.from_batch_response, max_bytes=MAX_BATCH_BYTES)
+        if (not isinstance(payload, dict)
+                or payload.get("skip_candidates") is not bool(args.skip_candidates)):
+            raise ClassificationPreparationError(
+                "CLI and envelope candidate policies do not match",
+                code="candidate_policy_mismatch",
+            )
+        report = file_batch_response(payload, model=args.model or "external-agent")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error: batch response refused ({_batch_error_code(exc)})", file=sys.stderr)
+        return 1
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+def emit_prompts(
+    sources: list[Path], out_dir: Path, *, skip_candidates: bool = False
+) -> int:
     """Keyless batch path: write one classification prompt per source plus a
     manifest.json the agent works through via --from-response. Mirrors the
     entity_roster --emit-task pattern."""
     out_dir.mkdir(parents=True, exist_ok=True)
     items = []
+    catalog = classifier_ctx.load_context_catalog(REPO_DIR)
     for source_path in sources:
         fm, story_text = load_source_text(source_path)
         if not story_text.strip():
@@ -1244,13 +2228,28 @@ def emit_prompts(sources: list[Path], out_dir: Path) -> int:
             continue
         stem = classify_stem(source_path)
         prompt_file = out_dir / f"{stem}.prompt.md"
-        snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+        snapshot = classifier_ctx.build_context_snapshot_from_catalog(
+            REPO_DIR, source_path, catalog
+        )
+        _path, existing = _existing_classification(source_path)
+        mode = classification_mode(snapshot, existing)
+        if mode is None:
+            continue
         write_text(
             prompt_file,
-            build_prompt(source_path, fm, story_text, context_snapshot=snapshot),
+            build_prompt(
+                source_path,
+                fm,
+                story_text,
+                context_snapshot=snapshot,
+                mode=mode,
+                include_candidates=not skip_candidates,
+            ),
         )
         items.append({
             "source": _relative_path(source_path),
+            "mode": mode,
+            "skip_candidates": skip_candidates,
             "prompt": prompt_file.name,
             "response": f"{stem}.response.json",
             "classification_snapshot": classifier_ctx.snapshot_metadata(snapshot),
@@ -1261,6 +2260,7 @@ def emit_prompts(sources: list[Path], out_dir: Path) -> int:
         "emitted_at": now_utc(),
         "ingest_command": (
             "python3 system/classify_story.py --from-response <response> --source <source>"
+            + (" --skip-candidates" if skip_candidates else "")
         ),
         "items": items,
     })
@@ -1291,7 +2291,9 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
         out_dir = Path(args.emit_prompts)
         if not out_dir.is_absolute():
             out_dir = REPO_DIR / out_dir
-        rc = emit_prompts(sources, out_dir)
+        rc = emit_prompts(
+            sources, out_dir, skip_candidates=getattr(args, "skip_candidates", False)
+        )
         # The keyless path is the one that actually starved: nothing is filed
         # here, so without advancing the cursor the same first-N heads are
         # re-emitted every week forever and the tail is never reached.
@@ -1310,7 +2312,7 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
             model,
             dry_run=args.dry_run,
             verbose=getattr(args, "verbose", False),
-            skip_candidates=getattr(args, "no_candidates", False),
+            skip_candidates=getattr(args, "skip_candidates", False),
         )
         if rc != 0:
             errors.append(str(source_path))
@@ -1330,12 +2332,16 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
 
 def cmd_refresh_targets(args: argparse.Namespace) -> int:
     """Print the canonical bounded classifier-refresh selection as JSON."""
-    sources = all_source_files()
+    sources, ineligible = classification_inventory()
     report = classifier_ctx.select_refresh_targets(
         REPO_DIR,
         sources,
         limit=args.limit if args.limit is not None else classifier_ctx.MAX_REFRESH_TARGETS,
     )
+    report["inventory_scope"] = "all"
+    report["eligible_count"] = len(sources)
+    report["ineligible_count"] = len(ineligible)
+    report["ineligible_items"] = ineligible
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 
@@ -1376,6 +2382,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print canonical bounded refresh targets and unfinished count as JSON.",
     )
+    mode.add_argument(
+        "--batch-plan",
+        action="store_true",
+        help="Print one bounded canonical archive plan as private JSON (default 50, max 500).",
+    )
+    mode.add_argument(
+        "--from-batch-response",
+        metavar="BATCH_JSON",
+        help="Validate and file a schema-v1 archive response envelope (max 500 items).",
+    )
 
     parser.add_argument(
         "--unclassified",
@@ -1402,6 +2418,16 @@ def build_parser() -> argparse.ArgumentParser:
              "--stale-first the cap is spent on stale files first.",
     )
     parser.add_argument(
+        "--sources-json",
+        metavar="PATH",
+        help="With --batch-plan: explicit JSON source list (max 500).",
+    )
+    parser.add_argument(
+        "--exclude-items-json",
+        metavar="PATH",
+        help="With --batch-plan: exact source/snapshot identities already attempted.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Preview actions without model calls or writes.",
@@ -1417,9 +2443,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --from-response: the source file the response classifies.",
     )
     parser.add_argument(
-        "--no-candidates",
+        "--skip-candidates", "--no-candidates",
+        dest="skip_candidates",
         action="store_true",
-        help="Skip candidate-question generation (archive backfills).",
+        help="Explicitly omit and suppress candidate questions (archive backfills only).",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -1443,6 +2470,10 @@ def main() -> int:
             print("Error: --from-response requires --source <file>", file=sys.stderr)
             return 1
         return cmd_from_response(args)
+    if args.from_batch_response:
+        return cmd_from_batch_response(args)
+    if args.batch_plan:
+        return cmd_batch_plan(args)
     if args.classify_all:
         return cmd_classify_all(args)
     if args.refresh_targets:
