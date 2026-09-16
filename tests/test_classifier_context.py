@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
 from pathlib import Path
 from unittest import mock
 
@@ -14,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
 
 import classifier_context as cc  # noqa: E402
+from ai_provider import failure_metadata  # noqa: E402
 import classifier_claims  # noqa: E402
 import classify_story  # noqa: E402
 import entity_roster  # noqa: E402
@@ -624,6 +628,230 @@ class ResponseValidationTests(ContextCase):
                 1,
             )
         self.assertEqual(path.read_bytes(), before)
+
+
+class ContextDiagnosticsTests(ContextCase):
+    CANARY = "SYNTHETIC_PRIVATE_CANARY_never_log"
+
+    def failure_cases(self):
+        code = cc.ContextFailureCode
+        snap = self.snapshot()
+        response = self.response(snap)
+        response["events"][0]["description"] = self.CANARY
+        relation = ("events", 0, "timeline_relation")
+        candidate = ("candidates", 0)
+        missing = object()
+        cases = [
+            ("response", code.RESPONSE_NOT_MAPPING, "response", (), []),
+            ("missing_snapshot", code.SNAPSHOT_MISMATCH, "response",
+             ("_classification_snapshot",), missing),
+            ("events", code.EVENTS_NOT_LIST, "response", ("events",), {}),
+            ("event", code.EVENT_NOT_MAPPING, "response", ("events", 0), self.CANARY),
+            ("relation_shape", code.RELATION_INVALID, "response", relation, []),
+            ("relation_kind", code.RELATION_INVALID, "response",
+             (*relation, "relation"), self.CANARY),
+            ("candidate", code.CANDIDATE_UNKNOWN, "response",
+             (*relation, "candidate_id"), self.CANARY),
+            ("truncated", code.CONTEXT_INCOMPLETE, "snapshot", ("context_truncated",), True),
+            ("incomplete_candidate", code.CONTEXT_INCOMPLETE, "snapshot",
+             (*candidate, "candidate_set_complete"), False),
+            ("unresolved", code.CANDIDATE_AMBIGUOUS, "snapshot",
+             (*candidate, "unresolved_entity_mentions"), [self.CANARY]),
+            ("ambiguous", code.CANDIDATE_AMBIGUOUS, "snapshot",
+             (*candidate, "entity_ref_ambiguities"), [{"mention": self.CANARY}]),
+            ("evidence", code.EVIDENCE_NOT_MAPPING, "response",
+             (*relation, "evidence"), None),
+            ("quote_empty", code.QUOTE_MISSING, "response",
+             (*relation, "evidence", "quote"), ""),
+            ("quote_type", code.QUOTE_MISSING, "response",
+             (*relation, "evidence", "quote"), [self.CANARY]),
+            ("quote_absent", code.QUOTE_NOT_FOUND, "response",
+             (*relation, "evidence", "quote"), self.CANARY),
+            ("quote_whitespace", code.QUOTE_NOT_EXACT, "response",
+             (*relation, "evidence", "quote"), "while  we lived in Cedarport"),
+            ("quote_repeated", code.QUOTE_AMBIGUOUS, "story", (),
+             self.source.read_text() + " Again, while we lived in Cedarport."),
+            ("refs_empty", code.ENTITY_REFS_INVALID, "response",
+             (*relation, "entity_refs"), []),
+            ("refs_null", code.ENTITY_REFS_INVALID, "response",
+             (*relation, "entity_refs"), None),
+            ("refs_missing", code.ENTITY_REFS_INVALID, "response",
+             (*relation, "entity_refs"), missing),
+            ("refs_type", code.ENTITY_REFS_INVALID, "response",
+             (*relation, "entity_refs"), "place/cedarport"),
+            ("refs_unknown", code.ENTITY_REFS_INVALID, "response",
+             (*relation, "entity_refs"), [self.CANARY]),
+            ("refs_competing", code.CANDIDATE_NOT_DISAMBIGUATED, "snapshot",
+             ("candidates",), [snap["candidates"][0],
+                              snap["candidates"][0] | {"candidate_id": "node:second"}]),
+        ]
+        for key in cc.SNAPSHOT_KEYS:
+            cases.append((f"changed_{key}", code.SNAPSHOT_MISMATCH, "response",
+                          ("_classification_snapshot", key), self.CANARY))
+        for name, expected, target, path, value in cases:
+            data = {"snapshot": deepcopy(snap), "response": deepcopy(response),
+                    "story": self.source.read_text()}
+            if path:
+                parent = data[target]
+                for key in path[:-1]:
+                    parent = parent[key]
+                if value is missing:
+                    del parent[path[-1]]
+                else:
+                    parent[path[-1]] = deepcopy(value)
+            else:
+                data[target] = deepcopy(value)
+            yield name, expected, data
+
+    def test_every_rejection_has_exact_bounded_content_free_metadata(self):
+        observed = set()
+        for name, code, data in self.failure_cases():
+            with self.subTest(case=name):
+                with self.assertRaises(cc.ClassifierContextError) as raised:
+                    cc.validate_response(data["response"], data["snapshot"], data["story"])
+                exc = raised.exception
+                self.assertIsInstance(exc, ValueError)
+                self.assertIs(exc.code, code)
+                observed.add(code)
+                self.assertLessEqual(len(code.value), 64)
+                self.assertRegex(code.value, r"^context_[a-z_]+$")
+                self.assertEqual(
+                    failure_metadata("classify-schema", exc),
+                    "provider=ai operation=classify-schema "
+                    f"failure=ClassifierContextError status={code.value}",
+                )
+        self.assertEqual(observed, set(cc.ContextFailureCode))
+
+    def test_exception_text_and_untyped_codes_never_enter_metadata(self):
+        for code in cc.ContextFailureCode:
+            exc = cc.ClassifierContextError(self.CANARY, code=code)
+            self.assertNotIn(self.CANARY, failure_metadata("classify-schema", exc))
+        with self.assertRaises(ValueError) as raised:
+            cc.ClassifierContextError(self.CANARY, code=self.CANARY)
+        self.assertNotIn(self.CANARY, str(raised.exception))
+        lookalike = ValueError(self.CANARY)
+        lookalike.code = self.CANARY
+        lookalike.status = self.CANARY
+        self.assertEqual(
+            failure_metadata("classify-schema", lookalike),
+            "provider=ai operation=classify-schema failure=ValueError status=failed",
+        )
+
+    def test_all_failures_surface_on_stderr_before_any_persistence(self):
+        classifications = self.root / "state" / "classifications"
+        classifications.mkdir()
+        prior = classifications / "sources-manual-story.json"
+        prior.write_text(json.dumps({"events": [{"description": "Prior accepted reading"}]}))
+        candidates = self.root / "state" / "question_candidates.json"
+        candidates.write_text(json.dumps({"candidates": [{"id": "synthetic-prior"}]}))
+        before = prior.read_bytes(), candidates.read_bytes()
+        for name, code, data in self.failure_cases():
+            with self.subTest(case=name), \
+                    mock.patch.object(classify_story, "REPO_DIR", self.root), \
+                    mock.patch.object(classify_story, "CLASSIFICATIONS_DIR", classifications), \
+                    mock.patch.object(classify_story, "QUESTION_CANDIDATES_FILE", candidates), \
+                    mock.patch.object(classify_story, "load_source_text",
+                                      return_value=({}, data["story"])), \
+                    mock.patch.object(cc, "build_context_snapshot", return_value=data["snapshot"]), \
+                    redirect_stderr(io.StringIO()) as err, redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(classify_story.classify_file(
+                    self.source, "synthetic-recorded", precomputed_result=data["response"],
+                ), 1)
+                self.assertEqual(out.getvalue(), "")
+                self.assertEqual(
+                    err.getvalue(),
+                    "Error: AI classification schema failed: provider=ai "
+                    "operation=classify-schema failure=ClassifierContextError "
+                    f"status={code.value}\n",
+                )
+                self.assertEqual((prior.read_bytes(), candidates.read_bytes()), before)
+                self.assertEqual(list(classifications.iterdir()), [prior])
+
+    def test_valid_then_invalid_event_does_not_partially_file_or_drop_relation(self):
+        response = self.response()
+        invalid = deepcopy(response["events"][0])
+        invalid["timeline_relation"]["entity_refs"] = []
+        response["events"].append(invalid)
+        prior = self.root / "state" / "prior.json"
+        prior.write_text('{"events": [{"description": "Prior accepted reading"}]}')
+        before = prior.read_bytes()
+        with mock.patch.object(classify_story, "REPO_DIR", self.root), \
+                mock.patch.object(classify_story, "classification_path", return_value=prior), \
+                mock.patch.object(classify_story, "save_candidate_store") as save_candidates, \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(classify_story.classify_file(
+                self.source, "synthetic-recorded", precomputed_result=response,
+            ), 1)
+        self.assertIn("status=context_entity_refs_invalid", err.getvalue())
+        self.assertEqual(prior.read_bytes(), before)
+        self.assertEqual(len(response["events"]), 2)
+        self.assertEqual(response["events"][1]["timeline_relation"]["entity_refs"], [])
+        self.assertEqual(response["events"][1]["timeline_relation"]["candidate_id"], "node:stay")
+        save_candidates.assert_not_called()
+
+    def test_null_relation_files_event_and_direct_date_without_a_model_call(self):
+        self.source.write_text("In 1999 I found the letter while we lived in Cedarport.")
+        result = self.response()
+        event = result["events"][0]
+        event["timeline_relation"] = None
+        event["date"] = {"stated": "1999", "age": None}
+        unchanged = deepcopy(result)
+        classifications = self.root / "state" / "classifications"
+        candidates = self.root / "state" / "question_candidates.json"
+        with mock.patch.object(classify_story, "REPO_DIR", self.root), \
+                mock.patch.object(classify_story, "CLASSIFICATIONS_DIR", classifications), \
+                mock.patch.object(classify_story, "QUESTION_CANDIDATES_FILE", candidates), \
+                mock.patch.object(classify_story, "classify_with_ai") as model, \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(classify_story.classify_file(
+                self.source, "synthetic-recorded", precomputed_result=result,
+            ), 0)
+            saved = json.loads(classify_story.classification_path(self.source).read_text())
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(saved["events"], [event])
+        self.assertEqual(result, unchanged)
+        self.assertIsNone(cc.refresh_reason(self.snapshot(), saved))
+        model.assert_not_called()
+
+    def test_prompt_explicitly_covers_existing_eligibility_and_abstention(self):
+        prompt = classify_story.build_prompt(
+            self.source, {}, self.source.read_text(), context_snapshot=self.snapshot(),
+        )
+        text = " ".join(prompt.split())
+        for rule in (
+            "`context_truncated` must be false",
+            "`candidate_set_complete` must be true",
+            "no `unresolved_entity_mentions` and no `entity_ref_ambiguities`",
+            "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
+            "exactly one candidate across the ENTIRE supplied candidate list",
+            "one exact, unchanged substring of Story Text occurring exactly once",
+            "empty, null, or missing entity refs",
+            "return the WHOLE `timeline_relation` as null",
+            "Keep the event and its independently stated date or age",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, text)
+
+    def test_v1_accepted_relations_and_null_relations_remain_current(self):
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["prompt_version"], "contextual-timeline:1")
+        self.assertEqual(snapshot["extractor_version"], "story-classifier:2")
+        self.assertEqual(snapshot["schema_version"], 1)
+        for relation in ("within", "before", "after", None):
+            result = self.response(snapshot)
+            event = result["events"][0]
+            event["date"] = {"stated": "1999", "age": None}
+            if relation is None:
+                event["timeline_relation"] = None
+            else:
+                event["timeline_relation"]["relation"] = relation
+            with self.subTest(relation=relation):
+                self.assertIs(cc.validate_response(result, snapshot, self.source.read_text()), result)
+                self.assertEqual(event["date"], {"stated": "1999", "age": None})
+                self.assertEqual(event["title"], "Finding the letter")
+                self.assertIsNone(cc.refresh_reason(snapshot, {
+                    "classification_snapshot": result["_classification_snapshot"],
+                }))
 
 
 class TellingIdentityIntegrationTests(ContextCase):

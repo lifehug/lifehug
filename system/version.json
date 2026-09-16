@@ -1,7 +1,7 @@
 {
-  "version": 301,
-  "released": "2026-09-15",
-  "changelog": "v301: Story classification can now ground an event within, before or after a bounded set of canonical dated landmarks and participation episodes, while direct dates remain independent claims. Stable source/context snapshots reject raced responses without replacing accepted evidence; one bounded selector serves maintenance and hosted scheduling. A shared usable-placement predicate aligns timeline counts, work items and old-question retirement, and age decades retain their intended range semantics.",
+  "version": 302,
+  "released": "2026-09-16",
+  "changelog": "v302: Clarify the already-enforced eligibility rules for optional classifier timeline relations: unsupported relations stay null without losing events or direct dates. Context validation failures now expose typed, content-free context_* status codes through existing failure_metadata, distinguishing snapshot mismatch from relation/evidence failures. Validation, snapshot schema, prompt/extractor freshness versions, and accepted readings remain unchanged.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
