@@ -42,6 +42,7 @@ EXPECTED_DATA_PATHS = {
     "artifact_sources",
     "book_offers",
     "candidate_research_sources",
+    "classification_batches",
     "classifications",
     "compile_needed",
     "config",
@@ -225,10 +226,11 @@ class VaultContractTests(unittest.TestCase):
         # away, v285 (Cut 4c) added `state/temporal_claims/
         # publication_receipts`, and v287 (Cut 6a) added
         # `state/landmarks/offers` — one store per vault,
-        # `vault-contract-v15`.
+        # `vault-contract-v15`; v303 adds deterministic archive-classification
+        # receipts at `state/classification_batches` (`vault-contract-v16`).
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 287)
+        self.assertEqual(exported["identity"]["framework_version"], 303)
         self.assertEqual(
             exported["identity"]["content_digest"],
             vault_paths._contract_digest(exported),

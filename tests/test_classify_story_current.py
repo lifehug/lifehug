@@ -635,6 +635,15 @@ class VaultContractTests(unittest.TestCase):
         self.assertEqual(entry["kind"], "file")
         self.assertFalse(entry["required"])
 
+    def test_classification_batch_receipts_are_declared_durable_state(self):
+        raw = json.loads(
+            (SYSTEM / "vault_contract.json").read_text(encoding="utf-8"))
+        entry = raw["data_paths"]["classification_batches"]
+        self.assertEqual(entry["path"], "state/classification_batches")
+        self.assertEqual(entry["kind"], "directory")
+        self.assertEqual(entry["schema"]["supported"], [1])
+        self.assertTrue(entry["tracked"])
+
 
 if __name__ == "__main__":
     unittest.main()

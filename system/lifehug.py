@@ -2328,7 +2328,15 @@ def cmd_monthly_research(args: argparse.Namespace) -> int:
 
 def cmd_classify_story(args: argparse.Namespace) -> int:
     flags: list[str] = []
-    if getattr(args, "refresh_targets", False):
+    if getattr(args, "batch_plan", False):
+        flags.append("--batch-plan")
+        if getattr(args, "sources_json", None):
+            flags.extend(["--sources-json", args.sources_json])
+        if getattr(args, "exclude_items_json", None):
+            flags.extend(["--exclude-items-json", args.exclude_items_json])
+    elif getattr(args, "from_batch_response", None):
+        flags.extend(["--from-batch-response", args.from_batch_response])
+    elif getattr(args, "refresh_targets", False):
         flags.append("--refresh-targets")
     elif args.prompt:
         flags.append("--prompt")
@@ -2356,6 +2364,8 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
         flags.extend(["--limit", str(args.limit)])
     if args.dry_run:
         flags.append("--dry-run")
+    if getattr(args, "skip_candidates", False):
+        flags.append("--skip-candidates")
     return run_python("classify_story.py", flags)
 
 
@@ -3112,10 +3122,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prompt", metavar="PATH", help="Output AI prompt only")
     p.add_argument("--from-response", metavar="PATH",
                    help="Ingest an agent-written classification JSON (keyless agent path)")
+    p.add_argument("--from-batch-response", metavar="PATH",
+                   help="File a schema-v1 archive batch response envelope")
     p.add_argument("--source", metavar="PATH", help="With --from-response: the source file it classifies")
     p.add_argument("--classify-all", action="store_true")
     p.add_argument("--refresh-targets", action="store_true",
                    help="Print canonical bounded contextual refresh targets as JSON")
+    p.add_argument("--batch-plan", action="store_true",
+                   help="Print one canonical archive batch plan as JSON (default 50, max 500)")
+    p.add_argument("--sources-json", metavar="PATH",
+                   help="With --batch-plan: explicit bounded JSON source list")
+    p.add_argument("--exclude-items-json", metavar="PATH",
+                   help="With --batch-plan: exact source/snapshot identities already attempted")
     p.add_argument("--unclassified", action="store_true")
     p.add_argument("--stale-first", action="store_true",
                    help="With --classify-all: stale classifications first (oldest first), "
@@ -3124,6 +3142,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--emit-prompts", metavar="DIR",
                    help="With --classify-all: write prompts + manifest for agent completion instead of calling AI")
     p.add_argument("--limit", type=int, help="With --classify-all: maximum files to classify")
+    p.add_argument("--skip-candidates", "--no-candidates", dest="skip_candidates",
+                   action="store_true",
+                   help="Explicitly omit and suppress question candidates for an archive pass")
     p.add_argument("--model", help="Override AI model")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--dry-run", action="store_true")

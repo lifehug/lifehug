@@ -20,6 +20,7 @@ import chronology as chrono
 import entity_roster
 import event_identity
 import identity_resolution
+import source_integrity
 import temporal_placement as placement
 import temporal_projection
 import temporal_store
@@ -104,6 +105,46 @@ def _digest(value: object) -> str:
 def source_revision(source_path: str | Path, *, source_bytes: bytes | None = None) -> str:
     raw = Path(source_path).read_bytes() if source_bytes is None else source_bytes
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def effective_source_revision(
+    vault_root: str | Path,
+    source_path: str | Path,
+    *,
+    source_bytes: bytes | None = None,
+    correction_records: list[source_integrity.CorrectionRecord] | None = None,
+) -> str:
+    """Hash every authoritative source input visible to the classifier.
+
+    Uncorrected sources retain their historical raw-byte revision. Once a
+    source has active corrections, the revision also binds the ordered bodies
+    selected by ``source_integrity``'s canonical supersession graph. This keeps
+    the four-key snapshot stable while making add/supersede correction races
+    impossible to adopt as an interpretation of the old input.
+    """
+    root = Path(vault_root)
+    source = Path(source_path)
+    raw_revision = source_revision(source, source_bytes=source_bytes)
+    if correction_records is None:
+        active = source_integrity.active_corrections_for(
+            source,
+            corrections_dir=root / "sources" / "corrections",
+            repo_dir=root,
+        )
+    else:
+        active = source_integrity.active_correction_leaves(
+            source_integrity.corrections_targeting(
+                source,
+                repo_dir=root,
+                records=correction_records,
+            )
+        )
+    if not active:
+        return raw_revision
+    return _digest({
+        "raw_source_revision": raw_revision,
+        "active_correction_bodies": [record.body for record in active],
+    })
 
 
 def snapshot_metadata(snapshot: object) -> dict:
@@ -263,6 +304,11 @@ def _candidate(
     }
     for ref in entity_refs:
         aliases.update(roster_aliases.get(ref, ()))
+    canonical_roster_terms = [
+        {"entity_ref": ref, "terms": list(roster_aliases[ref])}
+        for ref in entity_refs
+        if ref in roster_aliases
+    ]
     alternatives = [
         value for value in (_bounds(row) for row in node.get("alternate_values") or ())
         if value is not None
@@ -274,6 +320,9 @@ def _candidate(
         "kind": node.get("event_kind") or node.get("node_kind"),
         "name": node.get("label") or node.get("event_kind") or candidate_id,
         "aliases": sorted(aliases),
+        # Kept separate from projection-provided legacy aliases so freshness
+        # can bind canonical roster authority without classifier self-churn.
+        "canonical_roster_terms": canonical_roster_terms,
         "entity_refs": entity_refs,
         "unresolved_entity_mentions": unresolved_mentions,
         "entity_ref_ambiguities": entity_ref_ambiguities,
@@ -400,13 +449,13 @@ def _mentioned_roster_refs(
     roster_aliases: dict[str, tuple[str, ...]],
     story_text: str,
     *,
-    matchers: tuple[tuple[str, re.Pattern], ...] | None = None,
+    matchers: tuple[tuple[str, str, re.Pattern], ...] | None = None,
 ) -> set[str]:
     """Find exact roster phrases for retrieval, without treating them as bindings."""
     mentioned: set[str] = set()
     lowered = story_text.casefold()
     if matchers is not None:
-        for ref, pattern in matchers:
+        for ref, _term, pattern in matchers:
             if pattern.search(lowered):
                 mentioned.add(ref)
         return mentioned
@@ -417,6 +466,22 @@ def _mentioned_roster_refs(
                 mentioned.add(ref)
                 break
     return mentioned
+
+
+def _matched_roster_evidence(
+    story_text: str,
+    matchers: tuple[tuple[str, str, re.Pattern], ...],
+) -> list[dict]:
+    """Canonical roster terms that matched this source, including ambiguity."""
+    lowered = story_text.casefold()
+    matched: dict[str, list[str]] = {}
+    for ref, term, pattern in matchers:
+        if pattern.search(lowered):
+            matched.setdefault(ref, []).append(term)
+    return [
+        {"entity_ref": ref, "terms": sorted(set(terms))}
+        for ref, terms in sorted(matched.items())
+    ]
 
 
 def _roster_context(
@@ -465,6 +530,7 @@ def _freshness_candidate(row: dict) -> dict:
         key: row.get(key)
         for key in (
             "candidate_id", "episode_id", "kind", "entity_refs",
+            "canonical_roster_terms",
             "unresolved_entity_mentions", "entity_ref_ambiguities",
             "supported_bounds", "basis", "conflict_state", "alternatives",
         )
@@ -509,7 +575,7 @@ def _load_context_catalog(vault_root: Path) -> dict:
         projection = {}
     roster_aliases, rosters = _load_roster_catalog(vault_root)
     roster_matchers = tuple(
-        (ref, re.compile(rf"(?<!\w){re.escape(term.casefold())}(?!\w)"))
+        (ref, term, re.compile(rf"(?<!\w){re.escape(term.casefold())}(?!\w)"))
         for ref, terms in roster_aliases.items()
         for term in terms
     )
@@ -557,6 +623,10 @@ def _load_context_catalog(vault_root: Path) -> dict:
             identities, operations
         ),
         "manifest": manifest,
+        "correction_records": source_integrity.read_correction_records(
+            corrections_dir=vault_root / "sources" / "corrections",
+            repo_dir=vault_root,
+        ),
         "candidates": candidates,
     }
 
@@ -580,11 +650,13 @@ def _build_context_snapshot_from_catalog(
         catalog["claims_by_source"],
         catalog["classifier_claims"],
     )
-    grounded_refs |= _mentioned_roster_refs(
-        catalog["roster_aliases"],
+    roster_evidence = _matched_roster_evidence(
         story_text,
-        matchers=catalog["roster_matchers"],
+        catalog["roster_matchers"],
     )
+    grounded_refs |= {
+        row["entity_ref"] for row in roster_evidence
+    }
     prior_identities = _prior_identities_from_manifest(catalog["manifest"], relative)
     identities = catalog["identities_by_id"]
     bound_episode_ids = {
@@ -645,12 +717,18 @@ def _build_context_snapshot_from_catalog(
     digest_input = {
         "schema_version": CONTEXT_SCHEMA_VERSION,
         "candidates": [_freshness_candidate(row) for row in selected],
+        "source_roster_evidence": roster_evidence,
         "context_truncated": context_truncated,
         "human_identity_decisions": human_decisions,
     }
     snapshot = {
         "schema_version": CONTEXT_SCHEMA_VERSION,
-        "source_revision": source_revision(source, source_bytes=raw),
+        "source_revision": effective_source_revision(
+            root,
+            source,
+            source_bytes=raw,
+            correction_records=catalog["correction_records"],
+        ),
         "context_digest": _digest(digest_input),
         "prompt_version": PROMPT_VERSION,
         "extractor_version": EXTRACTOR_VERSION,
@@ -685,6 +763,34 @@ def build_context_snapshot(
         root,
         Path(source_path),
         _load_context_catalog(root),
+        source_bytes=source_bytes,
+        max_candidates=max_candidates,
+    )
+
+
+def load_context_catalog(vault_root: str | Path) -> dict:
+    """Load the immutable-for-one-operation context catalog once.
+
+    Batch planners and batch filers use this public boundary so hundreds of
+    source-specific snapshots do not reread the projection, claims, rosters,
+    identity decisions, and telling manifest hundreds of times.
+    """
+    return _load_context_catalog(Path(vault_root))
+
+
+def build_context_snapshot_from_catalog(
+    vault_root: str | Path,
+    source_path: str | Path,
+    catalog: dict,
+    *,
+    source_bytes: bytes | None = None,
+    max_candidates: int = MAX_CONTEXT_CANDIDATES,
+) -> dict:
+    """Build one source snapshot from a caller-owned shared catalog."""
+    return _build_context_snapshot_from_catalog(
+        Path(vault_root),
+        Path(source_path),
+        catalog,
         source_bytes=source_bytes,
         max_candidates=max_candidates,
     )
@@ -874,6 +980,9 @@ __all__ = [
     "RELATIONS",
     "SNAPSHOT_KEYS",
     "build_context_snapshot",
+    "build_context_snapshot_from_catalog",
+    "effective_source_revision",
+    "load_context_catalog",
     "refresh_reason",
     "select_refresh_targets",
     "snapshot_metadata",

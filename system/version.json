@@ -1,7 +1,7 @@
 {
-  "version": 302,
+  "version": 303,
   "released": "2026-09-16",
-  "changelog": "v302: Clarify the already-enforced eligibility rules for optional classifier timeline relations: unsupported relations stay null without losing events or direct dates. Context validation failures now expose typed, content-free context_* status codes through existing failure_metadata, distinguishing snapshot mismatch from relation/evidence failures. Validation, snapshot schema, prompt/extractor freshness versions, and accepted readings remain unchanged.",
+  "changelog": "v303: Build a whole archive timeline through one canonical bounded classifier plan and batch filing interface. Up to 500 source responses now share catalog reads, validate independently, preserve valid siblings when another item is malformed, and leave every prior classification untouched on refusal. Context-only work uses a narrower timeline prompt that refreshes events while preserving all non-temporal fields and candidate IDs; exact-current work skips the model. Snapshot freshness binds active authoritative corrections and source-relevant canonical roster evidence, so changed corrections or alias resolution cannot adopt stale model output. Deterministic content-free receipts under state/classification_batches make identical replay a no-op and reject changed input under an existing batch ID. Archive operators can explicitly use --skip-candidates to omit question generation from full prompts without changing ordinary new-story behavior, and can page beyond attempted refusals using exact source-plus-snapshot identities that automatically expire when source or context changes.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -22,6 +22,7 @@
     "docs/adr/0032-landmark-sufficiency.md",
     "docs/adr/0033-add-landmark-offer-mode.md",
     "docs/adr/0034-planned-questions-before-reengagement.md",
+    "docs/adr/0035-canonical-archive-classification-batches.md",
     "docs/contracts/event-identity-i0-fold.md",
     "docs/contracts/event-identity-i0-records.md",
     "docs/handbook/eras.md",
@@ -413,6 +414,7 @@
     "tests/tempdirs.py",
     "tests/test_268_correct_source_parity.py",
     "tests/test_already_answered.py",
+    "tests/test_archive_classification_batch.py",
     "tests/test_arc_walk.py",
     "tests/test_arc_walk_evals.py",
     "tests/test_artifact_workflow.py",
@@ -544,6 +546,7 @@
     "tests/test_work_item_queue.py",
     "tests/v119_job_pill_evidence.py",
     "tests/walkthrough_answers.py",
+    "tests/walkthrough_archive_classification_batch.py",
     "tests/walkthrough_candidate_research.py",
     "tests/walkthrough_entity_candidate.py",
     "tests/walkthrough_focus_candidate.py",
