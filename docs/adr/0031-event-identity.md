@@ -93,6 +93,18 @@ change a drawing. That is deliberate: the auditor's condition was that
 authority, identity, migration and recovery semantics be settled in executable
 contracts *before* the phases that consume them.
 
+### Superseded interpretation history (v305)
+
+An unchanged telling can acquire a different event ref when a classifier
+corrects its subject interpretation. The manifest's one-event guard applies
+to non-superseded claims, not their superseded history; disputed claims still
+participate. Every historical claim ID, receipt and human binding remains.
+If all claims are superseded and the history contains multiple event identities,
+the row stays retired and ineligible with `telling_retired_identity_ambiguous`.
+It cannot automatically re-key to a new telling; explicit durable human aliases
+remain authoritative. The global validator, frozen manifest row and durable
+identity digests do not change. See the [v305 contract](../pr-specs/telling-manifest-superseded-history.md).
+
 ## What I2 shipped (the binder)
 
 `system/episode_binder.py`, the `bind-episodes` verb and a weekly maintenance
