@@ -420,6 +420,16 @@ independent changes still invalidate affected contexts, including global fallbac
 contexts. Existing hashes are never restamped and prompt versions are unchanged;
 only unchanged semantic contexts are reusable without a new reading.
 
+Since v307, event extraction and timeline interpretation refresh separately.
+An unchanged story receives link-only event deltas keyed by stable event IDs,
+with an explicit `linked`, `missing_evidence`, `ambiguous`, `incomplete`, or
+`not_temporal` outcome for each event. Exact source-quoted ordinary dates and
+ages may become independent candidate facts; contextual links never do. Search
+is event-local, keeps same-entity competitors, and is not capped by unrelated
+owner facts. A date-only correction to a known anchor flows through an existing
+link without another model call, while identity, alias, competitor, correction,
+and human-decision changes invalidate only affected readings.
+
 ```bash
 python3 system/lifehug.py classify-story --classify answers/A14.md
 python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
@@ -427,6 +437,8 @@ python3 system/lifehug.py classify-story --refresh-targets --limit 50
 python3 system/lifehug.py classify-story --batch-plan --limit 500 --skip-candidates
 python3 system/lifehug.py classify-story --batch-plan --exclude-items-json /private/tmp/attempted.json --skip-candidates
 python3 system/lifehug.py classify-story --from-batch-response /private/tmp/archive-batch.json --skip-candidates
+python3 system/timeline_evidence_evals.py --json        # recorded plumbing report
+python3 system/timeline_evidence_evals.py --live --json # configured-provider quality run
 ```
 
 Calculated timeline nodes publish `usable_placement: true|false` as the stable

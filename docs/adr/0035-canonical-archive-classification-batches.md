@@ -75,11 +75,12 @@ counts cannot be distinguished from the originally filed result. Callers must
 obtain the receipt from their trusted transaction or commit boundary; they must
 not describe validation alone as proof that those outcomes happened.
 
-No-model anchor-bound reuse is deferred. It becomes valid only after a separate
-versioned dependency contract can prove that source/extractor, relation evidence,
-canonical IDs, aliases, competing candidates, identity decisions, and
-retractions are unchanged. Existing exact-current no-op and deterministic
-projection recalculation are the only no-model reuse in this version.
+No-model anchor-bound reuse was deferred in v303. ADR 0036 supplies that
+versioned dependency contract in v307: event-local fingerprints retain
+source/subject identity, role, aliases, competing candidates, human decisions,
+corrections and retractions while excluding bound-only payload changes. A
+date-only correction can now propagate through an unchanged canonical link;
+every identity or meaning change still requires an affected timeline refresh.
 
 ## Consequences
 
@@ -127,5 +128,5 @@ churn, not the dependency on genuine independent authority.
 - Candidate generation skipped for an archive can be repaired once at the
   actual-ingest boundary without turning unchanged archive rows into weekly
   refresh work.
-- Future deterministic contextual reuse must supersede this explicit dependency
-  boundary instead of weakening the context fingerprint.
+- Deterministic contextual reuse follows ADR 0036's explicit dependency
+  boundary; future reuse must supersede that contract instead of weakening it.

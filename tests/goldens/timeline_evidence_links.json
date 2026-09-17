@@ -1,0 +1,103 @@
+[
+  {
+    "fixture_id": "northstar-founding-not-employment",
+    "source_text": "I launched Northstar from the spare room before I ever joined its payroll.",
+    "candidates": [
+      {"candidate_id": "node:northstar-founded", "name": "Northstar founding", "event_role": "founded", "entity_refs": ["organization/northstar"], "bounds": "2012"},
+      {"candidate_id": "node:northstar-job", "name": "Northstar employment", "event_role": "job", "entity_refs": ["organization/northstar"], "bounds": "2014/2020"}
+    ],
+    "recorded_event": {
+      "title": "Northstar founding",
+      "description": "I launched Northstar from the spare room.",
+      "subject": "self",
+      "places": [],
+      "when_hint": null,
+      "anchor": null,
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": {"relation": "within", "candidate_id": "node:northstar-founded", "entity_refs": ["organization/northstar"], "evidence": {"quote": "I launched Northstar from the spare room"}},
+      "timeline_resolution": {"status": "linked", "candidate_ids": ["node:northstar-founded", "node:northstar-job"], "reason": "The launch wording distinguishes founding from employment."}
+    },
+    "expected": {"status": "linked", "candidate_id": "node:northstar-founded", "grounded": false}
+  },
+  {
+    "fixture_id": "river-house-second-stay",
+    "source_text": "During our second stay at River House, I found the blue letter.",
+    "candidates": [
+      {"candidate_id": "node:river-first", "name": "River House first stay", "event_role": "residence", "entity_refs": ["place/river-house"], "bounds": "1991/1993"},
+      {"candidate_id": "node:river-second", "name": "River House second stay", "event_role": "residence", "entity_refs": ["place/river-house"], "bounds": "2001/2003"}
+    ],
+    "recorded_event": {
+      "title": "Blue letter",
+      "description": "I found the blue letter during our second River House stay.",
+      "subject": "self",
+      "places": ["River House"],
+      "when_hint": "during our second stay",
+      "anchor": "River House",
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": {"relation": "within", "candidate_id": "node:river-second", "entity_refs": ["place/river-house"], "evidence": {"quote": "During our second stay at River House"}},
+      "timeline_resolution": {"status": "linked", "candidate_ids": ["node:river-first", "node:river-second"], "reason": "The source explicitly says this was the second stay."}
+    },
+    "expected": {"status": "linked", "candidate_id": "node:river-second", "grounded": false}
+  },
+  {
+    "fixture_id": "early-marriage-bounded",
+    "source_text": "In the early part of my marriage to Mira, we moved into the studio.",
+    "candidates": [
+      {"candidate_id": "node:mira-marriage", "name": "Marriage to Mira", "event_role": "marriage", "entity_refs": ["person/mira"], "bounds": "1998/2010"}
+    ],
+    "recorded_event": {
+      "title": "Studio move",
+      "description": "We moved into the studio early in my marriage to Mira.",
+      "subject": "self",
+      "places": ["the studio"],
+      "when_hint": "early in my marriage",
+      "anchor": "marriage to Mira",
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": {"relation": "within", "candidate_id": "node:mira-marriage", "entity_refs": ["person/mira"], "evidence": {"quote": "In the early part of my marriage to Mira"}},
+      "timeline_resolution": {"status": "linked", "candidate_ids": ["node:mira-marriage"], "reason": "The source places the move within the supplied marriage span."}
+    },
+    "expected": {"status": "linked", "candidate_id": "node:mira-marriage", "grounded": false}
+  },
+  {
+    "fixture_id": "mira-age-is-not-owner-age",
+    "source_text": "Mira was 21 when she married Jo.",
+    "candidates": [],
+    "recorded_event": {
+      "title": "Mira married Jo",
+      "description": "Mira married Jo at 21.",
+      "subject": "Mira",
+      "places": [],
+      "when_hint": "at 21",
+      "anchor": null,
+      "date": {"stated": null, "age": "21", "anchor_ref": null, "relation": null},
+      "source_grounding": {"quote": "Mira was 21 when she married Jo.", "temporal_quote": "21", "subject_quote": "Mira", "kind": "age"},
+      "timeline_relation": null,
+      "timeline_resolution": {"status": "missing_evidence", "candidate_ids": [], "reason": "No independent birth or landmark candidate is supplied."}
+    },
+    "expected": {"status": "missing_evidence", "candidate_id": null, "grounded": true}
+  },
+  {
+    "fixture_id": "river-house-undisambiguated",
+    "source_text": "We stayed at River House, and later I found the letter there.",
+    "candidates": [
+      {"candidate_id": "node:river-first", "name": "River House first stay", "event_role": "residence", "entity_refs": ["place/river-house"], "bounds": "1991/1993"},
+      {"candidate_id": "node:river-second", "name": "River House second stay", "event_role": "residence", "entity_refs": ["place/river-house"], "bounds": "2001/2003"}
+    ],
+    "recorded_event": {
+      "title": "River House letter",
+      "description": "I found the letter at River House.",
+      "subject": "self",
+      "places": ["River House"],
+      "when_hint": null,
+      "anchor": "River House",
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": null,
+      "timeline_resolution": {"status": "ambiguous", "candidate_ids": ["node:river-first", "node:river-second"], "reason": "The source does not identify which River House stay."}
+    },
+    "expected": {"status": "ambiguous", "candidate_id": null, "grounded": false}
+  }
+]
