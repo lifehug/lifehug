@@ -83,6 +83,33 @@ projection recalculation are the only no-model reuse in this version.
 
 ## Consequences
 
+### v306: independent context authority (issue #348)
+
+Mixed published episodes are not independent classifier context: retiring a
+classifier member can change their kind, subjects, bounds or conflicts, causing
+the next compile to invalidate otherwise current readings. The catalog now
+filters classifier claims before the existing canonical temporal fold, once per
+catalog. `temporal_publication.load_derivation_inputs` supplies the same authority
+loaders to publication, verification and context; no second engine is introduced.
+`event_identity.build_telling_manifest(active_index=...)` permits the already
+folded independent view without changing its default or identity guards.
+
+Independent tellings and explicit human records determine retrieval and human
+decision applicability. A human record naming a historical classifier telling
+resolves through its explicit references and immutable receipt provenance, not
+machine-inferred successor aliases or the mutable `bound_identity_ids` cache.
+Prior machine identities remain prompt history only. Candidate semantic fields,
+source corrections, roster terms, conflicts and completeness remain hashed.
+
+The four-key snapshot and prompt/extractor versions stay unchanged. Legacy hashes
+are never restamped or blanket-accepted: unchanged semantic digests remain valid;
+changed contexts require the ordinary refresh unless a separate compatibility
+proof exists. The 64-candidate fallback and matched-source retrieval are unchanged;
+genuine new context can affect many fallback sources. This removes self-generated
+churn, not the dependency on genuine independent authority.
+
+### Operational consequences
+
 - Hosted and local callers consume the same planner, mode, validation, filing,
   report, and receipt definitions; hosted transactions and scheduling remain
   outside this repository.

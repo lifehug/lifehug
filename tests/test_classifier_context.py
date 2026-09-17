@@ -11,6 +11,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,9 +70,16 @@ class ContextCase(unittest.TestCase):
         self.source.parent.mkdir(parents=True)
         self.source.write_text("I found the letter while we lived in Cedarport.", encoding="utf-8")
         (self.root / "state" / "temporal_claims").mkdir(parents=True)
+        # Retrieval/validator unit fixtures start at the independent fold's
+        # output. Real receipt/fold coverage lives in test_classifier_context_independent.
+        self.fold_patch = mock.patch.object(cc, "_derive_context_timeline",
+            side_effect=lambda *_args: SimpleNamespace(nodes=self.candidate_nodes))
+        self.fold_patch.start()
+        self.addCleanup(self.fold_patch.stop)
         self.write_projection([node()])
 
     def write_projection(self, nodes, *, generation=1) -> None:
+        self.candidate_nodes = nodes
         (self.root / cc.CALCULATED_TIMELINE_PATH).write_text(json.dumps({
             "version": 1,
             "projection_generation": generation,
@@ -240,6 +248,7 @@ class StableFreshnessTests(ContextCase):
         self.assertEqual(self.snapshot()["context_digest"], first)
 
     def test_this_sources_own_classifier_output_cannot_invalidate_itself(self):
+        self.fold_patch.stop()
         active = self.root / cc.ACTIVE_INDEX_PATH
         active.write_text(json.dumps({"claims": [{
             "claim_id": "claim:self",
@@ -270,15 +279,20 @@ class StableFreshnessTests(ContextCase):
         self.assertEqual(cc.refresh_reason(self.snapshot(), stored), "context_changed")
 
     def test_inherited_job_episode_is_retrieved_by_grounded_entity_ref(self):
-        (self.root / cc.ACTIVE_INDEX_PATH).write_text(json.dumps({"claims": [{
-            "claim_id": "claim:source-org",
-            "status": "active",
+        claim = temporal_claims.validate_temporal_claim({
             "subject_ref": "org/tidewheel",
+            "subject_mention": "Tidewheel",
             "source_ref": {
                 "source_id": "listener:story",
+                "revision": temporal_store.payload_sha256("synthetic"),
                 "source_path": "sources/manual/story.md",
             },
-        }]}), encoding="utf-8")
+            "source_kind": "conversation", "claim_type": "date", "event_kind": "job",
+            "temporal_value": date("2002/2006"), "basis": "explicit", "confidence": 1.0,
+            "evidence": [{"quote": "Synthetic evidence"}], "extractor_version": "test:1",
+        })
+        temporal_store.write_receipt(self.root, {"source_ref": claim["source_ref"],
+            "extractor_version": "test:1", "claims": [claim]})
         job = node("node:tidewheel-job", "2002/2006", "claim:job") | {
             "episode_id": None,
             "event_kind": "job",
@@ -293,6 +307,18 @@ class StableFreshnessTests(ContextCase):
 
     def test_human_negative_identity_is_visible_and_changes_freshness(self):
         telling_ref = "classification:story#aaaaaaaaaaaa"
+        claim = temporal_claims.validate_temporal_claim({
+            "source_ref": {"source_id": telling_ref,
+                           "revision": temporal_store.payload_sha256("synthetic"),
+                           "source_path": "sources/manual/story.md"},
+            "source_kind": "system_derived", "claim_type": "date", "subject_ref": "self",
+            "subject_mention": "I",
+            "event_kind": "moment", "temporal_value": date("1999"),
+            "basis": "explicit", "confidence": 1.0,
+            "evidence": [{"quote": "Synthetic evidence"}], "extractor_version": "test:1",
+        })
+        temporal_store.write_receipt(self.root, {"source_ref": claim["source_ref"],
+            "extractor_version": "test:1", "claims": [claim]})
         event_identity.write_telling_manifest(self.root, {
             "tellings": [{
                 "telling_ref": telling_ref,
@@ -348,14 +374,14 @@ class StableFreshnessTests(ContextCase):
             sources.append(source)
 
         with mock.patch.object(
-            temporal_publication,
-            "read_projection",
-            wraps=temporal_publication.read_projection,
-        ) as read_projection, mock.patch.object(
+            cc,
+            "_derive_context_timeline",
+            wraps=cc._derive_context_timeline,
+        ) as derive_context, mock.patch.object(
             temporal_store,
-            "read_active_index",
-            wraps=temporal_store.read_active_index,
-        ) as read_active_index, mock.patch.object(
+            "fold_active_index",
+            wraps=temporal_store.fold_active_index,
+        ) as fold_active_index, mock.patch.object(
             entity_roster,
             "load_roster",
             wraps=entity_roster.load_roster,
@@ -380,8 +406,8 @@ class StableFreshnessTests(ContextCase):
         self.assertEqual(report["pending_count"], 100)
         self.assertEqual(report["remaining_count"], 50)
         self.assertFalse(report["complete"])
-        self.assertEqual(read_projection.call_count, 1)
-        self.assertEqual(read_active_index.call_count, 1)
+        self.assertEqual(derive_context.call_count, 1)
+        self.assertEqual(fold_active_index.call_count, 1)
         self.assertEqual(load_roster.call_count, 3)
         self.assertEqual(load_event_identities.call_count, 1)
         self.assertEqual(load_episode_operations.call_count, 1)
@@ -389,19 +415,19 @@ class StableFreshnessTests(ContextCase):
 
     def test_standalone_snapshots_keep_independent_fresh_catalog_reads(self):
         with mock.patch.object(
-            temporal_publication,
-            "read_projection",
-            wraps=temporal_publication.read_projection,
-        ) as read_projection, mock.patch.object(
+            cc,
+            "_derive_context_timeline",
+            wraps=cc._derive_context_timeline,
+        ) as derive_context, mock.patch.object(
             temporal_store,
-            "read_active_index",
-            wraps=temporal_store.read_active_index,
-        ) as read_active_index:
+            "fold_active_index",
+            wraps=temporal_store.fold_active_index,
+        ) as fold_active_index:
             self.snapshot()
             self.snapshot()
 
-        self.assertEqual(read_projection.call_count, 2)
-        self.assertEqual(read_active_index.call_count, 2)
+        self.assertEqual(derive_context.call_count, 2)
+        self.assertEqual(fold_active_index.call_count, 2)
 
     def test_empty_target_inventory_does_not_load_the_catalog(self):
         with mock.patch.object(cc, "_load_context_catalog") as load_catalog:
@@ -411,7 +437,7 @@ class StableFreshnessTests(ContextCase):
         self.assertEqual(report["pending_count"], 0)
         self.assertTrue(report["complete"])
 
-    def test_shared_catalog_applies_own_output_exclusion_per_source(self):
+    def test_shared_independent_candidate_is_available_to_every_source(self):
         second = self.source.parent / "other.md"
         second.write_text("Another synthetic story.", encoding="utf-8")
         (self.root / cc.ACTIVE_INDEX_PATH).write_text(json.dumps({"claims": [
@@ -444,7 +470,7 @@ class StableFreshnessTests(ContextCase):
         )
         other = cc._build_context_snapshot_from_catalog(self.root, second, catalog)
 
-        self.assertEqual(own["candidates"], [])
+        self.assertEqual(own["candidates"], other["candidates"])
         self.assertEqual(
             [row["candidate_id"] for row in other["candidates"]], ["node:stay"]
         )
@@ -1249,6 +1275,10 @@ class TellingIdentityIntegrationTests(ContextCase):
 
 
 class ProductionPipelineAcceptanceTests(ContextCase):
+    def setUp(self):
+        super().setUp()
+        self.fold_patch.stop()
+
     def test_landmark_refresh_to_published_usable_window_retires_generic_item(self):
         body = "I found the envelope while we lived in Cedarport.\n"
         metadata = {
@@ -1296,7 +1326,7 @@ class ProductionPipelineAcceptanceTests(ContextCase):
         )
         temporal_publication.publish(
             self.root,
-            roster_snapshot=place_roster,
+            roster_snapshot=entity_roster.load_roster("person", vault_root=self.root),
             now="2026-09-15T03:01:00Z",
         )
 
@@ -1358,7 +1388,7 @@ class ProductionPipelineAcceptanceTests(ContextCase):
         )
         temporal_publication.publish(
             self.root,
-            roster_snapshot=place_roster,
+            roster_snapshot=entity_roster.load_roster("person", vault_root=self.root),
             now="2026-09-15T03:03:00Z",
         )
         view = temporal_publication.calculated_view(self.root)

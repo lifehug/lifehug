@@ -110,17 +110,19 @@ def run_real_context_scenario() -> dict:
         )
         publication.publish(root, roster_snapshot=place_roster, now="2026-09-16T01:00:00Z")
 
-        telling_ref = "classification:sources-manual-related#aaaaaaaaaaaa"
-        event_identity.write_telling_manifest(root, {
-            "tellings": [{
-                "telling_ref": telling_ref,
-                "source_path": "sources/manual/related.md",
-                "event_refs": [],
-                "era_refs": [],
-                "aliases": [],
-                "bound_identity_ids": [],
-            }],
-        })
+        historical_claims = classifier_claims.event_claims(
+            stem="sources-manual-related",
+            event={"title": "Existing event", "description": "Existing reading."},
+            revision=store.payload_sha256("synthetic historical reading"),
+            source_path="sources/manual/related.md", now="2026-09-16T01:00:00Z",
+        )
+        telling_ref = historical_claims[0]["source_ref"]["source_id"]
+        store.write_receipt(root, {
+            "source_ref": historical_claims[0]["source_ref"],
+            "extractor_version": historical_claims[0]["extractor_version"],
+            "claims": historical_claims,
+        }, now="2026-09-16T01:00:00Z")
+        event_identity.rebuild_telling_manifest(root)
         identity, created = event_identity.file_event_identity(
             root,
             telling_ref=telling_ref,

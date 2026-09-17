@@ -216,6 +216,17 @@ change makes them selectable again. Reusing an old model reading after an anchor
 change is deferred until a separately versioned dependency contract can exclude
 alias, competitor, identity-decision, removal, and retraction changes.
 
+**Independent context authority (v306, issue #348).** Candidate kind, subjects,
+bounds, basis and conflicts are derived from independent evidence through the
+same temporal fold used by publication. Classifier claims are excluded before
+derivation, including indirect date support. Explicit identity decisions remain
+authority; machine prior-telling rekeys are prompt history, not retrieval or
+decision-applicability inputs. Catalog loading is read-only and folds once for
+all sources. No prompt-version bump or legacy hash rewriting hides a context
+change: unchanged semantic digests remain reusable; affected old readings may
+need one honest refresh. Source-relevant retrieval and the bounded global
+fallback are unchanged, so real new context can legitimately affect many sources.
+
 ---
 
 ## 5. Relationships & Connection
