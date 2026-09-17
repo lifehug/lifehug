@@ -657,7 +657,7 @@ def corrections_for(source_path: Path) -> list[str]:
     ]
 
 
-_TIMELINE_EVIDENCE_DECISIONS = """
+_TIMELINE_EVIDENCE_DECISIONS = f"""
 ### Timeline Evidence Uses Two Independent Decisions
 
 1. `source_grounding` proves only a direct `date.stated` or `date.age`. It
@@ -691,6 +691,13 @@ advisory-board ordering is weaker. If no opening candidate is supplied or the
 quote does not identify one, preserve the supported `before` relation to the
 advisory-board candidate rather than inventing a `within` link.
 
+"Most specific" means the TIGHTEST SUPPORTED TIME BOUNDS, not the relation word
+that appears most literally in the quote. When the same occurrence can be
+`within` a supplied finite candidate interval, that bounded placement is more
+temporally precise than `before` or `after` a different candidate, which yields
+a one-sided open interval. Keep any independently stated ordering against the
+other event in `date.anchor_ref` plus `date.relation`; do not discard it.
+
 Relation direction is always CURRENT EXTRACTED EVENT relative to SELECTED
 CANDIDATE. `after` candidate X means this event happened after X; it never means
 X happened after some other event mentioned in the sentence. If the current
@@ -718,6 +725,8 @@ an empty candidate set for a real event is `missing_evidence`, never
 candidates remain plausible and the source cannot distinguish them, and use
 `missing_evidence` when no supplied candidate has enough source support.
 `not_temporal` is only for an extracted item that is not actually an event.
+Every `timeline_resolution.reason` must contain 1 to
+{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters.
 """
 
 
@@ -767,7 +776,7 @@ Return ONLY one raw JSON object with exactly these fields:
   "_classification_mode": "timeline",
   "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
   "events": [
-    {{ "event_key": "exact existing event_key", "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate id relevant to this event"], "reason": "bounded explanation" }} }}
+    {{ "event_key": "exact existing event_key", "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate id relevant to this event"], "reason": "1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation" }} }}
   ]
 }}
 
@@ -940,7 +949,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   }},
   "situation_vs_story": "situation_rich_story_empty|story_rich_situation_thin|balanced|neither",
   "events": [
-    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the subject's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate relevant to this event"], "reason": "bounded explanation" }} }}
+    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the subject's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate relevant to this event"], "reason": "1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation" }} }}
   ]{question_schema}
 }}
 

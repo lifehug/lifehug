@@ -257,6 +257,16 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             self.assertIn('"early in", and "late in"', normalized)
             self.assertIn('"After the wedding"', normalized)
             self.assertIn("date.anchor_ref", normalized)
+            self.assertIn("TIGHTEST SUPPORTED TIME BOUNDS", normalized)
+            self.assertIn("a one-sided open interval", normalized)
+            self.assertIn(
+                f"1-{te.MAX_RESOLUTION_REASON_CHARS} character explanation",
+                normalized,
+            )
+            self.assertIn(
+                f"{te.MAX_RESOLUTION_REASON_CHARS} characters",
+                normalized,
+            )
 
     def test_plan_builds_prompts_only_for_selected_items_and_names_ineligible(self) -> None:
         empty = self.sources / "manual" / "empty.md"

@@ -83,6 +83,16 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertIn('"early in", and "late in"', prompts[0])
         self.assertIn('"After the wedding"', prompts[0])
         self.assertIn("date.anchor_ref", prompts[0])
+        self.assertIn("TIGHTEST SUPPORTED TIME BOUNDS", prompts[0])
+        self.assertIn("a one-sided open interval", prompts[0])
+        self.assertIn(
+            f"1-{evals.timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",
+            prompts[0],
+        )
+        self.assertIn(
+            f"{evals.timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters",
+            prompts[0],
+        )
         self.assertNotIn("across the ENTIRE supplied candidate list", prompts[0])
         self.assertNotIn(fixture["fixture_id"], prompts[0])
 

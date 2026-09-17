@@ -1040,6 +1040,10 @@ class ContextDiagnosticsTests(ContextCase):
             '"early in", and "late in"',
             '"After the wedding"',
             "date.anchor_ref",
+            "TIGHTEST SUPPORTED TIME BOUNDS",
+            "a one-sided open interval",
+            f"1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",
+            f"{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
