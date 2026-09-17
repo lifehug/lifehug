@@ -746,7 +746,25 @@ class ExternalVaultSubprocessTests(unittest.TestCase):
             for path in (self.vault / "state" / "jobs").glob("[0-9a-f]*.json")
         ]
         self.assertGreaterEqual(len(records), 2)
-        self.assertTrue(all(record["state"] == "succeeded" for record in records))
+        refreshes = [
+            record for record in records
+            if record["command"] == "classification-refresh"
+        ]
+        ordinary = [
+            record for record in records
+            if record["command"] != "classification-refresh"
+        ]
+        self.assertTrue(
+            all(record["state"] == "succeeded" for record in ordinary),
+            records,
+        )
+        # This data-only fixture intentionally configures no unattended model.
+        # The normal answer lifecycle must still schedule refresh durably, and
+        # its inability to classify must remain visible instead of being
+        # reported as success or silently dropped.
+        self.assertEqual(len(refreshes), 1, records)
+        self.assertEqual(refreshes[0]["state"], "failed", refreshes[0])
+        self.assertEqual(refreshes[0]["failure_code"], "command_failed")
 
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
