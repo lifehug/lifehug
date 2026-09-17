@@ -2383,7 +2383,7 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
 
 
 def cmd_classification_refresh(args: argparse.Namespace) -> int:
-    """Run one bounded local refresh through the canonical archive batch APIs."""
+    """Drain bounded local refresh batches, then publish once."""
     if not _job_runner_active():
         payload: dict[str, object] = {"limit": args.limit}
         if args.model:
@@ -2411,15 +2411,11 @@ def cmd_classification_refresh(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if report["status"] == "unchanged":
+    if report["status"] == "unchanged" and not report["publication_needed"]:
         print("Classification refresh: no pending targets.")
         return 0
 
-    accepted_sources = report["accepted_sources"]
     downstream = (
-        ("migrate_classifier_moments", lambda: cmd_migrate_classifier_moments(
-            argparse.Namespace(source=accepted_sources, dry_run=False, json=False)
-        )),
         ("timeline_retire", lambda: cmd_timeline_retire(
             argparse.Namespace(dry_run=False)
         )),
@@ -2440,11 +2436,13 @@ def cmd_classification_refresh(args: argparse.Namespace) -> int:
             print(f"Error: classification refresh {step} failed", file=sys.stderr)
             return rc
 
+    classification_refresh.clear_publication_checkpoint(REPO_DIR)
+
     counts = report["counts"]
     print(
         "Classification refresh: "
         f"accepted {counts['accepted']}, refused {counts['refused']}, "
-        f"remaining {report['selection']['remaining_count']}."
+        f"batches {report['batch_count']}, remaining {report['selection']['remaining_count']}."
     )
     if report["status"] == "partial":
         record_learning_failure(
