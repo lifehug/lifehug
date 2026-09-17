@@ -679,6 +679,15 @@ General contrasts:
 - "Nina was 30 when she qualified" can have grounded age evidence even when no
   candidate exists; grounding does not by itself create a contextual relation.
 
+Prefer the most specific relation the exact quote supports. When a quote names
+the same occurrence as one supplied candidate, link `within` that candidate
+instead of choosing a looser `before` or `after` relation to another event that
+the sentence also mentions. For example, "I opened the clinic before I later
+joined its advisory board" belongs within a supplied clinic-opening candidate;
+the advisory-board ordering is weaker. If no opening candidate is supplied or
+the quote does not identify one, preserve the supported `before` relation to
+the advisory-board candidate rather than inventing a `within` link.
+
 Choose resolution from coverage, not candidate count. `incomplete` is allowed
 ONLY when that event's context says `complete: false`. When `complete: true`,
 an empty candidate set for a real event is `missing_evidence`, never

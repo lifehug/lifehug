@@ -65,7 +65,15 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertIn("Timeline Evidence Uses Two Independent Decisions", prompts[0])
         self.assertIn("does NOT need a calendar date or age", prompts[0])
         self.assertIn("an empty candidate set for a real event is `missing_evidence`", prompts[0])
+        self.assertIn("Prefer the most specific relation", prompts[0])
         self.assertNotIn("across the ENTIRE supplied candidate list", prompts[0])
+        self.assertNotIn(fixture["fixture_id"], prompts[0])
+
+    def test_machine_fixture_ids_never_enter_model_prompts(self) -> None:
+        for fixture in evals.load_fixtures():
+            with self.subTest(fixture_id=fixture["fixture_id"]):
+                prompt = evals.emitted_prompt(evals.build_case(fixture))
+                self.assertNotIn(fixture["fixture_id"], prompt)
 
 
 if __name__ == "__main__":

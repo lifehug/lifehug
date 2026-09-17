@@ -78,7 +78,7 @@ def build_case(fixture: dict) -> dict:
     story_text = str(fixture["source_text"])
     candidates = [_candidate(value) for value in fixture.get("candidates") or ()]
     provisional = {
-        "title": fixture["fixture_id"],
+        "title": str(fixture.get("title") or "Synthetic source"),
         "description": story_text,
         "subject": "self",
         "places": [],
@@ -133,7 +133,7 @@ def emitted_prompt(case: dict) -> str:
     fixture = case["fixture"]
     with tempfile.TemporaryDirectory(prefix="lifehug-timeline-eval-") as raw_root:
         root = Path(raw_root)
-        source = root / "sources/manual" / f"{fixture['fixture_id']}.md"
+        source = root / "sources/manual/source.md"
         source.parent.mkdir(parents=True)
         write_text(source, case["story_text"])
         old_values = (
@@ -147,7 +147,10 @@ def emitted_prompt(case: dict) -> str:
             classify_story.CLASSIFICATIONS_DIR = root / "state/classifications"
             return classify_story.build_prompt(
                 source,
-                {"title": fixture["fixture_id"], "type": "synthetic-eval"},
+                {
+                    "title": str(fixture.get("title") or "Synthetic source"),
+                    "type": "synthetic-eval",
+                },
                 case["story_text"],
                 context_snapshot=case["snapshot"],
                 mode="full",

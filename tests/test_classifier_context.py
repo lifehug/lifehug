@@ -1030,6 +1030,8 @@ class ContextDiagnosticsTests(ContextCase):
             "does NOT need a calendar date or age",
             "an empty candidate set for a real event is `missing_evidence`",
             "`incomplete` is allowed ONLY",
+            "Prefer the most specific relation",
+            "preserve the supported `before` relation",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
