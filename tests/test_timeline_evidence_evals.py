@@ -76,6 +76,13 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
             "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
             " ".join(prompts[0].split()),
         )
+        self.assertIn("FIRST test whether a supplied candidate", prompts[0])
+        self.assertIn("candidate's WHOLE occurrence", prompts[0])
+        self.assertIn("before that duration starts", prompts[0])
+        self.assertIn("after it ends", prompts[0])
+        self.assertIn('"early in", and "late in"', prompts[0])
+        self.assertIn('"After the wedding"', prompts[0])
+        self.assertIn("date.anchor_ref", prompts[0])
         self.assertNotIn("across the ENTIRE supplied candidate list", prompts[0])
         self.assertNotIn(fixture["fixture_id"], prompts[0])
 

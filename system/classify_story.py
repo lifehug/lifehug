@@ -679,14 +679,17 @@ General contrasts:
 - "Nina was 30 when she qualified" can have grounded age evidence even when no
   candidate exists; grounding does not by itself create a contextual relation.
 
-Prefer the most specific relation the exact quote supports. When a quote names
-the same occurrence as one supplied candidate, link `within` that candidate
-instead of choosing a looser `before` or `after` relation to another event that
-the sentence also mentions. For example, "I opened the clinic before I later
-joined its advisory board" belongs within a supplied clinic-opening candidate;
-the advisory-board ordering is weaker. If no opening candidate is supplied or
-the quote does not identify one, preserve the supported `before` relation to
-the advisory-board candidate rather than inventing a `within` link.
+Prefer the most specific relation the exact quote supports. Use this decision
+order for every event. FIRST test whether a supplied candidate is the same
+occurrence or a span containing the current event. When the exact quote supports
+that match, use `within` and stop; do not choose a looser `before` or `after`
+relation merely because the sentence also orders the event against another
+candidate. ONLY after ruling out every supported `within` match may you select
+`before` or `after`. For example, "I opened the clinic before I later joined its
+advisory board" belongs within a supplied clinic-opening candidate; the
+advisory-board ordering is weaker. If no opening candidate is supplied or the
+quote does not identify one, preserve the supported `before` relation to the
+advisory-board candidate rather than inventing a `within` link.
 
 Relation direction is always CURRENT EXTRACTED EVENT relative to SELECTED
 CANDIDATE. `after` candidate X means this event happened after X; it never means
@@ -694,6 +697,19 @@ X happened after some other event mentioned in the sentence. If the current
 event is the selected candidate's own occurrence, use `within` that candidate.
 Its independent `date.anchor_ref` may still retain a separate true before/after
 constraint to another event.
+
+Treat interval relations as relations to the candidate's WHOLE occurrence.
+When the supplied role and name explicitly represent a duration, `before` means
+before that duration starts and `after` means after it ends; "during", "while",
+"early in", and "late in" the duration are all `within`. Use the supplied
+`node_kind`, `event_role`, name, and bounds to distinguish a duration such as a
+marriage, residence, job, or term from a point occurrence such as a wedding.
+"After the wedding" may support `after` the wedding point, while "early in the
+marriage" supports `within` the marriage duration. A range on a point event may
+represent uncertainty, so never guess a duration or boundary the candidate does
+not state. If the quote does not establish the required whole-occurrence
+boundary, do not assert `before` or `after`. Apply the same direction and
+interval meaning to `date.anchor_ref` plus `date.relation`.
 
 Choose resolution from coverage, not candidate count. `incomplete` is allowed
 ONLY when that event's context says `complete: false`. When `complete: true`,

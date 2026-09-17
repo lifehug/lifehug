@@ -250,6 +250,13 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
                 "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
                 normalized,
             )
+            self.assertIn("FIRST test whether a supplied candidate", normalized)
+            self.assertIn("candidate's WHOLE occurrence", normalized)
+            self.assertIn("before that duration starts", normalized)
+            self.assertIn("after it ends", normalized)
+            self.assertIn('"early in", and "late in"', normalized)
+            self.assertIn('"After the wedding"', normalized)
+            self.assertIn("date.anchor_ref", normalized)
 
     def test_plan_builds_prompts_only_for_selected_items_and_names_ineligible(self) -> None:
         empty = self.sources / "manual" / "empty.md"

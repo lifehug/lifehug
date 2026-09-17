@@ -1033,6 +1033,13 @@ class ContextDiagnosticsTests(ContextCase):
             "Prefer the most specific relation",
             "preserve the supported `before` relation",
             "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
+            "FIRST test whether a supplied candidate",
+            "candidate's WHOLE occurrence",
+            "before that duration starts",
+            "after it ends",
+            '"early in", and "late in"',
+            '"After the wedding"',
+            "date.anchor_ref",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
