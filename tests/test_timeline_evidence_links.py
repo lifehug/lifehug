@@ -105,6 +105,87 @@ class GroundingSubjectTests(unittest.TestCase):
             self.assertEqual(normalized["subject_quote"], proof)
 
 
+class NaturalRangeGroundingTests(unittest.TestCase):
+    STORY = "River House was our home from January 2012 through December 2015."
+    REVISION = "sha256:" + "8" * 64
+
+    def grounding(self, **overrides) -> dict:
+        payload = {
+            "quote": self.STORY,
+            "temporal_quote": "January 2012 through December 2015",
+            "subject_quote": "River House",
+            "kind": "date",
+        }
+        payload.update(overrides)
+        return payload
+
+    def event(self, stated: str = "2012-01/2015-12") -> dict:
+        return {
+            "title": "River House years",
+            "description": self.STORY,
+            "subject": "River House",
+            "date": {"stated": stated, "age": None, "anchor_ref": None},
+        }
+
+    def test_exact_natural_range_proves_equivalent_normalized_bounds(self) -> None:
+        normalized = te.normalize_source_grounding(
+            self.grounding(),
+            self.event(),
+            story_text=self.STORY,
+            source_revision=self.REVISION,
+        )
+        self.assertEqual(normalized["quote"], self.STORY)
+        self.assertEqual(normalized["temporal_quote"],
+                         "January 2012 through December 2015")
+        self.assertEqual(normalized["subject_quote"], "River House")
+        self.assertEqual(
+            normalized["normalized_temporal_value"],
+            {
+                "best": "2012-01/2015-12",
+                "earliest": "2012-01",
+                "latest": "2015-12",
+                "granularity": "range",
+                "confidence": "certain",
+                "basis": "stated",
+                "anchors": [],
+                "provenance": [],
+            },
+        )
+
+    def test_wrong_normalized_bounds_are_still_refused(self) -> None:
+        with self.assertRaisesRegex(te.TimelineEvidenceError, "does not support"):
+            te.normalize_source_grounding(
+                self.grounding(),
+                self.event("2012-02/2015-12"),
+                story_text=self.STORY,
+                source_revision=self.REVISION,
+            )
+
+    def test_temporal_words_must_remain_inside_the_exact_quote(self) -> None:
+        with self.assertRaisesRegex(te.TimelineEvidenceError, "inside quote"):
+            te.normalize_source_grounding(
+                self.grounding(quote="River House was our home"),
+                self.event(),
+                story_text=self.STORY,
+                source_revision=self.REVISION,
+            )
+
+    def test_invalid_and_reversed_natural_ranges_are_refused(self) -> None:
+        for temporal_quote in (
+            "January 2012 through December",
+            "December 2015 through January 2012",
+        ):
+            story = f"River House was our home {temporal_quote}."
+            with self.subTest(temporal_quote=temporal_quote):
+                with self.assertRaisesRegex(te.TimelineEvidenceError, "does not support"):
+                    te.normalize_source_grounding(
+                        self.grounding(quote=story, temporal_quote=temporal_quote),
+                        self.event(),
+                        story_text=story,
+                        source_revision=self.REVISION,
+                    )
+
+
 class SelectiveRetrievalTests(unittest.TestCase):
     def test_narrow_reference_stays_complete_beyond_64_owner_facts(self) -> None:
         rows = [

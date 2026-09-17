@@ -241,6 +241,15 @@ alias, competitor, retraction, correction, or human decision still invalidates
 the affected outcome. Named-person age arithmetic requires that person's own
 supported birth and never borrows the owner's.
 
+**Natural quoted ranges (v308).** Exact source grounding accepts a narrowly
+bounded whole-string range when two explicit dates are joined by `through` or
+`to`, optionally beginning with `from`: for example, `January 2012 through
+December 2015` and `2012 to 2015`. Both endpoints use the canonical loose-date
+parser, so known month/day forms retain their precision and uncertainty.
+Missing years, ambiguous numeric dates, arbitrary prose, multiple connectors,
+nested ranges, invalid endpoints, and reversed ranges remain unparseable; exact
+quote, subject, bounds, and provenance validation are unchanged.
+
 ---
 
 ## 5. Relationships & Connection

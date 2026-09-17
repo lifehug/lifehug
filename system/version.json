@@ -1,7 +1,7 @@
 {
-  "version": 307,
+  "version": 308,
   "released": "2026-09-17",
-  "changelog": "v307: Timeline learning now keeps extracted story events stable and refreshes only exact event-key evidence links and closed resolution outcomes. Exact source-quoted ordinary dates and ages can become independent candidate facts without admitting contextual classifier output; named-person ages never borrow the owner's birth. Event-local lookup finds relevant facts beyond the old global slice, retains same-entity competitors, and excludes generic owner references. Selective fingerprints let date-only anchor corrections propagate through existing links with zero model work while aliases, competitors, identity, corrections, retractions and human decisions still invalidate affected outcomes. Full/timeline and outer batch schemas stay compatible, raw resolved handles collapse to canonical edges without erasing distinct constraints, and a recorded/live synthetic eval command reports plumbing separately from configured-model quality.",
+  "changelog": "v308: Exact source-quoted natural date ranges such as 'January 2012 through December 2015' and '2012 to 2015' now normalize through the canonical chronology parser, so matching timeline evidence is accepted without weakening quote, subject, bounds, or provenance validation. Explicit month/day endpoints and uncertainty are preserved; ambiguous, incomplete, nested, invalid, and reversed ranges remain refused.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -32,6 +32,7 @@
     "docs/handbook/interactions/landmarks.md",
     "docs/handbook/interactions/timeline.md",
     "docs/handbook/timeline.md",
+    "docs/pr-specs/natural-date-ranges.md",
     "docs/pr-specs/timeline-evidence-links.md",
     "examples/launchd/README.md",
     "examples/launchd/com.lifehug.daily.plist.example",

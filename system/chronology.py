@@ -537,6 +537,71 @@ _LOOSE_MONTH_DAY_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$
 _LOOSE_DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})\s+([A-Za-z]+)\.?\s+(\d{4})$")
 #: ``Month YYYY``.
 _LOOSE_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{4})$")
+#: One explicit whole-string range connector. Endpoints are parsed separately
+#: by the same single-date authority below; two connectors are ambiguous.
+_LOOSE_RANGE_CONNECTOR_RE = re.compile(r"\s+(?:through|to)\s+", re.IGNORECASE)
+_LOOSE_RANGE_FROM_RE = re.compile(r"^from\s+", re.IGNORECASE)
+
+
+def _parse_loose_single_date(raw: str) -> DateRecord | None:
+    """Parse one finite date, deliberately refusing every interval form."""
+    record = parse_edtf(raw, basis="stated")
+    if record is None:
+        edtf: str | None = None
+        match = _LOOSE_MONTH_DAY_YEAR_RE.match(raw)
+        if match:
+            month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
+            day = int(match.group(2))
+            if month and 1 <= day <= 31:
+                edtf = f"{int(match.group(3)):04d}-{month:02d}-{day:02d}"
+        if edtf is None:
+            match = _LOOSE_DAY_MONTH_YEAR_RE.match(raw)
+            if match:
+                day = int(match.group(1))
+                month = _LOOSE_MONTH_LOOKUP.get(match.group(2).lower())
+                if month and 1 <= day <= 31:
+                    edtf = f"{int(match.group(3)):04d}-{month:02d}-{day:02d}"
+        if edtf is None:
+            match = _LOOSE_MONTH_YEAR_RE.match(raw)
+            if match:
+                month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
+                if month:
+                    edtf = f"{int(match.group(2)):04d}-{month:02d}"
+        record = parse_edtf(edtf, basis="stated") if edtf is not None else None
+    if (record is None or record.granularity == "range"
+            or record.earliest is None or record.latest is None):
+        return None
+    return record
+
+
+def _parse_loose_natural_range(raw: str) -> DateRecord | None:
+    """Parse one explicit ``A through B`` / ``A to B`` whole-string range."""
+    body = _LOOSE_RANGE_FROM_RE.sub("", raw, count=1)
+    connectors = list(_LOOSE_RANGE_CONNECTOR_RE.finditer(body))
+    if len(connectors) != 1:
+        return None
+    connector = connectors[0]
+    left = _parse_loose_single_date(body[:connector.start()].strip())
+    right = _parse_loose_single_date(body[connector.end():].strip())
+    if left is None or right is None:
+        return None
+    left_bound = _ordinal(left.earliest, end=False)
+    right_bound = _ordinal(right.latest, end=True)
+    if left_bound is None or right_bound is None or left_bound > right_bound:
+        return None
+    confidence = max((left.confidence, right.confidence), key=CONFIDENCES.index)
+    return DateRecord(
+        best=f"{left.best}/{right.best}",
+        earliest=left.earliest,
+        latest=right.latest,
+        granularity="range",
+        confidence=confidence,
+        basis="stated",
+        anchors=(
+            left.anchors + tuple(a for a in right.anchors if a not in left.anchors)
+        ),
+        provenance=left.provenance + right.provenance,
+    )
 
 
 def parse_loose_date(text: object) -> dict | None:
@@ -547,8 +612,12 @@ def parse_loose_date(text: object) -> dict | None:
     or a month name with a year — ``1974``, ``1974-06``, ``1981-07-11``,
     ``2 April 1979``, ``April 2, 1979``, ``July 11, 1981``, ``Jun 1986``,
     ``June 1986`` — case-insensitive, full month names or their 3-letter
-    abbreviations. The EDTF forms are handed straight to :func:`parse_edtf`,
-    which already reads them (and every other human form it accepts, such as
+    abbreviations. A whole-string range may join two such explicit dates with
+    one ``through`` or ``to`` and may start with ``from``. Each endpoint is
+    parsed by the same single-date path; missing years, nested ranges,
+    multiple connectors, ambiguous numeric dates, and reversed endpoints are
+    refused. The EDTF forms are handed straight to :func:`parse_edtf`, which
+    already reads them (and every other human form it accepts, such as
     ``spring 1998`` or ``1970s``, for free); the month-name forms are turned
     into the equivalent EDTF expression first. A whole string wrapped in
     square brackets — ``[Jun 1986]`` — parses to the same date with
@@ -573,31 +642,11 @@ def parse_loose_date(text: object) -> dict | None:
 
     record = parse_edtf(raw, basis="stated")
     if record is None:
-        edtf: str | None = None
-        match = _LOOSE_MONTH_DAY_YEAR_RE.match(raw)
-        if match:
-            month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
-            day = int(match.group(2))
-            if month and 1 <= day <= 31:
-                edtf = f"{int(match.group(3)):04d}-{month:02d}-{day:02d}"
-        if edtf is None:
-            match = _LOOSE_DAY_MONTH_YEAR_RE.match(raw)
-            if match:
-                day = int(match.group(1))
-                month = _LOOSE_MONTH_LOOKUP.get(match.group(2).lower())
-                if month and 1 <= day <= 31:
-                    edtf = f"{int(match.group(3)):04d}-{month:02d}-{day:02d}"
-        if edtf is None:
-            match = _LOOSE_MONTH_YEAR_RE.match(raw)
-            if match:
-                month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
-                if month:
-                    edtf = f"{int(match.group(2)):04d}-{month:02d}"
-        if edtf is None:
-            return None
-        record = parse_edtf(edtf, basis="stated")
-        if record is None:
-            return None
+        record = _parse_loose_natural_range(raw)
+    if record is None:
+        record = _parse_loose_single_date(raw)
+    if record is None:
+        return None
     if approximate:
         record = replace(record, confidence="approximate", best=f"{record.best}~")
     return record.to_dict()
