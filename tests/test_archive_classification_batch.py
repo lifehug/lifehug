@@ -244,21 +244,23 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
                 normalized,
             )
             self.assertIn("`incomplete` is allowed ONLY", normalized)
-            self.assertIn("Prefer the most specific relation", normalized)
+            self.assertIn(
+                "A supported rough `before` or `after` placement is also valid",
+                normalized,
+            )
+            self.assertIn("do not invent `within` merely to tighten bounds", normalized)
             self.assertIn("preserve the supported `before` relation", normalized)
             self.assertIn(
                 "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
                 normalized,
             )
-            self.assertIn("FIRST test whether a supplied candidate", normalized)
             self.assertIn("candidate's WHOLE occurrence", normalized)
             self.assertIn("before that duration starts", normalized)
             self.assertIn("after it ends", normalized)
             self.assertIn('"early in", and "late in"', normalized)
             self.assertIn('"After the wedding"', normalized)
             self.assertIn("date.anchor_ref", normalized)
-            self.assertIn("TIGHTEST SUPPORTED TIME BOUNDS", normalized)
-            self.assertIn("a one-sided open interval", normalized)
+            self.assertNotIn("TIGHTEST SUPPORTED TIME BOUNDS", normalized)
             self.assertIn(
                 f"1-{te.MAX_RESOLUTION_REASON_CHARS} character explanation",
                 normalized,
@@ -414,6 +416,115 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         )
         self.assertEqual(filed["events"][0]["custom_field"], "preserve exactly")
         self.assertTrue(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+
+    def test_null_timeline_delta_revalidates_and_retains_literal_grounding(self) -> None:
+        self.a.write_text(
+            "---\ntitle: Alpha\n---\nI moved in 1999.\n", encoding="utf-8"
+        )
+        old = snapshot(self.a, "old")
+        current = snapshot(self.a, "new")
+        event = {
+            "title": "The move",
+            "description": "I moved in 1999.",
+            "subject": "self",
+            "places": [],
+            "when_hint": None,
+            "anchor": None,
+            "date": {
+                "stated": "1999",
+                "age": None,
+                "anchor_ref": None,
+                "relation": None,
+            },
+        }
+        proof = te.normalize_source_grounding(
+            {
+                "quote": "I moved in 1999.",
+                "temporal_quote": "1999",
+                "subject_quote": "I",
+                "kind": "date",
+            },
+            event,
+            story_text=cs.load_source_text(self.a)[1],
+            source_revision=old["source_revision"],
+        )
+        prior = self.existing(self.a, old, events=[{
+            **event,
+            "source_grounding": proof,
+            "timeline_relation": None,
+            "timeline_resolution": {
+                "status": "missing_evidence",
+                "candidate_ids": [],
+                "reason": "No independent candidate was available.",
+            },
+        }])
+        response = {
+            "_classification_mode": "timeline",
+            "_classification_snapshot": cc.snapshot_metadata(current),
+            "events": [timeline_delta(prior["events"][0], current)],
+        }
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            report = cs.file_batch_response(self.envelope("grounding-reuse", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "timeline",
+                "response_text": json.dumps(response),
+            }]))
+        self.assertEqual(report["counts"]["accepted"], 1)
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertEqual(filed["events"][0]["source_grounding"], proof)
+
+    def test_null_timeline_delta_does_not_retain_disallowed_grounding(self) -> None:
+        self.a.write_text(
+            "---\ntitle: Alpha\n---\nI moved in 1999.\n", encoding="utf-8"
+        )
+        old = snapshot(self.a, "old")
+        current = {**snapshot(self.a, "new"), "grounding_allowed": False}
+        event = {
+            "title": "The move",
+            "description": "I moved in 1999.",
+            "subject": "self",
+            "places": [],
+            "when_hint": None,
+            "anchor": None,
+            "date": {"stated": "1999", "age": None},
+        }
+        proof = te.normalize_source_grounding(
+            {
+                "quote": "I moved in 1999.",
+                "temporal_quote": "1999",
+                "subject_quote": "I",
+                "kind": "date",
+            },
+            event,
+            story_text=cs.load_source_text(self.a)[1],
+            source_revision=old["source_revision"],
+        )
+        prior = self.existing(self.a, old, events=[{
+            **event,
+            "source_grounding": proof,
+            "timeline_relation": None,
+            "timeline_resolution": {
+                "status": "missing_evidence",
+                "candidate_ids": [],
+                "reason": "No independent candidate was available.",
+            },
+        }])
+        response = {
+            "_classification_mode": "timeline",
+            "_classification_snapshot": cc.snapshot_metadata(current),
+            "events": [timeline_delta(prior["events"][0], current)],
+        }
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            report = cs.file_batch_response(self.envelope("grounding-disallowed", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "timeline",
+                "response_text": json.dumps(response),
+            }]))
+        self.assertEqual(report["counts"]["accepted"], 1)
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertIsNone(filed["events"][0]["source_grounding"])
 
     def test_timeline_response_requires_exact_existing_event_keys_and_delta_fields(self) -> None:
         old = snapshot(self.a, "old")

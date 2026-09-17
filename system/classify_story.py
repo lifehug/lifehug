@@ -679,24 +679,15 @@ General contrasts:
 - "Nina was 30 when she qualified" can have grounded age evidence even when no
   candidate exists; grounding does not by itself create a contextual relation.
 
-Prefer the most specific relation the exact quote supports. Use this decision
-order for every event. FIRST test whether a supplied candidate is the same
-occurrence or a span containing the current event. When the exact quote supports
-that match, use `within` and stop; do not choose a looser `before` or `after`
-relation merely because the sentence also orders the event against another
-candidate. ONLY after ruling out every supported `within` match may you select
-`before` or `after`. For example, "I opened the clinic before I later joined its
-advisory board" belongs within a supplied clinic-opening candidate; the
-advisory-board ordering is weaker. If no opening candidate is supplied or the
-quote does not identify one, preserve the supported `before` relation to the
-advisory-board candidate rather than inventing a `within` link.
-
-"Most specific" means the TIGHTEST SUPPORTED TIME BOUNDS, not the relation word
-that appears most literally in the quote. When the same occurrence can be
-`within` a supplied finite candidate interval, that bounded placement is more
-temporally precise than `before` or `after` a different candidate, which yields
-a one-sided open interval. Keep any independently stated ordering against the
-other event in `date.anchor_ref` plus `date.relation`; do not discard it.
+Use a relation the exact quote supports. When you recognize that a supplied
+candidate is the same occurrence or a span containing the current event,
+`within` is the useful connection. A supported rough `before` or `after`
+placement is also valid; do not invent `within` merely to tighten bounds. For
+example, "I opened the clinic before I later joined its advisory board" can
+link within a supplied clinic-opening candidate, but if no opening candidate is
+recognized, preserve the supported `before` relation to the advisory-board
+candidate. Keep any independently stated ordering against the other event in
+`date.anchor_ref` plus `date.relation`; do not discard it.
 
 Relation direction is always CURRENT EXTRACTED EVENT relative to SELECTED
 CANDIDATE. `after` candidate X means this event happened after X; it never means
@@ -1382,6 +1373,38 @@ def _validate_mode_result(
             )
 
 
+def _revalidated_stored_grounding(
+    event: dict,
+    *,
+    existing: dict,
+    snapshot: dict,
+    story_text: str,
+) -> dict | None:
+    """Reuse literal source proof only while its authoritative inputs agree."""
+    grounding = event.get("source_grounding")
+    if not isinstance(grounding, dict) or not snapshot.get("grounding_allowed", True):
+        return None
+    existing_snapshot = classifier_ctx.snapshot_metadata(
+        existing.get("classification_snapshot")
+    )
+    source_revision = str(snapshot.get("source_revision") or "")
+    if existing_snapshot.get("source_revision") != source_revision:
+        return None
+    if any(key not in grounding for key in timeline_evidence.GROUNDING_KEYS):
+        return None
+    raw = {key: grounding[key] for key in timeline_evidence.GROUNDING_KEYS}
+    try:
+        return timeline_evidence.normalize_source_grounding(
+            raw,
+            event,
+            story_text=story_text,
+            source_revision=source_revision,
+            grounding_allowed=True,
+        )
+    except timeline_evidence.TimelineEvidenceError:
+        return None
+
+
 def prepare_classification(
     source_path: Path,
     model: str,
@@ -1454,7 +1477,16 @@ def prepare_classification(
             merged = copy.deepcopy(stored)
             key = timeline_evidence.ensure_event_key(merged)
             delta = by_key[key]
-            for field in ("source_grounding", "timeline_relation", "timeline_resolution"):
+            grounding = delta["source_grounding"]
+            if grounding is None:
+                grounding = _revalidated_stored_grounding(
+                    stored,
+                    existing=existing,
+                    snapshot=snapshot,
+                    story_text=story_text,
+                )
+            merged["source_grounding"] = copy.deepcopy(grounding)
+            for field in ("timeline_relation", "timeline_resolution"):
                 merged[field] = copy.deepcopy(delta[field])
             merged_events.append(merged)
         classification["events"] = merged_events

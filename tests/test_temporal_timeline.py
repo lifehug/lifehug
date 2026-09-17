@@ -720,6 +720,66 @@ class WorkItems(unittest.TestCase):
         unresolved = emitted("missing_evidence")
         self.assertEqual(len(items_of(derive(unresolved), "precision_gap")), 1)
 
+    def test_linked_event_keeps_independent_order_without_raw_handle_question(self):
+        event = {
+            "title": "Northstar payroll",
+            "description": "I joined payroll after launching Northstar.",
+            "subject": "self",
+            "places": [],
+            "date": {
+                "stated": None,
+                "age": None,
+                "anchor_ref": "launching Northstar",
+                "relation": "after",
+            },
+            "timeline_relation": {
+                "relation": "within",
+                "candidate_id": "node:northstar-job",
+                "entity_refs": ["organization/northstar"],
+                "evidence": {"quote": "joined payroll"},
+            },
+            "timeline_resolution": {"status": "linked"},
+        }
+        emitted = classifier_claims.event_claims(
+            stem="northstar-payroll",
+            event=event,
+            revision=revision("northstar-payroll"),
+            source_path="sources/manual/northstar-payroll.md",
+            now=NOW,
+        )
+        job = claim(
+            claim_type="date",
+            subject_mention="Northstar",
+            event_kind="job",
+            event_ref="node:northstar-job",
+            event_mention="Northstar employment",
+            temporal_value="2014/2020",
+            seed="northstar-job",
+        )
+        result = derive(job, *emitted)
+        self.assertEqual([row["temporal_value"] for row in emitted], [
+            {"relation": "after", "anchors": ["launching Northstar"]},
+            {"relation": "within", "anchors": ["node:northstar-job"]},
+        ])
+        event_node = next(
+            row for row in result.nodes
+            if row["node_id"] == emitted[0]["event_ref"]
+        )
+        self.assertEqual(event_node["best_temporal_value"]["earliest"], "2014")
+        self.assertEqual(event_node["best_temporal_value"]["latest"], "2020")
+        self.assertTrue(any(
+            row.get("finding") == "anchor_unresolved"
+            and row.get("anchors") == ["launching Northstar"]
+            for row in result.diagnostics["findings"]
+        ))
+        self.assertEqual(items_of(result, "missing_anchor"), [])
+
+        without_canonical_anchor = derive(*emitted)
+        self.assertTrue(any(
+            row["subject_ref"] == "unresolved:launching northstar"
+            for row in items_of(without_canonical_anchor, "missing_anchor")
+        ))
+
     def test_a_generic_loss_question_never_reaches_the_daily_queue(self):
         """§2.4 — loss discovery is offer-only."""
         loss = claim(

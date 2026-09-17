@@ -280,6 +280,67 @@ class ClaimsPerEventTests(unittest.TestCase):
             "occurrence",
         )
 
+    def test_equivalent_link_retires_the_raw_anchor_handle(self):
+        row = event(
+            "The reception",
+            "We met after Mira's wedding.",
+            date={
+                "stated": None,
+                "age": None,
+                "anchor_ref": "Mira's wedding",
+                "relation": "after",
+            },
+            timeline_relation={
+                "relation": "after",
+                "candidate_id": "node:mira-wedding",
+                "entity_refs": ["person/mira"],
+                "evidence": {"quote": "after Mira's wedding"},
+            },
+            timeline_resolution={"status": "linked"},
+        )
+        claims = cc.event_claims(
+            stem="reception",
+            event=row,
+            revision="sha256:" + "a" * 64,
+            source_path="sources/manual/reception.md",
+            now=NOW,
+        )
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(claims[0]["temporal_value"], {
+            "relation": "after",
+            "anchors": ["node:mira-wedding"],
+        })
+
+    def test_independent_raw_ordering_is_retained_beside_a_link(self):
+        row = event(
+            "Northstar payroll",
+            "I joined payroll after launching Northstar.",
+            date={
+                "stated": None,
+                "age": None,
+                "anchor_ref": "launching Northstar",
+                "relation": "after",
+            },
+            timeline_relation={
+                "relation": "within",
+                "candidate_id": "node:northstar-job",
+                "entity_refs": ["organization/northstar"],
+                "evidence": {"quote": "joined payroll"},
+            },
+            timeline_resolution={"status": "linked"},
+        )
+        claims = cc.event_claims(
+            stem="payroll",
+            event=row,
+            revision="sha256:" + "b" * 64,
+            source_path="sources/manual/payroll.md",
+            now=NOW,
+        )
+        self.assertEqual([claim["temporal_value"] for claim in claims], [
+            {"relation": "after", "anchors": ["launching Northstar"]},
+            {"relation": "within", "anchors": ["node:northstar-job"]},
+        ])
+
     def test_two_undated_moments_in_one_story_are_two_claims(self):
         # The identity keys are FROZEN: two undated moments of one subject in
         # one source revision would derive ONE claim id. The per-event source

@@ -489,10 +489,16 @@ def _event_outcome(event: dict) -> dict:
 def _outcome_matches(actual: dict, oracle: dict) -> bool:
     required = ("status", "candidate_id", "relation", "grounded")
     optional = ("date_anchor_ref", "date_relation")
-    return all(actual.get(key) == oracle.get(key) for key in required) and all(
+    if not all(actual.get(key) == oracle.get(key) for key in required) or not all(
         key not in oracle or actual.get(key) == oracle.get(key)
         for key in optional
-    )
+    ):
+        return False
+    if "date_anchor_ref_aliases" in oracle:
+        aliases = oracle.get("date_anchor_ref_aliases")
+        if not isinstance(aliases, list) or actual.get("date_anchor_ref") not in aliases:
+            return False
+    return True
 
 
 def evaluate(fixtures: list[dict], responses: list[dict]) -> dict:

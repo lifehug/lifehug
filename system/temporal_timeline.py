@@ -3697,6 +3697,16 @@ def _resolution_suppresses_date_question(group: dict) -> bool:
     return bool(statuses) and set(statuses) <= {"incomplete", "not_temporal"}
 
 
+def _linked_resolution_suppresses_anchor_question(group: dict) -> bool:
+    """A canonical link retires parallel raw-handle question debt."""
+    claims = group.get("claims") or ()
+    return bool(claims) and all(
+        timeline_evidence.is_current_classifier_claim(claim)
+        and collapsed_text(claim.get("timeline_resolution_status")) == "linked"
+        for claim in claims
+    )
+
+
 def _group_timeline_resolution_status(group: dict) -> str | None:
     """Return one explicit classifier outcome only when the node agrees."""
     statuses = {
@@ -4596,6 +4606,10 @@ def _derive_work_items(
     handle_text: dict[str, str] = {}
     for row in diagnostics:
         if row.get("finding") != "anchor_unresolved":
+            continue
+        group = groups.get(row.get("node_id")) or {}
+        if (row.get("node_id") not in unplaced
+                and _linked_resolution_suppresses_anchor_question(group)):
             continue
         for anchor in row.get("anchors") or ():
             key = normalized_mention_key(anchor)

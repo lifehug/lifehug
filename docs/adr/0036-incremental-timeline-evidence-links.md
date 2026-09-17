@@ -62,6 +62,15 @@ date-only correction propagates through an existing canonical link during the
 pure fold without another model call, while an identity, meaning, alias,
 competitor, or authority change still invalidates the affected event.
 
+Refinement is opportunistic, not a background objective. A refresh already
+caused by relevant evidence may adopt any newly recognized supported
+connection, including a more useful one. Bound-only changes flow through the
+existing link deterministically. Unchanged evidence reuses the accepted result:
+compile does not call the model, and no periodic job re-reads settled links just
+to seek tighter bounds. Validation, stale-snapshot refusal, and human/direct
+source authority are hard boundaries; they are not a promise that every valid
+model choice is at least as precise as the previous one.
+
 ## Consequences
 
 - Filing or publishing classifier output still cannot feed its contextual
@@ -76,5 +85,7 @@ competitor, or authority change still invalidates the affected event.
 - Recorded synthetic evaluation proves retrieval, validation, and propagation
   plumbing only. Model quality is reported only by an explicit configured
   `timeline_evidence_evals.py --live` run.
+- Settled links receive no speculative refinement calls. Relevant evidence can
+  revisit them; otherwise compile is a deterministic no-op for interpretation.
 - Hosted adoption must pin this implementation while preserving its own outer
   API schemas; this ADR does not claim hosted deployment.

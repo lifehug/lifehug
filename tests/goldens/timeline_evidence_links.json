@@ -20,7 +20,7 @@
     },
     "expected": {"status": "linked", "candidate_id": "node:northstar-founded", "grounded": false},
     "allowed_extra_outcomes": [
-      {"status": "linked", "candidate_id": "node:northstar-job", "relation": "within", "grounded": false, "date_anchor_ref": "node:northstar-founded", "date_relation": "after"}
+      {"status": "linked", "candidate_id": "node:northstar-job", "relation": "within", "grounded": false, "date_anchor_ref_aliases": ["node:northstar-founded", "launched Northstar from the spare room"], "date_relation": "after"}
     ]
   },
   {

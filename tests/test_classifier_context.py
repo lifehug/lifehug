@@ -1030,24 +1030,23 @@ class ContextDiagnosticsTests(ContextCase):
             "does NOT need a calendar date or age",
             "an empty candidate set for a real event is `missing_evidence`",
             "`incomplete` is allowed ONLY",
-            "Prefer the most specific relation",
+            "A supported rough `before` or `after` placement is also valid",
+            "do not invent `within` merely to tighten bounds",
             "preserve the supported `before` relation",
             "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
-            "FIRST test whether a supplied candidate",
             "candidate's WHOLE occurrence",
             "before that duration starts",
             "after it ends",
             '"early in", and "late in"',
             '"After the wedding"',
             "date.anchor_ref",
-            "TIGHTEST SUPPORTED TIME BOUNDS",
-            "a one-sided open interval",
             f"1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",
             f"{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
         self.assertNotIn("across the ENTIRE supplied candidate list", text)
+        self.assertNotIn("TIGHTEST SUPPORTED TIME BOUNDS", text)
         self.assertNotIn("`context_truncated` must be false", text)
 
     def test_v2_accepted_relations_and_null_relations_remain_current(self):

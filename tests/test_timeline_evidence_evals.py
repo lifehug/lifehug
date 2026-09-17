@@ -65,36 +65,39 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertIsNone(skipped)
         self.assertEqual(responses, [response])
         self.assertEqual(len(prompts), 1)
-        self.assertIn('"event_contexts"', prompts[0])
-        self.assertIn("Compute this event's relevant candidates", prompts[0])
-        self.assertIn("provisional full-extraction", prompts[0])
-        self.assertIn("Timeline Evidence Uses Two Independent Decisions", prompts[0])
-        self.assertIn("does NOT need a calendar date or age", prompts[0])
-        self.assertIn("an empty candidate set for a real event is `missing_evidence`", prompts[0])
-        self.assertIn("Prefer the most specific relation", prompts[0])
+        prompt = " ".join(prompts[0].split())
+        self.assertIn('"event_contexts"', prompt)
+        self.assertIn("Compute this event's relevant candidates", prompt)
+        self.assertIn("provisional full-extraction", prompt)
+        self.assertIn("Timeline Evidence Uses Two Independent Decisions", prompt)
+        self.assertIn("does NOT need a calendar date or age", prompt)
+        self.assertIn("an empty candidate set for a real event is `missing_evidence`", prompt)
+        self.assertIn(
+            "A supported rough `before` or `after` placement is also valid",
+            prompt,
+        )
+        self.assertIn("do not invent `within` merely to tighten bounds", prompt)
         self.assertIn(
             "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
-            " ".join(prompts[0].split()),
+            prompt,
         )
-        self.assertIn("FIRST test whether a supplied candidate", prompts[0])
-        self.assertIn("candidate's WHOLE occurrence", prompts[0])
-        self.assertIn("before that duration starts", prompts[0])
-        self.assertIn("after it ends", prompts[0])
-        self.assertIn('"early in", and "late in"', prompts[0])
-        self.assertIn('"After the wedding"', prompts[0])
-        self.assertIn("date.anchor_ref", prompts[0])
-        self.assertIn("TIGHTEST SUPPORTED TIME BOUNDS", prompts[0])
-        self.assertIn("a one-sided open interval", prompts[0])
+        self.assertIn("candidate's WHOLE occurrence", prompt)
+        self.assertIn("before that duration starts", prompt)
+        self.assertIn("after it ends", prompt)
+        self.assertIn('"early in", and "late in"', prompt)
+        self.assertIn('"After the wedding"', prompt)
+        self.assertIn("date.anchor_ref", prompt)
         self.assertIn(
             f"1-{evals.timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",
-            prompts[0],
+            prompt,
         )
         self.assertIn(
             f"{evals.timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters",
-            prompts[0],
+            prompt,
         )
-        self.assertNotIn("across the ENTIRE supplied candidate list", prompts[0])
-        self.assertNotIn(fixture["fixture_id"], prompts[0])
+        self.assertNotIn("TIGHTEST SUPPORTED TIME BOUNDS", prompt)
+        self.assertNotIn("across the ENTIRE supplied candidate list", prompt)
+        self.assertNotIn(fixture["fixture_id"], prompt)
 
     def test_timeline_live_path_uses_stored_event_deltas(self) -> None:
         fixture = evals.load_fixtures()[0]
@@ -153,7 +156,7 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
             "date": {
                 "stated": None,
                 "age": None,
-                "anchor_ref": "node:northstar-founded",
+                "anchor_ref": "launched Northstar from the spare room",
                 "relation": "after",
             },
             "source_grounding": None,
@@ -174,6 +177,24 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertEqual(safe["passed_count"], 1)
         self.assertEqual(safe["outcomes"][0]["event_count"], 2)
         self.assertEqual(len(safe["outcomes"][0]["additional_outcomes"]), 1)
+
+        canonical = copy.deepcopy(response)
+        canonical["events"][1]["date"]["anchor_ref"] = "node:northstar-founded"
+        self.assertEqual(evals.evaluate([fixture], [canonical])["passed_count"], 1)
+
+        wrong_raw_direction = copy.deepcopy(response)
+        wrong_raw_direction["events"][1]["date"]["relation"] = "before"
+        self.assertEqual(
+            evals.evaluate([fixture], [wrong_raw_direction])["passed_count"], 0
+        )
+
+        wrong_raw_target = copy.deepcopy(response)
+        wrong_raw_target["events"][1]["date"]["anchor_ref"] = (
+            "joined Northstar's payroll"
+        )
+        self.assertEqual(
+            evals.evaluate([fixture], [wrong_raw_target])["passed_count"], 0
+        )
 
         wrong = copy.deepcopy(response)
         wrong["events"][1]["timeline_relation"]["relation"] = "after"

@@ -129,6 +129,15 @@ invalidate affected positive and negative resolutions. Re-read prior unmatched
 references on relevant new evidence, not just already-linked dependents.
 Allow the cheap full deterministic fold as correctness oracle/publication.
 
+Refinement is opportunistic and evidence-driven. Apply a better supported
+connection when ordinary affected work recognizes one, but never schedule a
+model call merely to hunt for tighter bounds. New relevant evidence refreshes
+affected events, bound-only changes propagate deterministically, and unchanged
+inputs reuse the accepted result. There is no periodic/background self-review
+and no claim that a validated model response can never be less precise than an
+earlier one. Human decisions and direct source authority continue to outrank
+inference; stale or invalid responses still cannot replace accepted evidence.
+
 Do not emit a new date question for a known resolved reference, processing
 failure, incomplete search or non-event. Preserve a genuine partial order even
 without a finite interval. Questions/gain use the same canonical relationships
