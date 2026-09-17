@@ -447,12 +447,12 @@ class ContradictionsAndMirror(unittest.TestCase):
     def test_compatible_exact_date_narrows_saved_range_without_rekeying(self):
         saved = claim(
             claim_type="date",
-            subject_mention="River House",
-            event_kind="residence",
+            subject_mention="the River House trip",
+            event_kind="visit",
             temporal_value="2000/2010",
-            source="sources/corrections/river-house-range",
-            seed="river-house-range",
-            quote="River House was home between 2000 and 2010",
+            source="sources/corrections/river-house-trip-range",
+            seed="river-house-trip-range",
+            quote="The River House trip was sometime between 2000 and 2010",
         )
         lower = claim(
             claim_type="date",
@@ -469,7 +469,7 @@ class ContradictionsAndMirror(unittest.TestCase):
             seed="upper-landmark",
         )
         initial = derive(saved, lower, upper)
-        saved_node = node_for(initial, "residence", "River House")
+        saved_node = node_for(initial, "visit", "the River House trip")
         lower_node = node_for(initial, "moment", "lower landmark")
         upper_node = node_for(initial, "moment", "upper landmark")
         between = tc.validate_ordering_constraint(
@@ -487,17 +487,17 @@ class ContradictionsAndMirror(unittest.TestCase):
         before = derive(saved, lower, upper, constraints=[between])
         exact = claim(
             claim_type="date",
-            subject_mention="River House",
-            event_kind="residence",
+            subject_mention="the River House trip",
+            event_kind="visit",
             temporal_value="2005-06-12",
-            source="src-later-river-house",
-            seed="later-river-house",
-            quote="River House was home on June 12, 2005",
+            source="src-later-river-house-trip",
+            seed="later-river-house-trip",
+            quote="The River House trip was on June 12, 2005",
         )
         after = derive(saved, lower, upper, exact, constraints=[between])
 
-        before_node = node_for(before, "residence", "River House")
-        after_node = node_for(after, "residence", "River House")
+        before_node = node_for(before, "visit", "the River House trip")
+        after_node = node_for(after, "visit", "the River House trip")
         self.assertEqual(
             (before_node["best_temporal_value"]["earliest"],
              before_node["best_temporal_value"]["latest"]),

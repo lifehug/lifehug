@@ -71,12 +71,13 @@ python3 scripts/ci/check_version_bump.py \
 
 ## Definition of done
 
-- [ ] Contract committed before implementation and draft PR opened.
-- [ ] Focused regressions and full core suite pass locally.
-- [ ] `system/version.json` is v308, released 2026-09-17, with an accurate
+- [x] Contract committed before implementation and draft PR opened.
+- [x] Focused regressions pass locally (167 tests); the full core suite passes
+      locally (5,657 tests, 4 skipped).
+- [x] `system/version.json` is v308, released 2026-09-17, with an accurate
       changelog and this distributable contract listed in `framework_files`.
-- [ ] Brief chronology documentation describes supported range forms and hard
+- [x] Brief chronology documentation describes supported range forms and hard
       parser limits.
-- [ ] Branch pushed with truthful model/surface attribution; PR remains draft
+- [x] Branch pushed with truthful model/surface attribution; PR remains draft
       with no labels, readiness change, merge, CI watching, hosted deploy, or
       private-vault work.
