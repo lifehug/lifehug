@@ -51,6 +51,16 @@ def _compile_checkpoint(root: Path) -> Path:
     return vault_data_path("compile_needed", vault_root=root)
 
 
+def _mark_publication_needed(root: Path) -> None:
+    from vault_paths import atomic_write_vault_text
+
+    atomic_write_vault_text(
+        _compile_checkpoint(root),
+        "classification refresh requires publication\n",
+        vault_root=root,
+    )
+
+
 def clear_publication_checkpoint(vault_root: str | Path) -> None:
     """Clear the existing compile checkpoint after full downstream success."""
     from vault_paths import unlink_vault_file
@@ -181,6 +191,10 @@ def run_batch(
             "skip_candidates": True,
             "items": response_items,
         }
+        # Filing can durably replace classifications before it returns. Record
+        # the downstream obligation first so a crash in that window is safe.
+        _mark_publication_needed(root)
+        publication_needed = True
         receipt = classify_story.file_batch_response(envelope, model=selected_model)
         accepted = [
             item["source_path"]
@@ -193,11 +207,6 @@ def run_batch(
             )
 
         batch_number += 1
-        # This write immediately follows canonical filing. Any later failure
-        # leaves an existing durable signal that the retry must finish.
-        checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint.touch()
-        publication_needed = True
         accepted_sources.extend(accepted)
         receipt_paths.append(receipt["receipt_path"])
         for name in counts:
