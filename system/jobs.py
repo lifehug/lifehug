@@ -710,6 +710,20 @@ def _build_process_answer(payload: dict) -> tuple[Invocation, ...]:
     return (_cli(*args, stdin_text=_text(payload, "answer", maximum=2_000_000)),)
 
 
+def _build_classification_refresh(payload: dict) -> tuple[Invocation, ...]:
+    _expect_payload(payload, optional={"limit", "model"})
+    args = ["classification-refresh"]
+    limit = payload.get("limit")
+    if limit is not None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+            raise ValueError("invalid refresh limit")
+        args += ["--limit", str(limit)]
+    model = _optional_text(payload, "model", maximum=256)
+    if model:
+        args += ["--model", model]
+    return (_cli(*args),)
+
+
 _FILE_ANSWER_VALUE_FLAGS = {
     "--source", "--answered-date", "--asked-date", "--followup", "--summary", "--sensitivity",
 }
@@ -780,6 +794,9 @@ COMMANDS: dict[str, CommandSpec] = {
     "artifact-save": CommandSpec(_build_artifact_save, "never"),
     "candidate-promote": CommandSpec(_build_candidate_promote, "idempotent"),
     "candidate-update": CommandSpec(_build_candidate_update, "never"),
+    "classification-refresh": CommandSpec(
+        _build_classification_refresh, "never", timeout_seconds=21600
+    ),
     "compile": CommandSpec(_build_compile, "idempotent"),
     "compile-pending": CommandSpec(_build_schedule("compile_and_commit.sh"), "never"),
     "conversation-close": CommandSpec(_build_conversation_close, "never", timeout_seconds=1800),
@@ -800,6 +817,9 @@ COMMANDS: dict[str, CommandSpec] = {
     "weekly": CommandSpec(_build_schedule("weekly_maintenance.sh"), "never", timeout_seconds=21600),
 }
 ALLOWED_COMMANDS = frozenset(COMMANDS)
+LIFECYCLE_REFRESH_PREDECESSORS = frozenset({
+    "process-answer", "conversation-close",
+})
 
 
 def _payload_path(job_id: str) -> Path:
@@ -900,6 +920,61 @@ def enqueue(
     ):
         _kick_worker()
     return record
+
+
+def _active_classification_refresh() -> dict | None:
+    """Return the oldest queued/running refresh so lifecycle bursts coalesce."""
+    rows: list[dict] = []
+    for path in JOBS_DIR.glob("*.json"):
+        if path.is_symlink() or not _ID_RE.fullmatch(path.stem):
+            continue
+        record = load_job(path.stem)
+        if (
+            record
+            and record["command"] == "classification-refresh"
+            and record["state"] in {"queued", "running", "safely-retryable"}
+        ):
+            rows.append(record)
+    rows.sort(key=lambda row: (row["created_at"], row["id"]))
+    return rows[0] if rows else None
+
+
+def enqueue_classification_refresh(*, identity: str | None = None, kick: bool) -> dict:
+    """Coalesce local lifecycle triggers onto one active refresh job."""
+    active = _active_classification_refresh()
+    if active is not None:
+        return active
+    return enqueue(
+        "classification-refresh",
+        {},
+        identity=f"classification-refresh:{identity}" if identity is not None else None,
+        kick=kick,
+    )
+
+
+def _ensure_lifecycle_refresh_successor(record: dict) -> dict | None:
+    """Attach one non-blocking refresh successor to a successful local mutation."""
+    if (
+        record.get("command") not in LIFECYCLE_REFRESH_PREDECESSORS
+        or record.get("state") != "succeeded"
+        or record.get("classification_refresh_job_id")
+    ):
+        return None
+    successor = enqueue_classification_refresh(identity=record["id"], kick=False)
+    record["classification_refresh_job_id"] = successor["id"]
+    record["updated_at"] = _now()
+    _write_json(_record_path(record["id"]), record)
+    return successor
+
+
+def _recover_lifecycle_refresh_successors() -> None:
+    """Close the receipt-to-successor crash window without replaying mutations."""
+    for path in sorted(JOBS_DIR.glob("*.json")):
+        if path.is_symlink() or not _ID_RE.fullmatch(path.stem):
+            continue
+        record = load_job(path.stem)
+        if record is not None:
+            _ensure_lifecycle_refresh_successor(record)
 
 
 def _kick_worker() -> None:
@@ -1468,6 +1543,12 @@ def _execute_record(record: dict, owner_id: str) -> dict:
     }
     _write_json(_receipt_path(record["id"], attempt_id), receipt)
     record = _finalize_from_receipt(record, receipt)
+    if record["state"] == "succeeded":
+        # The originating capture/close is already durable. A transient queue
+        # error must not turn that accepted mutation into a reported failure;
+        # the worker's recovery scan will retry this linkage on its next pass.
+        with contextlib.suppress(OSError, ValueError, TimeoutError):
+            _ensure_lifecycle_refresh_successor(record)
     if exit_code != 0 and failure_code != "command_failed":
         record["failure_code"] = failure_code
         _write_json(_record_path(record["id"]), record)
@@ -1479,6 +1560,7 @@ def worker_once(*, wait_seconds: float = 0.0) -> bool:
     try:
         with _WriterLease(wait_seconds=wait_seconds) as lease:
             recover_interrupted_jobs()
+            _recover_lifecycle_refresh_successors()
             cleanup_sidecars()
             record = _next_runnable()
             if record is None:

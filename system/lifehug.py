@@ -62,8 +62,8 @@ CANDIDATE_STATUS_CHOICES = sorted(VALID_STATUSES)
 # the same kernel writer lock directly. Read-only commands never block behind
 # a long job.
 QUEUED_MUTATION_COMMANDS = frozenset({
-    "artifact", "book-assemble", "compile", "monthly-research", "process-answer",
-    "weekly-maintenance",
+    "artifact", "book-assemble", "classification-refresh", "compile", "conversation-close",
+    "monthly-research", "process-answer", "weekly-maintenance",
 })
 READ_ONLY_COMMANDS = frozenset({
     "ai-status", "answer-ack-prompt", "answer-ack-status",
@@ -129,16 +129,15 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     "connector-auth", "connector-calibrate", "connector-dossier", "connector-excavate",
     "connector-fetch",
     # New in issue #115 (Conversation Interaction, Wave 1 PR 2): the session
-    # store's own three mutators. No jobs.py command kind yet (Wave 2) — they
-    # take the writer lock directly like the rest of this family.
-    "conversation-close", "conversation-open", "conversation-record-turn",
+    # store's open/record mutators take the writer lock directly. Close is in
+    # the queued family above so its successful receipt can chain refresh.
+    "conversation-open", "conversation-record-turn",
     # Issue #120 (eval harness): the default run is read-only, but
     # --emit-tasks writes state/agent_tasks/evals/ — classified with the
     # rest of the --emit-tasks family (arc-plan) rather than per-invocation.
     "conversation-evals",
     # New in issue #116 (Wave 2 PR 3): the operator retry door for a turn
-    # whose send definitively failed. conversation-close is unchanged here —
-    # it was already classified; #116 only upgraded what it does.
+    # whose send definitively failed.
     "conversation-turn-retry",
     "correct-source", "entity-roster",
     # entity-verdict (ADR 0013): the owner's graduate-now/never-a-page/clear
@@ -520,6 +519,12 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
     rc = run_python("ingest_story.py", flags)
     if rc == 0 and not args.dry_run and getattr(args, "commit", False):
         _safe_autocommit("Ingest story")
+    if rc == 0 and not args.dry_run and not _job_runner_active():
+        import jobs  # noqa: PLC0415
+
+        jobs.configure(REPO_DIR)
+        successor = jobs.enqueue_classification_refresh(kick=True)
+        print(f"Queued classification-refresh job {successor['id']}")
     return rc
 
 
@@ -1977,6 +1982,12 @@ def cmd_conversation_close(args: argparse.Namespace) -> int:
         return _enqueue_day_rollover_conversation_closes(dry_run=args.dry_run)
     if args.expired:
         return _enqueue_expired_conversation_closes()
+    if not _job_runner_active():
+        return _queue_and_wait(
+            "conversation-close",
+            {"session_id": args.session_id, "reason": args.reason},
+            identity=f"conversation-close:{args.session_id}",
+        )
     flags = ["close", args.session_id, "--reason", args.reason]
     rc = run_python("conversation_delivery.py", flags)
     if rc != 0:
@@ -2369,6 +2380,80 @@ def cmd_classify_story(args: argparse.Namespace) -> int:
     if getattr(args, "skip_candidates", False):
         flags.append("--skip-candidates")
     return run_python("classify_story.py", flags)
+
+
+def cmd_classification_refresh(args: argparse.Namespace) -> int:
+    """Run one bounded local refresh through the canonical archive batch APIs."""
+    if not _job_runner_active():
+        payload: dict[str, object] = {"limit": args.limit}
+        if args.model:
+            payload["model"] = args.model
+        return _queue_and_wait("classification-refresh", payload)
+
+    import classification_refresh  # noqa: PLC0415
+    from lifehug_core import record_learning_failure  # noqa: PLC0415
+
+    try:
+        report = classification_refresh.run_batch(
+            REPO_DIR,
+            limit=args.limit,
+            model=args.model,
+        )
+    except Exception as exc:  # noqa: BLE001 - provider/schema failures are job truth
+        record_learning_failure(
+            "classification_refresh",
+            "archive_batch",
+            type(exc).__name__,
+        )
+        print(
+            f"Error: classification refresh failed ({type(exc).__name__})",
+            file=sys.stderr,
+        )
+        return 1
+
+    if report["status"] == "unchanged":
+        print("Classification refresh: no pending targets.")
+        return 0
+
+    accepted_sources = report["accepted_sources"]
+    downstream = (
+        ("migrate_classifier_moments", lambda: cmd_migrate_classifier_moments(
+            argparse.Namespace(source=accepted_sources, dry_run=False, json=False)
+        )),
+        ("timeline_retire", lambda: cmd_timeline_retire(
+            argparse.Namespace(dry_run=False)
+        )),
+        ("wiki_compile", lambda: cmd_compile(argparse.Namespace(
+            dry_run=False, no_ai=True, model=None, emit_tasks=None
+        ))),
+    )
+    for step, action in downstream:
+        try:
+            rc = action()
+        except Exception as exc:  # noqa: BLE001 - keep the failed step observable
+            rc = 1
+            detail = type(exc).__name__
+        else:
+            detail = f"exit {rc}"
+        if rc != 0:
+            record_learning_failure("classification_refresh", step, detail)
+            print(f"Error: classification refresh {step} failed", file=sys.stderr)
+            return rc
+
+    counts = report["counts"]
+    print(
+        "Classification refresh: "
+        f"accepted {counts['accepted']}, refused {counts['refused']}, "
+        f"remaining {report['selection']['remaining_count']}."
+    )
+    if report["status"] == "partial":
+        record_learning_failure(
+            "classification_refresh",
+            "archive_batch_partial",
+            f"{counts['refused']} item(s) refused",
+        )
+        return 1
+    return 0
 
 
 def cmd_research_expand(args: argparse.Namespace) -> int:
@@ -3153,6 +3238,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_classify_story)
+
+    p = sub.add_parser(
+        "classification-refresh",
+        help="Run one bounded canonical archive-classification refresh batch",
+    )
+    p.add_argument("--limit", type=int, default=50, choices=range(1, 51))
+    p.add_argument("--model", help="Override the configured classifier model")
+    p.set_defaults(func=cmd_classification_refresh)
 
     # --- Research Neighborhoods ---
     p = sub.add_parser("research-expand", help="Generate question neighborhoods")
