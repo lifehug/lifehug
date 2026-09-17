@@ -444,6 +444,42 @@ def _write(vault_root: str | Path, relative: str, text: str) -> Path:
     return path
 
 
+def load_derivation_inputs(
+    vault_root: str | Path,
+    *,
+    constraints: object = None,
+    event_resolution_records: object = None,
+    era_views: object = None,
+    membership_assertions: object = None,
+    display_decisions: object = None,
+    frame_display_decisions: object = None,
+    landmark_entries: object = None,
+    episode_records: object = None,
+) -> dict:
+    """Read the canonical fold authorities without writing any materialization.
+
+    Publication, its rebuild oracle and classifier context share this boundary.
+    ``None`` loads the durable authority; an explicit empty sequence disables it.
+    """
+    return {
+        "constraints": store.active_ordering_constraints(vault_root)
+        if constraints is None else constraints,
+        "event_resolution_records": eb.load_event_resolutions(vault_root)
+        if event_resolution_records is None else event_resolution_records,
+        "era_views": ei.era_views(vault_root) if era_views is None else era_views,
+        "membership_assertions": era.active_era_memberships(vault_root)
+        if membership_assertions is None else membership_assertions,
+        "display_decisions": era.active_era_displays(vault_root)
+        if display_decisions is None else display_decisions,
+        "frame_display_decisions": era.active_frame_displays(vault_root)
+        if frame_display_decisions is None else frame_display_decisions,
+        "landmark_entries": lp.load_landmark_sources(vault_root)
+        if landmark_entries is None else landmark_entries,
+        "episode_records": ef.load_episode_records(vault_root)
+        if episode_records is None else episode_records,
+    }
+
+
 def publish(
     vault_root: str | Path,
     *,
@@ -509,49 +545,22 @@ def publish(
     )
     timings["fold"] = time.perf_counter() - mark
 
-    if constraints is None:
-        constraints = store.active_ordering_constraints(vault_root)
-    if event_resolution_records is None:
-        # `None` means "read them", exactly as it does for `constraints` above
-        # and for the same reason: the act that files a binding must publish a
-        # projection that HAS it, without every caller remembering to load the
-        # record it just wrote. `()` still means "none".
-        event_resolution_records = eb.load_event_resolutions(vault_root)
-    if era_views is None:
-        # Same `None` means "read them" rule as `constraints` above: the act
-        # that creates an era must publish a projection that HAS it.
-        era_views = ei.era_views(vault_root)
-    if membership_assertions is None:
-        membership_assertions = era.active_era_memberships(vault_root)
-    if display_decisions is None:
-        display_decisions = era.active_era_displays(vault_root)
-    if frame_display_decisions is None:
-        # E-L2d: same `None` means "read them" rule — the tap that files
-        # "tell My 20s by its eras" must publish a projection that HAS it,
-        # or the frame row keeps offering the proposal it just answered.
-        frame_display_decisions = era.active_frame_displays(vault_root)
-    if landmark_entries is None:
-        landmark_entries = lp.load_landmark_sources(vault_root)
-    if episode_records is None:
-        # Same `None` means "read them" rule (event identity I1, design §3.5):
-        # the act that files a binding must publish a projection that HAS it.
-        # `()` still means "none", which is what CERT-11's second half folds
-        # with when it proves the drawing returns.
-        episode_records = ef.load_episode_records(vault_root)
-
     generation = next_generation(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
-        event_resolution_records=event_resolution_records,
-        episode_records=episode_records,
-        era_views=era_views,
         roster_snapshot=roster_snapshot,
-        constraints=constraints,
-        membership_assertions=membership_assertions,
-        display_decisions=display_decisions,
-        frame_display_decisions=frame_display_decisions,
-        landmark_entries=landmark_entries,
+        **load_derivation_inputs(
+            vault_root,
+            event_resolution_records=event_resolution_records,
+            episode_records=episode_records,
+            era_views=era_views,
+            constraints=constraints,
+            membership_assertions=membership_assertions,
+            display_decisions=display_decisions,
+            frame_display_decisions=frame_display_decisions,
+            landmark_entries=landmark_entries,
+        ),
         birth_date=birth_date,
         owner_ref=owner_ref,
         projection_generation=generation,
@@ -971,46 +980,21 @@ def verify(
     if published is None:
         return {"published": False, "identical": False, "generation": 0}
     index = store.rebuild_active_index(vault_root)
-    if constraints is None:
-        constraints = store.active_ordering_constraints(vault_root)
-    if event_resolution_records is None:
-        # `None` means "read them", exactly as it does for `constraints` above
-        # and for the same reason: the act that files a binding must publish a
-        # projection that HAS it, without every caller remembering to load the
-        # record it just wrote. `()` still means "none".
-        event_resolution_records = eb.load_event_resolutions(vault_root)
-    if era_views is None:
-        # Same `None` means "read them" rule as `constraints` above: the act
-        # that creates an era must publish a projection that HAS it.
-        era_views = ei.era_views(vault_root)
-    if episode_records is None:
-        episode_records = ef.load_episode_records(vault_root)
-    # THE ORACLE READS EVERYTHING THE PUBLISHER READS (E-L2d). Four inputs
-    # `publish` loads by the same `None` means "read them" rule were missing
-    # here, so on any vault holding a membership receipt, a display decision
-    # or a landmark entry the oracle re-derived a DIFFERENT projection and
-    # reported the publication broken. A rebuild oracle that does not fold the
-    # same inputs is not an oracle; §12 row 20 is exactly this comparison.
-    if membership_assertions is None:
-        membership_assertions = era.active_era_memberships(vault_root)
-    if display_decisions is None:
-        display_decisions = era.active_era_displays(vault_root)
-    if frame_display_decisions is None:
-        frame_display_decisions = era.active_frame_displays(vault_root)
-    if landmark_entries is None:
-        landmark_entries = lp.load_landmark_sources(vault_root)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
-        event_resolution_records=event_resolution_records,
-        episode_records=episode_records,
-        era_views=era_views,
         roster_snapshot=roster_snapshot,
-        constraints=constraints,
-        membership_assertions=membership_assertions,
-        display_decisions=display_decisions,
-        frame_display_decisions=frame_display_decisions,
-        landmark_entries=landmark_entries,
+        **load_derivation_inputs(
+            vault_root,
+            event_resolution_records=event_resolution_records,
+            episode_records=episode_records,
+            era_views=era_views,
+            constraints=constraints,
+            membership_assertions=membership_assertions,
+            display_decisions=display_decisions,
+            frame_display_decisions=frame_display_decisions,
+            landmark_entries=landmark_entries,
+        ),
         birth_date=birth_date,
         owner_ref=owner_ref,
         projection_generation=_generation_of(published),

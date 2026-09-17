@@ -1,7 +1,7 @@
 {
-  "version": 305,
+  "version": 306,
   "released": "2026-09-16",
-  "changelog": "v305: Timeline publication no longer fails when a classifier corrects an event's subject while keeping its wording. The telling manifest checks non-superseded identity claims while preserving all old receipts, claim history and human bindings. Disputed or simultaneous current identities still fail closed; a fully retired telling with conflicting historical identities stays visible with a diagnostic and is never automatically re-keyed.",
+  "changelog": "v306: Classifying and publishing stories no longer makes those same readings stale through mixed timeline episodes. Classifier candidates now come from one read-only canonical fold of independent evidence, retaining genuine date, roster, correction and human-identity dependencies without borrowing classifier-generated subjects or dates. Machine telling rekeys cannot change retrieval or human-decision applicability. Batch and legacy maintenance selection share the catalog. Existing hashes are never rewritten: unchanged semantic contexts remain reusable, while genuinely different old contexts still require an honest refresh. No prompt-version bump, model call, receipt rewrite or identity-guard relaxation is introduced.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -423,6 +423,7 @@
     "tests/test_chain_coverage.py",
     "tests/test_classifier_claims.py",
     "tests/test_classifier_context.py",
+    "tests/test_classifier_context_independent.py",
     "tests/test_classify_story_current.py",
     "tests/test_connectors.py",
     "tests/test_conversation_delivery.py",

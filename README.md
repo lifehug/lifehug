@@ -413,6 +413,13 @@ Weekly maintenance classifies a capped number of new or source/context-stale sou
 
 For an archive build, `--batch-plan` loads that catalog once and emits one bounded private JSON plan (50 by default, at most 500); prompt construction happens only for the selected slice. Finite callers can pass `--exclude-items-json` with exact source-path plus four-key snapshot identities already attempted: pending stays truthful, only unchanged identities leave selection, and changed source/context is eligible again. `--from-batch-response` validates one response envelope against a shared catalog, reloads the catalog once as a race gate, and files valid siblings even when another item is malformed. A context-only refresh asks only for events and preserves all non-timeline fields and candidate IDs. Exact-current work is skipped before a model call. Empty or unsafe sources are reported as typed ineligible rows rather than silently skipped; a full pass is complete only when pending and ineligible counts are both zero. Deterministic content-free replay receipts live at `state/classification_batches/<batch-id>.json`; changed input under the same ID fails closed. `--skip-candidates` is an explicit archive-only policy on both commands: it removes question generation from full prompts and preserves prior candidate IDs, while ordinary new-story behavior continues generating candidates.
 
+Since v306, the catalog uses one read-only canonical fold of independent claims,
+not classifier-enriched published episodes. Filing and compiling readings cannot
+feed their own subjects, dates or identity rekeys back into freshness. Genuine
+independent changes still invalidate affected contexts, including global fallback
+contexts. Existing hashes are never restamped and prompt versions are unchanged;
+only unchanged semantic contexts are reusable without a new reading.
+
 ```bash
 python3 system/lifehug.py classify-story --classify answers/A14.md
 python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5

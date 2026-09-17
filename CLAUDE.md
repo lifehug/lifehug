@@ -53,6 +53,14 @@ all old receipts and human bindings; disputed or simultaneous current identities
 still fail closed. Fully retired mixed-identity history remains visible with
 `telling_retired_identity_ambiguous` and cannot be automatically re-keyed.
 
+**Stable classifier context (v306, issue #348).** Derive candidates from
+independent claims before the canonical temporal fold, not from mixed published
+episodes. Machine tellings and inferred rekeys cannot affect retrieval or which
+human decisions apply. One read-only fold serves a catalog; filing/publication
+alone cannot refresh paid readings. Genuine source corrections, independent
+dates, roster and human decisions still can. Legacy hashes are not restamped,
+and a genuine change to global fallback context can affect multiple sources.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:

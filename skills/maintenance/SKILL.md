@@ -81,6 +81,12 @@ classifications — classify first so this week's queue sees this week's answers
    claims. `classify-story --refresh-targets --limit 50` is the canonical
    bounded freshness/target report; `complete: false` means work remains.
 
+   Context is folded once from independent evidence, excluding classifier
+   claims before deriving candidates. Compiling accepted readings must not
+   invalidate them through their own output. Real landmark, roster, correction
+   or human-identity changes still require the canonical freshness check;
+   never rewrite an old snapshot to make a saved response current.
+
    "Unclassified" includes **stale** classifications (v103): filing a
    correction marks its target's classification `stale: true`, so corrected
    sources re-enter this batch automatically. Their prompts carry a LATER

@@ -4,8 +4,8 @@
 The classifier may relate an event only to candidates supplied here. Freshness
 is semantic: source bytes, prompt/extractor versions, and a stable digest of
 the supplied timeline context. Projection generations and timestamps are never
-inputs, and nodes touched by this source's own classifier claims are excluded
-so a reread cannot invalidate itself.
+inputs. Candidates are folded from independent evidence before classifier
+claims can contribute metadata, so filing and publication cannot feed back.
 """
 
 from __future__ import annotations
@@ -160,12 +160,8 @@ def _relative_source(vault_root: Path, source_path: Path) -> str:
         return str(source_path)
 
 
-def _load_claim_catalog(vault_root: Path) -> tuple[dict[str, list[dict]], dict[str, bool]]:
-    """Load active claims once and index the source-independent provenance."""
-    try:
-        payload = temporal_store.read_active_index(vault_root) or {}
-    except (OSError, ValueError):
-        payload = {}
+def _claim_catalog(payload: dict) -> tuple[dict[str, list[dict]], dict[str, bool]]:
+    """Index source provenance from the operation's already-folded claims."""
     claims_by_source: dict[str, list[dict]] = {}
     classifier_claim: dict[str, bool] = {}
     for claim in temporal_store.active_claims(payload if isinstance(payload, dict) else {}):
@@ -216,15 +212,6 @@ def _claim_context_from_catalog(
                 if "/" in text and not text.startswith("unresolved:"):
                     refs.add(text)
     return own, refs
-
-
-def _claim_context(vault_root: Path, source_path: Path) -> tuple[set[str], set[str], dict[str, bool]]:
-    """Own classifier ids, grounded entity refs, and classifier provenance."""
-    claims_by_source, classifier_claim = _load_claim_catalog(vault_root)
-    own, refs = _claim_context_from_catalog(
-        _relative_source(vault_root, source_path), claims_by_source, classifier_claim
-    )
-    return own, refs, classifier_claim
 
 
 def _bounds(record: object) -> dict | None:
@@ -420,12 +407,16 @@ def _applicable_human_identity_records(
 def _load_roster_catalog(vault_root: Path) -> tuple[
     dict[str, tuple[str, ...]],
     dict[str, identity_resolution.RosterIndex],
+    dict,
 ]:
     """Load and normalize each canonical roster once."""
     aliases: dict[str, tuple[str, ...]] = {}
     rosters: dict[str, identity_resolution.RosterIndex] = {}
+    person_roster: dict = {}
     for kind in ("person", "place", "period"):
         roster = entity_roster.load_roster(kind, vault_root=vault_root)
+        if kind == "person":
+            person_roster = roster
         rosters[kind] = identity_resolution.roster_index(roster, entity_type=kind)
         for entity in roster.get("entities") or () if isinstance(roster, dict) else ():
             if not isinstance(entity, dict):
@@ -442,7 +433,7 @@ def _load_roster_catalog(vault_root: Path) -> tuple[
                 ) if text
             ))
             aliases[ref] = terms
-    return aliases, rosters
+    return aliases, rosters, person_roster
 
 
 def _mentioned_roster_refs(
@@ -493,7 +484,7 @@ def _roster_context(
     dict[str, identity_resolution.RosterIndex],
 ]:
     """Canonical roster aliases and exact-phrase refs used only for retrieval."""
-    aliases, rosters = _load_roster_catalog(vault_root)
+    aliases, rosters, _person_roster = _load_roster_catalog(vault_root)
     return aliases, _mentioned_roster_refs(aliases, story_text), rosters
 
 
@@ -565,42 +556,73 @@ def _prior_identities(vault_root: Path, source_path: Path) -> list[dict]:
     )
 
 
+def _derive_context_timeline(vault_root: Path, index: dict, records: dict, roster: dict):
+    """Use publication's input authorities and its existing pure temporal fold."""
+    import temporal_publication  # noqa: PLC0415
+    import temporal_timeline  # noqa: PLC0415
+
+    return temporal_timeline.derive_calculated_timeline(
+        index, roster_snapshot=roster,
+        **temporal_publication.load_derivation_inputs(vault_root, episode_records=records),
+    )
+
+
 def _load_context_catalog(vault_root: Path) -> dict:
     """Load source-independent classifier context for one invocation."""
-    import temporal_publication  # noqa: PLC0415 - avoids the timeline import cycle
+    import episode_fold  # noqa: PLC0415 - avoids the timeline import cycle
 
-    try:
-        projection = temporal_publication.read_projection(vault_root) or {}
-    except (OSError, ValueError):
-        projection = {}
-    roster_aliases, rosters = _load_roster_catalog(vault_root)
+    roster_aliases, rosters, person_roster = _load_roster_catalog(vault_root)
     roster_matchers = tuple(
         (ref, term, re.compile(rf"(?<!\w){re.escape(term.casefold())}(?!\w)"))
         for ref, terms in roster_aliases.items()
         for term in terms
     )
-    claims_by_source, classifier_claims = _load_claim_catalog(vault_root)
-    identities = event_identity.load_event_identities(vault_root)
-    operations = event_identity.load_episode_operations(vault_root)
+    index = temporal_store.fold_active_index(vault_root)
+    # Filter before the canonical fold: mixed-node metadata, bounds, conflicts
+    # and dependencies must never borrow even another source's classifier claim.
+    independent_index = {**index, "claims": [
+        row for row in index.get("claims") or ()
+        if not str((row.get("source_ref") or {}).get("source_id") or "").startswith(
+            "classification:"
+        )
+    ]}
+    claims_by_source, classifier_claims = _claim_catalog(independent_index)
+    records = episode_fold.load_episode_records(vault_root, manifest={})
+    identities, operations = records["bindings"], records["operations"]
+    independent_manifest = event_identity.build_telling_manifest(
+        vault_root, bindings=identities, active_index=independent_index
+    )
+    records["manifest"] = independent_manifest
+    projection = _derive_context_timeline(vault_root, independent_index, records, person_roster)
     try:
         manifest = event_identity.read_telling_manifest(vault_root) or {}
     except (OSError, ValueError):
         manifest = {}
 
+    # Human decisions can name a historical classifier telling. Resolve only
+    # their explicit refs through immutable receipt provenance, not through the
+    # mutable manifest's inferred aliases, successors or bound_identity_ids.
+    human_records = _normalized_human_identity_records(identities, operations)
+    explicit_refs = {
+        str(ref) for row in human_records
+        for ref in (row.get("telling_ref"), *(row.get("telling_aliases") or ()))
+        if ref
+    }
+    human_tellings_by_source: dict[str, set[str]] = {}
+    for row in index.get("claims") or ():
+        source_ref = row.get("source_ref") or {}
+        ref = str(source_ref.get("source_id") or "")
+        path = str(source_ref.get("source_path") or "")
+        if ref in explicit_refs and path:
+            human_tellings_by_source.setdefault(path, set()).add(ref)
+
     candidates: list[tuple[dict, frozenset[str]]] = []
-    for node in projection.get("nodes") or () if isinstance(projection, dict) else ():
+    for node in projection.nodes:
         if not isinstance(node, dict):
             continue
         claim_ids = frozenset(
             str(value) for value in node.get("input_claim_refs") or () if value
         )
-        # Pure classifier readings are not landmark context. Excluding them in
-        # the shared catalog prevents two source rereads from refreshing each
-        # other forever; mixed independently grounded episodes remain eligible.
-        if claim_ids and all(
-            classifier_claims.get(claim_id, False) for claim_id in claim_ids
-        ):
-            continue
         row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
         if row is not None:
             candidates.append((row, claim_ids))
@@ -619,9 +641,9 @@ def _load_context_catalog(vault_root: Path) -> dict:
             for row in identities
             if isinstance(row, dict)
         },
-        "human_identity_records": _normalized_human_identity_records(
-            identities, operations
-        ),
+        "human_identity_records": human_records,
+        "human_tellings_by_source": human_tellings_by_source,
+        "independent_manifest": independent_manifest,
         "manifest": manifest,
         "correction_records": source_integrity.read_correction_records(
             corrections_dir=vault_root / "sources" / "corrections",
@@ -645,7 +667,7 @@ def _build_context_snapshot_from_catalog(
     raw = source.read_bytes() if source_bytes is None else source_bytes
     story_text = raw.decode("utf-8", errors="replace")
     relative = _relative_source(root, source)
-    own_claims, grounded_refs = _claim_context_from_catalog(
+    _own_claims, grounded_refs = _claim_context_from_catalog(
         relative,
         catalog["claims_by_source"],
         catalog["classifier_claims"],
@@ -658,18 +680,29 @@ def _build_context_snapshot_from_catalog(
         row["entity_ref"] for row in roster_evidence
     }
     prior_identities = _prior_identities_from_manifest(catalog["manifest"], relative)
+    authority_tellings = _prior_identities_from_manifest(
+        catalog["independent_manifest"], relative
+    ) + [
+        {"telling_ref": ref}
+        for ref in sorted(catalog["human_tellings_by_source"].get(relative, ()))
+    ]
+    source_decisions = _applicable_human_identity_records(
+        catalog["human_identity_records"], candidates=[], prior_identities=authority_tellings
+    )
     identities = catalog["identities_by_id"]
     bound_episode_ids = {
         str(identities[identity_id].get("episode_id") or "")
-        for telling in prior_identities
+        for telling in authority_tellings
         for identity_id in telling.get("bound_identity_ids") or ()
         if identity_id in identities and identities[identity_id].get("episode_id")
     }
+    bound_episode_ids.update(
+        str(row["episode_id"]) for row in source_decisions if row.get("episode_id")
+    )
     # Rows are copied because completeness is source-specific prompt metadata.
     candidates = [
         dict(row)
-        for row, claim_ids in catalog["candidates"]
-        if not own_claims.intersection(claim_ids)
+        for row, _claim_ids in catalog["candidates"]
     ]
     cap = max(0, min(int(max_candidates), MAX_CONTEXT_CANDIDATES))
     relevant = [
@@ -707,7 +740,7 @@ def _build_context_snapshot_from_catalog(
     human_decisions_all = _applicable_human_identity_records(
         catalog["human_identity_records"],
         candidates=selected,
-        prior_identities=prior_identities,
+        prior_identities=authority_tellings,
     )
     human_decisions = human_decisions_all[:MAX_CONTEXT_DECISIONS]
     decision_truncated = len(human_decisions_all) > len(human_decisions)
@@ -772,8 +805,8 @@ def load_context_catalog(vault_root: str | Path) -> dict:
     """Load the immutable-for-one-operation context catalog once.
 
     Batch planners and batch filers use this public boundary so hundreds of
-    source-specific snapshots do not reread the projection, claims, rosters,
-    identity decisions, and telling manifest hundreds of times.
+    source-specific snapshots do not refold independent evidence or reread
+    claims, rosters, identity decisions and manifests hundreds of times.
     """
     return _load_context_catalog(Path(vault_root))
 

@@ -853,6 +853,7 @@ def build_telling_manifest(
     vault_root: str | Path,
     *,
     bindings: Sequence[object] | None = None,
+    active_index: dict | None = None,
 ) -> dict:
     """The manifest, as a PURE projection of durable inputs (design §3.1).
 
@@ -867,7 +868,9 @@ def build_telling_manifest(
     "delete it and rebuild it byte-identically" is arithmetic rather than a
     hope.
     """
-    index = store.fold_active_index(vault_root)
+    # A read-only consumer may already own a folded evidence view (for example,
+    # classifier context excludes classifier claims before deriving its view).
+    index = store.fold_active_index(vault_root) if active_index is None else active_index
     receipts, unreadable = store.load_receipts(vault_root)
     by_receipt = {receipt.receipt_id: receipt for receipt in receipts}
     records = (

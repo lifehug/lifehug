@@ -232,7 +232,7 @@ def reset_withheld_stale() -> None:
     _WITHHELD_STALE.clear()
 
 
-def is_classified(source_path: Path) -> bool:
+def is_classified(source_path: Path, *, context_catalog: dict | None = None) -> bool:
     """Does this source still need a classification RUN? — the BATCH question.
 
     A classification carrying `stale: true` (a correction was filed against
@@ -247,7 +247,13 @@ def is_classified(source_path: Path) -> bool:
             data = read_json(path, default=None) or {}
             if _is_stale_data(data):
                 return False
-            snapshot = classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+            snapshot = (
+                classifier_ctx.build_context_snapshot(REPO_DIR, source_path)
+                if context_catalog is None else
+                classifier_ctx.build_context_snapshot_from_catalog(
+                    REPO_DIR, source_path, context_catalog
+                )
+            )
             return classifier_ctx.refresh_reason(snapshot, data) is None
     return False
 
@@ -2471,7 +2477,8 @@ def cmd_classify_all(args: argparse.Namespace) -> int:
     sources = all_source_files()
 
     if args.unclassified:
-        sources = [s for s in sources if not is_classified(s)]
+        catalog = classifier_ctx.load_context_catalog(REPO_DIR) if sources else None
+        sources = [s for s in sources if not is_classified(s, context_catalog=catalog)]
     stale_first = bool(getattr(args, "stale_first", False))
     sources = order_targets(
         sources, stale_first=stale_first, cursor=read_classify_cursor())
