@@ -102,5 +102,68 @@
       "timeline_resolution": {"status": "ambiguous", "candidate_ids": ["node:river-first", "node:river-second"], "reason": "The source does not identify which River House stay."}
     },
     "expected": {"status": "ambiguous", "candidate_id": null, "grounded": false}
+  },
+  {
+    "fixture_id": "willow-lodge-unresolved-identity",
+    "source_text": "I found the brass compass during our stay at Willow Lodge.",
+    "candidates": [
+      {"candidate_id": "node:willow-stay", "name": "Willow Lodge stay", "event_role": "residence", "entity_refs": ["place/willow-lodge"], "bounds": "1992/1994", "unresolved_entity_mentions": ["the caretaker"]},
+      {"candidate_id": "node:oak-job", "name": "Oak Books employment", "event_role": "job", "entity_refs": ["organization/oak-books"], "bounds": "2005/2008"}
+    ],
+    "recorded_event": {
+      "title": "Brass compass",
+      "description": "I found the brass compass during our stay at Willow Lodge.",
+      "subject": "self",
+      "places": ["Willow Lodge"],
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": null,
+      "timeline_resolution": {"status": "ambiguous", "candidate_ids": ["node:willow-stay"], "reason": "The supplied stay has unresolved identity and is ineligible despite matching the place."}
+    },
+    "expected": {"status": "ambiguous", "candidate_id": null, "grounded": false}
+  },
+  {
+    "fixture_id": "amber-studio-ambiguous-identity",
+    "source_text": "I painted the mural during my job at Amber Studio.",
+    "candidates": [
+      {"candidate_id": "node:amber-job", "name": "Amber Studio employment", "event_role": "job", "entity_refs": ["organization/amber-studio"], "bounds": "2002/2006", "entity_ref_ambiguities": [{"mention": "Amber Studio", "candidate_refs": ["organization/amber-east", "organization/amber-west"]}]}
+    ],
+    "recorded_event": {
+      "title": "Painted mural",
+      "description": "I painted the mural during my job at Amber Studio.",
+      "subject": "self",
+      "places": ["Amber Studio"],
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": null,
+      "timeline_resolution": {"status": "ambiguous", "candidate_ids": ["node:amber-job"], "reason": "The candidate's entity ambiguity prevents linking even though its label matches."}
+    },
+    "expected": {"status": "ambiguous", "candidate_id": null, "grounded": false}
+  },
+  {
+    "fixture_id": "cedar-cottage-ineligible-alternative",
+    "source_text": "During our second stay at Cedar Cottage, I repaired the clock.",
+    "candidates": [
+      {"candidate_id": "node:cedar-first", "name": "Cedar Cottage first stay", "event_role": "residence", "entity_refs": ["place/cedar-cottage"], "bounds": "1989/1991", "unresolved_entity_mentions": ["the landlord"]},
+      {"candidate_id": "node:cedar-second", "name": "Cedar Cottage second stay", "event_role": "residence", "entity_refs": ["place/cedar-cottage"], "bounds": "2001/2003"}
+    ],
+    "stored_event": {
+      "title": "Clock repair",
+      "description": "I repaired the clock during our second stay at Cedar Cottage.",
+      "subject": "self",
+      "places": ["Cedar Cottage"],
+      "date": {"stated": "2001", "age": null, "anchor_ref": null, "relation": null}
+    },
+    "recorded_event": {
+      "title": "Clock repair",
+      "description": "I repaired the clock during our second stay at Cedar Cottage.",
+      "subject": "self",
+      "places": ["Cedar Cottage"],
+      "date": null,
+      "source_grounding": null,
+      "timeline_relation": {"relation": "within", "candidate_id": "node:cedar-second", "entity_refs": ["place/cedar-cottage"], "evidence": {"quote": "During our second stay at Cedar Cottage"}},
+      "timeline_resolution": {"status": "linked", "candidate_ids": ["node:cedar-first", "node:cedar-second"], "reason": "The exact quote distinguishes the eligible second stay; the first remains a supplied alternative."}
+    },
+    "expected": {"status": "linked", "candidate_id": "node:cedar-second", "grounded": false}
   }
 ]

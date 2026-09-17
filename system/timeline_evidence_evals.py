@@ -62,8 +62,8 @@ def _candidate(value: dict) -> dict:
         "aliases": list(value.get("aliases") or ()),
         "canonical_roster_terms": [],
         "entity_refs": list(value["entity_refs"]),
-        "unresolved_entity_mentions": [],
-        "entity_ref_ambiguities": [],
+        "unresolved_entity_mentions": list(value.get("unresolved_entity_mentions") or ()),
+        "entity_ref_ambiguities": copy.deepcopy(value.get("entity_ref_ambiguities") or []),
         "supported_bounds": _bounds(value["bounds"]),
         "basis": "explicit",
         "conflict_state": "none",
@@ -175,7 +175,7 @@ def emitted_prompt(case: dict) -> str:
 def build_timeline_case(fixture: dict) -> dict:
     """Use one stored extraction and refresh only its evidence-link fields."""
     case = build_case(fixture)
-    existing = copy.deepcopy(fixture["recorded_event"])
+    existing = copy.deepcopy(fixture.get("stored_event") or fixture["recorded_event"])
     existing["source_grounding"] = None
     existing["timeline_relation"] = None
     existing.pop("timeline_resolution", None)
@@ -795,6 +795,7 @@ def main(argv: list[str] | None = None) -> int:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--live", action="store_true")
     modes.add_argument("--timeline-live", action="store_true")
+    modes.add_argument("--timeline-recorded", action="store_true")
     modes.add_argument("--catalog-live", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -815,12 +816,18 @@ def main(argv: list[str] | None = None) -> int:
         responses, skipped = timeline_live_responses(fixtures)
     elif args.live:
         responses, skipped = live_responses(fixtures)
+    elif args.timeline_recorded:
+        responses = [
+            recorded_timeline_response(build_timeline_case(fixture))
+            for fixture in fixtures
+        ]
+        skipped = None
     else:
         responses = [recorded_response(build_case(fixture)) for fixture in fixtures]
         skipped = None
     report = (
         evaluate_timeline(fixtures, responses)
-        if skipped is None and args.timeline_live
+        if skipped is None and (args.timeline_live or args.timeline_recorded)
         else evaluate(fixtures, responses) if skipped is None else {}
     )
     lifecycle = lifecycle_probe()
@@ -834,6 +841,7 @@ def main(argv: list[str] | None = None) -> int:
         "evaluation": "timeline-evidence-links",
         "mode": (
             "timeline-live" if args.timeline_live else
+            "timeline-recorded" if args.timeline_recorded else
             "live" if args.live else "recorded"
         ),
         "quality_note": None if args.live or args.timeline_live else QUALITY_NOTE,

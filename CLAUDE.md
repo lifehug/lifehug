@@ -72,6 +72,16 @@ stable link without model work; aliases, competitors, identity/meaning changes,
 corrections, retractions, and human decisions invalidate affected outcomes.
 Never use the owner's birth to calculate a named person's age.
 
+**Shared timeline eligibility (v309, issue #352).** Full and incremental prompts
+include one verbatim eligibility block. Incremental resolution copies the exact
+event-local candidate ID list, including rejected/ineligible alternatives, while
+links require resolved identity, exact nonempty refs, and unique source quotes.
+Both rendered contexts expose `identity_blocked_candidate_ids`, calculated by
+the validator's same pure identity predicate, without changing stored snapshots.
+Missing literal same-subject date/age proof returns null grounding independently
+of a valid relative link. This instruction clarification does not invalidate
+cached results or change validator policy, context/prompt, extractor, or schema versions.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:

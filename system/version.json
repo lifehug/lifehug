@@ -1,7 +1,7 @@
 {
-  "version": 308,
+  "version": 309,
   "released": "2026-09-17",
-  "changelog": "v308: Exact source-quoted natural date ranges such as 'January 2012 through December 2015' and '2012 to 2015' now normalize through the canonical chronology parser, so matching timeline evidence is accepted without weakening quote, subject, bounds, or provenance validation. Explicit month/day endpoints and uncertainty are preserved; ambiguous, incomplete, nested, invalid, and reversed ranges remain refused.",
+  "changelog": "v309: Full and incremental timeline classification now receive one shared candidate-eligibility instruction block: unresolved or ambiguous candidate identities cannot be linked, exact event-local candidate lists retain all alternatives, and refs and quotes must satisfy the existing strict validator. Both rendered contexts expose identity_blocked_candidate_ids from the validator's shared identity predicate without changing stored snapshots or membership. Missing literal date/age proof can abstain independently of a supported relative link. Validator policy, context/prompt and extractor versions, outer schemas, and valid cached classifications are unchanged. Synthetic evaluation adds unresolved identity, ambiguous identity, and an ineligible alternative alongside a valid link.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

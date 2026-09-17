@@ -708,17 +708,108 @@ represent uncertainty, so never guess a duration or boundary the candidate does
 not state. If the quote does not establish the required whole-occurrence
 boundary, do not assert `before` or `after`. Apply the same direction and
 interval meaning to `date.anchor_ref` plus `date.relation`.
+"""
+
+
+_TIMELINE_CANDIDATE_ELIGIBILITY = f"""
+### Timeline Candidate Eligibility (Full and Timeline Modes)
+
+`events[].timeline_relation` is optional contextual placement. Use only
+`within`, `before`, or `after`; never invent `at_start`. Assert a relation ONLY
+when ALL of these already-enforced prerequisites hold:
+1. The selected `candidate_id` must belong to this event's relevant candidate
+   set, and that event-local set must be complete.
+   - In timeline mode, copy the exact
+     `event_contexts[event_key].candidate_ids` list into
+     `timeline_resolution.candidate_ids`, including alternatives and ineligible
+     candidates. Do not recompute, filter, add, or omit IDs, even when abstaining.
+     Treat each `event_contexts[event_key]` entry independently: its `complete`
+     flag and candidate IDs govern only that immutable event. Another event's
+     candidates and global catalog completeness do not override it.
+   - In full mode, compute this event's relevant candidates from its own
+     source-grounded title, description, subject, places, anchor, and
+     date.anchor_ref. Specific names, aliases, entity refs, and reference keys
+     win; use role-only matches only when there is no specific match. Include
+     every supplied competitor sharing a matched non-owner entity ref, even
+     when ineligible for a link. The provisional full-extraction context is
+     retrieval input, not a candidate list to copy globally. Report the entire
+     resulting event-local set in `timeline_resolution.candidate_ids`.
+2. That candidate must have no `unresolved_entity_mentions` and no
+   `entity_ref_ambiguities`: both must be empty. A matching name, exact date,
+   apparent role match, or one otherwise valid ref does not resolve identity.
+   This is a literal whole-candidate eligibility check: ANY nonempty list blocks
+   the relation, even when its mention seems unrelated to the matched place or
+   role. Do not reinterpret or dismiss the supplied flags. With complete
+   coverage, return null relation plus `ambiguous`, preserving the entire
+   event-local candidate ID list.
+   Never choose an ID in `identity_blocked_candidate_ids`; keep it in the
+   resolution candidate list when supplied for this event.
+   Retain ineligible candidates in the resolution list; never link to them.
+3. `entity_refs` must be a nonempty list of exact refs supplied on THAT candidate,
+   supported by this event. If multiple candidates in the event-local set share
+   those refs, the exact source quote must distinguish the selected role or stay;
+   a shared ref alone does not disambiguate them. Do not substitute a name or
+   invent a ref when the supplied list is empty.
+4. `evidence.quote` must be one exact, unchanged substring of Story Text
+   occurring exactly once. Do not paraphrase, normalize whitespace, combine
+   excerpts, or quote context/metadata instead. The system derives offsets.
+
+If ANY prerequisite is unsupported or uncertain, including empty, null, or
+missing entity refs, return the WHOLE `timeline_relation` as null. Keep the
+event and its independently stated date or age; do not omit the event or invent
+references to make a relation pass. Document-level `places` are retrieval hints
+only, never evidence for every event. A supported contextual relation does not
+replace a direct stated date or age; return both when valid.
+
+`events[].source_grounding` independently proves a direct `date.stated` or
+`date.age`. Use one exact, uniquely occurring event quote whose temporal and
+subject fragments are exact substrings and prove the same event subject and
+existing date/age. If a stored direct date/age lacks that exact same-subject
+proof, return `source_grounding: null`; do not copy a candidate's dates or use
+another person's age to justify it. Description and when_hint summaries are
+not source quotations. Null grounding still permits an independently valid
+relative `timeline_relation`. Authoritative corrections override source text.
+
+`events[].timeline_resolution` is always present. `linked` requires a valid
+relation; every other status requires null. `candidate_ids` includes every
+event-local alternative, even when rejected or ineligible. This list is
+event-local, not the entire catalog.
 
 Choose resolution from coverage, not candidate count. `incomplete` is allowed
 ONLY when that event's context says `complete: false`. When `complete: true`,
 an empty candidate set for a real event is `missing_evidence`, never
-`incomplete`. With complete coverage, use `ambiguous` when multiple supplied
+`incomplete`. When `complete: false`, always return `incomplete` with a null
+relation. With complete coverage, use `ambiguous` when multiple supplied
 candidates remain plausible and the source cannot distinguish them, and use
 `missing_evidence` when no supplied candidate has enough source support.
+Unresolved or ambiguous candidate identity prevents a link; use `ambiguous`
+when that identity uncertainty prevents choosing an otherwise relevant anchor.
 `not_temporal` is only for an extracted item that is not actually an event.
 Every `timeline_resolution.reason` must contain 1 to
 {timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters.
 """
+
+
+def _timeline_prompt_context(context_snapshot: dict) -> str:
+    """Render existing context facts without changing the stored snapshot."""
+    return json.dumps({
+        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
+        "context_complete": context_snapshot.get("context_complete", False),
+        "context_truncated": context_snapshot.get("context_truncated", False),
+        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
+        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
+        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
+        "candidates": context_snapshot.get("candidates", []),
+        "identity_blocked_candidate_ids": sorted(
+            str(candidate["candidate_id"])
+            for candidate in context_snapshot.get("candidates") or ()
+            if isinstance(candidate, dict) and candidate.get("candidate_id")
+            and not classifier_ctx.candidate_identity_is_resolved(candidate)
+        ),
+        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
+        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
+        "event_contexts": context_snapshot.get("event_contexts", {}),
+    }, indent=2, sort_keys=True)
 
 
 def _build_timeline_prompt(
@@ -733,18 +824,7 @@ def _build_timeline_prompt(
     for event in stored_events:
         if isinstance(event, dict):
             timeline_evidence.ensure_event_key(event)
-    timeline_context = json.dumps({
-        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
-        "context_complete": context_snapshot.get("context_complete", False),
-        "context_truncated": context_snapshot.get("context_truncated", False),
-        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
-        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
-        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
-        "candidates": context_snapshot.get("candidates", []),
-        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
-        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
-        "event_contexts": context_snapshot.get("event_contexts", {}),
-    }, indent=2, sort_keys=True)
+    timeline_context = _timeline_prompt_context(context_snapshot)
     return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
 
 ## Source File
@@ -772,20 +852,13 @@ Return ONLY one raw JSON object with exactly these fields:
 }}
 
 {_TIMELINE_EVIDENCE_DECISIONS}
+{_TIMELINE_CANDIDATE_ELIGIBILITY}
 
 Return each existing event key exactly once. Do not re-extract, rename, reorder,
 add, or omit events. Return only the four event-delta fields shown. The framework
-merges only grounding, relation and resolution into the stored event. A linked
-outcome requires a relation; every other outcome requires null. `candidate_ids`
-must list the full relevant set supplied for that event, including alternatives.
-Treat each `event_contexts[event_key]` entry independently: its `complete` flag,
-candidate ids, and competitors govern only that event. Use incomplete when that
-event-local set is marked incomplete. Ground a direct date or age
-only with one exact unique event quote whose temporal and subject fragments occur
-inside it and support the stored date/age and subject. Never infer a calendar
-year. A relation quote must occur exactly once and distinguish competing roles or
-same-named stays in the source words. Do not return any document-level extraction
-field. Echo the mode and four-key snapshot exactly.
+merges only grounding, relation and resolution into the stored event. Never infer
+a calendar year. Do not return any document-level extraction field. Echo the
+mode and four-key snapshot exactly.
 """
 
 
@@ -819,18 +892,7 @@ def build_prompt(
             judgment_section += f"\n\n{signals_block}"
         categories_block = load_question_categories()
     themes_block = ", ".join(THEME_TAXONOMY)
-    timeline_context = json.dumps({
-        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
-        "context_complete": context_snapshot.get("context_complete", False),
-        "context_truncated": context_snapshot.get("context_truncated", False),
-        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
-        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
-        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
-        "candidates": context_snapshot.get("candidates", []),
-        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
-        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
-        "event_contexts": context_snapshot.get("event_contexts", {}),
-    }, indent=2, sort_keys=True)
+    timeline_context = _timeline_prompt_context(context_snapshot)
 
     relative_path = _relative_path(source_path)
     question_schema = ""
@@ -886,9 +948,9 @@ Captured at: {fm.get('captured_at', 'unknown')}
 ## Canonical Timeline Context
 Only the exact `candidate_id` and `entity_refs` values below may be used for a
 timeline relation. Candidate names and aliases are retrieval context, never
-permission to bind by a label or substring. A truncated context is visibly
-unfinished; do not assert a timeline relation from it. Do not infer candidates
-that are not supplied. Follow every eligibility prerequisite in the Guidelines.
+permission to bind by a label or substring. Incomplete event-local context is
+visibly unfinished; follow the shared Timeline Candidate Eligibility rules.
+Do not infer candidates that are not supplied.
 {timeline_context}
 
 ---
@@ -945,6 +1007,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 }}
 
 {_TIMELINE_EVIDENCE_DECISIONS}
+{_TIMELINE_CANDIDATE_ELIGIBILITY}
 
 ### Guidelines
 - `people`: include every named or described person; estimate mention_count from how prominent they are
@@ -969,43 +1032,6 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   leave `date` itself null when they said none of it. The system does the
   arithmetic from there — an age against a birthday, a relation against a dated
   landmark — so a guessed year is worse than no year at all.
-- `events[].timeline_relation`: optional contextual placement. Use only
-  `within`, `before`, or `after`; never invent `at_start`. Assert a relation ONLY
-  when ALL of these already-enforced prerequisites hold:
-  1. Compute this event's relevant candidates from its own source-grounded
-     title, description, subject, places, anchor, and date.anchor_ref. Specific
-     names, aliases, entity refs, and reference keys win; use role-only matches
-     only when there is no specific match. Include every supplied competitor
-     sharing a matched non-owner entity ref. Copy an exact supplied
-     `candidate_id` only when that event-local set is complete. Existing events
-     have their exact set in `event_contexts`; the provisional full-extraction
-     context is retrieval input, not a candidate list to copy globally.
-  2. That candidate must have no `unresolved_entity_mentions` and no
-     `entity_ref_ambiguities`. A matching name or date does not resolve identity.
-  3. `entity_refs` must be a nonempty list of exact refs supplied on THAT
-     candidate, supported by this event. If multiple candidates in the event-local
-     set share those refs, the exact source quote must distinguish the selected
-     role or stay; a shared ref alone does not disambiguate them.
-  4. `evidence.quote` must be one exact, unchanged substring of Story Text
-     occurring exactly once. Do not paraphrase, normalize whitespace, combine
-     excerpts, or quote context/metadata instead. The system derives offsets.
-  If ANY prerequisite is unsupported or uncertain, including empty, null, or
-  missing entity refs, return the WHOLE `timeline_relation` as null. Keep the
-  event and its independently stated date or age; do not omit the event or
-  invent references to make a relation pass. Document-level `places` are
-  retrieval hints only, never evidence for every event. A supported contextual
-  relation does not replace a direct stated date or age; return both when valid.
-- `events[].source_grounding`: ground a direct `date.stated` or `date.age` only
-  with one exact, uniquely occurring event quote. Its temporal and subject quote
-  must be exact substrings inside that quote and support this event's existing
-  date/age and subject. Use the event subject's age, never the owner's age for a
-  relative. Description and when_hint summaries are not source quotations.
-- `events[].timeline_resolution`: always present. `linked` requires a relation;
-  every other status requires null. List every supplied candidate relevant to
-  this event in `candidate_ids`, including rejected same-entity alternatives.
-  This list is event-local, not the entire catalog. Use `incomplete` when the
-  event-local set is incomplete and `not_temporal` only when this extracted item
-  is not an event.
 - Echo `_classification_snapshot` byte-for-byte as shown. It binds this response
   to the source and context seen in this prompt; never substitute newer values.
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
