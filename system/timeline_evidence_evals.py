@@ -10,12 +10,13 @@ import json
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import classifier_context
 import classify_story
 import timeline_evidence
 from ai_provider import AIProviderError, call_ai, provider_status
-from lifehug_core import REPO_DIR, load_config
+from lifehug_core import REPO_DIR
 
 FIXTURES_PATH = REPO_DIR / "tests/goldens/timeline_evidence_links.json"
 QUALITY_NOTE = (
@@ -294,8 +295,7 @@ def lifecycle_probe() -> dict:
 
 
 def live_responses(fixtures: list[dict]) -> tuple[list[dict], str | None]:
-    config = load_config()
-    model = str(config.get("classify_model") or "sonnet-class")
+    model = classify_story.get_model(SimpleNamespace(model=None))
     status = provider_status(model, probe=False)
     if not getattr(status, "ready", False):
         return [], "no configured live provider"

@@ -44,13 +44,14 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         response = evals.recorded_response(case)
         prompts = []
 
-        def answer(prompt, _model):
+        def answer(prompt, model):
             prompts.append(prompt)
+            self.assertEqual(model, evals.classify_story.DEFAULT_MODEL)
             return json.dumps(response)
 
-        with mock.patch.object(evals, "load_config", return_value={
-            "classify_model": "synthetic-model"
-        }), mock.patch.object(
+        with mock.patch.object(
+            evals.classify_story, "load_config", return_value={}
+        ), mock.patch.object(
             evals, "provider_status", return_value=mock.Mock(ready=True)
         ), mock.patch.object(evals, "call_ai", side_effect=answer):
             responses, skipped = evals.live_responses([fixture])
