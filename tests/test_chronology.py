@@ -115,6 +115,48 @@ class EdtfRoundTripTests(unittest.TestCase):
         self.assertEqual(ch.from_dict("1984"), ch.parse_edtf("1984"))
 
 
+class LooseNaturalRangeTests(unittest.TestCase):
+    def test_explicit_year_month_and_day_ranges_use_one_endpoint_parser(self):
+        cases = {
+            "January 2012 through December 2015": (
+                "2012-01/2015-12", "2012-01", "2015-12",
+            ),
+            "2012 to 2015": ("2012/2015", "2012", "2015"),
+            "from 2 April 1979 through July 11, 1981": (
+                "1979-04-02/1981-07-11", "1979-04-02", "1981-07-11",
+            ),
+        }
+        for text, (best, earliest, latest) in cases.items():
+            with self.subTest(text=text):
+                parsed = ch.parse_loose_date(text)
+                self.assertEqual(parsed["best"], best)
+                self.assertEqual(parsed["earliest"], earliest)
+                self.assertEqual(parsed["latest"], latest)
+                self.assertEqual(parsed["granularity"], "range")
+                self.assertEqual(parsed["basis"], "stated")
+
+    def test_range_preserves_endpoint_and_whole_range_uncertainty(self):
+        endpoint = ch.parse_loose_date("2012? to 2015")
+        self.assertEqual(endpoint["best"], "2012?/2015")
+        self.assertEqual(endpoint["confidence"], "conjectural")
+        bracketed = ch.parse_loose_date("[January 2012 through December 2015]")
+        self.assertEqual(bracketed["best"], "2012-01/2015-12~")
+        self.assertEqual(bracketed["confidence"], "approximate")
+
+    def test_ambiguous_invalid_nested_and_reversed_ranges_are_refused(self):
+        for text in (
+            "January through December 2015",
+            "January 2012 through someday",
+            "2012 to 2015 to 2018",
+            "2012/2013 to 2015",
+            "01/02/2012 to 03/04/2015",
+            "2015 to 2012",
+            "December 2015 through January 2012",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(ch.parse_loose_date(text))
+
+
 class DisplayTests(unittest.TestCase):
     def test_each_granularity_renders_the_way_a_person_would_say_it(self):
         cases = {

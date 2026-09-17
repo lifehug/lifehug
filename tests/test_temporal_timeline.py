@@ -444,6 +444,74 @@ class ContradictionsAndMirror(unittest.TestCase):
         self.assertEqual(node["conflict_state"], "alternatives")
         self.assertEqual(items_of(result, "contradiction"), [])
 
+    def test_compatible_exact_date_narrows_saved_range_without_rekeying(self):
+        saved = claim(
+            claim_type="date",
+            subject_mention="River House",
+            event_kind="residence",
+            temporal_value="2000/2010",
+            source="sources/corrections/river-house-range",
+            seed="river-house-range",
+            quote="River House was home between 2000 and 2010",
+        )
+        lower = claim(
+            claim_type="date",
+            subject_mention="lower landmark",
+            event_kind="moment",
+            temporal_value="2000",
+            seed="lower-landmark",
+        )
+        upper = claim(
+            claim_type="date",
+            subject_mention="upper landmark",
+            event_kind="moment",
+            temporal_value="2010",
+            seed="upper-landmark",
+        )
+        initial = derive(saved, lower, upper)
+        saved_node = node_for(initial, "residence", "River House")
+        lower_node = node_for(initial, "moment", "lower landmark")
+        upper_node = node_for(initial, "moment", "upper landmark")
+        between = tc.validate_ordering_constraint(
+            {
+                "relation": "between",
+                "subject_node_id": saved_node["node_id"],
+                "anchor_node_ids": [lower_node["node_id"], upper_node["node_id"]],
+                "source_ref": {
+                    "source_id": "sources/corrections/river-house-between",
+                    "revision": revision("river-house-between"),
+                },
+                "created_at": NOW,
+            }
+        )
+        before = derive(saved, lower, upper, constraints=[between])
+        exact = claim(
+            claim_type="date",
+            subject_mention="River House",
+            event_kind="residence",
+            temporal_value="2005-06-12",
+            source="src-later-river-house",
+            seed="later-river-house",
+            quote="River House was home on June 12, 2005",
+        )
+        after = derive(saved, lower, upper, exact, constraints=[between])
+
+        before_node = node_for(before, "residence", "River House")
+        after_node = node_for(after, "residence", "River House")
+        self.assertEqual(
+            (before_node["best_temporal_value"]["earliest"],
+             before_node["best_temporal_value"]["latest"]),
+            ("2000", "2010"),
+        )
+        self.assertEqual(after_node["best_temporal_value"]["best"], "2005-06-12")
+        self.assertEqual(after_node["node_id"], before_node["node_id"])
+        self.assertEqual(
+            before_node["input_constraint_refs"], [between["constraint_id"]]
+        )
+        self.assertEqual(
+            after_node["input_constraint_refs"], [between["constraint_id"]]
+        )
+
     def test_an_unresolved_contradiction_blocks_nothing_else(self):
         """§10: unrelated nodes and queue work are calculated exactly as before."""
         first, second = self.disagreeing()
