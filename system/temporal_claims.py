@@ -287,6 +287,9 @@ MAX_SUBJECT_MENTION_CHARS = 200
 #: "Building Etherfuse" — not a sentence, and the binder matches it as a whole
 #: label, so a paragraph here would never bind anything anyway.
 MAX_EVENT_MENTION_CHARS = 120
+TIMELINE_RESOLUTION_STATUSES = frozenset({
+    "linked", "missing_evidence", "ambiguous", "incomplete", "not_temporal",
+})
 #: Parts of an enumeration are names and short phrases; anything longer means
 #: the "and" was grammar rather than a list (see :func:`split_subject_enumeration`).
 MAX_ENUMERATION_PART_WORDS = 4
@@ -1451,6 +1454,13 @@ def validate_temporal_claim(value: object, *, now: object = None) -> dict:
     resolution = value.get("subject_resolution")
     if isinstance(resolution, dict) and resolution:
         normalized["subject_resolution"] = _normalized_resolution(resolution)
+    timeline_status = _opt_text(value.get("timeline_resolution_status"))
+    if timeline_status:
+        if timeline_status not in TIMELINE_RESOLUTION_STATUSES:
+            raise TemporalClaimError(
+                "unknown_claim_status", "timeline resolution status is invalid"
+            )
+        normalized["timeline_resolution_status"] = timeline_status
     return normalized
 
 

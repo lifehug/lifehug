@@ -46,6 +46,28 @@ def full_response(
     events: list[dict] | None = None,
     candidate_questions: list[dict] | None = None,
 ) -> dict:
+    normalized_events = []
+    for supplied in events or ():
+        event = copy.deepcopy(supplied)
+        key = te.event_key(event)
+        context = (snap.get("event_contexts") or {}).get(key) or te.build_event_context(
+            event, [row for row in snap.get("candidates") or () if isinstance(row, dict)]
+        )
+        candidate_ids = list(context.get("candidate_ids") or [
+            row["candidate_id"] for row in snap.get("candidates") or ()
+        ])
+        event.setdefault("source_grounding", None)
+        event.setdefault("timeline_resolution", {
+            "status": (
+                "linked" if event.get("timeline_relation") is not None else
+                "incomplete" if not context.get(
+                    "complete", not snap.get("context_truncated")
+                ) else "missing_evidence"
+            ),
+            "candidate_ids": candidate_ids,
+            "reason": "Synthetic evidence-link outcome.",
+        })
+        normalized_events.append(event)
     return {
         "_classification_mode": "full",
         "_classification_snapshot": cc.snapshot_metadata(snap),
@@ -62,7 +84,7 @@ def full_response(
         "sensitivity_reason": "synthetic",
         "scene_slots": {},
         "situation_vs_story": "balanced",
-        "events": [] if events is None else events,
+        "events": normalized_events,
         "candidate_questions": [] if candidate_questions is None else candidate_questions,
     }
 
@@ -202,8 +224,17 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertEqual({row["mode"] for row in plan["items"]}, {"full", "timeline"})
         self.assertTrue(plan["skip_candidates"])
         full_prompt = next(row["prompt"] for row in plan["items"] if row["mode"] == "full")
+        timeline_prompt = next(
+            row["prompt"] for row in plan["items"] if row["mode"] == "timeline"
+        )
         self.assertNotIn('"candidate_questions"', full_prompt)
         self.assertNotIn("Question-Judgment Rubric", full_prompt)
+        self.assertIn('"event_contexts": {}', full_prompt)
+        self.assertIn("provisional full-extraction", full_prompt)
+        self.assertIn("context is retrieval input", full_prompt)
+        self.assertNotIn("across the ENTIRE supplied candidate list", full_prompt)
+        self.assertIn('"event_contexts": {}', timeline_prompt)
+        self.assertIn("Treat each `event_contexts[event_key]` entry independently", timeline_prompt)
 
     def test_plan_builds_prompts_only_for_selected_items_and_names_ineligible(self) -> None:
         empty = self.sources / "manual" / "empty.md"
@@ -422,6 +453,11 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             }], skip=True))
         self.assertEqual(archive["items"][0]["status"], "accepted")
         archived = json.loads(cs.classification_path(self.a).read_text())
+        current = {
+            **current,
+            **cc.snapshot_metadata_for_events(current, archived["events"]),
+            "event_contexts": {},
+        }
         self.assertTrue(archived[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
         self.assertIsNone(cc.refresh_reason(current, archived))
         with mock.patch.object(cc, "_load_context_catalog", return_value={}), \
@@ -562,7 +598,8 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
     def test_correction_selects_full_mode_and_saved_old_response_is_refused(self) -> None:
         before = cc.build_context_snapshot(self.root, self.a)
         prior = self.existing(self.a, {**before, "source_revision": "sha256:" + "0" * 64})
-        response = full_response(before)
+        current = cc.build_context_snapshot(self.root, self.a)
+        response = full_response(current)
         original_prepare = cs.prepare_classification
         calls = 0
 

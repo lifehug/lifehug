@@ -1524,6 +1524,12 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
             if episode_node:
                 group["episode_id"] = episode_id
             groups[node_id] = group
+        elif event_kind == "moment" and group.get("event_kind") in (None, "", "started", "ended"):
+            # Participation identity claims can seed an episode before its
+            # temporal member arrives. A classifier moment names the composed
+            # event rather than one landmark boundary. Claim-id sort order must
+            # not decide which of those meanings is visible.
+            group["event_kind"] = event_kind
         if subject not in group["subjects"]:
             group["subjects"].append(subject)
         if collapsed_text(claim.get("subject_ref")):
@@ -3675,6 +3681,23 @@ def _evidence_refs(group: dict) -> list[str]:
     return sorted({_source_key(claim) for claim in group["claims"] if _source_key(claim)})
 
 
+def _resolution_suppresses_date_question(group: dict) -> bool:
+    """Incomplete searches and non-events are not missing date assertions."""
+    statuses: list[str] = []
+    for claim in group.get("claims") or ():
+        source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+        if (not collapsed_text(source_ref.get("source_id")).startswith("classification:")
+                or not collapsed_text(claim.get("extractor_version")).startswith(
+                    "classifier-claims/rule:3"
+                )):
+            return False
+        status = collapsed_text(claim.get("timeline_resolution_status"))
+        if not status:
+            return False
+        statuses.append(status)
+    return bool(statuses) and set(statuses) <= {"incomplete", "not_temporal"}
+
+
 # --------------------------------------------------------------------------
 # The derivation
 # --------------------------------------------------------------------------
@@ -3828,8 +3851,8 @@ def derive_calculated_timeline(
     mark = clock()
     # Ages need the birth anchor, and the birth anchor is itself a node, so the
     # dated claims settle first and the quantities read the result.
-    birth = chrono.from_dict(birth_date) if birth_date is not None else None
-    if birth is None:
+    owner_birth = chrono.from_dict(birth_date) if birth_date is not None else None
+    if owner_birth is None:
         # The owner's birth, and only the owner's. There used to be a fallback
         # here — "if that is not exactly one, take whatever birth exists" —
         # and it was wrong in both directions: with a child's birth filed it
@@ -3842,10 +3865,48 @@ def derive_calculated_timeline(
         ]
         if len(births) == 1:
             seeded = _reconcile_group(births[0], birth=None, diagnostics=[])
-            birth = seeded["best"]
+            owner_birth = seeded["best"]
+
+    births_by_subject: dict[str, object] = {}
+    for group in groups.values():
+        if group["event_kind"] != "birth":
+            continue
+        seeded = _reconcile_group(group, birth=None, diagnostics=[])
+        if seeded["best"] is None or seeded["conflict"] >= MATERIAL_CONFLICT:
+            continue
+        births_by_subject[normalized_mention_key(group["subject"])] = seeded["best"]
+
+    def birth_for_group(group: dict) -> object:
+        subject_key = normalized_mention_key(group["subject"])
+        owner_key = normalized_mention_key(owner)
+        if subject_key == owner_key or _is_owner_subject(group, owner):
+            return owner_birth
+        if subject_key in births_by_subject:
+            return births_by_subject[subject_key]
+        # Legacy claims often used an event label as subject_mention for an
+        # owner-age statement. Preserve that compatibility, but never lend the
+        # owner's birthday to a canonical person or a source-grounded
+        # classifier statement about a named other person.
+        subject_bound = "/" in collapsed_text(group["subject"])
+        grounded_classifier_age = any(
+            claim.get("claim_type") == "age"
+            and collapsed_text(claim.get("extractor_version")).startswith(
+                "classifier-claims/rule:3"
+            )
+            and any(
+                isinstance(span, dict)
+                and type(span.get("start")) is int
+                and type(span.get("end")) is int
+                for span in claim.get("evidence") or ()
+            )
+            for claim in group["claims"]
+        )
+        return None if subject_bound or grounded_classifier_age else owner_birth
 
     calculated = {
-        node_id: _reconcile_group(group, birth=birth, diagnostics=diagnostics)
+        node_id: _reconcile_group(
+            group, birth=birth_for_group(group), diagnostics=diagnostics
+        )
         for node_id, group in sorted(groups.items())
     }
     for node_id, group in sorted(groups.items()):
@@ -3867,7 +3928,7 @@ def derive_calculated_timeline(
         roster_snapshot=roster_snapshot,
         entry_index=entry_index,
         owner=owner,
-        birth=birth,
+        birth=owner_birth,
         displays=displays,
         place_flags=place_flags,
         diagnostics=diagnostics,
@@ -3881,7 +3942,7 @@ def derive_calculated_timeline(
         participation=participation,
         entry_index=entry_index,
         owner=owner,
-        birth=birth,
+        birth=owner_birth,
         displays=displays,
         place_flags=place_flags,
         diagnostics=diagnostics,
@@ -3913,7 +3974,7 @@ def derive_calculated_timeline(
         group = groups.get(node_id)
         if group is None or not _is_owner_subject(group, owner):
             continue
-        clamped = _clamp_to_origin(placed[node_id], birth)
+        clamped = _clamp_to_origin(placed[node_id], owner_birth)
         if clamped is not None:
             placed[node_id] = clamped
             diagnostics.append({
@@ -4011,10 +4072,12 @@ def derive_calculated_timeline(
 
     # The owner relevance layer (eras E2). Needs the origin resolved above —
     # `origin_best` is the birth (explicit or provisional) `_age_frame_nodes`
-    # just used, falling back to the plain reconciled `birth` (used for
+    # just used, falling back to the plain reconciled owner birth (used for
     # `_reconcile_group`) when neither exists — reading the origin twice would
     # be two definitions of "the owner's birthday".
-    origin_best = resolved_origin["best"] if resolved_origin is not None else birth
+    origin_best = (
+        resolved_origin["best"] if resolved_origin is not None else owner_birth
+    )
     relevance = {
         node_id: _owner_relevance(
             groups[node_id], best=placed.get(node_id), entry_index=entry_index,
@@ -4722,6 +4785,8 @@ def _derive_work_items(
         best = placed.get(node_id)
         possible = possibilities.get(node_id)
         if not _wants_precision(best, group["event_kind"], possible):
+            continue
+        if _resolution_suppresses_date_question(group):
             continue
         # D5: an age frame's boundary is arithmetic off the birth origin, never
         # a question (ADR 0030). "When did Childhood end?" is not askable.

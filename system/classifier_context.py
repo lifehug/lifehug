@@ -22,6 +22,7 @@ import event_identity
 import identity_resolution
 import source_integrity
 import temporal_placement as placement
+import temporal_claims
 import temporal_projection
 import temporal_store
 import timeline_evidence
@@ -276,8 +277,6 @@ def _candidate(
         return None
     node_kind = str(node.get("node_kind") or "")
     event_kind = str(node.get("event_kind") or "")
-    if node_kind == "event" and event_kind not in LANDMARK_EVENT_KINDS:
-        return None
     if node_kind == "period" and event_kind != "named_era":
         return None
     if node_kind not in ("event", "period", "episode"):
@@ -304,7 +303,7 @@ def _candidate(
         value for value in (_bounds(row) for row in node.get("alternate_values") or ())
         if value is not None
     ]
-    return {
+    row = {
         "candidate_id": candidate_id,
         "node_kind": node_kind,
         "episode_id": node.get("episode_id"),
@@ -322,6 +321,9 @@ def _candidate(
         "conflict_state": node.get("conflict_state", "none"),
         "alternatives": alternatives,
     }
+    row["event_role"] = event_kind
+    row["reference_keys"] = timeline_evidence.candidate_reference_keys(row)
+    return row
 
 
 def _normalized_human_identity_records(
@@ -479,6 +481,28 @@ def _matched_roster_evidence(
     ]
 
 
+def _source_roster_authority(
+    candidates: list[dict], candidate_ids: object, roster_evidence: object,
+) -> list[dict]:
+    """Roster matches that can change identity for this event-local set."""
+    selected = {str(value) for value in (candidate_ids or ()) if value}
+    selected_terms = {
+        str(term).casefold()
+        for row in candidates
+        if row.get("candidate_id") in selected
+        for authority in row.get("canonical_roster_terms") or ()
+        if isinstance(authority, dict)
+        for term in authority.get("terms") or ()
+        if str(term).strip()
+    }
+    return [
+        row for row in (roster_evidence or ())
+        if isinstance(row, dict) and selected_terms.intersection(
+            str(term).casefold() for term in row.get("terms") or ()
+        )
+    ]
+
+
 def _roster_context(
     vault_root: Path,
     story_text: str,
@@ -524,12 +548,53 @@ def _freshness_candidate(row: dict) -> dict:
     return {
         key: row.get(key)
         for key in (
-            "candidate_id", "episode_id", "kind", "entity_refs",
+            "candidate_id", "episode_id", "kind", "event_role", "entity_refs",
             "canonical_roster_terms",
             "unresolved_entity_mentions", "entity_ref_ambiguities",
             "supported_bounds", "basis", "conflict_state", "alternatives",
+            "grounding_identity", "reference_keys",
         )
     }
+
+
+def _independent_grounded_classifier_claim(claim: dict, retracted_paths: set[str]) -> bool:
+    """Only verified direct facts may cross v306's classifier exclusion."""
+    source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+    source_id = str(source_ref.get("source_id") or "")
+    if not source_id.startswith("classification:"):
+        return True
+    if str(source_ref.get("source_path") or "") in retracted_paths:
+        return False
+    if claim.get("claim_type") not in ("date", "age") or claim.get("basis") != "explicit":
+        return False
+    if claim.get("extractor_version") != temporal_claims.extractor_version_string(
+            "classifier-claims", rule_version="2"):
+        return False
+    return any(
+        isinstance(span, dict)
+        and isinstance(span.get("start"), int)
+        and isinstance(span.get("end"), int)
+        for span in claim.get("evidence") or ()
+    )
+
+
+def _grounding_identity(claim_ids: object, claims_by_id: dict[str, dict]) -> list[dict]:
+    rows: list[dict] = []
+    for claim_id in sorted(str(value) for value in (claim_ids or ()) if value):
+        claim = claims_by_id.get(claim_id)
+        if not isinstance(claim, dict):
+            continue
+        source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+        rows.append({
+            "claim_type": claim.get("claim_type"),
+            "temporal_value": claim.get("temporal_value"),
+            "subject_ref": claim.get("subject_ref"),
+            "subject_mention": claim.get("subject_mention"),
+            "source_path": source_ref.get("source_path"),
+            "source_revision": source_ref.get("revision"),
+            "evidence": claim.get("evidence"),
+        })
+    return rows
 
 
 def _prior_identities_from_manifest(manifest: object, relative_source: str) -> list[dict]:
@@ -582,15 +647,19 @@ def _load_context_catalog(vault_root: Path) -> dict:
         for term in terms
     )
     index = temporal_store.fold_active_index(vault_root)
-    # Filter before the canonical fold: mixed-node metadata, bounds, conflicts
-    # and dependencies must never borrow even another source's classifier claim.
+    retracted_paths = timeline_evidence.active_global_retracted_paths(vault_root)
+    # Filter before the canonical fold. Contextual classifier claims remain
+    # excluded; only exact-source direct date/age facts may become candidates.
     independent_index = {**index, "claims": [
         row for row in index.get("claims") or ()
-        if not str((row.get("source_ref") or {}).get("source_id") or "").startswith(
-            "classification:"
-        )
+        if _independent_grounded_classifier_claim(row, retracted_paths)
     ]}
     claims_by_source, classifier_claims = _claim_catalog(independent_index)
+    independent_claims_by_id = {
+        str(row.get("claim_id") or ""): row
+        for row in independent_index.get("claims") or ()
+        if isinstance(row, dict) and row.get("claim_id")
+    }
     records = episode_fold.load_episode_records(vault_root, manifest={})
     identities, operations = records["bindings"], records["operations"]
     independent_manifest = event_identity.build_telling_manifest(
@@ -629,6 +698,9 @@ def _load_context_catalog(vault_root: Path) -> dict:
         )
         row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
         if row is not None:
+            row["grounding_identity"] = _grounding_identity(
+                claim_ids, independent_claims_by_id
+            )
             candidates.append((row, claim_ids))
     candidates.sort(key=lambda item: (
         0 if item[0].get("node_kind") == "episode" else 1,
@@ -653,6 +725,8 @@ def _load_context_catalog(vault_root: Path) -> dict:
             corrections_dir=vault_root / "sources" / "corrections",
             repo_dir=vault_root,
         ),
+        "classifications": _classification_records(vault_root),
+        "retracted_paths": retracted_paths,
         "candidates": candidates,
     }
 
@@ -671,7 +745,7 @@ def _build_context_snapshot_from_catalog(
     raw = source.read_bytes() if source_bytes is None else source_bytes
     story_text = raw.decode("utf-8", errors="replace")
     relative = _relative_source(root, source)
-    _own_claims, grounded_refs = _claim_context_from_catalog(
+    own_claims, grounded_refs = _claim_context_from_catalog(
         relative,
         catalog["claims_by_source"],
         catalog["classifier_claims"],
@@ -703,61 +777,137 @@ def _build_context_snapshot_from_catalog(
     bound_episode_ids.update(
         str(row["episode_id"]) for row in source_decisions if row.get("episode_id")
     )
-    # Rows are copied because completeness is source-specific prompt metadata.
-    candidates = [
-        dict(row)
-        for row, _claim_ids in catalog["candidates"]
-    ]
-    cap = max(0, min(int(max_candidates), MAX_CONTEXT_CANDIDATES))
-    relevant = [
-        row for row in candidates
-        if set(row.get("entity_refs") or ()).intersection(grounded_refs)
-        or row.get("candidate_id") in bound_episode_ids
-        or row.get("episode_id") in bound_episode_ids
-    ]
-    competitor_refs = {
-        ref
-        for row in relevant
-        if row.get("node_kind") == "episode"
-        for ref in row.get("entity_refs") or ()
-        if ref in grounded_refs
-    }
-    if competitor_refs:
-        relevant.extend(
-            row for row in candidates
-            if row.get("node_kind") == "episode"
-            and set(row.get("entity_refs") or ()).intersection(competitor_refs)
+    # Exclude a candidate supported only by this target source. A second
+    # independent source may keep the same canonical candidate eligible.
+    candidates = []
+    for row, claim_ids in catalog["candidates"]:
+        if claim_ids and set(claim_ids).issubset(own_claims):
+            continue
+        candidates.append(dict(row))
+
+    forced_ids = set(bound_episode_ids)
+    forced_ids.update(
+        str(row.get("candidate_id") or "")
+        for row in candidates
+        if {
+            ref for ref in row.get("entity_refs") or ()
+            if not timeline_evidence.is_generic_owner_reference(ref)
+        }.intersection(
+            ref for ref in grounded_refs
+            if not timeline_evidence.is_generic_owner_reference(ref)
         )
-    by_id = {row["candidate_id"]: row for row in relevant}
-    relevant = [by_id[key] for key in sorted(by_id)]
-    birth = [row for row in candidates if row.get("kind") == "birth"]
-    required = list(relevant)
-    for row in birth:
-        if row["candidate_id"] not in by_id:
-            required.append(row)
-    if relevant:
-        selected = required[:cap]
-        truncated = len(required) > len(selected)
+    )
+    existing = catalog.get("classifications", {}).get(relative) or {}
+    stored_events = [
+        dict(row) for row in existing.get("events") or () if isinstance(row, dict)
+    ]
+    event_contexts: dict[str, dict] = {}
+    if existing:
+        for event in stored_events:
+            context = timeline_evidence.build_event_context(
+                event,
+                candidates,
+                forced_candidate_ids=forced_ids,
+                max_candidates=max_candidates,
+            )
+            event_contexts[context["event_key"]] = context
     else:
-        selected = candidates[:cap]
-        truncated = len(candidates) > len(selected)
+        # A full extraction has no stable event keys yet. Search the source as
+        # one provisional context; event-local contexts replace it after filing.
+        provisional = {
+            "title": source.stem,
+            "description": story_text,
+            "subject": "self",
+            "places": [],
+            "date": None,
+        }
+        context = timeline_evidence.build_event_context(
+            provisional,
+            candidates,
+            forced_candidate_ids=forced_ids,
+            max_candidates=max_candidates,
+        )
+        event_contexts[context["event_key"]] = context
+
+    selected_ids = {
+        candidate_id
+        for context in event_contexts.values()
+        for candidate_id in context.get("candidate_ids") or ()
+    }
+    selected = [
+        row for row in candidates if str(row.get("candidate_id") or "") in selected_ids
+    ]
+    selected.sort(key=lambda row: str(row.get("candidate_id") or ""))
+    if len(selected) > timeline_evidence.MAX_TOTAL_CANDIDATES:
+        retained = {
+            str(row.get("candidate_id") or "")
+            for row in selected[:timeline_evidence.MAX_TOTAL_CANDIDATES]
+        }
+        selected = selected[:timeline_evidence.MAX_TOTAL_CANDIDATES]
+        for context in event_contexts.values():
+            omitted = [
+                candidate_id for candidate_id in context.get("candidate_ids") or ()
+                if candidate_id not in retained
+            ]
+            if omitted:
+                context["candidate_ids"] = [
+                    candidate_id for candidate_id in context["candidate_ids"]
+                    if candidate_id in retained
+                ]
+                context["complete"] = False
+                context["remaining_candidate_count"] += len(omitted)
+                context["input_fingerprint"] = timeline_evidence.digest({
+                    "prior": context["input_fingerprint"],
+                    "total_prompt_omitted": omitted,
+                })
+    truncated = any(not row.get("complete") for row in event_contexts.values())
     human_decisions_all = _applicable_human_identity_records(
         catalog["human_identity_records"],
         candidates=selected,
         prior_identities=authority_tellings,
     )
-    human_decisions = human_decisions_all[:MAX_CONTEXT_DECISIONS]
-    decision_truncated = len(human_decisions_all) > len(human_decisions)
-    context_truncated = truncated or decision_truncated
+    human_decisions = human_decisions_all
+    decision_truncated = False
+    context_truncated = truncated
+    for context in event_contexts.values():
+        context["input_fingerprint"] = timeline_evidence.digest({
+            "event_context": context["input_fingerprint"],
+            "human_identity_decisions": human_decisions,
+            "source_roster_authority": _source_roster_authority(
+                selected, context.get("candidate_ids"), roster_evidence
+            ),
+        })
     for row in selected:
-        row["candidate_set_complete"] = not context_truncated
+        memberships = [
+            context for context in event_contexts.values()
+            if row.get("candidate_id") in (context.get("candidate_ids") or ())
+        ]
+        row["candidate_set_complete"] = all(
+            context.get("complete") for context in memberships
+        )
+        row["relevant_event_keys"] = sorted(
+            context["event_key"] for context in memberships
+        )
     digest_input = {
         "schema_version": CONTEXT_SCHEMA_VERSION,
-        "candidates": [_freshness_candidate(row) for row in selected],
-        "source_roster_evidence": roster_evidence,
-        "context_truncated": context_truncated,
+        "event_contexts": {
+            key: {
+                "candidate_ids": value.get("candidate_ids"),
+                "reference_keys": value.get("reference_keys"),
+                "unmatched_reference_keys": value.get("unmatched_reference_keys"),
+                "complete": value.get("complete"),
+                "remaining_candidate_count": value.get("remaining_candidate_count"),
+                "input_fingerprint": value.get("input_fingerprint"),
+            }
+            for key, value in sorted(event_contexts.items())
+        },
         "human_identity_decisions": human_decisions,
     }
+    active_corrections = source_integrity.active_correction_leaves(
+        source_integrity.corrections_targeting(
+            source, repo_dir=root, records=catalog["correction_records"]
+        )
+    )
     snapshot = {
         "schema_version": CONTEXT_SCHEMA_VERSION,
         "source_revision": effective_source_revision(
@@ -773,13 +923,24 @@ def _build_context_snapshot_from_catalog(
         "context_truncated": context_truncated,
         "candidate_count": len(selected),
         "remaining_candidate_count": max(
-            0, (len(required) if relevant else len(candidates)) - len(selected)
+            (
+                context.get("remaining_candidate_count") or 0
+                for context in event_contexts.values()
+            ),
+            default=0,
         ),
         "catalog_omitted_count": max(0, len(candidates) - len(selected)),
         "decision_count": len(human_decisions),
         "remaining_decision_count": max(0, len(human_decisions_all) - len(human_decisions)),
         "candidates": selected,
+        "event_contexts": event_contexts,
+        "source_roster_evidence": roster_evidence,
+        "grounding_allowed": not bool(active_corrections),
         "human_identity_decisions": human_decisions,
+        "source_identity_decision_ids": sorted(
+            str(row.get("identity_id") or "") for row in source_decisions
+            if row.get("identity_id")
+        ),
         # Useful to the prompt but excluded from context_digest: classifier
         # rereads may rekey these identities and must not trigger themselves.
         "prior_event_identities": prior_identities,
@@ -839,19 +1000,77 @@ def _event_context(snapshot: dict, event: dict) -> dict:
     if isinstance(contexts, dict) and isinstance(contexts.get(key), dict):
         return contexts[key]
     candidates = [row for row in snapshot.get("candidates") or () if isinstance(row, dict)]
-    return {
-        "event_key": key,
-        "candidate_ids": sorted(
-            str(row.get("candidate_id")) for row in candidates if row.get("candidate_id")
+    # Context lookup must not add event_key to a loaded base classification;
+    # the caller owns when that schema enrichment is persisted.
+    context = timeline_evidence.build_event_context(dict(event), candidates)
+    if snapshot.get("context_truncated"):
+        context["complete"] = False
+    selected = set(context.get("candidate_ids") or ())
+    if any(
+        row.get("candidate_id") in selected
+        and not row.get("candidate_set_complete", True)
+        for row in candidates
+    ):
+        context["complete"] = False
+    context["input_fingerprint"] = timeline_evidence.digest({
+        "event_context": context["input_fingerprint"],
+        "human_identity_decisions": snapshot.get("human_identity_decisions") or [],
+        "source_roster_authority": _source_roster_authority(
+            candidates,
+            context.get("candidate_ids"),
+            snapshot.get("source_roster_evidence") or [],
         ),
-        "complete": (
-            not bool(snapshot.get("context_truncated"))
-            and all(row.get("candidate_set_complete", True) for row in candidates)
-        ),
-        "input_fingerprint": timeline_evidence.digest([
-            _freshness_candidate(row) for row in candidates
-        ]),
+    })
+    return context
+
+
+def snapshot_metadata_for_events(snapshot: dict, events: object) -> dict:
+    """Four-key snapshot identity for the event-local context just accepted."""
+    candidates = [row for row in snapshot.get("candidates") or () if isinstance(row, dict)]
+    raw_contexts = [
+        timeline_evidence.build_event_context(event, candidates)
+        for event in (events if isinstance(events, list) else ())
+        if isinstance(event, dict)
+    ]
+    selected_ids = {
+        candidate_id for context in raw_contexts
+        for candidate_id in context.get("candidate_ids") or ()
     }
+    selected_episodes = {
+        str(row.get("episode_id") or "") for row in candidates
+        if row.get("candidate_id") in selected_ids and row.get("episode_id")
+    }
+    source_decision_ids = set(snapshot.get("source_identity_decision_ids") or ())
+    decisions = [
+        row for row in snapshot.get("human_identity_decisions") or ()
+        if (row.get("identity_id") in source_decision_ids
+            or row.get("episode_id") in selected_episodes)
+    ]
+    accepted_snapshot = {**snapshot, "human_identity_decisions": decisions}
+    contexts = {
+        context["event_key"]: context
+        for event in (events if isinstance(events, list) else ())
+        if isinstance(event, dict)
+        for context in (_event_context(accepted_snapshot, event),)
+    }
+    digest_input = {
+        "schema_version": CONTEXT_SCHEMA_VERSION,
+        "event_contexts": {
+            key: {
+                "candidate_ids": value.get("candidate_ids"),
+                "reference_keys": value.get("reference_keys"),
+                "unmatched_reference_keys": value.get("unmatched_reference_keys"),
+                "complete": value.get("complete"),
+                "remaining_candidate_count": value.get("remaining_candidate_count"),
+                "input_fingerprint": value.get("input_fingerprint"),
+            }
+            for key, value in sorted(contexts.items())
+        },
+        "human_identity_decisions": decisions,
+    }
+    accepted = dict(accepted_snapshot)
+    accepted["context_digest"] = _digest(digest_input)
+    return snapshot_metadata(accepted)
 
 
 def validate_response(

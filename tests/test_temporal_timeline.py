@@ -249,6 +249,60 @@ class RelativeAndInferredTime(unittest.TestCase):
         self.assertEqual(asks[0]["work_item_id"], BIRTH_ORIGIN_ID)
         self.assertEqual(asks[0]["claim_refs"], [fair["claim_id"]])
 
+    def test_a_named_others_age_never_uses_the_owners_birth(self):
+        owner_birth = claim(
+            claim_type="date",
+            subject_mention="self",
+            event_kind="birth",
+            temporal_value="1980",
+            seed="owner-birth-1980",
+        )
+        mira_married = claim(
+            claim_type="age",
+            subject_mention="person/mira",
+            event_kind="married",
+            temporal_value="21",
+            seed="mira-married-at-21",
+        )
+        result = derive(owner_birth, mira_married, owner_ref="self")
+        married = node_for(result, "married", "person/mira")
+        self.assertIsNone(married["best_temporal_value"])
+        self.assertIn(
+            "age_without_birth_anchor",
+            [row["finding"] for row in result.diagnostics["findings"]],
+        )
+
+    def test_a_named_others_age_uses_their_own_supported_birth(self):
+        owner_birth = claim(
+            claim_type="date",
+            subject_mention="self",
+            event_kind="birth",
+            temporal_value="1980",
+            seed="owner-birth-1980",
+        )
+        mira_birth = claim(
+            claim_type="date",
+            subject_mention="person/mira",
+            event_kind="birth",
+            temporal_value="1975",
+            seed="mira-birth-1975",
+        )
+        mira_married = claim(
+            claim_type="age",
+            subject_mention="person/mira",
+            event_kind="married",
+            temporal_value="21",
+            seed="mira-married-at-21",
+        )
+        result = derive(owner_birth, mira_birth, mira_married, owner_ref="self")
+        married = node_for(result, "married", "person/mira")
+        self.assertEqual(married["best_temporal_value"]["best"], "1996~")
+        self.assertEqual(
+            (married["best_temporal_value"]["earliest"],
+             married["best_temporal_value"]["latest"]),
+            ("1996", "1997"),
+        )
+
     def test_a_duration_places_nothing_until_it_has_a_start(self):
         lived = claim(
             claim_type="duration",
@@ -584,6 +638,33 @@ class WorkItems(unittest.TestCase):
         asked = {row["event_ref"]: row for row in items_of(result, "precision_gap")}
         self.assertNotIn(node_for(result, "move")["node_id"], asked)
         self.assertNotIn(node_for(result, "married")["node_id"], asked)
+
+    def test_incomplete_and_non_temporal_classifier_outcomes_do_not_ask_for_dates(self):
+        for status in ("incomplete", "not_temporal"):
+            with self.subTest(status=status):
+                event = claim(
+                    source=f"classification:story#{status}",
+                    claim_type="occurrence",
+                    subject_mention="self",
+                    event_kind="moment",
+                    temporal_value=None,
+                    extractor_version="classifier-claims/rule:3",
+                    timeline_resolution_status=status,
+                    seed=status,
+                )
+                self.assertFalse(items_of(derive(event), "precision_gap"))
+
+        unresolved = claim(
+            source="classification:story#missing",
+            claim_type="occurrence",
+            subject_mention="self",
+            event_kind="moment",
+            temporal_value=None,
+            extractor_version="classifier-claims/rule:3",
+            timeline_resolution_status="missing_evidence",
+            seed="missing-evidence",
+        )
+        self.assertEqual(len(items_of(derive(unresolved), "precision_gap")), 1)
 
     def test_a_generic_loss_question_never_reaches_the_daily_queue(self):
         """§2.4 — loss discovery is offer-only."""

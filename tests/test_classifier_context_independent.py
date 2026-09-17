@@ -91,7 +91,8 @@ class IndependentContextTests(unittest.TestCase):
         items = []
         for item in plan["items"]:
             self.assertEqual(item["mode"], "full")
-            response = full_response(item["snapshot"], events=events if
+            source = self.root / item["source_path"]
+            response = full_response(cc.build_context_snapshot(self.root, source), events=events if
                 item["source_path"] == "sources/manual/producer.md" else [])
             items.append({"source_path": item["source_path"], "mode": "full",
                           "response_text": json.dumps(response)})
@@ -185,6 +186,9 @@ class IndependentContextTests(unittest.TestCase):
         self.assertEqual(len(before["input_claim_refs"]), 4)
         self.assertEqual(before["event_kind"], "moment")
         self.assertEqual(before["subject_refs"], ["Cedar Shelter", "self"])
+        self.sources[2].write_text(
+            "---\ntitle: fallback\n---\nI wrote a notebook at Cedar Shelter.\n"
+        )
         candidate = next(c for c in cc.build_context_snapshot(
             self.root, self.sources[2])["candidates"] if c["episode_id"] == self.episode_id)
         self.assertEqual(candidate["kind"], "episode")
@@ -305,9 +309,9 @@ class IndependentContextTests(unittest.TestCase):
         self.assertNotEqual(changed["context_digest"], before["context_digest"])
         self.assertEqual(cc.build_context_snapshot(self.root, unrelated)["context_digest"],
                          other_before["context_digest"])
-        # A fallback source genuinely depends on the global candidates it saw.
-        self.assertNotEqual(cc.build_context_snapshot(self.root, self.sources[2])["context_digest"],
-                            fallback_before["context_digest"])
+        # A source with no matching reference is not poisoned by global changes.
+        self.assertEqual(cc.build_context_snapshot(self.root, self.sources[2])["context_digest"],
+                         fallback_before["context_digest"])
         with self.assertRaises(cc.ClassifierContextError) as refused:
             cc.validate_response(full_response(before), changed, self.sources[1].read_text())
         self.assertEqual(refused.exception.code, cc.ContextFailureCode.SNAPSHOT_MISMATCH)
@@ -324,6 +328,86 @@ class IndependentContextTests(unittest.TestCase):
         self.assertNotEqual(human["context_digest"], aliased["context_digest"])
         self.assertEqual(cc.build_context_snapshot(self.root, unrelated)["context_digest"],
                          other_before["context_digest"])
+
+    def test_linked_event_absorbs_real_bound_correction_without_model_refresh(self):
+        anchor = self.independent_anchor()
+        self.publish()
+        observer = self.sources[1]
+        before = cc.build_context_snapshot(self.root, observer)
+        stay = next(row for row in before["candidates"]
+                    if row["event_role"] == "residence")
+        linked_event = {
+            "title": "Finding the letter",
+            "description": "I found a letter in Cedarport.",
+            "subject": "self",
+            "places": ["Cedarport"],
+            "date": None,
+            "source_grounding": None,
+            "timeline_relation": {
+                "relation": "within",
+                "candidate_id": stay["candidate_id"],
+                "entity_refs": ["place/cedarport"],
+                "evidence": {"quote": "I found a letter in Cedarport"},
+            },
+        }
+        response = full_response(before, events=[linked_event])
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cs.classify_file(
+                observer, "synthetic-recorded", skip_candidates=True,
+                precomputed_result=response,
+            ), 0)
+        self.migrate()
+        self.publish()
+
+        def linked_node():
+            return next(
+                node for node in pub.read_projection(self.root)["nodes"]
+                if any(str(ref).startswith("claim:") for ref in node["input_claim_refs"])
+                and node.get("event_kind") == "moment"
+                and node.get("label") == "Finding the letter"
+            )
+
+        first = linked_node()
+        self.assertEqual(first["best_temporal_value"]["best"], "1994/1998")
+        first_plan = cs.build_batch_plan(
+            limit=10, sources=[observer], skip_candidates=True
+        )
+        self.assertEqual(first_plan["pending_count"], 0)
+
+        store.supersede_claims(
+            self.root, [anchor["claim_id"]], reason="The stay ended in 1999."
+        )
+        replacement = tc.validate_temporal_claim({
+            "source_ref": {
+                "source_id": "conversation:synthetic-residence-correction",
+                "revision": store.payload_sha256("corrected 1995/1999"),
+                "source_path": "sources/manual/anchor.md",
+            },
+            "source_kind": "conversation",
+            "claim_type": "date",
+            "subject_mention": "Cedarport",
+            "subject_ref": "place/cedarport",
+            "event_kind": "residence",
+            "temporal_value": date("1995/1999"),
+            "basis": "explicit",
+            "confidence": 1.0,
+            "evidence": [{"quote": "I lived in Cedarport from 1995 to 1999."}],
+            "extractor_version": "landmark_recorder/rule:1",
+        }, now=NOW)
+        store.write_receipt(self.root, {
+            "source_ref": replacement["source_ref"],
+            "extractor_version": "landmark_recorder/rule:1",
+            "claims": [replacement],
+        }, now=NOW)
+        self.publish()
+
+        corrected = linked_node()
+        self.assertEqual(corrected["node_id"], first["node_id"])
+        self.assertEqual(corrected["best_temporal_value"]["best"], "1995/1999")
+        corrected_plan = cs.build_batch_plan(
+            limit=10, sources=[observer], skip_candidates=True
+        )
+        self.assertEqual(corrected_plan["pending_count"], 0)
 
     def test_legacy_unclassified_prefilter_shares_one_catalog(self):
         self.independent_anchor()

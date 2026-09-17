@@ -37,6 +37,9 @@ _OWNER_TERMS = frozenset({
     "i", "me", "my", "mine", "myself", "self", "owner", "speaker", "author",
     "the speaker", "the author", "the owner",
 })
+_GENERIC_REFERENCE_TERMS = _OWNER_TERMS | frozenset({
+    "person self", "person owner", "person speaker", "person author",
+})
 _ROLE_TERMS = {
     "birth": ("birth", "born", "birthday"),
     "death": ("death", "died", "passed away"),
@@ -45,6 +48,7 @@ _ROLE_TERMS = {
     "started": ("started", "began", "founded", "created", "launched"),
     "founded": ("founded", "founding", "started", "created", "launched"),
     "move": ("move", "moved", "lived", "home", "residence"),
+    "residence": ("move", "moved", "lived", "home", "residence", "stay"),
     "span": ("lived", "residence", "stay", "worked", "attended"),
     "school": ("school", "attended", "graduated", "college"),
     "graduation": ("graduated", "graduation", "school", "college"),
@@ -102,24 +106,49 @@ def _search_terms(value: object) -> set[str]:
     terms = {phrase}
     words = phrase.split()
     terms.update(word for word in words if len(word) >= 4)
-    return terms
+    return {term for term in terms if term not in _GENERIC_REFERENCE_TERMS}
 
 
-def candidate_reference_keys(candidate: dict) -> list[str]:
-    """Deterministic entity, label, role and unresolved-reference lookup keys."""
+def is_generic_owner_reference(value: object) -> bool:
+    key = _search_key(value)
+    if key in _GENERIC_REFERENCE_TERMS:
+        return True
+    return key.startswith("person ") and key.split()[-1] in _OWNER_TERMS
+
+
+def _candidate_specific_reference_keys(candidate: dict) -> set[str]:
     values: list[object] = [
-        candidate.get("name"), candidate.get("kind"), candidate.get("event_role"),
-        *(candidate.get("aliases") or ()),
+        candidate.get("name"),
+        *(
+            value for value in candidate.get("aliases") or ()
+            if ":" not in collapsed_text(value)
+        ),
         *(candidate.get("unresolved_entity_mentions") or ()),
     ]
     for row in candidate.get("canonical_roster_terms") or ():
         if isinstance(row, dict):
             values.extend(row.get("terms") or ())
-    role = _search_key(candidate.get("event_role") or candidate.get("kind"))
-    values.extend(_ROLE_TERMS.get(role, ()))
+    for row in candidate.get("entity_ref_ambiguities") or ():
+        if isinstance(row, dict):
+            values.append(row.get("mention"))
     keys: set[str] = set()
     for value in values:
         keys.update(_search_terms(value))
+    return keys
+
+
+def _candidate_role_reference_keys(candidate: dict) -> set[str]:
+    role = _search_key(candidate.get("event_role") or candidate.get("kind"))
+    keys = _search_terms(role)
+    for value in _ROLE_TERMS.get(role, ()):
+        keys.update(_search_terms(value))
+    return keys
+
+
+def candidate_reference_keys(candidate: dict) -> list[str]:
+    """Deterministic entity, label, role and unresolved-reference lookup keys."""
+    keys = _candidate_specific_reference_keys(candidate)
+    keys.update(_candidate_role_reference_keys(candidate))
     return sorted(keys)
 
 
@@ -134,7 +163,8 @@ def event_reference_keys(event: dict) -> list[str]:
     for value in values:
         if isinstance(value, dict):
             value = value.get("name") or value.get("place")
-        keys.update(_search_terms(value))
+        if not is_generic_owner_reference(value):
+            keys.update(_search_terms(value))
     return sorted(keys)
 
 
@@ -149,7 +179,7 @@ def _event_haystack(event: dict) -> str:
     for value in values:
         if isinstance(value, dict):
             value = value.get("name") or value.get("place")
-        text = _search_key(value)
+        text = "" if is_generic_owner_reference(value) else _search_key(value)
         if text:
             parts.append(text)
     return " ".join(parts)
@@ -159,17 +189,25 @@ def _term_occurs(term: str, haystack: str) -> bool:
     return bool(term) and re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", haystack) is not None
 
 
-def _candidate_semantics(candidate: dict, *, include_bounds: bool) -> dict:
+def _candidate_semantics(candidate: dict) -> dict:
     keys = (
         "candidate_id", "episode_id", "node_kind", "kind", "event_role",
         "entity_refs", "canonical_roster_terms", "unresolved_entity_mentions",
         "entity_ref_ambiguities", "basis", "conflict_state", "alternatives",
-        "grounding_identity", "reference_keys",
+        "reference_keys",
     )
-    payload = {key: candidate.get(key) for key in keys}
-    if include_bounds:
-        payload["supported_bounds"] = candidate.get("supported_bounds")
-    return payload
+    semantics = {key: candidate.get(key) for key in keys}
+    semantics["grounding_identity"] = [
+        {
+            "claim_type": row.get("claim_type"),
+            "subject_ref": row.get("subject_ref"),
+            "subject_mention": row.get("subject_mention"),
+            "source_path": row.get("source_path"),
+        }
+        for row in candidate.get("grounding_identity") or ()
+        if isinstance(row, dict)
+    ]
+    return semantics
 
 
 def build_event_context(
@@ -189,21 +227,37 @@ def build_event_context(
         forced.add(linked_id)
 
     matched: list[dict] = []
+    role_matched: list[tuple[dict, set[str]]] = []
     matched_keys: set[str] = set()
     for candidate in candidates:
         reference_keys = list(candidate.get("reference_keys") or candidate_reference_keys(candidate))
         candidate["reference_keys"] = reference_keys
-        hits = {term for term in reference_keys if _term_occurs(term, haystack)}
-        if hits or collapsed_text(candidate.get("candidate_id")) in forced:
+        specific_hits = {
+            term for term in _candidate_specific_reference_keys(candidate)
+            if _term_occurs(term, haystack)
+        }
+        role_hits = {
+            term for term in _candidate_role_reference_keys(candidate)
+            if _term_occurs(term, haystack)
+        }
+        if specific_hits or collapsed_text(candidate.get("candidate_id")) in forced:
             matched.append(candidate)
-            matched_keys.update(hits)
+            matched_keys.update(specific_hits)
+            matched_keys.update(role_hits)
+        elif role_hits:
+            role_matched.append((candidate, role_hits))
+
+    if not matched:
+        for candidate, role_hits in role_matched:
+            matched.append(candidate)
+            matched_keys.update(role_hits)
 
     # A matched entity admits every competing role/stay for that same entity.
     entity_refs = {
         collapsed_text(ref)
         for row in matched
         for ref in row.get("entity_refs") or ()
-        if collapsed_text(ref)
+        if collapsed_text(ref) and not is_generic_owner_reference(ref)
     }
     if entity_refs:
         matched.extend(
@@ -224,13 +278,8 @@ def build_event_context(
     unmatched = sorted(term for term in explicit_keys if term not in matched_keys)
     fingerprint_candidates = []
     for row in selected:
-        candidate_id = collapsed_text(row.get("candidate_id"))
-        fingerprint_candidates.append(_candidate_semantics(
-            row,
-            include_bounds=not (linked_id and candidate_id == linked_id),
-        ))
+        fingerprint_candidates.append(_candidate_semantics(row))
     fingerprint = digest({
-        "event_key": key,
         "candidate_semantics": fingerprint_candidates,
         "reference_keys": sorted(matched_keys),
         "unmatched_reference_keys": unmatched,
@@ -294,14 +343,27 @@ def _same_date(left: object, right: object) -> tuple[bool, dict | None]:
     return all(a.get(field) == b.get(field) for field in fields), b
 
 
-def _subject_supported(subject: object, subject_quote: str) -> bool:
+def _subject_supported(
+    subject: object,
+    subject_quote: str,
+    *,
+    aliases: object = (),
+) -> bool:
     wanted = normalized_mention_key(subject)
     proof = normalized_mention_key(subject_quote)
     if wanted in _OWNER_TERMS:
-        return proof in _OWNER_TERMS or proof.startswith("my ")
+        return proof in _OWNER_TERMS
     if not wanted or not proof:
         return False
-    return wanted == proof or wanted in proof or proof in wanted
+    supported = {wanted}
+    if "/" in collapsed_text(subject):
+        supported.add(normalized_mention_key(collapsed_text(subject).rsplit("/", 1)[-1]))
+    supported.update(
+        normalized_mention_key(value)
+        for value in (aliases or ())
+        if normalized_mention_key(value)
+    )
+    return proof in supported
 
 
 def normalize_source_grounding(
@@ -332,7 +394,11 @@ def normalize_source_grounding(
     subject_quote = _contained_exact(
         quote, grounding.get("subject_quote"), code="grounding_subject_quote_invalid",
     )
-    if not _subject_supported(event.get("subject") or "self", subject_quote):
+    if not _subject_supported(
+        event.get("subject") or "self",
+        subject_quote,
+        aliases=event.get("subject_aliases") or (),
+    ):
         raise TimelineEvidenceError(
             "grounding_subject_mismatch", "subject evidence does not support the event subject",
         )
@@ -447,4 +513,3 @@ def active_global_retracted_paths(vault_root: str | Path) -> set[str]:
         if not pinned or pinned == current:
             retracted.add(target)
     return retracted
-

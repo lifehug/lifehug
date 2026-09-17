@@ -712,7 +712,9 @@ add, or omit events. Return only the four event-delta fields shown. The framewor
 merges only grounding, relation and resolution into the stored event. A linked
 outcome requires a relation; every other outcome requires null. `candidate_ids`
 must list the full relevant set supplied for that event, including alternatives.
-Use incomplete when that set is marked incomplete. Ground a direct date or age
+Treat each `event_contexts[event_key]` entry independently: its `complete` flag,
+candidate ids, and competitors govern only that event. Use incomplete when that
+event-local set is marked incomplete. Ground a direct date or age
 only with one exact unique event quote whose temporal and subject fragments occur
 inside it and support the stored date/age and subject. Never infer a calendar
 year. A relation quote must occur exactly once and distinguish competing roles or
@@ -761,6 +763,7 @@ def build_prompt(
         "candidates": context_snapshot.get("candidates", []),
         "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
         "prior_event_identities": context_snapshot.get("prior_event_identities", []),
+        "event_contexts": context_snapshot.get("event_contexts", {}),
     }, indent=2, sort_keys=True)
 
     relative_path = _relative_path(source_path)
@@ -901,14 +904,20 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 - `events[].timeline_relation`: optional contextual placement. Use only
   `within`, `before`, or `after`; never invent `at_start`. Assert a relation ONLY
   when ALL of these already-enforced prerequisites hold:
-  1. Copy an exact supplied `candidate_id`. `context_truncated` must be false
-     and that candidate's `candidate_set_complete` must be true.
+  1. Compute this event's relevant candidates from its own source-grounded
+     title, description, subject, places, anchor, and date.anchor_ref. Specific
+     names, aliases, entity refs, and reference keys win; use role-only matches
+     only when there is no specific match. Include every supplied competitor
+     sharing a matched non-owner entity ref. Copy an exact supplied
+     `candidate_id` only when that event-local set is complete. Existing events
+     have their exact set in `event_contexts`; the provisional full-extraction
+     context is retrieval input, not a candidate list to copy globally.
   2. That candidate must have no `unresolved_entity_mentions` and no
      `entity_ref_ambiguities`. A matching name or date does not resolve identity.
   3. `entity_refs` must be a nonempty list of exact refs supplied on THAT
-     candidate, supported by this event. At least one selected ref must occur
-     on exactly one candidate across the ENTIRE supplied candidate list;
-     refs shared by competing stays alone do not disambiguate them.
+     candidate, supported by this event. If multiple candidates in the event-local
+     set share those refs, the exact source quote must distinguish the selected
+     role or stay; a shared ref alone does not disambiguate them.
   4. `evidence.quote` must be one exact, unchanged substring of Story Text
      occurring exactly once. Do not paraphrase, normalize whitespace, combine
      excerpts, or quote context/metadata instead. The system derives offsets.
@@ -925,8 +934,10 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   relative. Description and when_hint summaries are not source quotations.
 - `events[].timeline_resolution`: always present. `linked` requires a relation;
   every other status requires null. List every supplied candidate relevant to
-  this event, including rejected alternatives. Use `incomplete` for an incomplete
-  relevant set and `not_temporal` only when this extracted item is not an event.
+  this event in `candidate_ids`, including rejected same-entity alternatives.
+  This list is event-local, not the entire catalog. Use `incomplete` when the
+  event-local set is incomplete and `not_temporal` only when this extracted item
+  is not an event.
 - Echo `_classification_snapshot` byte-for-byte as shown. It binds this response
   to the source and context seen in this prompt; never substitute newer values.
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
@@ -1397,6 +1408,9 @@ def prepare_classification(
             classified_at,
             candidate_ids,
             snapshot,
+        )
+        classification["classification_snapshot"] = classifier_ctx.snapshot_metadata_for_events(
+            snapshot, classification["events"]
         )
         classification[CLASSIFICATION_SKIP_CANDIDATES_FIELD] = bool(skip_candidates)
         if new_candidates:
