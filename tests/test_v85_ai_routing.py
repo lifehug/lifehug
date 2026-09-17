@@ -66,6 +66,7 @@ class _FakeSDKClient:
     class _Messages:
         def create(self, **kwargs):
             block = mock.Mock()
+            block.type = "text"
             block.text = "sdk says hi"
             resp = mock.Mock()
             resp.content = [block]
@@ -192,6 +193,34 @@ class OptionalAnthropicSdkTests(unittest.TestCase):
                 self.assertRaises(RuntimeError) as ctx:
             aip.call_ai("prompt", "claude-sonnet-5")
         self.assertIn("openclaw", str(ctx.exception))
+
+    def test_anthropic_aggregates_text_blocks_and_ignores_thinking(self):
+        response = mock.Mock()
+        response.content = [
+            mock.Mock(type="thinking", text="private chain of thought"),
+            mock.Mock(type="text", text='{"events":'),
+            mock.Mock(type="text", text="[]}"),
+        ]
+        client = mock.Mock()
+        client.messages.create.return_value = response
+        with mock.patch.object(aip, "get_anthropic_client", return_value=client):
+            content = aip._call_anthropic("prompt", "claude-sonnet-5", {})
+        self.assertEqual(content, '{"events":[]}')
+        client.messages.create.assert_called_once_with(
+            model="claude-sonnet-5",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": "prompt"}],
+        )
+
+    def test_anthropic_thinking_without_text_fails_visible(self):
+        response = mock.Mock()
+        response.content = [mock.Mock(type="thinking", text="not output")]
+        client = mock.Mock()
+        client.messages.create.return_value = response
+        with mock.patch.object(aip, "get_anthropic_client", return_value=client), \
+                self.assertRaises(aip.AIResponseError) as caught:
+            aip._call_anthropic("prompt", "claude-sonnet-5", {})
+        self.assertEqual(caught.exception.status, "empty")
 
 
 class KimiRoutingTests(unittest.TestCase):

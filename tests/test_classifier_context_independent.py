@@ -27,6 +27,7 @@ import temporal_claims as tc
 import temporal_publication as pub
 import temporal_store as store
 import temporal_timeline as tt
+import timeline_evidence as te
 from test_archive_classification_batch import full_response
 from test_classifier_context import date
 
@@ -99,7 +100,8 @@ class IndependentContextTests(unittest.TestCase):
         receipt = cs.file_batch_response({"schema_version": 1,
             "batch_id": "synthetic-first", "skip_candidates": True, "items": items})
         self.assertEqual(receipt["counts"]["accepted"], 3)
-        self.assertEqual(self.plan()["pending_count"], 0)
+        remaining = self.plan()
+        self.assertEqual(remaining["pending_count"], 0, remaining)
 
     def bind(self, claims):
         manifest = ei.read_telling_manifest(self.root)
@@ -401,6 +403,94 @@ class IndependentContextTests(unittest.TestCase):
         self.assertIn(
             "sources/manual/producer.md",
             {row["source_path"] for row in observed["grounding_identity"]},
+        )
+
+    def test_grounded_source_roles_survive_migration_and_disambiguate_paraphrase(self):
+        (self.root / "state/entity_rosters/organization.json").write_text(json.dumps({
+            "version": 1,
+            "type": "organization",
+            "entities": [{"name": "Northstar", "slug": "northstar", "aliases": []}],
+        }))
+        founder = self.source("northstar-founder", "I founded Northstar in 2012.")
+        employee = self.source("northstar-employee", "I joined Northstar payroll in 2014.")
+        consumer = self.source(
+            "northstar-memory",
+            "I launched Northstar before I ever joined its payroll.",
+        )
+
+        cases = (
+            (founder, "Northstar founding", "I founded Northstar in 2012.", "2012"),
+            (employee, "Northstar employment", "I joined Northstar payroll in 2014.", "2014"),
+        )
+        for source, title, description, year in cases:
+            snapshot = cc.build_context_snapshot(self.root, source)
+            extracted = {
+                "title": title,
+                "description": description,
+                "subject": "Northstar",
+                "places": [],
+                "date": {
+                    "stated": year,
+                    "age": None,
+                    "anchor_ref": None,
+                    "relation": None,
+                },
+                "timeline_relation": None,
+                "source_grounding": {
+                    "quote": description,
+                    "temporal_quote": year,
+                    "subject_quote": "Northstar",
+                    "kind": "date",
+                },
+            }
+            self.assertEqual(
+                cs.classify_file(
+                    source,
+                    "synthetic-recorded",
+                    skip_candidates=True,
+                    precomputed_result=full_response(snapshot, events=[extracted]),
+                ),
+                0,
+            )
+
+        migrated = self.migrate()
+        self.assertEqual(migrated["claims_by_type"]["date"], 2)
+        snapshot = cc.build_context_snapshot(self.root, consumer)
+        northstar = [
+            row for row in snapshot["candidates"]
+            if row.get("entity_refs") == ["organization/northstar"]
+        ]
+        self.assertEqual(
+            {row["event_role"] for row in northstar},
+            {"founded", "job"},
+            snapshot,
+        )
+        founding = next(row for row in northstar if row["event_role"] == "founded")
+        quote = "I launched Northstar before I ever joined its payroll."
+        self.assertTrue(te.quote_disambiguates(founding, northstar, quote))
+
+        linked = {
+            "title": "Northstar founding",
+            "description": quote,
+            "subject": "Northstar",
+            "places": [],
+            "date": None,
+            "source_grounding": None,
+            "timeline_relation": {
+                "relation": "within",
+                "candidate_id": founding["candidate_id"],
+                "entity_refs": ["organization/northstar"],
+                "evidence": {"quote": quote},
+            },
+        }
+        validated = cc.validate_response(
+            full_response(snapshot, events=[linked]),
+            snapshot,
+            quote,
+        )
+        self.assertEqual(
+            validated["events"][0]["timeline_relation"]["candidate_id"],
+            founding["candidate_id"],
         )
 
     def test_linked_event_absorbs_real_bound_correction_without_model_refresh(self):

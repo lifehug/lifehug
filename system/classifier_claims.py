@@ -602,11 +602,16 @@ def event_claims(
     row = event if isinstance(event, dict) else {}
     direct = {**temporal_reading(row), "reading_kind": "direct"}
     grounding = row.get("source_grounding")
+    direct_grounded = False
     if (isinstance(grounding, dict)
             and grounding.get("kind") == direct.get("claim_type")):
         grounded_evidence = _grounded_evidence(row)
         if grounded_evidence is not None:
             direct["evidence"] = grounded_evidence
+            direct_grounded = True
+    event_kind = (
+        timeline_evidence.event_role(row) if direct_grounded else None
+    ) or MOMENT_EVENT_KIND
     readings = [direct]
     contextual = contextual_reading(row)
     if contextual is not None and readings[0]["claim_type"] == tc.OCCURRENCE_CLAIM_TYPE:
@@ -640,7 +645,7 @@ def event_claims(
             "source_kind": SOURCE_KIND,
             "claim_type": reading["claim_type"],
             "subject_mention": event_subject_mention(row),
-            "event_kind": MOMENT_EVENT_KIND,
+            "event_kind": event_kind,
             "event_ref": event_ref,
             "event_mention": moment_title(row),
             "temporal_value": reading["temporal_value"],

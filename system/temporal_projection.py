@@ -72,6 +72,7 @@ from temporal_claims import (  # noqa: E402
     CLAIM_BASES,
     SCHEMA_VERSION,
     TEMPORAL_STATE_DIR,
+    TIMELINE_RESOLUTION_STATUSES,
     TemporalContractError,
     collapsed_text,
     digest_id,
@@ -395,6 +396,7 @@ ERROR_CODES = (
     "node_needs_rule_version",
     "unknown_origin_basis",
     "unknown_temporal_state",
+    "unknown_timeline_resolution_status",
     "unknown_life_view",
     "unknown_occurrence_subject_scope",
     "unknown_owner_timeline_relation",
@@ -615,6 +617,11 @@ class CalculatedTimelineNode:
     model_version: str | None = None
     projection_generation: int = 0
     conflict_state: str = "none"
+    #: v307, additive. The classifier's closed event-local outcome when every
+    #: status-bearing claim folded into this node agrees. The event and its
+    #: source evidence remain present for ``incomplete`` and ``not_temporal``;
+    #: consumers need not infer either state from an absent work item.
+    timeline_resolution_status: str | None = None
     #: v2, additive (eras design §2.2). A ``period`` node's own interval, with
     #: an EXCLUSIVE end; where the life clip stops (``present`` is a view token
     #: resolved at read time, never a stored date); how the origin was arrived
@@ -710,6 +717,7 @@ class CalculatedTimelineNode:
             ("origin_basis", self.origin_basis),
             ("life_view", self.life_view),
             ("temporal_state", self.temporal_state),
+            ("timeline_resolution_status", self.timeline_resolution_status),
             ("occurrence_subject_scope", self.occurrence_subject_scope),
             ("owner_timeline_relation", self.owner_timeline_relation),
             ("observed_envelope", self.observed_envelope),
@@ -835,6 +843,15 @@ def validate_calculated_timeline_node(value: object) -> dict:
         raise TimelineNodeError(
             "unknown_temporal_state", f"unknown temporal_state: {temporal_state!r}"
         )
+    timeline_resolution_status = collapsed_text(
+        value.get("timeline_resolution_status")
+    )
+    if (timeline_resolution_status
+            and timeline_resolution_status not in TIMELINE_RESOLUTION_STATUSES):
+        raise TimelineNodeError(
+            "unknown_timeline_resolution_status",
+            f"unknown timeline resolution status: {timeline_resolution_status!r}",
+        )
     scope = collapsed_text(value.get("occurrence_subject_scope"))
     if scope and scope not in OCCURRENCE_SUBJECT_SCOPES:
         raise TimelineNodeError(
@@ -889,6 +906,8 @@ def validate_calculated_timeline_node(value: object) -> dict:
         normalized["life_view"] = life_view
     if temporal_state:
         normalized["temporal_state"] = temporal_state
+    if timeline_resolution_status:
+        normalized["timeline_resolution_status"] = timeline_resolution_status
     if scope:
         normalized["occurrence_subject_scope"] = scope
     if relation:
@@ -1001,6 +1020,7 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         legacy_refs=tuple(normalized.get("legacy_refs") or ()),
         life_view=normalized.get("life_view"),
         temporal_state=normalized.get("temporal_state"),
+        timeline_resolution_status=normalized.get("timeline_resolution_status"),
         occurrence_subject_scope=normalized.get("occurrence_subject_scope"),
         owner_timeline_relation=normalized.get("owner_timeline_relation"),
         relation_evidence_refs=tuple(normalized.get("relation_evidence_refs") or ()),

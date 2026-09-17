@@ -412,7 +412,7 @@ class StableFreshnessTests(ContextCase):
         self.assertFalse(report["complete"])
         self.assertEqual(derive_context.call_count, 1)
         self.assertEqual(fold_active_index.call_count, 1)
-        self.assertEqual(load_roster.call_count, 3)
+        self.assertEqual(load_roster.call_count, 4)
         self.assertEqual(load_event_identities.call_count, 1)
         self.assertEqual(load_episode_operations.call_count, 1)
         self.assertEqual(read_telling_manifest.call_count, 1)
@@ -1026,6 +1026,10 @@ class ContextDiagnosticsTests(ContextCase):
             "return the WHOLE `timeline_relation` as null",
             "Keep the event and its independently stated date or age",
             "This list is event-local, not the entire catalog",
+            "Timeline Evidence Uses Two Independent Decisions",
+            "does NOT need a calendar date or age",
+            "an empty candidate set for a real event is `missing_evidence`",
+            "`incomplete` is allowed ONLY",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)

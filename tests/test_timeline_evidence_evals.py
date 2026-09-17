@@ -62,6 +62,9 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertIn('"event_contexts"', prompts[0])
         self.assertIn("Compute this event's relevant candidates", prompts[0])
         self.assertIn("provisional full-extraction", prompts[0])
+        self.assertIn("Timeline Evidence Uses Two Independent Decisions", prompts[0])
+        self.assertIn("does NOT need a calendar date or age", prompts[0])
+        self.assertIn("an empty candidate set for a real event is `missing_evidence`", prompts[0])
         self.assertNotIn("across the ENTIRE supplied candidate list", prompts[0])
 
 

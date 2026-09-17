@@ -657,6 +657,38 @@ def corrections_for(source_path: Path) -> list[str]:
     ]
 
 
+_TIMELINE_EVIDENCE_DECISIONS = """
+### Timeline Evidence Uses Two Independent Decisions
+
+1. `source_grounding` proves only a direct `date.stated` or `date.age`. It
+   requires exact temporal and subject words. It neither authorizes nor is
+   required for `timeline_relation`.
+2. `timeline_relation` places the event against a supplied candidate. Its exact
+   quote may use role, sequence, stay, office, relationship, or other contextual
+   words; it does NOT need a calendar date or age because the candidate carries
+   the supported bounds. A relation can therefore be valid while
+   `source_grounding` is null.
+
+General contrasts:
+- "I opened the shop before I ever drew a salary there" can distinguish an
+  opening candidate from an employment candidate and link to it without any
+  stated calendar words.
+- "While I served my second term as chair" can link within that supplied term
+  when the quote distinguishes it from the first term; it does not need a
+  direct date or age.
+- "Nina was 30 when she qualified" can have grounded age evidence even when no
+  candidate exists; grounding does not by itself create a contextual relation.
+
+Choose resolution from coverage, not candidate count. `incomplete` is allowed
+ONLY when that event's context says `complete: false`. When `complete: true`,
+an empty candidate set for a real event is `missing_evidence`, never
+`incomplete`. With complete coverage, use `ambiguous` when multiple supplied
+candidates remain plausible and the source cannot distinguish them, and use
+`missing_evidence` when no supplied candidate has enough source support.
+`not_temporal` is only for an extracted item that is not actually an event.
+"""
+
+
 def _build_timeline_prompt(
     source_path: Path,
     fm: dict,
@@ -706,6 +738,8 @@ Return ONLY one raw JSON object with exactly these fields:
     {{ "event_key": "exact existing event_key", "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate id relevant to this event"], "reason": "bounded explanation" }} }}
   ]
 }}
+
+{_TIMELINE_EVIDENCE_DECISIONS}
 
 Return each existing event key exactly once. Do not re-extract, rename, reorder,
 add, or omit events. Return only the four event-delta fields shown. The framework
@@ -877,6 +911,8 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
     {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the subject's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate relevant to this event"], "reason": "bounded explanation" }} }}
   ]{question_schema}
 }}
+
+{_TIMELINE_EVIDENCE_DECISIONS}
 
 ### Guidelines
 - `people`: include every named or described person; estimate mention_count from how prominent they are

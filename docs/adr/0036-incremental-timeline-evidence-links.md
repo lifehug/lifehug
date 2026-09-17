@@ -49,6 +49,10 @@ Each event records one of `linked`, `missing_evidence`, `ambiguous`,
 Incomplete and non-temporal outcomes do not create date questions. A proven
 raw relative anchor is replaced by its canonical target when both readings
 are the same edge; a genuinely different before/after constraint is retained.
+Calculated nodes carry the additive `timeline_resolution_status` field when
+all status-bearing claims in the node agree. This keeps the event and its raw
+evidence intact while letting readers show `incomplete` honestly and exclude
+`not_temporal` from chronological debt without guessing from missing work items.
 
 Freshness fingerprints include candidate identity, role, source/subject
 grounding identity, aliases, conflicts, alternatives, unmatched references,

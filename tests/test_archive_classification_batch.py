@@ -235,6 +235,15 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertNotIn("across the ENTIRE supplied candidate list", full_prompt)
         self.assertIn('"event_contexts": {}', timeline_prompt)
         self.assertIn("Treat each `event_contexts[event_key]` entry independently", timeline_prompt)
+        for prompt in (full_prompt, timeline_prompt):
+            normalized = " ".join(prompt.split())
+            self.assertIn("Timeline Evidence Uses Two Independent Decisions", normalized)
+            self.assertIn("does NOT need a calendar date or age", normalized)
+            self.assertIn(
+                "an empty candidate set for a real event is `missing_evidence`",
+                normalized,
+            )
+            self.assertIn("`incomplete` is allowed ONLY", normalized)
 
     def test_plan_builds_prompts_only_for_selected_items_and_names_ineligible(self) -> None:
         empty = self.sources / "manual" / "empty.md"

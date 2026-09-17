@@ -47,8 +47,8 @@ _GENERIC_REFERENCE_TERMS = _OWNER_TERMS | frozenset({
 _ROLE_TERMS = {
     "birth": ("birth", "born", "birthday"),
     "death": ("death", "died", "passed away"),
-    "job": ("job", "work", "worked", "hired", "joined", "employment"),
-    "work": ("job", "work", "worked", "hired", "joined", "employment"),
+    "job": ("job", "work", "worked", "hired", "joined", "employment", "payroll"),
+    "work": ("job", "work", "worked", "hired", "joined", "employment", "payroll"),
     "started": ("started", "began", "founded", "created", "launched"),
     "founded": ("founded", "founding", "started", "created", "launched"),
     "move": ("move", "moved", "lived", "home", "residence"),
@@ -61,6 +61,20 @@ _ROLE_TERMS = {
     "relationship": ("relationship", "dating", "together", "married"),
     "military": ("military", "army", "navy", "service", "served"),
     "visit": ("visit", "visited", "trip", "stayed"),
+}
+_EVENT_ROLE_TERMS = {
+    "birth": ("birth", "born", "birthday"),
+    "death": ("death", "died", "passed away"),
+    "founded": ("founded", "founding", "launch", "launched", "created"),
+    "job": ("job", "work", "worked", "hired", "joined", "employment", "payroll"),
+    "married": ("married", "marriage", "wedding"),
+    "move": ("move", "moved", "relocated"),
+    "residence": ("lived", "residence", "stay", "stayed", "home"),
+    "graduation": ("graduated", "graduation"),
+    "school": ("school", "attended", "college", "university"),
+    "military": ("military", "army", "navy", "service", "served"),
+    "visit": ("visit", "visited", "trip"),
+    "relationship": ("relationship", "dating", "together"),
 }
 
 
@@ -204,6 +218,20 @@ def _event_haystack(event: dict) -> str:
 
 def _term_occurs(term: str, haystack: str) -> bool:
     return bool(term) and re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", haystack) is not None
+
+
+def event_role(event: object) -> str | None:
+    """Preserve an explicit role from stable event words, or abstain."""
+    row = event if isinstance(event, dict) else {}
+    for value in (row.get("title"), row.get("description")):
+        text = _search_key(value)
+        matches = {
+            role for role, terms in _EVENT_ROLE_TERMS.items()
+            if any(_term_occurs(term, text) for term in terms)
+        }
+        if len(matches) == 1:
+            return next(iter(matches))
+    return None
 
 
 def _candidate_semantics(candidate: dict) -> dict:

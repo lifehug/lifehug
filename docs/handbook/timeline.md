@@ -248,6 +248,10 @@ generic owner references, so a narrow River House reference is not crowded out
 by many unrelated owner facts. Correcting only an anchor's bounds updates linked
 events through the deterministic fold without another model call. Named-person
 age arithmetic requires that person's own birth; it never borrows the owner's.
+When a calculated node's status-bearing claims agree, the published node carries
+their `timeline_resolution_status`. Incomplete and non-temporal events therefore
+remain visible with their source evidence, while timeline readers can keep them
+out of the missing-date count without inferring meaning from an absent question.
 
 **How organised is it** (v208, [ADR 0027](../adr/0027-the-placement-score.md)).
 The owner asked for a level — *how placed is this life, 0 → 1* — and already

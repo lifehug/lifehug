@@ -31,6 +31,7 @@ import classifier_claims  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
+import temporal_publication as pub  # noqa: E402
 import temporal_store as ts  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
@@ -702,7 +703,19 @@ class WorkItems(unittest.TestCase):
 
         for status in ("incomplete", "not_temporal"):
             with self.subTest(status=status):
-                self.assertFalse(items_of(derive(emitted(status)), "precision_gap"))
+                result = derive(emitted(status))
+                self.assertFalse(items_of(result, "precision_gap"))
+                node = result.nodes[0]
+                self.assertEqual(node["timeline_resolution_status"], status)
+                published = pub.projection_payload(
+                    result,
+                    published_at=NOW,
+                    input_digest="sha256:" + "a" * 64,
+                    timings={},
+                )
+                self.assertEqual(
+                    published["nodes"][0]["timeline_resolution_status"], status
+                )
 
         unresolved = emitted("missing_evidence")
         self.assertEqual(len(items_of(derive(unresolved), "precision_gap")), 1)

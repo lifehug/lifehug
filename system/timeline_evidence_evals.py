@@ -16,7 +16,7 @@ import classifier_context
 import classify_story
 import timeline_evidence
 from ai_provider import AIProviderError, call_ai, provider_status
-from lifehug_core import REPO_DIR
+from lifehug_core import REPO_DIR, read_text, write_text
 
 FIXTURES_PATH = REPO_DIR / "tests/goldens/timeline_evidence_links.json"
 QUALITY_NOTE = (
@@ -26,7 +26,7 @@ QUALITY_NOTE = (
 
 
 def load_fixtures(path: str | Path = FIXTURES_PATH) -> list[dict]:
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    value = json.loads(read_text(Path(path), encoding="utf-8"))
     if not isinstance(value, list) or not value:
         raise ValueError("timeline evidence fixtures must be a non-empty list")
     return value
@@ -135,7 +135,7 @@ def emitted_prompt(case: dict) -> str:
         root = Path(raw_root)
         source = root / "sources/manual" / f"{fixture['fixture_id']}.md"
         source.parent.mkdir(parents=True)
-        source.write_text(case["story_text"], encoding="utf-8")
+        write_text(source, case["story_text"])
         old_values = (
             classify_story.REPO_DIR,
             classify_story.SOURCES_DIR,

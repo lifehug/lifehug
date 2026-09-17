@@ -419,7 +419,11 @@ def _load_roster_catalog(vault_root: Path) -> tuple[
     aliases: dict[str, tuple[str, ...]] = {}
     rosters: dict[str, identity_resolution.RosterIndex] = {}
     person_roster: dict = {}
-    for kind in ("person", "place", "period"):
+    # Organizations use the same generic roster snapshot as the core entity
+    # types even though they are deliberately outside entity_roster's
+    # AI-assisted graduation pipeline. Timeline roles such as founding versus
+    # employment need that existing canonical identity to remain distinct.
+    for kind in ("person", "place", "period", "organization"):
         roster = entity_roster.load_roster(kind, vault_root=vault_root)
         if kind == "person":
             person_roster = roster
@@ -847,7 +851,7 @@ def _build_context_snapshot_from_catalog(
         dict(row) for row in existing.get("events") or () if isinstance(row, dict)
     ]
     event_contexts: dict[str, dict] = {}
-    if existing:
+    if existing and isinstance(existing.get("events"), list):
         for event in stored_events:
             context = timeline_evidence.build_event_context(
                 event,

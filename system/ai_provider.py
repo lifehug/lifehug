@@ -718,7 +718,15 @@ def _call_anthropic(prompt: str, model: str, cfg: dict[str, object]):
             status="unavailable",
         ) from None
     try:
-        content = response.content[0].text if response.content else ""
+        text_parts = []
+        for block in response.content or ():
+            if getattr(block, "type", None) != "text":
+                continue
+            text = getattr(block, "text")
+            if not isinstance(text, str):
+                raise TypeError("Anthropic text block did not contain text")
+            text_parts.append(text)
+        content = "".join(text_parts)
     except Exception:  # noqa: BLE001 — SDK accessors can expose response content
         raise AIResponseError(
             "anthropic response could not be decoded",

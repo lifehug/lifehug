@@ -3265,6 +3265,8 @@ def _node_dict(
             "calculation_rule_version": CALCULATION_RULE_VERSION,
             "projection_generation": generation,
             "conflict_state": state,
+            **({"timeline_resolution_status": status}
+               if (status := _group_timeline_resolution_status(group)) else {}),
             "provenance_summary": _provenance_summary(group, calculated, best),
             "life_view": life_view or _life_view(best, as_of),
             **({"possible_temporal_value": possible.to_dict()}
@@ -3693,6 +3695,16 @@ def _resolution_suppresses_date_question(group: dict) -> bool:
             return False
         statuses.append(status)
     return bool(statuses) and set(statuses) <= {"incomplete", "not_temporal"}
+
+
+def _group_timeline_resolution_status(group: dict) -> str | None:
+    """Return one explicit classifier outcome only when the node agrees."""
+    statuses = {
+        collapsed_text(claim.get("timeline_resolution_status"))
+        for claim in group.get("claims") or ()
+        if collapsed_text(claim.get("timeline_resolution_status"))
+    }
+    return next(iter(statuses)) if len(statuses) == 1 else None
 
 
 # --------------------------------------------------------------------------
