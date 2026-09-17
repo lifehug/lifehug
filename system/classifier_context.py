@@ -567,8 +567,7 @@ def _independent_grounded_classifier_claim(claim: dict, retracted_paths: set[str
         return False
     if claim.get("claim_type") not in ("date", "age") or claim.get("basis") != "explicit":
         return False
-    if claim.get("extractor_version") != temporal_claims.extractor_version_string(
-            "classifier-claims", rule_version="2"):
+    if not timeline_evidence.is_current_classifier_claim(claim):
         return False
     return any(
         isinstance(span, dict)
@@ -707,6 +706,45 @@ def _load_context_catalog(vault_root: Path) -> dict:
         str(item[0].get("kind") or ""),
         str(item[0].get("candidate_id") or ""),
     ))
+    # A mixed node can contain a target source's newly grounded fact plus an
+    # older independent recorder claim.  Keep a source-free form of those
+    # nodes so the target never receives bounds, conflicts, or aliases derived
+    # from its own output.  This is one additional pure fold per catalog, not
+    # one fold per source; candidates supported only by classifier facts are
+    # conservatively absent from the baseline.
+    baseline_candidates: dict[str, dict] = {}
+    if any(classifier_claims.values()):
+        baseline_index = {**independent_index, "claims": [
+            row for row in independent_index.get("claims") or ()
+            if not str((row.get("source_ref") or {}).get("source_id") or "").startswith(
+                "classification:"
+            )
+        ]}
+        baseline_claims_by_id = {
+            str(row.get("claim_id") or ""): row
+            for row in baseline_index["claims"]
+            if isinstance(row, dict) and row.get("claim_id")
+        }
+        baseline_records = dict(records)
+        baseline_records["manifest"] = event_identity.build_telling_manifest(
+            vault_root, bindings=identities, active_index=baseline_index
+        )
+        baseline_projection = _derive_context_timeline(
+            vault_root, baseline_index, baseline_records, person_roster
+        )
+        for node in baseline_projection.nodes:
+            if not isinstance(node, dict):
+                continue
+            claim_ids = frozenset(
+                str(value) for value in node.get("input_claim_refs") or () if value
+            )
+            row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
+            if row is None:
+                continue
+            row["grounding_identity"] = _grounding_identity(
+                claim_ids, baseline_claims_by_id
+            )
+            baseline_candidates[str(row.get("candidate_id") or "")] = row
     return {
         "roster_aliases": roster_aliases,
         "roster_matchers": roster_matchers,
@@ -728,6 +766,7 @@ def _load_context_catalog(vault_root: Path) -> dict:
         "classifications": _classification_records(vault_root),
         "retracted_paths": retracted_paths,
         "candidates": candidates,
+        "baseline_candidates": baseline_candidates,
     }
 
 
@@ -777,13 +816,19 @@ def _build_context_snapshot_from_catalog(
     bound_episode_ids.update(
         str(row["episode_id"]) for row in source_decisions if row.get("episode_id")
     )
-    # Exclude a candidate supported only by this target source. A second
-    # independent source may keep the same canonical candidate eligible.
+    # A target source must not consume its own grounded fact through a mixed
+    # episode.  Replace that enriched form with the source-free baseline; if
+    # no independent baseline exists, exclude the candidate conservatively.
     candidates = []
     for row, claim_ids in catalog["candidates"]:
-        if claim_ids and set(claim_ids).issubset(own_claims):
-            continue
-        candidates.append(dict(row))
+        candidate = row
+        if own_claims.intersection(claim_ids):
+            candidate = catalog["baseline_candidates"].get(
+                str(row.get("candidate_id") or "")
+            )
+            if candidate is None:
+                continue
+        candidates.append(dict(candidate))
 
     forced_ids = set(bound_episode_ids)
     forced_ids.update(

@@ -200,6 +200,14 @@ class ClaimEmissionTests(unittest.TestCase):
         event = self.grounded_event()
         self.assertEqual(classifier_claims.event_key(event), te.event_key(event))
 
+    def test_event_key_preserves_the_v306_unicode_identity(self) -> None:
+        event = {
+            "title": "Mira’s wedding",
+            "description": "We met in Bogotá.",
+        }
+        self.assertEqual(te.event_key(event), "363cccb54258")
+        self.assertEqual(classifier_claims.event_key(event), "363cccb54258")
+
     def test_grounded_direct_fact_identity_survives_link_refresh(self) -> None:
         event = self.grounded_event()
         before = self.claims(event, "sha256:" + "a" * 64)[0]

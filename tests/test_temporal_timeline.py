@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
 
 import chronology as chrono  # noqa: E402
+import classifier_claims  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -203,6 +204,7 @@ class RelativeAndInferredTime(unittest.TestCase):
         fair = claim(
             claim_type="age",
             subject_mention="the state fair",
+            subject_ref="self",
             event_kind="transition",
             temporal_value="about 12",
             quote="I was about 12",
@@ -271,6 +273,49 @@ class RelativeAndInferredTime(unittest.TestCase):
             "age_without_birth_anchor",
             [row["finding"] for row in result.diagnostics["findings"]],
         )
+
+    def test_unbound_named_ages_never_use_the_owners_birth(self):
+        owner_birth = claim(
+            claim_type="date", subject_mention="self", event_kind="birth",
+            temporal_value="1980", seed="owner-birth-for-unbound",
+        )
+        for subject in ("Mira", "my mother"):
+            with self.subTest(subject=subject):
+                age = claim(
+                    claim_type="age",
+                    subject_mention=subject,
+                    event_kind="married",
+                    temporal_value="21",
+                    seed=f"unbound-{subject}",
+                )
+                result = derive(owner_birth, age, owner_ref="self")
+                self.assertIsNone(node_for(result, "married")["best_temporal_value"])
+
+    def test_distinct_foreign_birth_groups_do_not_last_write_win(self):
+        first_ref = ident.derive_episode_ref(
+            event_kind="birth", subject_ref="person/mira", discriminator="first"
+        )
+        second_ref = ident.derive_episode_ref(
+            event_kind="birth", subject_ref="person/mira", discriminator="second"
+        )
+        births = [
+            claim(
+                claim_type="date", subject_ref="person/mira",
+                subject_mention="Mira", event_kind="birth", event_ref=first_ref,
+                temporal_value="1975", seed="mira-first-birth",
+            ),
+            claim(
+                claim_type="date", subject_ref="person/mira",
+                subject_mention="Mira", event_kind="birth", event_ref=second_ref,
+                temporal_value="1985", seed="mira-second-birth",
+            ),
+        ]
+        age = claim(
+            claim_type="age", subject_ref="person/mira", subject_mention="Mira",
+            event_kind="married", temporal_value="21", seed="mira-ambiguous-birth-age",
+        )
+        result = derive(*births, age, owner_ref="self")
+        self.assertIsNone(node_for(result, "married")["best_temporal_value"])
 
     def test_a_named_others_age_uses_their_own_supported_birth(self):
         owner_birth = claim(
@@ -640,30 +685,26 @@ class WorkItems(unittest.TestCase):
         self.assertNotIn(node_for(result, "married")["node_id"], asked)
 
     def test_incomplete_and_non_temporal_classifier_outcomes_do_not_ask_for_dates(self):
+        def emitted(status):
+            return classifier_claims.event_claims(
+                stem=f"story-{status}",
+                event={
+                    "title": f"{status} event",
+                    "description": "A synthetic event without a date.",
+                    "subject": "self",
+                    "date": None,
+                    "timeline_resolution": {"status": status},
+                },
+                revision=revision(status),
+                source_path=f"sources/manual/{status}.md",
+                now=NOW,
+            )[0]
+
         for status in ("incomplete", "not_temporal"):
             with self.subTest(status=status):
-                event = claim(
-                    source=f"classification:story#{status}",
-                    claim_type="occurrence",
-                    subject_mention="self",
-                    event_kind="moment",
-                    temporal_value=None,
-                    extractor_version="classifier-claims/rule:3",
-                    timeline_resolution_status=status,
-                    seed=status,
-                )
-                self.assertFalse(items_of(derive(event), "precision_gap"))
+                self.assertFalse(items_of(derive(emitted(status)), "precision_gap"))
 
-        unresolved = claim(
-            source="classification:story#missing",
-            claim_type="occurrence",
-            subject_mention="self",
-            event_kind="moment",
-            temporal_value=None,
-            extractor_version="classifier-claims/rule:3",
-            timeline_resolution_status="missing_evidence",
-            seed="missing-evidence",
-        )
+        unresolved = emitted("missing_evidence")
         self.assertEqual(len(items_of(derive(unresolved), "precision_gap")), 1)
 
     def test_a_generic_loss_question_never_reaches_the_daily_queue(self):
@@ -1103,6 +1144,7 @@ class TheBirthOrigin(unittest.TestCase):
         fair = claim(
             claim_type="age",
             subject_mention="the state fair",
+            subject_ref="self",
             event_kind="transition",
             temporal_value="about 12",
             seed="fair-reach",

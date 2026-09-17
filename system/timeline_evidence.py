@@ -18,6 +18,10 @@ import chronology as chrono
 from temporal_claims import collapsed_text, normalized_mention_key
 
 EVENT_KEY_LENGTH = 12
+CLASSIFIER_CLAIMS_RULE_VERSION = "2"
+CLASSIFIER_CLAIMS_EXTRACTOR = (
+    f"classifier-claims/rule:{CLASSIFIER_CLAIMS_RULE_VERSION}"
+)
 MAX_RELEVANT_CANDIDATES = 64
 MAX_TOTAL_CANDIDATES = 256
 MAX_RESOLUTION_REASON_CHARS = 300
@@ -69,7 +73,10 @@ class TimelineEvidenceError(ValueError):
 
 
 def _canonical(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    # Event identity predates this helper. Keep the exact v306 serializer used
+    # by landmark_projection.canonical_json so Unicode titles/descriptions do
+    # not re-key existing events or their manual references.
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def digest(value: object) -> str:
@@ -93,6 +100,16 @@ def ensure_event_key(event: dict) -> str:
         raise TimelineEvidenceError("event_key_changed", "event_key does not match stored event words")
     event["event_key"] = key
     return key
+
+
+def is_current_classifier_claim(claim: object) -> bool:
+    """Whether a claim belongs to the grounded-fact extractor generation."""
+    row = claim if isinstance(claim, dict) else {}
+    source_ref = row.get("source_ref") if isinstance(row.get("source_ref"), dict) else {}
+    return (
+        collapsed_text(source_ref.get("source_id")).startswith("classification:")
+        and collapsed_text(row.get("extractor_version")) == CLASSIFIER_CLAIMS_EXTRACTOR
+    )
 
 
 def _search_key(value: object) -> str:

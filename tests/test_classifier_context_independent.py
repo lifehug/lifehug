@@ -329,6 +329,80 @@ class IndependentContextTests(unittest.TestCase):
         self.assertEqual(cc.build_context_snapshot(self.root, unrelated)["context_digest"],
                          other_before["context_digest"])
 
+    def test_mixed_grounded_fact_cannot_feed_its_source_context(self):
+        anchor = self.independent_anchor()
+        self.publish()
+        anchor_node = next(
+            node for node in pub.read_projection(self.root)["nodes"]
+            if anchor["claim_id"] in node["input_claim_refs"]
+        )
+        self.sources[0].write_text(
+            "---\ntitle: producer\n---\n"
+            "I recorded Cedarport in 1996 and corrected the date to 1997.\n"
+        )
+        raw = self.sources[0].read_text()
+        revision = store.payload_sha256(raw)
+
+        def grounded_claim(year):
+            quote = str(year)
+            start = raw.index(quote)
+            grounded_event = {
+                **event(subject="Cedarport", title="Cedarport residence"),
+                "date": {"stated": quote, "age": None, "anchor_ref": None,
+                         "relation": None},
+                "source_grounding": {
+                    "kind": "date",
+                    "quote": quote,
+                    "temporal_quote": quote,
+                    "subject_quote": "Cedarport",
+                    "start": start,
+                    "end": start + len(quote),
+                    "source_revision": revision,
+                },
+            }
+            generated = classifier_claims.event_claims(
+                stem="producer",
+                event=grounded_event,
+                revision=revision,
+                source_path="sources/manual/producer.md",
+                now=NOW,
+            )[0]
+            return tc.validate_temporal_claim({
+                **generated,
+                "subject_ref": "place/cedarport",
+                "event_ref": anchor_node["node_id"],
+            }, now=NOW)
+
+        first = grounded_claim(1997)
+        store.write_receipt(self.root, {
+            "source_ref": first["source_ref"],
+            "extractor_version": classifier_claims.CLASSIFIER_EXTRACTOR,
+            "claims": [first],
+        }, now=NOW)
+        producer_before = cc.build_context_snapshot(self.root, self.sources[0])
+        target_before = next(
+            row for row in producer_before["candidates"]
+            if row["candidate_id"] == anchor_node["node_id"]
+        )
+        self.assertEqual(target_before["supported_bounds"]["best"], "1994/1998")
+        self.assertNotIn(
+            "sources/manual/producer.md",
+            {row["source_path"] for row in target_before["grounding_identity"]},
+        )
+        self.assertEqual(
+            cc.build_context_snapshot(self.root, self.sources[0])["context_digest"],
+            producer_before["context_digest"],
+        )
+        observer = cc.build_context_snapshot(self.root, self.sources[1])
+        observed = next(
+            row for row in observer["candidates"]
+            if row["candidate_id"] == anchor_node["node_id"]
+        )
+        self.assertIn(
+            "sources/manual/producer.md",
+            {row["source_path"] for row in observed["grounding_identity"]},
+        )
+
     def test_linked_event_absorbs_real_bound_correction_without_model_refresh(self):
         anchor = self.independent_anchor()
         self.publish()

@@ -115,6 +115,7 @@ import identity_resolution as ident  # noqa: E402
 import landmark_opportunities as lo  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
+import timeline_evidence  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
 import timeline_gain as tg  # noqa: E402
@@ -3685,11 +3686,7 @@ def _resolution_suppresses_date_question(group: dict) -> bool:
     """Incomplete searches and non-events are not missing date assertions."""
     statuses: list[str] = []
     for claim in group.get("claims") or ():
-        source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
-        if (not collapsed_text(source_ref.get("source_id")).startswith("classification:")
-                or not collapsed_text(claim.get("extractor_version")).startswith(
-                    "classifier-claims/rule:3"
-                )):
+        if not timeline_evidence.is_current_classifier_claim(claim):
             return False
         status = collapsed_text(claim.get("timeline_resolution_status"))
         if not status:
@@ -3867,14 +3864,21 @@ def derive_calculated_timeline(
             seeded = _reconcile_group(births[0], birth=None, diagnostics=[])
             owner_birth = seeded["best"]
 
-    births_by_subject: dict[str, object] = {}
+    birth_candidates_by_subject: dict[str, list[object]] = {}
     for group in groups.values():
         if group["event_kind"] != "birth":
             continue
         seeded = _reconcile_group(group, birth=None, diagnostics=[])
         if seeded["best"] is None or seeded["conflict"] >= MATERIAL_CONFLICT:
             continue
-        births_by_subject[normalized_mention_key(group["subject"])] = seeded["best"]
+        birth_candidates_by_subject.setdefault(
+            normalized_mention_key(group["subject"]), []
+        ).append(seeded["best"])
+    births_by_subject = {
+        subject: candidates[0]
+        for subject, candidates in birth_candidates_by_subject.items()
+        if subject and len(candidates) == 1
+    }
 
     def birth_for_group(group: dict) -> object:
         subject_key = normalized_mention_key(group["subject"])
@@ -3883,25 +3887,10 @@ def derive_calculated_timeline(
             return owner_birth
         if subject_key in births_by_subject:
             return births_by_subject[subject_key]
-        # Legacy claims often used an event label as subject_mention for an
-        # owner-age statement. Preserve that compatibility, but never lend the
-        # owner's birthday to a canonical person or a source-grounded
-        # classifier statement about a named other person.
-        subject_bound = "/" in collapsed_text(group["subject"])
-        grounded_classifier_age = any(
-            claim.get("claim_type") == "age"
-            and collapsed_text(claim.get("extractor_version")).startswith(
-                "classifier-claims/rule:3"
-            )
-            and any(
-                isinstance(span, dict)
-                and type(span.get("start")) is int
-                and type(span.get("end")) is int
-                for span in claim.get("evidence") or ()
-            )
-            for claim in group["claims"]
-        )
-        return None if subject_bound or grounded_classifier_age else owner_birth
+        # The owner's birth is never a generic fallback. An owner-age claim
+        # must carry explicit owner identity through subject_ref or an exact
+        # owner-only mention; a named or unbound subject stays unplaced.
+        return None
 
     calculated = {
         node_id: _reconcile_group(

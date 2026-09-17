@@ -147,10 +147,8 @@ from temporal_claims import (  # noqa: E402
 #: prompt, no temperature. `temporal_claims.extractor_version_string` is the
 #: one spelling, so "which extractor produced this" stays comparable.
 EXTRACTOR_NAME = "classifier-claims"
-RULE_VERSION = "2"
-CLASSIFIER_EXTRACTOR = tc.extractor_version_string(
-    EXTRACTOR_NAME, rule_version=RULE_VERSION
-)
+RULE_VERSION = timeline_evidence.CLASSIFIER_CLAIMS_RULE_VERSION
+CLASSIFIER_EXTRACTOR = timeline_evidence.CLASSIFIER_CLAIMS_EXTRACTOR
 
 #: ``classification:<stem>#<event key>``. The prefix is what tells this
 #: module's own claims apart from every other extractor's when it looks for
