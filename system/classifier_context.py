@@ -1147,6 +1147,14 @@ def snapshot_metadata_for_events(snapshot: dict, events: object) -> dict:
     return snapshot_metadata(accepted)
 
 
+def candidate_identity_is_resolved(candidate: dict) -> bool:
+    """The whole candidate must have no unresolved or ambiguous identity flags."""
+    return not (
+        candidate.get("unresolved_entity_mentions")
+        or candidate.get("entity_ref_ambiguities")
+    )
+
+
 def validate_response(
     result: object,
     snapshot: dict,
@@ -1253,8 +1261,7 @@ def validate_response(
                     "timeline relation candidate set is incomplete",
                     code=ContextFailureCode.CONTEXT_INCOMPLETE,
                 )
-            if (candidate.get("unresolved_entity_mentions")
-                    or candidate.get("entity_ref_ambiguities")):
+            if not candidate_identity_is_resolved(candidate):
                 raise ClassifierContextError(
                     "timeline relation candidate identity is unresolved or ambiguous",
                     code=ContextFailureCode.CANDIDATE_AMBIGUOUS,

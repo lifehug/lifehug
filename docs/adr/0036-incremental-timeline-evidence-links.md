@@ -75,7 +75,10 @@ The full and incremental prompts share one verbatim eligibility instruction
 block (v309, issue #352). Incremental resolution copies the exact supplied
 event-local candidate IDs, including ineligible alternatives; selecting a link
 still requires resolved identity, exact refs, and unique source evidence.
-Clarifying these existing requirements leaves validator and cache versions
+Rendered contexts list `identity_blocked_candidate_ids` using the validator's
+same pure identity predicate. This presents existing facts without changing
+stored snapshots, membership or digests.
+Clarifying these existing requirements leaves validator policy and cache versions
 unchanged, so accepted results are not re-run solely for clearer instructions.
 
 ## Consequences

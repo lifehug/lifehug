@@ -76,9 +76,11 @@ Never use the owner's birth to calculate a named person's age.
 include one verbatim eligibility block. Incremental resolution copies the exact
 event-local candidate ID list, including rejected/ineligible alternatives, while
 links require resolved identity, exact nonempty refs, and unique source quotes.
+Both rendered contexts expose `identity_blocked_candidate_ids`, calculated by
+the validator's same pure identity predicate, without changing stored snapshots.
 Missing literal same-subject date/age proof returns null grounding independently
 of a valid relative link. This instruction clarification does not invalidate
-cached results or change validator, context/prompt, extractor, or schema versions.
+cached results or change validator policy, context/prompt, extractor, or schema versions.
 
 ## First Session: Setup
 

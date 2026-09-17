@@ -245,9 +245,12 @@ supported birth and never borrows the owner's.
 receive the same candidate prerequisites. Incremental resolution copies the exact
 `event_contexts[event_key].candidate_ids` list, retaining alternatives even when
 unresolved or ambiguous identity makes them ineligible for a link. Exact refs,
-unique source evidence, event-local completeness and independent literal
-grounding remain mandatory. This prompt clarification preserves existing
-validators and cache versions; it schedules no reinterpretation by itself.
+unique source evidence and event-local completeness remain mandatory; grounding,
+when provided, independently proves literal date/age evidence. Both rendered
+contexts expose `identity_blocked_candidate_ids` using the validator's shared
+pure identity predicate, without mutating snapshots or candidate membership.
+Validator policy and cache versions remain unchanged; this presentation change
+schedules no reinterpretation by itself.
 
 **Natural quoted ranges (v308).** Exact source grounding accepts a narrowly
 bounded whole-string range when two explicit dates are joined by `through` or

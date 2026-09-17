@@ -742,6 +742,8 @@ when ALL of these already-enforced prerequisites hold:
    role. Do not reinterpret or dismiss the supplied flags. With complete
    coverage, return null relation plus `ambiguous`, preserving the entire
    event-local candidate ID list.
+   Never choose an ID in `identity_blocked_candidate_ids`; keep it in the
+   resolution candidate list when supplied for this event.
    Retain ineligible candidates in the resolution list; never link to them.
 3. `entity_refs` must be a nonempty list of exact refs supplied on THAT candidate,
    supported by this event. If multiple candidates in the event-local set share
@@ -788,6 +790,28 @@ Every `timeline_resolution.reason` must contain 1 to
 """
 
 
+def _timeline_prompt_context(context_snapshot: dict) -> str:
+    """Render existing context facts without changing the stored snapshot."""
+    return json.dumps({
+        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
+        "context_complete": context_snapshot.get("context_complete", False),
+        "context_truncated": context_snapshot.get("context_truncated", False),
+        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
+        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
+        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
+        "candidates": context_snapshot.get("candidates", []),
+        "identity_blocked_candidate_ids": sorted(
+            str(candidate["candidate_id"])
+            for candidate in context_snapshot.get("candidates") or ()
+            if isinstance(candidate, dict) and candidate.get("candidate_id")
+            and not classifier_ctx.candidate_identity_is_resolved(candidate)
+        ),
+        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
+        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
+        "event_contexts": context_snapshot.get("event_contexts", {}),
+    }, indent=2, sort_keys=True)
+
+
 def _build_timeline_prompt(
     source_path: Path,
     fm: dict,
@@ -800,18 +824,7 @@ def _build_timeline_prompt(
     for event in stored_events:
         if isinstance(event, dict):
             timeline_evidence.ensure_event_key(event)
-    timeline_context = json.dumps({
-        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
-        "context_complete": context_snapshot.get("context_complete", False),
-        "context_truncated": context_snapshot.get("context_truncated", False),
-        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
-        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
-        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
-        "candidates": context_snapshot.get("candidates", []),
-        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
-        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
-        "event_contexts": context_snapshot.get("event_contexts", {}),
-    }, indent=2, sort_keys=True)
+    timeline_context = _timeline_prompt_context(context_snapshot)
     return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
 
 ## Source File
@@ -879,18 +892,7 @@ def build_prompt(
             judgment_section += f"\n\n{signals_block}"
         categories_block = load_question_categories()
     themes_block = ", ".join(THEME_TAXONOMY)
-    timeline_context = json.dumps({
-        "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
-        "context_complete": context_snapshot.get("context_complete", False),
-        "context_truncated": context_snapshot.get("context_truncated", False),
-        "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
-        "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
-        "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
-        "candidates": context_snapshot.get("candidates", []),
-        "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
-        "prior_event_identities": context_snapshot.get("prior_event_identities", []),
-        "event_contexts": context_snapshot.get("event_contexts", {}),
-    }, indent=2, sort_keys=True)
+    timeline_context = _timeline_prompt_context(context_snapshot)
 
     relative_path = _relative_path(source_path)
     question_schema = ""

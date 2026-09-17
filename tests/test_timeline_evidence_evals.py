@@ -164,6 +164,7 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
                     "even when its mention seems unrelated to the matched place or role",
                     "Do not reinterpret or dismiss the supplied flags",
                     "With complete coverage, return null relation plus `ambiguous`, preserving the entire event-local candidate ID list",
+                    "Never choose an ID in `identity_blocked_candidate_ids`",
                     "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
                     "one exact, unchanged substring of Story Text occurring exactly once",
                     "return `source_grounding: null`",
@@ -179,6 +180,64 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
             ):
                 self.assertEqual(prompt.count(sentinel), 1)
                 self.assertNotIn("candidate must have no `unresolved_entity_mentions`", prompt)
+
+    def test_rendered_identity_blocks_match_in_both_modes_without_snapshot_mutation(self) -> None:
+        fixtures = evals.load_fixtures()
+        rendered = []
+        for mode in ("full", "timeline"):
+            with self.subTest(mode=mode):
+                case = (evals.build_timeline_case(fixtures[-1]) if mode == "timeline"
+                        else evals.build_case(fixtures[-1]))
+                for fixture in fixtures[5:7]:
+                    case["snapshot"]["candidates"].extend(
+                        evals.build_case(fixture)["snapshot"]["candidates"]
+                    )
+                before = copy.deepcopy(case["snapshot"])
+                prompt = (evals.emitted_timeline_prompt(case) if mode == "timeline"
+                          else evals.emitted_prompt(case))
+                context_text = prompt.split("## Canonical Timeline Context\n", 1)[1]
+                context, _ = json.JSONDecoder().raw_decode(context_text[context_text.index("{"):])
+                self.assertEqual(context["identity_blocked_candidate_ids"], [
+                    "node:amber-job", "node:cedar-first", "node:willow-stay",
+                ])
+                self.assertNotIn("node:cedar-second", context["identity_blocked_candidate_ids"])
+                self.assertEqual(context["candidates"], before["candidates"])
+                self.assertEqual(context["event_contexts"], before["event_contexts"])
+                self.assertEqual(context["classification_snapshot"],
+                                 evals.classifier_context.snapshot_metadata(before))
+                self.assertEqual(case["snapshot"], before)
+                self.assertNotIn("identity_blocked_candidate_ids", case["snapshot"])
+                rendered.append(context["identity_blocked_candidate_ids"])
+        self.assertEqual(*rendered)
+
+    def test_identity_predicate_preserves_existing_truthiness_policy(self) -> None:
+        predicate = evals.classifier_context.candidate_identity_is_resolved
+        self.assertTrue(predicate({}))
+        for unresolved in (None, [], "", ["unrelated caretaker"]):
+            for ambiguous in (None, [], "", [{"mention": "unrelated name"}]):
+                with self.subTest(unresolved=unresolved, ambiguous=ambiguous):
+                    candidate = {"unresolved_entity_mentions": unresolved,
+                                 "entity_ref_ambiguities": ambiguous}
+                    self.assertEqual(predicate(candidate), not (unresolved or ambiguous))
+
+    def test_renderer_and_validator_use_the_same_identity_predicate(self) -> None:
+        case = evals.build_timeline_case(evals.load_fixtures()[-1])
+        response = evals.recorded_timeline_response(case)
+        with mock.patch.object(
+            evals.classifier_context, "candidate_identity_is_resolved", return_value=False
+        ) as predicate:
+            context = json.loads(evals.classify_story._timeline_prompt_context(case["snapshot"]))
+            self.assertEqual(context["identity_blocked_candidate_ids"],
+                             ["node:cedar-first", "node:cedar-second"])
+            self.assertEqual(predicate.call_count, 2)
+            with self.assertRaises(evals.classifier_context.ClassifierContextError) as caught:
+                evals.classifier_context.validate_response(
+                    response, case["snapshot"], case["story_text"], mode="timeline",
+                    existing_events=case["existing_events"], require_event_contract=True,
+                )
+            self.assertEqual(caught.exception.code,
+                             evals.classifier_context.ContextFailureCode.CANDIDATE_AMBIGUOUS)
+            self.assertEqual(predicate.call_count, 3)
 
     def test_ineligible_candidates_stay_in_resolution_but_cannot_be_linked(self) -> None:
         fixtures = evals.load_fixtures()[5:7]
