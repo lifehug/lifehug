@@ -61,6 +61,17 @@ alone cannot refresh paid readings. Genuine source corrections, independent
 dates, roster and human decisions still can. Legacy hashes are not restamped,
 and a genuine change to global fallback context can affect multiple sources.
 
+**Incremental timeline evidence (v307, ADR 0036).** Keep extracted events stable
+and refresh only source grounding, canonical relation, and a closed resolution
+outcome by exact event key when story bytes are unchanged. Only exact
+source-grounded direct dates or ages may re-enter the independent candidate
+fold; contextual relations, target-source facts, summaries, and inferred dates
+remain excluded. Candidate lookup and completeness are event-local and include
+same-entity competitors. Bound-only anchor corrections propagate through a
+stable link without model work; aliases, competitors, identity/meaning changes,
+corrections, retractions, and human decisions invalidate affected outcomes.
+Never use the owner's birth to calculate a named person's age.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:

@@ -22,14 +22,16 @@ import event_identity
 import identity_resolution
 import source_integrity
 import temporal_placement as placement
+import temporal_claims
 import temporal_projection
 import temporal_store
+import timeline_evidence
 from ai_provider import AIResponseError
 from temporal_claims import normalized_mention_key
 from vault_paths import vault_data_path
 
 CONTEXT_SCHEMA_VERSION = 1
-PROMPT_VERSION = "contextual-timeline:1"
+PROMPT_VERSION = "contextual-timeline:2"
 EXTRACTOR_VERSION = "story-classifier:2"
 MAX_CONTEXT_CANDIDATES = 64
 MAX_CONTEXT_DECISIONS = 64
@@ -69,6 +71,9 @@ class ContextFailureCode(Enum):
     QUOTE_AMBIGUOUS = "context_quote_ambiguous"
     ENTITY_REFS_INVALID = "context_entity_refs_invalid"
     CANDIDATE_NOT_DISAMBIGUATED = "context_candidate_not_disambiguated"
+    EVENT_KEYS_INVALID = "context_event_keys_invalid"
+    GROUNDING_INVALID = "context_grounding_invalid"
+    RESOLUTION_INVALID = "context_resolution_invalid"
 
 
 class ClassifierContextError(AIResponseError, ValueError):
@@ -272,8 +277,6 @@ def _candidate(
         return None
     node_kind = str(node.get("node_kind") or "")
     event_kind = str(node.get("event_kind") or "")
-    if node_kind == "event" and event_kind not in LANDMARK_EVENT_KINDS:
-        return None
     if node_kind == "period" and event_kind != "named_era":
         return None
     if node_kind not in ("event", "period", "episode"):
@@ -300,7 +303,7 @@ def _candidate(
         value for value in (_bounds(row) for row in node.get("alternate_values") or ())
         if value is not None
     ]
-    return {
+    row = {
         "candidate_id": candidate_id,
         "node_kind": node_kind,
         "episode_id": node.get("episode_id"),
@@ -318,6 +321,9 @@ def _candidate(
         "conflict_state": node.get("conflict_state", "none"),
         "alternatives": alternatives,
     }
+    row["event_role"] = event_kind
+    row["reference_keys"] = timeline_evidence.candidate_reference_keys(row)
+    return row
 
 
 def _normalized_human_identity_records(
@@ -413,7 +419,11 @@ def _load_roster_catalog(vault_root: Path) -> tuple[
     aliases: dict[str, tuple[str, ...]] = {}
     rosters: dict[str, identity_resolution.RosterIndex] = {}
     person_roster: dict = {}
-    for kind in ("person", "place", "period"):
+    # Organizations use the same generic roster snapshot as the core entity
+    # types even though they are deliberately outside entity_roster's
+    # AI-assisted graduation pipeline. Timeline roles such as founding versus
+    # employment need that existing canonical identity to remain distinct.
+    for kind in ("person", "place", "period", "organization"):
         roster = entity_roster.load_roster(kind, vault_root=vault_root)
         if kind == "person":
             person_roster = roster
@@ -475,6 +485,28 @@ def _matched_roster_evidence(
     ]
 
 
+def _source_roster_authority(
+    candidates: list[dict], candidate_ids: object, roster_evidence: object,
+) -> list[dict]:
+    """Roster matches that can change identity for this event-local set."""
+    selected = {str(value) for value in (candidate_ids or ()) if value}
+    selected_terms = {
+        str(term).casefold()
+        for row in candidates
+        if row.get("candidate_id") in selected
+        for authority in row.get("canonical_roster_terms") or ()
+        if isinstance(authority, dict)
+        for term in authority.get("terms") or ()
+        if str(term).strip()
+    }
+    return [
+        row for row in (roster_evidence or ())
+        if isinstance(row, dict) and selected_terms.intersection(
+            str(term).casefold() for term in row.get("terms") or ()
+        )
+    ]
+
+
 def _roster_context(
     vault_root: Path,
     story_text: str,
@@ -520,12 +552,71 @@ def _freshness_candidate(row: dict) -> dict:
     return {
         key: row.get(key)
         for key in (
-            "candidate_id", "episode_id", "kind", "entity_refs",
+            "candidate_id", "episode_id", "kind", "event_role", "entity_refs",
             "canonical_roster_terms",
             "unresolved_entity_mentions", "entity_ref_ambiguities",
             "supported_bounds", "basis", "conflict_state", "alternatives",
+            "grounding_identity", "reference_keys",
         )
     }
+
+
+def _independent_grounded_classifier_claim(claim: dict, retracted_paths: set[str]) -> bool:
+    """Only verified direct facts may cross v306's classifier exclusion."""
+    source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+    source_id = str(source_ref.get("source_id") or "")
+    if not source_id.startswith("classification:"):
+        return True
+    if str(source_ref.get("source_path") or "") in retracted_paths:
+        return False
+    if claim.get("claim_type") not in ("date", "age") or claim.get("basis") != "explicit":
+        return False
+    if not timeline_evidence.is_current_classifier_claim(claim):
+        return False
+    return any(
+        isinstance(span, dict)
+        and isinstance(span.get("start"), int)
+        and isinstance(span.get("end"), int)
+        for span in claim.get("evidence") or ()
+    )
+
+
+def _grounding_identity(claim_ids: object, claims_by_id: dict[str, dict]) -> list[dict]:
+    rows: list[dict] = []
+    for claim_id in sorted(str(value) for value in (claim_ids or ()) if value):
+        claim = claims_by_id.get(claim_id)
+        if not isinstance(claim, dict):
+            continue
+        source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+        rows.append({
+            "claim_type": claim.get("claim_type"),
+            "temporal_value": claim.get("temporal_value"),
+            "subject_ref": claim.get("subject_ref"),
+            "subject_mention": claim.get("subject_mention"),
+            "source_path": source_ref.get("source_path"),
+            "source_revision": source_ref.get("revision"),
+            "evidence": claim.get("evidence"),
+        })
+    return rows
+
+
+def _grounded_candidate_role(
+    node: dict,
+    claim_ids: object,
+    claims_by_id: dict[str, dict],
+) -> str:
+    """Expose one grounded source role without rewriting episode authority."""
+    canonical = str(node.get("event_kind") or "")
+    if canonical not in ("", "moment"):
+        return canonical
+    roles = {
+        str(claim.get("event_kind") or "")
+        for claim_id in claim_ids or ()
+        if isinstance((claim := claims_by_id.get(str(claim_id))), dict)
+        and timeline_evidence.is_current_classifier_claim(claim)
+        and str(claim.get("event_kind") or "") not in ("", "moment")
+    }
+    return next(iter(roles)) if len(roles) == 1 else canonical
 
 
 def _prior_identities_from_manifest(manifest: object, relative_source: str) -> list[dict]:
@@ -578,15 +669,19 @@ def _load_context_catalog(vault_root: Path) -> dict:
         for term in terms
     )
     index = temporal_store.fold_active_index(vault_root)
-    # Filter before the canonical fold: mixed-node metadata, bounds, conflicts
-    # and dependencies must never borrow even another source's classifier claim.
+    retracted_paths = timeline_evidence.active_global_retracted_paths(vault_root)
+    # Filter before the canonical fold. Contextual classifier claims remain
+    # excluded; only exact-source direct date/age facts may become candidates.
     independent_index = {**index, "claims": [
         row for row in index.get("claims") or ()
-        if not str((row.get("source_ref") or {}).get("source_id") or "").startswith(
-            "classification:"
-        )
+        if _independent_grounded_classifier_claim(row, retracted_paths)
     ]}
     claims_by_source, classifier_claims = _claim_catalog(independent_index)
+    independent_claims_by_id = {
+        str(row.get("claim_id") or ""): row
+        for row in independent_index.get("claims") or ()
+        if isinstance(row, dict) and row.get("claim_id")
+    }
     records = episode_fold.load_episode_records(vault_root, manifest={})
     identities, operations = records["bindings"], records["operations"]
     independent_manifest = event_identity.build_telling_manifest(
@@ -625,12 +720,60 @@ def _load_context_catalog(vault_root: Path) -> dict:
         )
         row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
         if row is not None:
+            row["grounding_identity"] = _grounding_identity(
+                claim_ids, independent_claims_by_id
+            )
+            grounded_role = _grounded_candidate_role(
+                node, claim_ids, independent_claims_by_id
+            )
+            if grounded_role and grounded_role != row.get("event_role"):
+                row["event_role"] = grounded_role
+                row["reference_keys"] = timeline_evidence.candidate_reference_keys(row)
             candidates.append((row, claim_ids))
     candidates.sort(key=lambda item: (
         0 if item[0].get("node_kind") == "episode" else 1,
         str(item[0].get("kind") or ""),
         str(item[0].get("candidate_id") or ""),
     ))
+    # A mixed node can contain a target source's newly grounded fact plus an
+    # older independent recorder claim.  Keep a source-free form of those
+    # nodes so the target never receives bounds, conflicts, or aliases derived
+    # from its own output.  This is one additional pure fold per catalog, not
+    # one fold per source; candidates supported only by classifier facts are
+    # conservatively absent from the baseline.
+    baseline_candidates: dict[str, dict] = {}
+    if any(classifier_claims.values()):
+        baseline_index = {**independent_index, "claims": [
+            row for row in independent_index.get("claims") or ()
+            if not str((row.get("source_ref") or {}).get("source_id") or "").startswith(
+                "classification:"
+            )
+        ]}
+        baseline_claims_by_id = {
+            str(row.get("claim_id") or ""): row
+            for row in baseline_index["claims"]
+            if isinstance(row, dict) and row.get("claim_id")
+        }
+        baseline_records = dict(records)
+        baseline_records["manifest"] = event_identity.build_telling_manifest(
+            vault_root, bindings=identities, active_index=baseline_index
+        )
+        baseline_projection = _derive_context_timeline(
+            vault_root, baseline_index, baseline_records, person_roster
+        )
+        for node in baseline_projection.nodes:
+            if not isinstance(node, dict):
+                continue
+            claim_ids = frozenset(
+                str(value) for value in node.get("input_claim_refs") or () if value
+            )
+            row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
+            if row is None:
+                continue
+            row["grounding_identity"] = _grounding_identity(
+                claim_ids, baseline_claims_by_id
+            )
+            baseline_candidates[str(row.get("candidate_id") or "")] = row
     return {
         "roster_aliases": roster_aliases,
         "roster_matchers": roster_matchers,
@@ -649,7 +792,10 @@ def _load_context_catalog(vault_root: Path) -> dict:
             corrections_dir=vault_root / "sources" / "corrections",
             repo_dir=vault_root,
         ),
+        "classifications": _classification_records(vault_root),
+        "retracted_paths": retracted_paths,
         "candidates": candidates,
+        "baseline_candidates": baseline_candidates,
     }
 
 
@@ -667,7 +813,7 @@ def _build_context_snapshot_from_catalog(
     raw = source.read_bytes() if source_bytes is None else source_bytes
     story_text = raw.decode("utf-8", errors="replace")
     relative = _relative_source(root, source)
-    _own_claims, grounded_refs = _claim_context_from_catalog(
+    own_claims, grounded_refs = _claim_context_from_catalog(
         relative,
         catalog["claims_by_source"],
         catalog["classifier_claims"],
@@ -699,61 +845,143 @@ def _build_context_snapshot_from_catalog(
     bound_episode_ids.update(
         str(row["episode_id"]) for row in source_decisions if row.get("episode_id")
     )
-    # Rows are copied because completeness is source-specific prompt metadata.
-    candidates = [
-        dict(row)
-        for row, _claim_ids in catalog["candidates"]
-    ]
-    cap = max(0, min(int(max_candidates), MAX_CONTEXT_CANDIDATES))
-    relevant = [
-        row for row in candidates
-        if set(row.get("entity_refs") or ()).intersection(grounded_refs)
-        or row.get("candidate_id") in bound_episode_ids
-        or row.get("episode_id") in bound_episode_ids
-    ]
-    competitor_refs = {
-        ref
-        for row in relevant
-        if row.get("node_kind") == "episode"
-        for ref in row.get("entity_refs") or ()
-        if ref in grounded_refs
-    }
-    if competitor_refs:
-        relevant.extend(
-            row for row in candidates
-            if row.get("node_kind") == "episode"
-            and set(row.get("entity_refs") or ()).intersection(competitor_refs)
+    # A target source must not consume its own grounded fact through a mixed
+    # episode.  Replace that enriched form with the source-free baseline; if
+    # no independent baseline exists, exclude the candidate conservatively.
+    candidates = []
+    for row, claim_ids in catalog["candidates"]:
+        candidate = row
+        if own_claims.intersection(claim_ids):
+            candidate = catalog["baseline_candidates"].get(
+                str(row.get("candidate_id") or "")
+            )
+            if candidate is None:
+                continue
+        candidates.append(dict(candidate))
+
+    forced_ids = set(bound_episode_ids)
+    forced_ids.update(
+        str(row.get("candidate_id") or "")
+        for row in candidates
+        if {
+            ref for ref in row.get("entity_refs") or ()
+            if not timeline_evidence.is_generic_owner_reference(ref)
+        }.intersection(
+            ref for ref in grounded_refs
+            if not timeline_evidence.is_generic_owner_reference(ref)
         )
-    by_id = {row["candidate_id"]: row for row in relevant}
-    relevant = [by_id[key] for key in sorted(by_id)]
-    birth = [row for row in candidates if row.get("kind") == "birth"]
-    required = list(relevant)
-    for row in birth:
-        if row["candidate_id"] not in by_id:
-            required.append(row)
-    if relevant:
-        selected = required[:cap]
-        truncated = len(required) > len(selected)
+    )
+    existing = catalog.get("classifications", {}).get(relative) or {}
+    stored_events = [
+        dict(row) for row in existing.get("events") or () if isinstance(row, dict)
+    ]
+    event_contexts: dict[str, dict] = {}
+    if existing and isinstance(existing.get("events"), list):
+        for event in stored_events:
+            context = timeline_evidence.build_event_context(
+                event,
+                candidates,
+                forced_candidate_ids=forced_ids,
+                max_candidates=max_candidates,
+            )
+            event_contexts[context["event_key"]] = context
     else:
-        selected = candidates[:cap]
-        truncated = len(candidates) > len(selected)
+        # A full extraction has no stable event keys yet. Search the source as
+        # one provisional context; event-local contexts replace it after filing.
+        provisional = {
+            "title": source.stem,
+            "description": story_text,
+            "subject": "self",
+            "places": [],
+            "date": None,
+        }
+        context = timeline_evidence.build_event_context(
+            provisional,
+            candidates,
+            forced_candidate_ids=forced_ids,
+            max_candidates=max_candidates,
+        )
+        event_contexts[context["event_key"]] = context
+
+    selected_ids = {
+        candidate_id
+        for context in event_contexts.values()
+        for candidate_id in context.get("candidate_ids") or ()
+    }
+    selected = [
+        row for row in candidates if str(row.get("candidate_id") or "") in selected_ids
+    ]
+    selected.sort(key=lambda row: str(row.get("candidate_id") or ""))
+    if len(selected) > timeline_evidence.MAX_TOTAL_CANDIDATES:
+        retained = {
+            str(row.get("candidate_id") or "")
+            for row in selected[:timeline_evidence.MAX_TOTAL_CANDIDATES]
+        }
+        selected = selected[:timeline_evidence.MAX_TOTAL_CANDIDATES]
+        for context in event_contexts.values():
+            omitted = [
+                candidate_id for candidate_id in context.get("candidate_ids") or ()
+                if candidate_id not in retained
+            ]
+            if omitted:
+                context["candidate_ids"] = [
+                    candidate_id for candidate_id in context["candidate_ids"]
+                    if candidate_id in retained
+                ]
+                context["complete"] = False
+                context["remaining_candidate_count"] += len(omitted)
+                context["input_fingerprint"] = timeline_evidence.digest({
+                    "prior": context["input_fingerprint"],
+                    "total_prompt_omitted": omitted,
+                })
+    truncated = any(not row.get("complete") for row in event_contexts.values())
     human_decisions_all = _applicable_human_identity_records(
         catalog["human_identity_records"],
         candidates=selected,
         prior_identities=authority_tellings,
     )
-    human_decisions = human_decisions_all[:MAX_CONTEXT_DECISIONS]
-    decision_truncated = len(human_decisions_all) > len(human_decisions)
-    context_truncated = truncated or decision_truncated
+    human_decisions = human_decisions_all
+    decision_truncated = False
+    context_truncated = truncated
+    for context in event_contexts.values():
+        context["input_fingerprint"] = timeline_evidence.digest({
+            "event_context": context["input_fingerprint"],
+            "human_identity_decisions": human_decisions,
+            "source_roster_authority": _source_roster_authority(
+                selected, context.get("candidate_ids"), roster_evidence
+            ),
+        })
     for row in selected:
-        row["candidate_set_complete"] = not context_truncated
+        memberships = [
+            context for context in event_contexts.values()
+            if row.get("candidate_id") in (context.get("candidate_ids") or ())
+        ]
+        row["candidate_set_complete"] = all(
+            context.get("complete") for context in memberships
+        )
+        row["relevant_event_keys"] = sorted(
+            context["event_key"] for context in memberships
+        )
     digest_input = {
         "schema_version": CONTEXT_SCHEMA_VERSION,
-        "candidates": [_freshness_candidate(row) for row in selected],
-        "source_roster_evidence": roster_evidence,
-        "context_truncated": context_truncated,
+        "event_contexts": {
+            key: {
+                "candidate_ids": value.get("candidate_ids"),
+                "reference_keys": value.get("reference_keys"),
+                "unmatched_reference_keys": value.get("unmatched_reference_keys"),
+                "complete": value.get("complete"),
+                "remaining_candidate_count": value.get("remaining_candidate_count"),
+                "input_fingerprint": value.get("input_fingerprint"),
+            }
+            for key, value in sorted(event_contexts.items())
+        },
         "human_identity_decisions": human_decisions,
     }
+    active_corrections = source_integrity.active_correction_leaves(
+        source_integrity.corrections_targeting(
+            source, repo_dir=root, records=catalog["correction_records"]
+        )
+    )
     snapshot = {
         "schema_version": CONTEXT_SCHEMA_VERSION,
         "source_revision": effective_source_revision(
@@ -769,13 +997,24 @@ def _build_context_snapshot_from_catalog(
         "context_truncated": context_truncated,
         "candidate_count": len(selected),
         "remaining_candidate_count": max(
-            0, (len(required) if relevant else len(candidates)) - len(selected)
+            (
+                context.get("remaining_candidate_count") or 0
+                for context in event_contexts.values()
+            ),
+            default=0,
         ),
         "catalog_omitted_count": max(0, len(candidates) - len(selected)),
         "decision_count": len(human_decisions),
         "remaining_decision_count": max(0, len(human_decisions_all) - len(human_decisions)),
         "candidates": selected,
+        "event_contexts": event_contexts,
+        "source_roster_evidence": roster_evidence,
+        "grounding_allowed": not bool(active_corrections),
         "human_identity_decisions": human_decisions,
+        "source_identity_decision_ids": sorted(
+            str(row.get("identity_id") or "") for row in source_decisions
+            if row.get("identity_id")
+        ),
         # Useful to the prompt but excluded from context_digest: classifier
         # rereads may rekey these identities and must not trigger themselves.
         "prior_event_identities": prior_identities,
@@ -829,7 +1068,94 @@ def build_context_snapshot_from_catalog(
     )
 
 
-def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
+def _event_context(snapshot: dict, event: dict) -> dict:
+    key = timeline_evidence.event_key(event)
+    contexts = snapshot.get("event_contexts")
+    if isinstance(contexts, dict) and isinstance(contexts.get(key), dict):
+        return contexts[key]
+    candidates = [row for row in snapshot.get("candidates") or () if isinstance(row, dict)]
+    # Context lookup must not add event_key to a loaded base classification;
+    # the caller owns when that schema enrichment is persisted.
+    context = timeline_evidence.build_event_context(dict(event), candidates)
+    if snapshot.get("context_truncated"):
+        context["complete"] = False
+    selected = set(context.get("candidate_ids") or ())
+    if any(
+        row.get("candidate_id") in selected
+        and not row.get("candidate_set_complete", True)
+        for row in candidates
+    ):
+        context["complete"] = False
+    context["input_fingerprint"] = timeline_evidence.digest({
+        "event_context": context["input_fingerprint"],
+        "human_identity_decisions": snapshot.get("human_identity_decisions") or [],
+        "source_roster_authority": _source_roster_authority(
+            candidates,
+            context.get("candidate_ids"),
+            snapshot.get("source_roster_evidence") or [],
+        ),
+    })
+    return context
+
+
+def snapshot_metadata_for_events(snapshot: dict, events: object) -> dict:
+    """Four-key snapshot identity for the event-local context just accepted."""
+    candidates = [row for row in snapshot.get("candidates") or () if isinstance(row, dict)]
+    raw_contexts = [
+        timeline_evidence.build_event_context(event, candidates)
+        for event in (events if isinstance(events, list) else ())
+        if isinstance(event, dict)
+    ]
+    selected_ids = {
+        candidate_id for context in raw_contexts
+        for candidate_id in context.get("candidate_ids") or ()
+    }
+    selected_episodes = {
+        str(row.get("episode_id") or "") for row in candidates
+        if row.get("candidate_id") in selected_ids and row.get("episode_id")
+    }
+    source_decision_ids = set(snapshot.get("source_identity_decision_ids") or ())
+    decisions = [
+        row for row in snapshot.get("human_identity_decisions") or ()
+        if (row.get("identity_id") in source_decision_ids
+            or row.get("episode_id") in selected_episodes)
+    ]
+    accepted_snapshot = {**snapshot, "human_identity_decisions": decisions}
+    contexts = {
+        context["event_key"]: context
+        for event in (events if isinstance(events, list) else ())
+        if isinstance(event, dict)
+        for context in (_event_context(accepted_snapshot, event),)
+    }
+    digest_input = {
+        "schema_version": CONTEXT_SCHEMA_VERSION,
+        "event_contexts": {
+            key: {
+                "candidate_ids": value.get("candidate_ids"),
+                "reference_keys": value.get("reference_keys"),
+                "unmatched_reference_keys": value.get("unmatched_reference_keys"),
+                "complete": value.get("complete"),
+                "remaining_candidate_count": value.get("remaining_candidate_count"),
+                "input_fingerprint": value.get("input_fingerprint"),
+            }
+            for key, value in sorted(contexts.items())
+        },
+        "human_identity_decisions": decisions,
+    }
+    accepted = dict(accepted_snapshot)
+    accepted["context_digest"] = _digest(digest_input)
+    return snapshot_metadata(accepted)
+
+
+def validate_response(
+    result: object,
+    snapshot: dict,
+    story_text: str,
+    *,
+    mode: str = "full",
+    existing_events: object = None,
+    require_event_contract: bool = False,
+) -> dict:
     """Validate one model response against exactly the context it observed."""
     if not isinstance(result, dict):
         raise ClassifierContextError(
@@ -843,7 +1169,7 @@ def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
             "classification snapshot is missing or stale",
             code=ContextFailureCode.SNAPSHOT_MISMATCH,
         )
-    candidates = {
+    all_candidates = {
         str(row.get("candidate_id")): row
         for row in snapshot.get("candidates") or ()
         if isinstance(row, dict) and row.get("candidate_id")
@@ -853,71 +1179,155 @@ def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
         raise ClassifierContextError(
             "events must be a list", code=ContextFailureCode.EVENTS_NOT_LIST,
         )
+    bases: dict[str, dict] = {}
+    if mode == "timeline":
+        for value in existing_events if isinstance(existing_events, list) else ():
+            if not isinstance(value, dict):
+                continue
+            key = timeline_evidence.event_key(value)
+            if key in bases:
+                raise ClassifierContextError(
+                    "base classification has duplicate event keys",
+                    code=ContextFailureCode.EVENT_KEYS_INVALID,
+                )
+            bases[key] = value
+        supplied = [
+            str(value.get("event_key") or "") if isinstance(value, dict) else ""
+            for value in events
+        ]
+        if (any(not key for key in supplied)
+                or len(supplied) != len(set(supplied))
+                or set(supplied) != set(bases)):
+            raise ClassifierContextError(
+                "timeline response must contain each existing event key exactly once",
+                code=ContextFailureCode.EVENT_KEYS_INVALID,
+            )
+
+    normalized_events: list[dict] = []
     for event in events:
         if not isinstance(event, dict):
             raise ClassifierContextError(
                 "each event must be a mapping", code=ContextFailureCode.EVENT_NOT_MAPPING,
             )
+        if mode == "timeline":
+            if set(event) != timeline_evidence.EVENT_DELTA_KEYS:
+                raise ClassifierContextError(
+                    "timeline event is not a link-only delta",
+                    code=ContextFailureCode.EVENT_KEYS_INVALID,
+                )
+            key = str(event["event_key"])
+            base = bases[key]
+        else:
+            base = event
+            try:
+                key = timeline_evidence.ensure_event_key(base)
+            except timeline_evidence.TimelineEvidenceError as exc:
+                raise ClassifierContextError(
+                    str(exc), code=ContextFailureCode.EVENT_KEYS_INVALID,
+                ) from None
+
+        context = _event_context(snapshot, base)
+        candidate_ids = list(context.get("candidate_ids") or ())
+        candidates = {
+            candidate_id: all_candidates[candidate_id]
+            for candidate_id in candidate_ids if candidate_id in all_candidates
+        }
         relation = event.get("timeline_relation")
         if relation is None:
-            continue
-        if not isinstance(relation, dict) or relation.get("relation") not in RELATIONS:
-            raise ClassifierContextError(
-                "timeline relation must be within, before, or after",
-                code=ContextFailureCode.RELATION_INVALID,
+            candidate = None
+        else:
+            if not isinstance(relation, dict) or relation.get("relation") not in RELATIONS:
+                raise ClassifierContextError(
+                    "timeline relation must be within, before, or after",
+                    code=ContextFailureCode.RELATION_INVALID,
+                )
+            candidate_id = str(relation.get("candidate_id") or "")
+            candidate = candidates.get(candidate_id)
+            if candidate is None:
+                raise ClassifierContextError(
+                    "timeline relation references an unknown event candidate id",
+                    code=ContextFailureCode.CANDIDATE_UNKNOWN,
+                )
+            if not context.get("complete"):
+                raise ClassifierContextError(
+                    "timeline relation candidate set is incomplete",
+                    code=ContextFailureCode.CONTEXT_INCOMPLETE,
+                )
+            if (candidate.get("unresolved_entity_mentions")
+                    or candidate.get("entity_ref_ambiguities")):
+                raise ClassifierContextError(
+                    "timeline relation candidate identity is unresolved or ambiguous",
+                    code=ContextFailureCode.CANDIDATE_AMBIGUOUS,
+                )
+            evidence = relation.get("evidence")
+            if not isinstance(evidence, dict):
+                raise ClassifierContextError(
+                    "timeline relation requires source evidence",
+                    code=ContextFailureCode.EVIDENCE_NOT_MAPPING,
+                )
+            quote = evidence.get("quote")
+            if not isinstance(quote, str) or not quote:
+                raise ClassifierContextError(
+                    "timeline relation evidence quote is required",
+                    code=ContextFailureCode.QUOTE_MISSING,
+                )
+            start, end = _locate_unique_exact_quote(story_text, quote)
+            evidence["start"] = start
+            evidence["end"] = end
+            refs = relation.get("entity_refs")
+            allowed = set(candidate.get("entity_refs") or ())
+            if (not isinstance(refs, list) or not refs
+                    or any(str(ref) not in allowed for ref in refs)):
+                raise ClassifierContextError(
+                    "timeline relation entity refs are not allowlisted",
+                    code=ContextFailureCode.ENTITY_REFS_INVALID,
+                )
+            if not timeline_evidence.quote_disambiguates(
+                    candidate, list(candidates.values()), quote):
+                raise ClassifierContextError(
+                    "source quote does not disambiguate competing candidates",
+                    code=ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED,
+                )
+
+        try:
+            grounding = timeline_evidence.normalize_source_grounding(
+                event.get("source_grounding"),
+                base,
+                story_text=story_text,
+                source_revision=str(snapshot.get("source_revision") or ""),
+                grounding_allowed=bool(snapshot.get("grounding_allowed", True)),
             )
-        candidate_id = str(relation.get("candidate_id") or "")
-        candidate = candidates.get(candidate_id)
-        if candidate is None:
-            raise ClassifierContextError(
-                "timeline relation references an unknown candidate id",
-                code=ContextFailureCode.CANDIDATE_UNKNOWN,
+            raw_resolution = event.get("timeline_resolution")
+            if raw_resolution is None and not require_event_contract:
+                raw_resolution = {
+                    "status": (
+                        "linked" if relation is not None else
+                        "incomplete" if not context.get("complete") else
+                        "missing_evidence"
+                    ),
+                    "candidate_ids": candidate_ids,
+                    "reason": "Legacy event awaits an explicit evidence-link outcome.",
+                }
+            resolution = timeline_evidence.normalize_resolution(
+                raw_resolution,
+                event_key_value=key,
+                candidate_ids=candidate_ids,
+                context_complete=bool(context.get("complete")),
+                source_revision=str(snapshot.get("source_revision") or ""),
+                prompt_version=str(snapshot.get("prompt_version") or ""),
+                input_fingerprint=str(context.get("input_fingerprint") or ""),
+                relation=relation,
             )
-        if snapshot.get("context_truncated") or not candidate.get("candidate_set_complete"):
-            raise ClassifierContextError(
-                "timeline relation candidate set is incomplete",
-                code=ContextFailureCode.CONTEXT_INCOMPLETE,
+        except timeline_evidence.TimelineEvidenceError as exc:
+            code = (
+                ContextFailureCode.GROUNDING_INVALID
+                if exc.code.startswith("grounding_") else ContextFailureCode.RESOLUTION_INVALID
             )
-        if (candidate.get("unresolved_entity_mentions")
-                or candidate.get("entity_ref_ambiguities")):
-            raise ClassifierContextError(
-                "timeline relation candidate identity is unresolved or ambiguous",
-                code=ContextFailureCode.CANDIDATE_AMBIGUOUS,
-            )
-        evidence = relation.get("evidence")
-        if not isinstance(evidence, dict):
-            raise ClassifierContextError(
-                "timeline relation requires source evidence",
-                code=ContextFailureCode.EVIDENCE_NOT_MAPPING,
-            )
-        quote = evidence.get("quote")
-        if not isinstance(quote, str) or not quote:
-            raise ClassifierContextError(
-                "timeline relation evidence quote is required",
-                code=ContextFailureCode.QUOTE_MISSING,
-            )
-        start, end = _locate_unique_exact_quote(story_text, quote)
-        evidence["start"] = start
-        evidence["end"] = end
-        refs = relation.get("entity_refs")
-        allowed = set(candidate.get("entity_refs") or ())
-        if not isinstance(refs, list) or not refs or any(str(ref) not in allowed for ref in refs):
-            raise ClassifierContextError(
-                "timeline relation entity refs are not allowlisted",
-                code=ContextFailureCode.ENTITY_REFS_INVALID,
-            )
-        ref_counts = {
-            str(ref): sum(
-                str(ref) in set(row.get("entity_refs") or ())
-                for row in candidates.values()
-            )
-            for ref in refs
-        }
-        if not any(count == 1 for count in ref_counts.values()):
-            raise ClassifierContextError(
-                "timeline relation does not disambiguate competing candidates",
-                code=ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED,
-            )
+            raise ClassifierContextError(str(exc), code=code) from None
+        event["source_grounding"] = grounding
+        event["timeline_resolution"] = resolution
+        normalized_events.append(event)
+    result["events"] = normalized_events
     return result
 
 
@@ -945,8 +1355,10 @@ def refresh_reason(snapshot: dict, classification: object) -> str | None:
         return "legacy_snapshot"
     if recorded["source_revision"] != current["source_revision"]:
         return "source_changed"
-    if recorded["prompt_version"] != current["prompt_version"] or recorded["extractor_version"] != current["extractor_version"]:
+    if recorded["extractor_version"] != current["extractor_version"]:
         return "classifier_changed"
+    if recorded["prompt_version"] != current["prompt_version"]:
+        return "relationship_changed"
     if recorded["context_digest"] != current["context_digest"]:
         return "context_changed"
     return None

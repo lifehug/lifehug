@@ -37,6 +37,7 @@ EXPECTED_COMMANDS = frozenset({
     "artifact-save",
     "candidate-promote",
     "candidate-update",
+    "classification-refresh",
     "compile",
     "compile-pending",
     "conversation-close",

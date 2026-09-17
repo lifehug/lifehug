@@ -236,6 +236,23 @@ sibling's birth in the same sentence vetoes the birth join outright, and a
 free-text anchor that names nothing in your landmark index derives nothing at
 all. **A miss is fine; a wrong join is not.**
 
+**How ordinary stories teach later stories** (v307,
+[ADR 0036](../adr/0036-incremental-timeline-evidence-links.md)). Event extraction
+is stable; when independent timeline evidence changes, the classifier receives
+only exact event-key link deltas. Each event records whether it linked, lacked
+evidence, was ambiguous, had an incomplete search, or was not temporal. A direct
+date or age joins independent authority only when exact source words prove the
+date or age and the event's subject. A contextual placement never does. Search
+is per event, includes every same-entity competing stay or role, and ignores
+generic owner references, so a narrow River House reference is not crowded out
+by many unrelated owner facts. Correcting only an anchor's bounds updates linked
+events through the deterministic fold without another model call. Named-person
+age arithmetic requires that person's own birth; it never borrows the owner's.
+When a calculated node's status-bearing claims agree, the published node carries
+their `timeline_resolution_status`. Incomplete and non-temporal events therefore
+remain visible with their source evidence, while timeline readers can keep them
+out of the missing-date count without inferring meaning from an absent question.
+
 **How organised is it** (v208, [ADR 0027](../adr/0027-the-placement-score.md)).
 The owner asked for a level — *how placed is this life, 0 → 1* — and already
 had the margin: the star's *"one answer would place 53 things"*. They turned

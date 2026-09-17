@@ -227,6 +227,20 @@ change: unchanged semantic digests remain reusable; affected old readings may
 need one honest refresh. Source-relevant retrieval and the bounded global
 fallback are unchanged, so real new context can legitimately affect many sources.
 
+**Incremental evidence links (v307, ADR 0036).** A classifier event now has two
+lifecycles: stable extraction and refreshable temporal interpretation. Timeline
+refresh sends exact event-key deltas and records one closed outcome, so a null
+relation distinguishes missing evidence, ambiguity, incomplete search, and a
+non-event. An ordinary direct date or age crosses v306's boundary only with an
+exact unique source quote proving both temporal words and subject; a contextual
+relation never becomes authority. Retrieval is event-local, retains same-entity
+competitors beyond the old global slice, and excludes generic owner references.
+Fingerprinting follows identity and meaning rather than supported bounds, so a
+date correction reflows through an existing link without a model call while an
+alias, competitor, retraction, correction, or human decision still invalidates
+the affected outcome. Named-person age arithmetic requires that person's own
+supported birth and never borrows the owner's.
+
 ---
 
 ## 5. Relationships & Connection

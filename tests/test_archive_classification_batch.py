@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "system"))
 
 import classifier_context as cc  # noqa: E402
 import classify_story as cs  # noqa: E402
+import timeline_evidence as te  # noqa: E402
 
 
 def snapshot(source: Path, context: str = "context-1") -> dict:
@@ -45,6 +46,28 @@ def full_response(
     events: list[dict] | None = None,
     candidate_questions: list[dict] | None = None,
 ) -> dict:
+    normalized_events = []
+    for supplied in events or ():
+        event = copy.deepcopy(supplied)
+        key = te.event_key(event)
+        context = (snap.get("event_contexts") or {}).get(key) or te.build_event_context(
+            event, [row for row in snap.get("candidates") or () if isinstance(row, dict)]
+        )
+        candidate_ids = list(context.get("candidate_ids") or [
+            row["candidate_id"] for row in snap.get("candidates") or ()
+        ])
+        event.setdefault("source_grounding", None)
+        event.setdefault("timeline_resolution", {
+            "status": (
+                "linked" if event.get("timeline_relation") is not None else
+                "incomplete" if not context.get(
+                    "complete", not snap.get("context_truncated")
+                ) else "missing_evidence"
+            ),
+            "candidate_ids": candidate_ids,
+            "reason": "Synthetic evidence-link outcome.",
+        })
+        normalized_events.append(event)
     return {
         "_classification_mode": "full",
         "_classification_snapshot": cc.snapshot_metadata(snap),
@@ -61,8 +84,26 @@ def full_response(
         "sensitivity_reason": "synthetic",
         "scene_slots": {},
         "situation_vs_story": "balanced",
-        "events": [] if events is None else events,
+        "events": normalized_events,
         "candidate_questions": [] if candidate_questions is None else candidate_questions,
+    }
+
+
+def timeline_delta(event: dict, snap: dict, *, status: str = "missing_evidence") -> dict:
+    key = te.event_key(event)
+    context = (snap.get("event_contexts") or {}).get(key) or {}
+    candidate_ids = list(context.get("candidate_ids") or [
+        row["candidate_id"] for row in snap.get("candidates") or ()
+    ])
+    return {
+        "event_key": key,
+        "source_grounding": None,
+        "timeline_relation": None,
+        "timeline_resolution": {
+            "status": status,
+            "candidate_ids": candidate_ids,
+            "reason": "Synthetic evidence-link outcome.",
+        },
     }
 
 
@@ -122,7 +163,16 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             "sensitivity_reason": "preserve me",
             "scene_slots": {"what_happened": True},
             "situation_vs_story": "balanced",
-            "events": [{"title": "Old event"}],
+            "events": [{
+                "title": "Old event",
+                "description": "A synthetic first story.",
+                "subject": "self",
+                "places": [],
+                "when_hint": None,
+                "anchor": None,
+                "date": None,
+                "custom_field": "preserve exactly",
+            }],
         }
         value.update(extra)
         cs.write_json(cs.classification_path(source), value)
@@ -174,8 +224,51 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertEqual({row["mode"] for row in plan["items"]}, {"full", "timeline"})
         self.assertTrue(plan["skip_candidates"])
         full_prompt = next(row["prompt"] for row in plan["items"] if row["mode"] == "full")
+        timeline_prompt = next(
+            row["prompt"] for row in plan["items"] if row["mode"] == "timeline"
+        )
         self.assertNotIn('"candidate_questions"', full_prompt)
         self.assertNotIn("Question-Judgment Rubric", full_prompt)
+        self.assertIn('"event_contexts": {}', full_prompt)
+        self.assertIn("provisional full-extraction", full_prompt)
+        self.assertIn("context is retrieval input", full_prompt)
+        self.assertNotIn("across the ENTIRE supplied candidate list", full_prompt)
+        self.assertIn('"event_contexts": {}', timeline_prompt)
+        self.assertIn("Treat each `event_contexts[event_key]` entry independently", timeline_prompt)
+        for prompt in (full_prompt, timeline_prompt):
+            normalized = " ".join(prompt.split())
+            self.assertIn("Timeline Evidence Uses Two Independent Decisions", normalized)
+            self.assertIn("does NOT need a calendar date or age", normalized)
+            self.assertIn(
+                "an empty candidate set for a real event is `missing_evidence`",
+                normalized,
+            )
+            self.assertIn("`incomplete` is allowed ONLY", normalized)
+            self.assertIn(
+                "A supported rough `before` or `after` placement is also valid",
+                normalized,
+            )
+            self.assertIn("do not invent `within` merely to tighten bounds", normalized)
+            self.assertIn("preserve the supported `before` relation", normalized)
+            self.assertIn(
+                "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
+                normalized,
+            )
+            self.assertIn("candidate's WHOLE occurrence", normalized)
+            self.assertIn("before that duration starts", normalized)
+            self.assertIn("after it ends", normalized)
+            self.assertIn('"early in", and "late in"', normalized)
+            self.assertIn('"After the wedding"', normalized)
+            self.assertIn("date.anchor_ref", normalized)
+            self.assertNotIn("TIGHTEST SUPPORTED TIME BOUNDS", normalized)
+            self.assertIn(
+                f"1-{te.MAX_RESOLUTION_REASON_CHARS} character explanation",
+                normalized,
+            )
+            self.assertIn(
+                f"{te.MAX_RESOLUTION_REASON_CHARS} characters",
+                normalized,
+            )
 
     def test_plan_builds_prompts_only_for_selected_items_and_names_ineligible(self) -> None:
         empty = self.sources / "manual" / "empty.md"
@@ -298,7 +391,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(current),
-            "events": [{"title": "New synthetic event", "timeline_relation": None}],
+            "events": [timeline_delta(prior["events"][0], current)],
         }
         load, build = self.catalogs({self.a: current})
         with load, build:
@@ -312,8 +405,167 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         for key, value in prior.items():
             if key not in {"events", "classification_snapshot", "classified_at", "model_used"}:
                 self.assertEqual(filed[key], value, key)
-        self.assertEqual(filed["events"], response["events"])
+        expected_event = copy.deepcopy(prior["events"][0])
+        expected_event["event_key"] = te.event_key(expected_event)
+        for key, value in expected_event.items():
+            self.assertEqual(filed["events"][0][key], value, key)
+        self.assertIsNone(filed["events"][0]["source_grounding"])
+        self.assertIsNone(filed["events"][0]["timeline_relation"])
+        self.assertEqual(
+            filed["events"][0]["timeline_resolution"]["status"], "missing_evidence"
+        )
+        self.assertEqual(filed["events"][0]["custom_field"], "preserve exactly")
         self.assertTrue(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+
+    def test_null_timeline_delta_revalidates_and_retains_literal_grounding(self) -> None:
+        self.a.write_text(
+            "---\ntitle: Alpha\n---\nI moved in 1999.\n", encoding="utf-8"
+        )
+        old = snapshot(self.a, "old")
+        current = snapshot(self.a, "new")
+        event = {
+            "title": "The move",
+            "description": "I moved in 1999.",
+            "subject": "self",
+            "places": [],
+            "when_hint": None,
+            "anchor": None,
+            "date": {
+                "stated": "1999",
+                "age": None,
+                "anchor_ref": None,
+                "relation": None,
+            },
+        }
+        proof = te.normalize_source_grounding(
+            {
+                "quote": "I moved in 1999.",
+                "temporal_quote": "1999",
+                "subject_quote": "I",
+                "kind": "date",
+            },
+            event,
+            story_text=cs.load_source_text(self.a)[1],
+            source_revision=old["source_revision"],
+        )
+        prior = self.existing(self.a, old, events=[{
+            **event,
+            "source_grounding": proof,
+            "timeline_relation": None,
+            "timeline_resolution": {
+                "status": "missing_evidence",
+                "candidate_ids": [],
+                "reason": "No independent candidate was available.",
+            },
+        }])
+        response = {
+            "_classification_mode": "timeline",
+            "_classification_snapshot": cc.snapshot_metadata(current),
+            "events": [timeline_delta(prior["events"][0], current)],
+        }
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            report = cs.file_batch_response(self.envelope("grounding-reuse", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "timeline",
+                "response_text": json.dumps(response),
+            }]))
+        self.assertEqual(report["counts"]["accepted"], 1)
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertEqual(filed["events"][0]["source_grounding"], proof)
+
+    def test_null_timeline_delta_does_not_retain_disallowed_grounding(self) -> None:
+        self.a.write_text(
+            "---\ntitle: Alpha\n---\nI moved in 1999.\n", encoding="utf-8"
+        )
+        old = snapshot(self.a, "old")
+        current = {**snapshot(self.a, "new"), "grounding_allowed": False}
+        event = {
+            "title": "The move",
+            "description": "I moved in 1999.",
+            "subject": "self",
+            "places": [],
+            "when_hint": None,
+            "anchor": None,
+            "date": {"stated": "1999", "age": None},
+        }
+        proof = te.normalize_source_grounding(
+            {
+                "quote": "I moved in 1999.",
+                "temporal_quote": "1999",
+                "subject_quote": "I",
+                "kind": "date",
+            },
+            event,
+            story_text=cs.load_source_text(self.a)[1],
+            source_revision=old["source_revision"],
+        )
+        prior = self.existing(self.a, old, events=[{
+            **event,
+            "source_grounding": proof,
+            "timeline_relation": None,
+            "timeline_resolution": {
+                "status": "missing_evidence",
+                "candidate_ids": [],
+                "reason": "No independent candidate was available.",
+            },
+        }])
+        response = {
+            "_classification_mode": "timeline",
+            "_classification_snapshot": cc.snapshot_metadata(current),
+            "events": [timeline_delta(prior["events"][0], current)],
+        }
+        load, build = self.catalogs({self.a: current})
+        with load, build:
+            report = cs.file_batch_response(self.envelope("grounding-disallowed", [{
+                "source_path": "sources/manual/alpha.md",
+                "mode": "timeline",
+                "response_text": json.dumps(response),
+            }]))
+        self.assertEqual(report["counts"]["accepted"], 1)
+        filed = json.loads(cs.classification_path(self.a).read_text())
+        self.assertIsNone(filed["events"][0]["source_grounding"])
+
+    def test_timeline_response_requires_exact_existing_event_keys_and_delta_fields(self) -> None:
+        old = snapshot(self.a, "old")
+        current = snapshot(self.a, "new")
+        prior = self.existing(self.a, old)
+        valid = timeline_delta(prior["events"][0], current)
+        cases = {
+            "omitted": [],
+            "unknown": [{**valid, "event_key": "0" * 12}],
+            "duplicate": [valid, copy.deepcopy(valid)],
+            "replacement": [{**valid, "title": "Model rewrote extraction"}],
+        }
+        for index, (name, events) in enumerate(cases.items(), start=1):
+            with self.subTest(name=name):
+                response = {
+                    "_classification_mode": "timeline",
+                    "_classification_snapshot": cc.snapshot_metadata(current),
+                    "events": events,
+                }
+                load, build = self.catalogs({self.a: current})
+                with load, build:
+                    receipt = cs.file_batch_response(self.envelope(
+                        f"timeline-keys-{index}", [{
+                            "source_path": "sources/manual/alpha.md",
+                            "mode": "timeline",
+                            "response_text": json.dumps(response),
+                        }],
+                    ))
+                self.assertEqual(receipt["counts"]["refused"], 1)
+                self.assertIn(
+                    receipt["items"][0]["refusal_code"],
+                    {"context_event_keys_invalid", "timeline_schema_invalid"},
+                )
+                self.assertEqual(json.loads(cs.classification_path(self.a).read_text()), prior)
+
+    def test_relationship_prompt_change_selects_timeline_not_full(self) -> None:
+        current = snapshot(self.a)
+        prior_snapshot = {**current, "prompt_version": "contextual-timeline:1"}
+        prior = self.existing(self.a, prior_snapshot)
+        self.assertEqual(cc.refresh_reason(current, prior), "relationship_changed")
+        self.assertEqual(cs.classification_mode(current, prior), "timeline")
 
     def test_full_skip_candidates_preserves_prior_candidate_ids(self) -> None:
         old = snapshot(self.a, "old")
@@ -344,6 +596,11 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             }], skip=True))
         self.assertEqual(archive["items"][0]["status"], "accepted")
         archived = json.loads(cs.classification_path(self.a).read_text())
+        current = {
+            **current,
+            **cc.snapshot_metadata_for_events(current, archived["events"]),
+            "event_contexts": {},
+        }
         self.assertTrue(archived[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
         self.assertIsNone(cc.refresh_reason(current, archived))
         with mock.patch.object(cc, "_load_context_catalog", return_value={}), \
@@ -463,7 +720,10 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(current),
-            "events": [{"title": "Context refreshed"}],
+            "events": [timeline_delta(
+                json.loads(cs.classification_path(self.a).read_text())["events"][0],
+                current,
+            )],
         }
         load, build = self.catalogs({self.a: current})
         with load, build:
@@ -481,7 +741,8 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
     def test_correction_selects_full_mode_and_saved_old_response_is_refused(self) -> None:
         before = cc.build_context_snapshot(self.root, self.a)
         prior = self.existing(self.a, {**before, "source_revision": "sha256:" + "0" * 64})
-        response = full_response(before)
+        current = cc.build_context_snapshot(self.root, self.a)
+        response = full_response(current)
         original_prepare = cs.prepare_classification
         calls = 0
 
@@ -770,7 +1031,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(first),
-            "events": [],
+            "events": [timeline_delta(prior["events"][0], first)],
         }
         calls = 0
 

@@ -129,6 +129,16 @@ independent evidence. Publishing classifier output cannot change that context.
 Real authority changes still invalidate affected readings; old hashes are never
 restamped and unchanged semantic contexts remain reusable without model work.
 
+Since v307, event extraction and timeline interpretation refresh separately.
+An unchanged story receives link-only event deltas keyed by stable event IDs,
+with an explicit `linked`, `missing_evidence`, `ambiguous`, `incomplete`, or
+`not_temporal` outcome for each event. Exact source-quoted ordinary dates and
+ages may become independent candidate facts; contextual links never do. Search
+is event-local, keeps same-entity competitors, and is not capped by unrelated
+owner facts. A date-only correction to a known anchor flows through an existing
+link without another model call, while identity, alias, competitor, correction,
+and human-decision changes invalidate only affected readings.
+
 ## Neighborhood readiness
 
 Research neighborhoods track three different stages: questions generated, questions promoted into the bank, and answers captured. A full candidate arc means Lifehug knows what to ask next; it does **not** mean Dave has enough source material to draft an artifact. `progress` only labels a neighborhood ready to draft when the answered-material score crosses the readiness threshold.
@@ -172,6 +182,10 @@ python3 system/lifehug.py serve
 python3 system/lifehug.py weekly-maintenance
 python3 system/lifehug.py monthly-research
 python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
+python3 system/timeline_evidence_evals.py --json        # recorded plumbing report
+python3 system/timeline_evidence_evals.py --live --json # configured-provider quality run
+python3 system/timeline_evidence_evals.py --timeline-live --json # stable-event live quality
+python3 system/timeline_evidence_evals.py --catalog-live --json # live filed-catalog probe
 python3 system/lifehug.py candidates-list --status needs_review
 python3 system/lifehug.py candidates-review --status needs_review
 python3 system/lifehug.py candidates-update <candidate-id> --status deferred --reason "wait for more context"

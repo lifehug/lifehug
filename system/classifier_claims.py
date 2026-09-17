@@ -114,6 +114,7 @@ WHAT IT REFUSES TO INVENT, by name:
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -129,6 +130,7 @@ import temporal_claims as tc  # noqa: E402
 import temporal_publication as pub  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
+import timeline_evidence  # noqa: E402
 from temporal_claims import (  # noqa: E402
     TemporalContractError,
     bounded_quote,
@@ -145,10 +147,8 @@ from temporal_claims import (  # noqa: E402
 #: prompt, no temperature. `temporal_claims.extractor_version_string` is the
 #: one spelling, so "which extractor produced this" stays comparable.
 EXTRACTOR_NAME = "classifier-claims"
-RULE_VERSION = "2"
-CLASSIFIER_EXTRACTOR = tc.extractor_version_string(
-    EXTRACTOR_NAME, rule_version=RULE_VERSION
-)
+RULE_VERSION = timeline_evidence.CLASSIFIER_CLAIMS_RULE_VERSION
+CLASSIFIER_EXTRACTOR = timeline_evidence.CLASSIFIER_CLAIMS_EXTRACTOR
 
 #: ``classification:<stem>#<event key>``. The prefix is what tells this
 #: module's own claims apart from every other extractor's when it looks for
@@ -170,7 +170,7 @@ MOMENT_EVENT_KIND = "moment"
 #: Hex characters of the event digest that separate one moment from another
 #: inside one story. 48 bits over (title, description) within a single
 #: classification.
-EVENT_KEY_LENGTH = 12
+EVENT_KEY_LENGTH = timeline_evidence.EVENT_KEY_LENGTH
 
 #: `chronology.RELATIONS` -> `temporal_claims.CONSTRAINT_RELATIONS`. The two
 #: vocabularies are deliberately different (one compares date records, one
@@ -258,24 +258,18 @@ def event_key(event: object) -> str:
     does not re-identify every one of them, and two byte-identical events in
     one document are one moment (which is what they are).
     """
-    row = event if isinstance(event, dict) else {}
-    payload = {
-        "title": collapsed_text(row.get("title")),
-        "description": collapsed_text(row.get("description")),
-    }
-    return hashlib.sha256(
-        lp.canonical_json(payload).encode("utf-8")
-    ).hexdigest()[:EVENT_KEY_LENGTH]
+    return timeline_evidence.event_key(event)
 
 
-def event_source_id(stem: object, event: object) -> str:
+def event_source_id(stem: object, event: object, *, link: bool = False) -> str:
     """``classification:<stem>#<event key>`` — this moment's source identity."""
     text = collapsed_text(stem)
     if not text:
         raise ClassifierClaimsError(
             "classification_stem_required", "a classification is identified by its file stem"
         )
-    return f"{SOURCE_ID_PREFIX}:{text}#{event_key(event)}"
+    suffix = ":link" if link else ""
+    return f"{SOURCE_ID_PREFIX}:{text}#{event_key(event)}{suffix}"
 
 
 def document_revision(vault_root: str | Path, source_path: object) -> str | None:
@@ -312,12 +306,13 @@ def classification_source_prefix(stem: object) -> str:
 
 
 def event_source_ref(
-    *, stem: object, event: object, revision: object, source_path: object
+    *, stem: object, event: object, revision: object, source_path: object,
+    link: bool = False,
 ) -> dict:
     """The claim's source: this moment, of this classification, of that story."""
     return tc.validate_source_ref(
         {
-            "source_id": event_source_id(stem, event),
+            "source_id": event_source_id(stem, event, link=link),
             "revision": revision,
             "source_path": collapsed_text(source_path),
         }
@@ -470,6 +465,67 @@ def temporal_reading(event: object) -> dict:
     }
 
 
+def _grounded_evidence(event: object) -> list[dict] | None:
+    row = event if isinstance(event, dict) else {}
+    grounding = row.get("source_grounding")
+    if not isinstance(grounding, dict):
+        return None
+    quote = collapsed_text(grounding.get("quote"))
+    start = grounding.get("start")
+    end = grounding.get("end")
+    if not quote or type(start) is not int or type(end) is not int:
+        return None
+    return [{"quote": bounded_quote(quote), "start": start, "end": end}]
+
+
+def _reading_revision(event: dict, reading: dict, fallback: object) -> str:
+    """Stable source fact/link revision, excluding classifier timestamps."""
+    grounding = event.get("source_grounding")
+    if reading.get("reading_kind") == "direct" and isinstance(grounding, dict):
+        revision = collapsed_text(grounding.get("source_revision"))
+        if revision:
+            return revision
+    if reading.get("reading_kind") == "contextual":
+        resolution = event.get("timeline_resolution")
+        payload = {
+            "source_revision": (
+                resolution.get("source_revision")
+                if isinstance(resolution, dict) else None
+            ),
+            "event_key": event_key(event),
+            "temporal_value": reading.get("temporal_value"),
+            "evidence": reading.get("evidence"),
+            "input_fingerprint": (
+                resolution.get("input_fingerprint")
+                if isinstance(resolution, dict) else None
+            ),
+        }
+        return "sha256:" + hashlib.sha256(
+            lp.canonical_json(payload).encode("utf-8")
+        ).hexdigest()
+    return collapsed_text(fallback)
+
+
+def _raw_anchor_is_canonicalized(direct: dict, contextual: dict, event: dict) -> bool:
+    """True only when source evidence proves the raw handle is this edge."""
+    if (direct.get("claim_type") != "relative_order"
+            or contextual.get("claim_type") != "relative_order"):
+        return False
+    direct_value = direct.get("temporal_value") or {}
+    contextual_value = contextual.get("temporal_value") or {}
+    if direct_value.get("relation") != contextual_value.get("relation"):
+        return False
+    resolution = event.get("timeline_resolution")
+    if not isinstance(resolution, dict) or resolution.get("status") != "linked":
+        return False
+    anchors = direct_value.get("anchors") or ()
+    evidence = contextual.get("evidence") or ()
+    quote = evidence[0].get("quote") if evidence and isinstance(evidence[0], dict) else ""
+    raw = normalized_mention_key(anchors[0]) if len(anchors) == 1 else ""
+    proof = normalized_mention_key(quote)
+    return bool(raw and re.search(rf"(?<!\w){re.escape(raw)}(?!\w)", proof))
+
+
 def contextual_reading(event: object) -> dict | None:
     """A validated contextual relationship to a supplied canonical candidate."""
     row = event if isinstance(event, dict) else {}
@@ -487,6 +543,7 @@ def contextual_reading(event: object) -> dict | None:
     if not isinstance(refs, list) or not refs:
         return None
     return {
+        "reading_kind": "contextual",
         "claim_type": "relative_order",
         "temporal_value": {"relation": relation_name, "anchors": [candidate_id]},
         "basis": "explicit",
@@ -543,9 +600,24 @@ def event_claims(
     import temporal_projection as tp  # noqa: PLC0415 — pure, but keeps the load light
 
     row = event if isinstance(event, dict) else {}
-    readings = [temporal_reading(row)]
+    direct = {**temporal_reading(row), "reading_kind": "direct"}
+    grounding = row.get("source_grounding")
+    direct_grounded = False
+    if (isinstance(grounding, dict)
+            and grounding.get("kind") == direct.get("claim_type")):
+        grounded_evidence = _grounded_evidence(row)
+        if grounded_evidence is not None:
+            direct["evidence"] = grounded_evidence
+            direct_grounded = True
+    event_kind = (
+        timeline_evidence.event_role(row) if direct_grounded else None
+    ) or MOMENT_EVENT_KIND
+    readings = [direct]
     contextual = contextual_reading(row)
     if contextual is not None and readings[0]["claim_type"] == tc.OCCURRENCE_CLAIM_TYPE:
+        readings = [contextual]
+    elif contextual is not None and _raw_anchor_is_canonicalized(
+            readings[0], contextual, row):
         readings = [contextual]
     elif contextual is not None and not any(
         reading["claim_type"] == contextual["claim_type"]
@@ -553,9 +625,6 @@ def event_claims(
         for reading in readings
     ):
         readings.append(contextual)
-    source_ref = event_source_ref(
-        stem=stem, event=row, revision=revision, source_path=source_path
-    )
     event_ref = tp.derive_node_id(
         node_kind="event",
         event_kind=MOMENT_EVENT_KIND,
@@ -564,12 +633,19 @@ def event_claims(
     )
     claims = []
     for reading in readings:
+        source_ref = event_source_ref(
+            stem=stem,
+            event=row,
+            revision=_reading_revision(row, reading, revision),
+            source_path=source_path,
+            link=reading.get("reading_kind") == "contextual",
+        )
         payload = {
             "source_ref": source_ref,
             "source_kind": SOURCE_KIND,
             "claim_type": reading["claim_type"],
             "subject_mention": event_subject_mention(row),
-            "event_kind": MOMENT_EVENT_KIND,
+            "event_kind": event_kind,
             "event_ref": event_ref,
             "event_mention": moment_title(row),
             "temporal_value": reading["temporal_value"],
@@ -579,6 +655,9 @@ def event_claims(
             "extractor_version": CLASSIFIER_EXTRACTOR,
             "place_mentions": event_place_mentions(row, document_places),
         }
+        resolution = row.get("timeline_resolution")
+        if isinstance(resolution, dict) and resolution.get("status"):
+            payload["timeline_resolution_status"] = resolution["status"]
         claims.append(tc.validate_temporal_claim(payload, now=now))
     return claims
 
@@ -641,16 +720,14 @@ def _claims_by_source_id(index: object) -> dict[str, list[dict]]:
 
 
 def _superseded_by_reclassification(
-    claims_by_source_id: dict[str, list[dict]], *, stem: str, revision: str
+    claims_by_source_id: dict[str, list[dict]], *, stem: str,
+    current_claim_ids: set[str],
 ) -> tuple[list[str], list[str]]:
     """``(claim ids, revisions)`` of this classification's PREVIOUS reading.
 
-    Every active claim of this stem whose source revision is not the current
-    one. That covers both halves of a re-classification: an event whose words
-    changed (new key, so the old key is orphaned) and an event that survived
-    unchanged (same key, new revision) — in both cases the earlier reading is
-    of bytes that no longer exist, and a claim of bytes that no longer exist is
-    not the operative reading.
+    Every active claim of this stem that the current classification no longer
+    emits. Grounded direct facts keep their ids across link-only refreshes;
+    contextual edges and removed/changed events do not.
     """
     prefix = classification_source_prefix(stem)
     ids: set[str] = set()
@@ -662,7 +739,7 @@ def _superseded_by_reclassification(
             ref = claim.get("source_ref")
             if not isinstance(ref, dict):
                 continue
-            if collapsed_text(ref.get("revision")) == revision and \
+            if collapsed_text(claim.get("claim_id")) in current_claim_ids and \
                     collapsed_text(claim.get("extractor_version")) == CLASSIFIER_EXTRACTOR:
                 continue
             ids.add(collapsed_text(claim.get("claim_id")))
@@ -785,12 +862,14 @@ def migrate_classifier_moments(
         ) - len(events)
         report["events"] += len(events)
         deduped_here = 0
+        current_claim_ids: set[str] = set()
 
         for event in events:
             claims = event_claims(
                 stem=stem, event=event, revision=revision,
                 source_path=source_path, now=now,
             )
+            current_claim_ids.update(claim["claim_id"] for claim in claims)
             kept_claims = []
             for claim in claims:
                 if _already_recorded(claim, recorder_dates.get(source_path) or ()):
@@ -817,9 +896,14 @@ def migrate_classifier_moments(
                     new_nodes.add(node_ref)
             if not kept_claims:
                 continue
-            receipts.append(
-                {
-                    "source_ref": kept_claims[0]["source_ref"],
+            by_source_ref: dict[str, list[dict]] = {}
+            for claim in kept_claims:
+                by_source_ref.setdefault(
+                    lp.canonical_json(claim["source_ref"]), []
+                ).append(claim)
+            for grouped_claims in by_source_ref.values():
+                receipts.append({
+                    "source_ref": grouped_claims[0]["source_ref"],
                     "extractor_version": CLASSIFIER_EXTRACTOR,
                     "extractor": ei.declare_tellings(
                         {
@@ -829,19 +913,18 @@ def migrate_classifier_moments(
                         },
                         telling_keys={
                             claim["claim_id"]: ei.classifier_telling_ref(stem, event)
-                            for claim in kept_claims
+                            for claim in grouped_claims
                         },
                         document_revision=story_revision,
                     ),
-                    "claims": kept_claims,
+                    "claims": grouped_claims,
                     "recorder": "classifier_claims",
-                }
-            )
+                })
         if deduped_here:
             report["deduped_sources"] += 1
 
         stale_ids, stale_revisions = _superseded_by_reclassification(
-            claims_by_source_id, stem=stem, revision=revision
+            claims_by_source_id, stem=stem, current_claim_ids=current_claim_ids
         )
         if stale_ids:
             report["superseded_claims"] += len(stale_ids)

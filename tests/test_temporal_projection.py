@@ -233,6 +233,21 @@ class NodeValidationTests(unittest.TestCase):
         obj = tp.node_from_dict(normalized)
         self.assertEqual(tp.validate_calculated_timeline_node(obj.to_dict()), normalized)
 
+    def test_timeline_resolution_status_round_trips_and_is_closed(self):
+        normalized = tp.validate_calculated_timeline_node(
+            node(timeline_resolution_status="incomplete")
+        )
+        rebuilt = tp.node_from_dict(normalized)
+        self.assertEqual(rebuilt.timeline_resolution_status, "incomplete")
+        self.assertEqual(
+            rebuilt.to_dict()["timeline_resolution_status"], "incomplete"
+        )
+        with self.assertRaises(tp.TimelineNodeError) as caught:
+            tp.validate_calculated_timeline_node(
+                node(timeline_resolution_status="processing_failed")
+            )
+        self.assertEqual(caught.exception.code, "unknown_timeline_resolution_status")
+
     def test_the_tolerant_reader_never_raises(self):
         self.assertIsNone(tp.node_from_dict(None))
         self.assertIsNone(tp.node_from_dict({"node_kind": "event"}))

@@ -30,6 +30,7 @@ import temporal_publication  # noqa: E402
 import temporal_projection  # noqa: E402
 import temporal_store  # noqa: E402
 import temporal_timeline  # noqa: E402
+import timeline_evidence  # noqa: E402
 
 
 def date(value: str) -> dict:
@@ -270,7 +271,10 @@ class StableFreshnessTests(ContextCase):
         stored = {"classification_snapshot": cc.snapshot_metadata(first)}
         self.assertIsNone(cc.refresh_reason(first, stored))
         self.write_projection([node(value="2005/2008")])
-        self.assertEqual(cc.refresh_reason(self.snapshot(), stored), "context_changed")
+        self.assertIsNone(
+            cc.refresh_reason(self.snapshot(), stored),
+            "a bound-only candidate correction propagates through the canonical link",
+        )
 
     def test_context_removal_invalidates_the_prior_reading(self):
         first = self.snapshot()
@@ -302,7 +306,7 @@ class StableFreshnessTests(ContextCase):
         snapshot = self.snapshot()
         self.assertEqual(
             [row["candidate_id"] for row in snapshot["candidates"]],
-            ["node:tidewheel-job"],
+            ["node:stay", "node:tidewheel-job"],
         )
 
     def test_human_negative_identity_is_visible_and_changes_freshness(self):
@@ -408,7 +412,7 @@ class StableFreshnessTests(ContextCase):
         self.assertFalse(report["complete"])
         self.assertEqual(derive_context.call_count, 1)
         self.assertEqual(fold_active_index.call_count, 1)
-        self.assertEqual(load_roster.call_count, 3)
+        self.assertEqual(load_roster.call_count, 4)
         self.assertEqual(load_event_identities.call_count, 1)
         self.assertEqual(load_episode_operations.call_count, 1)
         self.assertEqual(read_telling_manifest.call_count, 1)
@@ -470,9 +474,9 @@ class StableFreshnessTests(ContextCase):
         )
         other = cc._build_context_snapshot_from_catalog(self.root, second, catalog)
 
-        self.assertEqual(own["candidates"], other["candidates"])
+        self.assertEqual(other["candidates"], [])
         self.assertEqual(
-            [row["candidate_id"] for row in other["candidates"]], ["node:stay"]
+            [row["candidate_id"] for row in own["candidates"]], ["node:stay"]
         )
 
     def test_large_catalog_keeps_relevant_repeated_stays_and_real_aliases(self):
@@ -496,6 +500,9 @@ class StableFreshnessTests(ContextCase):
                 "episode_id": None,
                 "node_kind": "event",
                 "event_kind": "moment",
+                "label": f"Noise moment {index}",
+                "legacy_refs": [f"noise-{index}"],
+                "subject_refs": ["self"],
             }
             for index in range(110)
         ]
@@ -507,6 +514,8 @@ class StableFreshnessTests(ContextCase):
             ) | {
                 "episode_id": None,
                 "subject_refs": [f"place/other-{index}", "self"],
+                "label": f"Other residence {index}",
+                "legacy_refs": [f"other-{index}"],
             }
             for index in range(70)
         ]
@@ -554,6 +563,8 @@ class StableFreshnessTests(ContextCase):
             ) | {
                 "episode_id": None,
                 "subject_refs": [f"place/other-{index}", "self"],
+                "label": f"Other residence {index}",
+                "legacy_refs": [f"other-{index}"],
             }
             for index in range(110)
         ]
@@ -616,8 +627,8 @@ class StableFreshnessTests(ContextCase):
 
         snapshot = self.snapshot()
 
-        self.assertTrue(snapshot["context_truncated"])
-        self.assertNotIn(
+        self.assertFalse(snapshot["context_truncated"])
+        self.assertIn(
             "node:zz-ranch",
             [row["candidate_id"] for row in snapshot["candidates"]],
         )
@@ -686,7 +697,7 @@ class ResponseValidationTests(ContextCase):
     def test_source_or_context_race_rejects_the_old_response(self):
         old = self.snapshot()
         result = self.response(old)
-        self.write_projection([node(value="2005/2008")])
+        self.write_projection([node() | {"conflict_state": "contradicted"}])
         with self.assertRaises(cc.ClassifierContextError):
             cc.validate_response(result, self.snapshot(), self.source.read_text())
 
@@ -842,6 +853,21 @@ class ContextDiagnosticsTests(ContextCase):
             ("refs_competing", code.CANDIDATE_NOT_DISAMBIGUATED, "snapshot",
              ("candidates",), [snap["candidates"][0],
                               snap["candidates"][0] | {"candidate_id": "node:second"}]),
+            ("event_key", code.EVENT_KEYS_INVALID, "response",
+             ("events", 0, "event_key"), "0" * 12),
+            ("grounding", code.GROUNDING_INVALID, "response",
+             ("events", 0, "source_grounding"), {
+                 "quote": "while we lived in Cedarport",
+                 "temporal_quote": "Cedarport",
+                 "subject_quote": "Cedarport",
+                 "kind": "date",
+             }),
+            ("resolution", code.RESOLUTION_INVALID, "response",
+             ("events", 0, "timeline_resolution"), {
+                 "status": "invented",
+                 "candidate_ids": ["node:stay"],
+                 "reason": "Synthetic invalid status.",
+             }),
         ]
         for key in cc.SNAPSHOT_KEYS:
             cases.append((f"changed_{key}", code.SNAPSHOT_MISMATCH, "response",
@@ -899,7 +925,10 @@ class ContextDiagnosticsTests(ContextCase):
         classifications = self.root / "state" / "classifications"
         classifications.mkdir()
         prior = classifications / "sources-manual-story.json"
-        prior.write_text(json.dumps({"events": [{"description": "Prior accepted reading"}]}))
+        prior.write_text(json.dumps({
+            "stale": True,
+            "events": [{"description": "Prior accepted reading"}],
+        }))
         candidates = self.root / "state" / "question_candidates.json"
         candidates.write_text(json.dumps({"candidates": [{"id": "synthetic-prior"}]}))
         before = prior.read_bytes(), candidates.read_bytes()
@@ -967,7 +996,15 @@ class ContextDiagnosticsTests(ContextCase):
             saved = json.loads(classify_story.classification_path(self.source).read_text())
         self.assertEqual(err.getvalue(), "")
         self.assertEqual(saved["events"], [event])
-        self.assertEqual(result, unchanged)
+        self.assertEqual(
+            {key: result[key] for key in result if key != "events"},
+            {key: unchanged[key] for key in unchanged if key != "events"},
+        )
+        self.assertEqual(result["events"][0]["title"], unchanged["events"][0]["title"])
+        self.assertIsNone(result["events"][0]["source_grounding"])
+        self.assertEqual(
+            result["events"][0]["timeline_resolution"]["status"], "missing_evidence"
+        )
         self.assertIsNone(cc.refresh_reason(self.snapshot(), saved))
         model.assert_not_called()
 
@@ -977,22 +1014,44 @@ class ContextDiagnosticsTests(ContextCase):
         )
         text = " ".join(prompt.split())
         for rule in (
-            "`context_truncated` must be false",
-            "`candidate_set_complete` must be true",
+            '"event_contexts"',
+            "Compute this event's relevant candidates from its own source-grounded",
+            "Specific names, aliases, entity refs, and reference keys win",
+            "the provisional full-extraction context is retrieval input",
             "no `unresolved_entity_mentions` and no `entity_ref_ambiguities`",
             "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
-            "exactly one candidate across the ENTIRE supplied candidate list",
+            "the exact source quote must distinguish the selected role or stay",
             "one exact, unchanged substring of Story Text occurring exactly once",
             "empty, null, or missing entity refs",
             "return the WHOLE `timeline_relation` as null",
             "Keep the event and its independently stated date or age",
+            "This list is event-local, not the entire catalog",
+            "Timeline Evidence Uses Two Independent Decisions",
+            "does NOT need a calendar date or age",
+            "an empty candidate set for a real event is `missing_evidence`",
+            "`incomplete` is allowed ONLY",
+            "A supported rough `before` or `after` placement is also valid",
+            "do not invent `within` merely to tighten bounds",
+            "preserve the supported `before` relation",
+            "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
+            "candidate's WHOLE occurrence",
+            "before that duration starts",
+            "after it ends",
+            '"early in", and "late in"',
+            '"After the wedding"',
+            "date.anchor_ref",
+            f"1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",
+            f"{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
+        self.assertNotIn("across the ENTIRE supplied candidate list", text)
+        self.assertNotIn("TIGHTEST SUPPORTED TIME BOUNDS", text)
+        self.assertNotIn("`context_truncated` must be false", text)
 
-    def test_v1_accepted_relations_and_null_relations_remain_current(self):
+    def test_v2_accepted_relations_and_null_relations_remain_current(self):
         snapshot = self.snapshot()
-        self.assertEqual(snapshot["prompt_version"], "contextual-timeline:1")
+        self.assertEqual(snapshot["prompt_version"], "contextual-timeline:2")
         self.assertEqual(snapshot["extractor_version"], "story-classifier:2")
         self.assertEqual(snapshot["schema_version"], 1)
         for relation in ("within", "before", "after", None):
@@ -1349,22 +1408,25 @@ class ProductionPipelineAcceptanceTests(ContextCase):
                 if row["kind"] == "residence"
             )
             response_path = tasks / task["response"]
+            prior_event = json.loads(classification_path.read_text())["events"][0]
             response_path.write_text(json.dumps({
+                "_classification_mode": "timeline",
                 "_classification_snapshot": task["classification_snapshot"],
-                "people": [],
-                "places": [{"name": "Cedarport", "slug": "cedarport"}],
-                "time_periods": [],
-                "themes": [],
                 "events": [{
-                    "title": "Finding the envelope",
-                    "description": "I found the envelope.",
-                    "places": ["Cedarport"],
-                    "date": None,
+                    "event_key": timeline_evidence.event_key(prior_event),
+                    "source_grounding": None,
                     "timeline_relation": {
                         "relation": "within",
                         "candidate_id": stay["candidate_id"],
                         "entity_refs": ["place/cedarport"],
                         "evidence": {"quote": "while we lived in Cedarport"},
+                    },
+                    "timeline_resolution": {
+                        "status": "linked",
+                        "candidate_ids": list(
+                            next(iter(snapshot["event_contexts"].values()))["candidate_ids"]
+                        ),
+                        "reason": "The source quote names the supplied residence.",
                     },
                 }],
             }), encoding="utf-8")
