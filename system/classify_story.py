@@ -44,6 +44,7 @@ LEGACY_FOCUS_KEY = "spot" "light_opportunities"
 
 from ai_provider import AIResponseError, failure_metadata, normalize_question_records
 import classifier_context as classifier_ctx
+import timeline_evidence
 
 from lifehug_core import (
     ANSWERS_DIR,
@@ -620,7 +621,7 @@ def classification_mode(
     reason = classifier_ctx.refresh_reason(snapshot, existing)
     if reason is None:
         return None
-    return "timeline" if reason == "context_changed" else "full"
+    return "timeline" if reason in ("context_changed", "relationship_changed") else "full"
 
 
 def _corrections_block(source_path: Path) -> str:
@@ -663,6 +664,11 @@ def _build_timeline_prompt(
     context_snapshot: dict,
 ) -> str:
     """Ask only for the temporal fields that can legitimately be refreshed."""
+    _path, existing = _existing_classification(source_path)
+    stored_events = copy.deepcopy((existing or {}).get("events") or [])
+    for event in stored_events:
+        if isinstance(event, dict):
+            timeline_evidence.ensure_event_key(event)
     timeline_context = json.dumps({
         "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
         "context_complete": context_snapshot.get("context_complete", False),
@@ -673,6 +679,7 @@ def _build_timeline_prompt(
         "candidates": context_snapshot.get("candidates", []),
         "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
         "prior_event_identities": context_snapshot.get("prior_event_identities", []),
+        "event_contexts": context_snapshot.get("event_contexts", {}),
     }, indent=2, sort_keys=True)
     return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
 
@@ -688,24 +695,29 @@ Type: {fm.get('type', 'unknown')}
 ## Canonical Timeline Context
 {timeline_context}
 
+## Existing Events (immutable except the three link fields)
+{json.dumps(stored_events, indent=2, sort_keys=True)}
+
 Return ONLY one raw JSON object with exactly these fields:
 {{
   "_classification_mode": "timeline",
   "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
   "events": [
-    {{ "title": "noun phrase of at most 7 words", "description": "one datable moment", "subject": "who or what experienced it", "places": ["source-grounded place names for this event only"], "when_hint": "the source's own words or null", "anchor": "nearest stated landmark or null", "date": {{ "stated": "explicit date/year or null", "age": "explicit age or null", "anchor_ref": "stated landmark or null", "relation": "before|after|within|null" }}, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null }}
+    {{ "event_key": "exact existing event_key", "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate id relevant to this event"], "reason": "bounded explanation" }} }}
   ]
 }}
 
-Extract every datable moment, including zero events when this is an opinion with
-no narrated moment. Never infer a calendar year. Preserve direct dates and ages
-alongside supported contextual relations. A timeline relation is optional and
-must be null unless its candidate set is complete, identity is unambiguous, at
-least one selected entity ref uniquely disambiguates the candidate, and its
-evidence quote occurs exactly once in Story Text. Do not return people, places,
-themes, insights, sensitivity, scene analysis, outputs, focuses, projects,
-contradictions, or candidate questions. The framework preserves those existing
-fields and human decisions. Echo the mode and four-key snapshot exactly.
+Return each existing event key exactly once. Do not re-extract, rename, reorder,
+add, or omit events. Return only the four event-delta fields shown. The framework
+merges only grounding, relation and resolution into the stored event. A linked
+outcome requires a relation; every other outcome requires null. `candidate_ids`
+must list the full relevant set supplied for that event, including alternatives.
+Use incomplete when that set is marked incomplete. Ground a direct date or age
+only with one exact unique event quote whose temporal and subject fragments occur
+inside it and support the stored date/age and subject. Never infer a calendar
+year. A relation quote must occur exactly once and distinguish competing roles or
+same-named stays in the source words. Do not return any document-level extraction
+field. Echo the mode and four-key snapshot exactly.
 """
 
 
@@ -859,7 +871,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   }},
   "situation_vs_story": "situation_rich_story_empty|story_rich_situation_thin|balanced|neither",
   "events": [
-    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the author's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null }}
+    {{ "title": "string — a noun phrase of at most 7 words naming the THING, not the telling ('Grandpa\'s two-page letter')", "description": "string — one datable moment", "subject": "string — who or what experienced this event", "places": ["source-grounded place names for this event only"], "when_hint": "string or null — as stated ('sixth grade', 'two weeks after the wedding')", "anchor": "string or null — nearest landmark (a move, wedding, birth, job change)", "date": {{ "stated": "string or null — a date or year the author ACTUALLY SAID", "age": "string or null — the subject's age at the time, in their words ('about five')", "anchor_ref": "string or null — the landmark this is dated against", "relation": "before|after|within|null" }}, "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "an exact supplied candidate_id", "entity_refs": ["one or more exact entity_refs supplied on that candidate"], "evidence": {{ "quote": "one exact, uniquely occurring quote from Story Text" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate relevant to this event"], "reason": "bounded explanation" }} }}
   ]{question_schema}
 }}
 
@@ -906,6 +918,15 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   invent references to make a relation pass. Document-level `places` are
   retrieval hints only, never evidence for every event. A supported contextual
   relation does not replace a direct stated date or age; return both when valid.
+- `events[].source_grounding`: ground a direct `date.stated` or `date.age` only
+  with one exact, uniquely occurring event quote. Its temporal and subject quote
+  must be exact substrings inside that quote and support this event's existing
+  date/age and subject. Use the event subject's age, never the owner's age for a
+  relative. Description and when_hint summaries are not source quotations.
+- `events[].timeline_resolution`: always present. `linked` requires a relation;
+  every other status requires null. List every supplied candidate relevant to
+  this event, including rejected alternatives. Use `incomplete` for an incomplete
+  relevant set and `not_temporal` only when this extracted item is not an event.
 - Echo `_classification_snapshot` byte-for-byte as shown. It binds this response
   to the source and context seen in this prompt; never substitute newer values.
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
@@ -1240,6 +1261,12 @@ def _validate_mode_result(
             raise ClassificationPreparationError(
                 "timeline events must be a list", code="context_events_not_list"
             )
+        for event in result["events"]:
+            if not isinstance(event, dict) or set(event) != timeline_evidence.EVENT_DELTA_KEYS:
+                raise ClassificationPreparationError(
+                    "timeline events must be exact link-only deltas",
+                    code="timeline_schema_invalid",
+                )
         return
     if not strict_schema:
         return
@@ -1296,8 +1323,15 @@ def prepare_classification(
         strict_schema=strict_schema,
         include_candidates=not skip_candidates,
     )
-    classifier_ctx.validate_response(result, snapshot, story_text)
     _path, existing = _existing_classification(source_path)
+    classifier_ctx.validate_response(
+        result,
+        snapshot,
+        story_text,
+        mode=mode,
+        existing_events=(existing or {}).get("events") if isinstance(existing, dict) else None,
+        require_event_contract=(mode == "timeline" or strict_schema),
+    )
     base_digest = _digest(existing) if isinstance(existing, dict) else ""
     expected_mode = classification_mode(
         snapshot,
@@ -1326,7 +1360,16 @@ def prepare_classification(
                 code="timeline_base_missing",
             )
         classification = copy.deepcopy(existing)
-        classification["events"] = result["events"]
+        by_key = {event["event_key"]: event for event in result["events"]}
+        merged_events: list[dict] = []
+        for stored in classification.get("events") or ():
+            merged = copy.deepcopy(stored)
+            key = timeline_evidence.ensure_event_key(merged)
+            delta = by_key[key]
+            for field in ("source_grounding", "timeline_relation", "timeline_resolution"):
+                merged[field] = copy.deepcopy(delta[field])
+            merged_events.append(merged)
+        classification["events"] = merged_events
         classification["classification_snapshot"] = classifier_ctx.snapshot_metadata(snapshot)
         classification["classified_at"] = classified_at
         classification["model_used"] = model

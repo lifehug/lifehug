@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "system"))
 
 import classifier_context as cc  # noqa: E402
 import classify_story as cs  # noqa: E402
+import timeline_evidence as te  # noqa: E402
 
 
 def snapshot(source: Path, context: str = "context-1") -> dict:
@@ -63,6 +64,24 @@ def full_response(
         "situation_vs_story": "balanced",
         "events": [] if events is None else events,
         "candidate_questions": [] if candidate_questions is None else candidate_questions,
+    }
+
+
+def timeline_delta(event: dict, snap: dict, *, status: str = "missing_evidence") -> dict:
+    key = te.event_key(event)
+    context = (snap.get("event_contexts") or {}).get(key) or {}
+    candidate_ids = list(context.get("candidate_ids") or [
+        row["candidate_id"] for row in snap.get("candidates") or ()
+    ])
+    return {
+        "event_key": key,
+        "source_grounding": None,
+        "timeline_relation": None,
+        "timeline_resolution": {
+            "status": status,
+            "candidate_ids": candidate_ids,
+            "reason": "Synthetic evidence-link outcome.",
+        },
     }
 
 
@@ -122,7 +141,16 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             "sensitivity_reason": "preserve me",
             "scene_slots": {"what_happened": True},
             "situation_vs_story": "balanced",
-            "events": [{"title": "Old event"}],
+            "events": [{
+                "title": "Old event",
+                "description": "A synthetic first story.",
+                "subject": "self",
+                "places": [],
+                "when_hint": None,
+                "anchor": None,
+                "date": None,
+                "custom_field": "preserve exactly",
+            }],
         }
         value.update(extra)
         cs.write_json(cs.classification_path(source), value)
@@ -298,7 +326,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(current),
-            "events": [{"title": "New synthetic event", "timeline_relation": None}],
+            "events": [timeline_delta(prior["events"][0], current)],
         }
         load, build = self.catalogs({self.a: current})
         with load, build:
@@ -312,8 +340,58 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         for key, value in prior.items():
             if key not in {"events", "classification_snapshot", "classified_at", "model_used"}:
                 self.assertEqual(filed[key], value, key)
-        self.assertEqual(filed["events"], response["events"])
+        expected_event = copy.deepcopy(prior["events"][0])
+        expected_event["event_key"] = te.event_key(expected_event)
+        for key, value in expected_event.items():
+            self.assertEqual(filed["events"][0][key], value, key)
+        self.assertIsNone(filed["events"][0]["source_grounding"])
+        self.assertIsNone(filed["events"][0]["timeline_relation"])
+        self.assertEqual(
+            filed["events"][0]["timeline_resolution"]["status"], "missing_evidence"
+        )
+        self.assertEqual(filed["events"][0]["custom_field"], "preserve exactly")
         self.assertTrue(filed[cs.CLASSIFICATION_SKIP_CANDIDATES_FIELD])
+
+    def test_timeline_response_requires_exact_existing_event_keys_and_delta_fields(self) -> None:
+        old = snapshot(self.a, "old")
+        current = snapshot(self.a, "new")
+        prior = self.existing(self.a, old)
+        valid = timeline_delta(prior["events"][0], current)
+        cases = {
+            "omitted": [],
+            "unknown": [{**valid, "event_key": "0" * 12}],
+            "duplicate": [valid, copy.deepcopy(valid)],
+            "replacement": [{**valid, "title": "Model rewrote extraction"}],
+        }
+        for index, (name, events) in enumerate(cases.items(), start=1):
+            with self.subTest(name=name):
+                response = {
+                    "_classification_mode": "timeline",
+                    "_classification_snapshot": cc.snapshot_metadata(current),
+                    "events": events,
+                }
+                load, build = self.catalogs({self.a: current})
+                with load, build:
+                    receipt = cs.file_batch_response(self.envelope(
+                        f"timeline-keys-{index}", [{
+                            "source_path": "sources/manual/alpha.md",
+                            "mode": "timeline",
+                            "response_text": json.dumps(response),
+                        }],
+                    ))
+                self.assertEqual(receipt["counts"]["refused"], 1)
+                self.assertIn(
+                    receipt["items"][0]["refusal_code"],
+                    {"context_event_keys_invalid", "timeline_schema_invalid"},
+                )
+                self.assertEqual(json.loads(cs.classification_path(self.a).read_text()), prior)
+
+    def test_relationship_prompt_change_selects_timeline_not_full(self) -> None:
+        current = snapshot(self.a)
+        prior_snapshot = {**current, "prompt_version": "contextual-timeline:1"}
+        prior = self.existing(self.a, prior_snapshot)
+        self.assertEqual(cc.refresh_reason(current, prior), "relationship_changed")
+        self.assertEqual(cs.classification_mode(current, prior), "timeline")
 
     def test_full_skip_candidates_preserves_prior_candidate_ids(self) -> None:
         old = snapshot(self.a, "old")
@@ -463,7 +541,10 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(current),
-            "events": [{"title": "Context refreshed"}],
+            "events": [timeline_delta(
+                json.loads(cs.classification_path(self.a).read_text())["events"][0],
+                current,
+            )],
         }
         load, build = self.catalogs({self.a: current})
         with load, build:
@@ -770,7 +851,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         response = {
             "_classification_mode": "timeline",
             "_classification_snapshot": cc.snapshot_metadata(first),
-            "events": [],
+            "events": [timeline_delta(prior["events"][0], first)],
         }
         calls = 0
 

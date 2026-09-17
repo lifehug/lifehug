@@ -24,12 +24,13 @@ import source_integrity
 import temporal_placement as placement
 import temporal_projection
 import temporal_store
+import timeline_evidence
 from ai_provider import AIResponseError
 from temporal_claims import normalized_mention_key
 from vault_paths import vault_data_path
 
 CONTEXT_SCHEMA_VERSION = 1
-PROMPT_VERSION = "contextual-timeline:1"
+PROMPT_VERSION = "contextual-timeline:2"
 EXTRACTOR_VERSION = "story-classifier:2"
 MAX_CONTEXT_CANDIDATES = 64
 MAX_CONTEXT_DECISIONS = 64
@@ -69,6 +70,9 @@ class ContextFailureCode(Enum):
     QUOTE_AMBIGUOUS = "context_quote_ambiguous"
     ENTITY_REFS_INVALID = "context_entity_refs_invalid"
     CANDIDATE_NOT_DISAMBIGUATED = "context_candidate_not_disambiguated"
+    EVENT_KEYS_INVALID = "context_event_keys_invalid"
+    GROUNDING_INVALID = "context_grounding_invalid"
+    RESOLUTION_INVALID = "context_resolution_invalid"
 
 
 class ClassifierContextError(AIResponseError, ValueError):
@@ -829,7 +833,36 @@ def build_context_snapshot_from_catalog(
     )
 
 
-def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
+def _event_context(snapshot: dict, event: dict) -> dict:
+    key = timeline_evidence.event_key(event)
+    contexts = snapshot.get("event_contexts")
+    if isinstance(contexts, dict) and isinstance(contexts.get(key), dict):
+        return contexts[key]
+    candidates = [row for row in snapshot.get("candidates") or () if isinstance(row, dict)]
+    return {
+        "event_key": key,
+        "candidate_ids": sorted(
+            str(row.get("candidate_id")) for row in candidates if row.get("candidate_id")
+        ),
+        "complete": (
+            not bool(snapshot.get("context_truncated"))
+            and all(row.get("candidate_set_complete", True) for row in candidates)
+        ),
+        "input_fingerprint": timeline_evidence.digest([
+            _freshness_candidate(row) for row in candidates
+        ]),
+    }
+
+
+def validate_response(
+    result: object,
+    snapshot: dict,
+    story_text: str,
+    *,
+    mode: str = "full",
+    existing_events: object = None,
+    require_event_contract: bool = False,
+) -> dict:
     """Validate one model response against exactly the context it observed."""
     if not isinstance(result, dict):
         raise ClassifierContextError(
@@ -843,7 +876,7 @@ def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
             "classification snapshot is missing or stale",
             code=ContextFailureCode.SNAPSHOT_MISMATCH,
         )
-    candidates = {
+    all_candidates = {
         str(row.get("candidate_id")): row
         for row in snapshot.get("candidates") or ()
         if isinstance(row, dict) and row.get("candidate_id")
@@ -853,71 +886,155 @@ def validate_response(result: object, snapshot: dict, story_text: str) -> dict:
         raise ClassifierContextError(
             "events must be a list", code=ContextFailureCode.EVENTS_NOT_LIST,
         )
+    bases: dict[str, dict] = {}
+    if mode == "timeline":
+        for value in existing_events if isinstance(existing_events, list) else ():
+            if not isinstance(value, dict):
+                continue
+            key = timeline_evidence.event_key(value)
+            if key in bases:
+                raise ClassifierContextError(
+                    "base classification has duplicate event keys",
+                    code=ContextFailureCode.EVENT_KEYS_INVALID,
+                )
+            bases[key] = value
+        supplied = [
+            str(value.get("event_key") or "") if isinstance(value, dict) else ""
+            for value in events
+        ]
+        if (any(not key for key in supplied)
+                or len(supplied) != len(set(supplied))
+                or set(supplied) != set(bases)):
+            raise ClassifierContextError(
+                "timeline response must contain each existing event key exactly once",
+                code=ContextFailureCode.EVENT_KEYS_INVALID,
+            )
+
+    normalized_events: list[dict] = []
     for event in events:
         if not isinstance(event, dict):
             raise ClassifierContextError(
                 "each event must be a mapping", code=ContextFailureCode.EVENT_NOT_MAPPING,
             )
+        if mode == "timeline":
+            if set(event) != timeline_evidence.EVENT_DELTA_KEYS:
+                raise ClassifierContextError(
+                    "timeline event is not a link-only delta",
+                    code=ContextFailureCode.EVENT_KEYS_INVALID,
+                )
+            key = str(event["event_key"])
+            base = bases[key]
+        else:
+            base = event
+            try:
+                key = timeline_evidence.ensure_event_key(base)
+            except timeline_evidence.TimelineEvidenceError as exc:
+                raise ClassifierContextError(
+                    str(exc), code=ContextFailureCode.EVENT_KEYS_INVALID,
+                ) from None
+
+        context = _event_context(snapshot, base)
+        candidate_ids = list(context.get("candidate_ids") or ())
+        candidates = {
+            candidate_id: all_candidates[candidate_id]
+            for candidate_id in candidate_ids if candidate_id in all_candidates
+        }
         relation = event.get("timeline_relation")
         if relation is None:
-            continue
-        if not isinstance(relation, dict) or relation.get("relation") not in RELATIONS:
-            raise ClassifierContextError(
-                "timeline relation must be within, before, or after",
-                code=ContextFailureCode.RELATION_INVALID,
+            candidate = None
+        else:
+            if not isinstance(relation, dict) or relation.get("relation") not in RELATIONS:
+                raise ClassifierContextError(
+                    "timeline relation must be within, before, or after",
+                    code=ContextFailureCode.RELATION_INVALID,
+                )
+            candidate_id = str(relation.get("candidate_id") or "")
+            candidate = candidates.get(candidate_id)
+            if candidate is None:
+                raise ClassifierContextError(
+                    "timeline relation references an unknown event candidate id",
+                    code=ContextFailureCode.CANDIDATE_UNKNOWN,
+                )
+            if not context.get("complete"):
+                raise ClassifierContextError(
+                    "timeline relation candidate set is incomplete",
+                    code=ContextFailureCode.CONTEXT_INCOMPLETE,
+                )
+            if (candidate.get("unresolved_entity_mentions")
+                    or candidate.get("entity_ref_ambiguities")):
+                raise ClassifierContextError(
+                    "timeline relation candidate identity is unresolved or ambiguous",
+                    code=ContextFailureCode.CANDIDATE_AMBIGUOUS,
+                )
+            evidence = relation.get("evidence")
+            if not isinstance(evidence, dict):
+                raise ClassifierContextError(
+                    "timeline relation requires source evidence",
+                    code=ContextFailureCode.EVIDENCE_NOT_MAPPING,
+                )
+            quote = evidence.get("quote")
+            if not isinstance(quote, str) or not quote:
+                raise ClassifierContextError(
+                    "timeline relation evidence quote is required",
+                    code=ContextFailureCode.QUOTE_MISSING,
+                )
+            start, end = _locate_unique_exact_quote(story_text, quote)
+            evidence["start"] = start
+            evidence["end"] = end
+            refs = relation.get("entity_refs")
+            allowed = set(candidate.get("entity_refs") or ())
+            if (not isinstance(refs, list) or not refs
+                    or any(str(ref) not in allowed for ref in refs)):
+                raise ClassifierContextError(
+                    "timeline relation entity refs are not allowlisted",
+                    code=ContextFailureCode.ENTITY_REFS_INVALID,
+                )
+            if not timeline_evidence.quote_disambiguates(
+                    candidate, list(candidates.values()), quote):
+                raise ClassifierContextError(
+                    "source quote does not disambiguate competing candidates",
+                    code=ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED,
+                )
+
+        try:
+            grounding = timeline_evidence.normalize_source_grounding(
+                event.get("source_grounding"),
+                base,
+                story_text=story_text,
+                source_revision=str(snapshot.get("source_revision") or ""),
+                grounding_allowed=bool(snapshot.get("grounding_allowed", True)),
             )
-        candidate_id = str(relation.get("candidate_id") or "")
-        candidate = candidates.get(candidate_id)
-        if candidate is None:
-            raise ClassifierContextError(
-                "timeline relation references an unknown candidate id",
-                code=ContextFailureCode.CANDIDATE_UNKNOWN,
+            raw_resolution = event.get("timeline_resolution")
+            if raw_resolution is None and not require_event_contract:
+                raw_resolution = {
+                    "status": (
+                        "linked" if relation is not None else
+                        "incomplete" if not context.get("complete") else
+                        "missing_evidence"
+                    ),
+                    "candidate_ids": candidate_ids,
+                    "reason": "Legacy event awaits an explicit evidence-link outcome.",
+                }
+            resolution = timeline_evidence.normalize_resolution(
+                raw_resolution,
+                event_key_value=key,
+                candidate_ids=candidate_ids,
+                context_complete=bool(context.get("complete")),
+                source_revision=str(snapshot.get("source_revision") or ""),
+                prompt_version=str(snapshot.get("prompt_version") or ""),
+                input_fingerprint=str(context.get("input_fingerprint") or ""),
+                relation=relation,
             )
-        if snapshot.get("context_truncated") or not candidate.get("candidate_set_complete"):
-            raise ClassifierContextError(
-                "timeline relation candidate set is incomplete",
-                code=ContextFailureCode.CONTEXT_INCOMPLETE,
+        except timeline_evidence.TimelineEvidenceError as exc:
+            code = (
+                ContextFailureCode.GROUNDING_INVALID
+                if exc.code.startswith("grounding_") else ContextFailureCode.RESOLUTION_INVALID
             )
-        if (candidate.get("unresolved_entity_mentions")
-                or candidate.get("entity_ref_ambiguities")):
-            raise ClassifierContextError(
-                "timeline relation candidate identity is unresolved or ambiguous",
-                code=ContextFailureCode.CANDIDATE_AMBIGUOUS,
-            )
-        evidence = relation.get("evidence")
-        if not isinstance(evidence, dict):
-            raise ClassifierContextError(
-                "timeline relation requires source evidence",
-                code=ContextFailureCode.EVIDENCE_NOT_MAPPING,
-            )
-        quote = evidence.get("quote")
-        if not isinstance(quote, str) or not quote:
-            raise ClassifierContextError(
-                "timeline relation evidence quote is required",
-                code=ContextFailureCode.QUOTE_MISSING,
-            )
-        start, end = _locate_unique_exact_quote(story_text, quote)
-        evidence["start"] = start
-        evidence["end"] = end
-        refs = relation.get("entity_refs")
-        allowed = set(candidate.get("entity_refs") or ())
-        if not isinstance(refs, list) or not refs or any(str(ref) not in allowed for ref in refs):
-            raise ClassifierContextError(
-                "timeline relation entity refs are not allowlisted",
-                code=ContextFailureCode.ENTITY_REFS_INVALID,
-            )
-        ref_counts = {
-            str(ref): sum(
-                str(ref) in set(row.get("entity_refs") or ())
-                for row in candidates.values()
-            )
-            for ref in refs
-        }
-        if not any(count == 1 for count in ref_counts.values()):
-            raise ClassifierContextError(
-                "timeline relation does not disambiguate competing candidates",
-                code=ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED,
-            )
+            raise ClassifierContextError(str(exc), code=code) from None
+        event["source_grounding"] = grounding
+        event["timeline_resolution"] = resolution
+        normalized_events.append(event)
+    result["events"] = normalized_events
     return result
 
 
@@ -945,8 +1062,10 @@ def refresh_reason(snapshot: dict, classification: object) -> str | None:
         return "legacy_snapshot"
     if recorded["source_revision"] != current["source_revision"]:
         return "source_changed"
-    if recorded["prompt_version"] != current["prompt_version"] or recorded["extractor_version"] != current["extractor_version"]:
+    if recorded["extractor_version"] != current["extractor_version"]:
         return "classifier_changed"
+    if recorded["prompt_version"] != current["prompt_version"]:
+        return "relationship_changed"
     if recorded["context_digest"] != current["context_digest"]:
         return "context_changed"
     return None
