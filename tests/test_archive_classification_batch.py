@@ -246,6 +246,10 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
             self.assertIn("`incomplete` is allowed ONLY", normalized)
             self.assertIn("Prefer the most specific relation", normalized)
             self.assertIn("preserve the supported `before` relation", normalized)
+            self.assertIn(
+                "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
+                normalized,
+            )
 
     def test_plan_builds_prompts_only_for_selected_items_and_names_ineligible(self) -> None:
         empty = self.sources / "manual" / "empty.md"

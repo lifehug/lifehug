@@ -134,6 +134,89 @@ class SelectiveRetrievalTests(unittest.TestCase):
         self.assertEqual(context["candidate_ids"], ["node:river-house"])
         self.assertEqual(context["remaining_candidate_count"], 0)
 
+    def test_exact_alias_outranks_shared_domain_words_beyond_cap(self) -> None:
+        rows = []
+        for index in range(600):
+            row = candidate(
+                f"node:home-{index:03d}",
+                f"Home number {index}",
+                entity_refs=[f"place/home-{index}"],
+            )
+            row["aliases"] = [f"Residence {index}"]
+            rows.append(row)
+
+        context = te.build_event_context(
+            {
+                "title": "Residence 499",
+                "description": "I found the photograph at Residence 499.",
+                "subject": "self",
+                "places": ["Residence 499"],
+                "date": None,
+            },
+            rows,
+        )
+
+        self.assertTrue(context["complete"])
+        self.assertEqual(context["candidate_ids"], ["node:home-499"])
+        self.assertEqual(context["remaining_candidate_count"], 0)
+
+    def test_whole_alias_normalizes_punctuation_and_rejects_numeric_prefix(self) -> None:
+        forty_nine = candidate(
+            "node:home-049",
+            "Home 49",
+            entity_refs=["place/home-49"],
+        )
+        forty_nine["aliases"] = ["St. John's Residence #49"]
+        four_ninety_nine = candidate(
+            "node:home-499",
+            "Home 499",
+            entity_refs=["place/home-499"],
+        )
+        four_ninety_nine["aliases"] = ["St. John's Residence #499"]
+
+        context = te.build_event_context(
+            {
+                "title": "St. John's Residence #499",
+                "description": "The photograph was at St. John's Residence #499.",
+                "subject": "self",
+                "places": ["St. John's Residence #499"],
+                "date": None,
+            },
+            [forty_nine, four_ninety_nine],
+        )
+
+        self.assertEqual(context["candidate_ids"], ["node:home-499"])
+
+    def test_exact_alias_retains_every_same_entity_competitor(self) -> None:
+        first = candidate(
+            "node:river-first",
+            "River House first stay",
+            entity_refs=["place/river-house"],
+        )
+        second = candidate(
+            "node:river-second",
+            "River House second stay",
+            entity_refs=["place/river-house"],
+        )
+        second["aliases"] = ["River House return"]
+
+        context = te.build_event_context(
+            {
+                "title": "River House return",
+                "description": "During the River House return, I found a letter.",
+                "subject": "self",
+                "places": ["River House"],
+                "date": None,
+            },
+            [first, second],
+        )
+
+        self.assertTrue(context["complete"])
+        self.assertEqual(
+            context["candidate_ids"],
+            ["node:river-first", "node:river-second"],
+        )
+
     def test_first_link_publish_has_the_same_semantic_fingerprint(self) -> None:
         row = candidate(
             "node:river-house",

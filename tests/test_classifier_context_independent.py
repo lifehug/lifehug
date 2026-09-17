@@ -493,6 +493,131 @@ class IndependentContextTests(unittest.TestCase):
             founding["candidate_id"],
         )
 
+    def test_grounded_roles_survive_legacy_moment_episode_bindings(self):
+        (self.root / "state/entity_rosters/organization.json").write_text(json.dumps({
+            "version": 1,
+            "type": "organization",
+            "entities": [{"name": "Northstar", "slug": "northstar", "aliases": []}],
+        }))
+        founder = self.source("legacy-founder", "I founded Northstar in 2012.")
+        employee = self.source("legacy-employee", "I joined Northstar payroll in 2014.")
+        consumer = self.source(
+            "legacy-memory",
+            "I launched Northstar before I ever joined its payroll.",
+        )
+        cases = (
+            (founder, "Northstar founding", "I founded Northstar in 2012.", "2012"),
+            (employee, "Northstar employment", "I joined Northstar payroll in 2014.", "2014"),
+        )
+        initial_events = {}
+        for source, title, description, year in cases:
+            initial_events[source] = {
+                "title": title,
+                "description": description,
+                "subject": "Northstar",
+                "places": [],
+                "date": {
+                    "stated": year,
+                    "age": None,
+                    "anchor_ref": None,
+                    "relation": None,
+                },
+                "source_grounding": None,
+                "timeline_relation": None,
+            }
+            cs.classification_path(source).write_text(json.dumps({
+                "version": 2,
+                "source_path": str(source.relative_to(self.root)),
+                "events": [initial_events[source]],
+            }))
+        self.migrate()
+
+        manifest = ei.read_telling_manifest(self.root)
+        episode_ids = []
+        for source, *_unused in cases:
+            relative = str(source.relative_to(self.root))
+            telling = next(
+                row for row in manifest["tellings"]
+                if row.get("source_path") == relative and row.get("status") == "active"
+            )
+            operation_id = ei.operation_digest(
+                authority="human",
+                op="create",
+                rule_version=ei.IDENTITY_RULE_VERSION,
+                member_refs=[telling["telling_ref"]],
+            )
+            episode_id = ei.episode_id_for(operation_id)
+            binding = {
+                "telling_ref": telling["telling_ref"],
+                "episode_id": episode_id,
+                "relation": "same",
+                "origin": "confirmed",
+                "operation_id": operation_id,
+                "source_ref": "sources/identity/legacy-moment.md",
+                "created_at": NOW,
+            }
+            binding_id = ei.validate_event_identity(binding)["identity_id"]
+            ei.file_operation_envelope(
+                self.root,
+                operation={
+                    "authority": "human",
+                    "op": "create",
+                    "episode_id": episode_id,
+                    "members": [telling["telling_ref"]],
+                    "creates_binding_ids": [binding_id],
+                    "canonical_event_kind": "moment",
+                    "source_ref": "sources/identity/legacy-moment.md",
+                    "created_at": NOW,
+                },
+                bindings=[binding],
+            )
+            episode_ids.append(episode_id)
+        ei.rebuild_telling_manifest(self.root)
+        identities_before = ei.load_event_identities(self.root)
+        operations_before = ei.load_episode_operations(self.root)
+
+        for source, title, description, year in cases:
+            refreshed = {
+                **initial_events[source],
+                "source_grounding": {
+                    "quote": description,
+                    "temporal_quote": year,
+                    "subject_quote": "Northstar",
+                    "kind": "date",
+                },
+            }
+            snapshot = cc.build_context_snapshot(self.root, source)
+            self.assertEqual(
+                cs.classify_file(
+                    source,
+                    "synthetic-recorded",
+                    skip_candidates=True,
+                    precomputed_result=full_response(snapshot, events=[refreshed]),
+                ),
+                0,
+            )
+        self.migrate()
+
+        snapshot = cc.build_context_snapshot(self.root, consumer)
+        candidates = [
+            row for row in snapshot["candidates"]
+            if row.get("episode_id") in episode_ids
+        ]
+        self.assertEqual({row["kind"] for row in candidates}, {"moment"})
+        self.assertEqual(
+            {row["event_role"] for row in candidates},
+            {"founded", "job"},
+            snapshot,
+        )
+        founding = next(row for row in candidates if row["event_role"] == "founded")
+        self.assertTrue(te.quote_disambiguates(
+            founding,
+            candidates,
+            "I launched Northstar before I ever joined its payroll.",
+        ))
+        self.assertEqual(ei.load_event_identities(self.root), identities_before)
+        self.assertEqual(ei.load_episode_operations(self.root), operations_before)
+
     def test_linked_event_absorbs_real_bound_correction_without_model_refresh(self):
         anchor = self.independent_anchor()
         self.publish()

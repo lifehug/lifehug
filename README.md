@@ -439,6 +439,8 @@ python3 system/lifehug.py classify-story --batch-plan --exclude-items-json /priv
 python3 system/lifehug.py classify-story --from-batch-response /private/tmp/archive-batch.json --skip-candidates
 python3 system/timeline_evidence_evals.py --json        # recorded plumbing report
 python3 system/timeline_evidence_evals.py --live --json # configured-provider quality run
+python3 system/timeline_evidence_evals.py --timeline-live --json # stable-event live quality
+python3 system/timeline_evidence_evals.py --catalog-live --json # live filed-catalog probe
 ```
 
 Calculated timeline nodes publish `usable_placement: true|false` as the stable

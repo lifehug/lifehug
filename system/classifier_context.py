@@ -600,6 +600,25 @@ def _grounding_identity(claim_ids: object, claims_by_id: dict[str, dict]) -> lis
     return rows
 
 
+def _grounded_candidate_role(
+    node: dict,
+    claim_ids: object,
+    claims_by_id: dict[str, dict],
+) -> str:
+    """Expose one grounded source role without rewriting episode authority."""
+    canonical = str(node.get("event_kind") or "")
+    if canonical not in ("", "moment"):
+        return canonical
+    roles = {
+        str(claim.get("event_kind") or "")
+        for claim_id in claim_ids or ()
+        if isinstance((claim := claims_by_id.get(str(claim_id))), dict)
+        and timeline_evidence.is_current_classifier_claim(claim)
+        and str(claim.get("event_kind") or "") not in ("", "moment")
+    }
+    return next(iter(roles)) if len(roles) == 1 else canonical
+
+
 def _prior_identities_from_manifest(manifest: object, relative_source: str) -> list[dict]:
     rows: list[dict] = []
     for row in manifest.get("tellings") or () if isinstance(manifest, dict) else ():
@@ -704,6 +723,12 @@ def _load_context_catalog(vault_root: Path) -> dict:
             row["grounding_identity"] = _grounding_identity(
                 claim_ids, independent_claims_by_id
             )
+            grounded_role = _grounded_candidate_role(
+                node, claim_ids, independent_claims_by_id
+            )
+            if grounded_role and grounded_role != row.get("event_role"):
+                row["event_role"] = grounded_role
+                row["reference_keys"] = timeline_evidence.candidate_reference_keys(row)
             candidates.append((row, claim_ids))
     candidates.sort(key=lambda item: (
         0 if item[0].get("node_kind") == "episode" else 1,

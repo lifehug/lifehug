@@ -1032,6 +1032,7 @@ class ContextDiagnosticsTests(ContextCase):
             "`incomplete` is allowed ONLY",
             "Prefer the most specific relation",
             "preserve the supported `before` relation",
+            "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)

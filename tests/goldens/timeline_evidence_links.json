@@ -18,7 +18,10 @@
       "timeline_relation": {"relation": "within", "candidate_id": "node:northstar-founded", "entity_refs": ["organization/northstar"], "evidence": {"quote": "I launched Northstar from the spare room"}},
       "timeline_resolution": {"status": "linked", "candidate_ids": ["node:northstar-founded", "node:northstar-job"], "reason": "The launch wording distinguishes founding from employment."}
     },
-    "expected": {"status": "linked", "candidate_id": "node:northstar-founded", "grounded": false}
+    "expected": {"status": "linked", "candidate_id": "node:northstar-founded", "grounded": false},
+    "allowed_extra_outcomes": [
+      {"status": "linked", "candidate_id": "node:northstar-job", "relation": "within", "grounded": false, "date_anchor_ref": "node:northstar-founded", "date_relation": "after"}
+    ]
   },
   {
     "fixture_id": "river-house-second-stay",

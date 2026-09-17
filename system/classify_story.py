@@ -688,6 +688,13 @@ the advisory-board ordering is weaker. If no opening candidate is supplied or
 the quote does not identify one, preserve the supported `before` relation to
 the advisory-board candidate rather than inventing a `within` link.
 
+Relation direction is always CURRENT EXTRACTED EVENT relative to SELECTED
+CANDIDATE. `after` candidate X means this event happened after X; it never means
+X happened after some other event mentioned in the sentence. If the current
+event is the selected candidate's own occurrence, use `within` that candidate.
+Its independent `date.anchor_ref` may still retain a separate true before/after
+constraint to another event.
+
 Choose resolution from coverage, not candidate count. `incomplete` is allowed
 ONLY when that event's context says `complete: false`. When `complete: true`,
 an empty candidate set for a real event is `missing_evidence`, never

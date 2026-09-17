@@ -184,6 +184,8 @@ python3 system/lifehug.py monthly-research
 python3 system/lifehug.py classify-story --classify-all --unclassified --limit 5
 python3 system/timeline_evidence_evals.py --json        # recorded plumbing report
 python3 system/timeline_evidence_evals.py --live --json # configured-provider quality run
+python3 system/timeline_evidence_evals.py --timeline-live --json # stable-event live quality
+python3 system/timeline_evidence_evals.py --catalog-live --json # live filed-catalog probe
 python3 system/lifehug.py candidates-list --status needs_review
 python3 system/lifehug.py candidates-review --status needs_review
 python3 system/lifehug.py candidates-update <candidate-id> --status deferred --reason "wait for more context"

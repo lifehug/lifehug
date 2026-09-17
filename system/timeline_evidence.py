@@ -65,7 +65,15 @@ _ROLE_TERMS = {
 _EVENT_ROLE_TERMS = {
     "birth": ("birth", "born", "birthday"),
     "death": ("death", "died", "passed away"),
-    "founded": ("founded", "founding", "launch", "launched", "created"),
+    "founded": (
+        "founded",
+        "founding",
+        "launch",
+        "launched",
+        "created",
+        "opened",
+        "opening",
+    ),
     "job": ("job", "work", "worked", "hired", "joined", "employment", "payroll"),
     "married": ("married", "marriage", "wedding"),
     "move": ("move", "moved", "relocated"),
@@ -147,9 +155,10 @@ def is_generic_owner_reference(value: object) -> bool:
     return key.startswith("person ") and key.split()[-1] in _OWNER_TERMS
 
 
-def _candidate_specific_reference_keys(candidate: dict) -> set[str]:
+def _candidate_reference_values(candidate: dict) -> list[object]:
     values: list[object] = [
         candidate.get("name"),
+        *(candidate.get("entity_refs") or ()),
         *(
             value for value in candidate.get("aliases") or ()
             if ":" not in collapsed_text(value)
@@ -162,10 +171,32 @@ def _candidate_specific_reference_keys(candidate: dict) -> set[str]:
     for row in candidate.get("entity_ref_ambiguities") or ():
         if isinstance(row, dict):
             values.append(row.get("mention"))
+    return values
+
+
+def _candidate_strong_reference_keys(candidate: dict) -> set[str]:
+    """Whole canonical handles that identify a candidate or its entity."""
+    return {
+        key
+        for value in _candidate_reference_values(candidate)
+        if (key := _search_key(value)) and key not in _GENERIC_REFERENCE_TERMS
+    }
+
+
+def _candidate_weak_reference_keys(candidate: dict) -> set[str]:
+    """Shared component words used only when no whole handle matches."""
     keys: set[str] = set()
-    for value in values:
-        keys.update(_search_terms(value))
+    for value in _candidate_reference_values(candidate):
+        whole = _search_key(value)
+        keys.update(_search_terms(value) - {whole})
     return keys
+
+
+def _candidate_specific_reference_keys(candidate: dict) -> set[str]:
+    return (
+        _candidate_strong_reference_keys(candidate)
+        | _candidate_weak_reference_keys(candidate)
+    )
 
 
 def _candidate_role_reference_keys(candidate: dict) -> set[str]:
@@ -217,7 +248,8 @@ def _event_haystack(event: dict) -> str:
 
 
 def _term_occurs(term: str, haystack: str) -> bool:
-    return bool(term) and re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", haystack) is not None
+    """Match normalized whole words or phrases without per-candidate regexes."""
+    return bool(term) and f" {term} " in f" {haystack} "
 
 
 def event_role(event: object) -> str | None:
@@ -271,28 +303,45 @@ def build_event_context(
     if linked_id:
         forced.add(linked_id)
 
-    matched: list[dict] = []
+    strong_matched: list[tuple[dict, set[str], set[str], set[str]]] = []
+    weak_matched: list[tuple[dict, set[str], set[str]]] = []
     role_matched: list[tuple[dict, set[str]]] = []
     matched_keys: set[str] = set()
     for candidate in candidates:
         reference_keys = list(candidate.get("reference_keys") or candidate_reference_keys(candidate))
         candidate["reference_keys"] = reference_keys
-        specific_hits = {
-            term for term in _candidate_specific_reference_keys(candidate)
+        strong_hits = {
+            term for term in _candidate_strong_reference_keys(candidate)
+            if _term_occurs(term, haystack)
+        }
+        weak_hits = {
+            term for term in _candidate_weak_reference_keys(candidate)
             if _term_occurs(term, haystack)
         }
         role_hits = {
             term for term in _candidate_role_reference_keys(candidate)
             if _term_occurs(term, haystack)
         }
-        if specific_hits or collapsed_text(candidate.get("candidate_id")) in forced:
-            matched.append(candidate)
-            matched_keys.update(specific_hits)
-            matched_keys.update(role_hits)
+        if strong_hits or collapsed_text(candidate.get("candidate_id")) in forced:
+            strong_matched.append((candidate, strong_hits, weak_hits, role_hits))
+        elif weak_hits:
+            weak_matched.append((candidate, weak_hits, role_hits))
         elif role_hits:
             role_matched.append((candidate, role_hits))
 
-    if not matched:
+    matched: list[dict] = []
+    if strong_matched:
+        for candidate, strong_hits, weak_hits, role_hits in strong_matched:
+            matched.append(candidate)
+            matched_keys.update(strong_hits)
+            matched_keys.update(weak_hits)
+            matched_keys.update(role_hits)
+    elif weak_matched:
+        for candidate, weak_hits, role_hits in weak_matched:
+            matched.append(candidate)
+            matched_keys.update(weak_hits)
+            matched_keys.update(role_hits)
+    else:
         for candidate, role_hits in role_matched:
             matched.append(candidate)
             matched_keys.update(role_hits)
