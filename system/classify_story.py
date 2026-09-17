@@ -737,6 +737,11 @@ when ALL of these already-enforced prerequisites hold:
 2. That candidate must have no `unresolved_entity_mentions` and no
    `entity_ref_ambiguities`: both must be empty. A matching name, exact date,
    apparent role match, or one otherwise valid ref does not resolve identity.
+   This is a literal whole-candidate eligibility check: ANY nonempty list blocks
+   the relation, even when its mention seems unrelated to the matched place or
+   role. Do not reinterpret or dismiss the supplied flags. With complete
+   coverage, return null relation plus `ambiguous`, preserving the entire
+   event-local candidate ID list.
    Retain ineligible candidates in the resolution list; never link to them.
 3. `entity_refs` must be a nonempty list of exact refs supplied on THAT candidate,
    supported by this event. If multiple candidates in the event-local set share
