@@ -782,11 +782,16 @@ class LocalCliHookTests(unittest.TestCase):
                 }
             ],
         }
-        receipt = {
-            "receipt_path": "state/classification_batches/recovery.json",
-            "counts": {"accepted": 1, "refused": 0, "already_current": 0},
-            "items": [{"source_path": "answers/A1.md", "status": "accepted"}],
-        }
+        classification = vault / "state" / "classifications" / "answer-a1.json"
+
+        def file_then_crash(_envelope: dict, *, model: str) -> dict:
+            self.assertEqual(model, "synthetic")
+            classification.parent.mkdir(parents=True, exist_ok=True)
+            classification.write_text(
+                '{"source_path":"answers/A1.md"}\n', encoding="utf-8"
+            )
+            raise RuntimeError("after durable filing, before return")
+
         args = argparse.Namespace(limit=1, model="synthetic")
         try:
             with (
@@ -809,12 +814,14 @@ class LocalCliHookTests(unittest.TestCase):
                     classify_story, "classify_with_ai", return_value={"events": []}
                 ) as ai,
                 mock.patch.object(
-                    classify_story, "file_batch_response", return_value=receipt
-                ),
+                    classify_story,
+                    "file_batch_response",
+                    side_effect=file_then_crash,
+                ) as file_response,
                 mock.patch.object(
                     classification_refresh,
                     "_migrate",
-                    side_effect=[RuntimeError("after filing"), {}],
+                    return_value={},
                 ) as migrate,
                 mock.patch.object(
                     lifehug, "cmd_timeline_retire", return_value=0
@@ -825,14 +832,13 @@ class LocalCliHookTests(unittest.TestCase):
                 mock.patch("lifehug_core.record_learning_failure"),
             ):
                 self.assertEqual(lifehug.cmd_classification_refresh(args), 1)
+                self.assertTrue(classification.is_file())
                 self.assertTrue((vault / "state" / ".compile-needed").is_file())
                 self.assertEqual(lifehug.cmd_classification_refresh(args), 0)
 
             self.assertEqual(ai.call_count, 1)
-            self.assertEqual(
-                migrate.call_args_list,
-                [mock.call(vault, ["answers/A1.md"]), mock.call(vault, None)],
-            )
+            file_response.assert_called_once()
+            migrate.assert_called_once_with(vault, None)
             retire.assert_called_once()
             compile_wiki.assert_called_once()
             self.assertFalse((vault / "state" / ".compile-needed").exists())
