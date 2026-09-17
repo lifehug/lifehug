@@ -1,6 +1,6 @@
 # Contract: Shared Timeline Candidate Eligibility
 
-Generated with GPT-6 via Codex.
+Generated with Codex.
 
 ## Why
 

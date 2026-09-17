@@ -241,6 +241,14 @@ alias, competitor, retraction, correction, or human decision still invalidates
 the affected outcome. Named-person age arithmetic requires that person's own
 supported birth and never borrows the owner's.
 
+**Shared eligibility instructions (v309, issue #352).** Both classifier modes
+receive the same candidate prerequisites. Incremental resolution copies the exact
+`event_contexts[event_key].candidate_ids` list, retaining alternatives even when
+unresolved or ambiguous identity makes them ineligible for a link. Exact refs,
+unique source evidence, event-local completeness and independent literal
+grounding remain mandatory. This prompt clarification preserves existing
+validators and cache versions; it schedules no reinterpretation by itself.
+
 **Natural quoted ranges (v308).** Exact source grounding accepts a narrowly
 bounded whole-string range when two explicit dates are joined by `through` or
 `to`, optionally beginning with `from`: for example, `January 2012 through

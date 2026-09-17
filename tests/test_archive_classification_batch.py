@@ -231,7 +231,7 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertNotIn("Question-Judgment Rubric", full_prompt)
         self.assertIn('"event_contexts": {}', full_prompt)
         self.assertIn("provisional full-extraction", full_prompt)
-        self.assertIn("context is retrieval input", full_prompt)
+        self.assertIn("context is retrieval input", " ".join(full_prompt.split()))
         self.assertNotIn("across the ENTIRE supplied candidate list", full_prompt)
         self.assertIn('"event_contexts": {}', timeline_prompt)
         self.assertIn("Treat each `event_contexts[event_key]` entry independently", timeline_prompt)

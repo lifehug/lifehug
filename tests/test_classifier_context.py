@@ -1015,9 +1015,9 @@ class ContextDiagnosticsTests(ContextCase):
         text = " ".join(prompt.split())
         for rule in (
             '"event_contexts"',
-            "Compute this event's relevant candidates from its own source-grounded",
+            "compute this event's relevant candidates from its own source-grounded",
             "Specific names, aliases, entity refs, and reference keys win",
-            "the provisional full-extraction context is retrieval input",
+            "The provisional full-extraction context is retrieval input",
             "no `unresolved_entity_mentions` and no `entity_ref_ambiguities`",
             "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
             "the exact source quote must distinguish the selected role or stay",

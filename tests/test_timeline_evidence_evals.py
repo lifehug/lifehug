@@ -20,14 +20,14 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         fixtures = evals.load_fixtures()
         responses = [evals.recorded_response(evals.build_case(row)) for row in fixtures]
         report = evals.evaluate(fixtures, responses)
-        self.assertEqual(report["fixture_count"], 5)
-        self.assertEqual(report["passed_count"], 5)
+        self.assertEqual(report["fixture_count"], 8)
+        self.assertEqual(report["passed_count"], 8)
         self.assertEqual(report["retrieval_coverage"], 1.0)
         self.assertEqual(report["validation_accuracy"], 1.0)
         wrong = copy.deepcopy(responses)
         wrong[0]["events"][0]["timeline_relation"]["relation"] = "after"
         rejected = evals.evaluate(fixtures, wrong)
-        self.assertEqual(rejected["passed_count"], 4)
+        self.assertEqual(rejected["passed_count"], 7)
         self.assertFalse(rejected["outcomes"][0]["validation_passed"])
         self.assertEqual(
             sorted(report["stage_timings_ms"]), ["retrieval", "total", "validation"]
@@ -67,7 +67,7 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertEqual(len(prompts), 1)
         prompt = " ".join(prompts[0].split())
         self.assertIn('"event_contexts"', prompt)
-        self.assertIn("Compute this event's relevant candidates", prompt)
+        self.assertIn("compute this event's relevant candidates", prompt)
         self.assertIn("provisional full-extraction", prompt)
         self.assertIn("Timeline Evidence Uses Two Independent Decisions", prompt)
         self.assertIn("does NOT need a calendar date or age", prompt)
@@ -130,7 +130,7 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
             for row in fixtures
         ]
         report = evals.evaluate_timeline(fixtures, responses)
-        self.assertEqual(report["passed_count"], 5)
+        self.assertEqual(report["passed_count"], 8)
         self.assertEqual(report["retrieval_coverage"], 1.0)
         self.assertEqual(report["validation_accuracy"], 1.0)
 
@@ -143,6 +143,132 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
                     evals.build_timeline_case(fixture)
                 )
                 self.assertNotIn(fixture["fixture_id"], timeline_prompt)
+
+    def test_full_and_timeline_share_verbatim_eligibility_instructions(self) -> None:
+        fixture = evals.load_fixtures()[-1]
+        block = evals.classify_story._TIMELINE_CANDIDATE_ELIGIBILITY
+        prompts = (
+            evals.emitted_prompt(evals.build_case(fixture)),
+            evals.emitted_timeline_prompt(evals.build_timeline_case(fixture)),
+        )
+        for prompt in prompts:
+            with self.subTest(mode="timeline" if "Existing Events" in prompt else "full"):
+                self.assertEqual(prompt.count(block), 1)
+                text = " ".join(prompt.split())
+                for rule in (
+                    "copy the exact `event_contexts[event_key].candidate_ids` list",
+                    "including alternatives and ineligible candidates",
+                    "Do not recompute, filter, add, or omit IDs, even when abstaining",
+                    "must have no `unresolved_entity_mentions` and no `entity_ref_ambiguities`",
+                    "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
+                    "one exact, unchanged substring of Story Text occurring exactly once",
+                    "return `source_grounding: null`",
+                    "Null grounding still permits an independently valid relative `timeline_relation`",
+                    "When `complete: false`, always return `incomplete` with a null relation",
+                ):
+                    self.assertIn(rule, text)
+        sentinel = "SYNTHETIC_SHARED_ELIGIBILITY_SENTINEL"
+        with mock.patch.object(evals.classify_story, "_TIMELINE_CANDIDATE_ELIGIBILITY", sentinel):
+            for prompt in (
+                evals.emitted_prompt(evals.build_case(fixture)),
+                evals.emitted_timeline_prompt(evals.build_timeline_case(fixture)),
+            ):
+                self.assertEqual(prompt.count(sentinel), 1)
+                self.assertNotIn("candidate must have no `unresolved_entity_mentions`", prompt)
+
+    def test_ineligible_candidates_stay_in_resolution_but_cannot_be_linked(self) -> None:
+        fixtures = evals.load_fixtures()[5:7]
+        for fixture in fixtures:
+            for mode in ("full", "timeline"):
+                with self.subTest(fixture=fixture["fixture_id"], mode=mode):
+                    case = (evals.build_timeline_case(fixture) if mode == "timeline"
+                            else evals.build_case(fixture))
+                    response = (evals.recorded_timeline_response(case) if mode == "timeline"
+                                else evals.recorded_response(case))
+                    kwargs = {
+                        "mode": mode,
+                        "existing_events": case.get("existing_events"),
+                        "require_event_contract": True,
+                    }
+                    normalized = evals.classifier_context.validate_response(
+                        copy.deepcopy(response), case["snapshot"], case["story_text"], **kwargs
+                    )
+                    self.assertEqual(normalized["events"][0]["timeline_resolution"]["candidate_ids"],
+                                     fixture["recorded_event"]["timeline_resolution"]["candidate_ids"])
+                    candidate = case["snapshot"]["candidates"][0]
+                    response["events"][0]["timeline_relation"] = {
+                        "relation": "within", "candidate_id": candidate["candidate_id"],
+                        "entity_refs": candidate["entity_refs"],
+                        "evidence": {"quote": case["story_text"]},
+                    }
+                    response["events"][0]["timeline_resolution"]["status"] = "linked"
+                    with self.assertRaises(evals.classifier_context.ClassifierContextError) as caught:
+                        evals.classifier_context.validate_response(
+                            response, case["snapshot"], case["story_text"], **kwargs
+                        )
+                    self.assertEqual(caught.exception.code,
+                                     evals.classifier_context.ContextFailureCode.CANDIDATE_AMBIGUOUS)
+
+    def test_timeline_candidate_ids_are_event_local_and_unfiltered(self) -> None:
+        fixture = evals.load_fixtures()[5]
+        case = evals.build_timeline_case(fixture)
+        valid = evals.recorded_timeline_response(case)
+        for ids in ([], ["node:willow-stay", "node:oak-job"]):
+            with self.subTest(ids=ids):
+                response = copy.deepcopy(valid)
+                response["events"][0]["timeline_resolution"]["candidate_ids"] = ids
+                with self.assertRaises(evals.classifier_context.ClassifierContextError) as caught:
+                    evals.classifier_context.validate_response(
+                        response, case["snapshot"], case["story_text"], mode="timeline",
+                        existing_events=case["existing_events"], require_event_contract=True,
+                    )
+                self.assertEqual(caught.exception.code,
+                                 evals.classifier_context.ContextFailureCode.RESOLUTION_INVALID)
+
+    def test_legacy_direct_date_without_literal_proof_can_still_link(self) -> None:
+        fixture = evals.load_fixtures()[-1]
+        case = evals.build_timeline_case(fixture)
+        response = evals.recorded_timeline_response(case)
+        self.assertEqual(case["existing_events"][0]["date"]["stated"], "2001")
+        report = evals.evaluate_timeline([fixture], [response])
+        self.assertEqual(report["passed_count"], 1)
+        self.assertFalse(report["outcomes"][0]["grounded"])
+        response["events"][0]["timeline_resolution"]["candidate_ids"] = ["node:cedar-second"]
+        refused = evals.evaluate_timeline([fixture], [response])
+        self.assertEqual(refused["passed_count"], 0)
+        self.assertEqual(
+            refused["outcomes"][0]["failure"],
+            str(evals.classifier_context.ContextFailureCode.RESOLUTION_INVALID),
+        )
+
+    def test_shared_link_prerequisites_remain_strict_in_both_modes(self) -> None:
+        fixture = evals.load_fixtures()[-1]
+        code = evals.classifier_context.ContextFailureCode
+        mutations = (
+            ("empty_refs", "entity_refs", [], code.ENTITY_REFS_INVALID),
+            ("foreign_refs", "entity_refs", ["place/another"], code.ENTITY_REFS_INVALID),
+            ("foreign_candidate", "candidate_id", "node:another", code.CANDIDATE_UNKNOWN),
+            ("paraphrase", "evidence", {"quote": "I fixed the clock."}, code.QUOTE_NOT_FOUND),
+            ("repeated_quote", None, None, code.QUOTE_AMBIGUOUS),
+        )
+        for mode in ("full", "timeline"):
+            for name, field, value, expected in mutations:
+                with self.subTest(mode=mode, mutation=name):
+                    case = (evals.build_timeline_case(fixture) if mode == "timeline"
+                            else evals.build_case(fixture))
+                    response = (evals.recorded_timeline_response(case) if mode == "timeline"
+                                else evals.recorded_response(case))
+                    story = case["story_text"]
+                    if field:
+                        response["events"][0]["timeline_relation"][field] = value
+                    else:
+                        story = story + " " + story
+                    with self.assertRaises(evals.classifier_context.ClassifierContextError) as caught:
+                        evals.classifier_context.validate_response(
+                            response, case["snapshot"], story, mode=mode,
+                            existing_events=case.get("existing_events"), require_event_contract=True,
+                        )
+                    self.assertEqual(caught.exception.code, expected)
 
     def test_full_scorer_allows_safe_split_but_rejects_extra_ordered_link(self) -> None:
         fixture = evals.load_fixtures()[0]

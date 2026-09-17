@@ -71,6 +71,13 @@ to seek tighter bounds. Validation, stale-snapshot refusal, and human/direct
 source authority are hard boundaries; they are not a promise that every valid
 model choice is at least as precise as the previous one.
 
+The full and incremental prompts share one verbatim eligibility instruction
+block (v309, issue #352). Incremental resolution copies the exact supplied
+event-local candidate IDs, including ineligible alternatives; selecting a link
+still requires resolved identity, exact refs, and unique source evidence.
+Clarifying these existing requirements leaves validator and cache versions
+unchanged, so accepted results are not re-run solely for clearer instructions.
+
 ## Consequences
 
 - Filing or publishing classifier output still cannot feed its contextual
