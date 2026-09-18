@@ -31,7 +31,7 @@ from temporal_claims import normalized_mention_key
 from vault_paths import vault_data_path
 
 CONTEXT_SCHEMA_VERSION = 1
-PROMPT_VERSION = "contextual-timeline:2"
+PROMPT_VERSION = "contextual-timeline:3"
 EXTRACTOR_VERSION = "story-classifier:2"
 MAX_CONTEXT_CANDIDATES = 64
 MAX_CONTEXT_DECISIONS = 64
@@ -61,6 +61,7 @@ class ContextFailureCode(Enum):
     EVENTS_NOT_LIST = "context_events_not_list"
     EVENT_NOT_MAPPING = "context_event_not_mapping"
     RELATION_INVALID = "context_relation_invalid"
+    RELATION_SHAPE_INVALID = "context_relation_shape_invalid"
     CANDIDATE_UNKNOWN = "context_candidate_unknown"
     CONTEXT_INCOMPLETE = "context_incomplete"
     CANDIDATE_AMBIGUOUS = "context_candidate_ambiguous"
@@ -237,6 +238,10 @@ def _resolved_subject_refs(
     rosters: dict[str, identity_resolution.RosterIndex],
 ) -> tuple[list[str], list[str], list[dict]]:
     """Resolve legacy labels only when the canonical roster has one answer."""
+    # The timeline owns this normalization. Import locally because the
+    # evidence/context modules are themselves timeline dependencies.
+    from temporal_timeline import is_owner_reference_only
+
     refs: set[str] = set()
     unresolved: set[str] = set()
     ambiguities: list[dict] = []
@@ -259,11 +264,39 @@ def _resolved_subject_refs(
                 "mention": mention,
                 "candidate_refs": sorted(matches),
             })
+        elif is_owner_reference_only(mention):
+            refs.add("self")
         elif "/" in mention or mention == "self":
             refs.add(mention)
         else:
             unresolved.add(mention)
     return sorted(refs), sorted(unresolved), sorted(ambiguities, key=_canonical)
+
+
+#: Event roles that are single occurrences whatever precision dates them. A
+#: wedding day, a birth, a death or a graduation has no inside to be `within`;
+#: only a duration does.
+POINT_EVENT_ROLES = frozenset({"birth", "death", "married", "wedding", "graduation"})
+
+
+def temporal_shape(node_kind: object, event_kind: object, bounds: object) -> str:
+    """``point`` or ``interval``: what `within` may legitimately attach to.
+
+    A named period is always an interval. A point role is always a point. For
+    the rest, a single day is a point and anything wider is an interval; a
+    month or a year alone is left as an interval because "during that year"
+    is a real relation, while "during that wedding day" places a bankruptcy
+    on a wedding.
+    """
+    if str(node_kind or "") == "period":
+        return "interval"
+    if str(event_kind or "") in POINT_EVENT_ROLES:
+        return "point"
+    row = bounds if isinstance(bounds, dict) else {}
+    if (row.get("granularity") == "day" and row.get("earliest")
+            and row.get("earliest") == row.get("latest")):
+        return "point"
+    return "interval"
 
 
 def _candidate(
@@ -287,6 +320,22 @@ def _candidate(
     entity_refs, unresolved_mentions, entity_ref_ambiguities = _resolved_subject_refs(
         node.get("subject_refs"), rosters=rosters
     )
+    if (unresolved_mentions and not entity_refs and not entity_ref_ambiguities
+            and str(node.get("occurrence_subject_scope") or "") == "owner"):
+        # The projection already scoped this occurrence to the owner and the
+        # only mention is the node's own label: an employer, a school, a
+        # company. That is the thing the owner did, not a person whose
+        # identity is open. The entity is the owner; the label stays a name.
+        # Compare after the owner rewrite so "speaker's mission" names the same
+        # thing as the label "your mission".
+        from temporal_timeline import owner_rewrite
+
+        label_key = normalized_mention_key(owner_rewrite(node.get("label")))
+        if label_key and all(
+            normalized_mention_key(owner_rewrite(mention)) == label_key
+            for mention in unresolved_mentions
+        ):
+            entity_refs, unresolved_mentions = ["self"], []
     aliases = {
         str(value) for value in (
             *(node.get("legacy_refs") or ()),
@@ -317,6 +366,7 @@ def _candidate(
         "unresolved_entity_mentions": unresolved_mentions,
         "entity_ref_ambiguities": entity_ref_ambiguities,
         "supported_bounds": _bounds(usable),
+        "temporal_shape": temporal_shape(node_kind, event_kind, _bounds(usable)),
         "basis": node.get("basis"),
         "conflict_state": node.get("conflict_state", "none"),
         "alternatives": alternatives,
@@ -1155,6 +1205,104 @@ def candidate_identity_is_resolved(candidate: dict) -> bool:
     )
 
 
+#: Per-event failures that, under ``salvage``, downgrade the one event to the
+#: conservative state the prompt itself asks for (null grounding, or a null
+#: relation with an abstaining resolution) instead of refusing the whole
+#: response. Structural failures never salvage: they mean the response is not
+#: an answer to this snapshot at all.
+SALVAGE_RELATION_CODES = {
+    ContextFailureCode.RELATION_INVALID: "missing_evidence",
+    ContextFailureCode.CANDIDATE_UNKNOWN: "missing_evidence",
+    ContextFailureCode.CONTEXT_INCOMPLETE: "incomplete",
+    ContextFailureCode.CANDIDATE_AMBIGUOUS: "ambiguous",
+    ContextFailureCode.EVIDENCE_NOT_MAPPING: "missing_evidence",
+    ContextFailureCode.QUOTE_MISSING: "missing_evidence",
+    ContextFailureCode.QUOTE_NOT_FOUND: "missing_evidence",
+    ContextFailureCode.QUOTE_NOT_EXACT: "missing_evidence",
+    ContextFailureCode.QUOTE_AMBIGUOUS: "missing_evidence",
+    ContextFailureCode.ENTITY_REFS_INVALID: "missing_evidence",
+    ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED: "ambiguous",
+    ContextFailureCode.RELATION_SHAPE_INVALID: "missing_evidence",
+}
+
+
+def _validate_relation(
+    relation: object, *, candidates: dict, context: dict, story_text: str,
+) -> dict | None:
+    """The selected candidate for a valid relation; raises the typed failure."""
+    if relation is None:
+        return None
+    if not isinstance(relation, dict) or relation.get("relation") not in RELATIONS:
+        raise ClassifierContextError(
+            "timeline relation must be within, before, or after",
+            code=ContextFailureCode.RELATION_INVALID,
+        )
+    candidate_id = str(relation.get("candidate_id") or "")
+    candidate = candidates.get(candidate_id)
+    if candidate is None:
+        raise ClassifierContextError(
+            "timeline relation references an unknown event candidate id",
+            code=ContextFailureCode.CANDIDATE_UNKNOWN,
+        )
+    if not context.get("complete"):
+        raise ClassifierContextError(
+            "timeline relation candidate set is incomplete",
+            code=ContextFailureCode.CONTEXT_INCOMPLETE,
+        )
+    if not candidate_identity_is_resolved(candidate):
+        raise ClassifierContextError(
+            "timeline relation candidate identity is unresolved or ambiguous",
+            code=ContextFailureCode.CANDIDATE_AMBIGUOUS,
+        )
+    if (relation.get("relation") == "within"
+            and candidate.get("temporal_shape") == "point"):
+        raise ClassifierContextError(
+            "within needs an interval candidate; this candidate is a point occurrence",
+            code=ContextFailureCode.RELATION_SHAPE_INVALID,
+        )
+    evidence = relation.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ClassifierContextError(
+            "timeline relation requires source evidence",
+            code=ContextFailureCode.EVIDENCE_NOT_MAPPING,
+        )
+    quote = evidence.get("quote")
+    if not isinstance(quote, str) or not quote:
+        raise ClassifierContextError(
+            "timeline relation evidence quote is required",
+            code=ContextFailureCode.QUOTE_MISSING,
+        )
+    start, end = _locate_unique_exact_quote(story_text, quote)
+    refs = relation.get("entity_refs")
+    allowed = set(candidate.get("entity_refs") or ())
+    if (not isinstance(refs, list) or not refs
+            or any(str(ref) not in allowed for ref in refs)):
+        raise ClassifierContextError(
+            "timeline relation entity refs are not allowlisted",
+            code=ContextFailureCode.ENTITY_REFS_INVALID,
+        )
+    if not timeline_evidence.quote_disambiguates(
+            candidate, list(candidates.values()), quote):
+        raise ClassifierContextError(
+            "source quote does not disambiguate competing candidates",
+            code=ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED,
+        )
+    evidence["start"] = start
+    evidence["end"] = end
+    return candidate
+
+
+def _abstaining_resolution(raw: object, *, status: str, candidate_ids: list[str], code: ContextFailureCode) -> dict:
+    """The resolution an event keeps once its relation was downgraded."""
+    reason = ""
+    if isinstance(raw, dict) and isinstance(raw.get("reason"), str):
+        reason = raw["reason"].strip()
+    note = f"[validator downgrade: {code.value}]"
+    limit = timeline_evidence.MAX_RESOLUTION_REASON_CHARS - len(note) - 1
+    reason = (reason[:limit].rstrip() + " " + note).strip() if limit > 0 else note[:timeline_evidence.MAX_RESOLUTION_REASON_CHARS]
+    return {"status": status, "candidate_ids": list(candidate_ids), "reason": reason}
+
+
 def validate_response(
     result: object,
     snapshot: dict,
@@ -1163,8 +1311,17 @@ def validate_response(
     mode: str = "full",
     existing_events: object = None,
     require_event_contract: bool = False,
+    salvage: bool = False,
+    downgrades: list | None = None,
 ) -> dict:
-    """Validate one model response against exactly the context it observed."""
+    """Validate one model response against exactly the context it observed.
+
+    With ``salvage`` a per-event evidence failure downgrades that one event to
+    the conservative state the prompt asks the model for (a null grounding, or
+    a null relation with an abstaining resolution over the supplied candidate
+    set) and is recorded in ``downgrades`` as ``{event_key, field, code}``.
+    Structural failures and snapshot mismatches still refuse the response.
+    """
     if not isinstance(result, dict):
         raise ClassifierContextError(
             "classification response must be a mapping",
@@ -1241,70 +1398,62 @@ def validate_response(
             for candidate_id in candidate_ids if candidate_id in all_candidates
         }
         relation = event.get("timeline_relation")
-        if relation is None:
-            candidate = None
-        else:
-            if not isinstance(relation, dict) or relation.get("relation") not in RELATIONS:
-                raise ClassifierContextError(
-                    "timeline relation must be within, before, or after",
-                    code=ContextFailureCode.RELATION_INVALID,
+        raw_resolution = event.get("timeline_resolution")
+        try:
+            _validate_relation(
+                relation, candidates=candidates, context=context, story_text=story_text,
+            )
+        except ClassifierContextError as exc:
+            if not salvage or exc.code not in SALVAGE_RELATION_CODES:
+                raise
+            status = SALVAGE_RELATION_CODES[exc.code]
+            if status == "incomplete" and context.get("complete"):
+                status = "missing_evidence"
+            if status != "incomplete" and not context.get("complete"):
+                status = "incomplete"
+            relation = None
+            event["timeline_relation"] = None
+            raw_resolution = _abstaining_resolution(
+                raw_resolution, status=status, candidate_ids=candidate_ids, code=exc.code,
+            )
+            if downgrades is not None:
+                downgrades.append({"event_key": key, "field": "timeline_relation", "code": exc.code.value})
+
+        grounding_input = event.get("source_grounding")
+        if salvage and grounding_input is not None:
+            try:
+                timeline_evidence.normalize_source_grounding(
+                    grounding_input,
+                    base,
+                    story_text=story_text,
+                    source_revision=str(snapshot.get("source_revision") or ""),
+                    grounding_allowed=bool(snapshot.get("grounding_allowed", True)),
                 )
-            candidate_id = str(relation.get("candidate_id") or "")
-            candidate = candidates.get(candidate_id)
-            if candidate is None:
-                raise ClassifierContextError(
-                    "timeline relation references an unknown event candidate id",
-                    code=ContextFailureCode.CANDIDATE_UNKNOWN,
-                )
-            if not context.get("complete"):
-                raise ClassifierContextError(
-                    "timeline relation candidate set is incomplete",
-                    code=ContextFailureCode.CONTEXT_INCOMPLETE,
-                )
-            if not candidate_identity_is_resolved(candidate):
-                raise ClassifierContextError(
-                    "timeline relation candidate identity is unresolved or ambiguous",
-                    code=ContextFailureCode.CANDIDATE_AMBIGUOUS,
-                )
-            evidence = relation.get("evidence")
-            if not isinstance(evidence, dict):
-                raise ClassifierContextError(
-                    "timeline relation requires source evidence",
-                    code=ContextFailureCode.EVIDENCE_NOT_MAPPING,
-                )
-            quote = evidence.get("quote")
-            if not isinstance(quote, str) or not quote:
-                raise ClassifierContextError(
-                    "timeline relation evidence quote is required",
-                    code=ContextFailureCode.QUOTE_MISSING,
-                )
-            start, end = _locate_unique_exact_quote(story_text, quote)
-            evidence["start"] = start
-            evidence["end"] = end
-            refs = relation.get("entity_refs")
-            allowed = set(candidate.get("entity_refs") or ())
-            if (not isinstance(refs, list) or not refs
-                    or any(str(ref) not in allowed for ref in refs)):
-                raise ClassifierContextError(
-                    "timeline relation entity refs are not allowlisted",
-                    code=ContextFailureCode.ENTITY_REFS_INVALID,
-                )
-            if not timeline_evidence.quote_disambiguates(
-                    candidate, list(candidates.values()), quote):
-                raise ClassifierContextError(
-                    "source quote does not disambiguate competing candidates",
-                    code=ContextFailureCode.CANDIDATE_NOT_DISAMBIGUATED,
-                )
+            except timeline_evidence.TimelineEvidenceError as exc:
+                if not exc.code.startswith("grounding_"):
+                    raise ClassifierContextError(str(exc), code=ContextFailureCode.RESOLUTION_INVALID) from None
+                grounding_input = None
+                if downgrades is not None:
+                    downgrades.append({"event_key": key, "field": "source_grounding", "code": exc.code})
+        if (salvage and isinstance(raw_resolution, dict)
+                and isinstance(raw_resolution.get("candidate_ids"), list)
+                and sorted(map(str, raw_resolution["candidate_ids"])) != sorted(candidate_ids)):
+            # The echoed list is bookkeeping the validator recomputes: a link is
+            # checked against the supplied set above, and an abstention over a
+            # partial or stale echo asserts nothing about the rest. The supplied
+            # set is the honest list either way.
+            raw_resolution = {**raw_resolution, "candidate_ids": list(candidate_ids)}
+            if downgrades is not None:
+                downgrades.append({"event_key": key, "field": "timeline_resolution", "code": "resolution_candidates_completed"})
 
         try:
             grounding = timeline_evidence.normalize_source_grounding(
-                event.get("source_grounding"),
+                grounding_input,
                 base,
                 story_text=story_text,
                 source_revision=str(snapshot.get("source_revision") or ""),
                 grounding_allowed=bool(snapshot.get("grounding_allowed", True)),
             )
-            raw_resolution = event.get("timeline_resolution")
             if raw_resolution is None and not require_event_contract:
                 raw_resolution = {
                     "status": (

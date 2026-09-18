@@ -82,10 +82,10 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
             prompt,
         )
         self.assertIn("candidate's WHOLE occurrence", prompt)
-        self.assertIn("before that duration starts", prompt)
+        self.assertIn("before it starts", prompt)
         self.assertIn("after it ends", prompt)
         self.assertIn('"early in", and "late in"', prompt)
-        self.assertIn('"After the wedding"', prompt)
+        self.assertIn('"two weeks after the wedding" are both `after`', prompt)
         self.assertIn("date.anchor_ref", prompt)
         self.assertIn(
             f"1-{evals.timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",

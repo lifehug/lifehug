@@ -18,7 +18,7 @@ import chronology as chrono
 from temporal_claims import collapsed_text, normalized_mention_key
 
 EVENT_KEY_LENGTH = 12
-CLASSIFIER_CLAIMS_RULE_VERSION = "3"
+CLASSIFIER_CLAIMS_RULE_VERSION = "4"
 CLASSIFIER_CLAIMS_EXTRACTOR = (
     f"classifier-claims/rule:{CLASSIFIER_CLAIMS_RULE_VERSION}"
 )
@@ -149,6 +149,12 @@ def _search_terms(value: object) -> set[str]:
 
 
 def is_generic_owner_reference(value: object) -> bool:
+    # temporal_timeline owns the authoritative owner rewrite. Import lazily:
+    # that module imports this evidence helper during its own initialization.
+    from temporal_timeline import is_owner_reference_only
+
+    if is_owner_reference_only(value) or normalized_mention_key(value) in _OWNER_TERMS:
+        return True
     key = _search_key(value)
     if key in _GENERIC_REFERENCE_TERMS:
         return True
@@ -230,6 +236,16 @@ def event_reference_keys(event: dict) -> list[str]:
     return sorted(keys)
 
 
+def _event_anchor_terms(event: dict) -> set[str]:
+    """The landmark words the extractor itself dated this event against."""
+    date = event.get("date") if isinstance(event.get("date"), dict) else {}
+    terms: set[str] = set()
+    for value in (event.get("anchor"), date.get("anchor_ref")):
+        if not is_generic_owner_reference(value):
+            terms.update(_search_terms(value))
+    return terms
+
+
 def _event_haystack(event: dict) -> str:
     date = event.get("date") if isinstance(event.get("date"), dict) else {}
     values: list[object] = [
@@ -303,25 +319,29 @@ def build_event_context(
     if linked_id:
         forced.add(linked_id)
 
+    anchor_terms = _event_anchor_terms(event)
     strong_matched: list[tuple[dict, set[str], set[str], set[str]]] = []
     weak_matched: list[tuple[dict, set[str], set[str]]] = []
     role_matched: list[tuple[dict, set[str]]] = []
+    anchor_specific: list[tuple[dict, set[str]]] = []
+    anchor_role: list[tuple[dict, set[str]]] = []
     matched_keys: set[str] = set()
     for candidate in candidates:
         reference_keys = list(candidate.get("reference_keys") or candidate_reference_keys(candidate))
         candidate["reference_keys"] = reference_keys
-        strong_hits = {
-            term for term in _candidate_strong_reference_keys(candidate)
-            if _term_occurs(term, haystack)
-        }
-        weak_hits = {
-            term for term in _candidate_weak_reference_keys(candidate)
-            if _term_occurs(term, haystack)
-        }
-        role_hits = {
-            term for term in _candidate_role_reference_keys(candidate)
-            if _term_occurs(term, haystack)
-        }
+        strong_keys = _candidate_strong_reference_keys(candidate)
+        weak_keys = _candidate_weak_reference_keys(candidate)
+        role_keys = _candidate_role_reference_keys(candidate)
+        strong_hits = {term for term in strong_keys if _term_occurs(term, haystack)}
+        weak_hits = {term for term in weak_keys if _term_occurs(term, haystack)}
+        role_hits = {term for term in role_keys if _term_occurs(term, haystack)}
+        if anchor_terms:
+            specific_anchor_hits = (strong_keys | weak_keys) & anchor_terms
+            role_anchor_hits = role_keys & anchor_terms
+            if specific_anchor_hits:
+                anchor_specific.append((candidate, specific_anchor_hits))
+            elif role_anchor_hits:
+                anchor_role.append((candidate, role_anchor_hits))
         if strong_hits or collapsed_text(candidate.get("candidate_id")) in forced:
             strong_matched.append((candidate, strong_hits, weak_hits, role_hits))
         elif weak_hits:
@@ -341,10 +361,25 @@ def build_event_context(
             matched.append(candidate)
             matched_keys.update(weak_hits)
             matched_keys.update(role_hits)
+        # Weak lexical overlap must not suppress an independently matched
+        # event-role anchor; strong references retain precedence above.
+        for candidate, role_hits in role_matched:
+            matched.append(candidate)
+            matched_keys.update(role_hits)
     else:
         for candidate, role_hits in role_matched:
             matched.append(candidate)
             matched_keys.update(role_hits)
+
+    # The extractor's own anchor words ("early in my marriage", "Calimesa
+    # residence") name the landmark this event is dated against. A candidate
+    # those words reach is admitted whatever tier the rest of the event text
+    # put it in: a strong hit on an unrelated name must not hide the one anchor
+    # the event explicitly cites. Specific anchor words win over role words, so
+    # "Calimesa residence" admits Calimesa and not every residence.
+    for candidate, anchor_hits in (anchor_specific or anchor_role):
+        matched.append(candidate)
+        matched_keys.update(anchor_hits)
 
     # A matched entity admits every competing role/stay for that same entity.
     entity_refs = {
@@ -437,16 +472,49 @@ def _same_date(left: object, right: object) -> tuple[bool, dict | None]:
     return all(a.get(field) == b.get(field) for field in fields), b
 
 
+def owner_profile_terms() -> set[str]:
+    """The vault owner's own names from profile.yaml, as normalized mention keys.
+
+    An extractor that writes the owner's first name as an event subject has
+    named the owner; "I" then proves that subject exactly as it proves
+    "narrator". Missing or unreadable profile data yields no terms.
+    """
+    try:
+        from lifehug_core import load_config  # noqa: PLC0415 - vault-bound at call time
+
+        config = load_config()
+    except Exception:  # noqa: BLE001 - no profile is simply no extra term
+        return set()
+    terms: set[str] = set()
+    for key in ("name", "full_name"):
+        value = normalized_mention_key(config.get(key) if isinstance(config, dict) else None)
+        if not value:
+            continue
+        terms.add(value)
+        first = value.split()[0]
+        if len(first) >= 3:
+            terms.add(first)
+    return terms
+
+
 def _subject_supported(
     subject: object,
     subject_quote: str,
     *,
     aliases: object = (),
 ) -> bool:
+    # See is_generic_owner_reference: the canonical predicate lives in
+    # temporal_timeline and cannot be imported eagerly without a cycle.
+    from temporal_timeline import is_owner_reference_only
+
     wanted = normalized_mention_key(subject)
     proof = normalized_mention_key(subject_quote)
-    if wanted in _OWNER_TERMS:
-        return proof in _OWNER_TERMS
+    owner_subject = (
+        is_owner_reference_only(subject) or wanted in _OWNER_TERMS
+        or wanted in owner_profile_terms()
+    )
+    if owner_subject:
+        return is_owner_reference_only(subject_quote) or proof in _OWNER_TERMS
     if not wanted or not proof:
         return False
     supported = {wanted}
@@ -458,6 +526,26 @@ def _subject_supported(
         if normalized_mention_key(value)
     )
     return proof in supported
+
+
+def _owner_clause_supported(event: dict, subject_quote: str) -> bool:
+    """Accept an exact first-person event label only for the canonical owner."""
+    from temporal_timeline import is_owner_reference_only
+
+    subject = event.get("subject") or "self"
+    if not (is_owner_reference_only(subject)
+            or normalized_mention_key(subject) in owner_profile_terms()):
+        return False
+    match = re.fullmatch(r"\s*[Ii]\s+(.+?)\s*", subject_quote)
+    if match is None:
+        return False
+    clause = normalized_mention_key(match.group(1))
+    if not clause:
+        return False
+    return clause in {
+        normalized_mention_key(event.get("title")),
+        normalized_mention_key(event.get("description")),
+    }
 
 
 def normalize_source_grounding(
@@ -492,7 +580,7 @@ def normalize_source_grounding(
         event.get("subject") or "self",
         subject_quote,
         aliases=event.get("subject_aliases") or (),
-    ):
+    ) and not _owner_clause_supported(event, subject_quote):
         raise TimelineEvidenceError(
             "grounding_subject_mismatch", "subject evidence does not support the event subject",
         )

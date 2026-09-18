@@ -116,6 +116,15 @@ class EdtfRoundTripTests(unittest.TestCase):
 
 
 class LooseNaturalRangeTests(unittest.TestCase):
+    def test_ordinal_day_forms_match_iso_dates(self):
+        for text, iso in (("March 3rd, 1994", "1994-03-03"), ("3rd March 1994", "1994-03-03"), ("January 11TH, 2007", "2007-01-11")):
+            with self.subTest(text=text):
+                self.assertEqual(ch.parse_loose_date(text)["best"], iso)
+
+    def test_ordinal_suffixes_keep_whole_string_validation(self):
+        self.assertIsNone(ch.parse_loose_date("we married March 3rd, 1994"))
+        self.assertIsNone(ch.parse_loose_date("March 3rd, 1994 or 1995"))
+
     def test_explicit_year_month_and_day_ranges_use_one_endpoint_parser(self):
         cases = {
             "January 2012 through December 2015": (
@@ -778,6 +787,65 @@ class ConflictStrengthTests(unittest.TestCase):
         lone = ch.DateRecord(best="1984", earliest="1984", latest="1984")
         self.assertEqual(ch.reconcile([lone])["conflict"], 0.0)
         self.assertEqual(ch.conflict_strength(None, [lone]), 0.0)
+
+
+class LooseNaturalFormTests(unittest.TestCase):
+    """Dates a person writes in words are dates, read by the one loose parser."""
+
+    def test_stated_date_reads_edtf_then_the_loose_forms(self):
+        for text, best in (
+            ("2007-01-11", "2007-01-11"), ("May 2022", "2022-05"),
+            ("December 21, 2010", "2010-12-21"), ("January 11th, 2007", "2007-01-11"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(ch.parse_stated_date(text).best, best)
+        self.assertIsNone(ch.parse_stated_date("when I was twelve"))
+        self.assertIsNone(ch.parse_stated_date(None))
+
+    def test_numeric_dates_are_unambiguous_or_an_interval_never_a_guess(self):
+        self.assertEqual(ch.parse_loose_date("12/21/2010")["best"], "2010-12-21")
+        self.assertEqual(ch.parse_loose_date("21/12/2010")["best"], "2010-12-21")
+        self.assertEqual(ch.parse_loose_date("5/5/2013")["best"], "2013-05-05")
+        both = ch.parse_loose_date("05/10/2013")
+        self.assertEqual(
+            (both["earliest"], both["latest"], both["confidence"]),
+            ("2013-05-10", "2013-10-05", "approximate"),
+        )
+        self.assertIsNone(ch.parse_loose_date("13/13/2013"))
+
+    def test_holidays_decades_and_day_spans(self):
+        self.assertEqual(ch.parse_loose_date("Thanksgiving of 2021")["best"], "2021-11")
+        self.assertEqual(ch.parse_loose_date("Christmas 2019")["best"], "2019-12-25")
+        self.assertEqual(
+            ch.parse_loose_date("around Thanksgiving of 2021")["confidence"], "approximate"
+        )
+        early = ch.parse_loose_date("early 1990s")
+        self.assertEqual(
+            (early["earliest"], early["latest"], early["confidence"]),
+            ("1990", "1993", "approximate"),
+        )
+        self.assertEqual(ch.parse_loose_date("mid-80s")["best"], "1983/1986")
+        self.assertEqual(ch.parse_loose_date("the late '90s")["best"], "1997/1999")
+        self.assertEqual(ch.parse_loose_date("the '90s")["best"], "199X")
+        self.assertEqual(
+            ch.parse_loose_date("December 21-22, 2010")["best"], "2010-12-21/2010-12-22"
+        )
+        self.assertIsNone(ch.parse_loose_date("December 22-21, 2010"))
+
+    def test_trailing_times_and_dash_ranges(self):
+        self.assertEqual(ch.parse_loose_date("May 10, 2013 10:25pm")["best"], "2013-05-10")
+        self.assertEqual(ch.parse_loose_date("July 1981 - July 1982")["best"], "1981-07/1982-07")
+        self.assertEqual(
+            ch.parse_loose_date("June 2001 until August 2003")["best"], "2001-06/2003-08"
+        )
+
+    def test_missing_years_and_prose_are_still_refused(self):
+        for text in (
+            "August 14", "January 11th", "August 31st through September 3",
+            "Easter 2004", "we married March 3rd, 1994",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(ch.parse_loose_date(text))
 
 
 if __name__ == "__main__":

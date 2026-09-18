@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "system"))
 
 import timeline_evidence as te  # noqa: E402
 import classifier_claims as classifier_claims  # noqa: E402
+import classifier_context as classifier_context  # noqa: E402
 
 
 def candidate(
@@ -48,6 +49,77 @@ def candidate(
 
 
 class GroundingSubjectTests(unittest.TestCase):
+    def test_owner_exact_first_person_clause_matches_event_title(self) -> None:
+        story = "I married Pat Smith on January 11th, 2007."
+        normalized = te.normalize_source_grounding(
+            {"quote": story, "temporal_quote": "January 11th, 2007", "subject_quote": "I married Pat Smith", "kind": "date"},
+            {"title": "Married Pat Smith", "subject": "narrator", "date": {"stated": "2007-01-11"}},
+            story_text=story, source_revision="sha256:" + "5" * 64,
+        )
+        self.assertEqual(normalized["subject_quote"], "I married Pat Smith")
+
+    def test_owner_clause_rejects_different_action_and_non_owner_subject(self) -> None:
+        story = "I watched Pat get married on January 11th, 2007."
+        grounding = {"quote": story, "temporal_quote": "January 11th, 2007", "subject_quote": "I watched Pat get married", "kind": "date"}
+        for subject in ("narrator", "person/pat"):
+            with self.subTest(subject=subject):
+                with self.assertRaisesRegex(te.TimelineEvidenceError, "subject evidence"):
+                    te.normalize_source_grounding(
+                        grounding,
+                        {"title": "Married Pat Smith", "subject": subject, "date": {"stated": "2007-01-11"}},
+                        story_text=story, source_revision="sha256:" + "6" * 64,
+                    )
+
+    def test_owner_clause_rejects_date_only_subject_quote(self) -> None:
+        story = "I married Pat Smith on January 11th, 2007."
+        with self.assertRaisesRegex(te.TimelineEvidenceError, "subject evidence"):
+            te.normalize_source_grounding(
+                {"quote": story, "temporal_quote": "January 11th, 2007", "subject_quote": "I married Pat Smith on", "kind": "date"},
+                {"title": "Married Pat Smith", "subject": "narrator", "date": {"stated": "2007-01-11"}},
+                story_text=story, source_revision="sha256:" + "7" * 64,
+            )
+
+    def test_narrator_grounding_accepts_an_exact_ordinal_date_quote(self) -> None:
+        story = "I married on January 11th, 2007."
+        normalized = te.normalize_source_grounding(
+            {"quote": story, "temporal_quote": "January 11th, 2007", "subject_quote": "I", "kind": "date"},
+            {"subject": "narrator", "date": {"stated": "2007-01-11"}},
+            story_text=story, source_revision="sha256:" + "4" * 64,
+        )
+        self.assertEqual(normalized["normalized_temporal_value"]["best"], "2007-01-11")
+
+    def test_canonical_owner_aliases_accept_narrator_and_keep_relatives_distinct(self) -> None:
+        story = "I married in 1990."
+        event = {"subject": "narrator", "date": {"stated": "1990"}}
+        normalized = te.normalize_source_grounding(
+            {"quote": story, "temporal_quote": "1990", "subject_quote": "I", "kind": "date"},
+            event, story_text=story, source_revision="sha256:" + "0" * 64,
+        )
+        self.assertEqual(normalized["subject_quote"], "I")
+        self.assertTrue(te._subject_supported("self", "I"))
+        self.assertTrue(te._subject_supported("owner", "I"))
+        self.assertFalse(te._subject_supported("narrator's father", "I"))
+
+    def test_narrator_is_not_an_unresolved_subject_reference(self) -> None:
+        refs, unresolved, ambiguities = classifier_context._resolved_subject_refs(
+            ["narrator"], rosters={}
+        )
+        self.assertEqual(refs, ["self"])
+        self.assertEqual(unresolved, [])
+        self.assertEqual(ambiguities, [])
+        _, unresolved, _ = classifier_context._resolved_subject_refs(
+            ["narrator's father"], rosters={}
+        )
+        self.assertEqual(unresolved, ["narrator's father"])
+
+    def test_existing_self_reference_is_retained(self) -> None:
+        refs, unresolved, ambiguities = classifier_context._resolved_subject_refs(
+            ["self"], rosters={}
+        )
+        self.assertEqual(refs, ["self"])
+        self.assertEqual(unresolved, [])
+        self.assertEqual(ambiguities, [])
+
     def test_owner_proof_does_not_accept_relative_or_substring(self) -> None:
         story = "My mother was 21 when she married."
         event = {
@@ -187,6 +259,25 @@ class NaturalRangeGroundingTests(unittest.TestCase):
 
 
 class SelectiveRetrievalTests(unittest.TestCase):
+    def test_role_anchor_survives_an_unrelated_weak_word_hit(self) -> None:
+        unrelated = candidate(
+            "node:note", "Note with photo", entity_refs=["self"], role="moment"
+        )
+        marriage = candidate(
+            "node:wedding", "Wedding to Pat", entity_refs=["self"], role="married"
+        )
+        context = te.build_event_context(
+            {
+                "title": "Early marriage",
+                "description": "I left with no options early in my marriage.",
+                "subject": "self",
+                "event_role": "married",
+                "date": None,
+            },
+            [unrelated, marriage],
+        )
+        self.assertIn("node:wedding", context["candidate_ids"])
+
     def test_narrow_reference_stays_complete_beyond_64_owner_facts(self) -> None:
         rows = [
             candidate(
@@ -440,6 +531,57 @@ class ClaimEmissionTests(unittest.TestCase):
             {row["temporal_value"]["relation"] for row in readings},
             {"before", "after"},
         )
+
+
+class AnchorAdmissionTests(unittest.TestCase):
+    """The extractor's own anchor words always reach the landmark they name."""
+
+    def test_the_events_anchor_survives_a_strong_hit_on_an_unrelated_name(self) -> None:
+        parent = candidate("node:dad", "Dad", entity_refs=[], role="graduation")
+        marriage = candidate(
+            "node:wedding", "Wedding to Pat", entity_refs=["self"], role="married"
+        )
+        context = te.build_event_context(
+            {
+                "title": "Took over the family business",
+                "description": "Took over the company after his father's illness.",
+                "subject": "self",
+                "when_hint": "Then my dad got sick",
+                "anchor": "early in my marriage",
+                "date": {"stated": None, "age": None,
+                         "anchor_ref": "early in my marriage", "relation": "within"},
+            },
+            [parent, marriage],
+        )
+        self.assertEqual(sorted(context["candidate_ids"]), ["node:dad", "node:wedding"])
+        self.assertIn("marriage", context["reference_keys"])
+        self.assertNotIn("marriage", context["unmatched_reference_keys"])
+
+    def test_specific_anchor_words_beat_role_words(self) -> None:
+        cedar = candidate(
+            "node:cedar", "Cedarport", entity_refs=["place/cedarport"], role="residence"
+        )
+        other = candidate(
+            "node:other", "Oakvale", entity_refs=["place/oakvale"], role="residence"
+        )
+        context = te.build_event_context(
+            {"title": "Fifth grade", "description": "Fifth grade.", "subject": "self",
+             "anchor": "Cedarport residence", "date": None},
+            [cedar, other],
+        )
+        self.assertIn("node:cedar", context["candidate_ids"])
+        self.assertNotIn("node:other", context["candidate_ids"])
+
+    def test_no_anchor_admits_nothing(self) -> None:
+        marriage = candidate(
+            "node:wedding", "Wedding to Pat", entity_refs=["self"], role="married"
+        )
+        context = te.build_event_context(
+            {"title": "A quiet day", "description": "Nothing much happened.",
+             "subject": "self", "date": None},
+            [marriage],
+        )
+        self.assertEqual(context["candidate_ids"], [])
 
 
 if __name__ == "__main__":
