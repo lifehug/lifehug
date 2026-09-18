@@ -159,7 +159,7 @@ Focused command from the new worktree (use the bundled Python interpreter;
 set `TMPDIR=/private/tmp` and `PYTHONDONTWRITEBYTECODE=1` on this machine):
 
 ```sh
-python3 -m unittest tests.test_classifier_receipt_identity tests.test_classifier_claims tests.test_timeline_evidence_links tests.test_classifier_context tests.test_temporal_publication tests.test_temporal_timeline
+PYTHONPATH=tests python3 -m unittest tests.test_classifier_receipt_identity tests.test_classifier_claims tests.test_timeline_evidence_links tests.test_classifier_context tests.test_classifier_context_independent tests.test_projection_publication tests.test_temporal_timeline
 python3 scripts/ci/check_framework_files.py
 git diff --check
 ```
@@ -182,7 +182,7 @@ before implementation. Do not push implementation before parent review.
 Only push this branch; no labels, readiness changes, merge, or CI watching.
 No operational replay is authorized by this contract.
 
-- [ ] Parent approves the contract before implementation.
+- [x] Parent approves the contract before implementation (550ad32b).
 - [ ] Historical and future identity regressions pass with immutable history.
 - [ ] Manual authority and published outcomes pass synthetic integration.
 - [ ] v310 version, released date, changelog, and framework manifest updated.

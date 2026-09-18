@@ -31,9 +31,12 @@ exactly as it is withheld from every other reader). Raw, because
 validated contextual relations. Document-level place lists are retrieval
 hints only; they are never copied onto every event.
 
-WHAT IT WRITES. One `ExtractionReceipt` per classifier EVENT, holding the
-event's independently supported claims: a direct date or age and a validated
-`within`/`before`/`after` relation may coexist. When a source is re-classified,
+WHAT IT WRITES. One `ExtractionReceipt` per classifier reading: an event's
+direct date or age and a validated `within`/`before`/`after` relation may
+coexist under separate source references. Rule 3 revisions hash the canonical
+normalized assertion and its existing source provenance, not generated ids or
+clocks. Changed assertions append new interpretations; identical grounded
+direct assertions survive unrelated link refresh. When a source is re-classified,
 one supersession correction retires only the older classifier-family reading.
 Nothing else. It never edits `state/classifications/`, never re-classifies
 anything, never calls a model, and never redraws `state/landmarks.json`.

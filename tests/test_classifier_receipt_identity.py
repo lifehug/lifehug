@@ -67,6 +67,37 @@ class HistoricalReceiptTests(unittest.TestCase):
         pub.publish(root, now=NOW)
         return root, fixture
 
+    def test_manual_move_and_undo_survive_generation_and_status_changes(self):
+        root, fixture = self.seed("grouped_v306")
+        node_id = fixture["grouped_v306"][0]["claims"][0]["event_ref"]
+        move = store.file_ordering_constraint(
+            root, relation="within", subject_node_id=node_id,
+            anchor_node_ids=["node:synthetic-acorn-job"], reason="Synthetic manual Move.")
+        move_path = root / move["relative_path"]
+        original_move = move_path.read_bytes()
+        _run(root)
+        changed = copy.deepcopy(fixture["classification"])
+        changed["events"][0]["timeline_resolution"] = {"status": "linked"}
+        _classification(root, fixture["stem"], changed)
+        _run(root)
+        node = next(row for row in pub.read_projection(root)["nodes"] if row["node_id"] == node_id)
+        self.assertIn(move["constraint_id"], node["input_constraint_refs"])
+        self.assertEqual(node["best_temporal_value"]["best"], "1996/1999")
+        self.assertEqual(move_path.read_bytes(), original_move)
+
+        undo = store.retract_ordering_constraint(root, move["constraint_id"], reason="Synthetic Undo.")
+        undo_path = root / undo.relative_path
+        original_undo = undo_path.read_bytes()
+        _run(root)
+        node = next(row for row in pub.read_projection(root)["nodes"] if row["node_id"] == node_id)
+        self.assertNotIn(move["constraint_id"], node["input_constraint_refs"])
+        self.assertEqual(node["best_temporal_value"]["best"], "1996/1999")
+        self.assertEqual(move_path.read_bytes(), original_move)
+        self.assertEqual(undo_path.read_bytes(), original_undo)
+        snapshot = _files(root)
+        _run(root)
+        self.assertEqual(_files(root), snapshot)
+
     def test_frozen_actual_producers_reproduce_subset_collision(self):
         root, fixture = self.seed("grouped_v306")
         old = fixture["grouped_v306"][0]
@@ -228,6 +259,14 @@ class AssertionIdentityTests(unittest.TestCase):
                 before = self.event()
                 _classification(root, "synthetic-founding", classification(source, before))
                 _run(root)
+                telling_ref = ei.classifier_telling_ref("synthetic-founding", before)
+                binding, _ = ei.file_event_identity(
+                    root, telling_ref=telling_ref, episode_id="episode:" + "c" * 24,
+                    relation="same", origin="confirmed", created_at=NOW)
+                binding_bytes = {path: path.read_bytes() for path in (root / ei.HUMAN_BINDINGS_DIR).glob("*.json")}
+                _run(root)
+                bound_node = next(row for row in pub.read_projection(root)["nodes"]
+                                  if row.get("input_claim_refs"))
                 original_claims = store.active_claims(store.fold_active_index(root))
                 old_bytes = {path: (root / path).read_bytes() for path in store.receipt_relative_paths(root)}
                 after = copy.deepcopy(before)
@@ -243,8 +282,13 @@ class AssertionIdentityTests(unittest.TestCase):
                 self.assertEqual({row["event_ref"] for row in active},
                                  {row["event_ref"] for row in original_claims})
                 node = next(row for row in pub.read_projection(root)["nodes"]
-                            if row["node_id"] == active[0]["event_ref"])
+                            if row["node_id"] == bound_node["node_id"])
                 self.assertEqual(node["best_temporal_value"]["best"], "2004")
+                telling = next(row for row in ei.read_telling_manifest(root)["tellings"]
+                               if row["telling_ref"] == telling_ref)
+                self.assertEqual(telling["bound_identity_ids"], [binding["identity_id"]])
+                for path, content in binding_bytes.items():
+                    self.assertEqual(path.read_bytes(), content)
                 for path, content in old_bytes.items():
                     self.assertEqual((root / path).read_bytes(), content)
                 snapshot = _files(root)
