@@ -48,7 +48,7 @@ evidence; parent owns green-CI merge and host pin. Do not watch CI, label, mark
 ready or merge.
 
 - [x] Contract precedes implementation and draft PR.
-- [ ] Typed round-trip fix and focused storage/publication regressions pass.
+- [x] Typed round-trip fix and focused storage/publication regressions pass.
 - [ ] Full local suite, manifest and diff checks reported.
 - [ ] v311, scoped documentation and exact-head PR evidence published.
 - [ ] Parent verifies exact-head CI and decides merge/pin.

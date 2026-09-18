@@ -12,9 +12,12 @@ Synthetic data only; NEVER references ~/Workspace/dave.
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import re
 import sys
 import unittest
+from dataclasses import fields
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -944,6 +947,41 @@ class CompatibilityTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, tc.__all__)
                 self.assertTrue(hasattr(tc, name))
+
+
+class TimelineResolutionRoundTripTests(unittest.TestCase):
+    def test_every_valid_status_survives_the_typed_claim_without_rekeying(self):
+        legacy = tc.validate_temporal_claim(claim())
+        for status in sorted(tc.TIMELINE_RESOLUTION_STATUSES):
+            with self.subTest(status=status):
+                normalized = tc.validate_temporal_claim(
+                    claim(timeline_resolution_status=status))
+                typed = tc.claim_from_dict(normalized)
+                self.assertIsNotNone(typed)
+                self.assertEqual(typed.to_dict(), normalized)
+                self.assertEqual(typed.timeline_resolution_status, status)
+                self.assertEqual(typed.claim_id, legacy["claim_id"])
+
+    def test_absent_status_preserves_literal_v310_bytes_and_positional_constructor(self):
+        typed = tc.claim_from_dict(claim())
+        self.assertEqual(typed.claim_id, "claim:e3763c08ccb1e0a53d17e84f")
+        encoded = json.dumps(typed.to_dict(), sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False).encode("utf-8")
+        self.assertEqual(hashlib.sha256(encoded).hexdigest(),
+                         "fe2d9ca159f35b5afcce72756e2057e9c50859521eabb031a20a304f0638a976")
+        self.assertNotIn("timeline_resolution_status", typed.to_dict())
+        names = [field.name for field in fields(tc.TemporalClaim)]
+        self.assertEqual(names[-2:], ["landmark_identity_kind", "timeline_resolution_status"])
+        positional = tc.TemporalClaim(*(getattr(typed, name) for name in names[:-1]))
+        self.assertEqual(positional.to_dict(), typed.to_dict())
+        self.assertIsNone(positional.timeline_resolution_status)
+
+    def test_invalid_status_still_uses_the_existing_validator(self):
+        payload = claim(timeline_resolution_status="invented")
+        with self.assertRaises(tc.TemporalClaimError) as caught:
+            tc.validate_temporal_claim(payload)
+        self.assertEqual(caught.exception.code, "unknown_claim_status")
+        self.assertIsNone(tc.claim_from_dict(payload))
 
 
 if __name__ == "__main__":  # pragma: no cover
