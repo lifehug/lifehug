@@ -159,7 +159,7 @@ from temporal_claims import (  # noqa: E402
 #: ``input_fingerprint`` moves with this bump whether or not that node is
 #: bound — which is the honest signal, since a stale projection calculated by
 #: :4 rules is stale everywhere, not only where a binding landed.
-CALCULATION_RULE_VERSION = "timeline-rules:6"
+CALCULATION_RULE_VERSION = "timeline-rules:7"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1736,13 +1736,44 @@ def _apply_participation_span(group: dict, calculated: dict, *, diagnostics: lis
     # start would publish a stretch nobody claimed as a point nobody named.
     # The record comes back carrying the inherited basis, so nothing here
     # promotes an inference to a statement.
-    span, open_ended = ec.span_from_claims(group.get("claims") or (),
-                                           require_stated=False)
-    if span is None:
+    #
+    # timeline-rules:7: one slot is one tenure, so its claims may hold BOTH
+    # the person's own stated stretch and the windows inherited from the stays
+    # the ladder recorded it under ("during the Peralta stay I worked at
+    # Boeing"). A window says the tenure OVERLAPPED that stay; it is not the
+    # tenure. So the stated stretch is the value when there is one, the union
+    # of the windows stands beside it as an alternate — visibly, with its own
+    # provenance — and the union is the value only when nothing was stated.
+    # A stated start with no stated end keeps the start and takes the widest
+    # inherited end, as an inherited stretch that says so.
+    claims = group.get("claims") or ()
+    stated, stated_open = ec.span_from_claims(claims, require_stated=True)
+    window, window_open = ec.span_from_claims(claims, require_stated=False)
+    if stated is None and window is None:
         return
+    if stated is None:
+        span, open_ended = window, window_open
+    else:
+        span, open_ended = stated, stated_open
+        if open_ended and window is not None and window.latest:
+            span = chrono.DateRecord(
+                best=f"{stated.earliest}/{window.latest}",
+                earliest=stated.earliest, latest=window.latest,
+                granularity="range",
+                confidence=chrono.at_most(stated.confidence, "inferred"),
+                basis="anchor", anchors=stated.anchors,
+                provenance=tuple(stated.provenance) + tuple(window.provenance),
+            )
+            open_ended = False
+    alternates = []
+    if (stated is not None and window is not None
+            and (window.earliest, window.latest) != (span.earliest, span.latest)):
+        alternates = [window]
     calculated["best"] = span
-    calculated["alternates"] = []
-    calculated["conflict"] = 0.0
+    calculated["alternates"] = alternates
+    calculated["conflict"] = (
+        float(chrono.conflict_strength(span, alternates)) if alternates else 0.0
+    )
     calculated["span_open_ended"] = bool(open_ended)
     diagnostics.append({
         "finding": "participation_span_applied",
