@@ -1,7 +1,7 @@
 {
-  "version": 310,
+  "version": 311,
   "released": "2026-09-17",
-  "changelog": "v310: Timeline migration can append new classifier readings beside historical grouped rule-2 receipts without colliding with immutable history. Deterministic classifier-claims rule 3 derives each reading revision from its canonical normalized assertion and existing source provenance, so changed evidence, role or resolution status creates a new interpretation while identical grounded direct facts survive unrelated link refresh. Event and telling identities remain stable; receipts are preserved and older readings superseded. Explicit corrections carry onto equivalent re-keyed assertions only with proven document/source provenance, attributed to the original correction rather than treated as a new user action. Candidate selection, selective freshness, prompt/model extractor versions and schemas are unchanged: receipt re-identification alone does not schedule a model pass. Synthetic historical-producer, publication, replay and manual-authority regressions cover the migration.",
+  "changelog": "v311: Preserve existing timeline resolution outcomes when reading temporal receipts and rebuilding the active index. Usably linked events no longer regain redundant raw-anchor questions after storage; incomplete searches and non-temporal items retain their existing date-question suppression, while missing evidence still asks for a date. The optional typed field preserves legacy absent-field bytes and claim IDs without changing receipts, prompts, validation, identity rules or schemas. Synthetic receipt-to-publication and replay tests cover all five outcomes.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -35,6 +35,7 @@
     "docs/pr-specs/natural-date-ranges.md",
     "docs/pr-specs/classifier-receipt-identity.md",
     "docs/pr-specs/timeline-evidence-links.md",
+    "docs/pr-specs/temporal-resolution-status-roundtrip.md",
     "examples/launchd/README.md",
     "examples/launchd/com.lifehug.daily.plist.example",
     "examples/launchd/com.lifehug.monthly.plist.example",
@@ -507,6 +508,7 @@
     "tests/test_temporal_claims.py",
     "tests/test_temporal_placement.py",
     "tests/test_temporal_projection.py",
+    "tests/test_temporal_resolution_roundtrip.py",
     "tests/test_temporal_store.py",
     "tests/test_temporal_timeline.py",
     "tests/test_timeline_evidence_evals.py",

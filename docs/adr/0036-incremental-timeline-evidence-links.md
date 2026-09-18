@@ -54,6 +54,15 @@ all status-bearing claims in the node agree. This keeps the event and its raw
 evidence intact while letting readers show `incomplete` honestly and exclude
 `not_temporal` from chronological debt without guessing from missing work items.
 
+The v311 storage fix (issue #357) carries this already-validated status through
+the typed claim, receipt reader and active-index fold; previously the typed
+reader dropped it before publication. The optional field is appended for
+positional compatibility and omitted when absent, preserving legacy bytes and
+claim IDs. It does not alter the vocabulary, validator, rule-3 assertion
+identity, prompts or resolution policy. Linked raw-anchor question suppression
+still requires a usable current placement; a withdrawn anchor can restore debt.
+Synthetic receipt-to-publication tests cover every status and byte-stable replay.
+
 Freshness fingerprints include candidate identity, role, source/subject
 grounding identity, aliases, conflicts, alternatives, unmatched references,
 and applicable human decisions. They exclude supported bounds, evidence text,

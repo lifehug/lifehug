@@ -1168,6 +1168,9 @@ class TemporalClaim:
     #: present when a typed place/organization name needs the punctuation
     #: qualification; ordinary historic claims remain byte-identical.
     landmark_identity_kind: str | None = None
+    #: Preserve the validated classifier outcome through receipt/index reads.
+    #: Omitted for legacy claims and outside the frozen claim identity keys.
+    timeline_resolution_status: str | None = None
 
     def to_dict(self) -> dict:
         payload: dict = {
@@ -1193,6 +1196,7 @@ class TemporalClaim:
             ("event_kind", self.event_kind),
             ("subject_resolution", self.subject_resolution),
             ("landmark_identity_kind", self.landmark_identity_kind),
+            ("timeline_resolution_status", self.timeline_resolution_status),
         ):
             if value is not None:
                 payload[key] = value
@@ -1573,6 +1577,7 @@ def claim_from_dict(value: object) -> TemporalClaim | None:
         subject_resolution=normalized.get("subject_resolution"),
         schema_version=int(normalized.get("schema_version") or SCHEMA_VERSION),
         landmark_identity_kind=normalized.get("landmark_identity_kind"),
+        timeline_resolution_status=normalized.get("timeline_resolution_status"),
     )
 
 
