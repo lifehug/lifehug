@@ -88,7 +88,12 @@ Legacy description/when_hint summaries are not verbatim source quotations.
 Build candidates from independent recorder/human evidence plus ONLY directly
 grounded current source facts above. Include eligible dated moments and all
 event roles, not only the current event-kind whitelist. Source-origin fact
-identity must be stable across relation refresh and classification timestamps.
+identity is stable across relation refresh and classification timestamps when
+its own normalized assertion and applicable source provenance are unchanged.
+Amended in v310: a changed asserted status, evidence, kind, or other assertion
+gets a new interpretation receipt, with the old interpretation preserved and
+superseded. This does not re-identify the event or telling. See
+[Classifier Receipt Identity](classifier-receipt-identity.md).
 Exclude the target source's own facts from its candidate context. Do not admit
 relative/contextual claims as independent facts; provenance retains the source
 revision and exact evidence locator. Age arithmetic may depend on the real

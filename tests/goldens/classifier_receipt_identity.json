@@ -1,0 +1,251 @@
+{
+  "classification": {
+    "events": [
+      {
+        "date": {
+          "anchor_ref": "the winter move",
+          "relation": "after"
+        },
+        "description": "I found an envelope after the winter move, while I worked at Acorn.",
+        "places": [],
+        "timeline_relation": {
+          "candidate_id": "node:synthetic-acorn-job",
+          "entity_refs": [
+            "organization/acorn"
+          ],
+          "evidence": {
+            "end": 66,
+            "quote": "while I worked at Acorn",
+            "start": 43
+          },
+          "relation": "within"
+        },
+        "title": "Finding an envelope"
+      }
+    ],
+    "people": [],
+    "places": [],
+    "source_path": "sources/manual/synthetic-envelope.md",
+    "themes": [],
+    "time_periods": []
+  },
+  "grouped_v306": [
+    {
+      "claims": [
+        {
+          "basis": "explicit",
+          "claim_id": "claim:bfcc292972a58c2a5144e340",
+          "claim_type": "relative_order",
+          "confidence": 0.45,
+          "created_at": "2026-09-17T00:00:00Z",
+          "event_kind": "moment",
+          "event_mention": "Finding an envelope",
+          "event_ref": "node:5aee5f9048f8967cfee114b6",
+          "evidence": [
+            {
+              "quote": "I found an envelope after the winter move, while I worked at Acorn."
+            }
+          ],
+          "extractor_version": "classifier-claims/rule:2",
+          "schema_version": 1,
+          "source_kind": "import",
+          "source_ref": {
+            "revision": "sha256:a0df0baccb8d48e2d2005ba35b969999f527a85b6e70622b8e3b16b61d571bc2",
+            "source_id": "classification:synthetic-envelope#f867ddfe189b",
+            "source_path": "sources/manual/synthetic-envelope.md"
+          },
+          "status": "active",
+          "subject_mention": "self",
+          "supersedes_claim_ids": [],
+          "temporal_value": {
+            "anchors": [
+              "the winter move"
+            ],
+            "relation": "after"
+          }
+        },
+        {
+          "basis": "explicit",
+          "claim_id": "claim:7cf41ada5b774ca18728a1d5",
+          "claim_type": "relative_order",
+          "confidence": 0.45,
+          "created_at": "2026-09-17T00:00:00Z",
+          "event_kind": "moment",
+          "event_mention": "Finding an envelope",
+          "event_ref": "node:5aee5f9048f8967cfee114b6",
+          "evidence": [
+            {
+              "end": 66,
+              "quote": "while I worked at Acorn",
+              "start": 43
+            }
+          ],
+          "extractor_version": "classifier-claims/rule:2",
+          "schema_version": 1,
+          "source_kind": "import",
+          "source_ref": {
+            "revision": "sha256:a0df0baccb8d48e2d2005ba35b969999f527a85b6e70622b8e3b16b61d571bc2",
+            "source_id": "classification:synthetic-envelope#f867ddfe189b",
+            "source_path": "sources/manual/synthetic-envelope.md"
+          },
+          "status": "active",
+          "subject_mention": "self",
+          "supersedes_claim_ids": [],
+          "temporal_value": {
+            "anchors": [
+              "node:synthetic-acorn-job"
+            ],
+            "relation": "within"
+          }
+        }
+      ],
+      "created_at": "2026-09-17T00:00:00Z",
+      "extractor": {
+        "deterministic": true,
+        "document_revision": "sha256:fa7eb3ac01cd303d0cb3ee2b05961e0e14a2918fb9adfde8f48a11bfdd7c1e55",
+        "name": "classifier-claims",
+        "rule_version": "2",
+        "telling_keys": {
+          "claim:7cf41ada5b774ca18728a1d5": "classification:synthetic-envelope#f867ddfe189b",
+          "claim:bfcc292972a58c2a5144e340": "classification:synthetic-envelope#f867ddfe189b"
+        }
+      },
+      "extractor_version": "classifier-claims/rule:2",
+      "receipt_id": "receipt:fdacae3ba8d067322a7fbaa6",
+      "recorder": "classifier_claims",
+      "schema_version": 1,
+      "source_ref": {
+        "revision": "sha256:a0df0baccb8d48e2d2005ba35b969999f527a85b6e70622b8e3b16b61d571bc2",
+        "source_id": "classification:synthetic-envelope#f867ddfe189b",
+        "source_path": "sources/manual/synthetic-envelope.md"
+      }
+    }
+  ],
+  "provenance": {
+    "generator": "tests/generate_classifier_receipt_identity.py",
+    "method": "git archive system at each producer commit; actual migrate_classifier_moments publish=False",
+    "now": "2026-09-17T00:00:00Z",
+    "producers": {
+      "grouped_v306": "809cd3f1686756db0d7cb2a6eb8edbfa3c995cf9",
+      "split_v309": "b00947dbed57e7106524463ea3902f62d3ce4437"
+    },
+    "synthetic_only": true
+  },
+  "source_path": "sources/manual/synthetic-envelope.md",
+  "source_text": "---\ntitle: Synthetic envelope\ntype: story\nsource_id: story:synthetic-envelope\ncontent_sha256: fa7eb3ac01cd303d0cb3ee2b05961e0e14a2918fb9adfde8f48a11bfdd7c1e55\n---\n\nI found an envelope after the winter move, while I worked at Acorn.\n",
+  "split_v309": [
+    {
+      "claims": [
+        {
+          "basis": "explicit",
+          "claim_id": "claim:bfcc292972a58c2a5144e340",
+          "claim_type": "relative_order",
+          "confidence": 0.45,
+          "created_at": "2026-09-17T00:00:00Z",
+          "event_kind": "moment",
+          "event_mention": "Finding an envelope",
+          "event_ref": "node:5aee5f9048f8967cfee114b6",
+          "evidence": [
+            {
+              "quote": "I found an envelope after the winter move, while I worked at Acorn."
+            }
+          ],
+          "extractor_version": "classifier-claims/rule:2",
+          "schema_version": 1,
+          "source_kind": "import",
+          "source_ref": {
+            "revision": "sha256:a0df0baccb8d48e2d2005ba35b969999f527a85b6e70622b8e3b16b61d571bc2",
+            "source_id": "classification:synthetic-envelope#f867ddfe189b",
+            "source_path": "sources/manual/synthetic-envelope.md"
+          },
+          "status": "active",
+          "subject_mention": "self",
+          "supersedes_claim_ids": [],
+          "temporal_value": {
+            "anchors": [
+              "the winter move"
+            ],
+            "relation": "after"
+          }
+        }
+      ],
+      "created_at": "2026-09-17T00:00:00Z",
+      "extractor": {
+        "deterministic": true,
+        "document_revision": "sha256:fa7eb3ac01cd303d0cb3ee2b05961e0e14a2918fb9adfde8f48a11bfdd7c1e55",
+        "name": "classifier-claims",
+        "rule_version": "2",
+        "telling_keys": {
+          "claim:bfcc292972a58c2a5144e340": "classification:synthetic-envelope#f867ddfe189b"
+        }
+      },
+      "extractor_version": "classifier-claims/rule:2",
+      "receipt_id": "receipt:fdacae3ba8d067322a7fbaa6",
+      "recorder": "classifier_claims",
+      "schema_version": 1,
+      "source_ref": {
+        "revision": "sha256:a0df0baccb8d48e2d2005ba35b969999f527a85b6e70622b8e3b16b61d571bc2",
+        "source_id": "classification:synthetic-envelope#f867ddfe189b",
+        "source_path": "sources/manual/synthetic-envelope.md"
+      }
+    },
+    {
+      "claims": [
+        {
+          "basis": "explicit",
+          "claim_id": "claim:d2b6fe3ea2809ffbc9a69c5d",
+          "claim_type": "relative_order",
+          "confidence": 0.45,
+          "created_at": "2026-09-17T00:00:00Z",
+          "event_kind": "moment",
+          "event_mention": "Finding an envelope",
+          "event_ref": "node:5aee5f9048f8967cfee114b6",
+          "evidence": [
+            {
+              "end": 66,
+              "quote": "while I worked at Acorn",
+              "start": 43
+            }
+          ],
+          "extractor_version": "classifier-claims/rule:2",
+          "schema_version": 1,
+          "source_kind": "import",
+          "source_ref": {
+            "revision": "sha256:2bad6ca12a3a1b11f15b7b6d7277da01b3a428e788c9c28df770b3c46af8b9c3",
+            "source_id": "classification:synthetic-envelope#f867ddfe189b:link",
+            "source_path": "sources/manual/synthetic-envelope.md"
+          },
+          "status": "active",
+          "subject_mention": "self",
+          "supersedes_claim_ids": [],
+          "temporal_value": {
+            "anchors": [
+              "node:synthetic-acorn-job"
+            ],
+            "relation": "within"
+          }
+        }
+      ],
+      "created_at": "2026-09-17T00:00:00Z",
+      "extractor": {
+        "deterministic": true,
+        "document_revision": "sha256:fa7eb3ac01cd303d0cb3ee2b05961e0e14a2918fb9adfde8f48a11bfdd7c1e55",
+        "name": "classifier-claims",
+        "rule_version": "2",
+        "telling_keys": {
+          "claim:d2b6fe3ea2809ffbc9a69c5d": "classification:synthetic-envelope#f867ddfe189b"
+        }
+      },
+      "extractor_version": "classifier-claims/rule:2",
+      "receipt_id": "receipt:403414cf8120871351cd5c2c",
+      "recorder": "classifier_claims",
+      "schema_version": 1,
+      "source_ref": {
+        "revision": "sha256:2bad6ca12a3a1b11f15b7b6d7277da01b3a428e788c9c28df770b3c46af8b9c3",
+        "source_id": "classification:synthetic-envelope#f867ddfe189b:link",
+        "source_path": "sources/manual/synthetic-envelope.md"
+      }
+    }
+  ],
+  "stem": "synthetic-envelope"
+}

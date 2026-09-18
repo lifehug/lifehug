@@ -698,6 +698,58 @@ class IndependentContextTests(unittest.TestCase):
         )
         self.assertEqual(corrected_plan["pending_count"], 0)
 
+    def test_generation_only_receipt_rekey_preserves_settled_normal_plan(self):
+        producer, observer = self.sources[:2]
+        fact = {
+            "title": "Cedarport residence", "description": "I lived in Cedarport in 1997.",
+            "subject": "Cedarport", "places": ["Cedarport"], "date": {"stated": "1997"},
+            "source_grounding": {"quote": "I lived in Cedarport in 1997.",
+                "temporal_quote": "1997", "subject_quote": "Cedarport", "kind": "date"},
+            "timeline_relation": None,
+        }
+        # Isolate generation re-identification from any model/context change.
+        # The historical bytes regression is the separate frozen-v306 test.
+        with mock.patch.object(classifier_claims, "RULE_VERSION", "2"), \
+                mock.patch.object(classifier_claims, "CLASSIFIER_EXTRACTOR", "classifier-claims/rule:2"), \
+                mock.patch.object(te, "CLASSIFIER_CLAIMS_EXTRACTOR", "classifier-claims/rule:2"), \
+                mock.patch.object(te, "CLASSIFIER_CLAIMS_RULE_VERSION", "2"):
+            initial = cc.build_context_snapshot(self.root, producer)
+            self.assertEqual(cs.classify_file(producer, "synthetic-recorded", skip_candidates=True,
+                precomputed_result=full_response(initial, events=[fact])), 0)
+            self.migrate()
+            self.publish()
+            before = cc.build_context_snapshot(self.root, observer)
+            stay = next(row for row in before["candidates"] if row["event_role"] == "residence")
+            linked = {"title": "Finding the letter", "description": "I found a letter in Cedarport.",
+                "subject": "self", "places": ["Cedarport"], "date": None,
+                "source_grounding": None, "timeline_relation": {
+                    "relation": "within", "candidate_id": stay["candidate_id"],
+                    "entity_refs": ["place/cedarport"],
+                    "evidence": {"quote": "I found a letter in Cedarport"}}}
+            self.assertEqual(cs.classify_file(observer, "synthetic-recorded", skip_candidates=True,
+                precomputed_result=full_response(before, events=[linked])), 0)
+            self.migrate()
+            self.publish()
+            settled = cc.build_context_snapshot(self.root, observer)
+            self.assertEqual(cs.build_batch_plan(limit=10, sources=[producer, observer],
+                                                skip_candidates=True)["pending_count"], 0)
+            old_ids = {row["claim_id"] for row in store.active_claims(store.fold_active_index(self.root))}
+        classifications = {path: path.read_bytes() for path in (self.root / "state/classifications").glob("*.json")}
+        report = self.migrate()
+        self.assertEqual(report["superseded_claims"], len(old_ids))
+        self.publish()
+        after = cc.build_context_snapshot(self.root, observer)
+        self.assertEqual(cc.snapshot_metadata(after), cc.snapshot_metadata(settled))
+        self.assertEqual(cs.build_batch_plan(limit=10, sources=[producer, observer],
+                                            skip_candidates=True)["pending_count"], 0)
+        new_ids = {row["claim_id"] for row in store.active_claims(store.fold_active_index(self.root))}
+        self.assertTrue(old_ids.isdisjoint(new_ids))
+        self.assertEqual({path: path.read_bytes() for path in classifications}, classifications)
+        own = cc.build_context_snapshot(self.root, producer)
+        self.assertNotIn(stay["candidate_id"], {row["candidate_id"] for row in own["candidates"]})
+        node = next(row for row in pub.read_projection(self.root)["nodes"] if row.get("label") == "Finding the letter")
+        self.assertEqual(node["best_temporal_value"]["best"], "1997")
+
     def test_legacy_unclassified_prefilter_shares_one_catalog(self):
         self.independent_anchor()
         self.file(events=[])

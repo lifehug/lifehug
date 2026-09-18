@@ -18,7 +18,7 @@ import chronology as chrono
 from temporal_claims import collapsed_text, normalized_mention_key
 
 EVENT_KEY_LENGTH = 12
-CLASSIFIER_CLAIMS_RULE_VERSION = "2"
+CLASSIFIER_CLAIMS_RULE_VERSION = "3"
 CLASSIFIER_CLAIMS_EXTRACTOR = (
     f"classifier-claims/rule:{CLASSIFIER_CLAIMS_RULE_VERSION}"
 )

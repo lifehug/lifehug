@@ -31,9 +31,12 @@ exactly as it is withheld from every other reader). Raw, because
 validated contextual relations. Document-level place lists are retrieval
 hints only; they are never copied onto every event.
 
-WHAT IT WRITES. One `ExtractionReceipt` per classifier EVENT, holding the
-event's independently supported claims: a direct date or age and a validated
-`within`/`before`/`after` relation may coexist. When a source is re-classified,
+WHAT IT WRITES. One `ExtractionReceipt` per classifier reading: an event's
+direct date or age and a validated `within`/`before`/`after` relation may
+coexist under separate source references. Rule 3 revisions hash the canonical
+normalized assertion and its existing source provenance, not generated ids or
+clocks. Changed assertions append new interpretations; identical grounded
+direct assertions survive unrelated link refresh. When a source is re-classified,
 one supersession correction retires only the older classifier-family reading.
 Nothing else. It never edits `state/classifications/`, never re-classifies
 anything, never calls a model, and never redraws `state/landmarks.json`.
@@ -114,6 +117,7 @@ WHAT IT REFUSES TO INVENT, by name:
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -478,32 +482,48 @@ def _grounded_evidence(event: object) -> list[dict] | None:
     return [{"quote": bounded_quote(quote), "start": start, "end": end}]
 
 
-def _reading_revision(event: dict, reading: dict, fallback: object) -> str:
-    """Stable source fact/link revision, excluding classifier timestamps."""
+def _reading_assertion(normalized: dict) -> dict:
+    """All canonical semantics, without generated identity or clocks."""
+    assertion = {key: value for key, value in normalized.items()
+                 if key not in ("claim_id", "created_at", "source_ref")}
+    assertion["source_ref"] = {
+        key: value for key, value in normalized["source_ref"].items()
+        if key != "revision"
+    }
+    return assertion
+
+
+def _validated_reading_claim(
+    payload: dict, *, event: dict, reading_kind: str, fallback: object, now: object,
+) -> dict:
+    """Content-address the normalized assertion, then mint its canonical id."""
+    normalized = tc.validate_temporal_claim(payload, now=now)
+    provenance: object = collapsed_text(fallback)
     grounding = event.get("source_grounding")
-    if reading.get("reading_kind") == "direct" and isinstance(grounding, dict):
+    if reading_kind == "direct" and isinstance(grounding, dict):
         revision = collapsed_text(grounding.get("source_revision"))
         if revision:
-            return revision
-    if reading.get("reading_kind") == "contextual":
+            provenance = revision
+    if reading_kind == "contextual":
         resolution = event.get("timeline_resolution")
-        payload = {
+        provenance = {
             "source_revision": (
                 resolution.get("source_revision")
                 if isinstance(resolution, dict) else None
             ),
-            "event_key": event_key(event),
-            "temporal_value": reading.get("temporal_value"),
-            "evidence": reading.get("evidence"),
             "input_fingerprint": (
                 resolution.get("input_fingerprint")
                 if isinstance(resolution, dict) else None
             ),
         }
-        return "sha256:" + hashlib.sha256(
-            lp.canonical_json(payload).encode("utf-8")
-        ).hexdigest()
-    return collapsed_text(fallback)
+    # Hash all canonical assertions, not a second list of temporal fields.
+    # The first id/revision and clock are generated, not asserted semantics.
+    assertion = _reading_assertion(normalized)
+    revision = "sha256:" + hashlib.sha256(lp.canonical_json({
+        "assertion": assertion, "source_provenance": provenance,
+    }).encode("utf-8")).hexdigest()
+    normalized["source_ref"] = {**normalized["source_ref"], "revision": revision}
+    return tc.validate_temporal_claim(normalized, now=now)
 
 
 def _raw_anchor_is_canonicalized(direct: dict, contextual: dict, event: dict) -> bool:
@@ -636,7 +656,7 @@ def event_claims(
         source_ref = event_source_ref(
             stem=stem,
             event=row,
-            revision=_reading_revision(row, reading, revision),
+            revision=revision,
             source_path=source_path,
             link=reading.get("reading_kind") == "contextual",
         )
@@ -658,7 +678,10 @@ def event_claims(
         resolution = row.get("timeline_resolution")
         if isinstance(resolution, dict) and resolution.get("status"):
             payload["timeline_resolution_status"] = resolution["status"]
-        claims.append(tc.validate_temporal_claim(payload, now=now))
+        claims.append(_validated_reading_claim(
+            payload, event=row, reading_kind=reading["reading_kind"],
+            fallback=revision, now=now,
+        ))
     return claims
 
 
@@ -726,8 +749,8 @@ def _superseded_by_reclassification(
     """``(claim ids, revisions)`` of this classification's PREVIOUS reading.
 
     Every active claim of this stem that the current classification no longer
-    emits. Grounded direct facts keep their ids across link-only refreshes;
-    contextual edges and removed/changed events do not.
+    emits. Grounded direct facts keep their ids across link-only refreshes
+    when their own assertion is unchanged; changed interpretations do not.
     """
     prefix = classification_source_prefix(stem)
     ids: set[str] = set()
@@ -760,6 +783,64 @@ def _already_recorded(claim: dict, recorder_dates: list) -> bool:
     if record is None:
         return False
     return any(chrono.intersect(record, other) is not None for other in recorder_dates)
+
+
+def _correction_equivalence_key(claim: dict) -> str:
+    assertion = _reading_assertion(claim)
+    assertion.pop("extractor_version")
+    source_ref = assertion["source_ref"]
+    source_ref["source_id"] = source_ref["source_id"].removesuffix(":link")
+    return lp.canonical_json(assertion)
+
+
+def _equivalent_correction_carries(
+    root: Path, index: dict, receipts: list[dict], provenance: dict[str, set[str]],
+) -> list[dict]:
+    """Carry explicit corrections only across proven equivalent re-identification."""
+    corrections = [row for row in index.get("corrections", ())
+                   if row.get("scope") not in (SUPERSEDE_SCOPE, store.CONSTRAINT_CORRECTION_SCOPE)]
+    if not corrections:
+        return []
+    old_rows = {row["claim_id"]: row for row in index.get("claims", ())
+                if is_classifier_source_id(row.get("source_ref", {}).get("source_id"))}
+    current: dict[str, list[tuple[dict, str | None]]] = {}
+    for receipt in receipts:
+        document = receipt["extractor"].get("document_revision")
+        for claim in receipt["claims"]:
+            current.setdefault(_correction_equivalence_key(claim), []).append((claim, document))
+    # Folded status is derived and its dataclass view may omit additive fields.
+    # Read only targeted receipts through the canonical no-follow store reader.
+    raw_receipts: dict[str, dict] = {}
+    carries = []
+    for correction in corrections:
+        targets: set[str] = set()
+        original_ids = set(correction["claim_ids"])
+        for claim_id in original_ids:
+            old = old_rows.get(claim_id)
+            if old is None:
+                continue
+            path = old["receipt_path"]
+            if path not in raw_receipts:
+                raw_receipts[path] = tc.validate_extraction_receipt(
+                    json.loads(store.read_store_text(root, path)))
+            receipt = raw_receipts[path]
+            old_claim = next(row for row in receipt["claims"] if row["claim_id"] == claim_id)
+            old_document = (receipt.get("extractor") or {}).get("document_revision")
+            for claim, document in current.get(_correction_equivalence_key(old_claim), ()):
+                if claim["claim_id"] in original_ids:
+                    continue
+                proven = (old_document == document if old_document else
+                          old_claim["source_ref"]["revision"] in provenance[claim["claim_id"]])
+                if proven:
+                    targets.add(claim["claim_id"])
+        if targets:
+            carries.append({
+                "kind": correction["kind"], "claim_ids": sorted(targets),
+                "scope": correction.get("scope"),
+                "reason": (f"Carried from {correction['correction_id']} across equivalent "
+                           f"classifier interpretation identity: {correction['reason']}"),
+            })
+    return carries
 
 
 # --------------------------------------------------------------------------
@@ -836,6 +917,7 @@ def migrate_classifier_moments(
         else classify_story.CLASSIFICATIONS_DIR
     )
     receipts: list[dict] = []
+    provenance: dict[str, set[str]] = {}
     corrections: list[dict] = []
     new_nodes: set[str] = set()
 
@@ -877,6 +959,11 @@ def migrate_classifier_moments(
                     deduped_here += 1
                     continue
                 kept_claims.append(claim)
+                grounding = event.get("source_grounding")
+                provenance[claim["claim_id"]] = {
+                    revision, collapsed_text(grounding.get("source_revision"))
+                    if isinstance(grounding, dict) else "",
+                } - {""}
                 report["claims"] += 1
                 kind = claim["claim_type"]
                 report["claims_by_type"][kind] = report["claims_by_type"].get(kind, 0) + 1
@@ -944,6 +1031,7 @@ def migrate_classifier_moments(
     report["skipped_no_source_path"].sort()
     report["skipped_source_missing"].sort()
 
+    carried_corrections = _equivalent_correction_carries(root, index, receipts, provenance)
     if dry_run:
         report["nodes_after"] = report["nodes_before"] + len(new_nodes)
         return report
@@ -970,6 +1058,11 @@ def migrate_classifier_moments(
             title="Superseded by re-classification",
             author="classifier_claims",
             occurred_at=now,
+        )
+    for correction in carried_corrections:
+        store.file_temporal_correction(
+            root, **correction, author="classifier_claims", occurred_at=now,
+            title="Preserved correction on equivalent classifier reading",
         )
 
     store.rebuild_active_index(root)

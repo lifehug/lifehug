@@ -205,12 +205,17 @@ class ClaimsPerEventTests(unittest.TestCase):
             sorted(row["claim_type"] for row in rows), ["age", "date", "occurrence"]
         )
 
-    def test_every_claim_cites_the_classification_revision_and_the_story(self):
+    def test_every_claim_cites_its_interpretation_and_the_story(self):
         _run(self.root, publish=False)
         revision = cc.classification_revision(self.payload)
         self.assertTrue(revision.startswith("sha256:"))
+        expected = {claim["claim_id"]: claim for row in self.payload["events"]
+                    for claim in cc.event_claims(
+                        stem="the-move", event=row, revision=revision,
+                        source_path=self.relative, now=NOW)}
         for row in ts.active_claims(ts.fold_active_index(self.root)):
-            self.assertEqual(row["source_ref"]["revision"], revision)
+            self.assertEqual(row["source_ref"], expected[row["claim_id"]]["source_ref"])
+            self.assertNotEqual(row["source_ref"]["revision"], revision)
             self.assertEqual(row["source_ref"]["source_path"], self.relative)
             self.assertTrue(
                 cc.is_classifier_source_id(row["source_ref"]["source_id"]),
