@@ -372,8 +372,13 @@ class ClaimEmissionTests(unittest.TestCase):
         self.assertEqual(te.event_key(event), "363cccb54258")
         self.assertEqual(classifier_claims.event_key(event), "363cccb54258")
 
-    def test_grounded_direct_fact_identity_survives_link_refresh(self) -> None:
+    def test_unchanged_grounded_direct_assertion_survives_link_refresh(self) -> None:
         event = self.grounded_event()
+        event["timeline_resolution"] = {
+            "status": "linked",
+            "source_revision": "sha256:" + "4" * 64,
+            "input_fingerprint": "sha256:" + "0" * 64,
+        }
         before = self.claims(event, "sha256:" + "a" * 64)[0]
         linked = copy.deepcopy(event)
         linked["timeline_relation"] = {
@@ -391,6 +396,7 @@ class ClaimEmissionTests(unittest.TestCase):
         direct = next(row for row in after if row["claim_type"] == "date")
         self.assertEqual(direct["claim_id"], before["claim_id"])
         self.assertEqual(direct["source_ref"], before["source_ref"])
+        self.assertEqual(direct, before)
         self.assertEqual(direct["evidence"], [{
             "quote": "I joined Northstar in 2018.", "start": 0, "end": 27,
         }])

@@ -478,32 +478,42 @@ def _grounded_evidence(event: object) -> list[dict] | None:
     return [{"quote": bounded_quote(quote), "start": start, "end": end}]
 
 
-def _reading_revision(event: dict, reading: dict, fallback: object) -> str:
-    """Stable source fact/link revision, excluding classifier timestamps."""
+def _validated_reading_claim(
+    payload: dict, *, event: dict, reading_kind: str, fallback: object, now: object,
+) -> dict:
+    """Content-address the normalized assertion, then mint its canonical id."""
+    normalized = tc.validate_temporal_claim(payload, now=now)
+    provenance: object = collapsed_text(fallback)
     grounding = event.get("source_grounding")
-    if reading.get("reading_kind") == "direct" and isinstance(grounding, dict):
+    if reading_kind == "direct" and isinstance(grounding, dict):
         revision = collapsed_text(grounding.get("source_revision"))
         if revision:
-            return revision
-    if reading.get("reading_kind") == "contextual":
+            provenance = revision
+    if reading_kind == "contextual":
         resolution = event.get("timeline_resolution")
-        payload = {
+        provenance = {
             "source_revision": (
                 resolution.get("source_revision")
                 if isinstance(resolution, dict) else None
             ),
-            "event_key": event_key(event),
-            "temporal_value": reading.get("temporal_value"),
-            "evidence": reading.get("evidence"),
             "input_fingerprint": (
                 resolution.get("input_fingerprint")
                 if isinstance(resolution, dict) else None
             ),
         }
-        return "sha256:" + hashlib.sha256(
-            lp.canonical_json(payload).encode("utf-8")
-        ).hexdigest()
-    return collapsed_text(fallback)
+    # Hash all canonical assertions, not a second list of temporal fields.
+    # The first id/revision and clock are generated, not asserted semantics.
+    assertion = {key: value for key, value in normalized.items()
+                 if key not in ("claim_id", "created_at", "source_ref")}
+    assertion["source_ref"] = {
+        key: value for key, value in normalized["source_ref"].items()
+        if key != "revision"
+    }
+    revision = "sha256:" + hashlib.sha256(lp.canonical_json({
+        "assertion": assertion, "source_provenance": provenance,
+    }).encode("utf-8")).hexdigest()
+    normalized["source_ref"] = {**normalized["source_ref"], "revision": revision}
+    return tc.validate_temporal_claim(normalized, now=now)
 
 
 def _raw_anchor_is_canonicalized(direct: dict, contextual: dict, event: dict) -> bool:
@@ -636,7 +646,7 @@ def event_claims(
         source_ref = event_source_ref(
             stem=stem,
             event=row,
-            revision=_reading_revision(row, reading, revision),
+            revision=revision,
             source_path=source_path,
             link=reading.get("reading_kind") == "contextual",
         )
@@ -658,7 +668,10 @@ def event_claims(
         resolution = row.get("timeline_resolution")
         if isinstance(resolution, dict) and resolution.get("status"):
             payload["timeline_resolution_status"] = resolution["status"]
-        claims.append(tc.validate_temporal_claim(payload, now=now))
+        claims.append(_validated_reading_claim(
+            payload, event=row, reading_kind=reading["reading_kind"],
+            fallback=revision, now=now,
+        ))
     return claims
 
 
@@ -726,8 +739,8 @@ def _superseded_by_reclassification(
     """``(claim ids, revisions)`` of this classification's PREVIOUS reading.
 
     Every active claim of this stem that the current classification no longer
-    emits. Grounded direct facts keep their ids across link-only refreshes;
-    contextual edges and removed/changed events do not.
+    emits. Grounded direct facts keep their ids across link-only refreshes
+    when their own assertion is unchanged; changed interpretations do not.
     """
     prefix = classification_source_prefix(stem)
     ids: set[str] = set()
