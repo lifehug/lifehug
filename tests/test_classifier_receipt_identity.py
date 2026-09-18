@@ -52,7 +52,7 @@ def anchor(root: Path) -> None:
 
 
 class HistoricalReceiptTests(unittest.TestCase):
-    def seed(self, generation: str):
+    def seed(self, generation: str, *, declared=True):
         root = _vault(self)
         fixture = golden()
         source = root / fixture["source_path"]
@@ -60,12 +60,129 @@ class HistoricalReceiptTests(unittest.TestCase):
         source.write_text(fixture["source_text"], encoding="utf-8")
         _classification(root, fixture["stem"], fixture["classification"])
         for row in fixture[generation]:
+            if not declared:
+                row = copy.deepcopy(row)
+                row["extractor"].pop("document_revision")
             store.write_receipt(root, row, now=NOW)
         anchor(root)
         store.rebuild_active_index(root)
         ei.rebuild_telling_manifest(root)
         pub.publish(root, now=NOW)
         return root, fixture
+
+    def test_explicit_corrections_follow_equivalent_rekey_without_rewriting_history(self):
+        for kind, status in (("retract", "retracted"), ("dispute", "disputed"), ("supersede", "superseded")):
+            with self.subTest(kind=kind):
+                root, fixture = self.seed("grouped_v306")
+                old_ids = [row["claim_id"] for row in fixture["grouped_v306"][0]["claims"]]
+                original = store.file_temporal_correction(
+                    root, kind=kind, claim_ids=old_ids, reason="Synthetic explicit owner correction.",
+                    scope="synthetic_owner_decision", author="owner", occurred_at=NOW)
+                preserved = {path: (root / path).read_bytes() for path in store.receipt_relative_paths(root)}
+                preserved[original.relative_path] = (root / original.relative_path).read_bytes()
+                _run(root)
+                index = store.fold_active_index(root)
+                new = [row for row in index["claims"] if row["extractor_version"] == cc.CLASSIFIER_EXTRACTOR]
+                self.assertEqual(len(new), 2)
+                self.assertEqual({row["status"] for row in new}, {status})
+                carries = [row for row in index["corrections"] if row["correction_id"] != original.correction_id]
+                self.assertEqual(len(carries), 1)
+                self.assertEqual(carries[0]["kind"], kind)
+                self.assertEqual(carries[0]["scope"], "synthetic_owner_decision")
+                self.assertEqual(carries[0]["claim_ids"], sorted(row["claim_id"] for row in new))
+                self.assertIn(original.correction_id, carries[0]["reason"])
+                for path, content in preserved.items():
+                    self.assertEqual((root / path).read_bytes(), content)
+                snapshot = _files(root)
+                _run(root)
+                self.assertEqual(_files(root), snapshot)
+
+    def test_automatic_supersession_and_move_scopes_are_not_inherited(self):
+        for scope in (cc.SUPERSEDE_SCOPE, store.CONSTRAINT_CORRECTION_SCOPE):
+            with self.subTest(scope=scope):
+                root, fixture = self.seed("grouped_v306")
+                store.supersede_claims(root, [row["claim_id"] for row in fixture["grouped_v306"][0]["claims"]],
+                                      reason="Synthetic excluded correction scope.", scope=scope)
+                _run(root)
+                index = store.fold_active_index(root)
+                new = [row for row in index["claims"] if row["extractor_version"] == cc.CLASSIFIER_EXTRACTOR]
+                self.assertEqual({row["status"] for row in new}, {"active"})
+                self.assertEqual(len(index["corrections"]), 1)
+
+    def test_changed_assertion_evidence_or_document_does_not_inherit_rejection(self):
+        for change in ("status", "evidence", "document"):
+            with self.subTest(change=change):
+                root, fixture = self.seed("grouped_v306")
+                store.retract_claims(root, [row["claim_id"] for row in fixture["grouped_v306"][0]["claims"]],
+                                     reason="Synthetic rejected interpretation.")
+                changed = copy.deepcopy(fixture["classification"])
+                if change == "status":
+                    changed["events"][0]["timeline_resolution"] = {"status": "linked"}
+                elif change == "evidence":
+                    changed["events"][0]["when_hint"] = "another stated detail"
+                    changed["events"][0]["timeline_relation"]["evidence"]["start"] += 1
+                else:
+                    text = "I corrected the synthetic story."
+                    (root / fixture["source_path"]).write_text(
+                        "---\nsource_id: story:synthetic-envelope\ncontent_sha256: "
+                        + store.payload_sha256(text) + "\n---\n\n" + text + "\n")
+                _classification(root, fixture["stem"], changed)
+                _run(root)
+                index = store.fold_active_index(root)
+                new = [row for row in index["claims"] if row["extractor_version"] == cc.CLASSIFIER_EXTRACTOR]
+                self.assertEqual({row["status"] for row in new}, {"active"})
+                self.assertEqual(len(index["corrections"]), 1)
+
+    def test_undeclared_legacy_provenance_requires_exact_existing_revision(self):
+        for unchanged in (True, False):
+            with self.subTest(unchanged=unchanged):
+                root, fixture = self.seed("grouped_v306", declared=False)
+                store.retract_claims(root, [row["claim_id"] for row in fixture["grouped_v306"][0]["claims"]],
+                                     reason="Synthetic legacy rejection.")
+                if not unchanged:
+                    changed = copy.deepcopy(fixture["classification"])
+                    changed["classified_at"] = LATER
+                    _classification(root, fixture["stem"], changed)
+                _run(root)
+                index = store.fold_active_index(root)
+                new = [row for row in index["claims"] if row["extractor_version"] == cc.CLASSIFIER_EXTRACTOR]
+                self.assertEqual({row["status"] for row in new}, {"retracted" if unchanged else "active"})
+
+    def test_stale_classification_is_not_migrated_after_correction(self):
+        root, fixture = self.seed("grouped_v306")
+        store.retract_claims(root, [row["claim_id"] for row in fixture["grouped_v306"][0]["claims"]],
+                             reason="Synthetic withdrawn source reading.")
+        _classification(root, fixture["stem"], {**fixture["classification"], "stale": True})
+        report = _run(root)
+        self.assertEqual(report["classifications"], 0)
+        self.assertEqual(report["receipts_written"], 0)
+        self.assertFalse(any(cc.is_classifier_source_id(row["source_ref"]["source_id"])
+                             for row in store.active_claims(store.fold_active_index(root))))
+
+    def test_correction_equivalence_retains_raw_asserted_resolution_status(self):
+        for stored_status in (None, "linked"):
+            with self.subTest(stored_status=stored_status):
+                root = _vault(self)
+                fixture = golden()
+                path = root / fixture["source_path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(fixture["source_text"])
+                old_ids = []
+                for old in fixture["split_v309"]:
+                    if stored_status:
+                        for claim in old["claims"]:
+                            claim["timeline_resolution_status"] = stored_status
+                    store.write_receipt(root, old, now=NOW)
+                    old_ids.extend(claim["claim_id"] for claim in old["claims"])
+                store.retract_claims(root, old_ids, reason="Synthetic status-bearing rejection.")
+                changed = fixture["classification"]
+                changed["events"][0]["timeline_resolution"] = {"status": "linked"}
+                _classification(root, fixture["stem"], changed)
+                _run(root)
+                new = [row for row in store.fold_active_index(root)["claims"]
+                       if row["extractor_version"] == cc.CLASSIFIER_EXTRACTOR]
+                self.assertEqual({row["status"] for row in new},
+                                 {"retracted" if stored_status else "active"})
 
     def test_manual_move_and_undo_survive_generation_and_status_changes(self):
         root, fixture = self.seed("grouped_v306")
@@ -207,12 +324,52 @@ class AssertionIdentityTests(unittest.TestCase):
         self.assertEqual(store.write_receipt(root, receipt(after), now=LATER), path)
         self.assertEqual(path.read_bytes(), original)
 
+    def test_final_validation_remints_id_from_final_revision(self):
+        row = self.event()
+        for claim in self.claims(row):
+            self.assertEqual(claim["claim_id"], tc.derive_claim_id(
+                claim_type=claim["claim_type"], subject_mention=claim["subject_mention"],
+                event_kind=claim["event_kind"], temporal_value=claim["temporal_value"],
+                source_ref=claim["source_ref"], extractor_version=claim["extractor_version"]))
+            provisional = {**claim, "source_ref": {**claim["source_ref"], "revision": "sha256:" + "a" * 64}}
+            self.assertNotEqual(tc.validate_temporal_claim(provisional, now=NOW)["claim_id"], claim["claim_id"])
+
+    def test_undeclared_grounded_source_proof_must_match_exactly(self):
+        for matching in (True, False):
+            with self.subTest(matching=matching):
+                root = _vault(self)
+                source = _story(root, "synthetic-founding", self.STORY)
+                event = self.event()
+                current = self.claims(event)[0]
+                old = tc.validate_temporal_claim({
+                    **current, "extractor_version": "classifier-claims/rule:2",
+                    "source_ref": {**current["source_ref"], "revision":
+                                   event["source_grounding"]["source_revision"] if matching else "sha256:" + "9" * 64},
+                }, now=NOW)
+                store.write_receipt(root, receipt(old), now=NOW)
+                store.retract_claims(root, [old["claim_id"]], reason="Synthetic grounded-source rejection.")
+                _classification(root, "synthetic-founding", classification(source, event))
+                _run(root)
+                direct = next(row for row in store.fold_active_index(root)["claims"]
+                              if row["extractor_version"] == cc.CLASSIFIER_EXTRACTOR and row["claim_type"] == "date")
+                self.assertEqual(direct["status"], "retracted" if matching else "active")
+
+    def test_normalized_assertion_not_incidental_formatting_sets_revision(self):
+        row = self.event()
+        canonical = self.claims(row)
+        padded = copy.deepcopy(row)
+        padded["subject"] = " self "
+        padded["title"] = " Acorn   founding "
+        padded["source_grounding"]["quote"] = " I  founded Acorn in 2004 "
+        self.assertEqual(self.claims(padded), canonical)
+
     def test_changed_assertion_matrix_never_reuses_a_receipt_path(self):
         event = self.event()
         variants = {}
         for status in sorted(tc.TIMELINE_RESOLUTION_STATUSES - {"linked"}):
             row = copy.deepcopy(event)
             row["timeline_resolution"]["status"] = status
+            row["timeline_relation"] = None
             variants[status] = row
         row = copy.deepcopy(event)
         row["source_grounding"] = te.normalize_source_grounding({
@@ -272,6 +429,7 @@ class AssertionIdentityTests(unittest.TestCase):
                 after = copy.deepcopy(before)
                 if change == "status":
                     after["timeline_resolution"]["status"] = "incomplete"
+                    after["timeline_relation"] = None
                 else:
                     after["source_grounding"]["quote"] = self.STORY
                     after["source_grounding"]["end"] = len(self.STORY)

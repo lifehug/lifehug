@@ -86,6 +86,29 @@ evidence, kind, or another assertion changes, a new interpretation ID is correct
 the event does not become a different event, and the prior interpretation stays
 in history. Retain status rather than pretending a changed assertion is equal.
 
+### Equivalent Correction Authority
+
+Approved implementation addendum: a producer-generation change must not revive
+an identical assertion explicitly retracted, disputed or superseded. Migration
+uses folded explicit correction records, not derived status or re-extraction
+marks, and compares the raw validated receipt claim's complete normalized
+assertion. Only generated IDs/clocks, producer version and revision are removed;
+only the known terminal `:link` source-identity marker is normalized. Resolution
+status and every other asserted field remain part of equality.
+
+Require matching nonempty declared document revisions. An undeclared legacy
+receipt may instead prove equality by its exact source-reference revision
+matching the current classification revision or verified grounding source
+revision; no heuristic matching is allowed. A changed assertion, evidence,
+document, or unproven provenance does not imply inherited rejection. This is
+not a general correction policy for changed interpretations.
+
+Append through `file_temporal_correction`, preserving kind/scope and attributing
+the original correction ID and reason, authored by the migration rather than
+impersonating a new owner action. Exclude automatic classifier supersession and
+Move scopes. Never edit the original receipt/correction. Equivalent disputes
+remain disputes; they are not suppressed as retractions. Replay adds no bytes.
+
 `test_grounded_direct_fact_identity_survives_link_refresh` currently checks only
 claim identity while also changing asserted status. It misses the conflicting
 receipt write. Replace that expectation explicitly with an unchanged-direct-
@@ -147,6 +170,9 @@ Required cases:
 - `manual_authority`: Move and Undo plus correction/retraction and binding
   guards survive migration and later assertion changes. No manual receipt or
   decision is rewritten, revived, or silently detached by claim re-identification.
+  Cover explicit retract/dispute/supersede carry, excluded automatic scopes,
+  raw asserted resolution status, changed semantics/evidence/document and exact
+  undeclared legacy provenance boundaries, with byte-identical replay.
 - Preserve recorder dedupe, current/stale classification gates, mixed-source
   self-exclusion, no-feedback candidate policy, selective freshness, and exact
   incomplete/missing/linked outcome coverage through real publication.
