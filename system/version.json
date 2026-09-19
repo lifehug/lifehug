@@ -1,7 +1,7 @@
 {
-  "version": 312,
+  "version": 313,
   "released": "2026-09-19",
-  "changelog": "v312: One landmark slot is one tenure across consecutive stays. A job or school recorded under several back-to-back residence entries now folds into a single participation episode whose window spans the whole run of stays, instead of one episode per stay competing for the same dates; a stated tenure beside its stay windows wins outright and the window union survives only as the alternate. Calculation rule version 7 (timeline-rules:7); the eras handbook quotes it. No model, prompt or schema change.",
+  "changelog": "v313: Stories place on the dates they state. The classifier now reads any stated date form the loose parser understands (numeric month/day/year, month-day ranges, decades and thirds, holidays, approximate prefixes, trailing times, dash and until connectors), so a story that names its date no longer falls back to a raw-anchor question. Candidate retrieval admits the specific anchor a story names before generic role matches, the owner's own name and full name are treated as the owner rather than a roster stranger, and a record restating a landmark entry without a date is skipped instead of filed twice. Validation salvages a batch response one event at a time: a relation or grounding failure on one event nulls that event and abstains, instead of refusing the whole batch. Classifier claims rule 4, prompt contextual-timeline:3. No schema change.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
