@@ -394,6 +394,63 @@ def work_items_payload(result: tt.CalculatedTimeline, *, published_at: str,
     return payload
 
 
+#: Where the resolver keeps what it asked. Read here, never folded.
+RESOLVER_LEDGER = Path("state") / "resolver" / "resolutions.json"
+
+
+def resolver_questions(vault_root: str | Path) -> dict[str, str]:
+    """``node_id -> the question the resolver says would settle it``.
+
+    The resolver reads a story against the spine and, only when the vault
+    genuinely cannot tell, proposes the ONE question that would place the
+    moment (ADR 0037). That sentence is better than the generic *"When did X
+    happen?"* the composer writes from a label, and it is the whole point of
+    having asked a model: the card should say what is actually missing.
+
+    Read, never folded. The ledger is the resolver's memory of what it asked,
+    not a claim about the person's life, so it is deliberately NOT a
+    derivation input — `CALCULATION_RULE_VERSION` describes the arithmetic
+    that places moments, and a better sentence on a card is not that
+    arithmetic. Unreadable or absent reads as "no questions".
+    """
+    try:
+        raw = json.loads((Path(vault_root) / RESOLVER_LEDGER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = raw.get("nodes") if isinstance(raw, dict) else None
+    found: dict[str, str] = {}
+    for node_id, row in (rows or {}).items():
+        if not isinstance(row, dict) or row.get("status") != "unknown":
+            continue
+        question = " ".join(str(row.get("question") or "").split())
+        if node_id and question:
+            found[str(node_id)] = question
+    return found
+
+
+def _with_resolver_questions(payloads: dict, questions: dict[str, str]) -> None:
+    """Put the resolver's own question on the work item for that node.
+
+    In place, on the rendered payloads and before the semantic no-op compares
+    them, so a newly proposed question is a new generation exactly as a new
+    date is. ``question_source`` says where the sentence came from; a reader
+    that has never heard of it is unaffected.
+    """
+    if not questions:
+        return
+    for payload in payloads.values():
+        rows = payload.get("work_items")
+        if not isinstance(rows, list):
+            continue
+        payload["work_items"] = [
+            {**row, "prompt_intent": questions[str(row.get("node_ref"))],
+             "question_source": "resolver"}
+            if isinstance(row, dict) and str(row.get("node_ref") or "") in questions
+            else row
+            for row in rows
+        ]
+
+
 def rebuild_signature(payload: object) -> dict:
     """A published file reduced to what a rebuild must reproduce exactly.
 
@@ -582,6 +639,10 @@ def publish(
             result, published_at=published_at, input_digest=digest, timings=timings
         ),
     }
+    # ADR 0037 (v316): a card asks the resolver's question when the resolver
+    # has one. A display decision over the SAME generation — nothing here
+    # re-derives a date, so `calculation_rule_version` does not move.
+    _with_resolver_questions(payloads, resolver_questions(vault_root))
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -1094,6 +1155,7 @@ __all__ = [
     "read_projection",
     "read_work_items",
     "rebuild_signature",
+    "resolver_questions",
     "verify",
     "work_items_path",
     "work_items_payload",
