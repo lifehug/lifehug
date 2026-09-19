@@ -2851,6 +2851,40 @@ class LandmarkRecorderTests(unittest.TestCase):
         self.assertEqual(outcome.record, {"domain": "military", "skipped": True})
         self.assertEqual(outcome.attempts, 1)
 
+    def test_a_work_record_with_no_employer_is_refused_with_a_named_finding(self):
+        """lifehug#365 item 2 — a tenure is a tenure AT an organization.
+
+        `{"domain": "work", "what": "SEO work"}` is what the listener filed on
+        a real vault; it projected as an episode labelled with the DOMAIN WORD
+        and a card reading "When were you at work?". The refusal is typed, not
+        silent.
+        """
+        outcome = self.recorder.record_answer(
+            domain="work", answer="I did some SEO work for a while.",
+            reply="SEO work, got it.",
+            call=lambda p, m: '{"landmark": {"domain": "work", '
+                              '"what": "SEO work"}}')
+        self.assertEqual(outcome.records, ())
+        self.assertIn(self.recorder.DROPPED_UNNAMED_TENURE, outcome.findings)
+
+    def test_a_named_employer_still_records(self):
+        outcome = self.recorder.record_answer(
+            domain="work", answer="I was at Tidewheel Works for four years.",
+            reply="Tidewheel Works, got it.",
+            call=lambda p, m: '{"landmark": {"domain": "work", '
+                              '"label": "Tidewheel Works", "what": "SEO work"}}')
+        self.assertEqual(outcome.status, self.recorder.STATUS_RECORDED)
+        self.assertEqual(outcome.record["label"], "Tidewheel Works")
+        self.assertNotIn(self.recorder.DROPPED_UNNAMED_TENURE, outcome.findings)
+
+    def test_a_none_and_a_skip_are_answers_and_are_never_refused(self):
+        """They complete the domain; they simply draw nothing on the timeline."""
+        outcome = self.recorder.record_answer(
+            domain="military", answer="I never served.", reply="Understood.",
+            call=lambda p, m: '{"landmark": {"domain": "military", "none": true}}')
+        self.assertEqual(outcome.record, {"domain": "military", "none": True})
+        self.assertNotIn(self.recorder.DROPPED_UNNAMED_TENURE, outcome.findings)
+
     def test_a_provider_failure_is_data_never_an_exception(self):
         def _boom(prompt: str, model: str) -> str:
             raise RuntimeError("no provider")

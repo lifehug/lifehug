@@ -587,5 +587,153 @@ class BatchHookTests(unittest.TestCase):
         self.assertEqual(cr._resolve(Path("/nonexistent"), [], model=None), {"skipped": True})
 
 
+class NotAnEventTests(LegsTests):
+    """ADR 0037's amendment — the resolver retires what was never an event.
+
+    lifehug#365 item 5: the classifier read an anticipated milestone, a
+    correction about the data itself and a bare statement of a name as
+    occurrences, and each became an undated moment the loop could only ask
+    about forever. The verdict is a DURABLE CORRECTION through the ordinary
+    path — the claims stay on disk, retracted and dated — and the node leaves
+    the projection on the republish that already follows filing.
+    """
+
+    def verdict_text(self, label: str, *, kind: str = "future",
+                     reason: str = "The shop has not opened yet.",
+                     answer: object = None) -> str:
+        return json.dumps({"answers": [{
+            "node_id": self.nodes[label], "answer": answer, "basis": "inferred",
+            "confidence": 0.2, "citations": [], "fact_key": "not_an_event",
+            "reason": reason, "question": None, "also_resolves": [],
+            "not_an_event": {"kind": kind, "reason": reason},
+        }]})
+
+    def planned(self, body: str, label: str = "shop") -> dict:
+        self.story("a1", body, [(label, "after", ["the move to Cedarport"])])
+        self.publish()
+        return resolver.plan_items(self.root, limit=5)["items"][0]
+
+    # -- verification -----------------------------------------------------
+
+    def test_every_kind_in_the_closed_set_is_accepted(self):
+        for kind in resolver.NOT_AN_EVENT_KINDS:
+            with self.subTest(kind=kind):
+                verdict, why = resolver.verify_not_an_event(
+                    {"answer": None, "not_an_event": {"kind": kind, "reason": "because"}})
+                self.assertEqual(why, "ok")
+                self.assertEqual(verdict, {"kind": kind, "reason": "because"})
+
+    def test_a_kind_outside_the_set_is_refused(self):
+        self.assertEqual(
+            resolver.verify_not_an_event(
+                {"answer": None, "not_an_event": {"kind": "boring", "reason": "r"}}),
+            (None, "verdict_kind_unknown"))
+
+    def test_a_verdict_beside_a_date_is_refused(self):
+        self.assertEqual(
+            resolver.verify_not_an_event(
+                {"answer": {"earliest": "1996", "latest": "1996"},
+                 "not_an_event": {"kind": "future", "reason": "r"}}),
+            (None, "verdict_with_an_answer"))
+
+    def test_an_ordinary_answer_carries_no_verdict(self):
+        self.assertEqual(resolver.verify_not_an_event({"answer": None})[1], "no_verdict")
+
+    # -- filing -----------------------------------------------------------
+
+    def test_a_verdict_retracts_the_claims_and_the_node_leaves_the_page(self):
+        import temporal_publication as pub
+
+        item = self.planned("One day the shop will open, after the move to Cedarport.")
+        before = {row["node_id"] for row in (pub.read_projection(self.root) or {}).get("nodes") or ()}
+        self.assertIn(self.nodes["shop"], before)
+
+        report = resolver.file_envelope(
+            self.root, self.envelope(item, self.verdict_text("shop")), now=NOW)
+
+        self.assertEqual(report["filed"], 0)
+        self.assertEqual(report["retracted"], 1)
+        self.assertEqual(report["outcomes"], {resolver.NOT_AN_EVENT_STATUS: 1})
+        self.assertEqual(report["refused_items"], [])
+        by_id = {c["claim_id"]: c for c in ts.fold_active_index(self.root)["claims"]}
+        self.assertEqual(by_id[self.handles["shop"]]["status"], "retracted")
+        after = {row["node_id"] for row in (pub.read_projection(self.root) or {}).get("nodes") or ()}
+        self.assertNotIn(self.nodes["shop"], after)
+
+    def test_the_ledger_records_the_status_the_kind_and_the_reason(self):
+        item = self.planned("One day the shop will open, after the move to Cedarport.")
+        resolver.file_envelope(
+            self.root,
+            self.envelope(item, self.verdict_text("shop", kind="meta",
+                                                  reason="This turn corrects the last one.")),
+            now=NOW)
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual(entry["status"], resolver.NOT_AN_EVENT_STATUS)
+        self.assertEqual(entry["kind"], "meta")
+        self.assertEqual(entry["reason"], "This turn corrects the last one.")
+        self.assertEqual(entry["retracted"], [self.handles["shop"]])
+
+    def test_the_retraction_is_a_correction_and_never_a_delete(self):
+        item = self.planned("One day the shop will open, after the move to Cedarport.")
+        resolver.file_envelope(self.root, self.envelope(item, self.verdict_text("shop")), now=NOW)
+        mine = [row for row in ts.load_temporal_corrections(self.root)
+                if row.scope == resolver.NOT_AN_EVENT_SCOPE]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0].kind, "retract")
+        self.assertEqual(list(mine[0].claim_ids), [self.handles["shop"]])
+        self.assertIn("future", mine[0].reason)
+        # The claim is still on disk, retracted — never deleted.
+        self.assertTrue((self.root / mine[0].relative_path).is_file())
+
+    def test_a_verdict_with_a_date_beside_it_files_the_date_instead(self):
+        """Verification is total: a contradiction is not a verdict."""
+        item = self.planned("We moved to Cedarport in June 1996; the shop opened that month.")
+        report = resolver.file_envelope(
+            self.root,
+            self.envelope(item, json.dumps({"answers": [{
+                "node_id": self.nodes["shop"],
+                "answer": {"earliest": "1996-06", "latest": "1996-06"},
+                "basis": "stated", "confidence": 0.9, "fact_key": "shop_opening",
+                "citations": [{"doc": "story", "quote": "the shop opened that month"}],
+                "reason": "The story says so.", "question": None, "also_resolves": [],
+                "not_an_event": {"kind": "future", "reason": "r"}}]})),
+            now=NOW)
+        self.assertEqual(report["filed"], 1)
+        self.assertEqual(report["retracted"], 0)
+        self.assertEqual(report["outcomes"], {"resolved": 1})
+
+    # -- once retired, never re-asked -------------------------------------
+
+    def test_a_retired_moment_is_never_planned_again(self):
+        item = self.planned("One day the shop will open, after the move to Cedarport.")
+        resolver.file_envelope(self.root, self.envelope(item, self.verdict_text("shop")), now=NOW)
+        plan = resolver.plan_items(self.root, limit=5)
+        self.assertEqual(plan["items"], [])
+        self.assertEqual(plan["pending_events"], 0)
+        self.assertTrue(plan["complete"])
+
+    def test_refile_skips_a_retired_moment(self):
+        item = self.planned("One day the shop will open, after the move to Cedarport.")
+        resolver.file_envelope(self.root, self.envelope(item, self.verdict_text("shop")), now=NOW)
+        report = resolver.refile_from_ledger(self.root, now=NOW)
+        self.assertEqual(report.get("refiled", 0), 0)
+        self.assertEqual(report["skipped"], 1)
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual(entry["status"], resolver.NOT_AN_EVENT_STATUS)
+
+    def test_a_retired_moment_is_not_an_open_question(self):
+        item = self.planned("One day the shop will open, after the move to Cedarport.")
+        report = resolver.file_envelope(
+            self.root, self.envelope(item, self.verdict_text("shop")), now=NOW)
+        self.assertEqual(report["open_questions"], [])
+
+    # -- the prompt says so -----------------------------------------------
+
+    def test_the_prompt_offers_the_verdict_and_names_every_kind(self):
+        self.assertIn("not_an_event", resolver.PROMPT)
+        for kind in resolver.NOT_AN_EVENT_KINDS:
+            self.assertIn(f'"{kind}"', resolver.PROMPT)
+
+
 if __name__ == "__main__":
     unittest.main()

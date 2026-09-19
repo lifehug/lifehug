@@ -5,7 +5,8 @@ Status: accepted (owner ruling, 2026-09-18/19)
 Extends: ADR 0024 (chronology with basis), ADR 0026 (cross-dating),
 ADR 0028 (the landmark recorder), ADR 0031 (event identity)
 Shipped: v314 (`system/resolver.py`, lifehug#362); v315 amends the shape rule;
-v316 adds the two legs for hosts
+v316 adds the two legs for hosts; v317 adds the not-a-landmark and
+not-an-event rules (lifehug#365)
 
 ## Context
 
@@ -116,6 +117,52 @@ with the vault in between, and the local run becomes those legs composed.
 behaviour: they are leg A → the completer → leg C, composed in memory with the
 same response cache. No prompt text change, no rule-version change, no schema
 change.
+
+## Amendment (v317): what is not a landmark, and what is not an event
+
+Decisions 1 and 2 say the spine is filled by landmarks and read by a model.
+Neither said what happens to a record that cannot fill it, or to a "moment"
+that never happened — and on the owner's own vault at v316 both drew cards
+(lifehug#365). The spine's own definition answers both.
+
+10. **A record that cannot improve the spine draws nothing.** A landmark
+    record has one job. A `none` terminal ("I never served") and a skip are
+    complete answers ABOUT the ladder, not stretches of a life; a `work` or
+    `schools` record with no organization named is not a tenure, because a
+    tenure is a tenure *at* someone. All three still FILE — they are what the
+    person said, and the domain goes on reading complete — and none of them
+    becomes an episode node, a stay slot or a work item.
+    `landmark_projection.not_a_landmark` is the one definition, read twice:
+    the recorder refuses an unnamed organization at filing with a typed
+    finding, and the fold skips all three at draw time, so a vault that
+    already holds one heals on its next redraw with no migration. A residence
+    stub that duplicates a dated stay is deliberately NOT here: two stays that
+    look alike are an identity problem, and attaching the stub to the stay it
+    repeats is a different fix.
+11. **An anchor that asks nothing and places nothing is not a question.** A
+    `missing_anchor` whose sentence was withheld, or one with no node of its
+    own that would place no moment, is dropped before publication
+    (`temporal_work_items.dangling_anchor_reason`). The birth origin is
+    exempt by O-E6: the birthday is the coordinate system, so it is asked
+    whatever its reach. This is work-item composition, not placement, so
+    `CALCULATION_RULE_VERSION` does not move.
+12. **Not every moment is an event, and the resolver may say so.** Beside a
+    date, a range and a question, an answer may carry
+    `{"not_an_event": {"kind": "future" | "meta" | "fact_statement" |
+    "duplicate", "reason": "..."}}` — an anticipated or hypothetical
+    milestone, a conversation about the data itself, a bare fact rather than
+    something that happened, or a restatement of a moment already dated
+    (whose id the reason cites). The set is closed and verification is the
+    usual mechanical kind: accepted only when the answer is null and the kind
+    is in the set. A verdict is filed as a dated RETRACTION of the node's own
+    occurrence, relation and date claims through the ordinary correction path
+    (`temporal_store.retract_claims`, scope `resolver_not_an_event`) — never a
+    delete, and never the entry's identity claim, which is the person's own
+    answer. The ledger records `status: "not_an_event"` with the kind and the
+    reason, the node leaves the projection on the republish that already
+    follows filing, and the moment is as settled as a dated one: `--plan`
+    never re-plans it, `--refile` skips it, and it is not an open question.
+    Both legs reach this through the same absorb, so a host gets it for free.
 
 ## Consequences
 

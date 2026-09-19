@@ -75,6 +75,35 @@ EXTRACTOR_VERSION = "resolver/rule:3"
 PRIOR_EXTRACTOR_VERSIONS = ("resolver/rule:1", "resolver/rule:2")
 SOURCE_ID_PREFIX = "resolver:"
 SUPERSEDE_SCOPE = "resolver_resolution"
+
+#: A MOMENT THAT NEVER HAPPENED IS NOT A DATING PROBLEM (ADR 0037's amendment,
+#: lifehug#365 item 5). The classifier reads a story and files what reads like
+#: an occurrence; some of what it reads is not one. Four shapes, and the set is
+#: CLOSED because a free-text verdict is a verdict nobody can verify:
+#:
+#: * ``future`` — an anticipated or hypothetical milestone ("when the shop
+#:   finally opens"). It has not happened, so there is no date to find.
+#: * ``meta`` — a conversation about the data itself: a correction, a
+#:   clarification, "no, that was the other James".
+#: * ``fact_statement`` — a bare fact rather than something that happened: a
+#:   person's full name, somebody else's birthday stated as a fact.
+#: * ``duplicate`` — a restatement of a moment already dated elsewhere; the
+#:   reason must cite that node's id.
+NOT_AN_EVENT_KINDS = ("future", "meta", "fact_statement", "duplicate")
+
+#: The ledger status and the correction scope a verdict is filed under. The
+#: scope is its own — never `SUPERSEDE_SCOPE` — so "this was never an event"
+#: is legible on the vault's own record as a different act from "this reading
+#: was replaced by a better one".
+NOT_AN_EVENT_STATUS = "not_an_event"
+NOT_AN_EVENT_SCOPE = "resolver_not_an_event"
+
+#: What a verdict RETRACTS: the claims that assert this moment happened and
+#: when. ``identity`` is deliberately absent — an identity claim says WHO, and
+#: a landmark entry's identity claim is the person's own ladder answer, which
+#: the resolver has no business withdrawing.
+NOT_AN_EVENT_CLAIM_TYPES = ("occurrence", "date", "range", "age", "duration",
+                            "relative_order")
 LEDGER_RELATIVE = Path("state") / "resolver" / "resolutions.json"
 RESPONSES_RELATIVE = Path("state") / "resolver" / "responses"
 MAX_SOURCE_CHARS = 7000
@@ -421,8 +450,19 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
             continue
         if story_path not in revisions:
             revisions[story_path] = ccl.document_revision(root, story_path)
+        # The claims a `not_an_event` verdict would retract: this node's own
+        # active occurrence, relation and date claims, in the fold's order.
+        # Carried on the target because the target is what a verdict answers
+        # about, and because `_targets_digest` reads node ids and handles
+        # alone — so adding it churns no plan identity.
+        node_claim_refs = [
+            claim_id for claim_id in (node.get("input_claim_refs") or ())
+            if collapsed_text((claims.get(claim_id) or {}).get("claim_type"))
+            in NOT_AN_EVENT_CLAIM_TYPES
+        ]
         by_source[story_path].append({
             "node_id": node["node_id"], "label": collapsed_text(node.get("label")),
+            "node_claim_refs": node_claim_refs,
             "event_ref": telling_event_ref or node["node_id"],
             "event_kind": telling_event_kind or collapsed_text(node.get("event_kind")) or "moment",
             "subject": subject or "self", "event": event or {}, "handles": handles,
@@ -496,6 +536,15 @@ Each answer:
   "question": null or "<the one question to the owner that would settle this, only when answer is null>",
   "also_resolves": ["<other node_ids from this list the same answer settles>"]
 }}
+Some listed moments are not moments at all. When that is so, set "answer" to null and
+add, instead of a question:
+  "not_an_event": {{"kind": "future" | "meta" | "fact_statement" | "duplicate", "reason": "<one sentence>"}}
+Use "future" for an anticipated or hypothetical milestone that has not happened yet,
+"meta" for a conversation about the data itself (a correction or a clarification),
+"fact_statement" for a bare statement of a fact (a name, somebody else's birthday)
+rather than something that happened, and "duplicate" for a restatement of a moment
+already dated elsewhere — cite that node_id in the reason. Use this only when you are
+sure; a moment you simply cannot date takes a question, not a verdict.
 Rules: "stated" means a passage or the story states the date; "derived" means arithmetic
 from a stated fact (cite the fact); "inferred" means you reasoned from ranges (cite them).
 An answer with no valid citation will be discarded, so cite the exact words. Prefer the
@@ -617,6 +666,26 @@ def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story
     }, "ok"
 
 
+def verify_not_an_event(item: dict) -> tuple[dict | None, str]:
+    """``({"kind", "reason"} , "ok")`` for an accepted verdict, else ``(None, why)``.
+
+    Mechanical and total, like every other verification here. Two conditions
+    and no more: the model must be claiming nothing about WHEN (``answer`` is
+    null), and the kind must be one of :data:`NOT_AN_EVENT_KINDS`. A verdict
+    that arrives beside a date is a contradiction, not a verdict, and is
+    refused so the answer can be read as an ordinary reading instead.
+    """
+    verdict = item.get("not_an_event") if isinstance(item, dict) else None
+    if not isinstance(verdict, dict):
+        return None, "no_verdict"
+    if item.get("answer") is not None:
+        return None, "verdict_with_an_answer"
+    kind = collapsed_text(verdict.get("kind"))
+    if kind not in NOT_AN_EVENT_KINDS:
+        return None, "verdict_kind_unknown"
+    return {"kind": kind, "reason": collapsed_text(verdict.get("reason"))[:400]}, "ok"
+
+
 # --------------------------------------------------------------------------
 # Filing
 # --------------------------------------------------------------------------
@@ -687,6 +756,35 @@ def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str
             author="resolver", occurred_at=now,
         )
     return {"receipt_path": str(path), "claim_id": claim["claim_id"], "superseded": handles}
+
+
+def file_not_an_event(root: Path, target: dict, verdict: dict, *, now: str) -> dict:
+    """Retract the claims behind a moment that was never one. A CORRECTION.
+
+    Never a delete. The claims stay on disk with a dated retraction beside
+    them saying who withdrew them and why — the same durable path a person's
+    own correction takes (`temporal_store.retract_claims`), under this
+    verdict's own scope so the record can tell the two acts apart. The node
+    leaves the projection on the republish that follows filing, because the
+    fold draws from the ACTIVE claims and there are now none.
+
+    Returns ``{"retracted", "correction_id", "correction_path"}``; a verdict
+    that names no claim retracts nothing and says so rather than filing an
+    empty correction.
+    """
+    claim_ids = [collapsed_text(ref) for ref in target.get("node_claim_refs") or ()
+                 if collapsed_text(ref)]
+    if not claim_ids:
+        return {"retracted": [], "correction_id": "", "correction_path": ""}
+    reason = (f"Not an event ({verdict['kind']}) by {EXTRACTOR_VERSION}: "
+              f"{verdict['reason'] or 'the moment is not something that happened'}")
+    correction = store.retract_claims(
+        root, claim_ids, reason=reason, scope=NOT_AN_EVENT_SCOPE,
+        title="Moment retired as not an event", author="resolver", occurred_at=now,
+    )
+    return {"retracted": sorted(claim_ids),
+            "correction_id": correction.correction_id,
+            "correction_path": correction.relative_path}
 
 
 # --------------------------------------------------------------------------
@@ -921,7 +1019,11 @@ def _still_asking(row: dict, *, retry_failed: bool, force: bool) -> bool:
     status = collapsed_text(row.get("status"))
     if not status:
         return True
-    if status in ("resolved", "unknown"):
+    if status in ("resolved", "unknown", NOT_AN_EVENT_STATUS):
+        # A moment judged not to be an event is as settled as a dated one:
+        # re-planning it would buy the same verdict again, and `--refile` has
+        # nothing to re-file (there is no answer, only a retraction that
+        # already stands).
         return False
     if status == "no_answer_returned":
         # The round-2 re-ask, made re-entrant: a row the model skipped is
@@ -1102,6 +1204,7 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
             entry["spine_changed"] = True
         resolved, why = verify(item, story=story, passages=passages, sp=read.spine,
                                story_path=source_path)
+        verdict, _verdict_why = verify_not_an_event(item)
         if resolved is not None:
             entry.update({"answer": resolved["record"], "basis": resolved["basis"],
                           "confidence": resolved["confidence"], "citations": resolved["citations"],
@@ -1114,6 +1217,21 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
                 report["bases"][resolved["basis"]] += 1
             except Exception as exc:  # noqa: BLE001
                 entry.update({"status": "file_error", "error": type(exc).__name__, "detail": str(exc)[:200]})
+                report.setdefault("error_samples", []).append(f"{node_id}: {str(exc)[:160]}")
+        elif verdict is not None:
+            # NOT AN EVENT (ADR 0037's amendment). The moment is retired
+            # through the ordinary correction path, so the loop cleans this
+            # up itself instead of asking the owner a question about a
+            # milestone that has not happened. Both legs reach this branch:
+            # `file_envelope` and the composed local run share this function.
+            entry.update({"kind": verdict["kind"], "reason": verdict["reason"]})
+            try:
+                entry.update({"status": NOT_AN_EVENT_STATUS, **file_not_an_event(
+                    read.root, target, verdict, now=now)})
+                report["retracted"] += len(entry.get("retracted") or ())
+            except Exception as exc:  # noqa: BLE001
+                entry.update({"status": "file_error", "error": type(exc).__name__,
+                              "detail": str(exc)[:200]})
                 report.setdefault("error_samples", []).append(f"{node_id}: {str(exc)[:160]}")
         elif item.get("answer") is None:
             entry.update({"status": "unknown", "question": collapsed_text(item.get("question")) or None,
@@ -1182,8 +1300,9 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
         raise ValueError("an envelope is an object with an `items` list")
     model = collapsed_text(model) or collapsed_text(envelope.get("model")) or DEFAULT_MODEL
     read = read or _Read(root)
-    report: dict = {"filed": 0, "outcomes": collections.Counter(), "bases": collections.Counter(),
-                    "usage": collections.Counter(), "refused_items": []}
+    report: dict = {"filed": 0, "retracted": 0, "outcomes": collections.Counter(),
+                    "bases": collections.Counter(), "usage": collections.Counter(),
+                    "refused_items": []}
     if deterministic:
         _file_deterministic(read, report, _pending(
             read, only_sources=only_sources, retry_failed=retry_failed, force=force,
@@ -1219,7 +1338,9 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
                 source_path=source_path, model=model, now=now, spine_changed=spine_changed)
     if finalize:
         save_ledger(root, read.ledger)
-        if report["filed"]:
+        if report["filed"] or report["retracted"]:
+            # A retraction moves the vault exactly as a filing does — it is
+            # how a retired non-event leaves the page — so it republishes.
             _republish(root)
     remaining, remaining_deterministic = _pending(read)
     report["outcomes"] = dict(report["outcomes"])
@@ -1249,7 +1370,8 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
                     "deterministic_age_handles": plan["deterministic_pending"],
                     "selected": min(limit, plan["pending_sources"]),
                     "outcomes": collections.Counter(), "usage": collections.Counter(),
-                    "filed": 0, "errors": 0, "bases": collections.Counter()}
+                    "filed": 0, "retracted": 0, "errors": 0,
+                    "bases": collections.Counter()}
 
     def flatten() -> dict:
         report["outcomes"] = dict(report["outcomes"])
@@ -1305,6 +1427,7 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
                             restrict=True, retry_failed=retry_failed, force=force,
                             deterministic=deterministic, finalize=False)
         report["filed"] += sub["filed"]
+        report["retracted"] += sub.get("retracted") or 0
         for name, value in sub["outcomes"].items():
             report["outcomes"][name] += value
         for name, value in sub["bases"].items():
@@ -1327,7 +1450,7 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         if again["items"]:
             file_round(again, deterministic=False)
     save_ledger(root, read.ledger)
-    if report["filed"]:
+    if report["filed"] or report["retracted"]:
         _republish(root)
     report["open_questions"] = open_questions(read.ledger)[:25]
     return flatten()

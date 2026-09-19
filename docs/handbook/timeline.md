@@ -416,7 +416,16 @@ apart — `lifehug resolve --plan --out <file>` writes the prompts it would buy
 and touches nothing in the vault, `lifehug resolve --from-response <envelope>`
 files the answers that come back (refusing any whose story has changed since),
 and a card carries the resolver's own proposed question rather than the
-generic one. Design and consequences:
+generic one. Since v317 the resolver can also answer that a listed moment is
+**not an event** — an anticipated future milestone, a conversation about the
+data itself, a bare statement of a fact, or a restatement of a moment already
+dated — and files that verdict as a dated retraction, so the moment leaves the
+page on the next publish instead of becoming a card nobody can answer.
+
+What is *not* a landmark never becomes a node in the first place (v317): a
+`none` or skipped answer completes its domain and draws nothing, and a `work`
+or `schools` record that names no organization is refused at filing rather
+than drawn as a tenure. Design and consequences:
 [ADR 0037](../adr/0037-the-spine-and-the-resolver.md).
 
 ## 4. The algorithm
