@@ -123,6 +123,12 @@ def run_batch(
 ) -> dict:
     """Drain canonical work through bounded batches and checkpoint publication.
 
+    Each accepted batch is filed with salvage on (one bad relation falls to
+    its conservative state instead of refusing the batch), migrated, and then
+    handed to the resolver, which reads the filed stories against the spine
+    and dates what the vault can already answer (ADR 0037). Only what the
+    vault cannot settle becomes a question.
+
     Provider calls are intentionally serial here. Hosted batching is a separate
     concern; this local worker owns one bounded archive transaction at a time.
     Migration runs between batches because accepted direct facts can make older

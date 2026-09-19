@@ -784,8 +784,9 @@ class LocalCliHookTests(unittest.TestCase):
         }
         classification = vault / "state" / "classifications" / "answer-a1.json"
 
-        def file_then_crash(_envelope: dict, *, model: str) -> dict:
+        def file_then_crash(_envelope: dict, *, model: str, salvage: bool = False) -> dict:
             self.assertEqual(model, "synthetic")
+            self.assertTrue(salvage)  # the local loop salvages; the resolver dates the rest
             classification.parent.mkdir(parents=True, exist_ok=True)
             classification.write_text(
                 '{"source_path":"answers/A1.md"}\n', encoding="utf-8"
