@@ -74,6 +74,14 @@ def value(text: str, *, basis: str = "stated") -> dict:
             "basis": basis, "confidence": "certain"}
 
 
+def inherited(text: str, clause: str) -> dict:
+    """A bound the ladder copied from a stay — `landmark_offer.inherit_dates`' shape."""
+    grain = {4: "year", 7: "month", 10: "day"}[len(text)]
+    return {"best": text, "earliest": text, "latest": text, "granularity": grain,
+            "basis": "anchor", "confidence": "inferred", "anchors": [],
+            "provenance": [{"basis": "inferred", "claim": clause}]}
+
+
 def revision(seed: str) -> str:
     return "sha256:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
@@ -317,6 +325,93 @@ class TwoStaysAtOnePlace(ParticipationEpisodeCase):
         node = self.node_labelled("The zoo trip in Cedarport")
         self.assertIsNone(node.get("best_temporal_value"))
         self.assertIsNone(node.get("possible_temporal_value"))
+
+
+class AJobRecordedUnderThreeConsecutiveStays(ParticipationEpisodeCase):
+    """timeline-rules:7 — the residence is the range; a job named inside three
+    consecutive stays is ONE tenure spanning them, not three tenures."""
+
+    ENTRIES = (
+        ("residences", {"label": "Cedarport", "city": "Cedarport",
+                        "span": {"start": value("1996-06"), "end": value("1998-06")}}),
+        ("residences", {"label": "Millgate", "city": "Millgate",
+                        "span": {"start": value("1998-06"), "end": value("2000-06")}}),
+        ("residences", {"label": "Harbor Row", "city": "Harbor Row",
+                        "span": {"start": value("2000-06"), "end": value("2001-08")}}),
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works",
+                  "span": {"start": inherited("1996-06", "from the dates of the Cedarport stay"),
+                           "end": inherited("1998-06", "from the dates of the Cedarport stay")}}),
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works",
+                  "span": {"start": inherited("1998-06", "from the dates of the Millgate stay"),
+                           "end": inherited("2000-06", "from the dates of the Millgate stay")}}),
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works",
+                  "span": {"start": inherited("2000-06", "from the dates of the Harbor Row stay"),
+                           "end": inherited("2001-08", "from the dates of the Harbor Row stay")}}),
+    )
+    STORIES = (
+        ("classification:answers-a2#aaa2",
+         "The Tidewheel Works picnic",
+         "Tidewheel Works held a picnic by the river."),
+    )
+
+    def test_three_stay_windows_fold_to_one_tenure_spanning_them(self):
+        job = self.node_of_kind("job", "Tidewheel Works")
+        best = job["best_temporal_value"]
+        self.assertEqual((best["earliest"], best["latest"]), ("1996-06", "2001-08"))
+        self.assertEqual(best["basis"], "anchor")
+        self.assertEqual(best["confidence"], "inferred")
+        clauses = {row.get("claim") for row in best.get("provenance") or ()}
+        self.assertIn("from the dates of the Cedarport stay", clauses)
+        self.assertIn("from the dates of the Harbor Row stay", clauses)
+
+    def test_the_later_windows_own_ids_alias_to_the_tenure(self):
+        job = self.node_of_kind("job", "Tidewheel Works")
+        pointing = [k for k, v in self.timeline.node_aliases.items() if v == job["node_id"]]
+        self.assertGreaterEqual(len(pointing), 2)
+
+    def test_no_tenure_question_is_asked(self):
+        # One tenure, so nothing to choose between. (Giving the undated story
+        # the tenure as its window still needs the binder to read the chained
+        # tellings as one unit; a container is opened in the person's own words
+        # and these windows are inherited. That is the identity layer's next
+        # step, not this fold's.)
+        self.assertEqual(
+            [row for row in self.timeline.work_items if row["kind"] == "tenure_ambiguous"], [])
+
+    def test_the_three_residences_stay_three(self):
+        stays = [row for row in self.timeline.nodes if row["event_kind"] == "residence"]
+        self.assertEqual(len(stays), 3)
+
+
+class AStatedTenureBesideItsStayWindows(ParticipationEpisodeCase):
+    """The person's own stretch is the tenure; the stays' windows stand beside it."""
+
+    ENTRIES = (
+        ("residences", {"label": "Cedarport", "city": "Cedarport",
+                        "span": {"start": value("1996-06"), "end": value("1998-06")}}),
+        ("residences", {"label": "Millgate", "city": "Millgate",
+                        "span": {"start": value("1998-06"), "end": value("2000-06")}}),
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works",
+                  "span": {"start": value("1997"), "end": value("2001")}}),
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works",
+                  "span": {"start": inherited("1996-06", "from the dates of the Cedarport stay"),
+                           "end": inherited("1998-06", "from the dates of the Cedarport stay")}}),
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works",
+                  "span": {"start": inherited("1998-06", "from the dates of the Millgate stay"),
+                           "end": inherited("2000-06", "from the dates of the Millgate stay")}}),
+    )
+    STORIES = ()
+
+    def test_the_stated_stretch_is_the_tenure(self):
+        job = self.node_of_kind("job", "Tidewheel Works")
+        best = job["best_temporal_value"]
+        self.assertEqual((best["earliest"], best["latest"], best["basis"]), ("1997", "2001", "stated"))
+
+    def test_the_windows_union_stands_beside_it_without_a_contradiction(self):
+        job = self.node_of_kind("job", "Tidewheel Works")
+        alternates = job.get("alternate_values") or []
+        self.assertEqual([(row["earliest"], row["latest"]) for row in alternates], [("1996-06", "2001")])
+        self.assertNotEqual(job.get("conflict_state"), "contradicted")
 
 
 class TwoTenuresAtOneEmployer(ParticipationEpisodeCase):

@@ -1052,6 +1052,7 @@ class ParticipationEpisodes:
                 "domain": entry["domain"],
                 "group": (entry["entry_key"], subject),
                 "start": _span_start_value(rows),
+                "end": _span_end_value(rows),
             })
 
         #: Which stay a telling with no start belongs to. The ladder fills one
@@ -1069,12 +1070,28 @@ class ParticipationEpisodes:
             if row["start"]:
                 starts.setdefault(row["group"], set()).add(row["start"])
 
+        # THE SLOT IS THE EPISODE. `stay_slots` has already decided which
+        # tellings are one entry — the ladder's own interval-aware identity,
+        # which joins stretches that intersect or abut and splits a stay the
+        # person returned to years later — so every telling of one slot folds
+        # to ONE episode node, discriminated by the slot's earliest start. A
+        # school or a job the ladder recorded under three consecutive stays
+        # ("from the dates of the Orchard House stay", three times) is one
+        # tenure across them, not three rival tenures no story can tell apart;
+        # a second stay at one place is still a second slot and a second
+        # episode. The id each later telling would have carried alone still
+        # resolves through `node_aliases`, derived rather than remembered, so
+        # nothing already cited churns.
+        # `stay_slots` compares each record against the FIRST stretch of its
+        # slot, so a chain of abutting windows (four consecutive stays that each
+        # name the same employer) can span several slots. The chain is walked
+        # here, once, in start order: a window that overlaps or begins within
+        # `SEQUENCE_ENTRY_ABUT_MONTHS` of the running end joins the tenure.
+        chain_start = _chain_starts(tellings)
+        del starts
+
         for row in sorted(tellings, key=lambda item: item["source_id"]):
-            group = row["group"]
-            known = starts.get(group) or set()
-            discriminator = row["start"]
-            if not discriminator and len(known) == 1:
-                discriminator = next(iter(known))
+            discriminator = chain_start.get(row["source_id"], "")
             # M3: an undated stay is still an episode. Its discriminator is
             # the promoted source id — durable, minted by the recorder, unique
             # per telling — so two undated stays at one place stay two.
@@ -1088,20 +1105,23 @@ class ParticipationEpisodes:
                 )
             except ident.IdentityResolutionError:
                 continue
-            if not unplaced and not row["start"]:
-                # THE RE-KEY, DERIVED RATHER THAN REMEMBERED. This telling
-                # gave no start and its entry's other telling did, so the id
-                # this telling would have carried alone still resolves. Both
-                # ids are pure functions of the same records, so the alias
+            if not unplaced:
+                # THE RE-KEY, DERIVED RATHER THAN REMEMBERED. The id this
+                # telling would have carried alone — its own start, or its
+                # promoted source id while it had no start — still resolves.
+                # Both ids are pure functions of the same records, so the alias
                 # survives a `state/` deletion exactly as event identity's own
                 # Law 5 aliases do — nothing is carried in state to lose.
-                try:
-                    self.node_aliases[ident.derive_episode_ref(
-                        event_kind=row["kind"], subject_mention=row["subject"],
-                        discriminator=row["source_id"],
-                    )] = node_id
-                except ident.IdentityResolutionError:
-                    pass
+                for former in (row["start"], row["source_id"]):
+                    if not former or former == discriminator:
+                        continue
+                    try:
+                        self.node_aliases[ident.derive_episode_ref(
+                            event_kind=row["kind"], subject_mention=row["subject"],
+                            discriminator=former,
+                        )] = node_id
+                    except ident.IdentityResolutionError:
+                        pass
             entry_id = row["source_id"].partition(":")[2] or row["source_id"]
             telling_ref = identity.landmark_telling_ref(entry_id)
             self.node_of_episode[ec.container_episode_id(telling_ref)] = node_id
@@ -1146,6 +1166,93 @@ class ParticipationEpisodes:
 
     def is_unplaced(self, node_id: object) -> bool:
         return collapsed_text(node_id) in self.unplaced
+
+
+def _months(text: object) -> int | None:
+    """A start or end as whole months since year zero; ``None`` when unreadable."""
+    import chronology as chrono  # noqa: PLC0415
+
+    record = chrono.parse_edtf(text)
+    value = collapsed_text(record.earliest if record is not None else text)
+    parts = value.split("-")
+    try:
+        year = int(parts[0])
+        month = int(parts[1]) if len(parts) > 1 else 1
+    except (TypeError, ValueError):
+        return None
+    return year * 12 + month
+
+
+def _chain_starts(tellings: object) -> dict[str, str]:
+    """``source id -> the start that discriminates its tenure``, chaining windows.
+
+    The tellings of one entry key and subject are sorted by start. A telling
+    whose window overlaps the running chain, or begins within
+    `landmarks_interaction.SEQUENCE_ENTRY_ABUT_MONTHS` of its end, joins it;
+    the chain's discriminator is its earliest start. An open-ended window keeps
+    the chain open. A telling with no start joins when its key has exactly one
+    chain and stays undiscriminated otherwise (design §3.2 M3) — an undated
+    telling of a place the person returned to belongs to one stay and nobody
+    knows which.
+    """
+    by_key: dict[tuple, list] = {}
+    for row in tellings or ():
+        slot = row["group"][0]
+        entry_key = slot[1] if isinstance(slot, tuple) and len(slot) > 1 else slot
+        by_key.setdefault((row["domain"], entry_key, row["subject"]), []).append(row)
+    result: dict[str, str] = {}
+    abut = landmarks_interaction.SEQUENCE_ENTRY_ABUT_MONTHS
+    for rows in by_key.values():
+        dated = sorted(
+            (row for row in rows if row["start"]),
+            key=lambda row: (_start_ordinal(row["start"]), row["source_id"]),
+        )
+        chains: list[list] = []  # [discriminator, running end in months or None (open), member ids]
+        for row in dated:
+            start = _months(row["start"])
+            end = _months(row["end"]) if row["end"] else None
+            current = chains[-1] if chains else None
+            joins = current is not None and (
+                current[1] is None or start is None or start - current[1] <= abut
+            )
+            if joins:
+                current[2].append(row["source_id"])
+                if current[1] is not None:
+                    current[1] = None if end is None else max(current[1], end)
+            else:
+                chains.append([row["start"], end, [row["source_id"]]])
+        for discriminator, _end, members in chains:
+            for source_id in members:
+                result[source_id] = discriminator
+        if len(chains) == 1:
+            for row in rows:
+                if not row["start"]:
+                    result[row["source_id"]] = chains[0][0]
+    return result
+
+
+def _start_ordinal(text: object) -> str:
+    """An ISO-comparable key for a start discriminator; the text itself otherwise."""
+    import chronology as chrono  # noqa: PLC0415
+
+    record = chrono.parse_edtf(text)
+    return (record.earliest if record is not None and record.earliest else
+            collapsed_text(text))
+
+
+def _span_end_value(claims: object) -> str:
+    """The latest bound of a participation entry's ``ended`` claim, or ``""``."""
+    import chronology as chrono  # noqa: PLC0415
+
+    for claim in claims or ():
+        if not isinstance(claim, dict):
+            continue
+        if collapsed_text(claim.get("event_kind")) != SPAN_END_EVENT_KIND:
+            continue
+        record = chrono.from_dict(claim.get("temporal_value"))
+        if record is not None and record.latest:
+            return record.latest
+    return ""
 
 
 def _span_start_value(claims: object) -> str:
