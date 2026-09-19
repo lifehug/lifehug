@@ -8,7 +8,13 @@ built by keyword rules — and every failed join became a question for the
 owner. The owner's own reading of that page: *if you can answer this from the
 repo, so should the system, and once answered it must never be asked again.*
 
-So this module does what a careful assistant does with the same question:
+So this module does what a careful assistant does with the same question.
+The intended loop, in the owner's words, is *a model resolving and calculating
+placement against a spine*: the spine (``spine``) is the lifetime frame —
+birth and the age table it implies, stays, tenures, dated points, people —
+generic at first and made specific by the landmarks and keystone answers the
+person adds. Everything below reads the vault against that spine
+(ADR 0037):
 
 1. **Index everything.** Every source, answer, landmark record, placed fact and
    prior resolution goes into one full-text index (SQLite FTS5, rebuilt per
@@ -26,7 +32,8 @@ So this module does what a careful assistant does with the same question:
    that fails verification is kept in the ledger as unverified and files
    nothing.
 4. **File the answer as a claim** on the event's existing node — a ``date``
-   claim under extractor ``resolver/rule:1`` whose evidence is the citations —
+   claim under extractor ``resolver/rule:3`` whose evidence is the citations,
+   declared on the classifier's own telling —
    and retire the raw handle claim it replaces with a supersession correction.
    The fold, the projection and the page then treat it like any other claim:
    durable, dated, correctable, never asked again.
@@ -168,7 +175,12 @@ def fact_documents(root: Path, projection: dict) -> list[dict]:
 
 
 def spine(root: Path, projection: dict) -> dict:
-    """The facts every question is read against: birth, stays, tenures, dated landmarks."""
+    """The spine: the dated facts every "when?" is read against.
+
+    Birth and the age table it implies, stays, tenures and schooling as
+    intervals, dated points, people. Generic at first (a birthday alone fills
+    the age table); the person's landmarks and keystone answers make it theirs.
+    """
     profile = {}
     try:
         from lifehug_core import load_config  # noqa: PLC0415

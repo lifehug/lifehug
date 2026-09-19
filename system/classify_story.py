@@ -2196,8 +2196,15 @@ def validate_batch_receipt(envelope: object, receipt: object) -> dict:
     return receipt
 
 
-def file_batch_response(payload: object, *, model: str = "external-agent") -> dict:
-    """Validate one envelope, apply valid siblings, then publish its receipt."""
+def file_batch_response(payload: object, *, model: str = "external-agent", salvage: bool = False) -> dict:
+    """Validate one envelope, apply valid siblings, then publish its receipt.
+
+    ``salvage`` is the local loop's setting (`classification_refresh.run_batch`):
+    one event's bad relation or grounding falls to its conservative state and
+    the resolver dates it afterwards. A host that files envelopes without a
+    resolver keeps the default and receives the refusal its own repair loop
+    re-asks the model about.
+    """
     binding = _batch_envelope_identity(payload)
     batch_id = binding["batch_id"]
     skip_candidates = binding["skip_candidates"]
@@ -2323,7 +2330,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 skip_candidates=skip_candidates,
                 require_mode=True,
                 strict_schema=True,
-                salvage=True,
+                salvage=salvage,
             )
             first_pass.append({**row, "status": prepared["status"], "snapshot": snapshot})
         except OSError:
@@ -2390,7 +2397,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 skip_candidates=skip_candidates,
                 require_mode=True,
                 strict_schema=True,
-                salvage=True,
+                salvage=salvage,
             )
             virtual_store = prepared["candidate_store"]
             prepared_items.append((row, prepared))
@@ -2441,7 +2448,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 row["source"], model, result, mode=row["mode"],
                 snapshot=row["snapshot"], candidate_store=virtual_store,
                 skip_candidates=skip_candidates, require_mode=True,
-                strict_schema=True, salvage=True,
+                strict_schema=True, salvage=salvage,
             )
             if classifier_ctx.effective_source_revision(
                 REPO_DIR, row["source"]

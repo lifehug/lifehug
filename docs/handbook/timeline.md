@@ -371,6 +371,48 @@ stopping the moment the answer is good enough for that unknown's slot. If you
 say you will find out, that is simply your answer: nothing is filed, nothing is
 remembered, and the unknown keeps its place.
 
+**The spine and the resolver (v314).** The three doors above are joins:
+an exact label, an exact quote, a candidate list built by rules. Every join
+that failed used to become a question for the owner, which is how a vault
+that plainly says when a company was founded still asked *"when was the
+founding?"*. The owner's ruling: *if you can answer this from the vault, so
+should the system, and once answered it must never be asked again.* So the
+loop is now, on purpose, one simple thing — **a model resolving and
+calculating placement against a spine**:
+
+- The **spine** (`resolver.spine`) is the set of dated facts every question is
+  read against: birth and the **age table** it implies (`resolver.age_table`,
+  every age → a date range, for any birthday), stays, tenures and schooling
+  as intervals, dated points, people. It is **generic first** — any lifetime
+  has this shape and a birthday alone fills the age table — and the person's
+  **landmarks** and **keystone** answers make it specific. That is what a
+  landmark is *for*: each one improves the spine, and the next run reads the
+  whole vault against the better spine.
+- The **resolver** (`system/resolver.py`) indexes every source, answer,
+  landmark and fact (SQLite FTS5, rebuilt per run), shows the model one story
+  at a time with the spine, the passages retrieved for that story's events
+  and the events still undated, and asks for a date or range with a basis,
+  citations and — only when the vault cannot tell — the one question that
+  would settle it. Bare age handles resolve from the age table without a
+  model call.
+- **Verification is mechanical**: every cited quote must occur in the cited
+  passage, every date must parse, ranges must be ordered, a `derived` answer
+  must cite the spine fact it came from. What fails files nothing.
+- **Filing is a claim like any other**: a `date` claim on the moment's own
+  node under `resolver/rule:3`, declared on the classifier's telling, the raw
+  handle superseded. The fold, the projection and the page treat it as
+  durable, dated and correctable.
+- **Memory**: `state/resolver/resolutions.json` records every outcome —
+  resolved, unverified, unknown with its question — so nothing is asked or
+  bought twice. New information re-opens a question; a clock never does.
+
+The resolver never dates a residence episode (two stays that look alike are an
+identity problem), never edits a source, and lets owner statements outrank
+inference with the latest dated correction winning. It runs after every
+accepted classification batch (`classification_refresh.run_batch`) and by hand
+as `lifehug resolve --execute`; `--eval` answers known-answer questions without
+filing. Design and consequences: [ADR 0037](../adr/0037-the-spine-and-the-resolver.md).
+
 ## 4. The algorithm
 
 **The elicitation ladder** (`timeline_interaction.PLAYBOOK_STEPS`), in order,
@@ -445,7 +487,9 @@ thrown away.
 ## 5. In the loop
 
 Per answer, classification records any explicit date claim and the event's
-title. The timeline is recomputed on every read and written to
+title; since v314 the resolver then reads that story against the spine and
+files whatever the vault can already answer, so the only questions that
+reach you are the ones the vault cannot settle. The timeline is recomputed on every read and written to
 `wiki/timeline.md` on every compile, so a new answer's dates appear
 immediately. Since v205 the **cross-dating pass runs inside that same
 recomputation**, which is why answering one landmark question visibly moves

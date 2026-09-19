@@ -282,19 +282,16 @@ POINT_EVENT_ROLES = frozenset({"birth", "death", "married", "wedding", "graduati
 def temporal_shape(node_kind: object, event_kind: object, bounds: object) -> str:
     """``point`` or ``interval``: what `within` may legitimately attach to.
 
-    A named period is always an interval. A point role is always a point. For
-    the rest, a single day is a point and anything wider is an interval; a
-    month or a year alone is left as an interval because "during that year"
-    is a real relation, while "during that wedding day" places a bankruptcy
-    on a wedding.
+    A named period is always an interval. A point role (a wedding, a birth, a
+    death, a graduation) is always a point, whatever its bounds. Everything
+    else is an interval, even when it is recorded to the day: "the week we
+    launched" sits inside a founding dated 2016-09-12 just as "during that
+    year" sits inside a year, while "during that wedding day" would place a
+    bankruptcy on a wedding. Shape follows the role, never the precision.
     """
     if str(node_kind or "") == "period":
         return "interval"
     if str(event_kind or "") in POINT_EVENT_ROLES:
-        return "point"
-    row = bounds if isinstance(bounds, dict) else {}
-    if (row.get("granularity") == "day" and row.get("earliest")
-            and row.get("earliest") == row.get("latest")):
         return "point"
     return "interval"
 

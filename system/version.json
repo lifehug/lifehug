@@ -1,7 +1,7 @@
 {
-  "version": 314,
+  "version": 315,
   "released": "2026-09-19",
-  "changelog": "v314: The resolver answers \"when?\" from the vault. After every accepted classification batch, a resolver indexes every story, answer, landmark and fact, builds the owner's spine (birth, an age table for any birthday, stays, tenures, dated points, people), and asks the model to date each undated event with citations. Every citation is verified mechanically against the indexed text before anything is filed; a verified answer becomes a dated claim on the event's own node under resolver/rule:3, declared on the same telling as the classifier's reading, and the raw handle it replaces is superseded. Bare age handles (\"when I was 18\") resolve deterministically from the age table without a model call. Answers the vault cannot support are recorded once in state/resolver/resolutions.json as open questions and are never re-bought automatically; residence episodes are never dated by the resolver. The owner's own name and full name now resolve to the owner instead of a roster stranger (timeline-rules:8). New CLI verb: resolve (--execute, --limit, --retry-failed, --refile, --model); set LIFEHUG_RESOLVER=0 to skip the batch hook. New framework files: system/resolver.py, tests/test_resolver.py, tests/test_owner_name_subject.py.",
+  "changelog": "v315: Shape follows the role, never the precision. A candidate is a point only when its role is one (a wedding, a birth, a death, a graduation); every other candidate is an interval even when it is recorded to the day, so \"the week we launched\" can sit within a founding dated 2016-09-12 the way it did before v313, while within a wedding day is still refused. Salvage is now the local loop's explicit choice: classification_refresh passes salvage=True to the batch filer so one bad relation falls to its conservative state and the resolver dates it, while a host that files envelopes without a resolver keeps the default refusal its own repair loop re-asks the model about. No prompt, schema or rule-version change. Documents the intended loop — a model resolving and calculating placement against a spine that starts generic and is improved by the person's landmarks and keystones — in README, the timeline handbook and ADR 0037.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -571,6 +571,7 @@
     "wiki/SCHEMA.md",
     "system/resolver.py",
     "tests/test_owner_name_subject.py",
-    "tests/test_resolver.py"
+    "tests/test_resolver.py",
+    "docs/adr/0037-the-spine-and-the-resolver.md"
   ]
 }
