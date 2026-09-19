@@ -349,6 +349,7 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
         story_path, event, subject, stem = "", None, "", ""
         telling_event_ref, telling_event_kind = "", ""
         landmark_path, landmark_entry_id = "", ""
+        fallback_claim = None
         for claim_id in node.get("input_claim_refs") or ():
             claim = claims.get(claim_id) or {}
             ref = claim.get("source_ref") or {}
@@ -369,18 +370,36 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
             if source_id.startswith("landmark:") and not landmark_path:
                 landmark_path = collapsed_text(ref.get("source_path"))
                 landmark_entry_id = source_id.partition(":")[2]
+            if fallback_claim is None and collapsed_text(ref.get("source_path")) \
+                    and (root / collapsed_text(ref.get("source_path"))).is_file():
+                fallback_claim = claim
             if claim.get("claim_type") == "relative_order":
                 value = claim.get("temporal_value") or {}
                 handles.append({"claim_id": claim_id, "relation": value.get("relation"),
                                 "anchors": list(value.get("anchors") or [])})
-        if not story_path and landmark_path and (root / landmark_path).is_file():
-            # An undated landmark record with no story behind it: the record
-            # itself is the story, and the ladder's own telling is the telling.
-            story_path = landmark_path
-            event = {"title": collapsed_text(node.get("label")),
-                     "description": f"Landmark record: {collapsed_text(node.get('label'))} ({collapsed_text(node.get('event_kind'))})"}
-            telling_event_ref = node["node_id"]
-            telling_event_kind = collapsed_text(node.get("event_kind"))
+        fallback_telling = ""
+        if not story_path and fallback_claim is not None:
+            # A node with no classifier event behind it (a landmark record, a
+            # conversation message the listener heard) still has a source the
+            # person wrote. That source is the story, and the claim's own
+            # telling is what the resolver's reading is declared under.
+            ref = fallback_claim.get("source_ref") or {}
+            story_path = collapsed_text(ref.get("source_path"))
+            label = collapsed_text(node.get("label"))
+            event = {"title": label, "description": f"{label} ({collapsed_text(node.get('event_kind'))}); source {collapsed_text(ref.get('source_id'))}"}
+            telling_event_ref = collapsed_text(fallback_claim.get("event_ref")) or node["node_id"]
+            telling_event_kind = collapsed_text(fallback_claim.get("event_kind")) or collapsed_text(node.get("event_kind"))
+            subject = collapsed_text(fallback_claim.get("subject_mention")) or subject
+            try:
+                receipt_rel = collapsed_text(fallback_claim.get("receipt_path"))
+                receipt = _json(root / receipt_rel, None) if receipt_rel else None
+                fallback_telling = ei.telling_ref_for_claim(fallback_claim, receipt=receipt)
+            except Exception:  # noqa: BLE001 - an undeclarable telling files undeclared
+                fallback_telling = ei.landmark_telling_ref(landmark_entry_id) if landmark_entry_id else ""
+            # A conversation telling is ONE event inside ONE message; a bare
+            # message id would span every event it holds, so it is not declared.
+            if fallback_telling.startswith("conversation:") and "#" not in fallback_telling:
+                fallback_telling = ""
         if not story_path:
             continue
         if story_path not in revisions:
@@ -394,8 +413,8 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
             # The resolver's claim is ANOTHER READING OF THE SAME TELLING, so it
             # is declared under the classifier's telling ref and follows that
             # telling's bindings instead of minting a second node.
-            "telling_ref": (ei.classifier_telling_ref(stem, event) if (stem and event)
-                            else ei.landmark_telling_ref(landmark_entry_id) if landmark_entry_id else ""),
+            "telling_ref": (ei.classifier_telling_ref(stem, event) if (stem and event and not fallback_telling)
+                            else fallback_telling),
             "document_revision": revisions[story_path],
         })
     return dict(by_source)
@@ -607,7 +626,8 @@ def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str
     evidence = [{"quote": tc.bounded_quote(
         " | ".join(f"{c['doc']}: {c['quote']}" for c in resolved["citations"])[:tc.MAX_EVIDENCE_QUOTE_CHARS]
     )}]
-    revision = _digest({"node": target["node_id"], "record": record, "citations": resolved["citations"], "model": model})
+    revision = _digest({"node": target["node_id"], "record": record, "citations": resolved["citations"], "model": model,
+                        "telling": target.get("telling_ref") or ""})
     source_ref = {"source_id": f"{SOURCE_ID_PREFIX}{target['node_id'].split(':')[-1]}",
                   "revision": revision, "source_path": story_path}
     claim = tc.validate_temporal_claim({
@@ -990,7 +1010,7 @@ def answer_questions(root: Path, questions: list[dict], *, model: str) -> list[d
     return graded
 
 
-def refile_from_ledger(root: Path, *, now: str) -> dict:
+def refile_from_ledger(root: Path, *, now: str, only_sources: set[str] | None = None) -> dict:
     """Re-file every ledger answer without a model call; then publish."""
     import event_identity as ei  # noqa: PLC0415
     import temporal_publication as pub  # noqa: PLC0415
@@ -1004,6 +1024,9 @@ def refile_from_ledger(root: Path, *, now: str) -> dict:
     report = collections.Counter()
     for node_id, entry in ledger["nodes"].items():
         if entry.get("status") not in ("resolved", "file_error") or not entry.get("answer"):
+            report["skipped"] += 1
+            continue
+        if only_sources and entry.get("source_path") not in only_sources:
             report["skipped"] += 1
             continue
         found = by_node.get(node_id)
@@ -1046,7 +1069,7 @@ def main() -> int:
     os.environ.setdefault("LIFEHUG_VAULT_ROOT", str(root))
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     if args.refile:
-        print(json.dumps(refile_from_ledger(root, now=now), indent=1))
+        print(json.dumps(refile_from_ledger(root, now=now, only_sources=set(args.source) or None), indent=1))
         return 0
     if args.eval:
         graded = answer_questions(root, _json(args.eval, []), model=args.model)
