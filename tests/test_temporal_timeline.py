@@ -1428,5 +1428,90 @@ class ProjectionContract(unittest.TestCase):
         self.assertEqual(result.nodes, ())
 
 
+class NoDanglingAnchorCards(unittest.TestCase):
+    """lifehug#365 item 4 — an anchor that asks nothing places nothing.
+
+    The owner read a `missing_anchor` card with no question on it and an empty
+    `resolves`. `temporal_timeline.compose_question` had WITHHELD the sentence
+    (the node's only human text was a reference to the owner), which is the
+    right call; minting the item anyway was not.
+    """
+
+    def owner_duration(self):
+        """A stretch with no start whose subject is the owner — no sentence."""
+        return claim(
+            claim_type="duration",
+            subject_mention="I",
+            event_kind="span",
+            temporal_value={"low": 3, "high": 3, "unit": "years"},
+            quote="we lived there three years",
+            seed="owner-duration-no-start",
+        )
+
+    def test_an_anchor_with_no_question_is_not_published(self):
+        result = derive(self.owner_duration(), owner_ref="self")
+        self.assertEqual(
+            [row for row in result.work_items
+             if row["kind"] == "missing_anchor" and not row.get("prompt_intent")],
+            [],
+        )
+
+    def test_the_node_itself_still_exists(self):
+        """Withholding the CARD is not deleting the moment."""
+        result = derive(self.owner_duration(), owner_ref="self")
+        self.assertIsNotNone(node_for(result, "span"))
+
+    def test_the_birth_origin_is_asked_even_when_it_resolves_nothing(self):
+        """O-E6: the birthday is the coordinate system, not one gap of many."""
+        result = derive(self.owner_duration(), owner_ref="self")
+        origin = [row for row in result.work_items
+                  if row["work_item_id"] == BIRTH_ORIGIN_ID]
+        self.assertEqual(len(origin), 1)
+        self.assertEqual(origin[0]["resolves"], [])
+        self.assertTrue(origin[0]["prompt_intent"])
+
+    def test_a_named_stretch_still_gets_its_anchor_card(self):
+        """The rule is narrow: a real question about a real node survives."""
+        lived = claim(
+            claim_type="duration",
+            subject_mention="the Mesa house",
+            event_kind="span",
+            temporal_value={"low": 3, "high": 3, "unit": "years"},
+            quote="we lived there three years",
+            seed="mesa-duration-no-start",
+        )
+        anchors = items_of(derive(lived), "missing_anchor")
+        self.assertEqual([row["prompt_intent"] for row in anchors],
+                         ["When did the Mesa house begin?"])
+        self.assertEqual([row["resolves"] for row in anchors], [[]])
+
+    # -- the rule itself, read as a unit ---------------------------------
+
+    def test_the_predicate_names_every_refusal(self):
+        self.assertEqual(
+            twi.dangling_anchor_reason({"kind": "missing_anchor", "prompt_intent": ""}),
+            twi.ANCHOR_WITHOUT_QUESTION,
+        )
+        self.assertEqual(
+            twi.dangling_anchor_reason({"kind": "missing_anchor",
+                                        "prompt_intent": "When did you meet Sam?",
+                                        "subject_ref": "mention:sam", "resolves": []}),
+            twi.ANCHOR_RESOLVES_NOTHING,
+        )
+        self.assertIn(twi.ANCHOR_RESOLVES_NOTHING, twi.DANGLING_ANCHOR_REASONS)
+
+    def test_the_predicate_keeps_what_it_should(self):
+        for row in (
+            {"kind": "precision_gap", "prompt_intent": None},
+            {"kind": "missing_anchor", "prompt_intent": "When did the shop open?",
+             "node_ref": "node:abc", "resolves": []},
+            {"kind": "missing_anchor", "prompt_intent": "What is your date of birth?",
+             "requested_field": twi.REQUESTED_FIELD_BIRTH_DATE, "resolves": []},
+            {"kind": "missing_anchor", "prompt_intent": "When did you meet Sam?",
+             "subject_ref": "mention:sam", "resolves": ["node:abc"]},
+        ):
+            self.assertIsNone(twi.dangling_anchor_reason(row), row)
+
+
 if __name__ == "__main__":
     unittest.main()

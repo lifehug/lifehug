@@ -4302,6 +4302,19 @@ def derive_calculated_timeline(
         universe=tg.gain_universe(nodes=nodes, items=items, unplaced=unplaced_ids),
     )
     items = tg.apply_gain(items, dependencies)
+    # NO DANGLING ANCHOR CARDS (lifehug#365 item 4). An anchor ask with no
+    # sentence, or one with no node of its own that would place nothing, is
+    # not a question — it is a card the person can only stare at. Dropped
+    # HERE, after `apply_gain`, because `resolves` is what decides it. Work
+    # items only: no node's placement changes, so `CALCULATION_RULE_VERSION`
+    # does not move.
+    dangling = {collapsed_text(row.get("work_item_id")) for row in items
+                if twi.dangling_anchor_reason(row)}
+    if dangling:
+        items = [row for row in items
+                 if collapsed_text(row.get("work_item_id")) not in dangling]
+        for work_item_id in dangling:
+            components.pop(work_item_id, None)
     keystone_rows = tg.keystones(items, dependencies)
 
     # LANDMARK OPPORTUNITIES AND SUFFICIENCY (Cut 5a, R2, ADR 0032). Computed

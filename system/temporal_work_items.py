@@ -415,7 +415,62 @@ def resolve_work_item_ids(refs: object, *, aliases: object = None) -> tuple[str,
     )
 
 
+#: WHY AN ANCHOR CARD IS DANGLING (lifehug#365 item 4). A closed vocabulary,
+#: for the same reason every other refusal here is one.
+ANCHOR_WITHOUT_QUESTION = "question_withheld"
+ANCHOR_RESOLVES_NOTHING = "resolves_nothing"
+DANGLING_ANCHOR_REASONS = (ANCHOR_WITHOUT_QUESTION, ANCHOR_RESOLVES_NOTHING)
+
+
+def dangling_anchor_reason(item: object) -> str | None:
+    """Why this ``missing_anchor`` row must not be published, or ``None``.
+
+    An anchor item is the one work-item shape that can exist with no node of
+    its own: it stands for a date the vault is MISSING, and its worth is the
+    moments that answering it would place. So two shapes are not questions at
+    all, and the owner met both on his own timeline at v316:
+
+    * **No sentence.** `temporal_timeline.compose_question` withholds the
+      question for a node whose only human text is a bare internal kind word
+      — deliberately, because the alternative is *"When did birth happen?"*.
+      The item was minted anyway, and the page drew a card with no question
+      and no play control.
+    * **Nothing to place.** An anchor with no node of its own and an empty
+      ``resolves`` is a name nothing is waiting on. Answering it would move
+      no moment, so asking it buys nothing.
+
+    Two shapes are deliberately NOT dangling. An item that HAS a node
+    (``node_ref``) is about that node, and `timeline_gain.item_gain` excludes
+    a row's own node from its ``resolves`` on purpose — *"a row that places
+    nothing but itself is exactly 1"* — so an empty ``resolves`` there is the
+    normal reading of a lone undated moment. And the BIRTH ORIGIN is asked
+    whatever its reach: the birthday is the coordinate system every age frame
+    is derived from, and O-E6 made "nothing is dated by age yet" a reason to
+    ask it rather than a reason to score it zero.
+
+    Read AFTER `timeline_gain.apply_gain`, which is where ``resolves`` gets
+    its value. Work-item composition only: no node's placement moves, so
+    `temporal_timeline.CALCULATION_RULE_VERSION` does not move either.
+    """
+    row = item if isinstance(item, dict) else {}
+    # `BIRTH_ORIGIN_KIND` IS the anchor kind — one spelling, named once here
+    # and re-used rather than written out a second time.
+    if collapsed_text(row.get("kind")) != BIRTH_ORIGIN_KIND:
+        return None
+    if not collapsed_text(row.get("prompt_intent")):
+        return ANCHOR_WITHOUT_QUESTION
+    if collapsed_text(row.get("requested_field")) == REQUESTED_FIELD_BIRTH_DATE:
+        return None
+    if collapsed_text(row.get("node_ref")) or collapsed_text(row.get("event_ref")):
+        return None
+    if not (row.get("resolves") or ()):
+        return ANCHOR_RESOLVES_NOTHING
+    return None
+
+
 __all__ = [
+    "ANCHOR_RESOLVES_NOTHING",
+    "ANCHOR_WITHOUT_QUESTION",
     "BIRTH_ANCHOR_KEYS",
     "BIRTH_ORIGIN_EVENT_KIND",
     "BIRTH_ORIGIN_KIND",
@@ -423,6 +478,7 @@ __all__ = [
     "BIRTH_ORIGIN_SCAFFOLD_VALUE",
     "BIRTH_ORIGIN_SCORE_RULE",
     "CANONICAL_REQUESTED_FIELDS",
+    "DANGLING_ANCHOR_REASONS",
     "DEFAULT_CANONICAL_REQUESTED_FIELD",
     "LEGACY_REQUESTED_FIELD",
     "OWNER_SUBJECT_REF",
@@ -438,6 +494,7 @@ __all__ = [
     "canonical_requested_field",
     "canonical_work_item_id",
     "clamp_unit",
+    "dangling_anchor_reason",
     "is_birth_anchor",
     "is_explicit_origin",
     "legacy_work_item_ids",
