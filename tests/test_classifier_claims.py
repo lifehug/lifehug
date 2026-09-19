@@ -1136,5 +1136,104 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(pub.rebuild_signature(pub.read_projection(root)), first)
 
 
+class StatedDateFormsTests(unittest.TestCase):
+    """A date the person said in words is a date claim, never an undated moment."""
+
+    def setUp(self):
+        self.root = _vault(self)
+        _birth_receipt(self.root, _story(self.root, "born"))
+        self.relative = _story(self.root, "founding")
+
+    def test_month_name_and_holiday_dates_are_date_claims(self):
+        _classification(self.root, "founding", classification(
+            self.relative,
+            event("Company founding", "I founded the company.",
+                  date={"stated": "May 2022", "age": None,
+                        "anchor_ref": None, "relation": None}),
+            event("The idea", "The idea came to me.",
+                  date={"stated": "around Thanksgiving of 2021", "age": None,
+                        "anchor_ref": None, "relation": None}),
+        ))
+        report = _run(self.root, publish=False)
+        self.assertEqual(report["claims_by_type"]["date"], 2)
+        self.assertEqual(report["claims_by_type"]["occurrence"], 0)
+        values = {
+            row["event_mention"]: (
+                row["temporal_value"]["earliest"], row["temporal_value"]["latest"],
+                row["temporal_value"]["confidence"],
+            )
+            for row in ts.active_claims(ts.fold_active_index(self.root))
+            if cc.is_classifier_source_id(row["source_ref"]["source_id"])
+        }
+        self.assertEqual(values, {
+            "Company founding": ("2022-05", "2022-05", "certain"),
+            "The idea": ("2021-11", "2021-11", "approximate"),
+        })
+
+    def test_prose_in_the_stated_field_is_still_an_occurrence(self):
+        _classification(self.root, "founding", classification(
+            self.relative,
+            event("The move", "We moved.",
+                  date={"stated": "when I was twelve", "age": None,
+                        "anchor_ref": None, "relation": None}),
+        ))
+        report = _run(self.root, publish=False)
+        self.assertEqual(report["claims_by_type"]["occurrence"], 1)
+
+
+class RecorderRecordRestatementTests(unittest.TestCase):
+    """An undated moment read out of a landmark record restates the record."""
+
+    def setUp(self):
+        self.root = _vault(self)
+        self.relative = _story(self.root, "school-entry")
+        _birth_receipt(self.root, self.relative)
+
+    def test_an_undated_moment_from_a_landmark_entry_is_a_restatement(self):
+        _classification(self.root, "school-entry", classification(
+            self.relative,
+            event("Attended Hillside Elementary",
+                  "Attended fifth grade at Hillside Elementary."),
+            source_type="landmark_entry",
+        ))
+        report = _run(self.root, publish=False)
+        self.assertEqual(report["deduped_undated_recorder_records"], 1)
+        self.assertEqual(report["claims"], 0)
+
+    def test_a_linked_moment_from_a_landmark_entry_still_files(self):
+        _classification(self.root, "school-entry", classification(
+            self.relative,
+            event("Moved to Hillside", "We moved to Hillside.",
+                  date={"stated": None, "age": None,
+                        "anchor_ref": "the Hillside stay", "relation": "within"}),
+            source_type="landmark_entry",
+        ))
+        report = _run(self.root, publish=False)
+        self.assertEqual(report["deduped_undated_recorder_records"], 0)
+        self.assertEqual(report["claims_by_type"]["relative_order"], 1)
+
+    def test_an_undated_moment_from_a_story_is_never_a_restatement(self):
+        _classification(self.root, "school-entry", classification(
+            self.relative,
+            event("The hospital on the hill", "It was the hospital on the hill."),
+            source_type="unprompted_story",
+        ))
+        report = _run(self.root, publish=False)
+        self.assertEqual(report["deduped_undated_recorder_records"], 0)
+        self.assertEqual(report["claims_by_type"]["occurrence"], 1)
+
+    def test_a_landmark_entry_nobody_recorded_still_files(self):
+        relative = _story(self.root, "unrecorded-entry")
+        _classification(self.root, "unrecorded-entry", classification(
+            relative,
+            event("Attended Hillside Elementary",
+                  "Attended fifth grade at Hillside Elementary."),
+            source_type="landmark_entry",
+        ))
+        report = _run(self.root, publish=False, sources=[relative])
+        self.assertEqual(report["deduped_undated_recorder_records"], 0)
+        self.assertEqual(report["claims_by_type"]["occurrence"], 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

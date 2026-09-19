@@ -532,15 +532,66 @@ del _loose_index, _loose_name
 #: the month lookup above is copied.
 _LOOSE_BRACKET_RE = re.compile(r"^\[(.*)\]$")
 #: ``Month D, YYYY`` / ``Month D YYYY`` — the comma is optional either way.
-_LOOSE_MONTH_DAY_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$")
+_LOOSE_MONTH_DAY_YEAR_RE = re.compile(
+    r"^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$", re.IGNORECASE
+)
 #: ``D Month YYYY``.
-_LOOSE_DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})\s+([A-Za-z]+)\.?\s+(\d{4})$")
+_LOOSE_DAY_MONTH_YEAR_RE = re.compile(
+    r"^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\.?\s+(\d{4})$", re.IGNORECASE
+)
 #: ``Month YYYY``.
 _LOOSE_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{4})$")
 #: One explicit whole-string range connector. Endpoints are parsed separately
 #: by the same single-date authority below; two connectors are ambiguous.
-_LOOSE_RANGE_CONNECTOR_RE = re.compile(r"\s+(?:through|to)\s+", re.IGNORECASE)
+_LOOSE_RANGE_CONNECTOR_RE = re.compile(
+    r"\s+(?:through|to|until|till|[-–—])\s+", re.IGNORECASE
+)
 _LOOSE_RANGE_FROM_RE = re.compile(r"^from\s+", re.IGNORECASE)
+#: Natural forms beyond the landmark leaves' plain dates. Each is deterministic
+#: and each is refused when the year is missing. A trailing clock time is noise
+#: on a date ("May 10, 2013 10:25pm"): the date stands and the time is dropped.
+_LOOSE_TRAILING_TIME_RE = re.compile(
+    r"\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)$", re.IGNORECASE
+)
+#: ``M/D/YYYY`` or ``D/M/YYYY``. Unambiguous when one field exceeds 12 or both
+#: agree; when both readings are calendar days the parse is the interval that
+#: covers both readings, never a guess at the writer's convention.
+_LOOSE_NUMERIC_DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
+#: ``Month D–D, YYYY``: a few days inside one month.
+_LOOSE_MONTH_DAY_SPAN_RE = re.compile(
+    r"^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s*[-–—]\s*"
+    r"(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$",
+    re.IGNORECASE,
+)
+#: ``early 1990s`` / ``mid-90s`` / ``the late '80s``. A bare two-digit decade
+#: reads against the twentieth century from the 30s on and the twenty-first
+#: before that; the qualified thirds are the conventional ones.
+_LOOSE_DECADE_RE = re.compile(
+    r"^(?:the\s+)?(?:(early|mid|late)[\s-]*)?'?(\d{4}|\d{2})s$", re.IGNORECASE
+)
+_DECADE_THIRDS = {"early": (0, 3), "mid": (3, 6), "late": (7, 9)}
+#: Holidays a person names instead of a calendar date. Thanksgiving is
+#: month-level on purpose: its day depends on the country.
+_LOOSE_HOLIDAY_RE = re.compile(
+    r"^(thanksgiving|christmas eve|christmas|new year'?s eve|new year'?s(?: day)?|"
+    r"halloween|(?:fourth|4th) of july|independence day|valentine'?s(?: day)?)"
+    r"\s+(?:of\s+)?(\d{4})$",
+    re.IGNORECASE,
+)
+_HOLIDAY_DATES = {
+    "thanksgiving": "-11",
+    "christmas eve": "-12-24",
+    "christmas": "-12-25",
+    "new years eve": "-12-31",
+    "new years": "-01-01",
+    "new years day": "-01-01",
+    "halloween": "-10-31",
+    "fourth of july": "-07-04",
+    "4th of july": "-07-04",
+    "independence day": "-07-04",
+    "valentines": "-02-14",
+    "valentines day": "-02-14",
+}
 
 
 def _parse_loose_single_date(raw: str) -> DateRecord | None:
@@ -567,6 +618,22 @@ def _parse_loose_single_date(raw: str) -> DateRecord | None:
                 month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
                 if month:
                     edtf = f"{int(match.group(2)):04d}-{month:02d}"
+        if edtf is None:
+            match = _LOOSE_NUMERIC_DATE_RE.match(raw)
+            if match:
+                first, second, year = (int(group) for group in match.groups())
+                if first > 12 >= second >= 1 and first <= 31:
+                    edtf = f"{year:04d}-{second:02d}-{first:02d}"
+                elif (second > 12 >= first >= 1 and second <= 31) or (
+                        first == second and 1 <= first <= 12):
+                    edtf = f"{year:04d}-{first:02d}-{second:02d}"
+        if edtf is None:
+            match = _LOOSE_HOLIDAY_RE.match(raw)
+            if match:
+                name = re.sub(r"[^a-z0-9 ]", "", match.group(1).lower())
+                suffix = _HOLIDAY_DATES.get(name)
+                if suffix:
+                    edtf = f"{int(match.group(2)):04d}{suffix}"
         record = parse_edtf(edtf, basis="stated") if edtf is not None else None
     if (record is None or record.granularity == "range"
             or record.earliest is None or record.latest is None):
@@ -604,6 +671,60 @@ def _parse_loose_natural_range(raw: str) -> DateRecord | None:
     )
 
 
+def _parse_loose_span_forms(raw: str) -> DateRecord | None:
+    """Whole-string spans a person writes as one phrase.
+
+    A few days inside one month (``December 21-22, 2010``), a decade or a
+    third of one (``early 1990s``, ``the '90s``), or a numeric date whose day
+    and month cannot be told apart (``05/10/2013``), which parses to the
+    interval covering both readings rather than to a guess at the convention.
+    """
+    match = _LOOSE_MONTH_DAY_SPAN_RE.match(raw)
+    if match:
+        month = _LOOSE_MONTH_LOOKUP.get(match.group(1).lower())
+        first, last = int(match.group(2)), int(match.group(3))
+        year = int(match.group(4))
+        if month and 1 <= first <= last <= 31:
+            return _interval(
+                f"{year:04d}-{month:02d}-{first:02d}",
+                f"{year:04d}-{month:02d}-{last:02d}",
+                "stated",
+            )
+        return None
+    match = _LOOSE_DECADE_RE.match(raw)
+    if match:
+        third, digits = match.group(1), match.group(2)
+        if len(digits) == 2:
+            digits = ("19" if int(digits) >= 30 else "20") + digits
+        decade = int(digits) // 10 * 10
+        if third is None:
+            return parse_edtf(f"{decade // 10}X", basis="stated")
+        low, high = _DECADE_THIRDS[third.lower()]
+        record = _interval(str(decade + low), str(decade + high), "stated")
+        return replace(record, confidence="approximate") if record else None
+    match = _LOOSE_NUMERIC_DATE_RE.match(raw)
+    if match:
+        first, second, year = (int(group) for group in match.groups())
+        if 1 <= first <= 12 and 1 <= second <= 12 and first != second:
+            low, high = sorted((
+                f"{year:04d}-{first:02d}-{second:02d}",
+                f"{year:04d}-{second:02d}-{first:02d}",
+            ))
+            record = _interval(low, high, "stated")
+            if record is None:
+                return None
+            return replace(
+                record,
+                confidence="approximate",
+                provenance=({
+                    "claim": raw,
+                    "basis": "stated",
+                    "note": "day/month order ambiguous; interval covers both readings",
+                },),
+            )
+    return None
+
+
 def parse_loose_date(text: object) -> dict | None:
     """Natural date text into the identical normalized dict :func:`normalized_date` returns.
 
@@ -623,6 +744,13 @@ def parse_loose_date(text: object) -> dict | None:
     square brackets — ``[Jun 1986]`` — parses to the same date with
     ``confidence: "approximate"``, the owner's own estimation convention.
 
+    Beyond those plain forms, the deterministic phrases people actually write
+    are read too: a numeric ``M/D/YYYY`` (an ambiguous one becomes the interval
+    covering both readings), a few days inside one month, a decade or a third
+    of one, a fixed-date holiday with its year, an ``about``/``around`` prefix
+    (``approximate``), and a trailing clock time, which is dropped. A range may
+    also join two dates with ``until``, ``till`` or a spaced dash.
+
     Never raises; text that is none of the above is ``None``, exactly like
     :func:`parse_edtf`. This is the ONLY fuzzy-date parsing this module
     performs — no other natural-language form is accepted.
@@ -639,6 +767,11 @@ def parse_loose_date(text: object) -> dict | None:
         if not raw:
             return None
         approximate = True
+    raw = _LOOSE_TRAILING_TIME_RE.sub("", raw)
+    match = _APPROX_PREFIX_RE.match(raw)
+    if match:
+        raw = raw[match.end():].strip()
+        approximate = True
 
     record = parse_edtf(raw, basis="stated")
     if record is None:
@@ -646,10 +779,27 @@ def parse_loose_date(text: object) -> dict | None:
     if record is None:
         record = _parse_loose_single_date(raw)
     if record is None:
+        record = _parse_loose_span_forms(raw)
+    if record is None:
         return None
     if approximate:
         record = replace(record, confidence="approximate", best=f"{record.best}~")
     return record.to_dict()
+
+
+def parse_stated_date(text: object) -> DateRecord | None:
+    """A date in a person's own words as a record: EDTF first, then the loose forms.
+
+    The one entry point for a classifier ``date.stated`` value. ``May 2022``
+    and ``December 21, 2010`` are dates the person said; refusing them because
+    they are not spelled as EDTF filed the moment as undated, which is a
+    fabricated ignorance. Anything neither parser reads is still ``None``.
+    """
+    record = parse_edtf(text, basis="stated")
+    if record is not None:
+        return record
+    loose = parse_loose_date(text)
+    return from_dict(loose) if loose else None
 
 
 def display_date(record: object, *, with_basis: bool = True) -> str:
@@ -2120,7 +2270,7 @@ def record_from_claim(claim: object, *, birth_date: object = None,
     parts: list[DateRecord] = []
     stated = normalized.get("stated")
     if stated:
-        record = parse_edtf(stated, basis="stated")
+        record = parse_stated_date(stated)
         if record:
             parts.append(replace(record, provenance=({"claim": stated, "basis": "stated"},)))
     age = normalized.get("age")

@@ -434,7 +434,7 @@ def temporal_reading(event: object) -> dict:
     if claim:
         stated = optional_text(claim.get("stated"))
         if stated:
-            record = chrono.parse_edtf(stated, basis="stated")
+            record = chrono.parse_stated_date(stated)
             if record is not None:
                 return {
                     "claim_type": "date",
@@ -710,6 +710,24 @@ def classification_events(data: object) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
+#: Source types whose whole content the landmark recorder already filed as a
+#: claim. A classifier moment read out of one of these that asserts no time of
+#: its own can only restate the record it came from; minting it a second node
+#: draws one school year twice and counts the copy as an unplaced story.
+RECORDER_RECORD_SOURCE_TYPES = frozenset({"landmark_entry"})
+
+
+def _restates_recorded_record(
+    claims: list[dict], *, source_type: object, recorded: bool,
+) -> bool:
+    """An undated, unlinked classifier moment from a record the recorder filed."""
+    if not recorded or collapsed_text(source_type) not in RECORDER_RECORD_SOURCE_TYPES:
+        return False
+    return bool(claims) and all(
+        claim.get("claim_type") == tc.OCCURRENCE_CLAIM_TYPE for claim in claims
+    )
+
+
 def _recorder_dates_by_source_path(index: object) -> dict[str, list]:
     """``source_path -> [DateRecord, ...]`` for every ACTIVE claim that is not
     this extractor's. The recorder is canonical; this is the set it is
@@ -863,6 +881,7 @@ def _empty_report(dry_run: bool) -> dict:
         "with_place": 0,
         "subjects": {"self": 0, "named_other": 0},
         "deduped_against_recorder": 0,
+        "deduped_undated_recorder_records": 0,
         "deduped_sources": 0,
         "receipts": 0,
         "receipts_written": 0,
@@ -926,6 +945,7 @@ def migrate_classifier_moments(
         source_path = collapsed_text((data or {}).get("source_path"))
         if wanted is not None and source_path not in wanted:
             continue
+        source_type = collapsed_text((data or {}).get("source_type"))
         report["classifications"] += 1
         if not source_path:
             report["skipped_no_source_path"].append(stem)
@@ -951,6 +971,12 @@ def migrate_classifier_moments(
                 stem=stem, event=event, revision=revision,
                 source_path=source_path, now=now,
             )
+            if _restates_recorded_record(
+                    claims, source_type=source_type,
+                    recorded=bool(recorder_dates.get(source_path))):
+                report["deduped_undated_recorder_records"] += 1
+                deduped_here += 1
+                continue
             current_claim_ids.update(claim["claim_id"] for claim in claims)
             kept_claims = []
             for claim in claims:
@@ -1094,6 +1120,8 @@ def describe_migration(report: object) -> list[str]:
         f"somebody named {subjects.get('named_other', 0)}",
         f"  deduped against the recorder: {row.get('deduped_against_recorder')} "
         f"event(s) across {row.get('deduped_sources')} source(s)",
+        f"  undated restatements of recorder records: "
+        f"{row.get('deduped_undated_recorder_records', 0)}",
         f"  superseded by re-classification: {row.get('superseded_claims')} claim(s) "
         f"across {row.get('superseded_classifications')} classification(s)",
         f"  nodes: {row.get('nodes_before')} -> {row.get('nodes_after')}"

@@ -236,8 +236,8 @@ class HistoricalReceiptTests(unittest.TestCase):
         self.assertEqual(_files(root), before)
 
     def test_grouped_and_split_rule2_migrate_append_publish_and_replay(self):
-        self.assertEqual(cc.RULE_VERSION, "3")
-        self.assertEqual(te.CLASSIFIER_CLAIMS_RULE_VERSION, "3")
+        self.assertEqual(cc.RULE_VERSION, "4")
+        self.assertEqual(te.CLASSIFIER_CLAIMS_RULE_VERSION, "4")
         for generation in ("grouped_v306", "split_v309"):
             with self.subTest(generation=generation):
                 root, fixture = self.seed(generation)
@@ -259,7 +259,7 @@ class HistoricalReceiptTests(unittest.TestCase):
                            if cc.is_classifier_source_id(row["source_ref"]["source_id"])]
                 self.assertEqual(len(current), 2)
                 self.assertEqual({row["extractor_version"] for row in current},
-                                 {"classifier-claims/rule:3"})
+                                 {"classifier-claims/rule:4"})
                 self.assertEqual({row["event_ref"] for row in current}, {old_node["node_id"]})
                 projection = pub.read_projection(root)
                 node = next(row for row in projection["nodes"] if row["node_id"] == old_node["node_id"])

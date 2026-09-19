@@ -868,6 +868,8 @@ class ContextDiagnosticsTests(ContextCase):
                  "candidate_ids": ["node:stay"],
                  "reason": "Synthetic invalid status.",
              }),
+            ("within_a_point", code.RELATION_SHAPE_INVALID, "snapshot",
+             (*candidate, "temporal_shape"), "point"),
         ]
         for key in cc.SNAPSHOT_KEYS:
             cases.append((f"changed_{key}", code.SNAPSHOT_MISMATCH, "response",
@@ -1035,10 +1037,12 @@ class ContextDiagnosticsTests(ContextCase):
             "preserve the supported `before` relation",
             "CURRENT EXTRACTED EVENT relative to SELECTED CANDIDATE",
             "candidate's WHOLE occurrence",
-            "before that duration starts",
+            "before it starts",
             "after it ends",
             '"early in", and "late in"',
-            '"After the wedding"',
+            '"two weeks after the wedding" are both `after`',
+            "`temporal_shape`",
+            "`within` a point is refused",
             "date.anchor_ref",
             f"1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation",
             f"{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} characters",
@@ -1051,7 +1055,7 @@ class ContextDiagnosticsTests(ContextCase):
 
     def test_v2_accepted_relations_and_null_relations_remain_current(self):
         snapshot = self.snapshot()
-        self.assertEqual(snapshot["prompt_version"], "contextual-timeline:2")
+        self.assertEqual(snapshot["prompt_version"], "contextual-timeline:3")
         self.assertEqual(snapshot["extractor_version"], "story-classifier:2")
         self.assertEqual(snapshot["schema_version"], 1)
         for relation in ("within", "before", "after", None):
@@ -1464,6 +1468,232 @@ class ProductionPipelineAcceptanceTests(ContextCase):
         self.assertTrue(event_node["usable_placement"])
         work_items = temporal_publication.read_work_items(self.root)["work_items"]
         self.assertFalse(any(row.get("node_ref") == event_node["node_id"] for row in work_items))
+
+
+class OwnerRecordIdentityTests(ContextCase):
+    """An owner-scoped record named by its own label is the owner's, not a stranger's."""
+
+    def record(self, label="Brightline Labs", scope="owner", event_kind="job", **extra):
+        row = node("node:record", "2019/2021", "claim:record") | {
+            "label": label, "event_kind": event_kind, "episode_id": None,
+            "subject_refs": [label], "legacy_refs": [],
+            "occurrence_subject_scope": scope,
+        }
+        row.update(extra)
+        return row
+
+    def test_an_owner_scoped_record_named_by_its_label_is_the_owners(self):
+        row = cc._candidate(self.record(), roster_aliases={}, rosters={})
+        self.assertEqual(row["entity_refs"], ["self"])
+        self.assertEqual(row["unresolved_entity_mentions"], [])
+        self.assertTrue(cc.candidate_identity_is_resolved(row))
+        self.assertEqual(row["name"], "Brightline Labs")
+
+    def test_a_person_mention_that_is_not_the_label_stays_unresolved(self):
+        row = cc._candidate(
+            self.record(label="Dad graduated", event_kind="graduation", subject_refs=["Dad"]),
+            roster_aliases={}, rosters={},
+        )
+        self.assertEqual(row["entity_refs"], [])
+        self.assertEqual(row["unresolved_entity_mentions"], ["Dad"])
+
+    def test_an_other_person_scope_is_never_rewritten(self):
+        row = cc._candidate(self.record(scope="other_person"), roster_aliases={}, rosters={})
+        self.assertEqual(row["entity_refs"], [])
+        self.assertEqual(row["unresolved_entity_mentions"], ["Brightline Labs"])
+
+
+class TemporalShapeTests(ContextCase):
+    """`within` attaches to a duration; a wedding day has no inside."""
+
+    def test_shape_follows_role_then_bounds(self):
+        day = {"granularity": "day", "earliest": "2007-01-11", "latest": "2007-01-11"}
+        self.assertEqual(cc.temporal_shape("episode", "married", day), "point")
+        self.assertEqual(cc.temporal_shape(
+            "episode", "married", {"granularity": "range", "earliest": "2007", "latest": "2010"}
+        ), "point")
+        self.assertEqual(cc.temporal_shape("event", "moment", day), "point")
+        self.assertEqual(cc.temporal_shape(
+            "episode", "job", {"granularity": "month", "earliest": "2022-05", "latest": "2022-05"}
+        ), "interval")
+        self.assertEqual(cc.temporal_shape(
+            "episode", "residence", {"granularity": "range", "earliest": "1998", "latest": "2001"}
+        ), "interval")
+        self.assertEqual(cc.temporal_shape("period", "named_era", day), "interval")
+
+    def test_within_a_wedding_day_is_refused_and_after_is_accepted(self):
+        wedding = node("node:wedding", "2007-01-11", "claim:wedding") | {
+            "label": "Married Pat", "event_kind": "married", "episode_id": None,
+            "subject_refs": ["self"], "legacy_refs": ["wedding"],
+            "occurrence_subject_scope": "owner",
+        }
+        wedding["best_temporal_value"]["granularity"] = "day"
+        self.write_projection([wedding])
+        self.source.write_text("Early in my marriage, I went bankrupt.", encoding="utf-8")
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["candidates"][0]["temporal_shape"], "point")
+
+        def response(relation):
+            return {
+                "_classification_snapshot": cc.snapshot_metadata(snapshot),
+                "events": [{
+                    "title": "Bankruptcy",
+                    "description": "Early in my marriage, I went bankrupt.",
+                    "places": [],
+                    "timeline_relation": {
+                        "relation": relation,
+                        "candidate_id": "node:wedding",
+                        "entity_refs": ["self"],
+                        "evidence": {"quote": "Early in my marriage"},
+                    },
+                }],
+            }
+
+        with self.assertRaises(cc.ClassifierContextError) as raised:
+            cc.validate_response(response("within"), snapshot, self.source.read_text())
+        self.assertIs(raised.exception.code, cc.ContextFailureCode.RELATION_SHAPE_INVALID)
+        cc.validate_response(response("after"), snapshot, self.source.read_text())
+
+
+class SalvageValidationTests(ContextCase):
+    """Under salvage one bad event field falls to its conservative state; the response survives."""
+
+    def test_grounding_failure_downgrades_to_null(self):
+        snapshot = self.snapshot()
+        result = self.response(snapshot)
+        result["events"][0]["source_grounding"] = {
+            "quote": "while we lived in Cedarport", "temporal_quote": "Cedarport",
+            "subject_quote": "Cedarport", "kind": "date",
+        }
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(deepcopy(result), snapshot, self.source.read_text())
+        downgrades: list = []
+        out = cc.validate_response(
+            deepcopy(result), snapshot, self.source.read_text(), salvage=True, downgrades=downgrades,
+        )
+        self.assertIsNone(out["events"][0]["source_grounding"])
+        self.assertIsNotNone(out["events"][0]["timeline_relation"])
+        self.assertEqual([row["field"] for row in downgrades], ["source_grounding"])
+
+    def test_unknown_candidate_becomes_a_missing_evidence_abstention(self):
+        snapshot = self.snapshot()
+        result = self.response(snapshot)
+        result["events"][0]["timeline_relation"]["candidate_id"] = "node:invented"
+        downgrades: list = []
+        out = cc.validate_response(
+            deepcopy(result), snapshot, self.source.read_text(), salvage=True, downgrades=downgrades,
+        )
+        event = out["events"][0]
+        self.assertIsNone(event["timeline_relation"])
+        self.assertEqual(event["timeline_resolution"]["status"], "missing_evidence")
+        self.assertEqual(event["timeline_resolution"]["candidate_ids"], ["node:stay"])
+        self.assertIn("context_candidate_unknown", event["timeline_resolution"]["reason"])
+        self.assertEqual(downgrades[0]["code"], "context_candidate_unknown")
+
+    def test_identity_blocked_link_becomes_ambiguous(self):
+        self.write_projection([node() | {"subject_refs": ["The Ranch", "self"]}])
+        snapshot = self.snapshot()
+        self.assertFalse(cc.candidate_identity_is_resolved(snapshot["candidates"][0]))
+        result = self.response(snapshot)
+        result["events"][0]["timeline_relation"]["entity_refs"] = ["self"]
+        out = cc.validate_response(deepcopy(result), snapshot, self.source.read_text(), salvage=True)
+        self.assertIsNone(out["events"][0]["timeline_relation"])
+        self.assertEqual(out["events"][0]["timeline_resolution"]["status"], "ambiguous")
+
+    def test_a_partial_abstention_list_is_completed(self):
+        self.write_projection([node(), node("node:second", "2002/2004", "claim:second")])
+        snapshot = self.snapshot()
+        result = self.response(snapshot)
+        result["events"][0]["timeline_relation"] = None
+        result["events"][0]["timeline_resolution"] = {
+            "status": "missing_evidence", "candidate_ids": ["node:stay"], "reason": "Only one considered.",
+        }
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(
+                deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
+            )
+        out = cc.validate_response(
+            deepcopy(result), snapshot, self.source.read_text(),
+            require_event_contract=True, salvage=True,
+        )
+        self.assertEqual(
+            out["events"][0]["timeline_resolution"]["candidate_ids"], ["node:second", "node:stay"]
+        )
+
+    def test_a_stale_echo_list_is_replaced_by_the_supplied_set(self):
+        snapshot = self.snapshot()
+        result = self.response(snapshot)
+        result["events"][0]["timeline_resolution"] = {
+            "status": "linked", "candidate_ids": ["node:stay", "node:stale"], "reason": "Linked.",
+        }
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(
+                deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
+            )
+        downgrades: list = []
+        out = cc.validate_response(
+            deepcopy(result), snapshot, self.source.read_text(),
+            require_event_contract=True, salvage=True, downgrades=downgrades,
+        )
+        self.assertIsNotNone(out["events"][0]["timeline_relation"])
+        self.assertEqual(out["events"][0]["timeline_resolution"]["candidate_ids"], ["node:stay"])
+        self.assertEqual(downgrades[-1]["code"], "resolution_candidates_completed")
+
+    def test_structural_failures_still_refuse(self):
+        snapshot = self.snapshot()
+        stale = self.response(snapshot)
+        stale["_classification_snapshot"]["context_digest"] = "sha256:" + "0" * 64
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(stale, snapshot, self.source.read_text(), salvage=True)
+        broken = self.response(snapshot)
+        broken["events"] = {}
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(broken, snapshot, self.source.read_text(), salvage=True)
+
+
+class OwnerNameAndPossessiveTests(ContextCase):
+    def test_a_possessive_owner_mention_matches_its_second_person_label(self):
+        row = node("node:mission", "1990/2000", "claim:mission") | {
+            "label": "your mission", "event_kind": "transition", "episode_id": None,
+            "subject_refs": ["speaker's mission"], "legacy_refs": [],
+            "occurrence_subject_scope": "owner",
+        }
+        candidate = cc._candidate(row, roster_aliases={}, rosters={})
+        self.assertEqual(candidate["entity_refs"], ["self"])
+        self.assertEqual(candidate["unresolved_entity_mentions"], [])
+
+    def test_the_owners_own_name_is_an_owner_subject_for_grounding(self):
+        story = "I moved to Yucaipa in 1994."
+        grounding = {"quote": story, "temporal_quote": "1994", "subject_quote": "I", "kind": "date"}
+        event = {"title": "Move to Yucaipa", "subject": "Dave", "date": {"stated": "1994"}}
+        with mock.patch.object(timeline_evidence, "owner_profile_terms", return_value=set()):
+            with self.assertRaisesRegex(timeline_evidence.TimelineEvidenceError, "subject evidence"):
+                timeline_evidence.normalize_source_grounding(
+                    dict(grounding), dict(event), story_text=story, source_revision="sha256:" + "1" * 64,
+                )
+        with mock.patch.object(
+            timeline_evidence, "owner_profile_terms", return_value={"dave", "david james taylor"}
+        ):
+            normalized = timeline_evidence.normalize_source_grounding(
+                dict(grounding), dict(event), story_text=story, source_revision="sha256:" + "1" * 64,
+            )
+        self.assertEqual(normalized["subject_quote"], "I")
+
+
+class ExtractJsonTests(unittest.TestCase):
+    def test_narration_with_braces_before_a_fenced_answer(self):
+        text = ("<think>\nEvent {abc} needs {x: y} care.\n```\nnot json\n```\n</think>\n"
+                "```json\n{\"_classification_mode\": \"timeline\", \"events\": []}\n```")
+        self.assertEqual(classify_story.extract_json(text)["_classification_mode"], "timeline")
+
+    def test_unfenced_answer_after_prose_with_braces(self):
+        text = ("Thinking {loosely} first. "
+                "{\"_classification_mode\": \"timeline\", \"events\": [{\"event_key\": \"a\"}]}")
+        self.assertEqual(len(classify_story.extract_json(text)["events"]), 1)
+
+    def test_no_object_is_still_malformed(self):
+        with self.assertRaises(Exception):
+            classify_story.extract_json("no json here { broken")
 
 
 if __name__ == "__main__":
