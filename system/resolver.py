@@ -811,178 +811,526 @@ def _story_text(root: Path, source_path: str) -> str:
 
 RETRY_STATUSES = ("unverified", "no_answer_returned", "file_error")
 
+#: A story whose answer came back short is re-asked in small groups, so one
+#: long story cannot starve its own moments.
+CHUNK = 4
+#: Twice. A story that returns nothing for a moment twice is not asked again
+#: without ``--retry-failed``: the third purchase has never bought anything.
+MAX_ATTEMPTS = 2
+PLAN_SCHEMA_VERSION = 1
+ENVELOPE_SCHEMA_VERSION = 1
+MAX_OUTPUT_TOKENS = 16000
+_UNBOUNDED = 1 << 30
+
+
+# --------------------------------------------------------------------------
+# The two legs: a plan anyone can buy, and an envelope anyone can file
+# --------------------------------------------------------------------------
+#
+# The local run is one process: read the vault, ask the model, file what
+# verified. A host cannot be one process — it holds the key, it buys the
+# completion somewhere else, and it may deliver the same answer twice. So the
+# same work is expressed as two pure legs with the vault in between:
+#
+#   plan_items()   read-only. Which moments are still unplaced, and the exact
+#                  prompt that would answer them, with an identity stamp of
+#                  the bytes the prompt was built from.
+#   file_envelope()  the answers come back; verify them against the vault as it
+#                  is NOW, refuse the ones whose story moved under them, file
+#                  the rest exactly as the local run does.
+#
+# `resolve_vault` is those two legs composed in memory with the response cache
+# between them, which is why the local behaviour is unchanged.
+
+
+def _read_bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return b""
+
+
+def _source_sha256(root: Path, source_path: str) -> str:
+    """The story's bytes, hashed.
+
+    The host echoes it back with the answer; a story the owner edited while
+    the model was thinking refuses the answer instead of filing a reading of
+    a page that no longer exists.
+    """
+    if not source_path:
+        return ""
+    return hashlib.sha256(_read_bytes(root / source_path)).hexdigest()
+
+
+def _targets_digest(node_ids: list[str], by_node: dict) -> str:
+    """The moments an item was planned for AND the raw handles it would retire.
+
+    Empty when a node is no longer a target at all — something else placed it,
+    and an answer to a question that is already settled must not be filed.
+    """
+    values: list[str] = []
+    for node_id in node_ids:
+        found = by_node.get(node_id)
+        if found is None:
+            return ""
+        values.append(node_id)
+        values.extend(collapsed_text(h.get("claim_id")) for h in found[1].get("handles") or ()
+                      if h.get("claim_id"))
+    return _digest(sorted(set(values)))
+
+
+class _Read:
+    """One read of the vault, shared by a plan and by the filing that answers it.
+
+    Everything a plan needs and everything absorbing an answer needs, derived
+    once: the published projection, the folded index, the ledger, the spine,
+    the full-text index and the targets. A composed local run holds ONE of
+    these across both rounds, so the ledger it mutates is the ledger it plans
+    against.
+    """
+
+    def __init__(self, root: Path) -> None:
+        import temporal_publication as pub  # noqa: PLC0415
+
+        self.root = root
+        self.projection = pub.read_projection(root) or {}
+        self.index = store.fold_active_index(root)
+        self.ledger = load_ledger(root)
+        self.spine = spine(root, self.projection)
+        self.fts = Index(story_documents(root) + fact_documents(root, self.projection))
+        self.targets = targets(root, self.projection, self.index)
+        self.prior = prior_resolver_claims(self.index)
+        self.by_node = {t["node_id"]: (s, t) for s, rows in self.targets.items() for t in rows}
+        self.spine_digest = _digest(self.spine)
+
+    def row(self, node_id: str) -> dict:
+        return (self.ledger.get("nodes") or {}).get(node_id) or {}
+
+
+def _attempts(row: dict) -> int:
+    try:
+        return max(0, int(row.get("attempts") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _still_asking(row: dict, *, retry_failed: bool, force: bool) -> bool:
+    """Is this moment still a question? Once answered, never asked again."""
+    if force:
+        return True
+    status = collapsed_text(row.get("status"))
+    if not status:
+        return True
+    if status in ("resolved", "unknown"):
+        return False
+    if status == "no_answer_returned":
+        # The round-2 re-ask, made re-entrant: a row the model skipped is
+        # asked once more in a smaller group, and then left alone.
+        return retry_failed or _attempts(row) < MAX_ATTEMPTS
+    if status in RETRY_STATUSES:
+        return retry_failed
+    return True
+
+
+def _pending(read: _Read, *, only_sources=None, retry_failed: bool = False, force: bool = False,
+             restrict: bool = False) -> tuple[list[tuple[str, list[dict]]], list[tuple[str, dict, tuple]]]:
+    """``([(source_path, rows)], [(source_path, target, (age, relation))])``.
+
+    The second list is the moments a bare age handle already answers: they need
+    no model and no question, so they are counted apart and filed by arithmetic.
+    """
+    birth = read.spine["birth"]
+    pending: list[tuple[str, list[dict]]] = []
+    deterministic: list[tuple[str, dict, tuple]] = []
+    for source_path in sorted(read.targets):
+        if restrict and only_sources and source_path not in only_sources:
+            continue
+        rows = []
+        for target in read.targets[source_path]:
+            if not _still_asking(read.row(target["node_id"]), retry_failed=retry_failed, force=force):
+                continue
+            aged = [(age_from_handle(a), h.get("relation"))
+                    for h in target["handles"] for a in (h.get("anchors") or ())]
+            aged = [(a, rel) for a, rel in aged if a is not None]
+            if aged and birth and len({a for a, _ in aged}) == 1 and age_range(birth, aged[0][0], aged[0][1]):
+                deterministic.append((source_path, target, aged[0]))
+            else:
+                rows.append(target)
+        if rows:
+            pending.append((source_path, rows))
+    return pending, deterministic
+
+
+def _ordered(read: _Read, pending: list, only_sources) -> list:
+    """The story the owner just told first, then the longest-waiting, then the new.
+
+    A host plans one item at a time and loops; the order is what decides which
+    question its next purchase answers.
+    """
+    named = set(only_sources or ())
+    oldest: dict[str, str] = {}
+    for row in (read.ledger.get("nodes") or {}).values():
+        source_path, at = collapsed_text(row.get("source_path")), collapsed_text(row.get("at"))
+        if source_path and at and at < oldest.get(source_path, "~"):
+            oldest[source_path] = at
+
+    def rank(entry):
+        source_path, _rows = entry
+        if source_path in named:
+            return (0, "", source_path)
+        seen = oldest.get(source_path)
+        return (1, seen, source_path) if seen else (2, "", source_path)
+
+    return sorted(pending, key=rank)
+
+
+def _groups(read: _Read, rows: list[dict], *, unanswered_only: bool) -> list[list[dict]]:
+    """One item per story — except the rows a previous round left unanswered."""
+    fresh, again = [], []
+    for target in rows:
+        row = read.row(target["node_id"])
+        (again if collapsed_text(row.get("status")) == "no_answer_returned" else fresh).append(target)
+    groups = [] if unanswered_only or not fresh else [fresh]
+    groups += [again[start:start + CHUNK] for start in range(0, len(again), CHUNK)]
+    return groups
+
+
+def plan_items(root: Path, *, limit: int = 1, only_sources=None, retry_failed: bool = False,
+               force: bool = False, model: str = DEFAULT_MODEL, read: _Read | None = None,
+               restrict: bool = False, unanswered_only: bool = False) -> dict:
+    """Leg A. What is still unplaced, and the exact prompt that would place it.
+
+    Read-only: nothing under the vault is touched — no ledger, no filing, no
+    publish, no response cache. ``only_sources`` orders the named stories first
+    (that is the story the person just told); ``restrict=True`` makes it a
+    filter instead, which is what the local run and the batch hook want.
+    """
+    read = read or _Read(root)
+    pending, deterministic = _pending(read, only_sources=only_sources, retry_failed=retry_failed,
+                                      force=force, restrict=restrict)
+    items: list[dict] = []
+    cap = max(0, int(limit))
+    for source_path, rows in _ordered(read, pending, only_sources):
+        for group in _groups(read, rows, unanswered_only=unanswered_only):
+            if len(items) >= cap:
+                break
+            node_ids = [target["node_id"] for target in group]
+            passages = _retrieve(read.fts, group, source_path)
+            items.append({
+                "key": _digest({"source": source_path, "nodes": node_ids, "model": model})[7:39],
+                "source_path": source_path,
+                "node_ids": node_ids,
+                "prompt": build_prompt(source_path=source_path, story=_story_text(root, source_path),
+                                       rows=group, sp=read.spine, passages=passages),
+                "identity": {
+                    "source_sha256": _source_sha256(root, source_path),
+                    "spine_digest": read.spine_digest,
+                    "targets_digest": _targets_digest(node_ids, read.by_node),
+                },
+            })
+        if len(items) >= cap:
+            break
+    pending_events = sum(len(rows) for _s, rows in pending)
+    remaining_events = pending_events - sum(len(item["node_ids"]) for item in items)
+    # Filing this plan also files every bare age handle (that is what leg C
+    # does first), so they only keep the vault incomplete when nothing is being
+    # filed at all.
+    remaining_deterministic = 0 if items else len(deterministic)
+    return {
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "extractor_version": EXTRACTOR_VERSION,
+        "model_hint": model,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
+        "items": items,
+        "pending_sources": len(pending),
+        "pending_events": pending_events,
+        "deterministic_pending": len(deterministic),
+        "complete": not remaining_events and not remaining_deterministic,
+    }
+
+
+def write_plan(plan: dict, out: object, *, vault_root: Path) -> Path:
+    """Write a plan to ``out``, which must be OUTSIDE the vault.
+
+    A plan is a host's scratch file, not vault data: it holds prompts, and
+    prompts are a reconstruction of the vault rather than a record of it. The
+    vault's own no-follow writer is the authority for vault paths and is not a
+    general-purpose file API, so an ``--out`` inside the vault root is refused
+    rather than quietly filed where a fold would later read it.
+    """
+    destination = Path(out).expanduser().resolve()
+    root = Path(vault_root).resolve()
+    if destination == root or root in destination.parents:
+        raise ValueError(f"--out must be outside the vault root ({root}): {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Deliberately the builtin writer: this path is not a vault path, and
+    # routing it through `vault_paths` would claim an authority over it that
+    # the vault does not have.
+    with open(destination, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(plan, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+    return destination
+
+
+def _unanswered(read: _Read, target: dict, *, source_path: str, model: str, now: str,
+                spine_changed: bool) -> None:
+    """The model returned nothing for this moment. Remember that it was asked."""
+    entry = {"label": target["label"], "source_path": source_path, "model": model, "at": now,
+             "status": "no_answer_returned", "attempts": _attempts(read.row(target["node_id"])) + 1}
+    if spine_changed:
+        entry["spine_changed"] = True
+    read.ledger["nodes"][target["node_id"]] = entry
+
+
+def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: str, passages: dict,
+            source_path: str, model: str, now: str, spine_changed: bool) -> None:
+    """Verify, file, remember — for every moment the item was planned for."""
+    answers = {collapsed_text(a.get("node_id")): a for a in parse_answers(text)}
+    for target in rows:
+        node_id = target["node_id"]
+        item = answers.get(node_id)
+        if item is None:
+            _unanswered(read, target, source_path=source_path, model=model, now=now,
+                        spine_changed=spine_changed)
+            report["outcomes"]["no_answer_returned"] += 1
+            continue
+        entry = {"label": target["label"], "source_path": source_path, "model": model, "at": now,
+                 "fact_key": collapsed_text(item.get("fact_key")) or None}
+        if spine_changed:
+            # The frame moved after the prompt was built. The citations are
+            # still verified against the text as it is now, so this is a note
+            # on the reading, not a reason to throw it away.
+            entry["spine_changed"] = True
+        resolved, why = verify(item, story=story, passages=passages, sp=read.spine,
+                               story_path=source_path)
+        if resolved is not None:
+            entry.update({"answer": resolved["record"], "basis": resolved["basis"],
+                          "confidence": resolved["confidence"], "citations": resolved["citations"],
+                          "reason": resolved["reason"]})
+            try:
+                entry.update({"status": "resolved", **file_resolution(
+                    read.root, target, resolved, story_path=source_path, model=model, now=now,
+                    prior=read.prior)})
+                report["filed"] += 1
+                report["bases"][resolved["basis"]] += 1
+            except Exception as exc:  # noqa: BLE001
+                entry.update({"status": "file_error", "error": type(exc).__name__, "detail": str(exc)[:200]})
+                report.setdefault("error_samples", []).append(f"{node_id}: {str(exc)[:160]}")
+        elif item.get("answer") is None:
+            entry.update({"status": "unknown", "question": collapsed_text(item.get("question")) or None,
+                          "also_resolves": [collapsed_text(x) for x in item.get("also_resolves") or ()],
+                          "reason": collapsed_text(item.get("reason"))[:400]})
+        else:
+            entry.update({"status": "unverified", "why": why, "proposed": item.get("answer"),
+                          "reason": collapsed_text(item.get("reason"))[:400]})
+        report["outcomes"][entry["status"]] += 1
+        read.ledger["nodes"][node_id] = entry
+
+
+def _file_deterministic(read: _Read, report: dict, deterministic: list, *, now: str) -> None:
+    """A bare age where an anchor should be is arithmetic, not a question."""
+    birth = read.spine["birth"]
+    for source_path, target, (age, relation) in deterministic:
+        resolved = {"record": age_range(birth, age, relation), "basis": "derived", "confidence": 0.9,
+                    "citations": [{"doc": "spine", "quote": f"Born: {birth}"}],
+                    "fact_key": f"age_{age}",
+                    "reason": f"The handle is the bare age {age} ({relation or 'within'}); computed from the birth date."}
+        try:
+            filed = file_resolution(read.root, target, resolved, story_path=source_path,
+                                    model="deterministic", now=now, prior=read.prior)
+            read.ledger["nodes"][target["node_id"]] = {
+                "label": target["label"], "source_path": source_path, "model": "deterministic",
+                "at": now, "status": "resolved", "answer": resolved["record"], "basis": "derived",
+                "confidence": 0.9, "citations": resolved["citations"], "fact_key": resolved["fact_key"],
+                "reason": resolved["reason"], **filed}
+            report["filed"] += 1
+            report["bases"]["derived"] += 1
+            report["outcomes"]["resolved"] += 1
+        except Exception as exc:  # noqa: BLE001
+            report["outcomes"]["file_error:" + type(exc).__name__] += 1
+            report.setdefault("error_samples", []).append(f"{target['node_id']}: {str(exc)[:200]}")
+
+
+def _republish(root: Path) -> None:
+    import event_identity as ei  # noqa: PLC0415
+    import timeline  # noqa: PLC0415
+
+    store.rebuild_active_index(root)
+    ei.rebuild_telling_manifest(root)
+    timeline.publish_calculated_timeline(root)
+
+
+def file_envelope(root: Path, envelope: object, *, now: str, model: str | None = None,
+                  read: _Read | None = None, only_sources=None, restrict: bool = False,
+                  retry_failed: bool = False, force: bool = False, deterministic: bool = True,
+                  finalize: bool = True) -> dict:
+    """Leg C. File the answers a plan asked for: verify, file, remember, publish.
+
+    The passages a citation is checked against are RE-RETRIEVED here rather
+    than carried across the wire: the same vault bytes retrieve the same
+    passages, so a host never has to store them and can never send stale ones.
+
+    An item whose story changed since the plan was built is refused
+    (``stale_source``), as is one whose moments are no longer the moments it
+    was planned for (``stale_targets``) — which is also what makes filing the
+    same envelope twice file nothing the second time. A moved spine is a note
+    on the ledger entry, not a refusal: the citations are verified against the
+    text either way.
+
+    Raises ``ValueError`` on an envelope that is not one; nothing is written.
+    """
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("items"), list):
+        raise ValueError("an envelope is an object with an `items` list")
+    model = collapsed_text(model) or collapsed_text(envelope.get("model")) or DEFAULT_MODEL
+    read = read or _Read(root)
+    report: dict = {"filed": 0, "outcomes": collections.Counter(), "bases": collections.Counter(),
+                    "usage": collections.Counter(), "refused_items": []}
+    if deterministic:
+        _file_deterministic(read, report, _pending(
+            read, only_sources=only_sources, retry_failed=retry_failed, force=force,
+            restrict=restrict)[1], now=now)
+    for raw in envelope["items"]:
+        if not isinstance(raw, dict):
+            report["refused_items"].append({"key": "", "reason": "item_not_an_object"})
+            continue
+        key = collapsed_text(raw.get("key"))
+        source_path = collapsed_text(raw.get("source_path"))
+        node_ids = [collapsed_text(n) for n in raw.get("node_ids") or () if collapsed_text(n)]
+        identity = raw.get("identity") if isinstance(raw.get("identity"), dict) else {}
+        if collapsed_text(identity.get("source_sha256")) != _source_sha256(root, source_path):
+            report["refused_items"].append({"key": key, "reason": "stale_source"})
+            continue
+        if collapsed_text(identity.get("targets_digest")) != _targets_digest(node_ids, read.by_node):
+            report["refused_items"].append({"key": key, "reason": "stale_targets"})
+            continue
+        spine_changed = collapsed_text(identity.get("spine_digest")) != read.spine_digest
+        rows = [read.by_node[node_id][1] for node_id in node_ids]
+        for name, value in (raw.get("usage") or {}).items():
+            if isinstance(value, int):
+                report["usage"][name] += value
+        text = raw.get("text") if isinstance(raw.get("text"), str) else ""
+        if raw.get("truncated") or not text.strip():
+            for target in rows:
+                _unanswered(read, target, source_path=source_path, model=model, now=now,
+                            spine_changed=spine_changed)
+                report["outcomes"]["no_answer_returned"] += 1
+            continue
+        _absorb(read, report, rows, text=text, story=_story_text(root, source_path),
+                passages={d["doc_id"]: d for d in _retrieve(read.fts, rows, source_path)},
+                source_path=source_path, model=model, now=now, spine_changed=spine_changed)
+    if finalize:
+        save_ledger(root, read.ledger)
+        if report["filed"]:
+            _republish(root)
+    remaining, remaining_deterministic = _pending(read)
+    report["outcomes"] = dict(report["outcomes"])
+    report["bases"] = dict(report["bases"])
+    report["usage"] = dict(report["usage"])
+    report["remaining_events"] = sum(len(rows) for _s, rows in remaining)
+    report["remaining_sources"] = len(remaining)
+    report["complete"] = not report["remaining_events"] and not remaining_deterministic
+    report["open_questions"] = open_questions(read.ledger)[:25]
+    return report
+
 
 def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurrency: int,
                   only_sources: set[str] | None, force: bool, now: str, retry_failed: bool = False) -> dict:
-    import event_identity as ei  # noqa: PLC0415
-    import temporal_publication as pub  # noqa: PLC0415
+    """The local run: the two legs composed in one process, with the cache between.
 
-    projection = pub.read_projection(root) or {}
-    index = store.fold_active_index(root)
-    ledger = load_ledger(root)
-    sp = spine(root, projection)
-    docs = story_documents(root) + fact_documents(root, projection)
-    fts = Index(docs)
-    all_targets = targets(root, projection, index)
-    prior = prior_resolver_claims(index)
-    pending: list[tuple[str, list[dict]]] = []
-    deterministic: list[tuple[str, dict, int]] = []
-    for source_path in sorted(all_targets):
-        if only_sources and source_path not in only_sources:
-            continue
-        rows = []
-        for r in all_targets[source_path]:
-            status = (ledger["nodes"].get(r["node_id"]) or {}).get("status")
-            settled = ("resolved", "unknown") if retry_failed else ("resolved", "unknown", *RETRY_STATUSES)
-            if not force and status in settled:
-                continue
-            # A bare age written where an anchor should be is arithmetic against
-            # the birth date; it needs no model and no question.
-            aged = [(age_from_handle(a), h.get("relation")) for h in r["handles"] for a in (h.get("anchors") or ())]
-            aged = [(a, rel) for a, rel in aged if a is not None]
-            if aged and sp["birth"] and len({a for a, _ in aged}) == 1 and age_range(sp["birth"], aged[0][0], aged[0][1]):
-                deterministic.append((source_path, r, aged[0]))
-            else:
-                rows.append(r)
-        if rows:
-            pending.append((source_path, rows))
-    report = {"model": model, "execute": execute, "sources_with_targets": len(all_targets),
-              "sources_pending": len(pending), "events_pending": sum(len(r) for _s, r in pending),
-              "deterministic_age_handles": len(deterministic),
-              "selected": min(limit, len(pending)), "outcomes": collections.Counter(), "usage": collections.Counter(),
-              "filed": 0, "errors": 0, "bases": collections.Counter()}
-    if execute:
-        for source_path, target, (age, relation) in deterministic:
-            resolved = {"record": age_range(sp["birth"], age, relation), "basis": "derived", "confidence": 0.9,
-                        "citations": [{"doc": "spine", "quote": f"Born: {sp['birth']}"}],
-                        "fact_key": f"age_{age}", "reason": f"The handle is the bare age {age} ({relation or 'within'}); computed from the birth date."}
-            try:
-                filed = file_resolution(root, target, resolved, story_path=source_path, model="deterministic", now=now, prior=prior)
-                ledger["nodes"][target["node_id"]] = {"label": target["label"], "source_path": source_path, "model": "deterministic",
-                                                     "at": now, "status": "resolved", "answer": resolved["record"], "basis": "derived",
-                                                     "confidence": 0.9, "citations": resolved["citations"], "fact_key": resolved["fact_key"],
-                                                     "reason": resolved["reason"], **filed}
-                report["filed"] += 1; report["bases"]["derived"] += 1; report["outcomes"]["resolved"] += 1
-            except Exception as exc:  # noqa: BLE001
-                report["outcomes"]["file_error:" + type(exc).__name__] += 1
-                report.setdefault("error_samples", []).append(f"{target['node_id']}: {str(exc)[:200]}")
-    pending = pending[:limit]
-    if not execute:
-        sample = pending[:1]
-        if sample:
-            source_path, rows = sample[0]
-            passages = _retrieve(fts, rows, source_path)
-            report["sample_prompt_chars"] = len(build_prompt(
-                source_path=source_path, story=_story_text(root, source_path), rows=rows, sp=sp, passages=passages))
-            report["sample_source"] = source_path
-            report["sample_passages"] = [d["doc_id"] for d in passages]
-        report["outcomes"] = dict(report["outcomes"]); report["usage"] = dict(report["usage"]); report["bases"] = dict(report["bases"])
+    Round 1 plans one item per pending story and buys it; round 2 re-asks, in
+    chunks, the moments round 1 came back silent about. Both rounds are plans
+    and both are filed through `file_envelope`, so a host that runs the legs
+    separately gets exactly what the local run gets.
+    """
+    read = _Read(root)
+    plan = plan_items(root, limit=max(1, limit), only_sources=only_sources, retry_failed=retry_failed,
+                      force=force, model=model, read=read, restrict=True)
+    report: dict = {"model": model, "execute": execute, "sources_with_targets": len(read.targets),
+                    "sources_pending": plan["pending_sources"], "events_pending": plan["pending_events"],
+                    "deterministic_age_handles": plan["deterministic_pending"],
+                    "selected": min(limit, plan["pending_sources"]),
+                    "outcomes": collections.Counter(), "usage": collections.Counter(),
+                    "filed": 0, "errors": 0, "bases": collections.Counter()}
+
+    def flatten() -> dict:
+        report["outcomes"] = dict(report["outcomes"])
+        report["usage"] = dict(report["usage"])
+        report["bases"] = dict(report["bases"])
         return report
 
+    if not execute:
+        if plan["items"]:
+            item = plan["items"][0]
+            rows = [read.by_node[n][1] for n in item["node_ids"] if n in read.by_node]
+            report["sample_prompt_chars"] = len(item["prompt"])
+            report["sample_source"] = item["source_path"]
+            report["sample_passages"] = [d["doc_id"] for d in _retrieve(read.fts, rows, item["source_path"])]
+        return flatten()
+
     complete = make_completer(model)
-    CHUNK = 4
 
-    def prepare(source_path: str, rows: list[dict]):
-        story = _story_text(root, source_path)
-        passages = _retrieve(fts, rows, source_path)
-        prompt = build_prompt(source_path=source_path, story=story, rows=rows, sp=sp, passages=passages)
-        key = _digest({"source": source_path, "nodes": [r["node_id"] for r in rows], "model": model})[7:39]
-        return (source_path, rows, story, {d["doc_id"]: d for d in passages}, prompt, key)
-
-    def work(item):
-        source_path, rows, story, passages, prompt, key = item
+    def buy(item: dict) -> dict:
+        """One purchase, durable before anything reads it; a rerun never buys twice."""
+        key = item["key"]
+        answered = {name: item[name] for name in ("key", "source_path", "node_ids", "identity")}
         cached = _json(_response_path(root, key), None)
         # A saved response is reused only when it is a usable answer: a cut-off
         # or unparseable one is bought again, in a smaller chunk.
         if (isinstance(cached, dict) and isinstance(cached.get("text"), str) and cached["text"].strip()
                 and not cached.get("truncated") and parse_answers(cached["text"])):
-            return source_path, rows, story, passages, cached["text"], {"cached": 1}
-        text, usage = complete(prompt, key)
+            return {**answered, "text": cached["text"], "usage": {"cached": 1}, "truncated": False}
+        text, usage = complete(item["prompt"], key)
         truncated = usage.get("stop_reason") == "max_tokens" or not text.strip()
-        _save_response(root, key, {"key": key, "source_path": source_path, "model": model,
-                                   "nodes": [r["node_id"] for r in rows], "usage": usage, "text": text,
+        _save_response(root, key, {"key": key, "source_path": item["source_path"], "model": model,
+                                   "nodes": item["node_ids"], "usage": usage, "text": text,
                                    "truncated": truncated})
-        return source_path, rows, story, passages, ("" if truncated else text), usage
+        return {**answered, "text": ("" if truncated else text), "usage": usage, "truncated": truncated}
 
-    def fan_out(items):
-        results = []
+    def fan_out(items: list[dict]) -> list[dict]:
+        bought: list[dict] = []
         with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-            futures = [pool.submit(work, item) for item in items]
+            futures = [pool.submit(buy, item) for item in items]
             for future in as_completed(futures):
                 try:
-                    results.append(future.result())
+                    bought.append(future.result())
                 except Exception as exc:  # noqa: BLE001
                     report["errors"] += 1
                     report["outcomes"]["call_error:" + type(exc).__name__] += 1
                     report.setdefault("error_samples", []).append(str(exc)[:200])
-        return results
+        return bought
 
-    def absorb(results) -> list[tuple[str, dict]]:
-        """File what verified; return the (source, target) pairs that got no row."""
-        missing: list[tuple[str, dict]] = []
-        for source_path, rows, story, passages, text, usage in results:
-            for k, v in usage.items():
-                if isinstance(v, int):
-                    report["usage"][k] += v
-            answers = {collapsed_text(a.get("node_id")): a for a in parse_answers(text)}
-            for target in rows:
-                node_id = target["node_id"]
-                item = answers.get(node_id)
-                if item is None:
-                    missing.append((source_path, target))
-                    continue
-                entry = {"label": target["label"], "source_path": source_path, "model": model, "at": now,
-                         "fact_key": collapsed_text(item.get("fact_key")) or None}
-                resolved, why = verify(item, story=story, passages=passages, sp=sp, story_path=source_path)
-                if resolved is not None:
-                    entry.update({"answer": resolved["record"], "basis": resolved["basis"],
-                                  "confidence": resolved["confidence"], "citations": resolved["citations"],
-                                  "reason": resolved["reason"]})
-                    try:
-                        entry.update({"status": "resolved", **file_resolution(
-                            root, target, resolved, story_path=source_path, model=model, now=now, prior=prior)})
-                        report["filed"] += 1
-                        report["bases"][resolved["basis"]] += 1
-                    except Exception as exc:  # noqa: BLE001
-                        entry.update({"status": "file_error", "error": type(exc).__name__, "detail": str(exc)[:200]})
-                        report.setdefault("error_samples", []).append(f"{node_id}: {str(exc)[:160]}")
-                elif item.get("answer") is None:
-                    entry.update({"status": "unknown", "question": collapsed_text(item.get("question")) or None,
-                                  "also_resolves": [collapsed_text(x) for x in item.get("also_resolves") or ()],
-                                  "reason": collapsed_text(item.get("reason"))[:400]})
-                else:
-                    entry.update({"status": "unverified", "why": why, "proposed": item.get("answer"),
-                                  "reason": collapsed_text(item.get("reason"))[:400]})
-                report["outcomes"][entry["status"]] += 1
-                ledger["nodes"][node_id] = entry
-        return missing
+    def file_round(round_plan: dict, *, deterministic: bool) -> dict:
+        envelope = {"schema_version": ENVELOPE_SCHEMA_VERSION, "model": model,
+                    "items": fan_out(round_plan["items"])}
+        sub = file_envelope(root, envelope, now=now, model=model, read=read, only_sources=only_sources,
+                            restrict=True, retry_failed=retry_failed, force=force,
+                            deterministic=deterministic, finalize=False)
+        report["filed"] += sub["filed"]
+        for name, value in sub["outcomes"].items():
+            report["outcomes"][name] += value
+        for name, value in sub["bases"].items():
+            report["bases"][name] += value
+        for name, value in sub["usage"].items():
+            report["usage"][name] += value
+        for name in ("refused_items", "error_samples"):
+            if sub.get(name):
+                report.setdefault(name, []).extend(sub[name])
+        return sub
 
-    # Round 1: one call per story. Round 2: the events that came back without a
-    # row (a truncated or partial answer) are re-asked in small chunks so a long
-    # story cannot starve its own moments.
-    missing = absorb(fan_out([prepare(s, r) for s, r in pending]))
-    report["round1_missing"] = len(missing)
-    by_source: dict[str, list[dict]] = collections.defaultdict(list)
-    for source_path, target in missing:
-        by_source[source_path].append(target)
-    round2 = []
-    for source_path, rows in by_source.items():
-        for start in range(0, len(rows), CHUNK):
-            round2.append(prepare(source_path, rows[start:start + CHUNK]))
-    still_missing = absorb(fan_out(round2)) if round2 else []
-    for source_path, target in still_missing:
-        ledger["nodes"][target["node_id"]] = {"label": target["label"], "source_path": source_path, "model": model,
-                                             "at": now, "status": "no_answer_returned"}
-        report["outcomes"]["no_answer_returned"] += 1
-    save_ledger(root, ledger)
+    first = file_round(plan, deterministic=True)
+    report["round1_missing"] = first["outcomes"].get("no_answer_returned", 0)
+    if plan["items"]:
+        # Round 2: only the moments round 1 came back silent about, in chunks
+        # of CHUNK, and only within the stories round 1 actually asked about.
+        again = plan_items(root, limit=_UNBOUNDED, only_sources={i["source_path"] for i in plan["items"]},
+                           retry_failed=retry_failed, model=model, read=read, restrict=True,
+                           unanswered_only=True)
+        if again["items"]:
+            file_round(again, deterministic=False)
+    save_ledger(root, read.ledger)
     if report["filed"]:
-        store.rebuild_active_index(root)
-        ei.rebuild_telling_manifest(root)
-        import timeline  # noqa: PLC0415
-        timeline.publish_calculated_timeline(root)
-    report["outcomes"] = dict(report["outcomes"]); report["usage"] = dict(report["usage"]); report["bases"] = dict(report["bases"])
-    report["open_questions"] = open_questions(ledger)[:25]
-    return report
+        _republish(root)
+    report["open_questions"] = open_questions(read.ledger)[:25]
+    return flatten()
 
 
 def _retrieve(fts: Index, rows: list[dict], source_path: str) -> list[dict]:
@@ -1073,29 +1421,60 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault-root", type=Path, required=True)
     parser.add_argument("--execute", action="store_true", help="call the model and file verified answers")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--limit", type=int, default=20, help="sources per invocation")
+    parser.add_argument("--model", default=None, help=f"model id (default {DEFAULT_MODEL}); with --from-response, overrides the envelope's own")
+    parser.add_argument("--limit", type=int, default=None, help="items per plan (default 1) / sources per local run (default 20)")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--force", action="store_true", help="re-resolve nodes already in the ledger")
     parser.add_argument("--retry-failed", action="store_true", help="re-verify unverified, unanswered and unfiled nodes (cached responses cost nothing)")
     parser.add_argument("--eval", type=Path, help="JSON list of {question, expected:{earliest,latest}, hint}")
     parser.add_argument("--refile", action="store_true", help="re-file ledger answers without a model call, then publish")
+    # The two legs a host runs separately (ADR 0037). --plan reads and writes
+    # nothing under the vault; --from-response files an envelope of answers
+    # exactly as the local --execute run files its own.
+    parser.add_argument("--plan", action="store_true", help="write the prompts a host should buy to --out; touches nothing in the vault")
+    parser.add_argument("--out", type=Path, help="where --plan writes its JSON (must be outside the vault root)")
+    parser.add_argument("--from-response", type=Path, help="file the answers in a response envelope a host bought")
     args = parser.parse_args()
     root = args.vault_root.resolve()
     os.environ.setdefault("LIFEHUG_VAULT_ROOT", str(root))
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    model = args.model or DEFAULT_MODEL
+    limit = args.limit if args.limit is not None else (1 if args.plan else 20)
+    if args.plan:
+        if args.out is None:
+            parser.error("--plan writes a file: pass --out")
+        plan = plan_items(root, limit=limit, only_sources=set(args.source) or None,
+                          retry_failed=args.retry_failed, model=model)
+        try:
+            written = write_plan(plan, args.out, vault_root=root)
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps({**{k: v for k, v in plan.items() if k != "items"},
+                          "out": str(written), "items": len(plan["items"]),
+                          "keys": [item["key"] for item in plan["items"]]},
+                         indent=1, ensure_ascii=False))
+        return 0
+    if args.from_response:
+        try:
+            report = file_envelope(root, _json(args.from_response, None), now=now, model=args.model)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(report, indent=1, ensure_ascii=False, default=str))
+        return 0
     if args.refile:
         print(json.dumps(refile_from_ledger(root, now=now, only_sources=set(args.source) or None), indent=1))
         return 0
     if args.eval:
-        graded = answer_questions(root, _json(args.eval, []), model=args.model)
+        graded = answer_questions(root, _json(args.eval, []), model=model)
         print(json.dumps(graded, indent=1, ensure_ascii=False))
         total = len(graded)
         print(f"\nEVAL: {sum(g['overlap'] for g in graded)}/{total} overlap, {sum(g['exact'] for g in graded)}/{total} exact, "
               f"{sum(g['verified'] for g in graded)}/{total} verified")
         return 0
-    report = resolve_vault(root, model=args.model, execute=args.execute, limit=args.limit, concurrency=args.concurrency,
+    report = resolve_vault(root, model=model, execute=args.execute, limit=limit, concurrency=args.concurrency,
                            only_sources=set(args.source) or None, force=args.force, now=now,
                            retry_failed=args.retry_failed)
     print(json.dumps(report, indent=1, ensure_ascii=False, default=str))
