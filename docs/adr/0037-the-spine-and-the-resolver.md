@@ -4,7 +4,8 @@ Date: 2026-09-19
 Status: accepted (owner ruling, 2026-09-18/19)
 Extends: ADR 0024 (chronology with basis), ADR 0026 (cross-dating),
 ADR 0028 (the landmark recorder), ADR 0031 (event identity)
-Shipped: v314 (`system/resolver.py`, lifehug#362); v315 amends the shape rule
+Shipped: v314 (`system/resolver.py`, lifehug#362); v315 amends the shape rule;
+v316 adds the two legs for hosts
 
 ## Context
 
@@ -67,6 +68,55 @@ the user adds keystones and landmarks to improve it.*
    two stays that look alike are an identity problem for the roster, not a
    dating problem.
 
+## Amendment (v316): two legs, so a host can run the same loop
+
+Decision 5 said where the resolver runs, and both seats assumed one process
+holding a key. A hosted vault has neither: the platform runs this package
+keyless through an extraction seam, buys the completion itself, and may
+deliver the same answer twice. So the same work is expressed as two pure legs
+with the vault in between, and the local run becomes those legs composed.
+
+6. **A plan is read-only.** `resolver.plan_items` (`resolve --plan --out
+   <path>`) answers *which moments are still unplaced, and what exactly would
+   be asked about them*: one item per story, each with the full prompt and an
+   identity stamp — the story's bytes (`source_sha256`), the spine
+   (`spine_digest`) and the moments with the raw handles they would retire
+   (`targets_digest`). It touches nothing under the vault: no ledger, no
+   filing, no publish, no response cache, and an `--out` inside the vault root
+   is refused rather than written. The ordering is the story the person just
+   told (`--source`) first, then the longest-waiting, then the never-seen, so
+   a host that plans one item at a time and loops converges on the whole
+   vault. `complete` says when that loop is done. Bare age handles are never
+   planned — they are counted and answered by arithmetic.
+7. **An envelope is filed against the vault as it is now.** `file_envelope`
+   (`resolve --from-response <envelope.json>`) re-retrieves the passages a
+   citation is checked against rather than trusting any that travelled with
+   the answer, so a host stores no evidence and can send none that is stale.
+   An item whose story changed under the plan is refused (`stale_source`); one
+   whose moments are no longer the moments it was planned for is refused
+   (`stale_targets`), which is also what makes filing the same envelope twice
+   file nothing the second time — the property a host's replay relies on. A
+   moved spine is recorded as `spine_changed` on the ledger entry and is not a
+   refusal: the citations are verified against the current text either way.
+8. **Twice, then stop asking.** A ledger entry counts its `attempts`. The
+   second round — the moments a model came back silent about, re-asked in
+   chunks of four — used to be a loop inside one call; it is now a re-entrant
+   consequence of the ledger, so a host gets it from planning again. A moment
+   that returns nothing twice is not bought a third time without
+   `--retry-failed`.
+9. **The card asks the resolver's question.** When the ledger holds a
+   `question` for a node, `temporal_publication.publish` puts it on that
+   node's work item as `prompt_intent`, with `question_source: "resolver"`,
+   instead of the generic sentence composed from a label. The ledger is read,
+   never folded: it is the resolver's memory of what it asked, not a claim
+   about the person's life, so `CALCULATION_RULE_VERSION` does not move for a
+   better sentence.
+
+`resolve --execute` and `classification_refresh.run_batch` are unchanged in
+behaviour: they are leg A → the completer → leg C, composed in memory with the
+same response cache. No prompt text change, no rule-version change, no schema
+change.
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or
@@ -82,9 +132,11 @@ the user adds keystones and landmarks to improve it.*
   1,164 and open work items from 859 to 70; the remaining questions are the
   ones only the owner can answer.
 - The hosted platform adopts the framework by pin. At the v314/v315 pin the
-  hosted classify path gains the placement, tenure and owner-name fixes; the
-  hosted worker does not yet call the resolver, which needs a model-router
-  purpose and a filing mutation of its own (catalogued `defer`).
+  hosted classify path gained the placement, tenure and owner-name fixes but
+  the hosted worker still could not call the resolver, which needs a
+  model-router purpose and a filing mutation of its own. v316's two legs are
+  the package's half of that: the platform's `resolve` purpose plans with leg
+  A, buys the completion, and files with leg C as the classify successor.
 - Complexity budget: the intended shape is *spine + model + verification +
   ledger*. New placement rules should improve the spine or the verifier, not
   add joins in front of the model.

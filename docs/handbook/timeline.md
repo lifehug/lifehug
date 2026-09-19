@@ -411,7 +411,13 @@ identity problem), never edits a source, and lets owner statements outrank
 inference with the latest dated correction winning. It runs after every
 accepted classification batch (`classification_refresh.run_batch`) and by hand
 as `lifehug resolve --execute`; `--eval` answers known-answer questions without
-filing. Design and consequences: [ADR 0037](../adr/0037-the-spine-and-the-resolver.md).
+filing. Since v316 that run is also available as two halves a host can run
+apart — `lifehug resolve --plan --out <file>` writes the prompts it would buy
+and touches nothing in the vault, `lifehug resolve --from-response <envelope>`
+files the answers that come back (refusing any whose story has changed since),
+and a card carries the resolver's own proposed question rather than the
+generic one. Design and consequences:
+[ADR 0037](../adr/0037-the-spine-and-the-resolver.md).
 
 ## 4. The algorithm
 
