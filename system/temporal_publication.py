@@ -496,6 +496,7 @@ def publish(
     landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
+    owner_names: object = (),
     now: object = None,
     correction_ref: object = None,
 ) -> dict:
@@ -550,6 +551,7 @@ def publish(
         index,
         resolution_records=resolution_records,
         roster_snapshot=roster_snapshot,
+        owner_names=owner_names,
         **load_derivation_inputs(
             vault_root,
             event_resolution_records=event_resolution_records,
@@ -962,6 +964,7 @@ def verify(
     landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
+    owner_names: object = (),
     now: object = None,
 ) -> dict:
     """Does the published projection still reproduce from the substrate?
@@ -984,6 +987,7 @@ def verify(
         index,
         resolution_records=resolution_records,
         roster_snapshot=roster_snapshot,
+        owner_names=owner_names,
         **load_derivation_inputs(
             vault_root,
             event_resolution_records=event_resolution_records,

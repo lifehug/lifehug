@@ -169,12 +169,19 @@ UNRESOLVED_REASON = "unresolved"
 #: recorded on the record like every other resolution so it is visible and
 #: reversible rather than a silent rewrite of the receipt.
 OWNER_BIRTH_DOMAIN_REASON = "owner_birth_domain_word"
+#: A roster entity that bears the owner's own name IS the owner. A roster built
+#: from the owner's answers will list the owner among the people it found, and
+#: resolving "Dave" to that entity drew a hundred of the owner's own moments as
+#: somebody else's life. The profile names the owner; the roster does not get
+#: to make a stranger of that name.
+OWNER_NAME_REASON = "owner_own_name"
 
 #: The legacy spelling that rule answers to.
 LEGACY_OWNER_BIRTH_MENTION = "birth"
 
 RESOLUTION_REASONS = DETERMINISTIC_REASONS + (
     OWNER_BIRTH_DOMAIN_REASON,
+    OWNER_NAME_REASON,
     MODEL_REASON,
     OWNER_REASON,
     UNRESOLVED_REASON,
@@ -810,6 +817,47 @@ def owner_birth_domain_resolution(
     )
 
 
+def owner_name_refs(roster: object, owner_names: object) -> frozenset[str]:
+    """The roster refs that answer to one of the owner's own names."""
+    refs: set[str] = set()
+    for name in owner_names or ():
+        text = collapsed_text(name)
+        if not text:
+            continue
+        for match in candidates_for(text, roster):
+            ref = collapsed_text(match.get("ref"))
+            if ref:
+                refs.add(ref)
+    return frozenset(refs)
+
+
+def owner_name_resolution(
+    mention: object,
+    *,
+    owner_ref: object,
+    evidence_ref: object,
+    now: object = None,
+) -> ResolutionRecord:
+    """The :data:`OWNER_NAME_REASON` rule, as a record: same shape and same
+    reversal path as the owner-birth rule and a roster match."""
+    ref = collapsed_text(owner_ref)
+    if not ref:
+        raise IdentityResolutionError(
+            "owner_ref_required", "the owner-name rule resolves to the owner's own handle"
+        )
+    return resolution_record(
+        {
+            "mention": mention,
+            "candidates": [{"ref": ref, "name": ref, "basis": "exact_ref"}],
+            "resolution": "same",
+            "resolved_ref": ref,
+            "reason": OWNER_NAME_REASON,
+            "evidence_ref": evidence_ref,
+        },
+        now=now,
+    )
+
+
 def unresolve(record: object, *, now: object = None) -> ResolutionRecord:
     """Reverse a resolution without destroying it (§6.3's "reversible").
 
@@ -1117,6 +1165,9 @@ __all__ = [
     "RESOLUTIONS",
     "RESOLUTION_REASONS",
     "OWNER_BIRTH_DOMAIN_REASON",
+    "OWNER_NAME_REASON",
+    "owner_name_refs",
+    "owner_name_resolution",
     "LEGACY_OWNER_BIRTH_MENTION",
     "is_owner_birth_domain_word",
     "owner_birth_domain_resolution",

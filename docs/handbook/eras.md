@@ -331,8 +331,8 @@ ladder, and whose refusal E-L2b (v277) completed with the rung's own condition
 container, no rebuild, sweep or rule bump puts it back — and event identity I1 took
 `timeline-rules:5` when grouping learned to read the identity layer, so the
 version in force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:7 -->
-`timeline-rules:7`, where usable placement also governs generic work items.
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:8 -->
+`timeline-rules:8`, where usable placement also governs generic work items.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*

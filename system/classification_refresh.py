@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,6 +84,35 @@ def _migrate(root: Path, sources: list[str] | None) -> dict:
         dry_run=False,
         publish=False,
     )
+
+
+def _resolve(root: Path, sources: list[str], *, model: str | None) -> dict:
+    """Date the accepted stories' undated moments from the whole vault.
+
+    Runs right after migration, so a story is placed in the same breath it is
+    filed and its answers are on disk before anyone is asked anything. A
+    resolver failure is reported, never raised: filing already succeeded and
+    the next run picks the story up again from its ledger.
+    """
+    if not sources or os.environ.get("LIFEHUG_RESOLVER", "1").strip() == "0":
+        return {"skipped": True}
+    try:
+        import resolver
+
+        return resolver.resolve_vault(
+            root, model=model or resolver.DEFAULT_MODEL, execute=True,
+            limit=max(1, len(sources)), concurrency=2, only_sources=set(sources),
+            force=False, now=_now_stamp(),
+        )
+    except Exception as exc:  # noqa: BLE001 — placement must never undo a filing
+        print(f"Resolver step failed ({type(exc).__name__}); stories stay filed.", file=sys.stderr)
+        return {"error": type(exc).__name__}
+
+
+def _now_stamp() -> str:
+    import time
+
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def run_batch(
@@ -221,3 +252,4 @@ def run_batch(
             }
         )
         _migrate(root, accepted)
+        _resolve(root, accepted, model=selected_model)
