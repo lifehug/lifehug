@@ -255,10 +255,10 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
                 normalized,
             )
             self.assertIn("candidate's WHOLE occurrence", normalized)
-            self.assertIn("before that duration starts", normalized)
+            self.assertIn("before it starts", normalized)
             self.assertIn("after it ends", normalized)
             self.assertIn('"early in", and "late in"', normalized)
-            self.assertIn('"After the wedding"', normalized)
+            self.assertIn('"two weeks after the wedding" are both `after`', normalized)
             self.assertIn("date.anchor_ref", normalized)
             self.assertNotIn("TIGHTEST SUPPORTED TIME BOUNDS", normalized)
             self.assertIn(

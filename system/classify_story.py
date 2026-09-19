@@ -697,17 +697,19 @@ Its independent `date.anchor_ref` may still retain a separate true before/after
 constraint to another event.
 
 Treat interval relations as relations to the candidate's WHOLE occurrence.
-When the supplied role and name explicitly represent a duration, `before` means
-before that duration starts and `after` means after it ends; "during", "while",
-"early in", and "late in" the duration are all `within`. Use the supplied
-`node_kind`, `event_role`, name, and bounds to distinguish a duration such as a
-marriage, residence, job, or term from a point occurrence such as a wedding.
-"After the wedding" may support `after` the wedding point, while "early in the
-marriage" supports `within` the marriage duration. A range on a point event may
-represent uncertainty, so never guess a duration or boundary the candidate does
-not state. If the quote does not establish the required whole-occurrence
-boundary, do not assert `before` or `after`. Apply the same direction and
-interval meaning to `date.anchor_ref` plus `date.relation`.
+Every candidate carries `temporal_shape`: `interval` for a duration such as a
+marriage, residence, job, or term, and `point` for a single occurrence such as
+a wedding day, a birth, a death, or a graduation. `within` is valid ONLY for an
+`interval` candidate; a `point` candidate supports only `before` or `after`,
+and `within` a point is refused. For an interval, `before` means before it
+starts and `after` means after it ends; "during", "while", "early in", and
+"late in" are all `within`. When the only supplied marriage candidate is the
+wedding day (a `point`), "early in my marriage" and "two weeks after the
+wedding" are both `after` that wedding, never `within`. A range on a point
+event may represent uncertainty, so never guess a duration or boundary the
+candidate does not state. If the quote does not establish the required
+whole-occurrence boundary, do not assert `before` or `after`. Apply the same
+direction and interval meaning to `date.anchor_ref` plus `date.relation`.
 """
 
 
@@ -1098,21 +1100,25 @@ def extract_json(text: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # Strip markdown code fences if present
-    fence_match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", stripped)
-    if fence_match:
+    # Strip markdown code fences if present. A model that narrates before
+    # answering can open a fence inside its prose, so every fenced block is
+    # tried, last first: the answer follows the narration.
+    for fence_match in reversed(list(re.finditer(r"```(?:json)?\s*([\s\S]+?)\s*```", stripped))):
         try:
             return require_object(json.loads(fence_match.group(1)))
         except json.JSONDecodeError:
-            pass
+            continue
 
-    # Find the first { ... } block
-    brace_match = re.search(r"\{[\s\S]+\}", stripped)
-    if brace_match:
+    # Decode a complete object starting at each brace, last candidate first;
+    # a greedy first-to-last brace span fails whenever prose holds a brace.
+    decoder = json.JSONDecoder()
+    for start in reversed([match.start() for match in re.finditer(r"\{", stripped)]):
         try:
-            return require_object(json.loads(brace_match.group(0)))
+            value, _end = decoder.raw_decode(stripped, start)
         except json.JSONDecodeError:
-            pass
+            continue
+        if isinstance(value, dict) and ("events" in value or "_classification_mode" in value):
+            return value
 
     raise AIResponseError(
         "AI response was not valid JSON",
@@ -1442,8 +1448,14 @@ def prepare_classification(
     skip_candidates: bool = False,
     require_mode: bool = False,
     strict_schema: bool = False,
+    salvage: bool = False,
 ) -> dict:
-    """Validate and normalize one result without writing any vault state."""
+    """Validate and normalize one result without writing any vault state.
+
+    ``salvage`` lets a per-event evidence failure downgrade that event to the
+    conservative state instead of refusing the whole response; every such
+    downgrade is kept on the classification as ``validation_downgrades``.
+    """
     if mode not in CLASSIFICATION_MODES:
         raise ClassificationPreparationError("unsupported mode", code="mode_invalid")
     fm, story_text = load_source_text(source_path)
@@ -1461,6 +1473,7 @@ def prepare_classification(
         include_candidates=not skip_candidates,
     )
     _path, existing = _existing_classification(source_path)
+    downgrades: list[dict] = []
     classifier_ctx.validate_response(
         result,
         snapshot,
@@ -1468,6 +1481,8 @@ def prepare_classification(
         mode=mode,
         existing_events=(existing or {}).get("events") if isinstance(existing, dict) else None,
         require_event_contract=(mode == "timeline" or strict_schema),
+        salvage=salvage,
+        downgrades=downgrades,
     )
     base_digest = _digest(existing) if isinstance(existing, dict) else ""
     expected_mode = classification_mode(
@@ -1519,6 +1534,7 @@ def prepare_classification(
         classification["classification_snapshot"] = classifier_ctx.snapshot_metadata(snapshot)
         classification["classified_at"] = classified_at
         classification["model_used"] = model
+        classification["validation_downgrades"] = downgrades
         new_candidates: list[dict] = []
         updated_store = candidate_store
     else:
@@ -1548,6 +1564,7 @@ def prepare_classification(
             snapshot, classification["events"]
         )
         classification[CLASSIFICATION_SKIP_CANDIDATES_FIELD] = bool(skip_candidates)
+        classification["validation_downgrades"] = downgrades
         if new_candidates:
             updated_store["candidates"].extend(new_candidates)
     return {
@@ -2306,6 +2323,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 skip_candidates=skip_candidates,
                 require_mode=True,
                 strict_schema=True,
+                salvage=True,
             )
             first_pass.append({**row, "status": prepared["status"], "snapshot": snapshot})
         except OSError:
@@ -2372,6 +2390,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 skip_candidates=skip_candidates,
                 require_mode=True,
                 strict_schema=True,
+                salvage=True,
             )
             virtual_store = prepared["candidate_store"]
             prepared_items.append((row, prepared))
@@ -2422,7 +2441,7 @@ def file_batch_response(payload: object, *, model: str = "external-agent") -> di
                 row["source"], model, result, mode=row["mode"],
                 snapshot=row["snapshot"], candidate_store=virtual_store,
                 skip_candidates=skip_candidates, require_mode=True,
-                strict_schema=True,
+                strict_schema=True, salvage=True,
             )
             if classifier_ctx.effective_source_revision(
                 REPO_DIR, row["source"]

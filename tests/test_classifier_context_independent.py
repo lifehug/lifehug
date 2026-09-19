@@ -194,8 +194,10 @@ class IndependentContextTests(unittest.TestCase):
         candidate = next(c for c in cc.build_context_snapshot(
             self.root, self.sources[2])["candidates"] if c["episode_id"] == self.episode_id)
         self.assertEqual(candidate["kind"], "episode")
-        self.assertEqual(candidate["entity_refs"], [])
-        self.assertEqual(candidate["unresolved_entity_mentions"], ["Cedar Shelter"])
+        # An owner-scoped residence named by its own label is the owner's stay;
+        # nothing here is borrowed from the retired claims.
+        self.assertEqual(candidate["entity_refs"], ["self"])
+        self.assertEqual(candidate["unresolved_entity_mentions"], [])
         self.file(events=[])
         self.assert_publication_fixed_point()
         after = next(n for n in pub.read_projection(self.root)["nodes"]
