@@ -61,6 +61,7 @@ import temporal_claims as tc  # noqa: E402
 import temporal_store as store  # noqa: E402
 from lifehug_core import split_frontmatter  # noqa: E402
 from temporal_claims import collapsed_text  # noqa: E402
+from vault_paths import atomic_write_vault_text  # noqa: E402
 
 DEFAULT_MODEL = "claude-sonnet-5"
 EXTRACTOR_VERSION = "resolver/rule:3"
@@ -660,11 +661,11 @@ def load_ledger(root: Path) -> dict:
 
 
 def save_ledger(root: Path, ledger: dict) -> None:
-    path = root / LEDGER_RELATIVE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(ledger, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_vault_text(
+        LEDGER_RELATIVE,
+        json.dumps(ledger, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        vault_root=root,
+    )
 
 
 def open_questions(ledger: dict) -> list[dict]:
@@ -702,8 +703,13 @@ def make_completer(model: str):
     if api_root not in sys.path:
         sys.path.insert(0, api_root)
     os.environ["LIFEHUG_LLM_LIVE_MODE"] = "1"
-    from app.llm.anthropic_live import AnthropicLlmAdapter  # noqa: PLC0415
-    from app.llm.interfaces import LlmRequest  # noqa: PLC0415
+    # The platform package is outside this repository; it is reached by name
+    # only when its root was supplied, never by an import the package sweep
+    # would have to resolve.
+    import importlib  # noqa: PLC0415
+
+    AnthropicLlmAdapter = importlib.import_module("app.llm.anthropic_live").AnthropicLlmAdapter
+    LlmRequest = importlib.import_module("app.llm.interfaces").LlmRequest
 
     class _Secrets:
         def get_secret(self, name):
@@ -743,15 +749,13 @@ def _response_path(root: Path, key: str) -> Path:
 
 
 def _save_response(root: Path, key: str, payload: dict) -> None:
-    """A purchase is durable before anything reads it; a rerun never buys it twice."""
-    path = _response_path(root, key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=1)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
+    """A purchase is durable before anything reads it; a rerun never buys it twice.
+    Written through the vault's own atomic, no-follow authority."""
+    atomic_write_vault_text(
+        RESPONSES_RELATIVE / f"{key}.json",
+        json.dumps(payload, ensure_ascii=False, indent=1) + "\n",
+        vault_root=root,
+    )
 
 
 # --------------------------------------------------------------------------

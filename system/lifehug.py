@@ -112,6 +112,7 @@ READ_ONLY_COMMANDS = frozenset({
 })
 DIRECT_MUTATION_COMMANDS = frozenset({
     "answer-ack-retry",
+    "resolve",
     # Issue #118 (Conversation Interaction, Wave 2): both write
     # state/arc_cards.json, so they take the writer lock like the rest of the
     # weekly/monthly learning-loop family.
