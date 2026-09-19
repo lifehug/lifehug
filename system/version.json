@@ -1,7 +1,7 @@
 {
-  "version": 311,
-  "released": "2026-09-17",
-  "changelog": "v311: Preserve existing timeline resolution outcomes when reading temporal receipts and rebuilding the active index. Usably linked events no longer regain redundant raw-anchor questions after storage; incomplete searches and non-temporal items retain their existing date-question suppression, while missing evidence still asks for a date. The optional typed field preserves legacy absent-field bytes and claim IDs without changing receipts, prompts, validation, identity rules or schemas. Synthetic receipt-to-publication and replay tests cover all five outcomes.",
+  "version": 313,
+  "released": "2026-09-19",
+  "changelog": "v313: Stories place on the dates they state. The classifier now reads any stated date form the loose parser understands (numeric month/day/year, month-day ranges, decades and thirds, holidays, approximate prefixes, trailing times, dash and until connectors), so a story that names its date no longer falls back to a raw-anchor question. Candidate retrieval admits the specific anchor a story names before generic role matches, the owner's own name and full name are treated as the owner rather than a roster stranger, and a record restating a landmark entry without a date is skipped instead of filed twice. Validation salvages a batch response one event at a time: a relation or grounding failure on one event nulls that event and abstains, instead of refusing the whole batch. Classifier claims rule 4, prompt contextual-timeline:3. No schema change.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
