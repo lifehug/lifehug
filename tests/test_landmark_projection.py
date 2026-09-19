@@ -759,5 +759,136 @@ class ConverterUnitTest(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------
+# lifehug#365 — landmarks fill the spine; non-landmarks draw nothing
+# --------------------------------------------------------------------------
+
+
+class NotALandmarkTest(unittest.TestCase):
+    """`lp.not_a_landmark` — the closed vocabulary, read as a unit."""
+
+    def test_a_none_terminal_is_not_a_landmark(self) -> None:
+        self.assertEqual(lp.not_a_landmark("military", {"domain": "military", "none": True}),
+                         lp.NONE_TERMINAL)
+
+    def test_a_skip_is_not_a_landmark(self) -> None:
+        self.assertEqual(lp.not_a_landmark("work", {"domain": "work", "skipped": True}),
+                         lp.SKIPPED_ANSWER)
+
+    def test_a_work_record_with_only_free_text_names_no_organization(self) -> None:
+        self.assertEqual(lp.not_a_landmark("work", {"domain": "work", "what": "SEO work"}),
+                         lp.UNNAMED_ORGANIZATION)
+
+    def test_a_school_record_with_no_name_names_no_organization(self) -> None:
+        self.assertEqual(lp.not_a_landmark("schools", {"domain": "schools",
+                                                       "place": "Millgate"}),
+                         lp.UNNAMED_ORGANIZATION)
+
+    def test_a_named_tenure_is_a_landmark(self) -> None:
+        self.assertIsNone(lp.not_a_landmark("work", {"domain": "work",
+                                                     "label": "Tidewheel Works",
+                                                     "what": "shop floor"}))
+        self.assertIsNone(lp.not_a_landmark("schools", {"domain": "schools",
+                                                        "name": "Alder Ridge High"}))
+
+    def test_a_residence_stub_is_left_alone(self) -> None:
+        """Item 3 is an IDENTITY fix, not a refusal — and it is a later PR."""
+        self.assertIsNone(lp.not_a_landmark("residences", {"domain": "residences",
+                                                           "city": "Cedarport"}))
+
+    def test_every_reason_is_in_the_closed_vocabulary(self) -> None:
+        for record in ({"domain": "military", "none": True},
+                       {"domain": "work", "skipped": True},
+                       {"domain": "work", "what": "SEO work"}):
+            self.assertIn(lp.not_a_landmark(record["domain"], record),
+                          lp.NOT_A_LANDMARK_REASONS)
+
+
+class NonLandmarkRecordsDrawNothingTest(unittest.TestCase):
+    """The three live defects of lifehug#365, filed through the REAL writer.
+
+    A none terminal, a skip and an employer-less work record are filed exactly
+    as `landmark-record` files them, the receipts are folded, and the
+    calculated timeline is derived. The entries must still be in the drawn
+    store — the person answered, and the domain reads complete — and there
+    must be no episode node and no work item for any of them.
+    """
+
+    NOW = "2026-09-19T12:00:00Z"
+
+    ENTRIES = (
+        # The one real tenure: it must survive every rule below.
+        ("work", {"label": "Tidewheel Works", "what": "Tidewheel Works"}),
+        # Defect 1: the military ladder's terminal "no".
+        ("military", {"domain": "military", "none": True}),
+        # Defect 2: a work record the listener filed with no employer.
+        ("work", {"domain": "work", "what": "SEO work"}),
+        # A decline is an answer too, and it draws nothing either.
+        ("schools", {"domain": "schools", "skipped": True}),
+    )
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="lifehug-365-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        (self.root / "state").mkdir(parents=True, exist_ok=True)
+        for ordinal, (domain, entry) in enumerate(self.ENTRIES, start=1):
+            lp.file_landmark_record(self.root, domain, entry, ordinal=ordinal,
+                                    now=self.NOW)
+        ts.rebuild_active_index(self.root)
+        self.sources = lp.load_landmark_sources(self.root)
+        self.drawn = lp.project_landmark_entries(
+            ts.fold_active_index(self.root), sources=self.sources)
+        import temporal_timeline as tt  # noqa: PLC0415
+
+        self.timeline = tt.derive_calculated_timeline(
+            ts.fold_active_index(self.root),
+            landmark_entries=self.sources,
+            now=self.NOW,
+        )
+
+    # -- the entries are still there -------------------------------------
+
+    def test_the_none_terminal_still_completes_its_domain(self) -> None:
+        military = (self.drawn["domains"] or {}).get("military") or []
+        self.assertEqual([entry.get("none") for entry in military], [True])
+        self.assertTrue(li.is_none_entry(military[0], li.domain_row("military")))
+
+    def test_the_unnamed_work_record_is_still_filed(self) -> None:
+        work = (self.drawn["domains"] or {}).get("work") or []
+        self.assertIn("SEO work", [entry.get("what") for entry in work])
+
+    # -- and they draw nothing -------------------------------------------
+
+    def test_a_none_terminal_is_not_an_episode(self) -> None:
+        self.assertEqual([row for row in self.timeline.nodes
+                          if row["event_kind"] == "military"], [])
+
+    def test_an_employer_less_work_record_is_not_a_tenure(self) -> None:
+        labels = sorted(row["label"] for row in self.timeline.nodes
+                        if row["event_kind"] == "job")
+        self.assertEqual(labels, ["Tidewheel Works"])
+
+    def test_a_skipped_school_is_not_a_tenure(self) -> None:
+        self.assertEqual([row for row in self.timeline.nodes
+                          if row["event_kind"] == "school"], [])
+
+    def test_no_node_is_labelled_with_a_bare_domain_word(self) -> None:
+        """The defect's own signature: a card reading "When were you at work?"."""
+        labels = {row["label"] for row in self.timeline.nodes}
+        self.assertFalse(labels & {"work", "military", "schools"}, labels)
+
+    def test_no_work_item_asks_about_a_record_that_draws_nothing(self) -> None:
+        drawn_nodes = {row["node_id"] for row in self.timeline.nodes}
+        for item in self.timeline.work_items:
+            for ref in ("node_ref", "event_ref"):
+                if item.get(ref):
+                    self.assertIn(item[ref], drawn_nodes | {""})
+
+    def test_the_only_participation_episode_is_the_named_tenure(self) -> None:
+        episodes = [row for row in self.timeline.nodes
+                    if row.get("node_kind") == "episode"]
+        self.assertEqual([row["label"] for row in episodes], ["Tidewheel Works"])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

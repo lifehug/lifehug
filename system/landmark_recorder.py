@@ -381,6 +381,46 @@ def parse_recorder_output(raw: object, *,
     return tuple(records)
 
 
+#: The NAMED refusal a record earns when it cannot be a tenure: a ``work`` or
+#: ``schools`` answer that names no organization (lifehug#365 item 2). It is
+#: `general_listener.DROPPED_NON_FAMILY`'s sibling and it reads the same way —
+#: a refused record must be legible, not silent — and it is the recorder's
+#: half of `landmark_projection.not_a_landmark`. Refused at FILING so nothing
+#: new lands, skipped at DRAW so what already landed heals.
+DROPPED_UNNAMED_TENURE = "tenure_record_has_no_name"
+
+
+def refuse_unnamed_tenures(records: object) -> tuple[tuple[dict, ...],
+                                                     tuple[str, ...]]:
+    """``(records worth filing, findings)`` — the one gate, both modes.
+
+    *A record that cannot improve the spine must not become a node* (ADR
+    0037). A tenure is a tenure AT an organization, so a ``work`` or
+    ``schools`` record carrying only free text ("SEO work") is not one: filed,
+    it becomes an episode the projection labels with the DOMAIN WORD and the
+    loop asks *"When were you at work?"* forever. The refusal is typed and it
+    is the projection's own sentence
+    (`landmark_projection.not_a_landmark` → ``unnamed_organization``), never a
+    second opinion about what a landmark is.
+
+    A ``none`` and a ``skip`` are NOT refused here: they are real answers that
+    complete a domain, and they file exactly as they always have. They simply
+    draw nothing, which is the projection's half of the same rule.
+    """
+    import landmark_projection as lp  # noqa: PLC0415 — one definition, read late
+
+    kept: list[dict] = []
+    findings: list[str] = []
+    for record in records or ():
+        if not isinstance(record, dict):
+            continue
+        if lp.not_a_landmark(record.get("domain"), record) == lp.UNNAMED_ORGANIZATION:
+            findings.append(DROPPED_UNNAMED_TENURE)
+            continue
+        kept.append(record)
+    return tuple(kept), tuple(dict.fromkeys(findings))
+
+
 def parse_recorder_claims(raw: object) -> tuple[tuple[dict, ...],
                                                 tuple[str, ...]]:
     """The focused recorder's ``claims`` list. ``(drafts, findings)``.
@@ -675,10 +715,11 @@ def record_answer(*, answer: str, call, domain: str | None = None,
                 raw, framework_root=framework_root,
                 identity_candidates=identity_candidates,
             )
-            findings = tuple(dict.fromkeys(findings + heard.findings))
+            heard_landmarks, unnamed = refuse_unnamed_tenures(heard.landmarks)
+            findings = tuple(dict.fromkeys(findings + heard.findings + unnamed))
             if len(heard) > len(best) + len(people) + len(claims) + len(identity_assertions):
                 best, people, claims, identity_assertions = (
-                    heard.landmarks, heard.people, heard.claims,
+                    heard_landmarks, heard.people, heard.claims,
                     heard.identity_assertions,
                 )
             finding = gl.listener_heard_nothing(
@@ -710,9 +751,10 @@ def record_answer(*, answer: str, call, domain: str | None = None,
                 continue
             reminder = gl.listening_reminder(verdict)
             continue
-        records = parse_recorder_output(raw, framework_root=framework_root)
+        records, unnamed = refuse_unnamed_tenures(
+            parse_recorder_output(raw, framework_root=framework_root))
         heard_claims, refusals = parse_recorder_claims(raw)
-        findings = tuple(dict.fromkeys(findings + refusals))
+        findings = tuple(dict.fromkeys(findings + refusals + unnamed))
         if len(records) > len(best):
             best = records
         if len(heard_claims) > len(claims):

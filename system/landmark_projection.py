@@ -193,6 +193,62 @@ PARTICIPATION_EPISODE_RULE_TEXT = (
 )
 
 
+#: WHY A FILED RECORD DRAWS NOTHING ON THE TIMELINE (ADR 0037's amendment).
+#: A CLOSED vocabulary, because "this is not a landmark" is a typed answer and
+#: not a shrug. A landmark record has one job — improve the spine — and a
+#: record that cannot improve it must still be FILED (it is what the person
+#: said) and must never become a node the fold asks a question about.
+NONE_TERMINAL = "none_terminal"
+SKIPPED_ANSWER = "skipped_answer"
+UNNAMED_ORGANIZATION = "unnamed_organization"
+NOT_A_LANDMARK_REASONS = (NONE_TERMINAL, SKIPPED_ANSWER, UNNAMED_ORGANIZATION)
+
+
+def not_a_landmark(domain: object, record: object) -> str | None:
+    """Why this filed record must never become a timeline node, or ``None``.
+
+    ONE definition, read twice: the recorder refuses to file an
+    :data:`UNNAMED_ORGANIZATION` at all, and the fold skips every reason here
+    at DRAW time, so a vault that already holds one heals on its next redraw
+    with no migration. The entry itself is untouched — it stays in
+    ``state/landmarks.json`` and its domain goes on reading complete, which is
+    the whole point of a ``none``: the person answered.
+
+    The three reasons, and the live records behind each (lifehug#365, seen on
+    a real vault at v316):
+
+    * :data:`NONE_TERMINAL` — ``{"domain": "military", "none": true}``, the
+      ladder's own "that never happened". It projected as an undated
+      ``military`` episode with a card and no question. A none is a complete
+      answer to a domain, not a stretch of somebody's life.
+    * :data:`SKIPPED_ANSWER` — a decline. It was never an answer about time.
+    * :data:`UNNAMED_ORGANIZATION` — ``{"domain": "work", "what": "SEO
+      work"}``, filed without a label. A tenure is a tenure AT an
+      organization, and the question set says which domains those are
+      (``identity_kind: organization`` — ``work`` and ``schools``); with no
+      name, :func:`entry_subject_mention` falls back to the DOMAIN WORD and
+      the person reads a card asking *"When were you at work?"*. Derived from
+      the question set rather than listed here, so a tenth domain declaring
+      itself an organization is covered by the same sentence.
+
+    ``residences`` is deliberately outside the unnamed rule: a place stub that
+    duplicates a dated stay is an IDENTITY problem (lifehug#365 item 3), and
+    attaching it to the stay it repeats is a different fix from refusing it.
+    """
+    if not isinstance(record, dict):
+        return None
+    if record.get("skipped") is True:
+        return SKIPPED_ANSWER
+    if record.get("none") is True:
+        return NONE_TERMINAL
+    row = domain_row_or_none(domain)
+    if not isinstance(row, dict) or row.get("identity_kind") != "organization":
+        return None
+    if landmarks_interaction.identity_named(record, row) is None:
+        return UNNAMED_ORGANIZATION
+    return None
+
+
 #: The event kind for an entry's own ``date`` when its domain dates SEVERAL
 #: events. ``partnerships`` declares ``first_met|dating_started|married`` and
 #: the pre-flip ladder stored ONE date without saying which of the three it
@@ -1005,6 +1061,14 @@ class ParticipationEpisodes:
             domain = collapsed_text(row.get("domain"))
             source_id = collapsed_text(row.get("source_id"))
             if not source_id or domain not in PARTICIPATION_EPISODE_KINDS:
+                continue
+            # NOT EVERY FILED RECORD IS A LANDMARK (lifehug#365,
+            # :func:`not_a_landmark`). A none terminal, a skip and an
+            # organization nobody named are complete answers that improve no
+            # spine, so they seed NO episode, take NO stay slot and carry no
+            # card. Skipped HERE, at draw time, so an existing vault heals on
+            # its next redraw.
+            if not_a_landmark(domain, row.get("record")):
                 continue
             entries[source_id] = {
                 "domain": domain,
