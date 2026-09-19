@@ -1512,7 +1512,10 @@ class TemporalShapeTests(ContextCase):
         self.assertEqual(cc.temporal_shape(
             "episode", "married", {"granularity": "range", "earliest": "2007", "latest": "2010"}
         ), "point")
-        self.assertEqual(cc.temporal_shape("event", "moment", day), "point")
+        # A day-dated founding still has a week inside it: shape follows the
+        # role, never the precision.
+        self.assertEqual(cc.temporal_shape("event", "moment", day), "interval")
+        self.assertEqual(cc.temporal_shape("event", "founded", day), "interval")
         self.assertEqual(cc.temporal_shape(
             "episode", "job", {"granularity": "month", "earliest": "2022-05", "latest": "2022-05"}
         ), "interval")
@@ -1557,6 +1560,16 @@ class TemporalShapeTests(ContextCase):
 
 class SalvageValidationTests(ContextCase):
     """Under salvage one bad event field falls to its conservative state; the response survives."""
+
+    def test_the_batch_filer_salvages_only_when_the_local_loop_asks(self):
+        import inspect
+
+        import classification_refresh as cr
+        import classify_story as cs
+
+        self.assertIs(inspect.signature(cs.file_batch_response).parameters["salvage"].default, False)
+        self.assertIn("file_batch_response(envelope, model=selected_model, salvage=True)",
+                      inspect.getsource(cr.run_batch))
 
     def test_grounding_failure_downgrades_to_null(self):
         snapshot = self.snapshot()

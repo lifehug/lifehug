@@ -226,7 +226,7 @@ def run_batch(
         # the downstream obligation first so a crash in that window is safe.
         _mark_publication_needed(root)
         publication_needed = True
-        receipt = classify_story.file_batch_response(envelope, model=selected_model)
+        receipt = classify_story.file_batch_response(envelope, model=selected_model, salvage=True)
         accepted = [
             item["source_path"]
             for item in receipt["items"]
