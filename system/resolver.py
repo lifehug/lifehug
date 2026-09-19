@@ -345,6 +345,11 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
             continue
         if node.get("occurrence_subject_scope") not in scopes:
             continue
+        if node.get("node_kind") == "episode" and collapsed_text(node.get("event_kind")) == "residence":
+            # A residence is dated by the ladder in the person's own words or is
+            # a duplicate of a stay that already is; a span guessed for it draws
+            # the person living in two places at once. Identity, not dating.
+            continue
         handles: list[dict] = []
         story_path, event, subject, stem = "", None, "", ""
         telling_event_ref, telling_event_kind = "", ""
