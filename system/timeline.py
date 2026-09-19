@@ -1137,6 +1137,7 @@ def publish_calculated_timeline(vault_root: object = None) -> dict:
     """
     root = Path(str(vault_root)) if vault_root is not None else _projection_vault_root()
     roster: object = ()
+    owner_names: tuple = ()
     if root == REPO_DIR:
         try:
             import entity_roster as _entity_roster  # noqa: PLC0415
@@ -1144,7 +1145,16 @@ def publish_calculated_timeline(vault_root: object = None) -> dict:
             roster = _entity_roster.load_roster("person")
         except Exception:  # noqa: BLE001 — a roster problem is "no roster"
             roster = ()
-    return temporal_publication.publish(root, roster_snapshot=roster)
+        try:
+            from lifehug_core import load_config  # noqa: PLC0415
+
+            profile = load_config()
+            owner_names = tuple(
+                str(profile.get(key)) for key in ("name", "full_name") if profile.get(key)
+            )
+        except Exception:  # noqa: BLE001 — no profile is simply no owner names
+            owner_names = ()
+    return temporal_publication.publish(root, roster_snapshot=roster, owner_names=owner_names)
 
 
 def flip_landmarks_if_needed() -> dict | None:

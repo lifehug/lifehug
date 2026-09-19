@@ -112,6 +112,7 @@ READ_ONLY_COMMANDS = frozenset({
 })
 DIRECT_MUTATION_COMMANDS = frozenset({
     "answer-ack-retry",
+    "resolve",
     # Issue #118 (Conversation Interaction, Wave 2): both write
     # state/arc_cards.json, so they take the writer lock like the rest of the
     # weekly/monthly learning-loop family.
@@ -2696,6 +2697,19 @@ def cmd_chapters_exercise(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resolve(args: argparse.Namespace) -> int:
+    flags = ["--vault-root", str(REPO_DIR), "--limit", str(args.limit)]
+    if args.execute:
+        flags.append("--execute")
+    if args.retry_failed:
+        flags.append("--retry-failed")
+    if args.refile:
+        flags.append("--refile")
+    if args.model:
+        flags.extend(["--model", args.model])
+    return run_python("resolver.py", flags)
+
+
 def cmd_retract_source(args: argparse.Namespace) -> int:
     flags = ["retract", args.target]
     if args.reason:
@@ -3485,6 +3499,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("second-voice-ack", help="Acknowledge a second-voice offer (hides the home card)")
     p.add_argument("key", help="The offer key from state/second_voice_offers.json")
     p.set_defaults(func=cmd_second_voice_ack)
+
+    p = sub.add_parser("resolve", help="Date undated moments from the whole vault with cited evidence (the resolver)")
+    p.add_argument("--execute", action="store_true", help="call the model and file verified answers (dry run otherwise)")
+    p.add_argument("--limit", type=int, default=50, help="stories per run")
+    p.add_argument("--retry-failed", action="store_true")
+    p.add_argument("--refile", action="store_true")
+    p.add_argument("--model", default=None)
+    p.set_defaults(func=cmd_resolve)
 
     p = sub.add_parser("timeline-retire",
                        help="Retire manual timeline pins the loop has caught up with (classification now places them)")

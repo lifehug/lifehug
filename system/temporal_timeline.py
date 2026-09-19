@@ -159,7 +159,7 @@ from temporal_claims import (  # noqa: E402
 #: ``input_fingerprint`` moves with this bump whether or not that node is
 #: bound — which is the honest signal, since a stale projection calculated by
 #: :4 rules is stale everywhere, not only where a binding landed.
-CALCULATION_RULE_VERSION = "timeline-rules:7"
+CALCULATION_RULE_VERSION = "timeline-rules:8"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -696,7 +696,8 @@ def _resolution_index(records: object) -> dict:
 
 
 def _resolve_subjects(
-    claims, *, resolution_records, roster_snapshot, now, owner_ref: object = None
+    claims, *, resolution_records, roster_snapshot, now, owner_ref: object = None,
+    owner_names: object = (),
 ):
     """Attach identity to every claim, keeping the ones that will not resolve.
 
@@ -731,6 +732,10 @@ def _resolve_subjects(
     supplied = _resolution_index(resolution_records)
     rule_records: dict[str, ident.ResolutionRecord] = {}
     roster_records: dict[str, ident.ResolutionRecord] = {}
+    # timeline-rules:8 — a roster entity that bears the owner's own name is the
+    # owner (`identity_resolution.OWNER_NAME_REASON`); its refs are resolved to
+    # the owner's handle instead of to a third person.
+    own_refs = ident.owner_name_refs(roster_snapshot, owner_names)
     by_mention: dict[str, list[str]] = {}
     resolved: list[dict] = []
 
@@ -761,6 +766,10 @@ def _resolve_subjects(
                     evidence_ref=evidence_ref,
                     now=now,
                 )
+                if own_refs and collapsed_text(getattr(record, "resolved_ref", "")) in own_refs:
+                    record = ident.owner_name_resolution(
+                        mention, owner_ref=owner, evidence_ref=evidence_ref, now=now
+                    )
                 roster_records[key] = record
         try:
             resolved.append(ident.apply_resolution(claim, record, now=now))
@@ -3768,6 +3777,7 @@ def derive_calculated_timeline(
     landmark_entries: object = (),
     birth_date: object = None,
     owner_ref: object = None,
+    owner_names: object = (),
     projection_generation: int = 0,
     now: object = None,
 ) -> CalculatedTimeline:
@@ -3850,6 +3860,7 @@ def derive_calculated_timeline(
         roster_snapshot=roster_snapshot,
         now=now,
         owner_ref=owner,
+        owner_names=owner_names,
     )
     timings["resolve"] = clock() - mark
 

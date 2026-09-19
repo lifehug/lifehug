@@ -1,7 +1,7 @@
 {
-  "version": 313,
+  "version": 314,
   "released": "2026-09-19",
-  "changelog": "v313: Stories place on the dates they state. The classifier now reads any stated date form the loose parser understands (numeric month/day/year, month-day ranges, decades and thirds, holidays, approximate prefixes, trailing times, dash and until connectors), so a story that names its date no longer falls back to a raw-anchor question. Candidate retrieval admits the specific anchor a story names before generic role matches, the owner's own name and full name are treated as the owner rather than a roster stranger, and a record restating a landmark entry without a date is skipped instead of filed twice. Validation salvages a batch response one event at a time: a relation or grounding failure on one event nulls that event and abstains, instead of refusing the whole batch. Classifier claims rule 4, prompt contextual-timeline:3. No schema change.",
+  "changelog": "v314: The resolver answers \"when?\" from the vault. After every accepted classification batch, a resolver indexes every story, answer, landmark and fact, builds the owner's spine (birth, an age table for any birthday, stays, tenures, dated points, people), and asks the model to date each undated event with citations. Every citation is verified mechanically against the indexed text before anything is filed; a verified answer becomes a dated claim on the event's own node under resolver/rule:3, declared on the same telling as the classifier's reading, and the raw handle it replaces is superseded. Bare age handles (\"when I was 18\") resolve deterministically from the age table without a model call. Answers the vault cannot support are recorded once in state/resolver/resolutions.json as open questions and are never re-bought automatically; residence episodes are never dated by the resolver. The owner's own name and full name now resolve to the owner instead of a roster stranger (timeline-rules:8). New CLI verb: resolve (--execute, --limit, --retry-failed, --refile, --model); set LIFEHUG_RESOLVER=0 to skip the batch hook. New framework files: system/resolver.py, tests/test_resolver.py, tests/test_owner_name_subject.py.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -568,6 +568,9 @@
     "tests/walkthrough_entity_candidate.py",
     "tests/walkthrough_focus_candidate.py",
     "tests/walkthrough_lib.py",
-    "wiki/SCHEMA.md"
+    "wiki/SCHEMA.md",
+    "system/resolver.py",
+    "tests/test_owner_name_subject.py",
+    "tests/test_resolver.py"
   ]
 }
