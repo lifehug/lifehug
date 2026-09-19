@@ -112,6 +112,10 @@ READ_ONLY_COMMANDS = frozenset({
 })
 DIRECT_MUTATION_COMMANDS = frozenset({
     "answer-ack-retry",
+    # resolve: classified BY NAME, like timeline-candidates below. The v316
+    # `--plan` leg writes nothing under the vault (its --out is refused inside
+    # the vault root), but `--execute` and `--from-response` file claims and
+    # republish, so the command keeps the writer lock for every invocation.
     "resolve",
     # Issue #118 (Conversation Interaction, Wave 2): both write
     # state/arc_cards.json, so they take the writer lock like the rest of the
@@ -2698,7 +2702,15 @@ def cmd_chapters_exercise(_args: argparse.Namespace) -> int:
 
 
 def cmd_resolve(args: argparse.Namespace) -> int:
-    flags = ["--vault-root", str(REPO_DIR), "--limit", str(args.limit)]
+    # A plan is one purchase at a time (a host loops); a local run sweeps.
+    limit = args.limit if args.limit is not None else (1 if args.plan else 50)
+    flags = ["--vault-root", str(REPO_DIR), "--limit", str(limit)]
+    if args.plan:
+        flags.append("--plan")
+    if args.out:
+        flags.extend(["--out", str(args.out)])
+    if args.from_response:
+        flags.extend(["--from-response", str(args.from_response)])
     if args.execute:
         flags.append("--execute")
     if args.retry_failed:
@@ -2707,6 +2719,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         flags.append("--refile")
     if args.model:
         flags.extend(["--model", args.model])
+    for source in args.source or []:
+        flags.extend(["--source", source])
     return run_python("resolver.py", flags)
 
 
@@ -3502,10 +3516,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("resolve", help="Date undated moments from the whole vault with cited evidence (the resolver)")
     p.add_argument("--execute", action="store_true", help="call the model and file verified answers (dry run otherwise)")
-    p.add_argument("--limit", type=int, default=50, help="stories per run")
+    p.add_argument("--limit", type=int, default=None, help="items per plan (default 1) / stories per local run (default 50)")
     p.add_argument("--retry-failed", action="store_true")
     p.add_argument("--refile", action="store_true")
     p.add_argument("--model", default=None)
+    # The two legs a host runs separately (ADR 0037): a plan it buys, and the
+    # envelope of answers it hands back. Locally they are one --execute run.
+    p.add_argument("--plan", action="store_true",
+                   help="write the prompts a host should buy to --out; touches nothing in the vault")
+    p.add_argument("--out", help="where --plan writes its JSON (must be outside the vault root)")
+    p.add_argument("--from-response", help="file the answers in a response envelope a host bought")
+    p.add_argument("--source", action="append", default=[],
+                   help="a story to plan first (repeatable); a filter for --execute")
     p.set_defaults(func=cmd_resolve)
 
     p = sub.add_parser("timeline-retire",
