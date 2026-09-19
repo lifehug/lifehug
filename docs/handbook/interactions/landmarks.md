@@ -231,6 +231,20 @@ A skip is "not now": it records nothing (`landmark_invocation` returns `None`)
 and the domain stays open. A none is "there is nothing here": it files
 (`landmark-record <domain> --none`) because it is the answer.
 
+**A none completes its domain and draws nothing** (v317). It is an answer
+about the ladder, not a stretch of somebody's life, so it never becomes a
+timeline episode, never takes a stay slot and never carries a card. The same
+rule retires two other shapes that could never improve the spine: a skip, and
+a `work` or `schools` record that names no organization
+(`{"domain": "work", "what": "SEO work"}` — a tenure is a tenure *at* someone,
+and with no label the episode was drawn with the domain word and asked "When
+were you at work?"). The recorder refuses that one at filing with a named
+finding (`landmark_recorder.DROPPED_UNNAMED_TENURE`) and the projection skips
+all three at draw time, so a vault that already holds one heals on its next
+redraw. One definition, read twice:
+`landmark_projection.not_a_landmark` — `none_terminal`, `skipped_answer`,
+`unnamed_organization`.
+
 ## 4. The algorithm, worked
 
 A person says their birthday is 12 April 1978, that they lived on Bell Avenue,
