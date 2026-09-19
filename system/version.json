@@ -1,7 +1,7 @@
 {
-  "version": 311,
-  "released": "2026-09-17",
-  "changelog": "v311: Preserve existing timeline resolution outcomes when reading temporal receipts and rebuilding the active index. Usably linked events no longer regain redundant raw-anchor questions after storage; incomplete searches and non-temporal items retain their existing date-question suppression, while missing evidence still asks for a date. The optional typed field preserves legacy absent-field bytes and claim IDs without changing receipts, prompts, validation, identity rules or schemas. Synthetic receipt-to-publication and replay tests cover all five outcomes.",
+  "version": 312,
+  "released": "2026-09-19",
+  "changelog": "v312: One landmark slot is one tenure across consecutive stays. A job or school recorded under several back-to-back residence entries now folds into a single participation episode whose window spans the whole run of stays, instead of one episode per stay competing for the same dates; a stated tenure beside its stay windows wins outright and the window union survives only as the alternate. Calculation rule version 7 (timeline-rules:7); the eras handbook quotes it. No model, prompt or schema change.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
